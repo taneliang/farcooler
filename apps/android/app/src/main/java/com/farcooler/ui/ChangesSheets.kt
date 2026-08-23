@@ -4,14 +4,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,17 +29,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -233,41 +227,14 @@ internal val ReviewSheetSaver: Saver<ReviewSheet?, String> = Saver(
 // ---- the frame they share ----
 
 /**
- * What every one of these sheets is: a title, a body, and the platform's own
- * dismissal.
+ * The filter every long list in here carries.
  *
- * One frame rather than five, so five sheets cannot come to disagree about their
- * own padding — and because the insets are the part that is easy to get wrong
- * once and then copy four times. `imePadding` and `navigationBarsPadding` are
- * the pair every other sheet in this app already applies, in that order, and the
- * manifest's `adjustResize` is what makes the first of them mean anything.
+ * Internal since `ResumeBranchSheet` grew a branch list of its own: two filter
+ * fields over two lists of the same repository's branches, one with a label and
+ * one without, is the drift a shared composable exists to stop.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReviewSheetFrame(
-    title: String,
-    onDismiss: () -> Unit,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
-        Column(
-            Modifier
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 16.dp)
-                .imePadding()
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(title, style = MaterialTheme.typography.headlineSmall)
-            content()
-        }
-    }
-}
-
-/** The filter every long list in here carries. */
-@Composable
-private fun FilterField(value: String, label: String, onChange: (String) -> Unit) {
+internal fun FilterField(value: String, label: String, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
@@ -345,12 +312,12 @@ internal fun FileIndexSheet(
     val written = remember(state.files, filter) { matchingFiles(state.handWrittenFiles, filter) }
     val generated = remember(state.files, filter) { matchingFiles(state.generatedFiles, filter) }
 
-    ReviewSheetFrame("Files", onDismiss) {
+    SheetFrame("Files", onDismiss) {
         FilterField(filter, "Filter files") { filter = it }
 
         if (written.isEmpty() && generated.isEmpty()) {
             SheetNote(noFilesHere(state.files.isEmpty()))
-            return@ReviewSheetFrame
+            return@SheetFrame
         }
 
         LazyColumn(Modifier.weight(1f, fill = false)) {
@@ -473,7 +440,7 @@ internal fun CommitHistorySheet(
         matchingCommits(state.commitsNewestFirst, filter)
     }
 
-    ReviewSheetFrame("History", onDismiss) {
+    SheetFrame("History", onDismiss) {
         FilterField(filter, "Filter commits") { filter = it }
 
         LazyColumn(Modifier.weight(1f, fill = false)) {
@@ -674,7 +641,7 @@ internal fun CommentComposerSheet(
     var text by rememberSaveable { mutableStateOf("") }
     val focus = remember { FocusRequester() }
 
-    ReviewSheetFrame("Add a note", onDismiss) {
+    SheetFrame("Add a note", onDismiss) {
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },
@@ -815,7 +782,7 @@ internal fun CommentOutboxSheet(
     val state by comments.state.collectAsStateWithLifecycle()
     val now = remember { System.currentTimeMillis() / 1_000 }
 
-    ReviewSheetFrame("Notes", onDismiss) {
+    SheetFrame("Notes", onDismiss) {
         // Above the list rather than in it. A failure is about the whole queue,
         // and one that scrolls out of sight while the reader looks at what it
         // kept is a failure the app has stopped saying.
@@ -1088,7 +1055,7 @@ internal fun BaseBranchSheet(
 
     val shown = remember(branches, filter) { matchingBranches(branches.orEmpty(), filter) }
 
-    ReviewSheetFrame("Base branch", onDismiss) {
+    SheetFrame("Base branch", onDismiss) {
         Text(
             baseDescription(set),
             style = MaterialTheme.typography.bodySmall,
@@ -1144,18 +1111,39 @@ internal fun BaseBranchSheet(
  * happened to end — iOS settled that in `fb79a8c` and this is the same shape.
  * Drawn only when there is one: [BranchRef.age] is empty for a branch git had no
  * committer date for, and a blank caption still takes the space it would use.
+ *
+ * **Internal and shared by two pickers, which want opposite things from
+ * [BranchRef.checkedOut].** Choosing a base to compare against a branch somebody
+ * else is sitting on is ordinary and usually the point, since that somebody is
+ * generally `main`; taking that same branch over is something git flatly
+ * refuses, one worktree per branch. So [enabled] is the caller's, and the
+ * checked-out row is dimmed and unclickable in `ResumeBranchSheet` and live
+ * here. What the row SAYS about it is the same either way — [branchAside] puts
+ * "checked out" in the second line — because "why can't I tap this" is otherwise
+ * the only question a dead row raises. iOS says the same at `BranchPicker.row`.
+ *
+ * Two pickers and one row on purpose: two lists of branches that came to look
+ * slightly different for no reason anybody could find later is the failure
+ * [SectionTitle] was promoted out of a private file to avoid.
  */
 @Composable
-private fun BranchRow(
+internal fun BranchRow(
     branch: BranchRef,
     current: Boolean,
     nowMs: Long,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    // Not `alpha` on the row: a translucent row dims the ground it sits on as
+    // well as the text, and this app's own disabled colour is the one Material
+    // resolved against the sheet's surface.
+    val ink =
+        if (enabled) MaterialTheme.colorScheme.onSurface
+        else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .heightIn(min = 48.dp)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1166,6 +1154,7 @@ private fun BranchRow(
                     branch.name,
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
+                    color = ink,
                     maxLines = 1,
                     overflow = TextOverflow.MiddleEllipsis,
                     modifier = Modifier.weight(1f, fill = false),

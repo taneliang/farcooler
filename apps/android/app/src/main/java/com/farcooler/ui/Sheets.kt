@@ -2,6 +2,7 @@ package com.farcooler.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,15 +36,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Runner
+import com.farcooler.model.BranchRef
 import com.farcooler.model.QuickAgents
 import com.farcooler.model.TaskSlug
 import com.farcooler.model.TerminalPresets
 import com.farcooler.model.Trouble
 import com.farcooler.model.Workspace
 import com.farcooler.net.Connection
+import com.farcooler.net.rethrowIfCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -450,6 +454,17 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
     var branch by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<Trouble?>(null) }
+    var picking by remember { mutableStateOf(false) }
+    /**
+     * The branch this sheet is about to take over, when one was picked.
+     *
+     * Set means the form is doing a different job, not the same job with a box
+     * ticked: `Service::adopt_branch` ignores `task_name` outright and names the
+     * worktree after the branch's last segment, so a name field left up would be
+     * collecting something the runner throws away. The form collapses instead
+     * and says what will happen.
+     */
+    var adopting by remember { mutableStateOf<BranchRef?>(null) }
 
     // Per runner, because the branch is created on the one holding the project.
     val branchPrefix by (connection?.branchPrefix
@@ -476,6 +491,11 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
             repositoryId = repositories.firstOrNull()?.id.orEmpty()
         }
     }
+    // A branch belongs to the project it was read from. Switching project — or
+    // runner, which changes the project list under it — has to drop it, or the
+    // sheet would offer to resume a branch on a repository that has never heard
+    // of it and the runner would answer "no such branch".
+    LaunchedEffect(repositoryId) { adopting = null }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
         Column(
@@ -502,6 +522,77 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                 selected = repositoryId,
                 enabled = !working,
             ) { repositoryId = it }
+
+            val resuming = adopting
+            if (resuming != null) {
+                // Adoption collapses the form: there is nothing to name and
+                // nothing to branch from. The label stays, because a bare
+                // monospace line under a project picker does not say which of
+                // the two nouns on this sheet it is.
+                Text(
+                    "Resuming",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    resuming.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    adoptionDescription(resuming.name),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(
+                    enabled = !working,
+                    onClick = { adopting = null },
+                ) { Text("Start a new branch instead") }
+                failure?.let { SheetFailure(it) }
+                Button(
+                    onClick = {
+                        val target = connection ?: return@Button
+                        working = true
+                        scope.launch {
+                            runCatching {
+                                // The branch twice, deliberately. The daemon
+                                // ignores the name on an adoption and derives
+                                // its own; passing the branch is what the CLI
+                                // and iOS both send, so all three clients put
+                                // the same thing in the field the runner does
+                                // not read.
+                                target.createWorkspace(
+                                    repositoryId,
+                                    resuming.name,
+                                    resuming.name,
+                                    adopt = true,
+                                )
+                            }.onFailure {
+                                // `runCatching` catches the one throwable that
+                                // must never be caught, which is what
+                                // `net/Cancellation.kt` exists to say. Rethrown
+                                // here rather than reported as a failed
+                                // adoption — the sheet closing is not an error.
+                                it.rethrowIfCancellation()
+                                failure = Trouble("Couldn’t resume that branch.", it.message)
+                                working = false
+                                return@launch
+                            }
+                            target.refresh()
+                            working = false
+                            onDismiss()
+                        }
+                    },
+                    enabled = !working && repositoryId.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Resume")
+                }
+                return@Column
+            }
 
             OutlinedTextField(
                 value = name,
@@ -545,6 +636,19 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            // The other way work arrives.
+            //
+            // Before this the only option was a new branch, so picking up
+            // something pushed from another machine — or produced by an agent
+            // running somewhere else entirely — meant typing its name exactly,
+            // from a phone keyboard, with no list to check it against.
+            if (repositoryId.isNotEmpty()) {
+                TextButton(
+                    enabled = !working,
+                    onClick = { picking = true },
+                ) { Text("Resume an existing branch…") }
+            }
+
             Text(
                 "A workspace is one Git worktree and one branch. Its name is the worktree’s " +
                     "folder, so it can’t be changed later.",
@@ -561,6 +665,10 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                         runCatching {
                             target.createWorkspace(repositoryId, trimmedName, effectiveBranch)
                         }.onFailure {
+                            // See the adoption arm above: `runCatching` catches
+                            // cancellation too, and a sheet dismissed mid-call
+                            // would otherwise report the worktree as refused.
+                            it.rethrowIfCancellation()
                             // It used to be the whole red line, so whatever the
                             // core said about a path or a branch was set in the
                             // face this sheet writes its own refusals in — the
@@ -581,6 +689,102 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
             ) {
                 Text("Create")
             }
+        }
+    }
+
+    // Stacked on top rather than swapped in, so the name and branch already
+    // typed are still there for somebody who opens the list, does not see what
+    // they wanted, and comes back. A `ModalBottomSheet` draws into a window of
+    // its own, so the second one sits over the first with its own scrim and the
+    // first stays composed — which is the whole reason this is not written as an
+    // early return, the shape `RunnerSettingsScreen` uses for its editors.
+    if (picking && connection != null && repositoryId.isNotEmpty()) {
+        ResumeBranchSheet(
+            connection = connection,
+            repository = repositoryId,
+            onPick = { adopting = it },
+            onDismiss = { picking = false },
+        )
+    }
+}
+
+/**
+ * Point a runner at a repository it does not know about yet.
+ *
+ * **Two grants, in the daemon's own order**, which is why the path field is
+ * asked for once and used twice — see [Connection.addRepository], which owns the
+ * reasoning and the one place this app deliberately differs from iOS's version
+ * of this sheet.
+ *
+ * Always a path on the RUNNER. There is no picker and could not be: the
+ * filesystem being described is at the other end of an ssh connection, and this
+ * phone's own storage has nothing in it worth registering. macOS's version of
+ * this sheet offers a local file picker for exactly that reason and this one
+ * cannot.
+ *
+ * Per-[Connection], like everything else that writes to a runner. A fleet of
+ * three has three sets of watched folders and this sheet only ever means one of
+ * them.
+ */
+@Composable
+fun AddRepositorySheet(
+    connection: Connection,
+    onAdded: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var path by remember { mutableStateOf("") }
+    var working by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<Trouble?>(null) }
+
+    SheetFrame("Add a repository", onDismiss) {
+        OutlinedTextField(
+            value = path,
+            onValueChange = { path = it },
+            label = { Text("Path on ${connection.host.displayLabel}") },
+            placeholder = { Text("/home/you/src/project") },
+            singleLine = true,
+            enabled = !working,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "An existing Git repository on this runner. Far Cooler starts watching the " +
+                "folder it is in, and adopts every worktree it already has.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        failure?.let { SheetFailure(it) }
+        Button(
+            onClick = {
+                working = true
+                failure = null
+                scope.launch {
+                    val added = runCatching { connection.addRepository(path.trim()) }
+                    added.onFailure {
+                        it.rethrowIfCancellation()
+                        // One sentence about the step and the runner's answer in
+                        // a box beneath it, never spliced together: this side
+                        // does not know whether the path was wrong, the folder
+                        // was not a repository, or the scope was refused, and
+                        // the only account of which is the text that came back.
+                        failure = Trouble("Adding this repository didn’t finish.", it.message)
+                        working = false
+                        return@launch
+                    }
+                    // Registering adopts every worktree the repository already
+                    // has, so the fleet this phone is holding is stale the
+                    // moment the call returns — `rpc.rs` announces it for other
+                    // clients and this is the same news for this one.
+                    connection.refresh()
+                    working = false
+                    onAdded(added.getOrDefault(""))
+                    onDismiss()
+                }
+            },
+            enabled = !working && path.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (working) "Adding…" else "Add")
         }
     }
 }
@@ -659,6 +863,58 @@ fun NewTerminalSheet(connection: Connection, workspace: Workspace, onDismiss: ()
             ) {
                 Text("Start")
             }
+        }
+    }
+}
+
+/**
+ * What every bottom sheet in this app is: a title, an optional control beside
+ * it, a body, and the platform's own dismissal.
+ *
+ * **One frame, promoted from three.** `ChangesSheets` grew `ReviewSheetFrame`
+ * first, and `WorkspaceSheets` copied it as `WorkspaceSheetFrame` with a comment
+ * saying a second copy was cheaper than widening a composable private to a file
+ * whose header explains why review sheets live apart — and ending "if a third
+ * appears, promote it". Two more appeared here, so it is promoted, and this is
+ * the promotion the note asked for rather than a fourth.
+ *
+ * The bodies were already identical: the same twenty points of horizontal
+ * padding, the same sixteen at the bottom, `imePadding` then
+ * `navigationBarsPadding` in that order, and ten points between children. The
+ * insets are the part that is easy to get wrong once and then copy, and the
+ * manifest's `adjustResize` is what makes the first of them mean anything.
+ *
+ * [action] is the only thing the workspace copy had that the review one did
+ * not — a refresh button in `StackSheet`'s title row — and it defaults to
+ * nothing, so a sheet that wants a plain title writes one.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SheetFrame(
+    title: String,
+    onDismiss: () -> Unit,
+    action: @Composable () -> Unit = {},
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
+        Column(
+            Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 16.dp)
+                .imePadding()
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                action()
+            }
+            content()
         }
     }
 }

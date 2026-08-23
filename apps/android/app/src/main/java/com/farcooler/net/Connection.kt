@@ -21,6 +21,8 @@ import com.farcooler.model.InboxReply
 import com.farcooler.model.InboxRow
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryList
+import com.farcooler.model.RepositoryRoot
+import com.farcooler.model.RepositoryRootList
 import com.farcooler.model.StackReply
 import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
@@ -986,10 +988,23 @@ class Connection(
         com.farcooler.data.Themes.merge(hostThemes())
     }
 
-    suspend fun adapters(): List<AdapterInfo> {
-        val data = attempt { core.call("adapters") }.getOrNull() ?: return emptyList()
-        return adaptersFrom(data)
-    }
+    /**
+     * Every agent adapter in force on this runner, shipped ones included.
+     *
+     * **Throws, and it used to answer an empty list.** `adapter.list` is
+     * `Scope::HostAdmin` — a READ, and still host_admin, because it reports
+     * `program`, `args` and `env`, which is local paths and, for an agent that
+     * needs one, an API key. This app enrolls at `control`. So the ordinary
+     * outcome of a scope-narrowed phone opening Settings was an Agents section
+     * that said this runner has no adapters, which is not true of any runner:
+     * `adapter_origin` merges the shipped table in, so an empty list is only
+     * ever a call that did not happen.
+     *
+     * Same rule as [branches] and [repositoryRoots], and the same reason. It is
+     * the screen's job to say which of the two it is, and it cannot if the
+     * failure was spent here.
+     */
+    suspend fun adapters(): List<AdapterInfo> = adaptersFrom(core.call("adapters"))
 
     suspend fun upsertAdapter(adapter: AdapterInfo): List<AdapterInfo>? {
         val data = attempt {
@@ -1024,6 +1039,68 @@ class Connection(
                 AdapterTestOutcome.Reason.Refused(
                     data["failure"]?.jsonPrimitive?.contentOrNull.orEmpty()))
         }
+    }
+
+    // ---- repositories, and the folders they are found in ----
+    //
+    // The last of the RPC family the parity inventory found routed in Rust and
+    // never called from Kotlin. Two lists that read as one and are not: a
+    // REPOSITORY is a project you can start work in, and a ROOT is a standing
+    // permission for the daemon to go looking inside a directory tree. Only the
+    // second is something a client creates or destroys — a repository is
+    // registered by pointing at it, and there is no RPC to unregister one.
+    //
+    // Every one of these throws rather than answering empty, the rule
+    // [branches] states: `repository_root.list` is `Scope::HostAdmin` and this
+    // app enrolls at `control`, so an empty list would be a phone telling
+    // somebody their runner watches no folders when what happened is that it
+    // was not allowed to ask. See the scope note on [removeWorktree].
+
+    /**
+     * The directories this runner is allowed to look for repositories in.
+     *
+     * Throws on any failure, including a scope denial. The screen turns that
+     * into a sentence of its own with the runner's words underneath, because
+     * this side cannot tell a denial from an old daemon from a socket that
+     * went away — and does not guess.
+     */
+    suspend fun repositoryRoots(): List<RepositoryRoot> {
+        val data = core.call("repository_root.list")
+        return json.decodeFromJsonElement(RepositoryRootList.serializer(), data).roots
+    }
+
+    /**
+     * Watch a folder, then register the repository inside it — in that order,
+     * and **without letting the first failure stop the second**.
+     *
+     * The order is the daemon's: `Service::register_repository` calls
+     * `root_for`, which refuses any path that is not already under an
+     * allowlisted root, so the root has to exist first. Two calls rather than
+     * one because the daemon has two, and it has two because they are different
+     * grants.
+     *
+     * The `runCatching` around the first call is the part that is not a copy of
+     * iOS, and it is a fix rather than a liberty. `Service::add_root` refuses a
+     * path that nests inside an existing root (`DomainError::PathNotAllowed`),
+     * which is the ORDINARY case the second time somebody adds a project:
+     * `~/src` is already watched, so adding `~/src/second-project` as a root is
+     * refused — and `AddRepositorySheet` in `apps/ios/FarCooler/FleetView.swift`
+     * runs both calls in one `do`, so that refusal throws before
+     * `registerRepository` is ever reached and the sheet reports that adding the
+     * repository didn't finish. It would have finished. Registering is the call
+     * that decides, it does its own root check, and its refusal is the more
+     * informative one for every reason the first can fail — a path that does not
+     * exist and a sensitive location both come back out of it too.
+     *
+     * Hands back the display name the runner chose, which is the folder's own
+     * leaf as `Service::register_repository` computes it. Not the id: nothing on
+     * the settings screen selects a repository, and the name is what a
+     * confirmation can say.
+     */
+    suspend fun addRepository(path: String): String {
+        attempt { core.call("repository_root.add", args("path" to path)) }
+        val data = core.call("repository.register", args("path" to path))
+        return data["displayName"]?.jsonPrimitive?.contentOrNull.orEmpty()
     }
 
     private fun themesFrom(data: JsonObject): List<Theme> = runCatching {
@@ -1157,12 +1234,28 @@ class Connection(
      * `terminal` names what runs there; empty means none, which is what a caller
      * about to create its own agent terminal wants. A shell here, because a
      * worktree with nothing running in it is a directory.
+     *
+     * [adopt] takes an EXISTING branch over instead of creating one, and it is a
+     * different operation rather than a flag on the same one: `rpc.rs` routes it
+     * to `Service::adopt_branch`, which checks the branch out into a new
+     * worktree instead of forking from HEAD.
+     *
+     * That makes [name] dead on this path. `adopt_branch` ignores it and names
+     * the worktree after the branch's last segment, so callers pass the branch
+     * in both places rather than sending something the runner will throw away —
+     * which is what the CLI and iOS both do. [branch] must already exist, on
+     * this repository or on exactly one of its remotes.
+     *
+     * False for every caller that predates it, and absent from an older client,
+     * which `crates/client/src/ffi.rs` reads as false: the behavior
+     * `workspace.create` always had.
      */
     suspend fun createWorkspace(
         repository: String,
         name: String,
         branch: String,
         terminal: String = "shell",
+        adopt: Boolean = false,
     ): String {
         val data = core.call(
             "workspace.create",
@@ -1172,6 +1265,7 @@ class Connection(
                 "branch" to branch,
                 "base" to "",
                 "terminal" to terminal,
+                "adopt" to adopt,
             ),
         )
         return data["id"]?.jsonPrimitive?.contentOrNull

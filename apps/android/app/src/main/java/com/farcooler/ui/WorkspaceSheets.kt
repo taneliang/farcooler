@@ -2,15 +2,14 @@ package com.farcooler.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,17 +19,14 @@ import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.model.BranchRef
 import com.farcooler.model.PullRequest
 import com.farcooler.model.StackLink
 import com.farcooler.model.StackReply
@@ -57,73 +54,40 @@ import com.farcooler.model.prChecksWord
 import com.farcooler.model.prReviewWord
 import com.farcooler.model.prStateWord
 import com.farcooler.net.Connection
+import com.farcooler.net.rethrowIfCancellation
 import kotlinx.coroutines.launch
 
-// The two things you can do to a worktree from its row that are not opening it.
+// What a workspace can become, other than opened: seen, removed, or started
+// from work that already exists.
 //
 // **Phase 8**, the last of the parity program: the RPCs that were routed in Rust
 // and never called from Kotlin. `stack.get` and `pr.refresh` answer "where does
 // this branch sit and did CI pass", which is the question you ask from a phone
 // and could not; `workspace.remove_worktree` is the one destructive thing in the
-// product, and the reason half this file is about refusing rather than doing.
+// product, and the reason half this file is about refusing rather than doing;
+// `branch.list` behind `ResumeBranchSheet` is the one that makes
+// `workspace.create` able to pick work up instead of only starting it.
 //
-// Both hang off `WorkspaceHeader`'s overflow menu in `FleetScreen`, which is
-// where iOS puts the same two — a `DropdownMenu` and not a swipe, per the
-// standing Android convention `cb13d31` recorded.
+// The first two hang off `WorkspaceHeader`'s overflow menu in `FleetScreen`,
+// which is where iOS puts the same two — a `DropdownMenu` and not a swipe, per
+// the standing Android convention `cb13d31` recorded. The third is reached from
+// `NewWorkspaceSheet`, because it is a way of creating a workspace and not a
+// thing done to one that exists.
 //
-// **Every runner is its own [Connection], and both of these take one.** That is
-// what keeps them right on a fleet of three: a stack is read from the runner
-// holding the repository, and a worktree is removed on the runner it lives on,
+// **Every runner is its own [Connection], and all three of these take one.**
+// That is what keeps them right on a fleet of three: a stack is read from the
+// runner holding the repository, a worktree is removed on the runner it lives
+// on, and branches are listed on the runner that has the repository —
 // structurally rather than by remembering to pass a host id. See
 // `net/FleetRepository.kt` — this app connects every runner at once and must
 // never grow a surface that assumes one.
 //
 // **Nothing in this file has drawn a frame.** There is no emulator and no device
 // for this phase. The sentences worth being sure about are pure functions in
-// `model/Stack.kt` where `StackTest` can read them; everything about layout and
-// colour is reasoning, and is marked as such in the report rather than claimed
-// here.
-
-/**
- * The bottom-sheet shell both of these use.
- *
- * The same shape as `ReviewSheetFrame` in `ChangesSheets`, deliberately, and a
- * second copy rather than a shared one: that composable is private to a file
- * whose header spends a paragraph on why review sheets live apart from the diff
- * list, and widening it for one caller would either move it somewhere it does
- * not belong or leave it named for a screen it no longer serves. Fifteen lines
- * of padding is the cheaper of the two. If a third appears, promote it.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun WorkspaceSheetFrame(
-    title: String,
-    onDismiss: () -> Unit,
-    action: @Composable () -> Unit = {},
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
-        Column(
-            Modifier
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 16.dp)
-                .imePadding()
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.weight(1f),
-                )
-                action()
-            }
-            content()
-        }
-    }
-}
+// `model/Stack.kt` and at the bottom of this file, where `StackTest`,
+// `RemoveWorktreeTest` and `ResumeBranchTest` can read them; everything about
+// layout and colour is reasoning, and is marked as such in the report rather
+// than claimed here.
 
 // ---- where a branch sits ----
 
@@ -157,7 +121,7 @@ fun StackSheet(
         loading = false
     }
 
-    WorkspaceSheetFrame(
+    SheetFrame(
         title = "Stack",
         onDismiss = onDismiss,
         action = {
@@ -537,7 +501,7 @@ private fun TypedNameSheet(
     var typed by remember { mutableStateOf("") }
     val matches = removalNameMatches(workspace.task, typed)
 
-    WorkspaceSheetFrame("Remove worktree", onDismiss) {
+    SheetFrame("Remove worktree", onDismiss) {
         Text(
             "This worktree has uncommitted changes. Type its name to remove it.",
             style = MaterialTheme.typography.bodySmall,
@@ -567,6 +531,96 @@ private fun TypedNameSheet(
                 ),
                 onClick = { onRemove(typed.trim()) },
             ) { Text("Remove") }
+        }
+    }
+}
+
+// ---- resuming onto work that already exists ----
+
+/**
+ * Pick a branch to take over, instead of typing its name exactly and hoping.
+ *
+ * **Adoption is a different operation, not a flag on creation.** `rpc.rs` sends
+ * an `adopt_existing` request to `Service::adopt_branch`, which ignores
+ * `task_name` outright and names the worktree after the branch's last segment —
+ * `feat/rate-limiting` lands in a directory called `rate-limiting`. So there is
+ * nothing else to fill in, which is why this is a list and not a form, and why
+ * [NewWorkspaceSheet] collapses when a branch comes back from here rather than
+ * leaving a name field collecting something the runner will throw away.
+ *
+ * Before this the only way work arrived was a new branch. Picking up something
+ * pushed from another machine — or produced by an agent running somewhere else —
+ * meant typing its name exactly, from a phone keyboard, with no list to check it
+ * against.
+ *
+ * Remote-only refs are in the list and are not a mistake:
+ * `git::create_worktree_from_branch` looks up which remote actually carries the
+ * name and runs `worktree add --track -b`, so adopting one creates the local
+ * tracking branch as part of the same call. Guessing `origin` is what it
+ * deliberately does not do, which is why [BranchRef.remote] is a name.
+ *
+ * `branch.list` is `Scope::Read`, so unlike the folder list on the settings
+ * screen this works on a phone the runner has given the narrowest scope.
+ */
+@Composable
+fun ResumeBranchSheet(
+    connection: Connection,
+    repository: String,
+    onPick: (BranchRef) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var filter by remember { mutableStateOf("") }
+    var branches by remember { mutableStateOf<List<BranchRef>?>(null) }
+    var failure by remember { mutableStateOf<Trouble?>(null) }
+    // Read once rather than ticked, for the reason `BaseBranchSheet` gives at
+    // the same line: a branch last touched three days ago will not become four
+    // while a picker is open.
+    val now = remember { System.currentTimeMillis() }
+
+    LaunchedEffect(repository) {
+        try {
+            branches = connection.branches(repository)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            failure = Trouble("Couldn’t read this project’s branches.", e.message)
+        }
+    }
+
+    val shown = remember(branches, filter) { matchingBranches(branches.orEmpty(), filter) }
+
+    SheetFrame("Resume a branch", onDismiss) {
+        when {
+            failure != null -> SheetFailure(failure!!)
+
+            branches == null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                SheetNoteText("Reading branches…")
+            }
+
+            else -> {
+                FilterField(filter, "Filter branches") { filter = it }
+                if (shown.isEmpty()) {
+                    SheetNoteText(noBranchesHere(branches.orEmpty().isEmpty()))
+                } else {
+                    LazyColumn(Modifier.weight(1f, fill = false)) {
+                        items(shown, key = { it.name }) { branch ->
+                            BranchRow(
+                                branch,
+                                current = false,
+                                nowMs = now,
+                                // git refuses a second checkout of one branch,
+                                // so the row is dead rather than left tappable
+                                // to fail after the sheet has closed.
+                                enabled = !branch.checkedOut,
+                            ) {
+                                onPick(branch)
+                                onDismiss()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -604,6 +658,31 @@ internal fun removalPrompt(runner: String, tmuxDown: Boolean): String =
         "Closes every terminal in it and deletes the folder on $runner. The branch " +
             "and everything committed on it stay."
     }
+
+/**
+ * What the collapsed form says will happen when a branch is resumed.
+ *
+ * Three claims, and each is checked against `Service::adopt_branch`:
+ *
+ * - **A new worktree**, not a checkout in place. `create_worktree_from_branch`
+ *   runs `git worktree add`, and refuses outright if the destination exists.
+ * - **Named after the branch's last segment** — `feat/rate-limiting` becomes a
+ *   directory called `rate-limiting`. Said here because the name field is gone
+ *   and this is the only place the resulting name is ever explained.
+ * - **Nothing on the branch changes.** True: adoption checks the branch out and
+ *   writes no commit. A remote-only name is the one case where something is
+ *   created, and what is created is a local tracking branch pointing at the
+ *   commit the remote already had.
+ *
+ * Takes the branch so the sentence names it. A prompt that said "this branch"
+ * while the branch itself was one line up would be the reader having to hold
+ * two halves together, which is what the removal prompt above avoids too.
+ */
+internal fun adoptionDescription(branch: String): String {
+    val folder = branch.substringAfterLast('/')
+    return "Far Cooler takes $branch over in a new worktree called $folder. " +
+        "Nothing on the branch changes."
+}
 
 /**
  * Whether what was typed is the worktree's name, by the runner's own rule.

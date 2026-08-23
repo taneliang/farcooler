@@ -625,6 +625,47 @@ data class Repository(
 data class RepositoryList(val repositories: List<Repository> = emptyList())
 
 /**
+ * A directory this runner is allowed to look for repositories inside.
+ *
+ * A standing permission rather than a project: nothing is registered by adding
+ * one, and removing one deletes nothing on disk. The two lists on the settings
+ * screen answer different questions for that reason — what you can start work
+ * in, and where the runner is allowed to look.
+ *
+ * **Two keys, and the wire has more.** `wire::repository_root` in
+ * `crates/daemon/src/wire.rs` also carries `resource_version`, `host_id`,
+ * `path_token`, `created_at` and — the one worth wanting — `repository_count`.
+ * The FFI does not pass them on: `crates/client/src/ffi.rs` builds
+ * `{"id", "displayPath"}` and nothing else, so a root row here cannot say how
+ * many projects sit under it, and adding the field to this class would declare a
+ * key that never arrives. Transcribed from that `json!` block rather than from
+ * the wire message, which is the rule `07e75e8`, `fb79a8c` and `22700b0` were
+ * each written after breaking.
+ */
+@Serializable
+data class RepositoryRoot(
+    val id: String = "",
+    /**
+     * Where it is — and NULL is a rule rather than a gap.
+     *
+     * `wire::repository_root` writes `display_path: admin(scope).then(...)`, so
+     * a client below `host_admin` is told the root exists and deliberately not
+     * told where. The row says "Hidden" rather than drawing an empty line, which
+     * would read as a bug instead of a policy. iOS says the same at
+     * `RunnerSettingsView.repositoriesSection`.
+     *
+     * In practice a phone that can read this list at all holds `host_admin` —
+     * `repository_root.list` is gated there — so the null arm is for a runner
+     * whose scope table has moved, not for today's ordinary case. It costs a
+     * `?` and it cannot be wrong.
+     */
+    val displayPath: String? = null,
+)
+
+@Serializable
+data class RepositoryRootList(val roots: List<RepositoryRoot> = emptyList())
+
+/**
  * What a runner is, and whether it is well — `host.health`, key for key.
  *
  * **Only [reasons] and [protocolVersion] are new information**, and that is
