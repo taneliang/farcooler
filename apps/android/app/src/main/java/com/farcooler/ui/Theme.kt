@@ -270,5 +270,12 @@ fun DiffCounts(counts: InboxRow, modifier: Modifier = Modifier) {
     }
 }
 
-/** The green a diff's insertions are drawn in. See [DiffCounts]. */
-private val DIFF_ADDED = Color(0xFF4CAF50)
+/**
+ * The green a diff's insertions are drawn in. See [DiffCounts].
+ *
+ * Internal rather than private since the review surface landed: `ChangesScreen`
+ * draws the same pair on a file heading, on a commit's counts and on every added
+ * line of a patch, and a fifth hand-mixed green three files away is precisely
+ * what [DiffCounts]'s own comment says one copy exists to prevent.
+ */
+internal val DIFF_ADDED = Color(0xFF4CAF50)

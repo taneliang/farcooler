@@ -422,6 +422,33 @@ data class FileDiffReply(
     /** Why this patch is not all of the file, when it is not. Null when it is. */
     val truncationNotice: String?
         get() = if (truncated) "This patch was cut short. It’s too big to send whole." else null
+
+    /**
+     * That this comparison is a merge against one side of itself.
+     *
+     * The honest caption for the one comparison on this screen that is not the
+     * whole truth: [DiffScope.Commit] is `{sha}^1..{sha}` and never `git show`,
+     * so a merge's patch here is what the merge did to the branch it landed ON
+     * and says nothing about the branch it brought in.
+     */
+    val mergeNotice: String?
+        get() = if (firstParentOfMerge) {
+            "This is a merge, shown against its first parent only."
+        } else {
+            null
+        }
+
+    /**
+     * The sentences that belong ABOVE this patch, in order.
+     *
+     * Both of these are notices AROUND a patch that is really there, and neither
+     * is a reason a file has no lines — an audit of this screen got that
+     * backwards once, and the two live together here so the next reader cannot.
+     * The reasons a file has no lines are [unsupported], a file git has never
+     * seen, and a fetch still in flight; all three are answered elsewhere and
+     * none of them is a notice.
+     */
+    val notices: List<String> get() = listOfNotNull(truncationNotice, mergeNotice)
 }
 
 @Serializable

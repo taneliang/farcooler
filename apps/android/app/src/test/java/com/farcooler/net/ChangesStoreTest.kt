@@ -242,6 +242,51 @@ class ChangesStoreTest {
     }
 
     /**
+     * **A notice is not a nothing**, which is the distinction an audit of this
+     * screen got backwards once. `truncated` and `firstParentOfMerge` decorate a
+     * patch that is really there; the reasons a file has no lines are
+     * `unsupported`, a file git has never seen, and a fetch still in flight.
+     * Both facts have crossed the FFI since `file_diff_json` existed and no
+     * phone read either until phase 5b.
+     */
+    @Test
+    fun `a cut-short merge patch keeps its lines and gains two notices`() = runTest {
+        val source = FakeSource().apply {
+            set = ChangeSet(files = listOf(file("big.rs")))
+            diffs["big.rs"] = diff("added" to 1, "added" to 2)
+                .copy(truncated = true, firstParentOfMerge = true)
+        }
+        val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())
+        store.load()
+        store.ensure("big.rs")
+        assertEquals(2, store.state.value.fileDiffs["big.rs"]?.size)
+        assertEquals(
+            listOf(
+                "This patch was cut short. It’s too big to send whole.",
+                "This is a merge, shown against its first parent only.",
+            ),
+            store.state.value.fileNotices["big.rs"],
+        )
+        // And it goes with the patch it is about. A notice left behind would
+        // caption whatever the next comparison put under that path.
+        store.load(fresh = true)
+        assertNull(store.state.value.fileNotices["big.rs"])
+    }
+
+    /** An ordinary patch collects no notices at all, so the row draws none. */
+    @Test
+    fun `a whole patch says nothing about itself`() = runTest {
+        val source = FakeSource().apply {
+            set = ChangeSet(files = listOf(file("a.rs")))
+            diffs["a.rs"] = diff("added" to 1)
+        }
+        val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())
+        store.load()
+        store.ensure("a.rs")
+        assertTrue(store.state.value.fileNotices.isEmpty())
+    }
+
+    /**
      * Left unread rather than recorded as empty, so pulling to refresh tries it
      * again instead of showing a permanent blank.
      */

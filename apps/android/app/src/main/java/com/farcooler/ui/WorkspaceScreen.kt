@@ -4,16 +4,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -36,13 +32,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.model.InboxRow
 import com.farcooler.model.Workspace
+import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -334,8 +330,10 @@ fun WorkspaceScreen(
                                 )
 
                                 is Pane.Changes -> ChangesTab(
+                                    model = model,
+                                    connection = connection,
+                                    workspaceId = route.workspaceId,
                                     workspace = workspace,
-                                    counts = counts,
                                     showRunner = connections.size > 1,
                                     runnerLabel = connection.host.displayLabel,
                                     onOpenDrawer = onOpenDrawer,
@@ -405,83 +403,51 @@ private val HIDDEN_PANE: Modifier = Modifier
     }
 
 /**
- * The worktree's diff, before there is a surface that can show one.
+ * The worktree's diff, at last.
  *
- * **Phase 5 of the parity program builds the review, and this is not it.** What
- * this phase owed was a Changes CHIP that does something honest, and leaving it
- * dead was explicitly not an option — so the tab exists, holds its seat in the
- * deck and says what it actually knows: how much the worktree has changed, and
- * that reading it here is not built yet.
+ * **Phase 5b, and this is the body `e23718c` reserved.** That phase said the
+ * review "replaces the body of this composable and nothing else: the chip, the
+ * tab, the focus entry and the deck all already exist", and that turned out to
+ * be exactly true — everything below this line is a lookup and a hand-off.
  *
- * That is more than a placeholder, because of where it sits. `Terminal.isChangesPane`
- * has been decoded since phase 1 with a note saying it had no caller and that a
- * host-side `changes` pane therefore fell past `isAgentPane` to the VT renderer
- * and was drawn as a grid of raw bytes — the defect the parity inventory found
- * on its way past `TerminalScreen.kt:334`. It has a caller now: [Pane] folds
- * such a pane into this tab from every direction — the remembered focus, the
- * landing rule, the strip, and the deck's prune — so the raw-bytes screen is no
- * longer reachable. Until phase 5 lands, THIS is what a `changes` pane shows,
- * and a sentence saying where the diff can be read is strictly better than a
- * screenful of escape sequences.
+ * What the tab used to say is deleted rather than kept behind a flag. It named
+ * the counts and then said reading the diff here was not built, which was the
+ * honest thing to say for as long as it was true and is now the one sentence on
+ * this screen that would be false. `Terminal.isChangesPane` still has the caller
+ * `e23718c` gave it, so a host-side `changes` pane still folds into this tab
+ * from every direction and the raw-VT renderer is still unreachable from one.
  *
- * When the review does land it replaces the body of this composable and nothing
- * else: the chip, the tab, the focus entry and the deck all already exist.
+ * The store comes off the [connection] rather than being built here, and that is
+ * structural rather than tidy: one of them belongs to one runner, so the host
+ * half of a review's identity cannot be got wrong by a call site, and a store
+ * outlives this composable — the deck can evict a pane, and a review rebuilt
+ * from nothing would refold every file and refetch every patch over somebody's
+ * cellular link. See [com.farcooler.net.ChangesStores].
+ *
+ * The chip's counts are deliberately not passed on. They are the fleet's
+ * `changes.inbox` watermark, which is a decoration on a chip; the surface reads
+ * the worktree itself through `changes.change_set`, and presenting a poll's
+ * summary as the diff is the one thing it must not do.
  */
 @Composable
 private fun ChangesTab(
+    model: AppModel,
+    connection: Connection,
+    workspaceId: String,
     workspace: Workspace?,
-    counts: InboxRow?,
     showRunner: Boolean,
     runnerLabel: String,
     onOpenDrawer: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        WorkspaceTopBar(
-            workspace = workspace,
-            fallbackTitle = "Changes",
-            showRunner = showRunner,
-            runnerLabel = runnerLabel,
-            onOpenDrawer = onOpenDrawer,
-        )
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 32.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("Changes", style = MaterialTheme.typography.titleMedium)
-            if (counts != null && counts.hasDiff) {
-                Spacer(Modifier.height(8.dp))
-                DiffCounts(counts)
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                changesTabMessage(counts),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-/**
- * What the Changes tab says, in three states that are genuinely different.
- *
- * A null [counts] is the absence of a fact and not the fact that there is
- * nothing — `model/NeedsYou.kt` draws the same line, and it matters more here,
- * where the alternative is telling somebody their branch is clean because their
- * runner has not finished its handshake.
- *
- * Pure, so the words can be read by a test rather than by a screenshot.
- */
-internal fun changesTabMessage(counts: InboxRow?): String = when {
-    counts == null ->
-        "Waiting for this runner to say what’s changed here."
-    !counts.hasDiff ->
-        "Nothing has changed on this branch yet. When an agent writes something, " +
-            "the counts show up on this chip."
-    else ->
-        "That’s everything this worktree has changed, committed or not. Reading the " +
-            "diff on your phone isn’t built yet — it’s on your Mac for now, and the " +
-            "agents that wrote it are one chip away."
+    val fontChoice by model.settings.font.collectAsStateWithLifecycle()
+    val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
+    ChangesPane(
+        store = connection.changes.store(workspaceId),
+        workspace = workspace,
+        showRunner = showRunner,
+        runnerLabel = runnerLabel,
+        fontFamily = TerminalFonts.family(fontChoice),
+        fontSize = fontSize,
+        onOpenDrawer = onOpenDrawer,
+    )
 }

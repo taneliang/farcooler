@@ -150,6 +150,20 @@ data class ChangesState(
     /** Files the daemon would not render, and why. */
     val unsupported: Map<String, String> = emptyMap(),
     /**
+     * What has to be said ABOVE a patch that is really there, by path.
+     *
+     * `truncated` and `firstParentOfMerge` — see [FileDiffReply.notices], which
+     * owns the wording and the distinction. Kept apart from [unsupported]
+     * because they are opposites: [unsupported] says there is no patch and why,
+     * and this decorates one there is. A phone that quietly showed the first
+     * half of a large file and called it the file would be committing the exact
+     * error every other sentence on this screen is written to avoid.
+     *
+     * Thrown away wherever [fileDiffs] is, and for the same reason: a notice is
+     * about a specific fetch of a specific comparison.
+     */
+    val fileNotices: Map<String, List<String>> = emptyMap(),
+    /**
      * Files being read right now, so a row can say so rather than look empty.
      * An unread file and a file with no hunks are not the same thing.
      */

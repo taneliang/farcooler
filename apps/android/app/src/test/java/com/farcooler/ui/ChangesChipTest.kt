@@ -2,46 +2,27 @@ package com.farcooler.ui
 
 import com.farcooler.model.InboxRow
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * What the Changes tab says before there is a review to show.
+ * What the Changes chip says about a worktree it has not opened.
  *
- * Phase 5 of the parity program builds the diff surface; what this phase owed
- * was a chip that does something honest in the meantime, and "leave it dead"
- * was explicitly not on the table. So the words are pinned here rather than in a
- * screenshot nobody takes: three states that are genuinely different, and one of
- * them is the one a phone gets wrong.
+ * This file used to pin three sentences as well — the tab's own body, which said
+ * how much had changed and that reading it here was not built yet. **Phase 5b
+ * built it, so those sentences and their two tests are gone rather than
+ * adjusted.** They were honest for exactly as long as they were true, and a copy
+ * test that outlives the copy is a test asserting the app still says something
+ * false. What survives is the part that was never about the deferral: the chip's
+ * own spoken label.
  */
 class ChangesChipTest {
     private fun row(insertions: Int, deletions: Int) =
         InboxRow(workspaceId = "w", insertions = insertions, deletions = deletions)
 
     /**
-     * A runner that has not answered is not a branch with nothing on it.
-     *
-     * Null is the absence of a fact; a row with no diff is the fact that there
-     * is nothing. `model/NeedsYou.kt` draws the same line and it matters more
-     * here, where reading the two as one means telling somebody their branch is
-     * clean because their runner is still shaking hands.
-     */
-    @Test
-    fun anUnansweredRunnerAndACleanBranchDoNotGetTheSameSentence() {
-        assertNotEquals(changesTabMessage(null), changesTabMessage(row(0, 0)))
-        assertTrue(changesTabMessage(null).contains("Waiting"))
-    }
-
-    /** The one clause only this surface carries: the counts include uncommitted work. */
-    @Test
-    fun theTabSaysWhatTheCountsActuallyCount() {
-        assertTrue(changesTabMessage(row(82, 13)).contains("committed or not"))
-    }
-
-    /**
      * There is no hover on a phone, so the accessibility label is the only place
-     * the chip itself can say what its numbers mean.
+     * the chip itself can say what its numbers mean — and they are not the
+     * branch total the workspace list shows under Branch.
      */
     @Test
     fun theChipTellsAScreenReaderWhatItIsCounting() {

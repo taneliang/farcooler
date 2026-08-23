@@ -168,6 +168,34 @@ class ReviewTest {
         )
     }
 
+    /**
+     * The other half of the sticky file name, added by phase 5b.
+     *
+     * A file's heading is drawn at the very top of its own row, so "has its
+     * heading gone" is the same question as "is its top above the viewport". The
+     * bar is drawn only when it is, or the same file's name would be on the
+     * screen twice.
+     */
+    @Test
+    fun `the pinned name appears only once the card's own heading has gone`() {
+        val rows = listOf(
+            ReviewScroll.VisibleRow("a.rs", -900, 2_000),
+            ReviewScroll.VisibleRow("b.rs", 1_100, 400),
+        )
+        assertTrue(ReviewScroll.scrolledPastHeading(rows, "a.rs", 0))
+        assertFalse(ReviewScroll.scrolledPastHeading(rows, "b.rs", 0))
+    }
+
+    /**
+     * A row the list is not currently showing has no offset to compare. False,
+     * rather than a guess, because the alternative is a bar naming a file that
+     * is nowhere on the screen.
+     */
+    @Test
+    fun `a row that is not laid out is not scrolled past`() {
+        assertFalse(ReviewScroll.scrolledPastHeading(emptyList(), "a.rs", 0))
+    }
+
     // ---- what a comment is attached to ----
 
     @Test

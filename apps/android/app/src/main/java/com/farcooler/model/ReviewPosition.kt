@@ -201,4 +201,27 @@ object ReviewScroll {
         }
         return null
     }
+
+    /**
+     * Whether that row's own top has gone off the top of the screen.
+     *
+     * The other half of the sticky file name, and the reason it is here rather
+     * than at the call site: it reads the same numbers [topVisible] does, so the
+     * name held at the top of the screen and the file the bookmark will record
+     * cannot come out of two different arithmetics.
+     *
+     * A file's heading is drawn at the very top of its own row, so this is the
+     * whole question — while the row's top is still on screen, the heading is
+     * too, and drawing the pinned bar would put the same file's name on the
+     * screen twice.
+     *
+     * False for a key the list is not currently showing, which is the honest
+     * answer rather than a guess: a row that has been recycled away has no
+     * offset to compare, and claiming its heading is off the top would leave a
+     * bar naming a file nobody can see.
+     */
+    fun scrolledPastHeading(rows: List<VisibleRow>, key: String, viewportStart: Int): Boolean {
+        val row = rows.firstOrNull { it.key == key } ?: return false
+        return row.offset < viewportStart
+    }
 }

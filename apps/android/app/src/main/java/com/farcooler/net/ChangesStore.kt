@@ -167,6 +167,7 @@ class ChangesStore(
             _state.update {
                 it.copy(
                     fileDiffs = emptyMap(),
+                    fileNotices = emptyMap(),
                     unsupported = emptyMap(),
                     generation = it.generation + 1,
                 )
@@ -208,13 +209,26 @@ class ChangesStore(
             if (_state.value.generation != asked) return
             _state.update { state ->
                 val why = diff.unsupported
+                // Recorded whichever way the patch went, because they are not
+                // about whether there IS one: a merge commit that the daemon
+                // also declined to render is still a merge shown against its
+                // first parent, and `combined_diff` is exactly that pairing.
+                // See [FileDiffReply.notices].
+                val notices = diff.notices
+                val withNotices =
+                    if (notices.isEmpty()) state.fileNotices
+                    else state.fileNotices + (path to notices)
                 if (why != null) {
                     state.copy(
                         unsupported = state.unsupported + (path to reason(why)),
                         fileDiffs = state.fileDiffs + (path to emptyList()),
+                        fileNotices = withNotices,
                     )
                 } else {
-                    state.copy(fileDiffs = state.fileDiffs + (path to diff.lines()))
+                    state.copy(
+                        fileDiffs = state.fileDiffs + (path to diff.lines()),
+                        fileNotices = withNotices,
+                    )
                 }
             }
             prefetchAfter(path)
@@ -303,6 +317,7 @@ class ChangesStore(
                 // another commit's subject, which is the same bug wearing a
                 // better disguise.
                 fileDiffs = emptyMap(),
+                fileNotices = emptyMap(),
                 unsupported = emptyMap(),
                 // Every scope is a different file list, so the open file goes
                 // with it rather than being carried across — the same path can
@@ -655,6 +670,7 @@ class ChangesStore(
                     changeSet = answer,
                     error = null,
                     fileDiffs = emptyMap(),
+                    fileNotices = emptyMap(),
                     unsupported = emptyMap(),
                     commitFiles = emptyList(),
                     commitUnreadable = false,
