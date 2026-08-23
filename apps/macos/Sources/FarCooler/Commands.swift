@@ -29,6 +29,7 @@ enum AppCommand: String {
     case diffNextCommit
     case diffPreviousCommit
     case diffFirstCommit
+    case diffMarkRead
 
     static let notification = Notification.Name("farcooler.command")
 
@@ -219,6 +220,18 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("]", modifiers: [.command, .control])
             Button("Previous Commit") { AppCommand.diffPreviousCommit.post() }
                 .keyboardShortcut("[", modifiers: [.command, .control])
+            Divider()
+            // Not a movement, which is why it is below the divider: it says
+            // something about the worktree rather than about where you are in
+            // it. The daemon keeps a per-worktree watermark and this is the
+            // only thing on the Mac that moves it — see `ChangesStore.markRead`
+            // for what it clears, most of which is on a phone.
+            //
+            // No key equivalent, deliberately. Every other item here is a
+            // movement you undo by pressing the other one, and this is the one
+            // item with a side effect the reader cannot see all of; a shortcut
+            // next to ⌥⌘] would be reachable by accident.
+            Button("Mark as Reviewed") { AppCommand.diffMarkRead.post() }
         }
 
         // Grouped only to stay inside what `CommandsBuilder` will build: it

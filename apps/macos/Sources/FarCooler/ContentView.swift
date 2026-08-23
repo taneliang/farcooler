@@ -2017,7 +2017,11 @@ struct ContentView: View {
         // still fails to compile until somebody decides where it goes.
         case .diffNextHunk, .diffPreviousHunk,
             .diffNextFile, .diffPreviousFile,
-            .diffNextCommit, .diffPreviousCommit, .diffFirstCommit:
+            .diffNextCommit, .diffPreviousCommit, .diffFirstCommit,
+            // Not a movement, but pane-scoped for the same reason: the
+            // watermark it moves belongs to the worktree whose diff you were
+            // reading, and a window can hold a diff and three terminals.
+            .diffMarkRead:
             break
         }
     }

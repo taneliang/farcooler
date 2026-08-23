@@ -620,7 +620,7 @@ private struct TilePane: View {
                 Task { await changes.load(fresh: true) }
             }
 
-            changeCount
+            changeCount.help(ifAny: changeCountHelp)
 
             if changes.changeSet.isDirty {
                 Circle()
@@ -643,32 +643,89 @@ private struct TilePane: View {
         }
     }
 
+    /// How big this comparison is, with what a tool wrote held apart.
+    ///
+    /// The headline is what a person or an agent wrote. A branch that touched
+    /// eleven source files and regenerated `Cargo.lock` reported four thousand
+    /// lines here, and nothing on screen distinguished it from a branch that
+    /// really did rewrite four thousand lines — which is the whole reason
+    /// `GeneratedFile` exists. The generated total does not disappear: it
+    /// follows, dimmer than the file count beside it, because a lockfile that
+    /// moved is a fact about the branch and only its SIZE was misleading.
+    ///
+    /// Both halves are summed from the file list when anything generated is in
+    /// it. `changeSet.insertions` is the daemon's count of the whole comparison
+    /// and cannot be asked for a subtotal, so under Branch the headline swaps
+    /// sources — and only then. With nothing generated present this is the
+    /// number it always was, from the source it always came from, which is what
+    /// keeps this inert on the branches that have not regenerated anything.
+    ///
+    /// Through `DiffCounts` now, which is drift this item had to fix to do its
+    /// own job: that type's doc says "thousands separators everywhere, because
+    /// a lockfile's `+35870` is a number nobody reads at a glance", and this
+    /// header — the one place a lockfile's number actually lands — was the one
+    /// place still interpolating the raw `Int`.
     private var changeCount: Text {
         let files = changes.files
         let fileCount = files.count
         var value = AttributedString(fileCount == 1 ? "1 file" : "\(fileCount) files")
         value.foregroundColor = .secondary
 
-        let insertions =
-            changes.scope == .branch
-            ? changes.changeSet.insertions
-            : files.reduce(0) { $0 + $1.insertions }
-        let deletions =
-            changes.scope == .branch
-            ? changes.changeSet.deletions
-            : files.reduce(0) { $0 + $1.deletions }
+        let generated = changes.generatedFiles
+        let insertions: Int
+        let deletions: Int
+        if !generated.isEmpty {
+            insertions = changes.writtenInsertions
+            deletions = changes.writtenDeletions
+        } else if changes.scope == .branch {
+            insertions = changes.changeSet.insertions
+            deletions = changes.changeSet.deletions
+        } else {
+            insertions = files.reduce(0) { $0 + $1.insertions }
+            deletions = files.reduce(0) { $0 + $1.deletions }
+        }
 
         if insertions > 0 {
-            var added = AttributedString("  +\(insertions)")
+            var added = AttributedString("  " + DiffCounts.added(insertions))
             added.foregroundColor = .green
             value.append(added)
         }
         if deletions > 0 {
-            var removed = AttributedString(" −\(deletions)")
+            var removed = AttributedString(" " + DiffCounts.removed(deletions))
             removed.foregroundColor = .red
             value.append(removed)
         }
-        return Text(value).font(.system(size: 10.5, design: .monospaced))
+        if !generated.isEmpty {
+            // Lines rather than a pair, and the word rather than a symbol. A
+            // second `+4,012 −0` beside the headline's own pair is two pairs of
+            // numbers to tell apart at 10.5pt; one total and the word that says
+            // what it is can be read without stopping. The tooltip has the rest.
+            let lines = changes.generatedInsertions + changes.generatedDeletions
+            var apart = AttributedString("  \(lines.formatted()) generated")
+            // A dimmed secondary rather than `.tertiary`, which is a
+            // `ShapeStyle` and not a `Color` — and this is one attributed
+            // string, on purpose, so the whole strip shares one baseline the
+            // way `WorkspaceSection`'s own pair does.
+            apart.foregroundColor = .secondary.opacity(0.7)
+            value.append(apart)
+        }
+        return Text(value)
+            .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
+    }
+
+    /// The sentence the trailing word has no room for, and nothing at all when
+    /// nothing is held apart — an empty tooltip is not the same as no tooltip.
+    private var changeCountHelp: String? {
+        let generated = changes.generatedFiles
+        guard !generated.isEmpty else { return nil }
+        let what =
+            generated.count == 1
+            ? "\(generated[0].name), which a build regenerated, is"
+            : "\(generated.count) files a build regenerated are"
+        return "\(DiffCounts.pair(insertions: changes.writtenInsertions, deletions: changes.writtenDeletions)) "
+            + "was written by hand. \(what) counted apart, so a lockfile can’t make a branch look "
+            + "four thousand lines bigger than it is. They’re listed last in the diff too, so Next "
+            + "reaches them at the end."
     }
 }
 

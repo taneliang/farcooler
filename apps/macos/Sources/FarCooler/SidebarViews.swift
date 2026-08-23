@@ -277,9 +277,17 @@ struct WorkspaceSection: View {
                         // in it for the same reason the attention dot's label
                         // carries it — this is its own element, reached on its
                         // own, with no row around it to say which one it is.
+                        //
+                        // The read state is spoken because it is drawn in
+                        // color and in nothing else. A row that has been
+                        // marked reviewed dims its pair and says nothing
+                        // otherwise, so a label that left it out would describe
+                        // two different rows identically.
                         .accessibilityLabel(
                             "\(changes.insertions) insertions, \(changes.deletions) deletions "
-                                + "in \(workspace.task), including work that isn’t committed yet")
+                                + "in \(workspace.task), including work that isn’t committed yet"
+                                + (changes.changedSinceReviewed
+                                    ? ", changed since you last looked" : ", reviewed"))
                 }
 
                 HStack(spacing: 2) {
@@ -379,12 +387,60 @@ struct WorkspaceSection: View {
     /// the fleet would be tracking one.
     private var changesHelp: String? {
         guard let changes, changes.hasDiff else { return nil }
-        return "\(DiffCounts.pair(insertions: changes.insertions, deletions: changes.deletions)) in this "
+        let counts = DiffCounts.pair(
+            insertions: changes.insertions, deletions: changes.deletions)
+        // Said only in the gray state, which is the one that needs explaining.
+        // A worktree nobody has marked read is every worktree until somebody
+        // starts marking them, and a sentence on every row in the fleet saying
+        // so would be the tooltip telling you the default.
+        let read =
+            changes.changedSinceReviewed
+            ? ""
+            : " You’ve marked this reviewed, and nothing has changed since."
+        return "\(counts) in this "
             + "workspace — committed work, uncommitted edits, and untracked files, together. "
             + "The Changes pane splits them: Branch is what’s committed, Uncommitted is what isn’t."
+            + read
     }
 
+    /// The pair, in color while there is something new here and gray once it
+    /// has been read.
+    ///
+    /// The daemon has kept a per-worktree watermark since this row was written
+    /// and the sidebar drew none of it: a worktree you had finished reading
+    /// looked exactly like one an agent had just rewritten. The phone gated its
+    /// whole Needs You list on `changedSinceReviewed && hasDiff`
+    /// (`FleetView.rule(for:inbox:)`) while the Mac's answer to the same
+    /// question was the counts alone, which stay true forever and therefore
+    /// answer "is there a branch here" rather than "is there anything new".
+    ///
+    /// A state on the element already in the row rather than a new one beside
+    /// it. This adds no glyph, no column and no width — `countsWidth` measures
+    /// a string this does not change — which is what keeps a watermark from
+    /// becoming a second badge in a list that is meant to be hundreds of rows
+    /// of one line each. And the contrast is the one the app has already
+    /// written down: `WorkspaceStyle.navigatorSelection(active:)` grays an
+    /// inactive selection because "the question an inactive selection answers
+    /// is 'this is remembered, not live'", which is exactly what a read diff is
+    /// saying. Gray against color is also a saturation channel and not a hue
+    /// one, so it survives the color blindness `+`/`−` against green/red does
+    /// not — and the accessibility label above says it in words regardless.
+    ///
+    /// Nothing changes appearance until somebody uses it. The daemon treats a
+    /// worktree that was never marked read as changed, so on a Mac that has
+    /// never marked anything — and never had a way to — every row draws exactly
+    /// what it drew before. The gray state appears the first time the reader
+    /// chooses Mark as Reviewed, or the first time their phone does.
     private func changeCountsText(_ changes: InboxRow) -> Text {
+        guard changes.changedSinceReviewed else {
+            // One run, one color: the sign characters carry the polarity on
+            // their own, and two grays either side of a space would be a
+            // distinction the reader is asked to look for and find nothing in.
+            var read = AttributedString(
+                DiffCounts.pair(insertions: changes.insertions, deletions: changes.deletions))
+            read.foregroundColor = .secondary
+            return Text(read)
+        }
         var additions = AttributedString(DiffCounts.added(changes.insertions))
         additions.foregroundColor = .green
         var deletions = AttributedString(" " + DiffCounts.removed(changes.deletions))

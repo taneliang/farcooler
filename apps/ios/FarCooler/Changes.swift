@@ -233,51 +233,19 @@ struct ChangedFile: Decodable, Equatable, Identifiable {
 
     /// Whether a tool wrote this file rather than a person or an agent.
     ///
-    /// It exists because of what it does to the two numbers at the top of the
-    /// screen. A branch that touched eleven source files and regenerated
-    /// `Cargo.lock` reads as four thousand lines changed, and the reader — who
-    /// has ninety seconds — has no way to tell that from a branch that really
-    /// did rewrite four thousand lines. Counted apart, the same branch reads as
-    /// `+300 −120`, and a quieter line underneath says a lockfile moved too.
+    /// The rule and the whole of its reasoning moved to
+    /// `GeneratedFile.isGenerated` when the Mac's diff pane needed the same
+    /// answer — including the part that matters most, that this belongs on the
+    /// host and is a stopgap until it gets there. Two clients deciding it
+    /// separately was the failure the move prevents: the fold below and the
+    /// Mac's reading order have to agree about what a lockfile is, or the two
+    /// screens disagree about what a branch changed.
     ///
-    /// **This rule belongs on the host, beside `crates/core/src/feed.rs`.** It
-    /// is a fact about a repository — what its build regenerates, what its
-    /// `.gitattributes` marks `linguist-generated`, what its own conventions
-    /// call vendored — and the host is the only place that can read any of
-    /// that. Deciding it here means two clients with two lists, and a phone
-    /// that is wrong about a repository it has never seen. It is here only
-    /// because putting it there is a protocol field plus a daemon rule plus
-    /// both clients, which is a larger change than this screen; when that
-    /// lands, this becomes a fallback for older runners and nothing else.
-    ///
-    /// Deliberately conservative in the meantime. Everything below is a name a
-    /// tool writes and nobody edits by hand, so a false positive costs a fold
-    /// the reader can open with one tap; a rule like "anything under `vendor/`"
-    /// would start folding files people wrote.
-    var isGenerated: Bool { Self.isGenerated(path) }
-
-    static func isGenerated(_ path: String) -> Bool {
-        let name = (path as NSString).lastPathComponent
-        if generatedNames.contains(name) { return true }
-        // Suffixes rather than whole names, for the families whose stem varies:
-        // `pnpm-lock.yaml` is matched above, `schema.generated.ts` here.
-        return generatedSuffixes.contains { name.hasSuffix($0) }
-    }
-
-    private static let generatedNames: Set<String> = [
-        "Cargo.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
-        "Gemfile.lock", "Podfile.lock", "poetry.lock", "uv.lock", "composer.lock",
-        "go.sum", "Package.resolved", "flake.lock", "gradle.lockfile", "mix.lock",
-        // An .xcodeproj is generated state in this repository specifically —
-        // `apps/ios/generate-project.py` writes it — and it is the file that
-        // most often makes an iOS branch look twice its size.
-        "project.pbxproj",
-    ]
-
-    private static let generatedSuffixes: [String] = [
-        ".generated.swift", ".generated.ts", ".generated.go", ".g.dart", ".pb.go",
-        ".pb.rs", "_pb2.py",
-    ]
+    /// One sentence did NOT survive intact, and it is recorded there rather
+    /// than dropped: the phone's version said a false positive costs "a fold
+    /// the reader can open with one tap", which is true of this screen and of
+    /// no other. The Mac folds nothing.
+    var isGenerated: Bool { GeneratedFile.isGenerated(path) }
 }
 
 enum ChangedFileStatus: String, Decodable {
@@ -1140,7 +1108,13 @@ final class ChangesStore: ObservableObject {
     /// they are marked at all is that they are not what the review is about —
     /// and Next dropping somebody into the middle of a regenerated lockfile,
     /// eleven files before the end, is the tap that ends a review.
-    var reviewOrder: [ChangedFile] { handWrittenFiles + generatedFiles }
+    ///
+    /// Through `GeneratedFile.reviewOrder` rather than `handWrittenFiles +
+    /// generatedFiles`, which is the same list by a different route and is not
+    /// a tidy-up: the Mac walks this order too now, and a partition written
+    /// twice is two answers to "which file does Next open" waiting to differ.
+    /// The two `filter`s stay for the counts, which want the groups themselves.
+    var reviewOrder: [ChangedFile] { GeneratedFile.reviewOrder(files, path: \.path) }
 
     /// `4,012 lines` across the generated files, for the line under the counts.
     var generatedLineCount: Int {

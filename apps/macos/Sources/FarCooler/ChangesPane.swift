@@ -112,6 +112,7 @@ struct ChangesPane: View {
             case .diffNextCommit: moveCommit(1)
             case .diffPreviousCommit: moveCommit(-1)
             case .diffFirstCommit: Task { await readCommitByCommit() }
+            case .diffMarkRead: Task { await changes.markRead() }
             default: break
             }
         }
@@ -1061,6 +1062,13 @@ struct ChangesPane: View {
         return parts.isEmpty ? "no lines" : parts.joined(separator: " ")
     }
 
+    /// Why a file is at the bottom of a list it did not start at the bottom of.
+    private func generatedNote(_ file: ChangedFile) -> String? {
+        guard file.isGenerated else { return nil }
+        return "A build wrote this one. It’s listed after everything a person or an agent "
+            + "wrote, and counted apart from the branch’s totals."
+    }
+
     private func pathLabel(_ file: ChangedFile) -> String {
         guard file.status == .renamed, let old = file.oldPath, old != file.path else {
             return file.path
@@ -1152,6 +1160,14 @@ struct ChangesPane: View {
                                 changes.selectedFile == f.path
                                     ? WorkspaceStyle.navigatorSelection : .clear,
                                 in: RoundedRectangle(cornerRadius: 4))
+                            // Only on the rows that raise the question. A
+                            // lockfile sitting under files it comes before in
+                            // the daemon's order is the one thing in this
+                            // column that is not where the reader put it, and
+                            // this is the sentence saying who moved it. Every
+                            // other row gets no tooltip at all, rather than an
+                            // empty one — see `help(ifAny:)`.
+                            .help(ifAny: generatedNote(f))
                         }
                         .buttonStyle(.plain)
                     }
@@ -1344,7 +1360,10 @@ struct ChangesPane: View {
     private var rows: [DiffRow] {
         var out: [DiffRow] = []
         // The reading order, not the daemon's, and the same one `moveFile`
-        // walks — see `ChangesStore.reviewOrder`. Today they are the same list.
+        // walks — see `ChangesStore.reviewOrder`. They stopped being the same
+        // list when the generated-file rule landed: a lockfile is drawn at the
+        // bottom of the diff and is the last thing Next reaches, which is one
+        // decision precisely because this line and `moveFile` read one property.
         let files = changes.reviewOrder
         out.reserveCapacity(files.count * 8)
         for f in files {

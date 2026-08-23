@@ -211,6 +211,16 @@ struct ChangedFile: Decodable, Equatable, Identifiable {
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
 
+    /// Whether a tool wrote this file rather than a person or an agent.
+    ///
+    /// The rule and all of its reasoning live in `GeneratedFile.isGenerated`,
+    /// which is shared with the phone — including the part that matters most,
+    /// that this belongs on the host and is a stopgap until it gets there. The
+    /// phone had it first and had it alone; two clients deciding separately
+    /// what a lockfile is would be two answers to what a branch changed, on
+    /// the two screens most likely to be open at once.
+    var isGenerated: Bool { GeneratedFile.isGenerated(path) }
+
     enum CodingKeys: String, CodingKey {
         case path, status, insertions, deletions, binary
         case oldPath = "old_path"
@@ -457,6 +467,15 @@ struct WorkingTreeFile: Decodable, Equatable {
 /// This used to carry counts of open and answered comments. Those came from the
 /// review buffer, which is gone; what is left is the question the sidebar
 /// actually asks.
+///
+/// It did not ask all of it. `changedSinceReviewed` was decoded here from the
+/// beginning and read by nothing on this platform for as long — the sidebar
+/// drew the counts and ignored the watermark, so a worktree you had finished
+/// reading looked exactly like one you had not. The phone had been gating both
+/// its Needs You list and its widget count on this pair the whole time
+/// (`FleetView.rule(for:inbox:)`), which is why the drift showed up as the two
+/// clients disagreeing about which worktrees still wanted you rather than as
+/// anything visibly wrong here.
 struct InboxRow: Decodable, Equatable, Identifiable {
     var workspaceId: String
     var changedSinceReviewed: Bool
@@ -896,19 +915,48 @@ final class ChangesStore: ObservableObject {
     /// The files in reading order: the one order the pane draws AND the one
     /// order Next and Previous walk.
     ///
-    /// One property rather than a sort inside the view, and that is the whole
-    /// reason it exists while it still returns `files` unchanged. A position
-    /// counts the list the reader is looking at, so a display order that
-    /// differed from the navigation order would make Next jump backwards up the
-    /// screen — and the phone has already learned where that bites: it puts
-    /// generated files last precisely so Next never drops somebody into the
-    /// middle of a regenerated lockfile eleven files before the end.
+    /// One property rather than a sort inside the view. A position counts the
+    /// list the reader is looking at, so a display order that differed from the
+    /// navigation order would make Next jump backwards up the screen — and the
+    /// phone had already learned where that bites: it puts generated files last
+    /// precisely so Next never drops somebody into the middle of a regenerated
+    /// lockfile eleven files before the end.
     ///
-    /// The Mac has no generated-file rule yet, and this is where it goes when
-    /// it arrives. Naming the seam now costs nothing; discovering it later
-    /// means re-opening the movement arithmetic, which is the part of this pane
-    /// with a test around it for a reason.
-    var reviewOrder: [ChangedFile] { files }
+    /// This is the seam `1c81111` named and left returning `files` unchanged,
+    /// against the day the Mac learned what a generated file is. It has, so the
+    /// rule lands here and the movement arithmetic was never re-opened —
+    /// `moveFile`, `moveHunk` and the hand-off between commits all walk this
+    /// property and none of them had to know. `GeneratedFile.reviewOrder` is a
+    /// stable partition, so a comparison with no lockfile in it is still
+    /// `files`, byte for byte, which is what makes this inert on most branches.
+    ///
+    /// It reorders `.local` too, and that is deliberate rather than incidental:
+    /// a regenerated lockfile is exactly as unhelpful to walk into before it is
+    /// committed as after. Inside each group `files`' own order survives —
+    /// staged, then unstaged, then untracked, each alphabetical.
+    var reviewOrder: [ChangedFile] { GeneratedFile.reviewOrder(files, path: \.path) }
+
+    /// The two groups themselves, for the counts that hold them apart.
+    ///
+    /// Split rather than filtered away: a lockfile that moved is a real fact
+    /// about a branch, and hiding it would be this pane deciding what the
+    /// reader is allowed to see. Only its SIZE is misleading — see
+    /// `GeneratedFile.isGenerated` — so both are listed and only the numbers
+    /// separate.
+    var generatedFiles: [ChangedFile] { files.filter(\.isGenerated) }
+    var handWrittenFiles: [ChangedFile] { files.filter { !$0.isGenerated } }
+
+    /// What a person or an agent wrote, added up, for the pane's headline.
+    ///
+    /// Summed from the file list rather than taken from the change set, which
+    /// is the only way to get it: `changeSet.insertions` is the whole
+    /// comparison and the lockfile inside it is the number this split exists to
+    /// stop showing. See `TileView.changeCount`, which is the one caller and
+    /// reaches for these only when there is something generated to hold apart.
+    var writtenInsertions: Int { handWrittenFiles.reduce(0) { $0 + $1.insertions } }
+    var writtenDeletions: Int { handWrittenFiles.reduce(0) { $0 + $1.deletions } }
+    var generatedInsertions: Int { generatedFiles.reduce(0) { $0 + $1.insertions } }
+    var generatedDeletions: Int { generatedFiles.reduce(0) { $0 + $1.deletions } }
 
     /// Whether git has never seen this file.
     ///
@@ -1424,8 +1472,30 @@ final class ChangesStore: ObservableObject {
         await client.refreshChangesInbox()
     }
 
+    /// Move the daemon's watermark to where this worktree is now.
+    ///
+    /// What it is FOR is mostly not on this screen: `changed_since_reviewed` is
+    /// what puts a worktree in the phone's Needs You list and in the home
+    /// screen widget's count, so the reader who has just read a branch here is
+    /// clearing a row they would otherwise be shown again on a device in their
+    /// pocket. The sidebar's counts answer for it locally — see
+    /// `WorkspaceSection.changeCountsText` — which is the whole of what the Mac
+    /// draws from this watermark and is deliberately not more.
+    ///
+    /// It used to call `load()`, and that was wrong in a way nothing could have
+    /// noticed while the method had no caller. Marking read tells the daemon
+    /// when you last looked; it changes nothing about the diff, and `load()`
+    /// runs `reset()` — every fetched patch dropped, every expanded gap closed,
+    /// every file re-fetched as the reader scrolls back down. So the one
+    /// gesture that means "I have finished reading this" would have thrown away
+    /// the reading. It refreshes the INBOX instead, which is the only thing
+    /// that actually changed and the only thing with anything to redraw.
+    ///
+    /// Directly rather than through `refreshChangesInboxSoon()`: the coalescing
+    /// floor exists to keep a fleet of polling panes off a timer, and this is a
+    /// click that has to answer for itself.
     func markRead() async {
         await client.changesMarkRead(workspace: workspace.short)
-        await load()
+        await client.refreshChangesInbox()
     }
 }

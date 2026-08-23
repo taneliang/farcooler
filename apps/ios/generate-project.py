@@ -130,6 +130,13 @@ AGENTKIT_SOURCES = [
     # anything.
     "WatchLink.swift",
     "DiffComputation.swift",
+    # Which changed files a tool wrote. Only in THIS list: the watch and the
+    # two extensions show a count and a status, never a file list, so nothing
+    # there has a reading order to put a lockfile at the end of. It is here
+    # rather than in `SOURCES` because the Mac's diff pane walks the same order
+    # off the same rule, and the day the daemon answers this question there has
+    # to be one caller-side rule to demote instead of two.
+    "GeneratedFiles.swift",
     # In this list AND in `activity_build_ids` AND in `notify_build_ids` below,
     # for the same reason `AgentActivityAttributes.swift` is in two: THREE
     # targets, three binaries, one file. The widget renders the snapshot the app
