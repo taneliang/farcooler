@@ -16,6 +16,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Difference
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,39 +27,77 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.farcooler.model.InboxRow
 import com.farcooler.model.StateKind
-import com.farcooler.net.FleetEntry
-import com.farcooler.net.TerminalRef
+import com.farcooler.model.Workspace
 
 /**
- * Every terminal in the fleet, one tap from whichever one is on screen.
+ * One workspace's tabs: its agents, and its diff.
  *
- * The Mac always has its sidebar up, so switching terminals there is a click
- * away regardless of which is open. A phone's terminal screen is full-bleed,
- * and "open the drawer, find the row, tap it" is the wrong cost for something
- * as routine as glancing at a second agent. This makes every terminal one tap
- * away without ever leaving the screen that made checking on it worthwhile.
+ * The Mac always has its sidebar up, so switching panes there is a click away
+ * regardless of which is open. A phone's workspace screen is full-bleed, and
+ * "open the drawer, find the row, tap it" is the wrong cost for something as
+ * routine as glancing at a second agent.
  *
- * Deliberately flat across the whole fleet — every runner included — rather
- * than scoped to the current workspace: the 3am case this exists for is "is the
- * OTHER agent still blocked", which is exactly as likely to be on a different
- * runner as in the same workspace.
+ * ## Why this is scoped to one workspace now
+ *
+ * It used to be flat across the whole fleet, and the argument for that was
+ * written down right here: the 3am case is "is the OTHER agent still blocked",
+ * which is as likely to be on a different runner as in the same worktree. That
+ * is still true, and it stopped being the case this strip has to serve.
+ *
+ * The job the owner described is reviewing what an agent did — reading what it
+ * said, judging it, looking at the change, replying — and every one of those is
+ * inside ONE worktree. A flat strip cannot hold that worktree's diff, because a
+ * diff belongs to a workspace and a flat strip has no workspace; and if it did
+ * hold one it would be a lone unlabeled chip in a row of ten unrelated ones.
+ * Scoped, the strip is the toggle: the agents that did the work, and the work
+ * they did, side by side.
+ *
+ * The cross-worktree jump is not lost and did not even move far. Back is
+ * [NeedsYouScreen], which answers "is the other agent still blocked" with a
+ * ranked sentence rather than with a chip's dot, and it now spans every runner
+ * — which the flat strip did too, and which is the thing this app must not give
+ * up. The drawer is still an edge swipe away on this very screen and still
+ * lists the whole fleet. Two ways out, both of them better at the job than a
+ * row of chips for panes in other worktrees.
+ *
+ * ## The position is not up for discussion
+ *
+ * **Bottom, in thumb reach.** iOS moved its strip to a floating overlay under
+ * the navigation bar; `cb13d31` and the parity inventory both say Android's
+ * stays where it is, and the reason is stated on the screen that owns it. This
+ * change is to the strip's SCOPE, not its position.
+ *
+ * A host-side `changes` pane gets no chip of its own. The Changes chip already
+ * is that pane's review, and two chips onto one diff is a choice with no
+ * difference behind it — see [Pane].
  */
 @Composable
 fun TerminalTabStrip(
-    entries: List<FleetEntry>,
-    showRunner: Boolean,
-    current: TerminalRef,
-    onSelect: (TerminalRef) -> Unit,
+    /**
+     * The workspace whose tabs these are.
+     *
+     * Nullable only for the moment between this screen appearing and the
+     * fleet's next answer. The Changes chip stands on its own until then,
+     * because the diff is asked for by workspace id and needs nothing from the
+     * fleet to be worth a chip.
+     */
+    workspace: Workspace?,
+    /** What this worktree has changed, for the Changes chip's counts. */
+    counts: InboxRow?,
+    current: Pane,
+    onSelect: (Pane) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     data class Chip(
-        val ref: TerminalRef,
+        val pane: Pane,
         val label: String,
-        val runner: String,
         val kind: StateKind,
         val wantsAttention: Boolean,
         val attention: com.farcooler.model.AgentActivity,
@@ -69,30 +110,27 @@ fun TerminalTabStrip(
         val turnDidFail: Boolean,
     )
 
-    val chips = entries.flatMap { entry ->
-        val numbering = entry.workspace.ordinals()
-        entry.workspace.terminals.map { terminal ->
+    val numbering = workspace?.ordinals() ?: emptyMap()
+    val chips = workspace?.terminals.orEmpty()
+        .filterNot { it.isChangesPane }
+        .map { terminal ->
             Chip(
-                ref = TerminalRef(entry.host.id, entry.workspace.id, terminal.id),
+                pane = Pane.Terminal(terminal.id),
                 label = terminal.displayName(numbering[terminal.id]),
-                runner = entry.host.displayLabel,
                 kind = StateKind.parse(terminal.state),
                 wantsAttention = terminal.agent.wantsAttention,
                 attention = terminal.agent,
                 turnDidFail = terminal.turnDidFail,
             )
         }
-    }
-    if (chips.isEmpty()) return
 
     val state = rememberLazyListState()
-    val index = chips.indexOfFirst { it.ref.terminalId == current.terminalId }
+    // +1 for the Changes chip, which leads and is not in [chips].
+    val index = chips.indexOfFirst { it.pane == current }.let { if (it < 0) 0 else it + 1 }
 
-    // Scrolled to the open terminal when it changes, not on every fleet
-    // refresh: a poll landing mid-scroll must not fight the user's own gesture.
-    LaunchedEffect(current.terminalId) {
-        if (index >= 0) state.animateScrollToItem(index)
-    }
+    // Scrolled to the open tab when it changes, not on every fleet refresh: a
+    // poll landing mid-scroll must not fight the user's own gesture.
+    LaunchedEffect(current) { state.animateScrollToItem(index) }
 
     LazyRow(
         state = state,
@@ -108,9 +146,20 @@ fun TerminalTabStrip(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(chips.size, key = { chips[it].ref.hostId + "/" + chips[it].ref.terminalId }) { i ->
+        // Changes leads, so the one chip that is always there is always in the
+        // same place — the diff is what a thumb can find without reading, and
+        // the agents shuffle around it as panes come and go.
+        item(key = Pane.CHANGES_ID) {
+            ChangesChip(
+                counts = counts,
+                isCurrent = current is Pane.Changes,
+                onTap = { onSelect(Pane.Changes) },
+            )
+        }
+
+        items(chips.size, key = { chips[it].pane.id }) { i ->
             val chip = chips[i]
-            val isCurrent = chip.ref.terminalId == current.terminalId
+            val isCurrent = chip.pane == current
             Row(
                 Modifier
                     .clip(CircleShape)
@@ -129,7 +178,7 @@ fun TerminalTabStrip(
                             Modifier
                         }
                     )
-                    .clickable { onSelect(chip.ref) }
+                    .clickable { onSelect(chip.pane) }
                     .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -152,7 +201,13 @@ fun TerminalTabStrip(
                     // one "Complete D17 authorization decision for Far Cooler"
                     // — which filled the strip with a single tab and pushed
                     // every other pane off the end of it.
-                    if (showRunner) "${chip.label} · ${chip.runner}" else chip.label,
+                    //
+                    // The runner is gone from the label. It was here while this
+                    // strip spanned the fleet and two chips could be two
+                    // machines; a scoped strip is one workspace on one runner,
+                    // and the title bar above already names it when more than
+                    // one is connected.
+                    chip.label,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (chip.wantsAttention) FontWeight.SemiBold else FontWeight.Normal,
                     maxLines = 1,
@@ -165,4 +220,89 @@ fun TerminalTabStrip(
             }
         }
     }
+}
+
+/**
+ * The worktree's own tab: what the branch changed.
+ *
+ * Always there, including on a workspace with no panes at all, because the diff
+ * is asked for by workspace id — see [Pane]. That is also why it needs no
+ * terminal, no dot and no state: nothing about it can be starting, exited or
+ * lost.
+ *
+ * **Deliberately not amber.** Orange means an agent is waiting on an answer, on
+ * this strip and on the fleet list and the front door, and a glance at any of
+ * them has to answer "does this need me" without reading a word. A diff waiting
+ * to be read is worth showing; it is not worth the color that means somebody is
+ * stuck. `NeedsYouScreen`'s review row makes the same argument about the same
+ * fact.
+ *
+ * So the counts carry it instead, in the green and red they have everywhere
+ * else — which says how big the change is as well as that there is one, in the
+ * space a badge would have taken.
+ */
+@Composable
+private fun ChangesChip(counts: InboxRow?, isCurrent: Boolean, onTap: () -> Unit) {
+    Row(
+        Modifier
+            .clip(CircleShape)
+            .background(
+                if (isCurrent) MaterialTheme.colorScheme.secondaryContainer
+                else Color.Transparent
+            )
+            .clickable(onClick = onTap)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            // There is no hover on a phone, so this is the only place the chip
+            // can say WHAT it counts: everything the worktree has changed, not
+            // the branch total the workspace list shows under Branch. The fleet
+            // list's workspace header and the front door both say the same
+            // clause in the same place and for the same reason.
+            .semantics {
+                contentDescription = changesDescription(counts)
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            // Material's own mark for a comparison of two things, which is what
+            // a diff is. The Apple apps print `plusminus`; Android has no
+            // guarantee of that glyph in the system font, and the counts three
+            // dp to the right already carry the two signs.
+            Icons.Filled.Difference,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint =
+                if (isCurrent) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "Changes",
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            color =
+                if (isCurrent) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // Absent entirely on a clean worktree. `+0 -0` on every branch with
+        // nothing on it is noise in the shape of information — the fleet list's
+        // workspace header leaves it out for the same reason.
+        if (counts != null && counts.hasDiff) {
+            Spacer(Modifier.width(6.dp))
+            DiffCounts(counts)
+        }
+    }
+}
+
+/**
+ * What the Changes chip says to a screen reader.
+ *
+ * Pure and out here rather than built inline, so a test can read the one clause
+ * that only exists in this string: the counts are everything the worktree has
+ * changed, committed or not, which is not the branch total the workspace list
+ * shows under Branch.
+ */
+internal fun changesDescription(counts: InboxRow?): String {
+    if (counts == null || !counts.hasDiff) return "Changes"
+    return "Changes, ${counts.insertions} added, ${counts.deletions} removed, " +
+        "including work that isn’t committed yet"
 }

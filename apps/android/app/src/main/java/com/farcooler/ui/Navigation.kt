@@ -156,15 +156,85 @@ sealed interface Route {
 }
 
 /**
- * Which pane a workspace is showing, and whether a person chose it.
+ * One tab of a workspace.
+ *
+ * Two kinds, and the second one has nothing behind it on the runner. Every
+ * `changes.*` RPC takes a workspace id and nothing else — `Session::change_set`
+ * and `Session::file_diff` in `crates/client/src/session.rs` pass `None` where
+ * a terminal-scoped call passes an id — so the diff is a fact about the
+ * worktree that this app can ask for whether or not anybody ever opened a
+ * `changes` pane in it. That is what lets Changes be a tab at no cost on the
+ * daemon side.
+ *
+ * A `changes` pane the host DOES have folds into [Changes] rather than
+ * becoming a tab of its own, and that fold is where the defect the parity
+ * inventory found gets fixed: `TerminalScreen` routed only on
+ * [com.farcooler.model.Terminal.isAgentPane], so a `changes` pane created from
+ * the Mac fell through to the VT renderer and was drawn as a grid of whatever
+ * bytes are on a pane that is not a tty. It cannot reach that renderer any
+ * more — [Backstack.chooseFocus] and [Backstack.rule] both fold it, so every
+ * road into it now arrives at the Changes tab.
+ *
+ * [id] is NAMESPACED, because a terminal id and the word "changes" are
+ * different kinds of thing and a collision between them would silently give two
+ * tabs one Compose identity — which Compose resolves by drawing one of them.
+ * It is also what a `SaveableStateHolder` buckets a tab's saved state under, so
+ * a collision there would hand one pane's half-typed message to another.
+ */
+sealed interface Pane {
+    /** Stable, namespaced, and the only thing anything downstream keys on. */
+    val id: String
+
+    /** One pane on the runner, by id. */
+    data class Terminal(val terminalId: String) : Pane {
+        override val id: String get() = "$TERMINAL_PREFIX$terminalId"
+    }
+
+    /** The worktree's own diff. Needs nothing on the runner to exist. */
+    data object Changes : Pane {
+        override val id: String get() = CHANGES_ID
+    }
+
+    companion object {
+        const val CHANGES_ID = "changes"
+        const val TERMINAL_PREFIX = "terminal:"
+
+        /** The tab a pane on the runner belongs on. See the type's own note on folding. */
+        fun of(terminal: com.farcooler.model.Terminal): Pane =
+            if (terminal.isChangesPane) Changes else Terminal(terminal.id)
+
+        /**
+         * Read back an [id].
+         *
+         * The third arm is a MIGRATION and not a fallback. Phases 2 and 3 wrote
+         * the focus map as bare terminal ids, and those strings are sitting in
+         * the saved state of every phone that has run one of those builds; read
+         * strictly they would each cost somebody the tab they last chose. A
+         * value that carries neither namespace is exactly what those builds
+         * wrote, so it is read as what it was.
+         */
+        fun parse(id: String): Pane = when {
+            id == CHANGES_ID -> Changes
+            id.startsWith(TERMINAL_PREFIX) -> Terminal(id.removePrefix(TERMINAL_PREFIX))
+            else -> Terminal(id)
+        }
+    }
+}
+
+/**
+ * Which tab a workspace is showing, and whether a person chose it.
  *
  * The second half is not bookkeeping. Only a chosen focus is written down —
  * see [Backstack.encodeFocus] — because a notification tap and a fleet-list row
  * are places somebody was SENT, and a 3am ping about an agent that got itself
  * blocked must not decide where the workspace opens tomorrow morning. iOS draws
  * the same line in `09b1e1f`, one writer and three deliberate non-writers.
+ *
+ * A [Pane] rather than a terminal id since the workspace screen gained a
+ * Changes tab: "where I was in this worktree" has an answer that is not a pane
+ * on the runner, and a map that could only hold terminal ids could not say it.
  */
-data class Focus(val terminalId: String, val chosen: Boolean)
+data class Focus(val pane: Pane, val chosen: Boolean)
 
 /**
  * The navigation stack, and everything about it that is pure.
@@ -227,7 +297,7 @@ object Backstack {
      * today's fleet in front of it.
      */
     fun encodeFocus(focus: Map<String, Focus>): String {
-        val chosen = focus.filterValues { it.chosen }.mapValues { it.value.terminalId }
+        val chosen = focus.filterValues { it.chosen }.mapValues { it.value.pane.id }
         return json.encodeToString(focusFormat, chosen)
     }
 
@@ -235,7 +305,7 @@ object Backstack {
         if (saved.isNullOrBlank()) return emptyMap()
         val decoded = runCatching { json.decodeFromString(focusFormat, saved) }
             .getOrNull() ?: return emptyMap()
-        return decoded.mapValues { Focus(it.value, chosen = true) }
+        return decoded.mapValues { Focus(Pane.parse(it.value), chosen = true) }
     }
 
     /**
@@ -276,7 +346,15 @@ object Backstack {
      * to the activity's saved state on every navigation.
      */
     fun prune(focus: Map<String, Focus>, lives: (key: String, terminalId: String) -> Boolean) =
-        focus.filter { (key, value) -> lives(key, value.terminalId) }
+        focus.filter { (key, value) ->
+            // The Changes tab is never pruned, and cannot be: nothing on the
+            // runner has to exist for it, so nothing can stop existing. iOS
+            // makes the same exception in `WorkspaceView.prune`.
+            when (val pane = value.pane) {
+                is Pane.Changes -> true
+                is Pane.Terminal -> lives(key, pane.terminalId)
+            }
+        }
 
     /**
      * Which pane a workspace shows, in an order of authority.
@@ -290,10 +368,34 @@ object Backstack {
      * remembered agent that died overnight falls through to whatever is
      * blocked this morning instead of resolving to a blank pane.
      */
-    fun chooseFocus(terminals: List<Terminal>, focus: Focus?): String? {
-        val wanted = focus?.terminalId
-        if (wanted != null && terminals.any { it.id == wanted }) return wanted
-        return rule(terminals)
+    fun chooseFocus(terminals: List<Terminal>, focus: Focus?): Pane? =
+        resolve(focus?.pane, terminals) ?: rule(terminals)
+
+    /**
+     * The tab a remembered or requested pane actually resolves to, or null when
+     * it names nothing this workspace has.
+     *
+     * Split out of [chooseFocus] because the workspace screen needs the first
+     * half WITHOUT the second. That screen watches the focus map so a
+     * notification tap or a fleet row moves the tab you are looking at — but it
+     * must not follow the RULE, which changes on every poll: an agent finishing
+     * somewhere else in the worktree would otherwise yank a screen somebody is
+     * reading. The rule gets exactly one turn, when the screen opens. iOS
+     * writes the same restriction on `WorkspaceView.select`.
+     *
+     * Null while a runner has not answered, which is the honest result rather
+     * than a gap: the pane may well exist, and a tap that arrives before the
+     * fleet does gets honored on the poll that brings it.
+     */
+    fun resolve(pane: Pane?, terminals: List<Terminal>): Pane? = when (pane) {
+        null -> null
+        // Answerable with no fleet at all, which is the property the tab has:
+        // the diff is asked for by workspace id. So a remembered Changes tab
+        // comes back during a handshake, where a remembered terminal cannot.
+        is Pane.Changes -> Pane.Changes
+        // Folded, not returned as itself: the pane named may have been switched
+        // to `changes` mode from the Mac since anyone last looked. See [Pane].
+        is Pane.Terminal -> terminals.firstOrNull { it.id == pane.terminalId }?.let { Pane.of(it) }
     }
 
     /**
@@ -305,7 +407,15 @@ object Backstack {
      * workspace, and the two must not be able to disagree about which pane
      * matters.
      */
-    fun rule(terminals: List<Terminal>): String? = terminals.landingTerminal?.id
+    fun rule(terminals: List<Terminal>): Pane? {
+        // A `changes` pane is never landed ON as a terminal — it is the Changes
+        // tab — so it is out of the running before the ordering is applied, and
+        // is the floor underneath it when it is the only thing there is.
+        val panes = terminals.filterNot { it.isChangesPane }
+        panes.landingTerminal?.let { return Pane.Terminal(it.id) }
+        if (terminals.any { it.isChangesPane }) return Pane.Changes
+        return null
+    }
 
     private val stackFormat = ListSerializer(Route.serializer())
 

@@ -223,21 +223,29 @@ class AppModel(
     }
 
     /**
-     * Go to a pane somebody CHOSE — the one writer of the remembered focus.
+     * Go to a tab somebody CHOSE — the one writer of the remembered focus.
      *
-     * Called from the tab strip and nowhere else. The strip spans the whole
-     * fleet, so a chip may belong to another workspace on another runner; when
-     * it does this is navigation as well, and when it does not **the stack is
-     * not touched at all**. That is the property the whole shape exists for:
-     * tapping a chip moves no navigation state, so nothing keyed on the route
-     * has a reason to reset. See [Route.Terminal].
+     * Called from the tab strip and nowhere else, and **the stack is never
+     * touched**. That last clause used to be conditional: the strip spanned the
+     * whole fleet, so a chip could belong to another workspace on another
+     * runner and tapping it was navigation. The strip is scoped to one
+     * workspace now, so every chip on it names the workspace already on screen
+     * and [goTo] finds its own target at the top of the stack — which is the
+     * property the whole shape exists for. Tapping a chip moves no navigation
+     * state, so nothing keyed on the route has a reason to reset, and the panes
+     * mounted under it are not disturbed. See [Route.Terminal].
+     *
+     * Takes the runner and the workspace beside the tab rather than a
+     * `TerminalRef`, because the Changes tab is a tab with no terminal in it and
+     * a `TerminalRef` cannot say so. Everything that names something on a runner
+     * still carries the runner.
      *
      * Choosing the chip you are already on still records. Confirming the rule's
      * guess is a choice, and the next visit should not have to guess again.
      */
-    fun choose(ref: TerminalRef) {
-        rememberChoice(ref)
-        goTo(Route.Terminal(ref.hostId, ref.workspaceId))
+    fun choose(hostId: String, workspaceId: String, pane: Pane) {
+        record(Backstack.key(hostId, workspaceId), pane, chosen = true)
+        goTo(Route.Terminal(hostId, workspaceId))
     }
 
     /**
@@ -352,28 +360,28 @@ class AppModel(
      * nothing to show it with.
      *
      * Resolved fresh on every read rather than stored, for the reason
-     * `TerminalScreen` looks its terminal up fresh: a remembered pane that has
+     * `TerminalPane` looks its terminal up fresh: a remembered pane that has
      * since exited must fall through to the rule, and a copy taken when the
      * route was installed cannot.
      */
-    fun paneOf(route: Route.Terminal): TerminalRef? {
+    fun paneOf(route: Route.Terminal): Pane? {
         val terminals = terminalsIn(route.hostId, route.workspaceId)
         val key = Backstack.key(route.hostId, route.workspaceId)
-        val id = Backstack.chooseFocus(terminals, _focus.value[key]) ?: return null
-        return TerminalRef(route.hostId, route.workspaceId, id)
+        return Backstack.chooseFocus(terminals, _focus.value[key])
     }
 
     /** Where somebody was sent. Not written down — see [Focus]. */
-    private fun point(ref: TerminalRef) = record(ref, chosen = false)
+    private fun point(ref: TerminalRef) =
+        record(
+            Backstack.key(ref.hostId, ref.workspaceId),
+            Pane.Terminal(ref.terminalId),
+            chosen = false,
+        )
 
-    /** Where somebody chose to be. Written down. */
-    private fun rememberChoice(ref: TerminalRef) = record(ref, chosen = true)
-
-    private fun record(ref: TerminalRef, chosen: Boolean) {
-        val key = Backstack.key(ref.hostId, ref.workspaceId)
+    private fun record(key: String, pane: Pane, chosen: Boolean) {
         val existing = _focus.value[key]
-        if (existing?.terminalId == ref.terminalId && existing.chosen == chosen) return
-        _focus.value = _focus.value + (key to Focus(ref.terminalId, chosen))
+        if (existing?.pane == pane && existing.chosen == chosen) return
+        _focus.value = _focus.value + (key to Focus(pane, chosen))
         // Only a choice changes what is on disk, so a fleet row tap costs
         // nothing here and cannot overwrite a real preference in the saved
         // copy. What that trades is narrow and deliberate: a pane you were sent
@@ -451,7 +459,27 @@ class AppModel(
         if (persist) saved[STACK] = Backstack.encodeStack(safe)
     }
 
+    private val _foreground = MutableStateFlow(true)
+
+    /**
+     * Whether the app is in front of somebody.
+     *
+     * Observable, which it did not have to be until panes started staying
+     * mounted. [FleetRepository] and [Notifier] are TOLD this and act on it;
+     * the workspace screen has to be able to WATCH it, because every mounted
+     * pane's stream and agent poll follow it. Without that, a phone with three
+     * tabs open would hold three second SSH channels while it sat in a pocket —
+     * where one re-pointed session held one, and the push path is what covers a
+     * phone nobody is looking at anyway.
+     *
+     * Not saved. "Is the app in front of me" is answered by the activity's own
+     * lifecycle the moment there is one, and a restored `true` from a process
+     * that has since died would be a claim about nothing.
+     */
+    val foreground: StateFlow<Boolean> = _foreground.asStateFlow()
+
     fun setForeground(foreground: Boolean) {
+        _foreground.value = foreground
         fleet.setForeground(foreground)
         notifier.isForeground = foreground
     }

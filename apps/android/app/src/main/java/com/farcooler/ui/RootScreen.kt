@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.Text
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -19,7 +18,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -184,48 +182,43 @@ fun RootScreen(model: AppModel) {
  * see [Route.isOverlay] for why the terminal did not become an overlay when it
  * started being pushed rather than replacing.
  *
- * Keyed on the RUNNER, and on nothing that can change when a chip is tapped.
- * That is the Compose form of the rule iOS wrote down in `09b1e1f`: which pane
- * is focused must not be able to restructure this subtree, because
- * restructuring it discards the terminal session, the transcript's scroll and
- * the half-typed message in the composer. The focus lives beside the stack in
- * `AppModel.focus`, and [Route.Terminal] deliberately has no room for it.
+ * Keyed on the runner AND the workspace, and on nothing that can change when a
+ * chip is tapped. That is the Compose form of the rule iOS wrote down in
+ * `09b1e1f`: which pane is focused must not be able to restructure this
+ * subtree, because restructuring it discards every mounted pane — its terminal
+ * session, its transcript's scroll and its half-typed message. The focus lives
+ * beside the stack in `AppModel.focus`, and [Route.Terminal] deliberately has
+ * no room for it.
  *
- * The runner and not the workspace, matching the `remember(ref.hostId)` that
- * `TerminalScreen` already builds its session with: moving between workspaces
- * on one runner re-points the existing session rather than closing an SSH
- * channel and opening another. That one session is re-pointed at all is F-3 in
- * the parity inventory and is the pane-lifetime work, not this — what belongs
- * here is only that the key cannot contain a terminal id.
+ * **The workspace is in the key now, and this doc has claimed it was since it
+ * was written.** It said "the runner and not the workspace", and argued for it
+ * from the `remember(ref.hostId)` that the old single screen built its one
+ * session with: moving between workspaces on one runner re-pointed that session
+ * rather than closing an SSH channel and opening another. That session is gone
+ * — a pane owns its own now, and there is nothing left to re-point — so the
+ * key can finally be what this screen actually is, which is one worktree.
+ * Leaving the workspace out would mean opening a second worktree reused the
+ * first one's deck, and every pane in it would be mounted for a workspace it
+ * does not belong to.
  */
 @Composable
 private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer: () -> Unit) {
-    // Subscribed to rather than read. `paneOf` resolves against plain values —
-    // the focus map and whichever fleet last arrived — so something has to make
-    // this composable run again when they change, or a chip tap would move
-    // nothing and an agent exiting would leave a dead pane on screen.
-    // `TerminalScreen` subscribes to its connection's fleet the same way and
-    // for the same reason.
-    model.focus.collectAsStateWithLifecycle()
-    model.fleet.entries.collectAsStateWithLifecycle()
-
+    // Two subscriptions used to sit here — the focus map and the fleet — held
+    // only so that this composable ran again when either moved, because it
+    // resolved the workspace's pane itself and then handed a `TerminalRef` down.
+    // It does not resolve anything any more: [WorkspaceScreen] collects both for
+    // itself, and the fleet list and the front door always did. So they are
+    // gone rather than left as an inert pair of calls that reads like a
+    // dependency.
     Box(Modifier.fillMaxSize()) {
         when (route) {
-            is Route.Terminal -> key(route.hostId) {
-                val ref = model.paneOf(route)
-                if (ref == null) {
-                    // Only reachable before the runner has answered: the moment
-                    // it does and the workspace is empty, `settle` takes the
-                    // route off the stack in the same turn.
-                    EmptyWorkspace()
-                } else {
-                    TerminalScreen(
-                        model = model,
-                        ref = ref,
-                        visible = visible,
-                        onOpenDrawer = onOpenDrawer,
-                    )
-                }
+            is Route.Terminal -> key(route.hostId, route.workspaceId) {
+                WorkspaceScreen(
+                    model = model,
+                    route = route,
+                    onScreen = visible,
+                    onOpenDrawer = onOpenDrawer,
+                )
             }
 
             is Route.Fleet -> FleetScreen(
@@ -248,13 +241,6 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
                 onOpenDrawer = onOpenDrawer,
             )
         }
-    }
-}
-
-@Composable
-private fun EmptyWorkspace() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Waiting for that runner.")
     }
 }
 

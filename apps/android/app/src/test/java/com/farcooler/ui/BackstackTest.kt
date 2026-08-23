@@ -28,8 +28,14 @@ import org.junit.Test
  * the back gesture animates. Both need hardware.
  */
 class BackstackTest {
-    private fun terminal(id: String, state: String = "exited", activity: String? = null) =
-        Terminal(id = id, state = state, activity = activity)
+    private fun terminal(
+        id: String,
+        state: String = "exited",
+        activity: String? = null,
+        paneMode: String? = null,
+    ) = Terminal(id = id, state = state, activity = activity, paneMode = paneMode)
+
+    private fun tab(id: String) = Pane.Terminal(id)
 
     // ---- The encoding ----
 
@@ -163,26 +169,60 @@ class BackstackTest {
     @Test
     fun onlyAChosenTabIsRememberedAcrossTheProcess() {
         val live = mapOf(
-            "host-a/w1" to Focus("t-chosen", chosen = true),
-            "host-a/w2" to Focus("t-sent", chosen = false),
+            "host-a/w1" to Focus(tab("t-chosen"), chosen = true),
+            "host-a/w2" to Focus(tab("t-sent"), chosen = false),
         )
         val encoded = Backstack.encodeFocus(live)
-        assertEquals("""{"host-a/w1":"t-chosen"}""", encoded)
+        assertEquals("""{"host-a/w1":"terminal:t-chosen"}""", encoded)
 
         val back = Backstack.decodeFocus(encoded)
-        assertEquals(mapOf("host-a/w1" to Focus("t-chosen", chosen = true)), back)
+        assertEquals(mapOf("host-a/w1" to Focus(tab("t-chosen"), chosen = true)), back)
+    }
+
+    /**
+     * The Changes tab is a place somebody can be, and it is written down like
+     * any other.
+     *
+     * Namespaced on the way out, because a terminal id and the word "changes"
+     * are different kinds of thing: a collision between them would hand one
+     * tab's identity — and, through the `SaveableStateHolder`, one tab's
+     * half-typed message — to the other.
+     */
+    @Test
+    fun theChangesTabIsSomewhereToBeRemembered() {
+        val live = mapOf("h/w" to Focus(Pane.Changes, chosen = true))
+        val encoded = Backstack.encodeFocus(live)
+        assertEquals("""{"h/w":"changes"}""", encoded)
+        assertEquals(live, Backstack.decodeFocus(encoded))
+    }
+
+    /**
+     * A phone that ran phases 2 or 3 has bare terminal ids in its saved state.
+     *
+     * Read strictly, every one of them would cost somebody the tab they last
+     * chose — silently, on the first launch after an update, which is the one
+     * launch where losing your place is least forgivable. A value carrying
+     * neither namespace is exactly what those builds wrote, so it is read as
+     * what it was.
+     */
+    @Test
+    fun aFocusSavedBeforeThisPhaseStillNamesItsTerminal() {
+        assertEquals(
+            mapOf("h/w" to Focus(tab("abc123"), chosen = true)),
+            Backstack.decodeFocus("""{"h/w":"abc123"}"""),
+        )
     }
 
     @Test
     fun aFocusIsKeyedByRunnerAsWellAsWorkspace() {
         val live = mapOf(
-            Backstack.key("host-a", "shared-id") to Focus("t1", chosen = true),
-            Backstack.key("host-b", "shared-id") to Focus("t2", chosen = true),
+            Backstack.key("host-a", "shared-id") to Focus(tab("t1"), chosen = true),
+            Backstack.key("host-b", "shared-id") to Focus(tab("t2"), chosen = true),
         )
         val back = Backstack.decodeFocus(Backstack.encodeFocus(live))
         assertEquals(2, back.size)
-        assertEquals("t1", back[Backstack.key("host-a", "shared-id")]?.terminalId)
-        assertEquals("t2", back[Backstack.key("host-b", "shared-id")]?.terminalId)
+        assertEquals(tab("t1"), back[Backstack.key("host-a", "shared-id")]?.pane)
+        assertEquals(tab("t2"), back[Backstack.key("host-b", "shared-id")]?.pane)
     }
 
     @Test
@@ -195,11 +235,24 @@ class BackstackTest {
     @Test
     fun rememberedTabsForSomethingGoneAreDropped() {
         val focus = mapOf(
-            "h/alive" to Focus("t1", chosen = true),
-            "h/merged-away" to Focus("t2", chosen = true),
+            "h/alive" to Focus(tab("t1"), chosen = true),
+            "h/merged-away" to Focus(tab("t2"), chosen = true),
         )
         val pruned = Backstack.prune(focus) { key, _ -> key == "h/alive" }
         assertEquals(setOf("h/alive"), pruned.keys)
+    }
+
+    /**
+     * A remembered Changes tab survives a workspace whose panes have all gone.
+     *
+     * Nothing on the runner has to exist for that tab, so nothing about the
+     * runner can make it stop existing — and a worktree whose last agent was
+     * stopped still has a diff, which is usually why somebody was in it.
+     */
+    @Test
+    fun aRememberedChangesTabIsNeverPruned() {
+        val focus = mapOf("h/w" to Focus(Pane.Changes, chosen = true))
+        assertEquals(focus, Backstack.prune(focus) { _, _ -> false })
     }
 
     // ---- Resolving a workspace's pane ----
@@ -211,8 +264,8 @@ class BackstackTest {
             terminal("reading-this"),
         )
         assertEquals(
-            "reading-this",
-            Backstack.chooseFocus(terminals, Focus("reading-this", chosen = true)),
+            tab("reading-this"),
+            Backstack.chooseFocus(terminals, Focus(tab("reading-this"), chosen = true)),
         )
     }
 
@@ -232,8 +285,8 @@ class BackstackTest {
             terminal("needs-you", activity = "blocked"),
         )
         assertEquals(
-            "needs-you",
-            Backstack.chooseFocus(terminals, Focus("exited-overnight", chosen = true)),
+            tab("needs-you"),
+            Backstack.chooseFocus(terminals, Focus(tab("exited-overnight"), chosen = true)),
         )
     }
 
@@ -244,14 +297,39 @@ class BackstackTest {
             terminal("running", state = "running"),
             terminal("needs-you", activity = "blocked"),
         )
-        assertEquals("needs-you", Backstack.chooseFocus(terminals, null))
-        assertEquals("running", Backstack.chooseFocus(terminals.dropLast(1), null))
-        assertEquals("first", Backstack.chooseFocus(listOf(terminal("first")), null))
+        assertEquals(tab("needs-you"), Backstack.chooseFocus(terminals, null))
+        assertEquals(tab("running"), Backstack.chooseFocus(terminals.dropLast(1), null))
+        assertEquals(tab("first"), Backstack.chooseFocus(listOf(terminal("first")), null))
+    }
+
+    /**
+     * A `changes` pane never lands on the VT renderer again.
+     *
+     * The parity inventory found this on its way past `TerminalScreen.kt:334`:
+     * the screen routed only on `isAgentPane`, so a `changes` pane created from
+     * the Mac fell through to the terminal renderer and was drawn as a grid of
+     * whatever bytes are on a pane that is not a tty. Every road into a
+     * workspace goes through this function or [Backstack.rule], and both fold
+     * such a pane into the Changes tab — including the case where it is the
+     * only pane the worktree has.
+     */
+    @Test
+    fun aChangesPaneIsTheChangesTabFromEveryDirection() {
+        val onlyChanges = listOf(terminal("c1", paneMode = "changes"))
+        assertEquals(Pane.Changes, Backstack.chooseFocus(onlyChanges, null))
+        assertEquals(
+            Pane.Changes,
+            Backstack.chooseFocus(onlyChanges, Focus(tab("c1"), chosen = true)),
+        )
+
+        // And it is never what the rule lands on when there is a real pane.
+        val mixed = listOf(terminal("c1", paneMode = "changes"), terminal("shell"))
+        assertEquals(tab("shell"), Backstack.chooseFocus(mixed, null))
     }
 
     @Test
     fun aWorkspaceWithNoPanesResolvesToNothing() {
-        assertNull(Backstack.chooseFocus(emptyList(), Focus("t1", chosen = true)))
+        assertNull(Backstack.chooseFocus(emptyList(), Focus(tab("t1"), chosen = true)))
         assertNull(Backstack.chooseFocus(emptyList(), null))
     }
 

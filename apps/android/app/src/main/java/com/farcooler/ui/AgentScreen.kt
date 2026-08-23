@@ -78,20 +78,45 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * One agent session, as a conversation.
  *
- * The surface the terminal screen swaps in when the daemon reports the pane is
+ * The surface [TerminalPane] swaps in when the daemon reports the pane is
  * hosting a chat. Unlike the Mac there is no tmux rectangle to draw into: this
  * pane is always the whole screen, and the tab strip that lets you leave it
- * lives below it exactly the way it lives below a terminal — the terminal
- * screen owns that, not this.
+ * lives below every pane rather than below this one — [WorkspaceScreen] owns
+ * that, not this.
+ *
+ * ## The stream outlives the tab tap now
+ *
+ * This built a fresh [AgentStream] with `remember(ref.terminalId)`, because one
+ * copy of this screen was re-pointed at whichever pane the strip had selected.
+ * So leaving a conversation and coming back threw away the transcript, its
+ * scroll position and the poll, and rebuilt all three from `fromSeq = 0`. Half
+ * of F-3 in the parity inventory; the other half was the terminal.
+ *
+ * A pane is mounted for as long as it is a tab now, so the key is gone — there
+ * is nothing left for it to guard against, and anything in one would be a way
+ * for this stream to be rebuilt without the pane being. What starts and stops
+ * the POLL is [live], which is not the same question: a tab nobody is reading,
+ * and every tab while the app is backgrounded, keeps its transcript and spends
+ * nothing on the link.
  */
 @Composable
-fun AgentScreen(model: AppModel, ref: TerminalRef, connection: Connection) {
+fun AgentScreen(
+    model: AppModel,
+    ref: TerminalRef,
+    connection: Connection,
+    /** Whether this pane is the one being read. See [TerminalPane]. */
+    live: Boolean = true,
+) {
     val scope = rememberCoroutineScope()
-    val stream = remember(ref.terminalId) {
-        AgentStream(ref.terminalId, connection.core, scope)
+    val stream = remember { AgentStream(ref.terminalId, connection.core, scope) }
+    // Resumed rather than restarted, and [AgentStream.pump] is what makes that
+    // free: it asks from `transcript.cursor`, so a poll that stopped for ten
+    // minutes comes back asking for exactly what it missed rather than for the
+    // whole conversation again.
+    LaunchedEffect(live) {
+        if (live) stream.start() else stream.stop()
     }
     DisposableEffect(stream) {
-        stream.start()
         onDispose { stream.stop() }
     }
 
@@ -402,12 +427,22 @@ private fun AgentComposer(
     // they were writing. `TextFieldValue.Saver` carries the selection with the
     // text, so the caret comes back where it was too.
     //
-    // Keyed to nothing, which is a DRIFT recorded rather than fixed here: this
-    // screen is re-pointed at a different pane instead of one being mounted per
-    // pane, so one draft is shared across every terminal. That is the same
-    // single-session shape `TerminalScreen` has, and untangling it is the
-    // pane-lifetime work, not this. Saving it changes nothing about which pane
-    // it belongs to.
+    // Keyed to nothing, and that is now correct rather than a drift.
+    //
+    // `c37f487` recorded what this said then: one screen was re-pointed at
+    // every pane in turn, so one draft was shared across every terminal in the
+    // fleet, and a message half typed to one agent appeared in the composer of
+    // the next one you opened. The note said it was waiting on the
+    // pane-lifetime work, and this is it — the composable itself is per pane
+    // now, so "keyed to nothing" means keyed to this pane.
+    //
+    // [WorkspaceScreen] wraps each pane in a `SaveableStateHolder` bucketed by
+    // `Pane.id`, which does two things no key here could. It makes the
+    // separation certain rather than a consequence of how `rememberSaveable`
+    // derives a key from the composition's shape; and it KEEPS what is written
+    // here when the pane is unmounted by the mount limit, so a draft survives
+    // its own tab being evicted — and survives the process being killed, which
+    // is what `docs/jobs-to-be-done.md` F4 actually asks for.
     var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }

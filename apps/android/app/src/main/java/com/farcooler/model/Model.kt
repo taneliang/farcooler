@@ -457,12 +457,20 @@ data class Terminal(
     /**
      * Whether this pane is a review of what its worktree changed.
      *
-     * The daemon has served this mode since the review surface landed and this
-     * app has no branch for it: a `changes` pane falls past [isAgentPane] to the
-     * VT renderer at `TerminalScreen.kt:334` and is drawn as a raw terminal — a
-     * grid of whatever bytes are on a pane that is not a tty. Decoded here so
-     * the screen that has to route around it can ask; the routing itself is a
-     * later phase's, and until it lands this property has no caller.
+     * **It has callers now, and the drift this field was decoded to record is
+     * closed.** The note here said the daemon had served this mode since the
+     * review surface landed while this app had no branch for it — a `changes`
+     * pane fell past [isAgentPane] to the VT renderer and was drawn as a raw
+     * terminal, a grid of whatever bytes are on a pane that is not a tty. That
+     * was the defect the parity inventory found on its way past
+     * `TerminalScreen.kt:334`, and the property was decoded a phase early so
+     * whoever routed around it would not have to reopen this file.
+     *
+     * `ui/Navigation.kt`'s `Pane` is what asks: such a pane is FOLDED into the
+     * workspace's Changes tab from every direction — the remembered focus, the
+     * landing rule, the tab strip and the deck's prune — so the VT renderer is
+     * no longer reachable from one. What that tab draws is still a deferral
+     * until the review surface lands; what it is not is escape sequences.
      */
     val isChangesPane: Boolean get() = paneMode == "changes"
 

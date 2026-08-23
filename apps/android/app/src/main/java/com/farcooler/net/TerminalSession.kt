@@ -110,7 +110,20 @@ class TerminalSession(
             extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val copied: SharedFlow<String> = _copied.asSharedFlow()
 
-    private var terminalId: String = terminalId
+    /**
+     * The one pane this session is about, for as long as it exists.
+     *
+     * A `var` until this phase, with a `switchTo` that re-pointed it at a
+     * sibling — one session for a whole workspace, torn down and rebuilt around
+     * a different terminal on every tab tap. That IS F-3 in the parity
+     * inventory: the tap threw away the outgoing pane's emulator, its screen
+     * and its stream, so the tab you came back to was one that had never been
+     * open. The method is gone rather than left uncalled, because an
+     * uncallable re-pointer is an invitation to reintroduce the defect it was.
+     * One session per pane now, mounted for as long as the pane is — see
+     * `ui/PaneDeck.kt`.
+     */
+    private val terminalId: String = terminalId
     private var vt: VtCore? = null
     private var poller: Job? = null
 
@@ -171,26 +184,27 @@ class TerminalSession(
     private var failedAttaches = 0
     private var started = false
 
+    /**
+     * Whether this session was stopped BY A SCREEN that still exists.
+     *
+     * Distinct from `!started`, and the distinction is what makes a hidden pane
+     * possible. `!started` has always meant "nothing has opened this yet", and
+     * [configure] acts on it: the canvas reporting its size is what opens the
+     * first terminal, because the canvas only exists once there is a screen to
+     * draw and waiting for it would be waiting for what opening produces.
+     *
+     * A paused session is also `!started`, and a `configure` arriving on one —
+     * the layout still runs for a mounted pane nobody is looking at, so
+     * `onSize` still fires — would reopen the SSH channel this pane was
+     * deliberately told to give up, and reflow a shared tmux pane to phone
+     * width on behalf of a screen nobody can see. The size is still recorded;
+     * nothing is asked of the host.
+     */
+    private var paused = false
+
     private var interval = FAST_INTERVAL_MS
 
     private val json = Json { ignoreUnknownKeys = true }
-
-    /**
-     * Show this terminal, if nothing has yet.
-     *
-     * Separate from [configure] because the two answer different questions and
-     * the first has to be answerable without the second: `configure` is driven
-     * by the canvas reporting its size, and the canvas is only composed once
-     * there is a screen to draw — so waiting for it to open the session would
-     * be waiting for a screen that opening the session is what produces.
-     */
-    fun start() {
-        scope.launch {
-            if (started) return@launch
-            started = true
-            open()
-        }
-    }
 
     /**
      * Learn the size this screen would like the pane to be, open the terminal
@@ -200,6 +214,11 @@ class TerminalSession(
         if (columns <= 0 || rows <= 0) return
         scope.launch {
             lastRequestedSize = columns to rows
+            // Remembered and then dropped. See [paused]: a mounted pane nobody
+            // is looking at is still laid out, so this still arrives, and
+            // acting on it would put a channel back on a pane that was told to
+            // let go of one. [resume] re-asserts the size it finds here.
+            if (paused) return@launch
             if (!started) {
                 started = true
                 open()
@@ -222,50 +241,6 @@ class TerminalSession(
     }
 
     /**
-     * Point this same session at a different terminal — what the tab strip
-     * calls when you tap a sibling.
-     *
-     * Everything describing the outgoing terminal goes at once — its emulator,
-     * its screen, its stream — because every one of them would otherwise be
-     * read as belonging to the incoming one: a stale grid makes the tap look
-     * like it did nothing, and a stale [lastScreen] makes the new terminal's
-     * first capture compare equal by coincidence.
-     */
-    fun switchTo(id: String) {
-        scope.launch {
-            if (id == terminalId) return@launch
-            teardown()
-            val leaving = terminalId
-            val handBack = shapeBeforeUs
-            shapeBeforeUs = null
-            core.stopStream(leaving)
-            releasePane(leaving, handBack)
-
-            terminalId = id
-            vt?.free()
-            vt = null
-            _grid.value = null
-            lastScreen = null
-            revision = 0uL
-            paneSize = null
-            _phase.value = Phase.Connecting
-            started = true
-            // The strike count belongs to the terminal being left, not the one
-            // arriving. Carried over, a terminal whose predecessor had already
-            // given up on streaming reached the three-strike fallback on its
-            // first hiccup and showed a failure it had not earned.
-            failedAttaches = 0
-            hasResized = false
-            // The size this device would like has not changed — the screen did
-            // not resize, only what it is showing did — but `lastResizeSent`
-            // described the OUTGOING terminal's pane.
-            lastResizeSent = null
-            open()
-            scheduleResize()
-        }
-    }
-
-    /**
      * The link under this session was replaced by a new one.
      *
      * Everything the old link set up — the stream, the emulator's idea of
@@ -275,13 +250,16 @@ class TerminalSession(
      * falls back to polling, but it stays on the slower path until the screen
      * is rebuilt: streaming is one round trip and polling is an interval.
      *
-     * [switchTo] minus the two things that only make sense when the terminal
-     * itself changes. The id is the same, and the outgoing pane is not handed
-     * its old size back — that pane is on the far side of a link that is gone,
-     * so asking it anything is a request into the void.
+     * [resume] with the emulator thrown away, and that is the whole difference
+     * between them. The pane is not handed its old size back either: it is on
+     * the far side of a link that is gone, so asking it anything is a request
+     * into the void.
      */
     fun relink() {
         scope.launch {
+            // A paused pane is already `!started`, so this covers it too: a
+            // reconnect must not put a channel back on a pane nobody is
+            // looking at. [resume] opens a fresh link when it is looked at.
             if (!started) return@launch
             teardown()
             vt?.free()
@@ -300,13 +278,36 @@ class TerminalSession(
     }
 
     /**
-     * Stop watching. A screen nobody is looking at has no business holding an
-     * SSH channel open, or spending this phone's battery.
+     * Stop watching, keeping everything this session has drawn.
+     *
+     * A pane nobody is looking at has no business holding an SSH channel open,
+     * or spending this phone's battery — and now that panes stay MOUNTED while
+     * hidden, this is what "hidden" costs the runner: nothing. Two callers, and
+     * they are the two ways a pane stops being read: the tab strip moving to a
+     * sibling, and the app leaving the foreground.
+     *
+     * The emulator and the grid deliberately survive. That is the difference
+     * between this and [relink] — see [resume], which is why a tab you have
+     * already opened does not say "Loading…" when you come back to it.
+     *
+     * **`hasResized` is cleared here, and its absence was a real bug waiting
+     * for its first caller.** Until this phase, `stop` was reachable only
+     * through [dispose], so a session was never resumed and the flag never
+     * outlived anything. [prime] gates recording a new [shapeBeforeUs] on
+     * exactly this flag, so left true: the pane has just been handed back to
+     * whatever the Mac had it at, the next visit reshapes it to phone width
+     * with nothing remembered to restore, and whoever else is watching keeps
+     * the phone's column for good. iOS hit this the moment `resume` existed and
+     * wrote the same three sentences on `TerminalSession.stop`; Android's copy
+     * of that method had drifted off it before it ever ran.
      */
     fun stop() {
         scope.launch {
+            if (paused) return@launch
+            paused = true
             teardown()
             started = false
+            hasResized = false
             val id = terminalId
             val handBack = shapeBeforeUs
             shapeBeforeUs = null
@@ -315,7 +316,66 @@ class TerminalSession(
         }
     }
 
-    /** Release everything. Called when the screen is gone for good. */
+    /**
+     * Watch again, on a pane this session already knows.
+     *
+     * **`resume`, not [relink].** Relinking drops the emulator and the grid and
+     * puts the phase back to `Connecting`, which is right when the link
+     * underneath was replaced and is the exact opposite of what mounting hidden
+     * panes is for: it would put "Loading…" over a tab you had already opened,
+     * every time you came back to it. Here the last picture stays on screen
+     * until the host's replay paints over it.
+     *
+     * **[scheduleResize] runs AFTER [open], which is not where the other
+     * openers put it and has to be here.** `scheduleResize` compares
+     * [lastRequestedSize] against [lastResizeSent] and does nothing when they
+     * agree — and on a return visit they always agree, wrongly.
+     * `lastRequestedSize` still holds the shape this phone asked for last time
+     * and `lastResizeSent` still holds the shape it was told it got, and
+     * neither survived contact with what [stop] did on the way out:
+     * `releasePane` handed the pane back to whatever the Mac had it at. So the
+     * pane is genuinely wide again, both variables still say phone-width, and a
+     * schedule run before [prime] decides there is nothing to ask for. `prime`
+     * is what corrects it, by seeding `lastResizeSent` from the host's own
+     * answer, and it is inside `open`.
+     *
+     * [configure] cannot cover for this the way it used to, because `paused`
+     * makes it a no-op for exactly the window this is closing.
+     */
+    fun resume() {
+        scope.launch {
+            // Guarded on `started` rather than on `paused`, which makes this a
+            // superset of the `start` it replaces: a session nobody has opened
+            // yet and one that was told to let go are both "not running", and
+            // the pane calls this in both cases. Separate from [configure] for
+            // the reason `start` was: `configure` is driven by the canvas
+            // reporting its size, and the canvas is only composed once there is
+            // a screen to draw — so waiting for it to open the session would be
+            // waiting for a screen that opening the session is what produces.
+            if (started) return@launch
+            paused = false
+            started = true
+            // A fresh visit deserves a fresh backoff. An interval an earlier
+            // visit widened must not make this one wait out a slow poll for its
+            // first picture, and a strike count belonging to a link that has
+            // since been idle for ten minutes is not evidence about this one.
+            interval = FAST_INTERVAL_MS
+            failedAttaches = 0
+            open()
+            scheduleResize()
+        }
+    }
+
+    /**
+     * Release everything. Called when the pane is gone for good — unmounted by
+     * the workspace screen's limit, or pruned because the runner no longer has
+     * it.
+     *
+     * [stop] first, and it is a no-op on a session that is already paused,
+     * which is the usual case: a pane is evicted while hidden. What still has
+     * to happen either way is below — the emulator handle and its thread are
+     * not the garbage collector's to reclaim.
+     */
     fun dispose() {
         stop()
         scope.launch {

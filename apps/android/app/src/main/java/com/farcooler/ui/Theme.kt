@@ -3,7 +3,9 @@ package com.farcooler.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -24,7 +26,9 @@ import androidx.compose.ui.text.font.FontWeight
 import com.farcooler.R
 import com.farcooler.data.Themes
 import com.farcooler.data.TerminalFontChoice
+import androidx.compose.material3.Text
 import com.farcooler.model.AgentActivity
+import com.farcooler.model.InboxRow
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
 
@@ -230,3 +234,41 @@ fun attentionColor(terminal: Terminal): Color =
 @Composable
 fun attentionColor(agent: AgentActivity, turnDidFail: Boolean): Color =
     if (turnDidFail) MaterialTheme.colorScheme.error else attentionColor(agent)
+
+/**
+ * `+82 -13`: how much a worktree has changed, in the two colours those signs
+ * have everywhere in this app.
+ *
+ * One copy, not one per surface. The front door's review row wrote this out and
+ * the workspace's Changes chip was about to write it out again, which is the
+ * shape `df87410` already had to pull the landing ordering back from: three
+ * copies of one rule is three chances for a phone to disagree with itself.
+ *
+ * The green is a literal and matches [attentionColor]'s green to the byte,
+ * because it is the one colour Material's scheme has no role for — there is no
+ * "positive" slot in a `ColorScheme` the way there is an `error` one. It is
+ * written here rather than borrowed from `attentionColor` so that a change to
+ * what a FINISHED AGENT looks like cannot silently change what an added line
+ * looks like. Red IS the scheme's error role, because "removed" and "went
+ * wrong" want the same red under every theme.
+ */
+@Composable
+fun DiffCounts(counts: InboxRow, modifier: Modifier = Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            "+${counts.insertions}",
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = DIFF_ADDED,
+        )
+        Text(
+            "-${counts.deletions}",
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}
+
+/** The green a diff's insertions are drawn in. See [DiffCounts]. */
+private val DIFF_ADDED = Color(0xFF4CAF50)

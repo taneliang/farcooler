@@ -37,7 +37,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -367,12 +366,20 @@ private fun SectionHeader(section: NeedsYouSection, showRunner: Boolean) {
  * important target on this screen.
  *
  * **Where it goes today is the workspace, not the diff, and that is a deferral
- * rather than a design.** Android has no review surface yet — it is the largest
- * remaining piece of the parity work, and `TerminalScreen` currently renders a
- * `changes` pane as raw VT bytes, so pointing this row at one would be worse
- * than pointing it at the worktree. What the row says is true now: this
- * worktree changed and nobody has looked. When the Changes screen lands, this
- * `onSelect` is the one line that has to change.
+ * rather than a design.** Android still has no review surface — it is the
+ * largest remaining piece of the parity work.
+ *
+ * Half of the reason given here has since stopped being true and is worth
+ * correcting rather than deleting: this said the workspace screen rendered a
+ * `changes` pane as raw VT bytes, so pointing the row at one would be worse
+ * than pointing it at the worktree. It does not any more — the workspace has a
+ * Changes tab and `Pane` folds such a pane into it. What is left is the half
+ * that still decides the question: that tab can say how big the diff is and
+ * cannot yet show it, and sending somebody who asked to review changes to a
+ * screen that says "not yet" is worse than sending them to the agents that made
+ * them. What the row says is true either way — this worktree changed and nobody
+ * has looked — and when the review lands, this `onSelect` is still the one line
+ * that has to change.
  *
  * A `ListItem`, unlike the agent rows above it. This one is a leading icon,
  * one line of text and a trailing pair of numbers, which is exactly the shape
@@ -399,29 +406,11 @@ private fun ChangesRow(
             )
         },
         trailingContent = {
-            if (counts != null && counts.hasDiff) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // The same green a finished agent's check wears, and the
-                    // theme's own error red. Both are already spoken for by
-                    // this app's vocabulary, and a diff is the one place they
-                    // mean "added" and "removed" rather than "done" and
-                    // "failed" — so they are written out here rather than
-                    // borrowed from `attentionColor`, which would make a rename
-                    // there silently change what a diff looks like.
-                    Text(
-                        "+${counts.insertions}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = ADDED,
-                    )
-                    Text(
-                        "-${counts.deletions}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
+            // The counts, drawn by the one composable that knows what those
+            // two colours mean — the workspace's Changes chip shows the same
+            // pair for the same worktree, and they must not be able to come out
+            // different. See [DiffCounts].
+            if (counts != null && counts.hasDiff) DiffCounts(counts)
         },
         // No terminal named — see [AppModel.openWorkspace]. The workspace's own
         // rule picks the pane, which is the honest answer while this row cannot
@@ -589,13 +578,4 @@ private fun WorkspacesRow(
     )
 }
 
-/**
- * The green a diff's insertions are drawn in.
- *
- * A literal, matching `attentionColor`'s green to the byte, because both are
- * the one colour Material's scheme has no role for — there is no "positive"
- * slot in a `ColorScheme` the way there is an `error` one. Written here rather
- * than shared with `attentionColor` so that a change to what a FINISHED AGENT
- * looks like cannot silently change what an added line looks like.
- */
-private val ADDED = Color(0xFF4CAF50)
+
