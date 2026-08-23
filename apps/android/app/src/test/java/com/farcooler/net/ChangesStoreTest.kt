@@ -3,6 +3,7 @@ package com.farcooler.net
 import com.farcooler.core.CoreException
 import com.farcooler.core.DisconnectedException
 import com.farcooler.data.InMemoryReviewStorage
+import com.farcooler.model.BranchRef
 import com.farcooler.model.ChangeSet
 import com.farcooler.model.ChangeCommit
 import com.farcooler.model.ChangedFile
@@ -106,6 +107,17 @@ class ChangesStoreTest {
 
         override suspend fun refreshCounts() {
             refreshCountsCalls += 1
+        }
+
+        /** The base picker's list. Scripted, and it records what it was asked about. */
+        val branchCalls = mutableListOf<String>()
+        var branchList = listOf(BranchRef(name = "main", local = true))
+        var branchesFail: Exception? = null
+
+        override suspend fun branches(repository: String): List<BranchRef> {
+            branchCalls += repository
+            branchesFail?.let { throw it }
+            return branchList
         }
 
         override suspend fun agentPrompt(terminal: String, text: String) {
@@ -744,6 +756,97 @@ class ChangesStoreTest {
         assertEquals("t1", source.prompts[0].first)
         assertTrue(source.prompts[0].second.contains("`a.rs`, around line 3"))
         assertTrue(store.comments.state.value.pending.isEmpty())
+    }
+
+    /**
+     * The index sheet's most likely tap, and 5b could not have caught it.
+     *
+     * `expand` began with a guard that returned when the path was already open,
+     * which is a drift from `Jump`'s own doc comment: it says a jump carries a
+     * serial precisely so tapping the same file twice moves the scroll twice.
+     * Nothing could ask for that until the file index existed — the Next button
+     * never targets the file it is already on — and the sheet lists the open file
+     * along with every other one. So the write is still guarded and the scroll is
+     * not.
+     */
+    @Test
+    fun `opening the file that is already open still moves the scroll`() = runTest {
+        val storage = InMemoryReviewStorage()
+        val source = FakeSource().apply { set = ChangeSet(files = listOf(file("a.rs"))) }
+        val store = ChangesStore(ref, source, storage, storeScope())
+        store.load()
+        store.expand("a.rs")
+        val first = requireNotNull(store.state.value.jump)
+        val writes = storage.writes
+
+        store.expand("a.rs")
+        val second = requireNotNull(store.state.value.jump)
+        assertEquals(first.key, second.key)
+        assertTrue(second.serial > first.serial)
+        // The position did not move, so nothing was written down about it.
+        assertEquals(writes, storage.writes)
+    }
+
+    /**
+     * The base picker's list comes through the store, so the sheet can be built
+     * without a `Connection` — and the repository is the daemon's own scope for
+     * `branch.list`, not the workspace.
+     */
+    @Test
+    fun `the branch list is read for the repository it was asked about`() = runTest {
+        val source = FakeSource().apply {
+            branchList = listOf(
+                BranchRef(name = "main", local = true),
+                BranchRef(name = "origin/main", remote = true),
+            )
+        }
+        val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())
+        assertEquals(
+            listOf("main", "origin/main"),
+            store.branches("repo-1").map { it.name },
+        )
+        assertEquals(listOf("repo-1"), source.branchCalls)
+    }
+
+    /**
+     * **A base that would not resolve is not a workspace that could not be
+     * read**, and until the picker existed to reach this line it said the wrong
+     * one. `review_ops::set_base` validates with `rev-parse --verify` before
+     * recording anything, so the ordinary failure is a ref deleted between the
+     * picker reading the list and somebody tapping it — and the fact the reader
+     * needs is that nothing changed.
+     */
+    @Test
+    fun `a base that would not resolve says the base is unchanged`() = runTest {
+        val before = ChangeSet(baseRef = "main", files = listOf(file("a.rs")))
+        val fake = FakeSource()
+        fake.set = before
+        val source = object : ChangesSource by fake {
+            override suspend fun setBase(workspace: String, baseRef: String): ChangeSet =
+                throw CoreException(
+                    "the base this branch is compared against could not be resolved"
+                )
+        }
+        val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())
+        store.load()
+        store.setBase("origin/gone")
+
+        val trouble = requireNotNull(store.state.value.error)
+        assertTrue(trouble.sentence.contains("origin/gone"))
+        assertTrue(trouble.sentence.contains("unchanged"))
+        // The runner's own words travel only where this app has none of its own.
+        assertNull(trouble.transcript)
+        // And the diff on screen is the diff that was on screen.
+        assertEquals("main", store.state.value.changeSet.baseRef)
+        assertEquals(listOf("a.rs"), store.state.value.files.map { it.path })
+    }
+
+    /** A failure with no account of itself passes the runner's words along. */
+    @Test
+    fun `an unexplained base failure carries the runner's own words`() {
+        val trouble = ChangesStore.baseTrouble(CoreException("EPIPE"), "main")
+        assertEquals("Couldn’t change the base, so it’s unchanged.", trouble.sentence)
+        assertEquals("EPIPE", trouble.transcript)
     }
 
     @Test

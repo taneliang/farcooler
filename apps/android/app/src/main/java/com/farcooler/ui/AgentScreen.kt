@@ -279,6 +279,7 @@ fun AgentScreen(
                 harness = harness,
                 isWorking = isWorking,
                 workspaceId = ref.workspaceId,
+                terminalId = ref.terminalId,
                 connection = connection,
                 onSetConfig = { id, value -> stream.setConfig(id, value) },
                 onSetMode = { mode -> stream.setMode(mode) },
@@ -412,6 +413,8 @@ private fun AgentComposer(
     harness: String,
     isWorking: Boolean,
     workspaceId: String,
+    /** This pane, so it can pick up anything another pane has left for it. */
+    terminalId: String,
     connection: Connection,
     onSetConfig: (String, String) -> Unit,
     onSetMode: (String) -> Unit,
@@ -446,6 +449,27 @@ private fun AgentComposer(
     var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
+    // Notes the review pane has put here for this agent.
+    //
+    // APPENDED, never assigned over. This field is where a half-typed message
+    // lives, and that message is the one thing on this pane a person wrote —
+    // dropping a batch of review notes on top of it would be the app throwing
+    // away a sentence to make room for another one. The same rule
+    // `ComposerHandoff.offer` follows when two batches arrive before either is
+    // taken, and for the same reason.
+    //
+    // Taken once and cleared inside the handoff, so a recomposition cannot
+    // append it twice. The caret goes to the end, which is where somebody who
+    // wants to add a line to what just arrived would put it — and it is also why
+    // the arriving text goes at the END rather than the start: the notes are the
+    // thing about to be sent, and the draft above them is context.
+    val waiting by connection.composerHandoff.waiting.collectAsStateWithLifecycle()
+    LaunchedEffect(waiting[terminalId]) {
+        val text = connection.composerHandoff.take(terminalId) ?: return@LaunchedEffect
+        val joined = if (field.text.isEmpty()) text else field.text.trimEnd() + "\n\n" + text
+        field = TextFieldValue(joined, TextRange(joined.length))
+    }
+
     var mentionResults by remember { mutableStateOf<List<String>>(emptyList()) }
     var attachments by remember { mutableStateOf<List<AgentStream.Attachment>>(emptyList()) }
     var attachmentError by remember { mutableStateOf<String?>(null) }

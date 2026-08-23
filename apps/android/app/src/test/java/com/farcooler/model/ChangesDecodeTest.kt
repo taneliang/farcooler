@@ -401,6 +401,82 @@ class ChangesDecodeTest {
         assertEquals(DiffComputation.Kind.CONTEXT, diff.lines()[0].kind)
     }
 
+    // ---- branch.list, which the base picker reads ----
+
+    /**
+     * `Session::branches`, transcribed key for key.
+     *
+     * `crates/client/src/session.rs:1074`, and camelCase where the change set is
+     * snake_case — the same two-casings-out-of-one-FFI trap `Changes.kt` records
+     * at the top, which is exactly the sort of thing a `@SerialName` gets wrong
+     * once and then reports as a permanently-false flag.
+     *
+     * `updatedAt` is MILLISECONDS here. The protocol carries seconds and that
+     * line multiplies by a thousand, so a client reading it as seconds would put
+     * every branch fifty-six thousand years in the past.
+     *
+     * Values are non-default throughout, including `local: false` on the remote
+     * row, which is what makes `whereItLives` a real answer rather than a
+     * default that happened to be right.
+     */
+    @Test
+    fun `a branch list decodes every key session dot rs emits`() {
+        val payload = """
+            {
+              "branches": [
+                {
+                  "name": "main",
+                  "local": true,
+                  "remote": true,
+                  "checkedOut": true,
+                  "subject": "fix: green means one thing again, on both phones",
+                  "updatedAt": 1755900000000
+                },
+                {
+                  "name": "origin/feat/review",
+                  "local": false,
+                  "remote": true,
+                  "checkedOut": false,
+                  "subject": "",
+                  "updatedAt": null
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val reply = json.decodeFromString(BranchListReply.serializer(), payload)
+        assertEquals(2, reply.branches.size)
+
+        val main = reply.branches[0]
+        assertEquals("main", main.name)
+        assertTrue(main.local)
+        assertTrue(main.remote)
+        assertTrue(main.checkedOut)
+        assertEquals("fix: green means one thing again, on both phones", main.subject)
+        assertEquals(1_755_900_000_000, main.updatedAt)
+        assertEquals("local and remote", main.whereItLives)
+
+        val remote = reply.branches[1]
+        assertFalse(remote.local)
+        assertFalse(remote.checkedOut)
+        assertEquals("remote", remote.whereItLives)
+        // Absent rather than zero, so a row can decline to say rather than lie.
+        assertNull(remote.updatedAt)
+    }
+
+    /** A runner too old to send a key leaves it at its default, not at an error. */
+    @Test
+    fun `a branch with only a name still decodes`() {
+        val reply = json.decodeFromString(
+            BranchListReply.serializer(), """{"branches":[{"name":"main"}]}"""
+        )
+        assertEquals("main", reply.branches.single().name)
+        // Neither flag was sent, so neither is claimed — and `whereItLives`
+        // falls to "local", which is what an unqualified branch name means.
+        assertEquals("local", reply.branches.single().whereItLives)
+        assertEquals(BranchListReply(), json.decodeFromString(BranchListReply.serializer(), "{}"))
+    }
+
     // ---- the scope, which is a wire value too ----
 
     /**

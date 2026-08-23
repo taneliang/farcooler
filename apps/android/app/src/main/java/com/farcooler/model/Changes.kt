@@ -558,3 +558,61 @@ sealed interface DiffScope {
         }
     }
 }
+
+/**
+ * One ref this worktree could be compared against.
+ *
+ * The only thing in this file that is not a `changes.*` shape, and it is here
+ * because it has exactly one reader: the sheet behind
+ * `ChangeSet.baseIsGuessed`'s warning, which needs a menu of refs to hand to
+ * `changes.set_base`. `branch.list` is routed in `crates/daemon/src/rpc.rs` and
+ * shaped in `crates/client/src/session.rs:1074`, and this is that JSON,
+ * key for key.
+ *
+ * The daemon validates a base with `rev-parse --verify` before recording it —
+ * `review_ops::set_base` — so a name that has gone away fails loudly at the
+ * moment it is chosen rather than producing a wrong diff quietly, which is the
+ * failure the whole affordance exists to answer.
+ *
+ * Everything has a default, for the reason [ChangeCommit] gives at length: one
+ * absent key on an older runner must not fail the decode of the whole list.
+ */
+@Serializable
+data class BranchRef(
+    val name: String = "",
+    /** Whether a local ref of this name exists. */
+    val local: Boolean = false,
+    /** Whether a remote-tracking ref does. A branch can be both. */
+    val remote: Boolean = false,
+    /**
+     * Whether some worktree of this repository has it checked out.
+     *
+     * Not a reason to exclude it here — comparing against a branch somebody
+     * else is sitting on is ordinary and often the point, since that somebody
+     * is usually `main`. It is worth SAYING, which is what the row does.
+     */
+    @SerialName("checkedOut") val checkedOut: Boolean = false,
+    /** The subject of its tip commit, so a name is not the only thing to go on. */
+    val subject: String = "",
+    /** Milliseconds, per `session.rs`, which multiplies the protocol's seconds. */
+    @SerialName("updatedAt") val updatedAt: Long? = null,
+) {
+    /**
+     * How this reads under the name.
+     *
+     * A branch that is only a remote-tracking ref is worth marking, because
+     * `origin/main` and `main` are different answers to "what is this branch
+     * based on" and a phone list of thirty names is where they would otherwise
+     * be told apart by nothing.
+     */
+    val whereItLives: String
+        get() = when {
+            local && remote -> "local and remote"
+            remote -> "remote"
+            else -> "local"
+        }
+}
+
+/** What `branch.list` answers with. */
+@Serializable
+data class BranchListReply(val branches: List<BranchRef> = emptyList())

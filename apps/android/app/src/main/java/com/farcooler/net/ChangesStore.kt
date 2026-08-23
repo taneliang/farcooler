@@ -5,11 +5,13 @@ import com.farcooler.data.ReviewStorage
 import com.farcooler.model.ChangeSet
 import com.farcooler.model.ChangesState
 import com.farcooler.model.ChangedFile
+import com.farcooler.model.BranchRef
 import com.farcooler.model.ChangesRow
 import com.farcooler.model.DiffScope
 import com.farcooler.model.FileDiffReply
 import com.farcooler.model.Jump
 import com.farcooler.model.ReviewBookmarks
+import com.farcooler.model.ReviewAgentTarget
 import com.farcooler.model.ReviewCommentQueue
 import com.farcooler.model.ReviewPosition
 import com.farcooler.model.ReviewRef
@@ -29,8 +31,8 @@ import kotlinx.coroutines.launch
  * `android.util.Base64` on its first line, `Connection` owns an SSH session and
  * a poll loop, and this module has no Robolectric — so a store that named either
  * of them by type could not be exercised at all, and there is no emulator for
- * this phase and no UI to look at either. Six methods, each one `changes.*` call
- * plus the send the outbox needs.
+ * this phase and no UI to look at either. Six `changes.*` calls, the send the
+ * outbox needs, and the ref list the base picker needs.
  *
  * Every method THROWS on failure rather than answering with a null. A failure is
  * not an empty diff — saying so was a real bug on the Mac once, where a runner
@@ -57,6 +59,18 @@ interface ChangesSource {
 
     /** `terminal.agent_prompt`, which is what the outbox hands a batch to. */
     suspend fun agentPrompt(terminal: String, text: String)
+
+    /**
+     * The repository's refs, for the sheet that pins a base.
+     *
+     * The one method here that is not a `changes.*` call or the send. It is on
+     * this interface anyway because it has one caller and that caller is a
+     * review: `changes.set_base` needs a ref to record, and a phone keyboard is
+     * the worst way in the world to type one. Given to the store rather than
+     * fetched by the sheet so the sheet needs no [Connection], which is what
+     * keeps every rule on this screen provable from the JVM.
+     */
+    suspend fun branches(repository: String): List<BranchRef>
 }
 
 /**
@@ -108,6 +122,24 @@ class ChangesStore(
             }
         },
     )
+
+    /**
+     * Hand the queue to an agent, on a coroutine that outlives the sheet.
+     *
+     * **Not `rememberCoroutineScope()` in the outbox**, and the difference is
+     * not style. A send is one `terminal.agent_prompt` with `request_no_wait`,
+     * so cancelling it mid-flight tells this client nothing about whether the
+     * agent got the prompt — and a sheet swiped away while the spinner is up
+     * would do exactly that, leaving the notes pending, no failure recorded, and
+     * a reader who presses Send again. That is the duplicate prompt
+     * [ReviewCommentQueue] refuses to produce automatically, produced by hand.
+     *
+     * This store's scope is the connection's, so the call finishes and the
+     * receipt is written whether or not anybody is still looking at the sheet.
+     */
+    fun sendNotes(target: ReviewAgentTarget, branch: String) {
+        scope.launch { comments.send(target, branch) }
+    }
 
     /** Whether this store has ever read the worktree. */
     private var hasLoaded = false
@@ -407,11 +439,34 @@ class ChangesStore(
 
     // ---- moving through the files ----
 
-    /** Open one file, closing whatever was open. */
+    /**
+     * Open one file, closing whatever was open, and go to it.
+     *
+     * **The jump is raised whether or not the file was already open, and the
+     * early return this used to begin with was a drift from [Jump]'s own doc
+     * comment.** That comment says at length that a jump carries a serial
+     * precisely so "tapping the same file in the index twice … has to move the
+     * scroll both times" — and a guard that skipped the whole method when the
+     * path had not changed made that impossible. iOS has the same guard and the
+     * same defect; it went unnoticed there because until 5c there was nothing on
+     * either phone that could ask to open a file that was already open.
+     *
+     * Two things now can. The file index sheet lists the open file along with
+     * every other, and tapping it is somebody asking to be taken back to it
+     * after scrolling away — the single most likely tap in the sheet. And a
+     * resume whose bookmark names the file that happens to be open already, on a
+     * store that outlived the process but not the scroll, would have dismissed
+     * the card and moved nothing.
+     *
+     * So the WRITE is still guarded — an unchanged position is not a new
+     * position and must not cost a preferences write on every tap — and the
+     * scroll is not.
+     */
     fun expand(path: String?) {
-        if (_state.value.expandedFile == path) return
-        _state.update { it.copy(expandedFile = path) }
-        rememberPosition()
+        if (_state.value.expandedFile != path) {
+            _state.update { it.copy(expandedFile = path) }
+            rememberPosition()
+        }
         if (path != null) jumpTo(path)
     }
 
@@ -654,6 +709,19 @@ class ChangesStore(
     }
 
     /**
+     * The repository's refs, so a base can be chosen rather than typed.
+     *
+     * A pass-through, and deliberately not cached. It is read once when a sheet
+     * opens, the answer is a list of branch names on a machine an agent is
+     * committing to, and a stale list is the one thing that would make this
+     * control fail in exactly the way it exists to prevent — a base that no
+     * longer resolves. Throws, like every other read on this object: the sheet
+     * has somewhere to put the sentence, and an empty list would be a claim that
+     * the repository has no branches.
+     */
+    suspend fun branches(repository: String): List<BranchRef> = source.branches(repository)
+
+    /**
      * Pin what this worktree is compared against.
      *
      * The affordance that exists because a GUESSED base produces a wrong diff
@@ -681,7 +749,11 @@ class ChangesStore(
             adoptExpansion()
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            _state.update { it.copy(error = loadTrouble(e)) }
+            // NOT `loadTrouble`, which was this line until the picker existed to
+            // reach it. That sentence says the workspace could not be read, and
+            // nothing here failed to read a workspace: the diff on screen is
+            // exactly the diff that was on screen a moment ago. See [baseTrouble].
+            _state.update { it.copy(error = baseTrouble(e, baseRef)) }
         } finally {
             _state.update { it.copy(loading = false) }
         }
@@ -718,6 +790,33 @@ class ChangesStore(
                 "Couldn’t read this workspace. The request that reads it didn’t finish.",
                 e.message,
             )
+        }
+
+        /**
+         * Why the base did not change, in words about a base.
+         *
+         * The failure this exists for is the ordinary one: `review_ops::set_base`
+         * validates with `rev-parse --verify` before recording anything, so a ref
+         * that has been deleted since the picker read the list comes back as
+         * `BaseUnresolvable` — "the base this branch is compared against could
+         * not be resolved", which is a Rust sentence about a git object and not
+         * something to put on a phone. The runner's own words travel only on the
+         * arm that has nothing of its own to say, the same rule
+         * [loadTrouble] and [sendTrouble] follow.
+         *
+         * Both arms say the base did not change, because that is the fact the
+         * reader needs: nothing was lost, the diff on screen is still the diff
+         * that was on screen, and the thing to do is pick a different ref.
+         */
+        internal fun baseTrouble(e: Exception, baseRef: String): Trouble {
+            val text = (e.message ?: "").lowercase()
+            if (text.contains("resolve")) {
+                return Trouble(
+                    "This runner couldn’t resolve $baseRef, so the base is unchanged. " +
+                        "It may have been deleted since this list was read."
+                )
+            }
+            return Trouble("Couldn’t change the base, so it’s unchanged.", e.message)
         }
 
         /**

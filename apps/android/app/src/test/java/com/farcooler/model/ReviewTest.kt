@@ -403,6 +403,87 @@ class ReviewTest {
         assertEquals(listOf("two"), q.state.value.pending.map { it.text })
     }
 
+    // ---- the other way out ----
+
+    /**
+     * **Put in composer is the Mac's control, and 5a recorded that this app is
+     * the Mac's case before anything called it.** `e23718c` keeps this
+     * worktree's agent panes MOUNTED beside the Changes tab, so a batch dropped
+     * into one is a chip away — and text a person can see and send themselves
+     * needs no delivery receipt, which is the thing `terminal.agent_prompt`
+     * cannot offer.
+     *
+     * It empties the queue exactly as a send does, and the text is not lost by
+     * that: it is in the composer, and it is in the receipt.
+     */
+    @Test
+    fun `putting a batch in a composer empties the queue and leaves a receipt`() {
+        val storage = InMemoryReviewStorage()
+        val q = queue(storage)
+        q.write(ReviewAnchor(file = "a.rs", firstLine = 3), "handle 429 as well")
+        q.write(ReviewAnchor(file = "b.rs"), "and rename this")
+
+        val text = q.putInComposer(target, "feat/x")
+        assertNotNull(text)
+        assertTrue(text!!.contains("handle 429 as well"))
+        assertTrue(text.contains("and rename this"))
+        assertTrue(q.state.value.pending.isEmpty())
+
+        val receipt = q.state.value.sent.single()
+        assertEquals(2, receipt.count)
+        assertEquals("claude 2", receipt.agentName)
+        assertEquals(text, receipt.text)
+        // The distinction the receipt row reads. `true` and not absent: absent
+        // means "sent", which is what every receipt written before this field
+        // existed meant.
+        assertEquals(true, receipt.placedInComposer)
+    }
+
+    /** Nothing to hand over is not a hand-over. */
+    @Test
+    fun `an empty queue puts nothing in a composer`() {
+        val q = queue(InMemoryReviewStorage())
+        assertNull(q.putInComposer(target, "feat/x"))
+        assertTrue(q.state.value.sent.isEmpty())
+    }
+
+    /**
+     * A send leaves the OTHER kind of receipt, and the two must not read the
+     * same: one was handed to an agent with no way to confirm it arrived, the
+     * other is sitting in a field waiting for a person to press Send.
+     */
+    @Test
+    fun `a sent batch is not marked as put in a composer`() = runTest {
+        val q = queue(InMemoryReviewStorage())
+        q.write(ReviewAnchor(file = "a.rs"), "one")
+        q.send(target, "feat/x")
+        assertNull(q.state.value.sent.single().placedInComposer)
+    }
+
+    // ---- the hallway between two panes ----
+
+    /**
+     * Two batches offered before either is taken are JOINED rather than
+     * replaced, which is the same rule the composer itself follows: nothing a
+     * person wrote is overwritten by something else they wrote.
+     */
+    @Test
+    fun `a handoff joins what is waiting and hands it over once`() {
+        val handoff = ComposerHandoff()
+        assertNull(handoff.take("t1"))
+
+        handoff.offer("t1", "first")
+        handoff.offer("t1", "second")
+        handoff.offer("t2", "elsewhere")
+        assertEquals(setOf("t1", "t2"), handoff.waiting.value.keys)
+
+        assertEquals("first\n\nsecond", handoff.take("t1"))
+        // Taken once. A second read must not append the same notes twice.
+        assertNull(handoff.take("t1"))
+        assertEquals("elsewhere", handoff.take("t2"))
+        assertTrue(handoff.waiting.value.isEmpty())
+    }
+
     // ---- where a note can be sent ----
 
     /**

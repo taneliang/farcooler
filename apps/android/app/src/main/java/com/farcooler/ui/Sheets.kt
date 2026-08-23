@@ -712,9 +712,15 @@ fun Picker(
  * One composable rather than a copy in each sheet, so two sheets reporting the
  * same kind of failure cannot come to render it differently. Its Apple twin is
  * `SheetFailureSection` in `apps/ios/FarCooler/FleetView.swift`.
+ *
+ * Internal rather than private since the review's sheets landed: the outbox
+ * reports a send that did not go and the base picker reports a branch list that
+ * could not be read, and both are the same two fields under the same rule — the
+ * sentence this app wrote, and only where it has none of its own, the runner's
+ * words in a box beneath it.
  */
 @Composable
-private fun SheetFailure(trouble: Trouble) {
+internal fun SheetFailure(trouble: Trouble) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             trouble.sentence,

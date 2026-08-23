@@ -148,8 +148,9 @@ class ChangesScreenTest {
      * left out of it: `crates/daemon/src` spelled letter by letter once per file
      * on a forty-file branch is what `NeedsYou`'s workspace header already
      * refuses. The directory stays on screen for the eye, and the index sheet —
-     * where a screen-reader user CHOOSES a file rather than passes one — will
-     * say the whole path when phase 5c builds it.
+     * where a screen-reader user CHOOSES a file rather than passes one — says the
+     * directory too. 5c built it: see `spokenIndexRow`, and the test for it in
+     * `ChangesSheetsTest`.
      */
     @Test
     fun `a file heading is spoken without its directory`() {

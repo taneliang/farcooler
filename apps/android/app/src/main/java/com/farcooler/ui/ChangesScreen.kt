@@ -22,15 +22,18 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FormatListNumbered
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Refresh
@@ -59,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -87,6 +91,9 @@ import com.farcooler.model.ChangesState
 import com.farcooler.model.DiffComputation
 import com.farcooler.model.DiffLayout
 import com.farcooler.model.DiffScope
+import com.farcooler.model.ReviewAgentTarget
+import com.farcooler.model.ReviewAnchor
+import com.farcooler.model.ReviewCommentQueue
 import com.farcooler.model.ReviewPosition
 import com.farcooler.model.ReviewScroll
 import com.farcooler.model.Workspace
@@ -98,9 +105,10 @@ import kotlinx.coroutines.launch
 /**
  * Reviewing what a worktree changed, on a phone.
  *
- * Phase 5b of the parity program, and the body `e23718c` reserved. Phase 5a
- * built the whole model — [ChangesState], [ChangesStore], [DiffLayout],
- * [ReviewPosition] — with nothing to look at; this is the looking. The screen is
+ * Phases 5b and 5c of the parity program, in the body `e23718c` reserved. Phase
+ * 5a built the whole model — [ChangesState], [ChangesStore], [DiffLayout],
+ * [ReviewPosition] — with nothing to look at; 5b is the looking and 5c is
+ * saying something back. The screen is
  * shaped around the same ninety seconds `apps/ios/FarCooler/ChangesView.swift`
  * is shaped around: one hand, between sets, with the process very likely killed
  * in between, reading a branch an agent wrote overnight. So the controls that
@@ -178,6 +186,22 @@ import kotlinx.coroutines.launch
  * button on the screen — is a filled `Button`.
  * Green and red are [DIFF_ADDED] and the scheme's `error`, the same pair the
  * fleet row, the front door and the Changes chip already spend.
+ *
+ * **That rule stops at a sheet, and `ChangesSheets.kt` says why.** A
+ * `ModalBottomSheet` draws on `surfaceContainerLow`, which `FarCoolerTheme`
+ * leaves to the platform — only `surfaceContainerLowest` is pinned to the
+ * terminal's colour — so a sheet is on Material's own ground under Material's
+ * own scheme, and accent there is accent the way every other sheet in this app
+ * already uses it. What is forbidden is accent on THIS pane.
+ *
+ * ## What 5c added, and what it did not move
+ *
+ * The controls whose destinations did not exist in 5b: the Files button (which
+ * is the position label), the outbox row above the bar, the comment button on
+ * every hunk and at the foot of every open file, the History rows, and the base
+ * picker the guessed-base warning had only been naming. Every one of them opens
+ * a [ReviewSheet]; none of them adds an item to the list, which is the one rule
+ * above that has no exceptions.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -189,12 +213,59 @@ fun ChangesPane(
     /** The terminal's own face and size — see [DiffLine] for why a diff wears them. */
     fontFamily: FontFamily,
     fontSize: Float,
+    /**
+     * The agent panes in this worktree a review note can be handed to.
+     *
+     * A list of VALUES rather than the connection they come from, which is what
+     * [ReviewAgentTarget] exists for: holding a live fleet here would
+     * re-evaluate this function — and therefore rebuild a forty-card lazy list's
+     * item lambda — on every three-second poll, which is the one thing a screen
+     * built for scrolling a long patch must not do.
+     */
+    agents: List<ReviewAgentTarget>,
+    /**
+     * Put a batch of notes in an agent's composer, and go there.
+     *
+     * Both halves, and the second is this app's rather than the Mac's. See
+     * [com.farcooler.model.ComposerHandoff]: on a Mac the chat is beside the
+     * diff and the reader watches the text land, while here it is a chip away,
+     * so text put somewhere nobody is looking at is text nobody knows arrived.
+     */
+    onPutInComposer: (ReviewAgentTarget, String) -> Unit,
+    /**
+     * Whether this tab is the thing being looked at.
+     *
+     * Read for exactly one purpose, and it is a hazard the mounted-pane
+     * discipline creates rather than one this screen invented. A pane switched
+     * away from is hidden with `alpha(0f)` and stays composed — which is the
+     * whole point, since it holds the scroll, the folds and the fetched patches
+     * — but a `ModalBottomSheet` is a WINDOW rather than part of that subtree,
+     * so an open sheet would go on floating over whatever tab replaced this one.
+     * Nothing else on this screen has that property, because nothing else on it
+     * is drawn outside the pane.
+     *
+     * Not the same question as a terminal pane's `live`, which is about traffic:
+     * this tab costs the runner nothing while it sits there, and backgrounding
+     * the app must not close a sheet somebody is halfway through.
+     */
+    visible: Boolean,
     onOpenDrawer: () -> Unit,
 ) {
     val state by store.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
+
+    // Which sheet is open, and the one piece of this screen's own state that
+    // survives the process. See [ReviewSheet] and [ReviewSheetSaver] — the four
+    // pickers are saved because they cost nothing to save, and the composer is
+    // saved because what is in it is a sentence somebody typed.
+    var sheet by rememberSaveable(stateSaver = ReviewSheetSaver) {
+        mutableStateOf<ReviewSheet?>(null)
+    }
+
+    // A sheet belongs to the tab that opened it. See [visible].
+    LaunchedEffect(visible) { if (!visible) sheet = null }
 
     // Once per store, not once per appearance. `load` throws away every patch it
     // holds, and this tab is one chip away from the agents — glancing at one and
@@ -263,6 +334,8 @@ fun ChangesPane(
             onOpenDrawer = onOpenDrawer,
         ) {
             ReviewMenu(
+                hasCommits = state.changeSet.commits.isNotEmpty(),
+                onOpenSheet = { sheet = it },
                 onMarkRead = { scope.launch { store.markRead() } },
                 onRecompute = { scope.launch { store.load(fresh = true) } },
             )
@@ -298,7 +371,12 @@ fun ChangesPane(
                     // item here moves every jump on the screen by one.
                     items(rows, key = { it.key }, contentType = { it::class }) { row ->
                         when (row) {
-                            is ChangesRow.Summary -> SummaryBlock(state, store, workspace)
+                            is ChangesRow.Summary -> SummaryBlock(
+                                state = state,
+                                store = store,
+                                workspace = workspace,
+                                onOpenSheet = { sheet = it },
+                            )
                             is ChangesRow.GeneratedHeading -> GeneratedHeading(row)
                             is ChangesRow.File -> FileCard(
                                 file = row.file,
@@ -306,6 +384,7 @@ fun ChangesPane(
                                 store = store,
                                 fontFamily = fontFamily,
                                 fontSize = fontSize,
+                                onComment = { sheet = ReviewSheet.Note(it) },
                             )
                         }
                     }
@@ -326,7 +405,67 @@ fun ChangesPane(
             )
         }
 
-        ReviewBar(state, store, scope)
+        // The comment queue is collected INSIDE the bar rather than here, which
+        // is iOS's decision and worth inheriting exactly: this function reads
+        // `state.rows` and therefore rebuilds the list's item lambda whenever it
+        // recomposes, so observing the queue at this level would redraw forty
+        // cards every time somebody wrote a note.
+        ReviewBar(
+            state = state,
+            store = store,
+            scope = scope,
+            comments = store.comments,
+            onOpenSheet = { sheet = it },
+        )
+    }
+
+    // Presented from here rather than from the controls that open them, which is
+    // the same reason iOS gives: one of those controls is inside a `DropdownMenu`
+    // whose content is torn down the instant it is tapped, so a sheet hung off it
+    // would be hung off something that has stopped existing.
+    when (val open = sheet) {
+        null -> Unit
+
+        ReviewSheet.Index -> FileIndexSheet(
+            state = state,
+            // The store raises the jump; this sheet never computes an index of
+            // its own. See [FileIndexSheet] and [com.farcooler.model.Jump].
+            onOpen = { store.expand(it) },
+            onDismiss = { sheet = null },
+        )
+
+        ReviewSheet.History -> CommitHistorySheet(
+            state = state,
+            onWholeBranch = { store.showWholeBranch() },
+            // Not awaited. The read is a round trip over somebody's cellular
+            // link and holding the sheet up for it would hide the pane that has
+            // the spinner in it; the store, not the sheet, owns the work.
+            onSelect = { sha -> scope.launch { store.select(sha) } },
+            onDismiss = { sheet = null },
+        )
+
+        ReviewSheet.Outbox -> CommentOutboxSheet(
+            comments = store.comments,
+            agents = agents,
+            branch = state.changeSet.branch,
+            onSend = { store.sendNotes(it, state.changeSet.branch) },
+            onPutInComposer = onPutInComposer,
+            onDismiss = { sheet = null },
+        )
+
+        ReviewSheet.Base -> BaseBranchSheet(
+            set = state.changeSet,
+            repositoryId = workspace?.repository,
+            loadBranches = { store.branches(it) },
+            onChoose = { ref -> scope.launch { store.setBase(ref) } },
+            onDismiss = { sheet = null },
+        )
+
+        is ReviewSheet.Note -> CommentComposerSheet(
+            anchor = open.anchor,
+            onAdd = { store.comments.write(open.anchor, it) },
+            onDismiss = { sheet = null },
+        )
     }
 }
 
@@ -410,6 +549,7 @@ private fun FileCard(
     store: ChangesStore,
     fontFamily: FontFamily,
     fontSize: Float,
+    onComment: (ReviewAnchor) -> Unit,
 ) {
     val expanded = state.isExpanded(file.path)
 
@@ -431,7 +571,7 @@ private fun FileCard(
     ) {
         FileHeading(file, expanded, onClick = { store.toggle(file.path) })
         if (expanded) {
-            FileBody(file, state, fontFamily, fontSize)
+            FileBody(file, state, fontFamily, fontSize, onComment)
         }
     }
 }
@@ -517,7 +657,7 @@ private fun FileHeading(file: ChangedFile, expanded: Boolean, onClick: () -> Uni
 }
 
 @Composable
-private fun FileCounts(file: ChangedFile) {
+internal fun FileCounts(file: ChangedFile) {
     if (file.binary) {
         Text(
             "binary",
@@ -567,6 +707,7 @@ private fun FileBody(
     state: ChangesState,
     fontFamily: FontFamily,
     fontSize: Float,
+    onComment: (ReviewAnchor) -> Unit,
 ) {
     val path = file.path
     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
@@ -601,7 +742,53 @@ private fun FileBody(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             )
 
-            else -> Patch(state.fileDiffs[path].orEmpty(), fontFamily, fontSize)
+            else -> Patch(
+                lines = state.fileDiffs[path].orEmpty(),
+                fontFamily = fontFamily,
+                fontSize = fontSize,
+                onComment = { first, last, quote ->
+                    onComment(
+                        ReviewAnchor(
+                            file = path,
+                            commit = state.scope.commitSha,
+                            firstLine = first,
+                            lastLine = last,
+                            quote = quote,
+                        )
+                    )
+                },
+            )
+        }
+
+        // At the END of the file rather than in the heading, because that is
+        // where the reader is when they have something to say about it — and
+        // because a second tap target inside the heading's own target is a
+        // button that folds the card as often as it opens a composer.
+        //
+        // Drawn for every branch above, including the ones with no patch: a
+        // binary file that changed, a submodule that moved and a merge shown
+        // against one parent are all perfectly good things to have an opinion
+        // about, and the anchor carries the path either way.
+        //
+        // `FilledTonalButton`, which is the trap this screen's doc comment
+        // names: `OutlinedButton` looks like the counterpart of SwiftUI's
+        // `.bordered` and is not — it puts accent text over the terminal's own
+        // ground with a line around it, which is the shape `b6e3114` had to
+        // correct on iOS three times.
+        Spacer(Modifier.height(4.dp))
+        FilledTonalButton(
+            onClick = {
+                onComment(ReviewAnchor(file = path, commit = state.scope.commitSha))
+            },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        ) {
+            Icon(
+                Icons.Outlined.ChatBubbleOutline,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Comment on this file", maxLines = 1)
         }
     }
 }
@@ -649,7 +836,13 @@ private fun FileNotice(text: String) {
  * from. It fires on almost nothing a person wrote — see [PATCH_BUDGET].
  */
 @Composable
-private fun Patch(lines: List<DiffComputation.Line>, fontFamily: FontFamily, fontSize: Float) {
+private fun Patch(
+    lines: List<DiffComputation.Line>,
+    fontFamily: FontFamily,
+    fontSize: Float,
+    /** First line, last line, and the line worth quoting back. See [Hunk]. */
+    onComment: (Int?, Int?, String?) -> Unit,
+) {
     var whole by remember(lines) { mutableStateOf(false) }
     val hunks = remember(lines, whole) {
         DiffLayout.hunks(if (whole) lines else lines.take(PATCH_BUDGET))
@@ -657,7 +850,7 @@ private fun Patch(lines: List<DiffComputation.Line>, fontFamily: FontFamily, fon
 
     Column(Modifier.fillMaxWidth()) {
         for (hunk in hunks) {
-            key(hunk.id) { Hunk(hunk, fontFamily, fontSize) }
+            key(hunk.id) { Hunk(hunk, fontFamily, fontSize, onComment) }
         }
         if (!whole && lines.size > PATCH_BUDGET) {
             Row(
@@ -710,21 +903,63 @@ private const val PATCH_BUDGET = 600
  * code would wrap.
  */
 @Composable
-private fun Hunk(hunk: DiffLayout.Hunk, fontFamily: FontFamily, fontSize: Float) {
+private fun Hunk(
+    hunk: DiffLayout.Hunk,
+    fontFamily: FontFamily,
+    fontSize: Float,
+    onComment: (Int?, Int?, String?) -> Unit,
+) {
     // Folds the reader has opened, by segment. Local to the hunk and lost when
     // the card is folded, which is right: the reason to open a fold is the
     // question being asked right now.
     var revealed by remember(hunk) { mutableStateOf(emptySet<Int>()) }
 
     Column(Modifier.fillMaxWidth()) {
-        hunk.rangeLabel?.let { range ->
-            Text(
-                range,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 2.dp),
-            )
+        // Where in the file this is, and the way to say something about it.
+        //
+        // The line range is what turns a note on a hunk into an instruction an
+        // agent can act on: `push.ts` alone leaves it to search a 300-line file
+        // for whatever was meant, and `push.ts`, around lines 120-148 does not.
+        // See [ReviewAnchor], which argues the same point from the agent's end.
+        //
+        // The row is drawn even for a hunk with no range to print — every line
+        // of a deleted file has no new-side numbering — because the button is
+        // the reason the row exists and a file whose whole content went is a
+        // thing people have opinions about.
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            hunk.rangeLabel?.let { range ->
+                Text(
+                    range,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(
+                onClick = {
+                    onComment(
+                        hunk.firstLine,
+                        hunk.lastLine,
+                        // The first line this hunk actually CHANGED, not its
+                        // first line: a hunk opens with context, and quoting an
+                        // untouched line back at an agent points it at the line
+                        // before the thing being talked about.
+                        ReviewAnchor.quoting(changedLine(hunk).orEmpty()),
+                    )
+                },
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.ChatBubbleOutline,
+                    contentDescription = "Comment on this hunk",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
         Column(
             Modifier
@@ -763,6 +998,10 @@ private fun Hunk(hunk: DiffLayout.Hunk, fontFamily: FontFamily, fontSize: Float)
         }
     }
 }
+
+/** The first line a hunk changed, for a note to quote. See [Hunk]. */
+private fun changedLine(hunk: DiffLayout.Hunk): String? =
+    hunk.lines.firstOrNull { it.kind != DiffComputation.Kind.CONTEXT }?.text
 
 /**
  * One line of a patch, in the terminal's own face and size.
@@ -823,7 +1062,12 @@ private fun DiffLine(line: DiffComputation.Line, fontFamily: FontFamily, fontSiz
  * land. See [ChangesRow.Summary].
  */
 @Composable
-private fun SummaryBlock(state: ChangesState, store: ChangesStore, workspace: Workspace?) {
+private fun SummaryBlock(
+    state: ChangesState,
+    store: ChangesStore,
+    workspace: Workspace?,
+    onOpenSheet: (ReviewSheet) -> Unit,
+) {
     val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Card {
@@ -855,9 +1099,9 @@ private fun SummaryBlock(state: ChangesState, store: ChangesStore, workspace: Wo
             // than being squeezed in beside the branch's base and counts — which
             // would then be describing something nobody is looking at.
             if (state.scope.commitSha != null) {
-                CommitHeader(state, store, scope)
+                CommitHeader(state, store, scope, onOpenSheet)
             } else {
-                ComparisonHeader(state, store, scope)
+                ComparisonHeader(state, store, scope, onOpenSheet)
             }
         }
 
@@ -913,6 +1157,7 @@ private fun ComparisonHeader(
     state: ChangesState,
     store: ChangesStore,
     scope: CoroutineScope,
+    onOpenSheet: (ReviewSheet) -> Unit,
 ) {
     val local = state.scope == DiffScope.Local
     val total =
@@ -975,6 +1220,13 @@ private fun ComparisonHeader(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+        // The warning named this control for a whole phase without being able to
+        // open it. A sentence that says a screen may be lying, beside no way to
+        // stop it lying, is the shape this app refuses everywhere else.
+        Spacer(Modifier.height(6.dp))
+        FilledTonalButton(onClick = { onOpenSheet(ReviewSheet.Base) }) {
+            Text("Choose base branch", maxLines = 1)
+        }
     }
 
     // Which question the list below is answering. A segmented control rather
@@ -1001,7 +1253,7 @@ private fun ComparisonHeader(
         }
     }
 
-    CommitEntry(state, store, scope)
+    CommitEntry(state, store, scope, onOpenSheet)
 }
 
 /**
@@ -1014,43 +1266,81 @@ private fun ComparisonHeader(
  * fixes what the second introduced, and read backwards it is a repair to
  * something that has not happened yet.
  *
- * The history PICKER is a sheet and belongs to phase 5c. This row does not need
- * it: it starts at the first commit, and the header that replaces this one
- * carries Previous and Next, so the whole branch is walkable without one.
+ * The two doors are different questions and both are here. This one starts at
+ * the beginning and keeps going, and the header that replaces it carries
+ * Previous and Next, so the whole branch is walkable without a picker. The
+ * History row under it is the other question — the commit somebody already has
+ * in mind — and it opens [CommitHistorySheet].
+ *
+ * One filled button and one plain row, not two filled buttons. The reading is
+ * the thing this card is recommending; the picker is the thing it is offering,
+ * and a card with two equally loud controls recommends neither.
  */
 @Composable
 private fun CommitEntry(
     state: ChangesState,
     store: ChangesStore,
     scope: CoroutineScope,
+    onOpenSheet: (ReviewSheet) -> Unit,
 ) {
     val count = state.changeSet.commits.size
-    Spacer(Modifier.height(6.dp))
-    if (count == 0) {
-        // Said rather than left blank. A branch with nothing on it yet is the
-        // ordinary state of a worktree an agent has only just started in, and a
-        // control that does nothing when tapped is worse than one that says why
-        // it is quiet.
-        Text(
-            "No commits yet.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        return
+    if (count > 0) {
+        Spacer(Modifier.height(6.dp))
+        FilledTonalButton(
+            onClick = { scope.launch { store.startAtFirstCommit() } },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(
+                Icons.Outlined.FormatListNumbered,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Review commit by commit", maxLines = 1)
+        }
     }
-    FilledTonalButton(
-        onClick = { scope.launch { store.startAtFirstCommit() } },
-        modifier = Modifier.fillMaxWidth(),
+
+    // Always drawn, and quiet rather than absent when the branch has nothing on
+    // it. A worktree an agent has only just started in is the ordinary case, and
+    // a row that says why it is quiet beats a control that vanishes — the reader
+    // who looked for History once and did not find it does not look again.
+    Spacer(Modifier.height(2.dp))
+    val enabled = count > 0
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onOpenSheet(ReviewSheet.History) }
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.Outlined.FormatListNumbered,
+            Icons.Outlined.History,
             contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(16.dp),
         )
         Spacer(Modifier.width(8.dp))
-        Text("Review commit by commit", maxLines = 1)
+        Text(
+            "History",
+            style = MaterialTheme.typography.labelLarge,
+            color =
+                if (enabled) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.weight(1f))
-        Text(commitCount(count), style = MaterialTheme.typography.labelSmall)
+        Text(
+            if (enabled) commitCount(count) else "No commits yet",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (enabled) {
+            Icon(
+                Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp).size(16.dp),
+            )
+        }
     }
 }
 
@@ -1067,6 +1357,7 @@ private fun CommitHeader(
     state: ChangesState,
     store: ChangesStore,
     scope: CoroutineScope,
+    onOpenSheet: (ReviewSheet) -> Unit,
 ) {
     val sha = state.scope.commitSha ?: return
     val known = state.selectedCommitInfo
@@ -1177,6 +1468,16 @@ private fun CommitHeader(
                 Icon(
                     Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                     contentDescription = "Next commit",
+                )
+            }
+            // The way to a commit that is not the next one along. Reading in
+            // sequence is what the two chevrons beside this are for; this is for
+            // the reader who has remembered a commit and wants that one.
+            IconButton(onClick = { onOpenSheet(ReviewSheet.History) }) {
+                Icon(
+                    Icons.Outlined.History,
+                    contentDescription = "History",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.weight(1f))
@@ -1393,31 +1694,104 @@ private fun Notice(
  * and on the last file of a commit it becomes Next commit. That join is what
  * turns a stack of commits into something you can walk end to end.
  *
- * **What is not here yet.** iOS puts a Files button at the leading edge, opening
- * the index sheet, and an outbox row above the bar once notes have been written.
- * Both of those are sheets, and sheets are phase 5c; a control that opens
- * nothing is worse than no control, so neither is drawn. The position label
- * takes the leading edge in the meantime.
+ * **The position label IS the Files button, which is where this stops being a
+ * port.** iOS spends two of the bar's four slots on the same fact: a Files
+ * button at the leading edge and `7 of 23` beside it, which is the answer a
+ * table of contents gives. On a phone that bar also has to hold two chevrons and,
+ * once per commit, the words Next commit — so the two are one control here.
+ * `7 of 23` is exactly what somebody taps when they want to know what the other
+ * sixteen are, the target is the whole label rather than a glyph, and no chrome
+ * is spent saying the same thing twice.
+ *
+ * The outbox row above it appears only once something has been written. A
+ * permanent empty outbox would be a row of chrome charging rent on a screen that
+ * has none to spare, and its absence is not a loss: the way to write a note is
+ * beside the hunk, not up here.
  */
 @Composable
 private fun ReviewBar(
     state: ChangesState,
     store: ChangesStore,
     scope: CoroutineScope,
+    comments: ReviewCommentQueue,
+    onOpenSheet: (ReviewSheet) -> Unit,
 ) {
+    // Observed here and nowhere above, so writing a note redraws this bar and
+    // not the diff behind it. See the call site.
+    val queue by comments.state.collectAsStateWithLifecycle()
+    val waiting = queue.pending.size
+
     Column(Modifier.fillMaxWidth()) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        if (waiting > 0) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenSheet(ReviewSheet.Outbox) }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.ChatBubbleOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(notesWaiting(waiting), style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.weight(1f))
+                // Secondary, not accent. The whole row is the button — these
+                // three words are not a target of their own, and painting them
+                // accent over the terminal's ground would be this screen
+                // spending its one "this is tappable" signal on the part of the
+                // row that is not tappable. The chevron already says the row
+                // goes somewhere.
+                Text(
+                    "Review and send",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Icon(
+                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp).size(16.dp),
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
         Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp),
+            Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                state.positionLabel,
-                style = MaterialTheme.typography.labelLarge,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+            val hasFiles = state.files.isNotEmpty()
+            Row(
+                Modifier
+                    .clickable(enabled = hasFiles) { onOpenSheet(ReviewSheet.Index) }
+                    .padding(horizontal = 10.dp, vertical = 14.dp)
+                    // Spoken as one thing, because it IS one thing: the button
+                    // and the count are the same control and a screen reader
+                    // that read them apart would offer a target with no name.
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = spokenPosition(state.positionLabel, hasFiles)
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Outlined.FormatListBulleted,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    state.positionLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
             Spacer(Modifier.weight(1f))
             // A glyph is not a tap target; the button is. Material's own
             // `IconButton` is 48dp square, which clears the 44 the visual
@@ -1454,21 +1828,50 @@ private fun ReviewBar(
 }
 
 /**
- * The two writes this tab can make without a sheet.
+ * Everything this tab can do that is not moving through the diff.
  *
  * Marking a worktree read is what clears its badge on the front door and in the
- * fleet list, and it needs nothing but a tap; recomputing is the same thing pull
- * to refresh does, kept here for the reader who is a thousand lines down and
- * would have to fling back to the top to reach the gesture. `changes.set_base`
- * is the third write and needs a branch picker, so it waits for phase 5c.
+ * fleet list; recomputing is the same thing pull to refresh does, kept here for
+ * the reader who is a thousand lines down and would have to fling back to the
+ * top to reach the gesture. Both are writes and neither needs a sheet.
+ *
+ * The other two are second doors to sheets that have first ones. History is in
+ * the summary card, which is at the top of a list somebody is forty files down;
+ * the base picker is under the guessed-base warning, which is not drawn at all
+ * once a base has been recorded — and somebody who pinned the wrong branch has
+ * no other way back. A second door to a screen you are already a long way from
+ * is the whole reason a menu exists.
  */
 @Composable
-private fun ReviewMenu(onMarkRead: () -> Unit, onRecompute: () -> Unit) {
+private fun ReviewMenu(
+    hasCommits: Boolean,
+    onOpenSheet: (ReviewSheet) -> Unit,
+    onMarkRead: () -> Unit,
+    onRecompute: () -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
         Icon(Icons.Filled.MoreVert, contentDescription = "Review options")
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenuItem(
+            text = { Text("History") },
+            leadingIcon = { Icon(Icons.Outlined.History, contentDescription = null) },
+            enabled = hasCommits,
+            onClick = {
+                open = false
+                onOpenSheet(ReviewSheet.History)
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("Base branch") },
+            leadingIcon = { Icon(Icons.Outlined.AccountTree, contentDescription = null) },
+            onClick = {
+                open = false
+                onOpenSheet(ReviewSheet.Base)
+            },
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         DropdownMenuItem(
             text = { Text("Mark as reviewed") },
             leadingIcon = { Icon(Icons.Outlined.CheckCircleOutline, contentDescription = null) },
@@ -1529,7 +1932,7 @@ private fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope
 }
 
 @Composable
-private fun Counts(insertions: Int, deletions: Int) {
+internal fun Counts(insertions: Int, deletions: Int) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             "+$insertions",
@@ -1556,7 +1959,7 @@ private fun Counts(insertions: Int, deletions: Int) {
  * already says which is which.
  */
 @Composable
-private fun statusColor(status: ChangedFileStatus): Color = when (status) {
+internal fun statusColor(status: ChangedFileStatus): Color = when (status) {
     ChangedFileStatus.ADDED, ChangedFileStatus.UNTRACKED -> DIFF_ADDED
     ChangedFileStatus.DELETED -> MaterialTheme.colorScheme.error
     ChangedFileStatus.CONFLICTED -> MaterialTheme.colorScheme.error
@@ -1632,6 +2035,17 @@ internal fun spokenHeading(file: ChangedFile): String {
     }
     return parts.joinToString(", ")
 }
+
+/**
+ * The bar's leading control, said as one phrase.
+ *
+ * "7 of 23" alone is a fragment that never says what it is counting, and the
+ * word that would have said it — Files — is the same control rather than a
+ * separate element. So the label names both, the same fix `ComparisonHeader` and
+ * the rows in `NeedsYouScreen` and `FleetScreen` already got.
+ */
+internal fun spokenPosition(positionLabel: String, hasFiles: Boolean): String =
+    if (hasFiles) "Files, $positionLabel" else positionLabel
 
 internal fun generatedHeading(count: Int): String =
     if (count == 1) "1 generated file" else "$count generated files"

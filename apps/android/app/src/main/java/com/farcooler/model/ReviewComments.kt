@@ -28,16 +28,25 @@ import java.util.UUID
 // The mapping from a platform's own error to that sentence stays on the
 // platform, which for this one is `net/Connection.kt`.
 //
-// **What is deliberately not here: `putInComposer`.** AgentKit carries a second
-// way out of the outbox, where a batch lands in an agent's composer for the
-// reader to send themselves — the Mac's answer to the missing delivery receipt,
-// since a message visibly in a transcript needs no receipt. iOS never uses it
-// (`ReviewAgentTarget.showsChat` exists purely to gate the Mac's button), and it
-// is not ported because nothing calls it yet. It is worth recording that this
-// app is the Mac's case rather than iOS's: since `e23718c` the agent panes of
-// this workspace are MOUNTED beside the Changes tab, drafts and all, so a batch
-// dropped into one is a chip away rather than a screen away. That is 5c's, which
-// owns the outbox sheet.
+// **`putInComposer` is here, and 5a said why before it was.** AgentKit carries a
+// second way out of the outbox, where a batch lands in an agent's composer for
+// the reader to send themselves — the Mac's answer to the missing delivery
+// receipt, since a message visibly in a transcript needs no receipt. iOS never
+// uses it (`ReviewAgentTarget.showsChat` exists purely to gate the Mac's
+// button), and 5a left it out because nothing called it, while recording that
+// **this app is the Mac's case rather than iOS's**: since `e23718c` the agent
+// panes of this workspace are MOUNTED beside the Changes tab, drafts and all, so
+// a batch dropped into one is a chip away rather than a screen away. That note
+// is honored rather than re-argued — see [ReviewCommentQueue.putInComposer] and
+// [ComposerHandoff].
+//
+// One thing this app does that the Mac cannot. On a Mac the two panes are side
+// by side, so `ComposerHandoff.offer` is the whole gesture and the reader
+// watches the text land. Here the agent is a CHIP away rather than an inch away,
+// so text put into a composer nobody is looking at is text nobody knows arrived
+// — which would be the delivery-receipt problem again, one layer up. So the
+// screen that calls this also switches the tab, and the two together are what
+// makes the hand-off visible. See `ChangesPane`'s `onPutInComposer`.
 
 /**
  * The part of the diff a comment is about.
@@ -136,6 +145,18 @@ data class SentReviewBatch(
     val agentName: String,
     val sentAt: Long,
     val count: Int,
+    /**
+     * Whether this batch was put in a composer instead of being sent.
+     *
+     * Nullable, and that is not decoration: this type is written to disk, so a
+     * non-null field would need a default anyway and the default would be a
+     * claim. Absent means "sent", which is what every receipt written before
+     * this field existed meant. The receipt row says which happened, because
+     * they are different promises — one was handed to an agent with no way to
+     * confirm it arrived, the other is sitting in a text field waiting for
+     * somebody to press Send.
+     */
+    val placedInComposer: Boolean? = null,
 )
 
 /**
@@ -153,9 +174,10 @@ data class ReviewAgentTarget(
     /**
      * Whether this pane is being DRAWN as a chat right now.
      *
-     * Nothing reads it yet — see the note at the top of this file about
-     * `putInComposer`. Filled in anyway, because a field one caller leaves at its
-     * default is a field that is wrong the first time somebody wants it.
+     * Read by exactly one control: the outbox's Put in composer, which narrows
+     * to the panes that HAVE a composer. A pane showing its raw terminal is a
+     * perfectly good target for a SEND — `terminal.agent_prompt` reaches the
+     * agent either way — so this narrows one button rather than the list.
      */
     val showsChat: Boolean = false,
 )
@@ -352,8 +374,49 @@ class ReviewCommentQueue(
         // those are two `didSet`s and the note there says a crash between them
         // loses the receipt rather than the comments; one atomic write makes
         // that ordering unnecessary rather than merely safe.
+        finish(text, target, count, placedInComposer = null)
+    }
+
+    /**
+     * Take the batch out of the queue for a composer to hold instead.
+     *
+     * The other way out, and on this app it is the better one for the reason
+     * this whole file is careful about: `terminal.agent_prompt` has no delivery
+     * receipt, so [send] can only ever be reported as "handed over", while text
+     * sitting in a composer the reader is looking at needs no receipt at all.
+     * They press Send, and the transcript shows what happened.
+     *
+     * It EMPTIES the queue exactly as a send does, and the text is not lost by
+     * that: it is in the composer, and it is in the receipt this leaves behind,
+     * which discloses the full message the same way a send's does. Nothing here
+     * is described as sent, because nothing was.
+     *
+     * Answers with the text rather than delivering it, because where it goes is
+     * not this object's business — see [ComposerHandoff], and the note at the
+     * top of this file for why an app whose agent panes are a chip away has to
+     * do one more thing than the Mac after calling this.
+     */
+    fun putInComposer(target: ReviewAgentTarget, branch: String): String? {
+        val before = _state.value
+        if (before.pending.isEmpty() || before.sending) return null
+        val text = message(branch)
+        finish(text, target, before.pending.size, placedInComposer = true)
+        return text
+    }
+
+    /** One write that records what happened and empties the queue. */
+    private fun finish(
+        text: String,
+        target: ReviewAgentTarget,
+        count: Int,
+        placedInComposer: Boolean?,
+    ) {
         val receipt = SentReviewBatch(
-            text = text, agentName = target.name, sentAt = now(), count = count
+            text = text,
+            agentName = target.name,
+            sentAt = now(),
+            count = count,
+            placedInComposer = placedInComposer,
         )
         update {
             it.copy(
@@ -409,5 +472,76 @@ class ReviewCommentQueue(
         private const val SENT_KEPT = 5
 
         private val json = Json { ignoreUnknownKeys = true }
+    }
+}
+
+/**
+ * Text one pane wants to put in another pane's composer.
+ *
+ * One case today: the outbox's Put in composer, which is the review's other way
+ * out — see [ReviewCommentQueue.putInComposer] and the note at the top of this
+ * file. A port of the Mac's `ComposerHandoff.swift`, and the reasoning is that
+ * file's: the two panes are siblings with no reference to each other, so a
+ * callback threaded from one to the other would have to pass through the screen
+ * that deliberately knows nothing about what its panes contain.
+ *
+ * **The text WAITS.** A batch put into a pane the mount limit has evicted, or
+ * one whose composer has not been composed yet, has nowhere to land at the
+ * moment it is offered — so it stays here until a composer asks. Nothing is lost
+ * if none ever does: the batch is in the outbox's receipt list with its full
+ * text, which is the same place a sent batch is.
+ *
+ * **In memory only**, unlike [ReviewCommentQueue]. What is here is a message the
+ * reader has already decided to hand over, in flight across one window; the
+ * queue is the thing that is written down, and it is written down BEFORE this is
+ * ever reached. It is also why nothing here needs a [ReviewRef]: the receipt is
+ * already filed under `host/workspace`, and this is a hallway rather than a
+ * record.
+ *
+ * ## Why one per runner rather than one per app
+ *
+ * A terminal id is minted by a daemon, so two runners can hand out the same one
+ * — the collision `df87410` had to answer for the front door and [ReviewRef]
+ * answers for a bookmark. Holding this on a `Connection` makes the runner half
+ * of the address structural: there is no call that could offer one runner's
+ * notes to another runner's pane, because there is no way to reach the wrong
+ * object. The Mac's is a singleton and can be, since it talks to one daemon at a
+ * time; this app connects to every runner at once, which is the first item on
+ * the do-not-delete list.
+ */
+class ComposerHandoff {
+    private val _waiting = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    /** What is waiting, by terminal id, so a composer can watch for its own. */
+    val waiting: StateFlow<Map<String, String>> = _waiting.asStateFlow()
+
+    /**
+     * Leave text for a pane.
+     *
+     * Two batches offered before either is taken are JOINED rather than
+     * replaced, on the same rule the composer itself follows when it receives
+     * one: nothing a person wrote is overwritten by something else they wrote.
+     */
+    @Synchronized
+    fun offer(terminal: String, text: String) {
+        if (text.isEmpty()) return
+        val already = _waiting.value[terminal]
+        val next = if (already.isNullOrEmpty()) text else "$already\n\n$text"
+        _waiting.value = _waiting.value + (terminal to next)
+    }
+
+    /**
+     * Take what is waiting, once.
+     *
+     * Synchronized with [offer] rather than an `update` on the flow, because
+     * this is a read AND a write and the two have to be one step: a batch
+     * offered between reading the map and clearing the entry would be dropped,
+     * and a dropped batch here is a note the reader believes is in a composer.
+     */
+    @Synchronized
+    fun take(terminal: String): String? {
+        val text = _waiting.value[terminal] ?: return null
+        _waiting.value = _waiting.value - terminal
+        return text
     }
 }

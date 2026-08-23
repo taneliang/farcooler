@@ -6,9 +6,12 @@ import com.farcooler.data.Identity
 import com.farcooler.data.Theme
 import com.farcooler.model.AdapterInfo
 import com.farcooler.model.AdapterTestOutcome
+import com.farcooler.model.BranchListReply
+import com.farcooler.model.BranchRef
 import com.farcooler.model.ChangeSet
 import com.farcooler.model.ChangedFile
 import com.farcooler.model.CommitFilesReply
+import com.farcooler.model.ComposerHandoff
 import com.farcooler.model.DaemonBuild
 import com.farcooler.model.DiffLayout
 import com.farcooler.model.FileDiffReply
@@ -1092,6 +1095,25 @@ class Connection(
     }
 
     /**
+     * Every ref in a repository, for the sheet that pins a review's base.
+     *
+     * `branch.list` is one of the family the parity inventory found routed in
+     * Rust and never called from Kotlin, and this is its first Kotlin caller.
+     * Scoped to a REPOSITORY rather than a workspace, which is the daemon's own
+     * shape — `Session::branches` takes a repository id — and the reason the one
+     * caller has to read [Workspace.repository] and say so when it is missing
+     * rather than guessing.
+     *
+     * Throws with the rest of this section. A base picker that answered an empty
+     * list for a failed call would be telling somebody their repository has no
+     * branches, which is exactly the confusion this whole group refuses.
+     */
+    override suspend fun branches(repository: String): List<BranchRef> {
+        val data = core.call("branch.list", args("repository" to repository))
+        return json.decodeFromJsonElement(BranchListReply.serializer(), data).branches
+    }
+
+    /**
      * The review stores for this runner's worktrees, one each, kept alive past
      * the screens that show them.
      *
@@ -1101,6 +1123,16 @@ class Connection(
      * this shape forecloses.
      */
     val changes = ChangesStores(host.id, this, review, scope)
+
+    /**
+     * Text one of this runner's panes is holding for another of them.
+     *
+     * One case: the review outbox's Put in composer. Held here for the same
+     * reason [changes] is — a terminal id is minted per daemon, so the runner
+     * half of the address is structural and no call can offer one runner's notes
+     * to another runner's pane. See [ComposerHandoff].
+     */
+    val composerHandoff = ComposerHandoff()
 
     fun terminal(id: String): Terminal? =
         _fleet.value.workspaces.flatMap { it.terminals }.firstOrNull { it.id == id }

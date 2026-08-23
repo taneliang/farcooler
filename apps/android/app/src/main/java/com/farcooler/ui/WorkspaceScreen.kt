@@ -38,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.model.InboxRow
 import com.farcooler.model.Workspace
+import com.farcooler.model.reviewAgentTargets
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.Dispatchers
@@ -332,10 +333,16 @@ fun WorkspaceScreen(
                                 is Pane.Changes -> ChangesTab(
                                     model = model,
                                     connection = connection,
-                                    workspaceId = route.workspaceId,
+                                    route = route,
                                     workspace = workspace,
                                     showRunner = connections.size > 1,
                                     runnerLabel = connection.host.displayLabel,
+                                    // Not `live`: this tab costs the runner
+                                    // nothing while it sits mounted. What this
+                                    // decides is whether a sheet it opened is
+                                    // still over the right thing — see
+                                    // `ChangesPane.visible`.
+                                    visible = showing && onScreen,
                                     onOpenDrawer = onOpenDrawer,
                                 )
                             }
@@ -428,26 +435,58 @@ private val HIDDEN_PANE: Modifier = Modifier
  * `changes.inbox` watermark, which is a decoration on a chip; the surface reads
  * the worktree itself through `changes.change_set`, and presenting a poll's
  * summary as the diff is the one thing it must not do.
+ *
+ * ## What 5c added here, and why it belongs at this level
+ *
+ * The review can hand a batch of notes to an agent's composer instead of sending
+ * it — see [com.farcooler.model.ComposerHandoff]. Both halves of that gesture
+ * live here rather than inside the diff pane, because both are about the pane
+ * NEXT to it: the text goes into the handoff this runner owns, and then the tab
+ * changes to the pane that is holding it. `ChangesPane` is given one callback
+ * and knows neither.
+ *
+ * The tab change is not decoration. On a Mac the chat is beside the diff and the
+ * reader watches the notes land, which is what makes "put in composer" a
+ * complete gesture there; here it is a chip away, and text put into a composer
+ * nobody is looking at is text nobody knows arrived — the delivery-receipt
+ * problem the queue is careful about, one layer up.
  */
 @Composable
 private fun ChangesTab(
     model: AppModel,
     connection: Connection,
-    workspaceId: String,
+    route: Route.Terminal,
     workspace: Workspace?,
     showRunner: Boolean,
     runnerLabel: String,
+    visible: Boolean,
     onOpenDrawer: () -> Unit,
 ) {
     val fontChoice by model.settings.font.collectAsStateWithLifecycle()
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
+    // Derived once per fleet poll rather than inside the diff pane, and handed
+    // down as values: `ReviewAgentTarget` exists precisely so a screen scrolling
+    // a long patch does not hold the fleet. `reviewAgentTargets` is the shared
+    // filter — both words for "an agent is in here", minus a `changes` pane,
+    // which is the diff of the thing being reviewed.
+    val agents = remember(workspace) { workspace?.reviewAgentTargets().orEmpty() }
     ChangesPane(
-        store = connection.changes.store(workspaceId),
+        store = connection.changes.store(route.workspaceId),
         workspace = workspace,
         showRunner = showRunner,
         runnerLabel = runnerLabel,
         fontFamily = TerminalFonts.family(fontChoice),
         fontSize = fontSize,
+        agents = agents,
+        visible = visible,
+        onPutInComposer = { target, text ->
+            connection.composerHandoff.offer(target.id, text)
+            // `choose`, not `open`: this is a person saying where they want to
+            // be, which is exactly what [Focus] means by a CHOSEN pane — and
+            // because the pane is in this workspace, it moves the tab without
+            // touching the navigation stack.
+            model.choose(route.hostId, route.workspaceId, Pane.Terminal(target.id))
+        },
         onOpenDrawer = onOpenDrawer,
     )
 }
