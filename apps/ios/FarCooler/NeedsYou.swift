@@ -517,7 +517,7 @@ struct NeedsYouView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
-            Text(item.workspace.isMainCheckout ? "Primary checkout" : item.workspace.branch)
+            Text(item.workspace.isPrimaryCheckout ? "Primary checkout" : item.workspace.branch)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

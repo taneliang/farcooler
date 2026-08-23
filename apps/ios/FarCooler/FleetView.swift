@@ -1818,7 +1818,7 @@ struct FleetList: View {
                         // but WHICH branch is not the useful fact about it —
                         // that it is the repository itself, and so cannot be
                         // removed, is. The Mac says the same thing here.
-                        Text(workspace.isMainCheckout ? "Primary checkout" : workspace.branch)
+                        Text(workspace.isPrimaryCheckout ? "Primary checkout" : workspace.branch)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -1863,7 +1863,7 @@ struct FleetList: View {
                                     Label("Hide", systemImage: "eye.slash")
                                 }
                             }
-                            if !workspace.isMainCheckout {
+                            if !workspace.isPrimaryCheckout {
                                 Button(role: .destructive) {
                                     onRemove(workspace)
                                 } label: {

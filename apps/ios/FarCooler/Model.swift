@@ -42,11 +42,36 @@ struct Workspace: Decodable, Identifiable, Hashable {
 
     /// Whether this workspace IS the repository's own checkout — offering to
     /// remove it would offer to delete the directory the repository itself
-    /// lives in. Optional because an older daemon never sent this key, and
-    /// decoding must not fail the entire fleet over one absent field.
-    var isMainCheckout: Bool { is_main_checkout ?? false }
-    // swiftlint:disable:next identifier_name
-    var is_main_checkout: Bool?
+    /// lives in.
+    ///
+    /// Named for the wire key exactly, and the spelling is the whole point.
+    /// Every property on `Workspace` and `Terminal` is, because a synthesized
+    /// decoder matches on the property NAME; the one mapping in this file is
+    /// `Fleet`'s, for the only two snake_case keys the FFI emits. This one was
+    /// spelled `is_main_checkout` for as long as the phone has had it, which is
+    /// the Mac's spelling and the CLI's — `farcooler workspace list --json`
+    /// sends snake_case and the Mac decodes that. The phone does not read the
+    /// CLI. It reads `Session::fleet` (crates/client/src/session.rs), which
+    /// sends `isMainCheckout`, so the key never matched, this was nil for every
+    /// workspace, and `isPrimaryCheckout` answered false for all of them — which
+    /// put "Remove Worktree…" on the one worktree it must never be offered for.
+    /// Don't copy a key across from the Mac's model without checking which
+    /// producer this app actually decodes.
+    ///
+    /// Optional because an older daemon never sent this key, and decoding must
+    /// not fail the entire fleet over one absent field.
+    var isMainCheckout: Bool?
+
+    /// The decided answer, for the two screens that draw it.
+    ///
+    /// Absent reads as false, which is the direction that OFFERS the removal —
+    /// safe only because the daemon refuses it independently: `remove_worktree`
+    /// (crates/daemon/src/service.rs) checks the stored flag and then compares
+    /// the worktree path against the repository's own, and both run before it
+    /// touches a terminal or a directory. This keeps the button off the menu so
+    /// nobody is walked through a destructive confirmation that cannot succeed;
+    /// it is not what makes the checkout safe.
+    var isPrimaryCheckout: Bool { isMainCheckout ?? false }
 
     /// Which of several identically-labeled terminals each one is, keyed by
     /// terminal id.
