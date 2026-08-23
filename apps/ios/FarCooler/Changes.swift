@@ -5,7 +5,7 @@ import SwiftUI
 //
 // The shapes below are the Mac's `ChangesModel.swift` decodables, unchanged:
 // both decode what one Rust function emits (`change_set_json` in
-// crates/client/src/session.rs), so there is one definition of what a change
+// crates/client/src/changes_json.rs), so there is one definition of what a change
 // set looks like on the wire rather than one per platform. What differs is how
 // they are FETCHED — the Mac shells out to `farcooler changes … --json`, and a
 // phone has no CLI to shell out to, so these go through the same FFI every
@@ -93,7 +93,7 @@ struct ChangeCommit: Decodable, Equatable, Identifiable {
     ///
     /// `body = 3` has been in `ChangeCommit` in the protocol since the message
     /// existed, and it was dropped on the way out rather than never carried:
-    /// `change_set_json` in crates/client/src/session.rs projected four fields
+    /// `change_set_json` in crates/client/src/changes_json.rs projected four fields
     /// and this was not one of them.
     ///
     /// It matters more for agent work than for human work. An agent's commit
@@ -407,7 +407,7 @@ struct InboxResponse: Decodable {
 ///
 /// Here it is an associated value, and the reason is the wire.
 /// `changes.file_diff` takes ONE `scope` string, and `Session::file_diff` in
-/// crates/client/src/session.rs matches it as `"branch"`, `"local"`,
+/// crates/client/src/changes_json.rs matches it as `"branch"`, `"local"`,
 /// `"staged"`, `"unstaged"` — and `sha => Kind::Commit(sha)` for anything else.
 /// So by the time a comparison reaches this client's FFI it is already a single
 /// value carrying both facts, and splitting it in two on the way there would
@@ -1497,10 +1497,16 @@ private struct CommitFiles: Decodable {
 
 /// The daemon's answer for one file, before it becomes drawable lines.
 ///
-/// Structured hunks rather than the unified text the Mac parses: the phone's
-/// FFI hands back JSON either way, so taking the numbers the daemon already
-/// computed beats re-deriving them from `@@` headers — which is the one part of
-/// the Mac's path that can silently be off by one.
+/// Structured hunks rather than unified text: taking the numbers the daemon
+/// already computed beats re-deriving them from `@@` headers, which can
+/// silently be off by one.
+///
+/// The Mac parsed that text until `c2f1117` gave `changes diff` a `--json`
+/// and both clients one builder, so it now decodes this same object. The
+/// sentence that used to sit here — that scraping was "the one part of the
+/// Mac's path that can silently be off by one" — described a gap that is
+/// closed, and it is recorded rather than deleted because it is why the
+/// shared builder exists.
 private struct FileDiff: Decodable {
     var hunks: [Hunk]
     var unsupported: String?

@@ -12,6 +12,16 @@ import SwiftUI
 struct ChangeSet: Decodable, Equatable {
     var branch: String
     var baseRef: String
+    /// Where `baseRef` came from: `recorded`, `upstream`, `pr_base`,
+    /// `default_branch`, `guessed`, or `unknown`.
+    ///
+    /// Optional for the reason `ChangeCommit`'s own comment gives at length: it
+    /// decodes INSIDE this type, and a runner whose `farcooler` predates the key
+    /// would otherwise fail the whole change set over it. Such a runner is not
+    /// hypothetical — the daemon has sent `base_source` since `BaseSource`
+    /// existed, but the CLI's copy of the JSON builder did not print it until
+    /// `c2f1117`, so every runner installed before that answers without it.
+    var baseSource: String?
     var baseCommit: String
     var headCommit: String
     var insertions: Int
@@ -23,6 +33,7 @@ struct ChangeSet: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case branch
         case baseRef = "base_ref"
+        case baseSource = "base_source"
         case baseCommit = "base_commit"
         case headCommit = "head_commit"
         case insertions, deletions, commits, files
@@ -30,7 +41,7 @@ struct ChangeSet: Decodable, Equatable {
     }
 
     static let empty = ChangeSet(
-        branch: "", baseRef: "", baseCommit: "", headCommit: "",
+        branch: "", baseRef: "", baseSource: nil, baseCommit: "", headCommit: "",
         insertions: 0, deletions: 0, commits: [], files: [], workingTree: nil)
 
     var isDirty: Bool {
@@ -38,6 +49,17 @@ struct ChangeSet: Decodable, Equatable {
         return !w.staged.isEmpty || !w.unstaged.isEmpty || !w.untracked.isEmpty
             || !w.conflicted.isEmpty
     }
+
+    /// Whether nothing knew what this branch is based on, so a local `main` was
+    /// assumed.
+    ///
+    /// The one source worth warning about, and the phone's `baseIsGuessed` makes
+    /// the same call for the same reason: the other five are recorded facts, and
+    /// a guess is the only one that can silently produce a diff that looks
+    /// exactly like a right one. An absent key reads as not-a-guess, which is
+    /// the honest answer for a runner that cannot say — see `BaseSource` in the
+    /// protocol, where `unknown` is likewise not a guess.
+    var baseIsGuessed: Bool { baseSource == "guessed" }
 }
 
 /// One commit on this branch, as the history picker draws it.
@@ -234,6 +256,158 @@ enum ChangedFileStatus: String, Decodable {
 /// same `ChangedFile` the change set's own files decode into.
 struct CommitFiles: Decodable, Equatable {
     var files: [ChangedFile]
+}
+
+/// What `changes diff <workspace> <path> --json` answers: one file's patch, and
+/// the things about it that are not lines of patch.
+///
+/// ## Why this is not read out of the human output any more
+///
+/// It was, until `c2f1117` gave the command a `--json` at all, and the three
+/// fields below `lines` died in that pipe — the human output states them as
+/// prose a reader understands and a parser does not. Losing them is worse than
+/// a missing feature: an empty hunk list with no reason attached reads as
+/// "nothing changed", so this pane told people a submodule was unchanged, which
+/// is the one thing it could not have been. `DaemonClient.parseUnified` is
+/// still here and still parses that output, for a runner too old to answer in
+/// JSON; what it cannot do is answer any of these three questions.
+///
+/// ## The shape
+///
+/// Built by `farcooler_client::changes_json::file_diff_json`, which is the same
+/// function the phones reach over the FFI — so this decodes the same bytes
+/// `apps/ios/FarCooler/Changes.swift` decodes, and the two clients cannot
+/// disagree about what a hunk is.
+///
+/// Hunks are flattened on the way in, exactly as the phone flattens them: this
+/// pane draws one list and finds its own gaps from the jump between two line
+/// numbers — see `ChangesPane.body(of:lines:)`, which does not want `@@`
+/// headers and would have to throw them away again.
+struct FileDiff {
+    /// Every line of the patch, hunk boundaries gone.
+    var lines: [DiffComputation.Line] = []
+
+    /// Why there are no lines, when the reason is not "nothing changed":
+    /// `binary`, `submodule`, `combined_diff` or `malformed`.
+    ///
+    /// A `String` rather than an enum, matching the phone, so a code this
+    /// version has never heard of degrades to one unrecognized reason instead
+    /// of failing the decode and taking the whole patch with it.
+    var unsupported: String?
+
+    /// Hunks were left out: this is not the whole patch.
+    ///
+    /// The protocol is blunt about why it travels — "a client showing a
+    /// truncated diff must say so; one that does not is claiming the rest of
+    /// the file is unchanged". This client could not say so, because it could
+    /// not see it.
+    var truncated = false
+
+    /// The patch is one parent's view of a merge.
+    ///
+    /// Not an error and not a truncation — the lines are real. What it changes
+    /// is what they MEAN, which is why it is drawn above them rather than
+    /// instead of them.
+    var firstParentOfMerge = false
+
+    /// What to say in place of the lines, when there are none for a reason.
+    ///
+    /// Nil when the file is genuinely unchanged, which is the case the pane
+    /// still answers with "No textual changes".
+    ///
+    /// The four sentences are the phone's own, verbatim from `ChangesStore.reason`
+    /// in `apps/ios/FarCooler/Changes.swift`: the situation is identical on both
+    /// screens, and a Mac that phrased a submodule differently would be two
+    /// products describing one fact.
+    var unsupportedNote: String? {
+        switch unsupported {
+        case nil: return nil
+        case "binary": return Self.binaryNote
+        case "submodule": return "Submodule"
+        case "combined_diff": return Self.mergeNote
+        default: return "This patch could not be read"
+        }
+    }
+
+    /// One parent's view of a merge, said the same way whether the patch came
+    /// with it or not.
+    ///
+    /// `combined_diff` means the daemon refused a merge's combined patch — its
+    /// lines carry a column per parent and an ordinary parser reads them as
+    /// nonsense — and showed nothing. `firstParentOfMerge` means it made the
+    /// same decision and had a patch to show for it. The fact a reader needs is
+    /// identical, so the sentence is, and it lives in one constant so it cannot
+    /// quietly become two.
+    static let mergeNote = "A merge commit, shown against its first parent"
+
+    /// What a binary file says in this pane.
+    ///
+    /// The phone says "Binary file". This pane has said this longer, from the
+    /// change set's own `binary` flag, back when that was the only way it could
+    /// know — so the two arms share the sentence the pane already had rather
+    /// than the pane growing a second one for the same fact. That is the drift
+    /// `c2f1117` just deleted on the Rust side, and it is not worth reopening
+    /// here to save four words.
+    static let binaryNote = "Binary file — nothing to show"
+
+    /// What a diff the daemon cut short says.
+    ///
+    /// The protocol's own instruction, in a sentence: "a client showing a
+    /// truncated diff must say so; one that does not is claiming the rest of
+    /// the file is unchanged". So this says the opposite of that claim, out
+    /// loud, rather than naming which cap was hit — the caps are the daemon's
+    /// business and the reader's question is only whether they are looking at
+    /// all of it.
+    static let truncatedNote = "Truncated — the rest of this file isn’t shown"
+}
+
+extension FileDiff: Decodable {
+    private enum CodingKeys: String, CodingKey {
+        case hunks, unsupported, truncated, firstParentOfMerge
+    }
+
+    private struct WireHunk: Decodable {
+        var lines: [WireLine]
+    }
+
+    private struct WireLine: Decodable {
+        var kind: String
+        var oldNumber: Int?
+        var newNumber: Int?
+        var text: String
+    }
+
+    /// `hunks` is required and everything else is not, and that asymmetry is
+    /// load-bearing: a missing `hunks` is how `DaemonClient.changesDiff` learns
+    /// it is talking to a runner too old to have printed JSON at all, and falls
+    /// back to reading the same bytes as human output. See there.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let hunks = try c.decode([WireHunk].self, forKey: .hunks)
+        unsupported = try c.decodeIfPresent(String.self, forKey: .unsupported)
+        truncated = try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+        firstParentOfMerge = try c.decodeIfPresent(Bool.self, forKey: .firstParentOfMerge) ?? false
+
+        var out: [DiffComputation.Line] = []
+        for hunk in hunks {
+            for line in hunk.lines {
+                out.append(
+                    DiffComputation.Line(
+                        id: out.count,
+                        kind: {
+                            switch line.kind {
+                            case "added": return .added
+                            case "removed": return .removed
+                            default: return .context
+                            }
+                        }(),
+                        oldNumber: line.oldNumber,
+                        newNumber: line.newNumber,
+                        text: line.text))
+            }
+        }
+        lines = out
+    }
 }
 
 struct WorkingTree: Decodable, Equatable {
@@ -457,7 +631,10 @@ final class ChangesStore: ObservableObject {
     /// looked at — but it is filled a file at a time, as each scrolls into view,
     /// rather than up front. A branch that changed forty files would otherwise
     /// pay forty round trips before it drew anything, to show a screenful.
-    @Published var fileDiffs: [String: [DiffComputation.Line]] = [:]
+    ///
+    /// The whole `FileDiff` and not just its lines, because "no lines" is four
+    /// different answers and this pane used to give one of them to all four.
+    @Published var fileDiffs: [String: FileDiff] = [:]
 
     /// Files currently being read, so a section can say so rather than look
     /// empty — an unread file and a file with no hunks are not the same thing.
@@ -998,14 +1175,15 @@ final class ChangesStore: ObservableObject {
     private func read(_ path: String) async {
         let asked = generation
         loadingFiles.insert(path)
-        let lines = await diff(path)
+        let answer = await diff(path)
+        let lines = answer.lines
         loadingFiles.remove(path)
         // What was being compared changed while this was in flight, so these
         // lines answer a question nobody is asking any more. Keyed on the path
         // alone they would file perfectly, under a heading now showing a
         // different commit — a wrong diff that looks exactly like a right one.
         guard asked == generation else { return }
-        fileDiffs[path] = lines
+        fileDiffs[path] = answer
         // The expanded copy described the file as it was a moment ago, and its
         // line numbers no longer line up with the hunks around them. Dropped
         // rather than re-fetched: a gap somebody opened once is cheap to open
@@ -1028,7 +1206,7 @@ final class ChangesStore: ObservableObject {
     /// `changesJSON`, which republishes the client's error state as a side
     /// effect of asking for a patch — so a per-file read inside a commit
     /// repainted rather more than the file it was for.
-    private func diff(_ path: String, context: Int = 0) async -> [DiffComputation.Line] {
+    private func diff(_ path: String, context: Int = 0) async -> FileDiff {
         await client.changesDiff(
             workspace: workspace.short, path: path, scope: scope, context: context,
             commit: selectedCommit)
@@ -1051,7 +1229,11 @@ final class ChangesStore: ObservableObject {
         let need = min(size + 4, 2_000)
         if (fullContext[path] ?? 0) < need {
             let asked = generation
-            let lines = await diff(path, context: need)
+            // The lines alone. A gap is filled with context this file's own
+            // hunks left out, and the three notices belong to the file — they
+            // were answered once, by `read`, and re-filing them from a
+            // wide-context re-read would say them twice.
+            let lines = await diff(path, context: need).lines
             // The same in-flight check `read` makes, for the same reason: these
             // are the unchanged lines of a file as some OTHER comparison saw
             // it, and they would slot into the gap without looking wrong.

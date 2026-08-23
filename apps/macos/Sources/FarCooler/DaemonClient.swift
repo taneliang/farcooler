@@ -1889,15 +1889,11 @@ final class DaemonClient: ObservableObject {
         }
     }
 
-    /// One file's diff, as lines the diff tile draws directly.
-    ///
-    /// Parsed from the CLI's unified output rather than recomputed here: the
-    /// daemon already refused what it could not read, and a second parser in the
-    /// app would be free to disagree with it about what a hunk is.
-    /// One file's diff. `context` is lines of unchanged context around each
-    /// hunk; zero leaves git's own default of three, and a large number is how
-    /// the lines a diff omits are recovered.
     /// One file's diff, under whichever comparison is on screen.
+    ///
+    /// `context` is lines of unchanged context around each hunk; zero leaves
+    /// git's own default of three, and a large number is how the lines a diff
+    /// omits are recovered.
     ///
     /// `commit` is the sha when the comparison is a single commit, and nil for
     /// the two that need no argument. It is a separate parameter rather than an
@@ -1909,10 +1905,33 @@ final class DaemonClient: ObservableObject {
     /// invocation keeps ONE reader of a diff: the commit path briefly went out
     /// through `changesJSON`, which republishes this client's error state as a
     /// side effect of asking for a patch.
+    ///
+    /// ## How an older runner is detected
+    ///
+    /// By what came back, not by asking what version answered. `--json` is a
+    /// GLOBAL flag on `farcooler`, so every runner this app can talk to accepts
+    /// it here; one whose CLI predates `c2f1117` simply ignores it on this
+    /// command and prints the human patch anyway. So the decode is the probe: a
+    /// payload with no `hunks` key is not this shape, and the same bytes go to
+    /// `parseUnified`. That is `readCommitFiles`' rule for `changes files`,
+    /// arrived at for the same reason — a runner one version behind must draw a
+    /// diff, not a warning triangle.
+    ///
+    /// Per call, and deliberately not remembered. `changesSupported` is the
+    /// cached-refusal flag in this class and its own comment says why caching
+    /// one is delicate; a runner that gets upgraded mid-session starts
+    /// answering in JSON on its very next file with nothing to reset.
+    ///
+    /// What the fallback cannot recover is the three fields that are the whole
+    /// point of the JSON — the human output states them as prose, and reading
+    /// prose back is the thing this change exists to stop. So an older runner
+    /// still says "No textual changes" about a submodule. That is the one
+    /// remaining case, it is bounded by the runner's version, and it is what
+    /// updating the runner fixes.
     func changesDiff(
         workspace: String, path: String, scope: DiffScope, context: Int = 0,
         commit: String? = nil
-    ) async -> [DiffComputation.Line] {
+    ) async -> FileDiff {
         var args = ["changes", "diff", workspace, path]
         // `--local`, not `--unstaged`: everything uncommitted. Asking for the
         // unstaged half alone meant a file went blank the moment it was staged,
@@ -1922,12 +1941,23 @@ final class DaemonClient: ObservableObject {
         // section works inside a commit exactly as it does on the branch.
         if let commit, scope == .commit { args += ["--commit", commit] }
         if context > 0 { args += ["--context", "\(context)"] }
-        guard let data = await run(args, background: true),
-            let text = String(data: data, encoding: .utf8)
-        else { return [] }
-        return Self.parseUnified(text)
+        args.append("--json")
+        guard let data = await run(args, background: true) else { return FileDiff() }
+        if let diff = try? JSONDecoder().decode(FileDiff.self, from: data) { return diff }
+        guard let text = String(data: data, encoding: .utf8) else { return FileDiff() }
+        return FileDiff(lines: Self.parseUnified(text))
     }
 
+    /// The CLI's human patch, read back into lines.
+    ///
+    /// The older-runner path only, since `c2f1117`. Kept rather than deleted
+    /// because deleting it would make a runner one version behind show a
+    /// warning triangle where a diff used to be — the same trade
+    /// `parseCommitFiles` makes, and the same reason.
+    ///
+    /// It reads `@@` headers for the line numbers and takes the first character
+    /// of each line as its kind, which is every fact this format carries. The
+    /// three it cannot carry are what `FileDiff` exists for.
     static func parseUnified(_ text: String) -> [DiffComputation.Line] {
         var lines: [DiffComputation.Line] = []
         var next = 0

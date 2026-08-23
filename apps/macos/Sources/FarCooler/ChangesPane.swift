@@ -69,6 +69,7 @@ struct ChangesPane: View {
                 if changes.error != nil {
                     problem
                 }
+                guessedBase
                 if geo.size.width >= Self.wideEnough {
                     HStack(spacing: 0) {
                         fileColumn.frame(width: fileColumnWidth(for: geo.size.width))
@@ -149,6 +150,56 @@ struct ChangesPane: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(9)
         .background(.orange.opacity(0.12))
+    }
+
+    /// Said only when the base was GUESSED, and only under Branch.
+    ///
+    /// The daemon reports where the base came from and five of the six answers
+    /// are recorded facts — an upstream, a PR base, the repository's default
+    /// branch. A guess is the sixth and the only one worth a word, because it is
+    /// the only one that can produce a wrong diff that looks exactly like a
+    /// right one: nothing knew what this branch came from, so a local `main` was
+    /// assumed, and every file and every count below is measured from there.
+    ///
+    /// The scope gate is not the phone's. `ChangesView` turns this off for
+    /// Uncommitted, which is the same reasoning as far as it goes — that
+    /// comparison is `git diff HEAD` and never reaches for a base, so a warning
+    /// there would be claiming a diff against `HEAD` might be wrong, which is
+    /// the one thing it cannot be. The Mac has a third scope the phone's `!local`
+    /// leaves the warning on for, and it does not want it either: a commit is
+    /// diffed against its FIRST PARENT, which is a fact about the repository and
+    /// not a guess about the branch. So `.branch` only, and nothing else.
+    ///
+    /// One line, in the pane's own scale, rather than the `problem` banner's
+    /// three: `problem` describes a pane that is showing nothing, and this
+    /// describes a pane that is showing something with a caveat on it. The
+    /// tooltip names the ref the guess landed on, which is the Mac having
+    /// somewhere to put it that a phone does not.
+    @ViewBuilder
+    private var guessedBase: some View {
+        if changes.changeSet.baseIsGuessed && changes.scope == .branch {
+            HStack(spacing: 5) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 9.5))
+                Text("Base branch was guessed, so this diff may be wrong.")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.orange.opacity(0.12))
+            .help(guessedBaseDetail)
+        }
+    }
+
+    private var guessedBaseDetail: String {
+        let base = changes.changeSet.baseRef
+        return base.isEmpty
+            ? "Nothing recorded what this branch was branched from."
+            : "Nothing recorded what this branch was branched from, so \(base) was assumed."
     }
 
     // MARK: - Navigation
@@ -1285,19 +1336,18 @@ struct ChangesPane: View {
             out.append(DiffRow(id: f.path, kind: .heading(f), path: f.path))
             if changes.collapsedFiles.contains(f.path) { continue }
             if f.binary {
-                out.append(note(f, "Binary file — nothing to show"))
+                // Known from the change set before a patch is ever asked for,
+                // which is why this arm comes first and shares its sentence
+                // with the one the patch itself can carry.
+                out.append(note(f, FileDiff.binaryNote))
             } else if changes.isUntracked(f.path) {
                 // Listed but not diffed, and it says so. git has nothing to
                 // compare a brand new file against, and "No textual changes"
                 // under the name of a file somebody just wrote is the most
                 // wrong thing this view could say.
                 out.append(note(f, "New file — git isn’t tracking it yet"))
-            } else if let lines = changes.fileDiffs[f.path] {
-                if lines.isEmpty {
-                    out.append(note(f, "No textual changes"))
-                } else {
-                    out.append(contentsOf: body(of: f, lines: lines))
-                }
+            } else if let diff = changes.fileDiffs[f.path] {
+                out.append(contentsOf: rows(of: f, diff: diff))
             } else {
                 out.append(note(f, changes.loadingFiles.contains(f.path) ? "Reading…" : "…"))
             }
@@ -1305,8 +1355,53 @@ struct ChangesPane: View {
         return out
     }
 
-    private func note(_ f: ChangedFile, _ text: String) -> DiffRow {
-        DiffRow(id: "\(f.path)!note", kind: .note(text), path: f.path)
+    /// One file, once its patch has arrived.
+    ///
+    /// Four different facts used to reach this view as one — an empty line list
+    /// — and the pane answered all four with "No textual changes". A submodule
+    /// is not an unchanged file. Nor is a binary. A diff the daemon cut short is
+    /// not the whole file, and a merge shown against its first parent is a real
+    /// patch that is still only one of two stories about the same commit. None
+    /// of it was distinguishable here until `c2f1117` gave `changes diff` a
+    /// `--json` — the human output states each of them as prose, which is what
+    /// `DaemonClient.parseUnified` reads past.
+    ///
+    /// The order is the CLI's own: the merge notice above the patch, the
+    /// truncation notice below it. That is where each is read — one frames what
+    /// follows, the other reports where it stopped.
+    private func rows(of f: ChangedFile, diff: FileDiff) -> [DiffRow] {
+        // Nothing was rendered, so nothing goes underneath the reason. The two
+        // parse failures arrive with `truncated` set as well — see the daemon's
+        // `file_diff.rs`, which reports an unreadable patch rather than half of
+        // one — and a second notice under a sentence that has already closed the
+        // question is noise.
+        if let why = diff.unsupportedNote {
+            return [note(f, why, "why")]
+        }
+        var out: [DiffRow] = []
+        if diff.firstParentOfMerge {
+            out.append(note(f, FileDiff.mergeNote, "merge"))
+        }
+        // Truncation is checked here as well, because the daemon's file cap can
+        // answer with no hunks at all — see `ChangesStore.open(gap:of:in:)`,
+        // which meets exactly that — and "No textual changes" is the one thing
+        // a diff too big to render is not.
+        if diff.lines.isEmpty && !diff.truncated {
+            out.append(note(f, "No textual changes", "empty"))
+        } else {
+            out.append(contentsOf: body(of: f, lines: diff.lines))
+        }
+        if diff.truncated {
+            out.append(note(f, FileDiff.truncatedNote, "cut"))
+        }
+        return out
+    }
+
+    /// `tag` keeps two notices about one file apart. A merge shown first-parent
+    /// only and truncated at the cap is two rows, and one id for both would let
+    /// the lazy stack draw whichever it saw last, twice.
+    private func note(_ f: ChangedFile, _ text: String, _ tag: String = "note") -> DiffRow {
+        DiffRow(id: "\(f.path)!\(tag)", kind: .note(text), path: f.path)
     }
 
     /// One file's lines, with the gaps between its hunks marked.
