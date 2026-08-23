@@ -2534,7 +2534,10 @@ struct SheetFailure {
 /// kind of failure cannot come to render it differently — the principle
 /// `f9f37eb` and `776d3e0` both turned on. `DetailBox` itself is AgentKit's and
 /// the Mac's; see `DaemonUpdateCard`, `RunnersSettings` and `ChangesPane`.
-private struct SheetFailureSection: View {
+/// Internal rather than private to this file, because `RunnerSettings`'s own
+/// typed-name sheet reports the same kind of failure — which is precisely the
+/// case the paragraph above says one view exists to prevent.
+struct SheetFailureSection: View {
     let failure: SheetFailure
 
     var body: some View {

@@ -40,12 +40,24 @@ final class RunnerSettingsModel: ObservableObject {
         roots = await connection.repositoryRoots()
     }
 
-    func removeRoot(_ root: RepositoryRoot) async {
-        guard await connection.removeRepositoryRoot(root.id) else {
-            failure = "That runner wouldn’t stop watching that folder."
-            return
-        }
-        roots.removeAll { $0.id == root.id }
+    /// Stop watching a folder, with the name the person typed.
+    ///
+    /// Hands the outcome back rather than setting `failure`, because the sheet
+    /// that collected the name is where it has to be shown: it is the view still
+    /// on screen, and the two things that can go wrong there — a name that
+    /// doesn't match, and the runner refusing — read differently and only one of
+    /// them is worth retyping for.
+    ///
+    /// It used to take no name and report "that runner wouldn’t stop watching
+    /// that folder" every time, which was never true. The request was going out
+    /// without the confirmation payload the runner requires, so it was refused
+    /// before the runner considered the folder at all.
+    func removeRoot(
+        _ root: RepositoryRoot, confirm: String
+    ) async -> Connection.RemoveRootResult {
+        let outcome = await connection.removeRepositoryRoot(root.id, confirm: confirm)
+        if case .ok = outcome { roots.removeAll { $0.id == root.id } }
+        return outcome
     }
 
     func setBranchPrefix(_ prefix: String) async {
@@ -161,6 +173,9 @@ struct RunnerSettingsView: View {
     @State private var prefixDraft = ""
     @State private var editingTheme: Theme?
     @State private var editingAdapter: AdapterInfo?
+    /// The folder a swipe asked to stop watching, waiting for its name to be
+    /// typed. The runner demands that every time; see `RemoveRootConfirmSheet`.
+    @State private var removingRoot: RepositoryRoot?
 
     init(name: String, connection: Connection) {
         self.name = name
@@ -283,6 +298,11 @@ struct RunnerSettingsView: View {
             await model.load()
             prefixDraft = model.branchPrefix
         }
+        .sheet(item: $removingRoot) { root in
+            RemoveRootConfirmSheet(root: root) { typed in
+                await model.removeRoot(root, confirm: typed)
+            }
+        }
         .sheet(item: $editingTheme) { theme in
             NavigationStack {
                 ThemeEditorView(theme: theme) { edited in
@@ -366,18 +386,33 @@ struct RunnerSettingsView: View {
         if !model.roots.isEmpty {
             Section {
                 ForEach(model.roots) { root in
-                    // "Hidden" rather than a blank row: a phone with read scope
-                    // is told the root exists and deliberately not told where it
-                    // is, and an empty row reads as a bug rather than a rule.
+                    // "Hidden" rather than a blank row: a root's path is only
+                    // sent to a `host_admin` session, and an empty row reads as
+                    // a bug rather than as a rule.
+                    //
+                    // Kept, and it is now unreachable through this screen:
+                    // `repository_root.list` is itself `host_admin`, so a
+                    // session that got this list got the paths with it. It stays
+                    // because the field is optional on the wire and decoding it
+                    // as anything else would be inventing a path — and because
+                    // the swipe below reads the same `nil` as "there is no name
+                    // to type", which is the honest answer either way.
                     Text(root.displayPath ?? "Hidden")
                         .font(root.displayPath == nil ? .body.italic() : .body)
                         .foregroundStyle(root.displayPath == nil ? .secondary : .primary)
                         .lineLimit(1)
                         .truncationMode(.head)
-                }
-                .onDelete { offsets in
-                    let targets = offsets.map { model.roots[$0] }
-                    Task { for root in targets { await model.removeRoot(root) } }
+                        // Per row rather than `onDelete` on the ForEach, which
+                        // is what this was. The runner wants the folder's name
+                        // typed back, and a row whose path this session was
+                        // never sent has no name to ask for — so that row
+                        // offers no Remove, rather than offering one that
+                        // cannot be completed.
+                        .swipeActions(edge: .trailing) {
+                            if root.displayPath != nil {
+                                Button("Remove", role: .destructive) { removingRoot = root }
+                            }
+                        }
                 }
             } header: {
                 Text("Watched Folders")
@@ -486,5 +521,96 @@ extension Theme {
             "name": name, "dark": dark, "background": background,
             "foreground": foreground, "cursor": cursor, "ansi": ansi,
         ]
+    }
+}
+
+/// Typing a folder's name to stop watching it.
+///
+/// The same ceremony as `RemoveWorktreeConfirmSheet` in `FleetView`, on purpose
+/// and not a shorter one — but reached differently. A worktree is asked for its
+/// name only when it is dirty, so that flow tries once with nothing typed and
+/// puts this sheet up if the runner asks. A root is asked every time, because
+/// removing one revokes Far Cooler's permission over a whole directory tree, so
+/// there is no first attempt worth making and the swipe comes straight here.
+///
+/// What has to be typed is the folder's own name, not its whole path: that is
+/// what the runner compares against, and asking for a long path would be asking
+/// people to retype something they would paste.
+private struct RemoveRootConfirmSheet: View {
+    let root: RepositoryRoot
+    let onRemove: (String) async -> Connection.RemoveRootResult
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var typed = ""
+    @State private var working = false
+    @State private var failure: SheetFailure?
+
+    /// The last segment of the path, which is what the runner asks for.
+    ///
+    /// Empty only if this row had no path at all, and the swipe that opens this
+    /// sheet is not offered on such a row — Remove stays disabled either way
+    /// rather than sending a name nothing could match.
+    private var folderName: String {
+        guard let path = root.displayPath else { return "" }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    private var matches: Bool { !folderName.isEmpty && typed == folderName }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(
+                        "Far Cooler stops looking for repositories here. Nothing on the "
+                        + "runner is deleted, and the repositories already registered under "
+                        + "it are removed from the list.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                TextField("Type \(folderName) to confirm", text: $typed)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if let failure {
+                    SheetFailureSection(failure: failure)
+                }
+            }
+            .navigationTitle("Stop Watching")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Remove", role: .destructive) {
+                        working = true
+                        Task {
+                            switch await onRemove(typed) {
+                            case .ok:
+                                working = false
+                                dismiss()
+                            // The app's own diagnosis, and a complete one: the
+                            // name typed is not the folder's name. Nothing came
+                            // back from the runner to show.
+                            case .nameDidNotMatch:
+                                working = false
+                                failure = SheetFailure(
+                                    sentence: "That name didn’t match — try again.")
+                            // `message` is whatever the call came back with, and
+                            // this side has no idea why. In the box rather than
+                            // in the red line, so a runner's words don't read as
+                            // Far Cooler's — same as `RemoveWorktreeConfirmSheet`.
+                            case .failed(let message):
+                                working = false
+                                failure = SheetFailure(
+                                    sentence: "That folder is still being watched.",
+                                    transcript: message)
+                            }
+                        }
+                    }
+                    .disabled(!matches || working)
+                }
+            }
+        }
     }
 }

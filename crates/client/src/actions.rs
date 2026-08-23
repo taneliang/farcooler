@@ -25,6 +25,24 @@ pub enum RemoveWorktreeOutcome {
     ConfirmationRequired,
 }
 
+/// The same three-way answer for a repository root, and its own type on
+/// purpose.
+///
+/// `RemoveWorktreeOutcome::ConfirmationRequired` means "that worktree is dirty,
+/// so the daemon wants the name after all" — a state a caller discovers by
+/// asking with an empty string. A root NEVER has that state: the daemon demands
+/// the typed name unconditionally, because removal revokes Far Cooler's
+/// permission over a whole directory tree rather than deleting one worktree. So
+/// here the same variant can only mean the name that WAS typed did not match,
+/// and a caller that showed "this needs confirming" would be saying something
+/// false. One shared enum would have hidden that difference behind one word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveRootOutcome {
+    Removed,
+    /// The typed name is not the root directory's name. Nothing was removed.
+    NameDidNotMatch,
+}
+
 async fn call<R, W>(
     client: &mut Client<R, W>,
     method: &str,
@@ -210,6 +228,45 @@ where
     match client.call(request).await?.value {
         Some(result::Value::RepositoryRoot(root)) => Ok(root),
         _ => Err(ClientError::WrongResult { expected: "repository_root", got: "something else" }),
+    }
+}
+
+/// Stop allowing Far Cooler to operate under a directory.
+///
+/// `confirm` must be the root directory's last path segment, typed by the
+/// person doing it. Sent as `TypedConfirmation`, which is the same payload and
+/// the same ceremony `remove_worktree` above uses — the daemon destructures the
+/// request as exactly that and refuses anything else before it looks at the
+/// scope, the root or the name.
+///
+/// Here rather than built at each call site, which is the reason this module
+/// exists: the CLI and the mobile core reach the daemon over different
+/// connections and must ask identically. They did not. The CLI built this
+/// payload inline and worked; `Session::remove_repository_root` took no
+/// `confirm` argument at all and sent `None`, so every FFI client's request went
+/// out carrying `Payload::Empty` and came back `InvalidArgument { what:
+/// "payload" }` — a control that could never once have succeeded, on iOS since
+/// the day it shipped.
+pub async fn remove_repository_root<R, W>(
+    client: &mut Client<R, W>,
+    root: Uuid,
+    confirm: &str,
+) -> Result<RemoveRootOutcome, ClientError>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    let payload = request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
+        typed_confirmation: confirm.to_string(),
+    });
+    match call(client, "repository_root.remove", root, Some(payload)).await {
+        Ok(_) => Ok(RemoveRootOutcome::Removed),
+        Err(ClientError::Daemon { code, .. })
+            if code == farcooler_protocol::v1::ErrorCode::ConfirmationRequired as i32 =>
+        {
+            Ok(RemoveRootOutcome::NameDidNotMatch)
+        }
+        Err(other) => Err(other),
     }
 }
 

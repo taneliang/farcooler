@@ -85,14 +85,44 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *
  *   fleet                  {}                     -> workspaces with derived state
  *   repositories           {}                     -> registered repositories
+ *   host                   {}                     -> what that runner is, and
+ *                                                    what this session may do
  *   workspace.create       {repository, task, branch, base?}
  *   workspace.hide         {workspace}
  *   workspace.unhide       {workspace}
+ *   workspace.remove_worktree  {workspace, confirm}
+ *                          -> {"ok": true} | {"confirmationRequired": true}
+ *   repository_root.list   {}
+ *   repository_root.add    {path}
+ *   repository_root.remove {root, confirm}
+ *                          -> {"ok": true} | {"confirmationRequired": true}
  *   terminal.create        {workspace, title, preset}
  *   terminal.stop          {terminal}
  *   terminal.restart       {terminal}
  *   terminal.dismiss_lost  {terminal}
  *   terminal.resize        {terminal, columns, rows}
+ *
+ * The two `confirm` arguments are a name a PERSON typed, and neither is
+ * optional in the way an empty string is optional. They differ in when the
+ * runner insists:
+ *
+ *   - workspace.remove_worktree only wants it when the worktree is dirty, so
+ *     "" is a legitimate first attempt, and `confirmationRequired` back from it
+ *     means "now ask the person" rather than "you got it wrong".
+ *   - repository_root.remove ALWAYS wants it, because removing a root revokes
+ *     Far Cooler's permission over a whole directory tree rather than deleting
+ *     one worktree. There is no first attempt to make: collect the root
+ *     directory's last path segment first, and read `confirmationRequired` as
+ *     "that is not its name". An app cannot invent this on the user's behalf —
+ *     that is the entire point of typing it.
+ *
+ * `host` answers `capabilities` and `grantedScope` together, and a control
+ * usually needs both: the capability says this runner HAS the feature, the scope
+ * says this connection may use it. `grantedScope` is one of "read", "control",
+ * "host_admin" — sshd's own word for what it applied to this session, taken from
+ * the handshake, not from `client.list`. It is "unspecified" from a runner too
+ * old to send it, which means "no answer" and must not be drawn as "no
+ * permission".
  *
  * Which devices may log in to that runner — the end of the enrollment ceremony,
  * and the only part of it that changes anything. Every one of these reads or

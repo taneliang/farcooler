@@ -29,6 +29,7 @@ use clap::{Parser, Subcommand};
 mod changes;
 mod clients;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
+use farcooler_client::actions::RemoveRootOutcome;
 use farcooler_daemon::runtime::Runtime;
 use farcooler_protocol::v1::{
     Repository, RepositoryRoot, Terminal, TerminalState, Workspace, WorkspaceState, request, result,
@@ -981,14 +982,36 @@ async fn root(runner: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
         RootCmd::Remove { root, confirm } => {
             let roots = list_roots(&mut link).await?;
             let target = resolve(&roots, &root, |r| &r.id, "root")?;
-            link.call(with(
-                req_for("repository_root.remove", uuid_of(&target.id)),
-                request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
-                    typed_confirmation: confirm,
-                }),
-            ))
+            // Through the shared action rather than built here, which is what
+            // this command used to do. Building it inline is why the CLI was the
+            // only client whose root removal worked: `Session` was sending no
+            // payload at all, and nothing pointed the two at the same code.
+            let outcome = farcooler_client::actions::remove_repository_root(
+                link.client_mut(),
+                uuid_of(&target.id),
+                &confirm,
+            )
             .await?;
-            println!("removed root {} (nothing on disk was touched)", short_bytes(&target.id));
+            match outcome {
+                RemoveRootOutcome::Removed => {
+                    println!(
+                        "removed root {} (nothing on disk was touched)",
+                        short_bytes(&target.id)
+                    );
+                }
+                // An error, not a printed line: this used to arrive as a daemon
+                // refusal and exit non-zero, and a script that stopped noticing
+                // a wrong --confirm would think it had removed a root it still
+                // has.
+                //
+                // The same string `workspace remove` returns further down, and the same
+                // reason: it is the substring the daemon's own error carried, and
+                // `DaemonClient.swift` on macOS still sniffs stderr for
+                // "confirmation" to tell a name mismatch from a real failure.
+                RemoveRootOutcome::NameDidNotMatch => {
+                    return Err("exact typed confirmation required".into());
+                }
+            }
         }
         RootCmd::List => {
             let roots = list_roots(&mut link).await?;

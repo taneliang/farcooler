@@ -229,6 +229,36 @@ impl Session {
         &self.client.server_hello().capabilities
     }
 
+    /// What THIS session is allowed to ask for, as the word `authorized_keys`
+    /// spells it.
+    ///
+    /// The pair to `capabilities`, and neither substitutes for the other: a
+    /// capability is what the RUNNER can serve, a scope is what this connection
+    /// may ask it for, and a control needs both. Learned in the same handshake,
+    /// so it is available before the first request at no round trip —
+    /// `crates/transport`'s `handshake` has always computed it from the session's
+    /// real grant and sent it in `ServerHello`. Nothing above the transport read
+    /// it, which is why both phones ask and report the refusal.
+    ///
+    /// Deliberately NOT read out of `client.list`, which looks like it answers
+    /// this and does not, three ways over: it reports what is written in the
+    /// fence rather than what sshd applied to THIS session; a key somebody added
+    /// by hand has no client id to match on and reads back `unspecified` while
+    /// the real grant is host_admin; and it is stale by construction, because
+    /// sshd reads `authorized_keys` once, at authentication.
+    ///
+    /// `unspecified` in two cases, and neither is "no grant". The wire's own
+    /// default is zero, so a daemon that did not set the field reads as this —
+    /// though there is no such daemon in this tree's history: `granted_scope` has
+    /// been `ServerHello` field 5 since the first vertical slice, and every
+    /// daemon since has set it from the session's real grant. The case that will
+    /// actually happen is the other one: a NEWER runner naming a scope this build
+    /// has no word for. Either way a caller must read it as "no answer" and keep
+    /// offering what it offers today — see `can` above for the same shape.
+    pub fn granted_scope(&self) -> &'static str {
+        scope_label(self.client.server_hello().granted_scope)
+    }
+
     /// Whether the runner can do something, by name.
     ///
     /// Empty means a daemon too old to answer the question at all — every one
@@ -1239,9 +1269,22 @@ impl Session {
     }
 
     /// Remove a repository root. The paired `add` already exists above.
-    pub async fn remove_repository_root(&mut self, root: Uuid) -> Result<(), SessionError> {
-        self.value("repository_root.remove", Some(root), None).await?;
-        Ok(())
+    ///
+    /// `confirm` is the root directory's own name, typed by the person doing it.
+    /// Unlike `remove_worktree`, there is no phase that asks first and finds
+    /// out: the daemon demands the name every time, so a caller with nothing
+    /// typed has nothing to send and `NameDidNotMatch` is the only thing an
+    /// empty string can come back as.
+    ///
+    /// It used to take no `confirm` at all and send `None`, so every request
+    /// built here was refused before the runner looked at the root — see
+    /// `actions::remove_repository_root` for what that cost.
+    pub async fn remove_repository_root(
+        &mut self,
+        root: Uuid,
+        confirm: &str,
+    ) -> Result<crate::actions::RemoveRootOutcome, SessionError> {
+        Ok(crate::actions::remove_repository_root(&mut self.client, root, confirm).await?)
     }
 
     async fn value(

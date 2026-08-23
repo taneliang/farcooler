@@ -46,17 +46,23 @@ class RunnerSettingsCopyTest {
      *
      * The absence of a Remove button on that section is the only thing on this
      * screen that is NOT a scope question, and reading it as one would send
-     * somebody to widen a scope that changes nothing:
-     * `Session::remove_repository_root` sends no `TypedConfirmation` and
-     * `crates/daemon/src/rpc.rs` refuses without one, before scope is looked at.
-     * So the sentence has to say "this app" and has to name somewhere that
-     * works.
+     * somebody to widen a scope that changes nothing. It used to be that no app
+     * could make the call at all — `Session::remove_repository_root` sent no
+     * `TypedConfirmation` and `crates/daemon/src/rpc.rs` refuses without one,
+     * before scope is looked at. That is fixed, and the limit is now this
+     * screen's own: the runner wants the folder's name typed back and there is
+     * nowhere here to type it. Either way the sentence has to say "this app" and
+     * has to name somewhere that works.
      */
     @Test
     fun `the watched-folders note names the client and an alternative`() {
         val note = rootRemovalNote()
         assertTrue(note.contains("this app"))
         assertTrue(note.contains("Mac app"))
+        // iOS collects the name in a sheet now, so it belongs in the list of
+        // places this can be done. Leaving it out would send somebody to a Mac
+        // they may not have.
+        assertTrue(note.contains("iPhone app"))
         // Not a refusal by the runner. Every other missing control on this
         // screen is the runner's answer and this one is not, which is the only
         // thing this sentence is for.

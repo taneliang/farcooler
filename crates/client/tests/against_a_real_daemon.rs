@@ -423,6 +423,75 @@ async fn adding_a_root_and_registering_a_repository_round_trips() {
     assert_eq!(repositories.len(), 1);
 }
 
+/// Defect 1, from the side that shipped it.
+///
+/// The daemon's own coverage — `rpc_over_socket.rs` — builds the request by
+/// hand: `request("repository_root.remove")` with a `TypedConfirmation` payload
+/// attached in the test body. That proves the daemon's RULE, and it passes no
+/// matter what any client sends, which is exactly how a client that sent no
+/// payload at all went unnoticed. This one calls `Session::remove_repository_root`
+/// — the function the FFI arm calls, which is the function iOS and Android call
+/// — so the payload under test is the one a phone actually builds.
+///
+/// Before the fix it fails at the first `assert`, with the daemon answering
+/// `InvalidArgument { what: "payload" }` before it looks at the scope, the root
+/// or the name.
+#[tokio::test]
+async fn a_root_removed_through_the_client_is_actually_removed() {
+    use farcooler_client::actions::RemoveRootOutcome;
+
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let dir = tempfile::tempdir().unwrap();
+    let watched = dir.path().join("watched");
+    std::fs::create_dir(&watched).unwrap();
+    let name = watched.file_name().unwrap().to_string_lossy().into_owned();
+
+    session
+        .add_repository_root(&watched.to_string_lossy())
+        .await
+        .expect("add_repository_root");
+    let root = session.roots().await.expect("roots").pop().expect("one root");
+    let id = uuid::Uuid::from_slice(&root.id).expect("a root id");
+
+    // A near miss is refused, and comes back as the domain outcome rather than
+    // as an error a UI would have to show raw. Removing a root revokes Far
+    // Cooler's permission over a whole tree, so this must not go through.
+    assert_eq!(
+        session.remove_repository_root(id, "not-its-name").await.expect("a refusal, not a failure"),
+        RemoveRootOutcome::NameDidNotMatch
+    );
+    assert_eq!(session.roots().await.expect("roots").len(), 1, "a near miss must remove nothing");
+
+    assert_eq!(
+        session.remove_repository_root(id, &name).await.expect("remove_repository_root"),
+        RemoveRootOutcome::Removed
+    );
+    assert!(session.roots().await.expect("roots").is_empty(), "the root is still watched");
+
+    // And nothing on disk was touched, which is the promise both apps' footers
+    // make on this control's behalf.
+    assert!(watched.exists(), "removing a root must not delete anything");
+}
+
+/// Defect 2: what this session may ask for, not what the fence says about it.
+///
+/// `crates/transport` has always computed this from the session's real grant and
+/// sent it in `ServerHello`; nothing above the transport read it, so no FFI
+/// client could tell `control` from `host_admin` and both phones had to ask and
+/// report the refusal. The daemon's own `stdio_transport.rs` asserts the same
+/// value off `client.server_hello()` directly — this asserts it through the
+/// accessor an app reaches, which is the part that did not exist.
+#[tokio::test]
+async fn a_client_learns_what_this_session_may_ask_for() {
+    let daemon = start().await;
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    // A local socket session is the runner talking to itself.
+    assert_eq!(session.granted_scope(), "host_admin");
+}
+
 // MARK: - Device enrollment
 //
 // The last step of the ceremony, and the only one that changes anything: a key

@@ -1156,6 +1156,24 @@ async fn dispatch(
                 "clientVersion": farcooler_protocol::BUILD,
                 "buildsMatch": facts.daemon_version == farcooler_protocol::BUILD,
                 "capabilities": capabilities,
+                // What this SESSION may ask for, beside what the runner can
+                // serve. The two are a pair and a control needs both: a
+                // capability says the runner has the feature, this says whether
+                // this connection is allowed to use it.
+                //
+                // Here rather than in `daemon.version` because it is a fact
+                // about the connection, not about the daemon — `daemon.version`
+                // is what a client would cache and reuse, and a cached scope
+                // would be a lie the moment a key was re-enrolled. Here rather
+                // than in `farcooler_client_connect`'s reply, which also has it
+                // from the handshake, because no app reads that reply; this call
+                // is the one every app already makes exactly once per
+                // connection, and the scope costs nothing to add to it.
+                //
+                // "unspecified" from a runner too old to send it in the
+                // handshake. An app must read that as "no answer" and keep
+                // offering what it offers today, NOT as "no permission".
+                "grantedScope": session.granted_scope(),
                 "platform": facts.platform,
                 "livePanes": facts.live_terminal_count,
                 "healthy": facts.self_health
@@ -1451,8 +1469,15 @@ async fn dispatch(
         }
 
         "repository_root.remove" => {
-            session.remove_repository_root(id("root")?).await?;
-            Ok(json!({}))
+            use crate::actions::RemoveRootOutcome;
+            // The same two shapes `workspace.remove_worktree` answers with, so
+            // an app has one pattern for both, but they do not mean the same
+            // thing here: a root always demands the name, so this can only be
+            // the name being wrong. See `actions::RemoveRootOutcome`.
+            match session.remove_repository_root(id("root")?, &text("confirm")).await? {
+                RemoveRootOutcome::Removed => Ok(json!({ "ok": true })),
+                RemoveRootOutcome::NameDidNotMatch => Ok(json!({ "confirmationRequired": true })),
+            }
         }
 
         "repository_root.add" => {

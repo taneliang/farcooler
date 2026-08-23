@@ -406,21 +406,27 @@ private fun RepositoriesSection(repositories: List<Repository>) {
  *
  * ## Why there is no Remove here
  *
- * `repository_root.remove` cannot be sent through this app's client core, and
- * this is not about scope. `crates/daemon/src/rpc.rs` destructures the request
- * as `Some(request::Payload::TypedConfirmation(p))` and refuses anything else;
- * the FFI's arm calls `Session::remove_repository_root`, which is
- * `self.value("repository_root.remove", Some(root), None)` and accepts no
- * `confirm` argument to build one from — so the request goes out carrying
- * `Payload::Empty`, which is what `farcooler_transport::request` puts there, and
- * comes back `InvalidArgument { what: "payload" }` before scope, the root or a
- * typed name is ever looked at. iOS's swipe-to-delete on this same screen goes
- * through that same arm and cannot have succeeded; the Mac's works because it
- * shells out to the CLI, which builds the payload itself.
+ * It used to be that no app could send this call at all: `crates/daemon` refuses
+ * a `repository_root.remove` that carries anything but a `TypedConfirmation`
+ * payload, and `Session::remove_repository_root` took no `confirm` argument and
+ * sent `None`, so the request went out carrying `Payload::Empty` and came back
+ * `InvalidArgument { what: "payload" }` before scope, the root or a typed name
+ * was ever looked at. iOS's swipe on this same screen went through that arm and
+ * cannot once have succeeded. Only the Mac's worked, by shelling out to the CLI,
+ * which built the payload itself.
  *
- * A button that can never work is the thing `07e75e8` is a fix for, so there
- * isn't one, and the footer names the two places that can do it. Making it work
- * is four lines in `crates/client`, outside this app's tree.
+ * That is fixed. `crates/client`'s `actions::remove_repository_root` builds the
+ * payload for every client, and the FFI's arm takes a `confirm` argument, so the
+ * call is reachable from here today.
+ *
+ * What is missing now is this screen's half, and it is not a small one: the
+ * runner asks for the folder's own name typed back, EVERY time, because removal
+ * revokes Far Cooler's permission over a whole directory tree. A client cannot
+ * invent that on the user's behalf — that is the entire point of typing it — so
+ * a Remove here means a confirmation sheet, which iOS's `RemoveRootConfirmSheet`
+ * now has and this screen does not. A button that opens nothing is still the
+ * thing `07e75e8` is a fix for, so there still isn't one; the note below names
+ * where it can be done instead.
  *
  * [trouble] is the honest answer to a scope denial rather than a guess at one.
  * `repository_root.list` is `Scope::HostAdmin` and this app enrolls at
@@ -480,18 +486,22 @@ private fun WatchedFoldersSection(
  * the whole value of the sentence: every other refusal on this screen is a scope
  * question the app deliberately does not pre-empt, and somebody who read this
  * absence as another one would go looking for a scope to widen and find that
- * widening it changed nothing. `crates/daemon/src/rpc.rs` requires a
- * `TypedConfirmation` payload on `repository_root.remove`;
- * `Session::remove_repository_root` sends `None` and takes no argument to build
- * one from, so the call fails before scope is considered.
+ * widening it changed nothing.
  *
- * Names the two places that CAN do it, because a control that is missing without
- * an alternative is just a dead end. Both work: the Mac shells out to the CLI,
- * and the CLI builds the payload.
+ * What the limit IS has changed. It used to be the client core — it sent no
+ * confirmation payload and the runner refused every such request, from every
+ * app. That is fixed; the missing half is now this screen's, which has nowhere
+ * to type the folder's name the runner asks for. The sentence says "this app"
+ * either way, which is why it did not need rewording when the core was fixed —
+ * only the list of places that work got longer.
+ *
+ * Names the places that CAN do it, because a control that is missing without an
+ * alternative is just a dead end. All three work: iOS asks for the name in a
+ * sheet, the Mac shells out to the CLI, and the CLI takes it as `--confirm`.
  */
 internal fun rootRemovalNote(): String =
-    "Removing one takes the Mac app or the runner’s own command line — this app can’t send " +
-        "the confirmation the runner asks for."
+    "Removing one takes the Mac app, the iPhone app or the runner’s own command line — this " +
+        "app has nowhere to type the folder’s name the runner asks for."
 
 /**
  * What a section says when the runner would not answer it.

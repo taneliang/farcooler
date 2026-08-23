@@ -964,10 +964,50 @@ final class Connection: ObservableObject {
         return (try? JSONDecoder().decode(RepositoryRootList.self, from: data))?.roots ?? []
     }
 
+    /// What asking to stop watching a folder came back with.
+    ///
+    /// The same three-way shape as `RemoveWorktreeResult` above, so both
+    /// confirmation sheets read an outcome the same way — but the middle case
+    /// means something narrower here. A worktree is only asked for its name when
+    /// it is dirty, so `confirmationRequired` there can mean "now ask the
+    /// person"; a root is asked every time, so this can only mean the name that
+    /// was typed is not the folder's.
+    enum RemoveRootResult {
+        case ok
+        case nameDidNotMatch
+        case failed(String)
+    }
+
     /// Stop watching a directory. The repositories already registered under it
     /// are the runner's business, not this call's.
-    func removeRepositoryRoot(_ id: String) async -> Bool {
-        ((try? await core.call("repository_root.remove", ["root": id])) != nil)
+    ///
+    /// `confirm` is the folder's own name — the last segment of its path — typed
+    /// by the person doing it. The runner asks for it every time, because this
+    /// revokes Far Cooler's permission over a whole directory tree rather than
+    /// deleting anything, and it refuses a request that carries no typed name at
+    /// all before it looks at the scope, the root or the name.
+    ///
+    /// This used to send the id alone. The client core took no `confirm` and put
+    /// no payload on the request, so every call came back `invalid argument:
+    /// payload` and the swipe on Watched Folders cannot once have worked — it
+    /// reported that the runner wouldn't stop watching the folder, which was
+    /// this app's own request being malformed. The Mac's works because it shells
+    /// out to the CLI, which built the payload itself.
+    func removeRepositoryRoot(_ id: String, confirm: String) async -> RemoveRootResult {
+        let data: Data
+        do {
+            data = try await core.call(
+                "repository_root.remove", ["root": id, "confirm": confirm])
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+        struct Reply: Decodable {
+            var ok: Bool?
+            var confirmationRequired: Bool?
+        }
+        let reply = (try? JSONDecoder().decode(Reply.self, from: data)) ?? Reply()
+        if reply.confirmationRequired == true { return .nameDidNotMatch }
+        return .ok
     }
 
     func setBranchPrefix(_ prefix: String) async -> String? {
