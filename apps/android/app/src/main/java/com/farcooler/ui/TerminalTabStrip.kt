@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -61,6 +60,13 @@ fun TerminalTabStrip(
         val kind: StateKind,
         val wantsAttention: Boolean,
         val attention: com.farcooler.model.AgentActivity,
+        /**
+         * Whether that attention is a turn that DIED. Carried beside
+         * [attention] because [com.farcooler.model.AgentActivity] has no word
+         * for it — the daemon sends a failed turn as `done` — and without it
+         * this ring was green around an agent that had stopped working.
+         */
+        val turnDidFail: Boolean,
     )
 
     val chips = entries.flatMap { entry ->
@@ -73,6 +79,7 @@ fun TerminalTabStrip(
                 kind = StateKind.parse(terminal.state),
                 wantsAttention = terminal.agent.wantsAttention,
                 attention = terminal.agent,
+                turnDidFail = terminal.turnDidFail,
             )
         }
     }
@@ -113,7 +120,11 @@ fun TerminalTabStrip(
                     )
                     .then(
                         if (chip.wantsAttention) {
-                            Modifier.border(1.5.dp, attentionColor(chip.attention), CircleShape)
+                            Modifier.border(
+                                1.5.dp,
+                                attentionColor(chip.attention, chip.turnDidFail),
+                                CircleShape,
+                            )
                         } else {
                             Modifier
                         }
@@ -122,10 +133,18 @@ fun TerminalTabStrip(
                     .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Same dot, same colours as the fleet list — `processColor` is
-                // shared rather than redefined here so a terminal cannot read
-                // green in one screen and red in the other.
-                Box(Modifier.size(6.dp).clip(CircleShape).background(processColor(chip.kind)))
+                // Same dot, same size, same rules as the fleet list —
+                // [ProcessDot] is shared rather than redrawn here so a terminal
+                // cannot read one way in one screen and another in the other.
+                // This drew its own 6dp circle while the list drew 8dp, which is
+                // exactly the drift the Mac's `StatusGlyph` had to be pulled
+                // back from.
+                //
+                // A running pane draws nothing at all now. The chip does not
+                // collapse when it does: the box is claimed whether or not
+                // anything occupies it, so a pane starting or dying does not
+                // shove every chip after it sideways.
+                ProcessDot(chip.kind)
                 Spacer(Modifier.width(6.dp))
                 Text(
                     // Capped, because a chip carries the CONVERSATION's name

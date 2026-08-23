@@ -1,6 +1,11 @@
 package com.farcooler.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -8,14 +13,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import com.farcooler.R
 import com.farcooler.data.Themes
 import com.farcooler.data.TerminalFontChoice
+import com.farcooler.model.AgentActivity
+import com.farcooler.model.StateKind
+import com.farcooler.model.Terminal
 
 /**
  * Whichever way the chosen theme goes — and Material You inside that.
@@ -97,19 +108,82 @@ object TerminalFonts {
 
 /**
  * The dot colour for "is the process alive" — shared by the fleet list and the
- * terminal tab strip, so the same terminal cannot read green in one screen and
- * red in the other.
+ * terminal tab strip, so the same terminal cannot read one way in one screen
+ * and another way in the other.
+ *
+ * **Silence is the default, and green is spent once.** This was green for
+ * RUNNING, which put a green dot on every row of a list where green already
+ * meant something else: [attentionColor] gives it to DONE, so an idle `zsh`
+ * and an agent that had just finished its work wore the same mark, and on a
+ * busy worktree they wore it three rows apart. A running process is the
+ * ordinary case and now says nothing at all; green survives on exactly one
+ * state, the same one the Mac spends it on. See `StatusGlyph` over there,
+ * whose `.idle, .running, .exited` branch draws `Color.clear`. [ProcessDot]
+ * reserves the column either way, so names line up down the list rather than
+ * stepping in and out as panes start and stop.
+ *
+ * **Not amber for STARTING.** A pane is starting for well under a second, and
+ * a colour nobody has time to read is a colour spent for nothing. It was worse
+ * than spent here: Material amber 500 (`FFC107`) sat one step from the orange
+ * 500 (`FF9800`) that means an agent is waiting on you, on an 8dp dot, so the
+ * two most different pieces of news this list carries — "give it a moment" and
+ * "come here now" — were told apart by a hue shift nobody can resolve at that
+ * size. Starting is in progress, which is what the neutral means here and on
+ * the Mac.
+ *
+ * **EXITED keeps its dot**, where the Mac draws nothing for it. The Mac can
+ * afford the silence because its fused `Status` puts "Exited" on the row in
+ * words; this row's supporting line says the process state for every pane, so
+ * the dot and the word agree rather than one standing in for the other.
  */
 @Composable
-fun processColor(kind: com.farcooler.model.StateKind): Color = when (kind) {
-    com.farcooler.model.StateKind.RUNNING -> Color(0xFF4CAF50)
-    com.farcooler.model.StateKind.STARTING -> Color(0xFFFFC107)
-    com.farcooler.model.StateKind.EXITED -> MaterialTheme.colorScheme.onSurfaceVariant
+fun processColor(kind: StateKind): Color = when (kind) {
+    StateKind.RUNNING -> Color.Transparent
+    StateKind.STARTING, StateKind.EXITED -> MaterialTheme.colorScheme.onSurfaceVariant
     // The one state that means Far Cooler does not know what happened.
-    com.farcooler.model.StateKind.LOST, com.farcooler.model.StateKind.ERROR ->
-        MaterialTheme.colorScheme.error
-    com.farcooler.model.StateKind.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+    StateKind.LOST, StateKind.ERROR -> MaterialTheme.colorScheme.error
+    // Not an error: the runner did not answer, which is a claim about the
+    // reading and not about the pane. Painting the whole fleet red every time
+    // tmux is busy is how a colour stops meaning anything.
+    StateKind.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
 }
+
+/** The one diameter, named so nobody has to pick a number at a call site. */
+val PROCESS_DOT = 8.dp
+
+/**
+ * That dot, drawn — one shape, one size, and a hollow one where something is
+ * missing.
+ *
+ * **Shape before colour.** Hollow says "something is not there" before the hue
+ * does, which is the half of this vocabulary that survives a colourblind
+ * reader, a greyscale screenshot and a phone in bright sun. The phones had
+ * dropped it entirely and drew every state as a filled disc, leaving hue as
+ * the only channel; `StatusGlyph.mark` on the Mac has carried it all along,
+ * with the same three states hollow — a pane that died where the app was not
+ * looking, one that failed to start, and one the runner would not report on.
+ *
+ * **One size.** The tab strip drew 6dp and the fleet list drew 8dp for the
+ * same mark. That is the drift the Mac had to be pulled back from, where
+ * eleven call sites passed five diameters of a glyph whose whole argument is
+ * that it is always the same mark.
+ */
+@Composable
+fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
+    val colour = processColor(kind)
+    val hollow = kind == StateKind.LOST || kind == StateKind.ERROR || kind == StateKind.UNKNOWN
+    Box(
+        modifier
+            .size(PROCESS_DOT)
+            .then(
+                if (hollow) Modifier.border(1.5.dp, colour, CircleShape)
+                // A transparent fill still claims the box, which is the point:
+                // the column is reserved whether or not anything occupies it.
+                else Modifier.clip(CircleShape).background(colour)
+            )
+    )
+}
+
 
 /**
  * The colour behind an agent's activity glyph, shared with the tab strip for
@@ -117,8 +191,33 @@ fun processColor(kind: com.farcooler.model.StateKind): Color = when (kind) {
  * colour, so a list of twenty still reads at a glance.
  */
 @Composable
-fun attentionColor(agent: com.farcooler.model.AgentActivity): Color = when (agent) {
-    com.farcooler.model.AgentActivity.BLOCKED -> Color(0xFFFF9800)
-    com.farcooler.model.AgentActivity.DONE -> Color(0xFF4CAF50)
+fun attentionColor(agent: AgentActivity): Color = when (agent) {
+    AgentActivity.BLOCKED -> Color(0xFFFF9800)
+    AgentActivity.DONE -> Color(0xFF4CAF50)
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
+
+/**
+ * The same colour, for a terminal whose finished turn may have DIED.
+ *
+ * Green and red are the whole difference between "it's done" and "it stopped
+ * working", and [AgentActivity] alone cannot tell them apart — the daemon
+ * sends both as `done` and says which in `turnFailed`. This app decoded no such
+ * field, so an agent whose turn had died wore the green checkmark of one that
+ * had succeeded: the second place green meant two things on this screen, and
+ * the one that mattered more. iOS has had this overload since the field
+ * landed; see `attentionColor(_ terminal:)` in its `FleetView`.
+ */
+@Composable
+fun attentionColor(terminal: Terminal): Color =
+    attentionColor(terminal.agent, terminal.turnDidFail)
+
+/**
+ * The same rule again, for a surface that has already taken the two facts apart
+ * — `TerminalTabStrip` flattens its terminals into chips before it draws them.
+ * One rule in one place either way: a chip's ring and the row it names must not
+ * be able to come out different colours.
+ */
+@Composable
+fun attentionColor(agent: AgentActivity, turnDidFail: Boolean): Color =
+    if (turnDidFail) MaterialTheme.colorScheme.error else attentionColor(agent)

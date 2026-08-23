@@ -1356,14 +1356,19 @@ struct WorkspaceListView: View {
         // argument; the short version is that the theme is the terminal's
         // palette and a list of workspaces is chrome.
         .toolbar {
-            // Sparkles for "describe it" (`TaskComposerView`), plain plus for
+            // A sparkle for "describe it" (`TaskComposerView`), plain plus for
             // "fill in the form" (`NewWorkspaceView`) — same two flows the
             // Mac keeps side by side, kept apart here by icon rather than
             // by picking a winner, since a phone's one-sentence flow is
             // new and unproven next to a form that already works.
             //
+            // `sparkle` rather than `sparkles`: the Mac's `QuickCreate` and its
+            // command palette both mark this flow with the singular, and one
+            // concept gets one glyph. There is no argument either way beyond
+            // that, which is itself the argument for taking the Mac's.
+            //
             // Named out loud, because an `Image` alone in a `Button` is read
-            // as its SF Symbol: "sparkles" and "plus" were the whole of what
+            // as its SF Symbol: "sparkle" and "plus" were the whole of what
             // VoiceOver had to tell the app's two ways of starting work apart,
             // and neither is a word this product uses. Each is named for the
             // sheet it opens — Quick Task's own title, and the workspace form's
@@ -1371,7 +1376,7 @@ struct WorkspaceListView: View {
             // behind it are one name, and `FleetList`'s empty state points at
             // these two by exactly these names.
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showQuickTask = true } label: { Image(systemName: "sparkles") }
+                Button { showQuickTask = true } label: { Image(systemName: "sparkle") }
                     .accessibilityLabel("Quick Task")
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -1550,12 +1555,17 @@ struct HostSwitcherBar: View {
 /// same property that made the bar the app's escape hatch in the first place.
 ///
 /// Connected is a dot and no words. A permanent "Connected" on a phone screen
-/// is noise, and the absence of a colored dot says the same thing in no space at
+/// is noise, and a dot the eye passes over says the same thing in no space at
 /// all. It used to say "the absence of amber", and amber is no longer this
 /// chip's to spend: orange means an agent is waiting on you, everywhere in this
-/// app and on the widget, the Live Activity and the complication. A link that is
-/// still coming up is in progress, so it is yellow — the same yellow
-/// `processColor` gives a pane that is starting.
+/// app and on the widget, the Live Activity and the complication.
+///
+/// The comment was right and the code had drifted: it said "the absence of a
+/// colored dot" and then drew a GREEN one, which is the color this app gives a
+/// finished agent. So the chip is down to two colors — neutral for a link with
+/// nothing wrong with it, whether it is up or on its way up, and red for one
+/// that has stopped. Which of the two neutral cases you are in is carried by
+/// the word beside the dot, in a channel that costs no color at all.
 ///
 /// The tap works from every state, green included. That is the "it's actually
 /// cooked" case: the app believes it is fine and the person holding it can see
@@ -1599,10 +1609,30 @@ struct LinkStatusChip: View {
 
     private var color: Color {
         switch connection.phase {
-        case .connected: return .green
-        // In progress, not attention. See the note on amber above.
-        case .connecting, .reconnecting: return .yellow
-        case .needsApproval, .failed: return .red
+        // Not green, per the note above. Not nothing either, which is what the
+        // Mac's `HostDot` draws for a connected runner: that dot is not a
+        // button in that state and this one is. This IS the escape hatch — the
+        // paragraph below is the argument that the tap has to work when the app
+        // believes the link is fine and the person holding it can see that it
+        // is not — and an invisible button fails exactly then.
+        case .connected: return .secondary
+        // In progress, not attention, and no longer yellow: a pane that is
+        // `starting` gave up its yellow for the same reason, which
+        // `processColor` states in full.
+        case .connecting, .reconnecting: return .secondary
+        // Red is for a fault, and `daemonMissing` is not one. SSH worked; Far
+        // Cooler simply is not over there yet, which is one `host install`
+        // away. The Mac has said this all along — `notInstalled` is
+        // `.secondary` in both `HostDot` and `troubleColor` — and this app's
+        // own full-screen failure agrees, drawing every kind but a changed host
+        // key in `.tertiary`. This chip was the one surface still calling it a
+        // failure.
+        case .failed(let message):
+            return Connection.Failure(message: message) == .daemonMissing ? .secondary : .red
+        // Left red deliberately. A fingerprint nobody has answered is not a
+        // fault, but until somebody does this device cannot talk to that runner
+        // at all, and the row is the one place that says so.
+        case .needsApproval: return .red
         }
     }
 
@@ -1651,9 +1681,6 @@ struct FleetList: View {
 
     private var shown: [Workspace] { fleet.workspaces.filter { !$0.isHidden } }
     private var hidden: [Workspace] { fleet.workspaces.filter(\.isHidden) }
-    private var hiddenAttention: Int {
-        hidden.flatMap(\.terminals).filter(\.agent.wantsAttention).count
-    }
 
     var body: some View {
         List {
@@ -1736,11 +1763,16 @@ struct FleetList: View {
                         // Something under here wants you, said once at the top
                         // rather than left to be inferred from a row further
                         // down that may be scrolled off.
-                        if workspace.terminals.contains(where: { $0.agent.wantsAttention }) {
+                        //
+                        // In the color of the row you get by expanding it, not
+                        // in orange whatever is inside — see `mostUrgent(in:)`.
+                        // A header that says orange over a row that says red is
+                        // a header pointing somewhere else.
+                        if let leader = mostUrgent(in: workspace.terminals) {
                             Circle()
-                                .fill(Color.orange)
+                                .fill(attentionColor(leader))
                                 .frame(width: 6, height: 6)
-                                .accessibilityLabel("Needs you")
+                                .accessibilityLabel(leader.activityLabel)
                         }
                         // The worktree this workspace names is not on disk any
                         // more. Said on the header because every row under it
@@ -1894,8 +1926,13 @@ struct FleetList: View {
                             Text("Hidden")
                             Text("\(hidden.count)")
                                 .foregroundStyle(.tertiary)
-                            if hiddenAttention > 0 {
-                                Circle().fill(Color.orange).frame(width: 6, height: 6)
+                            // Same rule as a workspace header: the color of
+                            // what you would find, not orange regardless.
+                            if let leader = mostUrgent(in: hidden.flatMap(\.terminals)) {
+                                Circle()
+                                    .fill(attentionColor(leader))
+                                    .frame(width: 6, height: 6)
+                                    .accessibilityLabel(leader.activityLabel)
                             }
                             Spacer()
                         }
@@ -1916,7 +1953,15 @@ struct FleetList: View {
                         // pane on this runner lives inside is not answering,
                         // which is a failure. The audit did not list this one
                         // and it is the same bug as the six it did.
-                        .fill(fleet.runtimeHealthy ? .green : .red)
+                        //
+                        // And neutral rather than green for the healthy case,
+                        // which was the OTHER half of the same bug: green is
+                        // what an agent that has finished its work wears, and
+                        // this spent it on "nothing is wrong" at the foot of the
+                        // list where those agents are. The count beside it says
+                        // the fleet is alive; the colour is now reserved for the
+                        // sentence that is news.
+                        .fill(fleet.runtimeHealthy ? Color.secondary : Color.red)
                         .frame(width: 8, height: 8)
                     Text(
                         fleet.runtimeHealthy
@@ -2053,9 +2098,7 @@ struct TerminalRow: View {
 
     private func content(at now: Date) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: RowGutter.gap) {
-            Circle()
-                .fill(processColor(kind))
-                .frame(width: RowGutter.dot, height: RowGutter.dot)
+            ProcessDot(kind: kind)
                 // The dot sits on the first line's baseline rather than in the
                 // middle of a row that is now up to four lines tall.
                 //
@@ -2095,6 +2138,32 @@ struct TerminalRow: View {
                         // The reason to have opened the app. Only the two states
                         // worth acting on get color, so a list of twenty still
                         // reads at a glance.
+                        //
+                        // Six silhouettes, where the Mac's `StatusGlyph` forbids
+                        // them outright — "not a moon for idle and a gearwheel
+                        // for working" — and that is deliberate. The Mac's dot
+                        // is one pointer-rest from explaining itself: every
+                        // `StatusGlyph` carries a `.help` with the state's name
+                        // in it. A phone has no hover, so a mark that encodes
+                        // its meaning in hue alone is unrecoverable — and the
+                        // pair a reader most needs separated, blocked and done,
+                        // is orange-filled against green-filled, which is
+                        // exactly the pair that collapses for the commonest kind
+                        // of color blindness. The shape is what survives that.
+                        //
+                        // The two halves of the Mac's complaint that ARE about
+                        // this list were taken: the mark is one size (Android
+                        // stepped 16→20 on attention and moved its own column),
+                        // and it is filled for the states that want a person and
+                        // outlined for the ones that do not, which is
+                        // hollow-vs-filled in SF Symbols' own vocabulary.
+                        //
+                        // The weight below still steps, and that is safe HERE
+                        // and nowhere else: this glyph is anchored against the
+                        // `Spacer` above it, so a semibold mark grows leftward
+                        // into slack and nothing after it moves. `TabChip` keeps
+                        // one weight for the opposite reason — a chip that grows
+                        // slides every chip after it sideways.
                         //
                         // `.footnote`, which is 13 points at the default size —
                         // the same 13 this was hardcoded to as
@@ -2182,8 +2251,10 @@ struct TerminalRow: View {
     private func statusText(at now: Date) -> String? {
         guard terminal.agent.isAgent, terminal.agent != .unknown else {
             // A plain shell still says whether it is alive, which is the whole
-            // of what is known about it. Exited is worth saying; running is
-            // what the green dot already said.
+            // of what is known about it. Exited is worth saying; running is the
+            // ordinary case and `ProcessDot` now draws nothing for it, so a
+            // live shell is a row with a name on it and nothing else — which is
+            // the point of the silence, not a fact withheld.
             return kind == .running ? nil : terminal.state.lowercased()
         }
         guard let elapsed = terminal.displayDuration(at: now) else { return terminal.activityLabel }
@@ -2191,17 +2262,79 @@ struct TerminalRow: View {
     }
 }
 
-/// The dot color for "is the process alive" — shared by the fleet list and
-/// the terminal tab strip (`TerminalTabStrip`), so the same terminal cannot
-/// read green in one screen and red in the other.
+/// The dot for "is the process alive" — shared by the fleet list and the
+/// terminal tab strip (`TerminalTabStrip`), so the same terminal cannot read
+/// one way in one screen and another way in the other.
+///
+/// **Silence is the default, and green is spent once.** This was `.green` for
+/// `running`, which put a green dot on every row of a list where green already
+/// meant something else: `attentionColor` gives it to `done`, so an idle
+/// `zsh` and an agent that had just finished its work wore the same mark, and
+/// on a busy worktree they wore it three rows apart. A running process is the
+/// ordinary case and now says nothing; green survives on exactly one state,
+/// the same one the Mac spends it on. See `StatusGlyph` over there, whose
+/// `.idle, .running, .exited` branch has drawn `Color.clear` since `8bce995`.
+/// `ProcessDot` reserves the column either way, so names line up down the list
+/// rather than stepping in and out as panes start and stop.
+///
+/// **Not yellow for `starting`.** A pane is starting for well under a second,
+/// and a color nobody has time to read is a color spent for nothing. The Mac
+/// calls `starting` in-progress and paints it `.secondary`; so does this now.
+///
+/// **`exited` keeps its dot**, where the Mac draws nothing for it. The Mac can
+/// afford silence because its fused `Status` puts "Exited" on the row in
+/// words; `TerminalRow.statusText` spells the state out only for panes that
+/// are NOT agents, so an agent pane whose process is gone would otherwise lose
+/// its only mark.
 func processColor(_ kind: StateKind) -> Color {
     switch kind {
-    case .running: return .green
-    case .starting: return .yellow
-    case .exited: return .secondary
+    case .running: return .clear
+    case .starting, .exited, .unknown: return .secondary
     // The one state that means Far Cooler does not know what happened.
     case .lost, .error: return .red
-    case .unknown: return .secondary
+    }
+}
+
+/// That dot, drawn — one shape, one size, and a hollow one where something is
+/// missing.
+///
+/// **Shape before color.** Hollow says "something is not there" before the hue
+/// does, which is the half of this vocabulary that survives a colorblind
+/// reader, a grayscale screenshot and a phone in bright sun. The phones had
+/// dropped it entirely and drew every state as a filled disc, leaving hue as
+/// the only channel; `StatusGlyph.mark` on the Mac has carried it all along,
+/// with the same three states hollow — a pane that died where the app was not
+/// looking, one that failed to start, and one the runner would not report on.
+///
+/// **One size**, `RowGutter.dot`. The tab strip drew 6 and this list drew 8 for
+/// the same mark; that is the drift the Mac had to be pulled back from, where
+/// eleven call sites passed five diameters of a glyph whose whole argument is
+/// that it is always the same mark. Eight is the one that is load-bearing:
+/// `RowGutter.text` is measured off it, and `NeedsYou`'s changes row puts its
+/// symbol in a frame of exactly this width so the two sets of words share an
+/// axis.
+struct ProcessDot: View {
+    let kind: StateKind
+
+    var body: some View {
+        Group {
+            if hollow {
+                // 1.5, which is `StatusGlyph`'s line width for the same ring at
+                // the same diameter — a third of the dot, so the hole reads as
+                // a hole rather than as a slightly soft disc.
+                Circle().strokeBorder(processColor(kind), lineWidth: 1.5)
+            } else {
+                Circle().fill(processColor(kind))
+            }
+        }
+        .frame(width: RowGutter.dot, height: RowGutter.dot)
+    }
+
+    private var hollow: Bool {
+        switch kind {
+        case .lost, .error, .unknown: return true
+        case .running, .starting, .exited: return false
+        }
     }
 }
 
@@ -2224,6 +2357,38 @@ func attentionColor(_ agent: AgentActivity) -> Color {
 /// strip cannot disagree about the same pane.
 func attentionColor(_ terminal: Terminal) -> Color {
     terminal.turnDidFail ? .red : attentionColor(terminal.agent)
+}
+
+/// The one terminal a roll-up should wear the color of, out of everything
+/// waiting inside it.
+///
+/// A collapsed workspace header cannot show six dots, so it shows the one that
+/// decides the color. It was showing solid orange for all of them, which is the
+/// bug the Mac fixed in `90c8dd6` and the phone inherited: a worktree whose only
+/// pending item is a FAILED agent said orange in the header and red one tap
+/// down, so the same pane had two colors decided by whether the section was
+/// expanded. Orange also means one specific thing across this app, the widget,
+/// the Live Activity and the complication — an agent waiting on an answer — and
+/// spending it on a worktree where nothing is waiting weakens it everywhere.
+///
+/// The ranking is `Status.mostUrgent(in:)`'s, for the reason stated there:
+/// blocked first, because an agent stalled mid-turn is the state this
+/// application exists for and the only one where the work resumes the moment you
+/// look; a dead turn next, because something stopped; `done` last, because
+/// nothing is waiting on anything — it is finished and merely unread.
+///
+/// Nil when nothing inside wants attention, which is also when nothing should be
+/// drawn.
+func mostUrgent(in terminals: some Sequence<Terminal>) -> Terminal? {
+    terminals
+        .filter(\.agent.wantsAttention)
+        .min { attentionRank($0) < attentionRank($1) }
+}
+
+private func attentionRank(_ terminal: Terminal) -> Int {
+    if terminal.agent == .blocked { return 0 }
+    if terminal.turnDidFail { return 1 }
+    return 2
 }
 
 /// What a sheet says when the thing it asked for did not happen: the app's own

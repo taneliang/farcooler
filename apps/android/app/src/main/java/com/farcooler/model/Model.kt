@@ -68,6 +68,22 @@ data class Terminal(
      * it is why the same badge means the same thing here as on the Mac.
      */
     val activity: String? = null,
+    /**
+     * Whether the turn the agent just finished DIED rather than completed.
+     *
+     * Read from the agent's own session log on the host, and carried beside
+     * [activity] because that has no word for it: a turn that died and one that
+     * succeeded are both `done` there. This app decoded no such field, so it
+     * drew the green checkmark of a finished turn over one that had stopped
+     * working — see `attentionColor(Terminal)`. Sent as `turnFailed`; see
+     * `crates/cli/src/main.rs` and iOS's `Terminal.turnFailed`.
+     *
+     * Nullable rather than defaulted to false, on the rule every field added to
+     * this type follows: a daemon built before it sends no key at all, and
+     * absent means "nothing claimed the turn went badly" rather than a real
+     * answer.
+     */
+    val turnFailed: Boolean? = null,
     val epoch: Int = 0,
     /**
      * What this terminal's pane is hosting. Absent on older daemons, which is
@@ -81,6 +97,12 @@ data class Terminal(
     val availableAgentModes: List<String>? = null,
 ) {
     val agent: AgentActivity get() = AgentActivity.parse(activity)
+
+    /** Whether the last turn ended badly. Only `done` can answer this. */
+    val turnDidFail: Boolean get() = agent == AgentActivity.DONE && turnFailed == true
+
+    /** What this agent's state is called in a row, failure included. */
+    val activityLabel: String get() = if (turnDidFail) "Failed" else agent.label
 
     /** Whether to draw a chat or a VT grid. */
     val isAgentPane: Boolean get() = paneMode == "agent"

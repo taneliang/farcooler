@@ -1,6 +1,5 @@
 package com.farcooler.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,10 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PanTool
@@ -50,7 +49,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -291,17 +289,37 @@ private fun FleetBody(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // "tmux unavailable" was set in exactly the typography and
+                // exactly the colour of "3 live · 2 runners" — the one sentence
+                // on this screen that means every pane on every runner is
+                // unreadable, drawn as though it were a healthy count. Both the
+                // Mac and iOS give the same three words a coloured mark; this
+                // one already has a mark of its own, so the mark takes the
+                // colour rather than a second dot being added beside it.
+                //
+                // Red rather than the Mac's amber. Amber means an agent is
+                // waiting on you, and nobody is waiting here: the runtime every
+                // pane lives inside is not answering, which is a failure. iOS
+                // settled that in `7e4a4f7` and the Mac is now the one surface
+                // out of step.
+                //
+                // "No runners" is deliberately not coloured. An app nobody has
+                // added a runner to yet is empty, not broken.
+                val down = runtimeIsDown(connections)
+                val tint =
+                    if (down) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 Icon(
                     Icons.Outlined.Dns,
                     null,
                     Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = tint,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     liveSummary(connections),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = tint,
                 )
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { addingRunner = true }) { Text("Add a runner") }
@@ -339,6 +357,15 @@ private fun FleetBody(
         )
     }
 }
+
+/**
+ * Whether every runner this app knows about has an unreadable tmux.
+ *
+ * The same condition [liveSummary] turns into "tmux unavailable", asked
+ * separately so the row can colour itself without parsing its own sentence.
+ */
+private fun runtimeIsDown(connections: List<Connection>): Boolean =
+    connections.isNotEmpty() && connections.none { it.fleet.value.runtimeHealthy }
 
 private fun liveSummary(connections: List<Connection>): String {
     val healthy = connections.count { it.fleet.value.runtimeHealthy }
@@ -429,10 +456,28 @@ private fun RunnerStatusRow(
 
             is Connection.Phase.Failed -> {
                 val kind = current.kind
+                // Red for the one failure that is genuinely alarming, and the
+                // app's ordinary text for the rest. Every kind was red,
+                // including DAEMON_MISSING — which is not a failure at all but a
+                // runner that has never had `host install` run on it — and
+                // KEY_NOT_TRUSTED and STOPPED, both of which this file's own
+                // comments call "not a fault". Red on a step somebody simply has
+                // not taken yet shouts about the wrong thing, and a colour spent
+                // on everything is a colour that says nothing about the one case
+                // that warrants it: a host key that changed underneath us.
+                //
+                // The same rule iOS's full-screen failure already follows, and
+                // the same call the Mac makes for `notInstalled`, which it
+                // paints `.secondary` in both `HostDot` and `troubleColor`. The
+                // headline names what happened either way; it does not need the
+                // colour to do it.
                 Text(
                     failureHeadline(kind, connection),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color =
+                        if (kind == Connection.Failure.HOST_KEY_CHANGED)
+                            MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
                     failureDetail(kind, connection, current.message),
@@ -596,12 +641,7 @@ private fun TerminalRow(
             .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(processColor(kind))
-        )
+        ProcessDot(kind)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -631,12 +671,25 @@ private fun TerminalRow(
 
         // The reason to have opened the app. Only the two states worth acting
         // on get colour, so a list of twenty still reads at a glance.
+        //
+        // One size. This stepped 16dp to 20dp on `wantsAttention`, so the
+        // trailing column changed width every time an agent finished a turn or
+        // asked a question — and it changed for ONE row, which pulls that row's
+        // glyph out of line with the twenty above and below it. A column that
+        // moves as its rows change state is a defect on any platform, and the
+        // Mac's `StatusGlyph` spends its whole doc comment on the same point.
+        // Emphasis is carried by fill and by colour instead, in channels that
+        // cost no layout: PanTool and CheckCircle are filled where PauseCircle
+        // and Pending are outlined.
+        //
+        // [attentionColor] takes the TERMINAL, not its activity, so a turn that
+        // died is red rather than wearing the green of one that succeeded.
         if (terminal.agent.isAgent && terminal.agent != AgentActivity.UNKNOWN) {
             Icon(
-                activityIcon(terminal.agent),
-                contentDescription = terminal.agent.label,
-                tint = attentionColor(terminal.agent),
-                modifier = Modifier.size(if (terminal.agent.wantsAttention) 20.dp else 16.dp),
+                activityIcon(terminal),
+                contentDescription = terminal.activityLabel,
+                tint = attentionColor(terminal),
+                modifier = Modifier.size(18.dp),
             )
         }
 
@@ -675,7 +728,20 @@ private fun TerminalRow(
     }
 }
 
-/** The same vocabulary the Apple apps use, in this platform's icon set. */
+/**
+ * The same vocabulary the Apple apps use, in this platform's icon set.
+ *
+ * NONE and UNKNOWN are unreachable from every call site — both guard on
+ * `isAgent && != UNKNOWN` before drawing anything — and are kept because the
+ * `when` is exhaustive over the enum, not because either has ever been on
+ * screen. Recorded rather than deleted so the next reader does not go looking
+ * for the terminal glyph.
+ *
+ * Filled where the state wants a person, outlined where it does not, which is
+ * the non-colour half of the vocabulary the Mac calls hollow-vs-filled. It
+ * happens to be right here already; the process dot beside it is where the
+ * phones had lost it.
+ */
 fun activityIcon(activity: AgentActivity): ImageVector = when (activity) {
     AgentActivity.NONE -> Icons.Outlined.Terminal
     AgentActivity.IDLE -> Icons.Outlined.PauseCircle
@@ -684,3 +750,14 @@ fun activityIcon(activity: AgentActivity): ImageVector = when (activity) {
     AgentActivity.DONE -> Icons.Filled.CheckCircle
     AgentActivity.UNKNOWN -> Icons.AutoMirrored.Outlined.HelpOutline
 }
+
+/**
+ * The same mark, for a terminal whose finished turn may have DIED.
+ *
+ * `Cancel` is Material's filled circle with a cross in it — the same mark iOS
+ * draws as `xmark.circle.fill`, and the same filled shape as the CheckCircle it
+ * replaces, so a failed turn and a finished one differ in what is inside the
+ * circle as well as in its colour.
+ */
+fun activityIcon(terminal: Terminal): ImageVector =
+    if (terminal.turnDidFail) Icons.Filled.Cancel else activityIcon(terminal.agent)

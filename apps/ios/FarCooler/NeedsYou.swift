@@ -567,7 +567,12 @@ struct NeedsYouView: View {
                 // section. An 8-point frame is exactly the width of the dot a
                 // `TerminalRow` draws, so the symbol sits on that axis and the
                 // words line up with theirs.
-                Image(systemName: "doc.text.magnifyingglass")
+                //
+                // The Mac's mark for the same destination, and `ChangesChip`'s
+                // now too: `plusminus` IS the diff, where a document under a
+                // loupe is searching inside a file. One concept, one glyph,
+                // across three surfaces.
+                Image(systemName: "plusminus")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(width: RowGutter.dot)

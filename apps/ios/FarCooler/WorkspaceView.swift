@@ -470,7 +470,11 @@ struct WorkspaceView: View {
             }
 
             Button { showWorkspaceList = true } label: {
-                Image(systemName: "square.stack")
+                // `rectangle.stack`, which is the mark the Mac puts on the set
+                // of workspaces. Nothing distinguishes it from `square.stack`
+                // beyond which app drew it first, and that is the whole reason
+                // to stop having two.
+                Image(systemName: "rectangle.stack")
             }
             .accessibilityLabel("Switch workspace")
         }

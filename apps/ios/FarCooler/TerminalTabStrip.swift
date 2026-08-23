@@ -161,7 +161,13 @@ private struct ChangesChip: View {
                 // `.caption`, not `.system(size: 11)`. A fixed point size beside
                 // text that scales is a symbol that shrinks against its own
                 // label at every Dynamic Type setting but the default.
-                Image(systemName: "doc.text.magnifyingglass")
+                //
+                // `plusminus`, which is the Mac's mark for this same tab and
+                // is what a diff literally is: lines added and lines taken
+                // away, in the two signs the counts three points to the right
+                // are already carrying. This drew `doc.text.magnifyingglass` —
+                // a document under a loupe, which is "search inside a file".
+                Image(systemName: "plusminus")
                     .font(.caption)
                 Text("Changes")
                     .font(.caption)
@@ -221,10 +227,19 @@ private struct TabChip: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 5) {
-                // Same dot, same colors as the fleet list — `processColor`
-                // is shared rather than redefined here so a terminal cannot
-                // read green in one screen and red in the other.
-                Circle().fill(processColor(kind)).frame(width: 6, height: 6)
+                // Same dot, same size, same rules as the fleet list —
+                // `ProcessDot` is shared rather than redrawn here so a terminal
+                // cannot read one way in one screen and another in the other.
+                // This drew its own 6-point circle while the list drew 8, which
+                // is exactly the drift the Mac's `StatusGlyph` had to be pulled
+                // back from.
+                //
+                // A running pane draws nothing at all now. The chip does not
+                // collapse when it does: the frame is reserved whether or not
+                // anything occupies it, so a pane starting or dying does not
+                // shove every chip after it sideways — the same reflow the
+                // fixed order and the one type weight below exist to prevent.
+                ProcessDot(kind: kind)
                 // Not monospaced. The strip names TERMINALS, which are things
                 // in this app, not text a terminal is showing — and monospace
                 // beside a chat's body font is what made it read as a piece of
@@ -289,9 +304,9 @@ private struct TabChip: View {
     ///
     /// So a running pane whose agent is working, idle, or not an agent at all
     /// says only its name. That is not a fact withheld: it is the chip with no
-    /// ring and a green dot, and a reader learns that state by hearing nothing
-    /// after a name rather than by hearing "Working" eight times on the way to
-    /// the tab they wanted.
+    /// ring and no dot — the silence IS the state — and a reader learns it by
+    /// hearing nothing after a name rather than by hearing "Working" eight
+    /// times on the way to the tab they wanted.
     private var spokenStatus: String? {
         // The two ornaments are not independent, so they resolve to one clause
         // rather than two — activity only means anything while the process is
