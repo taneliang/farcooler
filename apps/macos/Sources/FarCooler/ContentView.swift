@@ -1030,8 +1030,36 @@ struct ContentView: View {
                 // is a failure rather than a request. iOS settled this in
                 // `7e4a4f7` and Android followed in `8481657`, which left this
                 // dot as the last place the three apps disagreed about it.
+                //
+                // Neutral, not green, when it is healthy — the other half of
+                // the same line, and `8741757` recorded it here rather than
+                // changing it inside an amber sweep. Three arguments, and they
+                // agree. Green in this palette is `Status.done` and nothing
+                // else: `StatusGlyph` says so outright, `150eb0f` took it back
+                // off `WorkspaceDot`, and a permanent green at the foot of the
+                // window is the one place a person looks for finished agents.
+                // `HostDot` states the principle a few hundred lines away —
+                // "a dot that is always there is a dot nobody reads, and the
+                // whole point is that you notice it only when something is
+                // wrong" — and draws `EmptyView()` for `.connected` on that
+                // reasoning; this dot cannot vanish, because it is the mark the
+                // "tmux unavailable" sentence needs, so neutral is the same
+                // argument at the only volume available. And both phones
+                // already moved: iOS in `8481657`, Android's `Dns` tint to
+                // `onSurfaceVariant`, so the Mac was again the last surface out
+                // of step on a line whose other half it had just fixed.
+                //
+                // The audit that prompted this had it backwards, which is worth
+                // recording because it is the second time: item 5 reads "iOS
+                // draws a green dot for a healthy connection where the other
+                // two draw nothing — Keep the Mac's." The Mac drew green too,
+                // and had drawn it longer. Same shape as `150eb0f`, where the
+                // Mac was credited with avoiding the exact bug it had.
+                //
+                // "N live" beside it already says the fleet is alive, and the
+                // per-runner dots to the right still name anyone who isn't.
                 Circle()
-                    .fill(store.fleet.runtimeHealthy ? Color.green : Color.red)
+                    .fill(store.fleet.runtimeHealthy ? Color.secondary : Color.red)
                     .frame(width: 7, height: 7)
                 Text(
                     store.fleet.runtimeHealthy
@@ -1042,13 +1070,18 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
 
                 // The dot above is an OR across every runner, deliberately —
-                // ANDing would paint the bar orange every time one laptop was
+                // ANDing would turn the bar red every time one laptop was
                 // merely asleep. But on a fleet of more than one, an OR alone
-                // means it takes just ONE healthy runner to turn that dot
-                // green while a second sits there unreachable or without
+                // means it takes just ONE healthy runner to keep that dot
+                // quiet while a second sits there unreachable or without
                 // tmux at all, invisibly. These name that runner instead of
                 // letting the merged dot speak for it; a click retries it at
                 // once, same as a header's own dot.
+                //
+                // This read "orange" and "green" for those two states, which
+                // it did until `8741757` and the line above respectively.
+                // `FleetStore.unhealthyHosts` records both moves and why
+                // neither touches the argument.
                 //
                 // Built by hand here rather than calling `HostDot`, and
                 // deliberately so, not as an oversight: `HostDot` draws
@@ -1120,8 +1153,9 @@ struct ContentView: View {
     /// Not `HostDot`'s palette reused outright: `HostDot` renders nothing at
     /// all for `.connected`, which is right for a header naming only whether
     /// the RUNNER is reachable — but a runner can be perfectly reachable
-    /// and still be the reason the fleet's tmux status reads orange, and that
-    /// case has to draw something here.
+    /// and still be the reason the fleet's tmux status reads red, and that
+    /// case has to draw something here. ("Orange" here until `8741757`, which
+    /// is the commit that made it red.)
     private func troubleColor(for host: String) -> Color {
         switch store.state(of: host) {
         case .unreachable: return .red

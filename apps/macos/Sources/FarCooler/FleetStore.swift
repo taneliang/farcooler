@@ -63,9 +63,9 @@ final class FleetStore: ObservableObject {
     /// rest of it. A window that closes and reopens while this store's own
     /// lifetime spans both — the common case, since closing the last window
     /// does not quit the app — came back with `state` still reading
-    /// `.connected` and a green dot, but no stream, no retry and no timer
-    /// underneath it. `startEvents()`'s own `eventStream == nil` guard makes
-    /// this safe to call unconditionally: for the ordinary case, where
+    /// `.connected` and a healthy-looking bar, but no stream, no retry and no
+    /// timer underneath it. `startEvents()`'s own `eventStream == nil` guard
+    /// makes this safe to call unconditionally: for the ordinary case, where
     /// `rebuild()` already started every client, every one of these is a
     /// no-op.
     func resume() {
@@ -189,9 +189,16 @@ final class FleetStore: ObservableObject {
             // reading, and letting either in reports hands on deck — or tmux
             // health — that in fact went home. Without this gate on `healthy`,
             // a single unreachable runner with a stale `runtimeHealthy == true`
-            // could paint the whole bar green while the only runner actually
-            // answering has no tmux at all; on a fleet of one, the sole
-            // daemon dying would still show a green dot and "0 live".
+            // could keep the whole bar reading well while the only runner
+            // actually answering has no tmux at all; on a fleet of one, the
+            // sole daemon dying would still show a healthy dot and "0 live".
+            //
+            // This said "paint the whole bar green" and "a green dot", which
+            // was literal until the status bar's healthy dot went neutral —
+            // green there meant `Status.done`, and it was the last permanent
+            // green in the app. The argument is untouched by that: what the
+            // gate prevents is a stale `true`, and the dot the stale `true`
+            // wins is the wrong dot whichever color it is.
             if client.state.refusal == nil {
                 live += client.fleet.livePanes
                 if client.fleet.runtimeHealthy { healthy = true }
@@ -204,14 +211,23 @@ final class FleetStore: ObservableObject {
     /// name individually.
     ///
     /// `fleet.runtimeHealthy` above ORs across every runner, and stays an OR
-    /// on purpose — ANDing would paint the whole status bar orange every time
-    /// any one laptop was merely asleep, which is not news worth a color
-    /// change. But a single merged boolean is also the whole story only if
-    /// nobody needs to know WHICH runner is the problem, and with more than
-    /// one runner configured that is exactly the question a green dot can no
-    /// longer answer: it takes only one healthy runner to turn it green
-    /// while a second sits there with no tmux at all. This is how the bar can
-    /// name that second runner instead of just going quiet about it.
+    /// on purpose — ANDing would turn the whole status bar red every time any
+    /// one laptop was merely asleep, which is not news worth a color change.
+    /// But a single merged boolean is also the whole story only if nobody
+    /// needs to know WHICH runner is the problem, and with more than one
+    /// runner configured that is exactly the question the merged dot cannot
+    /// answer: it takes only one healthy runner to keep it quiet while a
+    /// second sits there with no tmux at all. This is how the bar can name
+    /// that second runner instead of just going quiet about it.
+    ///
+    /// Two colors in that paragraph have moved out from under it, and both
+    /// arguments survive the move. The ANDed bar was "orange" until `8741757`
+    /// made an unreadable tmux red rather than amber — nobody is waiting, the
+    /// runtime is not answering. And the merged dot was "a green dot ... turn
+    /// it green" until the healthy half went neutral: green in this palette is
+    /// `Status.done`, and a dot that is always on is a dot nobody reads. The
+    /// point was never the hue. It is that one boolean ORed across a fleet
+    /// cannot name a runner, so something else has to.
     ///
     /// A runner still in `.connecting` — the few seconds before its first
     /// read has come back — is not yet known to be anything, so it is left
