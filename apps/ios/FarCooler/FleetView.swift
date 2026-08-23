@@ -1659,6 +1659,25 @@ struct LinkStatusChip: View {
 /// list — a `NavigationStack` with a title and a "Done" button in the sheet,
 /// nothing of the kind when it's `FleetView`'s own fallback content — and
 /// `List` content itself carries no opinion about what encloses it.
+///
+/// **Accent is spent per screen, not per card.** Every row here is a tap
+/// target, so blue cannot mean "this is tappable" — everything is, and the
+/// terminal rows carrying the actual work are not blue. What is left for it to
+/// mean is "this is the one worth finding", and a full-accent label repeated
+/// once per workspace down a scrolling list says that about the least urgent
+/// thing on the screen. The rule: a control that appears ONCE keeps the accent,
+/// because color is the only thing that makes it findable; a control that
+/// repeats per card is found by its position and its glyph, and drops to
+/// secondary.
+///
+/// So the accent stays on `WorkspaceListView`'s two toolbar buttons — the one
+/// place in the app work is started, in the platform's own corner, named by
+/// this list's own empty state — and on `HostSwitcherBar`'s runner menu, which
+/// is the escape hatch from a screen that believes it is fine while the person
+/// holding it can see that it is not. It leaves the two things this list draws
+/// once per workspace: the overflow `…`, which iOS draws secondary in its own
+/// lists, and "New terminal", whose `+` keeps the accent so the row still reads
+/// as an action.
 struct FleetList: View {
     let fleet: Fleet
     @ObservedObject var connection: Connection
@@ -1745,12 +1764,33 @@ struct FleetList: View {
                     if workspace.terminals.isEmpty {
                         Text("No terminals").font(.callout).foregroundStyle(.secondary)
                     }
+                    // The loudest accent on the screen, and the least urgent
+                    // action on it: a full-blue sentence at the foot of every
+                    // card, repeated for as many workspaces as the runner has.
+                    // See the rule on `FleetList`. The `+` keeps the accent, so
+                    // a row with no chevron and no disclosure still reads as
+                    // something you press; the words drop to secondary, where
+                    // they are also plainly easier to read than accent-on-dark.
+                    //
+                    // Tinted rather than only restyled, because `.foregroundStyle`
+                    // inside a button's label is not reliably what wins — see the
+                    // note on the `…` menu below, and `AgentView`'s composer row.
+                    // `Color.accentColor` on the glyph rather than `.tint`: the
+                    // tint IS secondary here, so asking for it would grey the
+                    // thing this comment is keeping blue. If the explicit style
+                    // is overridden too, the row goes entirely grey, which is the
+                    // safe direction to fail in.
                     Button {
                         Task { await connection.createTerminal(workspace: workspace) }
                     } label: {
-                        Label("New terminal", systemImage: "plus")
+                        Label {
+                            Text("New terminal")
+                        } icon: {
+                            Image(systemName: "plus").foregroundStyle(Color.accentColor)
+                        }
                     }
                     .font(.callout)
+                    .tint(.secondary)
                 } header: {
                     HStack(spacing: 6) {
                         Text(workspace.task)
@@ -1759,7 +1799,20 @@ struct FleetList: View {
                             // WHICH worktree this is; without a priority it was
                             // simply the first `Text` the layout reached for
                             // when the branch and the counts wanted room.
+                            //
+                            // That priority was right and incomplete, and what
+                            // it left out shipped a broken header: a priority
+                            // says who gives up width, not HOW, and it named no
+                            // order among the three things that now had to give
+                            // instead. See the counts below. One line and a
+                            // middle truncation is the how — the same pair
+                            // `NeedsYouView.header` puts on the same string, so
+                            // a long task reads the same way on both screens
+                            // rather than wrapping a section header to two lines
+                            // on one of them.
                             .layoutPriority(1)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         // Something under here wants you, said once at the top
                         // rather than left to be inferred from a row further
                         // down that may be scrolled off.
@@ -1781,6 +1834,14 @@ struct FleetList: View {
                         if workspace.worktreeMissing {
                             Text("worktree gone")
                                 .font(.caption2)
+                                // A fixed two-word notice, not user text, and
+                                // the same reasoning as the counts: it either
+                                // fits on its line or the row is the wrong shape
+                                // for it. Wrapped to "worktree" over "gone" it
+                                // doubles the height of a header that is trying
+                                // to say a worktree is missing.
+                                .lineLimit(1)
+                                .fixedSize()
                                 // Red, not amber. A worktree that is no longer
                                 // on disk is a failure, and amber in this app
                                 // means an agent is waiting on you — which the
@@ -1788,7 +1849,10 @@ struct FleetList: View {
                                 // in the same color, about something else.
                                 .foregroundStyle(.red)
                         }
-                        Spacer()
+                        // `minLength: 0`, as in `NeedsYouView.header`. A bare
+                        // `Spacer` reserves 8 points it will not give back, and
+                        // this row's whole problem is the last few points.
+                        Spacer(minLength: 0)
                         // What this worktree has changed, which is the fact the
                         // Mac's sidebar puts here and the one that says whether
                         // a workspace is worth opening. Monospaced so the
@@ -1801,6 +1865,27 @@ struct FleetList: View {
                                 Text("-\(counts.deletions)").foregroundStyle(.red)
                             }
                             .font(.caption2.monospaced())
+                            // **Rigid.** This is what broke: with the task on
+                            // `.layoutPriority(1)` and nothing said about these,
+                            // the counts became the thing the row squeezed
+                            // instead — and a `Text` with no line limit reports
+                            // its minimum width as one character, so `+1,366`
+                            // and `-1,449` did not truncate, they WRAPPED, into
+                            // a column of single digits about seven points wide.
+                            // The branch beside them was being crushed to `e…s`
+                            // in the same move, because the two of them sat at
+                            // the same priority and gave way together.
+                            //
+                            // `.fixedSize` rather than another priority number.
+                            // A priority only orders who gives first; these must
+                            // never give at all, and they can afford not to — a
+                            // diff count is a handful of digits with a known
+                            // ceiling, and it is the fact this row exists to
+                            // carry. The line limit is belt and braces: it is
+                            // what keeps the failure a truncation rather than a
+                            // column if a future edit takes the fixed size away.
+                            .lineLimit(1)
+                            .fixedSize()
                             // Read aloud, the parts are "plus 82" and "minus
                             // 13" — two numbers with nothing attaching them to
                             // a diff, which is what this said until now. The
@@ -1823,6 +1908,24 @@ struct FleetList: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            // Last in the chain, which is the rule
+                            // `NeedsYouView.header` already states in words for
+                            // this same string: which worktree this is survives
+                            // a narrow screen; which branch it is on is the fact
+                            // that can afford to be truncated. That header had
+                            // the `-1` and this one never did, so on the front
+                            // door the branch was a peer of the counts rather
+                            // than the thing that yields to them.
+                            //
+                            // The consequence is deliberate and worth naming: a
+                            // long task now takes the width, and on the worst
+                            // rows the branch is an ellipsis. That is the right
+                            // trade — these branches share a prefix and differ
+                            // in the tail, so a few characters of one identifies
+                            // nothing, while a truncated task still says which
+                            // worktree you are looking at, and the branch is
+                            // spelled in full one tap inside.
+                            .layoutPriority(-1)
                         // Hide, Unhide, Remove Worktree and the stack all live
                         // behind this glyph and nowhere else on the phone, and
                         // it inherited a grouped header's `.footnote` — a
@@ -1831,6 +1934,10 @@ struct FleetList: View {
                         // band is 44, which costs this header about 24 points of
                         // height per workspace. Worth it: a header is read once
                         // on the way past and this is the one control in it.
+                        //
+                        // Rigid, like the counts: an `Image` in a fixed frame
+                        // has nothing to give, so it is not part of the
+                        // negotiation above at all.
                         Menu {
                             Button {
                                 Task { await connection.createTerminal(workspace: workspace) }
@@ -1880,6 +1987,22 @@ struct FleetList: View {
                                     alignment: .trailing)
                                 .contentShape(.rect)
                         }
+                        // The `.foregroundStyle` above was right and never
+                        // reached the glyph. A `Menu` tints its own label with
+                        // the accent color and a foreground style set inside
+                        // does not survive it — the bug `4458dcb` found in the
+                        // transcript composer, where five controls "read as a
+                        // line of links", and `AgentView` fixes the same way.
+                        // So this circled `…` has been drawing in full accent on
+                        // every workspace header while the code asked for grey.
+                        //
+                        // Grey is also what it should be on the merits: iOS
+                        // draws the overflow affordance in its own lists
+                        // secondary, and this one repeats per card. The style
+                        // stays where it is rather than being deleted, because
+                        // it is what the glyph resolves to once the tint lets it
+                        // through.
+                        .tint(.secondary)
                     }
                     // Against the grouped list's uppercasing, which is right for
                     // the word "SETTINGS" and wrong for both halves of this: the
