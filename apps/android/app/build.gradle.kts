@@ -202,6 +202,41 @@ android {
         buildConfig = true
     }
 
+    // The one lint check that fails a release build over a class this app does
+    // not have.
+    //
+    // `lintVitalRelease` runs on `assembleRelease` and not on `assembleDebug`,
+    // so this was the SECOND thing standing between this project and a release
+    // build — invisible for the same reason the missing `proguard-rules.pro`
+    // was, and only reachable once R8 stopped failing first.
+    //
+    // `InvalidFragmentVersionForActivityResult` fires on any
+    // `registerForActivityResult` call when the resolved `androidx.fragment` is
+    // older than 1.3.0, and it resolves to 1.1.0 here — pulled in transitively
+    // by `play-services-basement`, under `firebase-messaging`, which is the
+    // only reason this app has Fragment on its classpath at all.
+    //
+    // What the check is warning about cannot happen here. The bug is that
+    // `FragmentActivity` before 1.3.0 did not call
+    // `super.onRequestPermissionsResult()` and used request codes the
+    // ActivityResult APIs could not match. `MainActivity` is a
+    // `ComponentActivity` — this app is Compose end to end and instantiates no
+    // Fragment anywhere — so the broken override is not on the path, and R8
+    // strips the unused Fragment classes out of the release APK regardless.
+    //
+    // Disabled rather than baselined on purpose: a `lint-baseline.xml` would
+    // silence this one by freezing a snapshot of EVERY finding, including the
+    // ones a later change introduces. Naming the single check keeps the rest of
+    // `lintVital` gating releases, which is what it is for.
+    //
+    // The other way out is a direct `androidx.fragment` dependency pinned at a
+    // current version, which would satisfy the check honestly. It is not taken
+    // because it means declaring a dependency on a library this app never
+    // names, to raise the version of something that is dead code in its APK.
+    lint {
+        disable += "InvalidFragmentVersionForActivityResult"
+    }
+
     packaging {
         jniLibs {
             // The `.so` stays a real file in the APK rather than being extracted
