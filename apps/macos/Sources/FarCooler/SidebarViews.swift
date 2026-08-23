@@ -148,28 +148,12 @@ struct WorkspaceSection: View {
         )
     }
 
-    /// Numbers for terminals a worktree has more than one of, by command.
-    private var ordinals: [String: Int] {
-        var counts: [String: Int] = [:]
-        for terminal in workspace.terminals {
-            counts[terminal.label, default: 0] += 1
-        }
-        var seen: [String: Int] = [:]
-        var out: [String: Int] = [:]
-        for terminal in workspace.terminals where counts[terminal.label, default: 0] > 1 {
-            let next = (seen[terminal.label] ?? 0) + 1
-            seen[terminal.label] = next
-            out[terminal.id] = next
-        }
-        return out
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
             if showsTerminals {
-                let numbering = ordinals
+                let numbering = workspace.ordinals()
                 // Creation order, always. Sorting whatever needs you to the top
                 // put the sidebar in motion at the exact moment you were
                 // reaching for it: an agent three rows down finishes, every row
@@ -924,22 +908,6 @@ struct WorkspaceDetail: View {
     let onUnhide: () -> Void
     let onRemove: () -> Void
     let onOpenTerminal: (Terminal) -> Void
-
-    /// Numbers for terminals a worktree has more than one of, by command.
-    private var ordinals: [String: Int] {
-        var counts: [String: Int] = [:]
-        for terminal in workspace.terminals {
-            counts[terminal.label, default: 0] += 1
-        }
-        var seen: [String: Int] = [:]
-        var out: [String: Int] = [:]
-        for terminal in workspace.terminals where counts[terminal.label, default: 0] > 1 {
-            let next = (seen[terminal.label] ?? 0) + 1
-            seen[terminal.label] = next
-            out[terminal.id] = next
-        }
-        return out
-    }
 
     var body: some View {
         ScrollView {

@@ -67,6 +67,18 @@ struct AgentSurface: View {
     /// child, so the value has to live above both — the same reason `tail`
     /// above is not owned by the scroll view it steers.
     @State private var prefill: String?
+    /// A batch of review notes on its way in from the diff pane, held for the
+    /// one moment between arriving and being appended. Owned here for the same
+    /// reason `prefill` is: the composer is a child, and the thing handing text
+    /// over is not even in this pane.
+    @State private var appendix: String?
+
+    /// Text other panes have left for this one. See `ComposerHandoff`.
+    ///
+    /// Observed, which costs this pane a body evaluation whenever ANY pane is
+    /// handed something — a few times an hour at most, since it takes a person
+    /// pressing a button in an outbox to move it.
+    @ObservedObject private var handoff = ComposerHandoff.shared
 
     init(
         terminal: Terminal, binary: String?, environment: [String: String],
@@ -175,8 +187,20 @@ struct AgentSurface: View {
                             // cannot feed back into it. The freeze came from height,
                             // which does.
                             width: proxy.size.width,
-                            prefill: $prefill)
+                            prefill: $prefill,
+                            appendix: $appendix)
                             .padding(10)
+                            // `.task(id:)` rather than `onChange`, because the
+                            // text can be waiting BEFORE this pane exists: a
+                            // note put in the composer of a pane in another
+                            // tmux layout has nowhere to land until that layout
+                            // is switched to. A task runs on appearance as well
+                            // as on change, so both arrivals are the same code.
+                            .task(id: handoff.waiting[terminal.short]) {
+                                guard let text = handoff.take(for: terminal.short)
+                                else { return }
+                                appendix = text
+                            }
                     }
                 }
             }

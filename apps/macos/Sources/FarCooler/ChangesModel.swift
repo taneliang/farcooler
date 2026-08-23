@@ -620,6 +620,40 @@ enum DiffWalk {
     }
 }
 
+// MARK: - Where a review note can be sent
+
+extension Workspace {
+    /// The panes in this worktree a review note can be handed to.
+    ///
+    /// `isAgentPane` OR `canSwitchPaneMode`, because both are the daemon's word
+    /// for "an agent is in here" and only the first is about what is currently
+    /// DRAWN. A claude the reader has flipped back to its raw terminal is still
+    /// an agent holding an ACP session, and `terminal agent-prompt` reaches it;
+    /// excluding it would mean a review with nowhere to send to for the sole
+    /// reason that somebody wanted to watch the tty.
+    ///
+    /// The phone has this filter too and the two are deliberately NOT one
+    /// function: `Workspace` and `Terminal` are declared once per app, and this
+    /// app's `canSwitchPaneMode` says `&& !isChangesPane` where the phone's
+    /// does not — because a Mac can put a diff in a pane and the daemon refuses
+    /// to switch that one. `ReviewAgentTarget` is shared; the two meanings of
+    /// "can this pane hold a chat" are not the same fact.
+    ///
+    /// `short`, not `id`, because that is what a command line takes — the same
+    /// identifier `AgentStream` passes to `terminal agent-prompt` for a typed
+    /// message. The phone's targets carry its FFI's id for the same reason.
+    func reviewAgentTargets() -> [ReviewAgentTarget] {
+        let numbering = ordinals()
+        return terminals
+            .filter { $0.isAgentPane || $0.canSwitchPaneMode }
+            .map {
+                ReviewAgentTarget(
+                    id: $0.short, name: $0.displayName(ordinal: numbering[$0.id]),
+                    showsChat: $0.isAgentPane)
+            }
+    }
+}
+
 /// What one worktree changed, and the file currently open.
 @MainActor
 final class ChangesStore: ObservableObject {
@@ -755,9 +789,47 @@ final class ChangesStore: ObservableObject {
     let client: DaemonClient
     let workspace: Workspace
 
+    /// What the reader wants to tell the agent, collected across the review.
+    ///
+    /// A separate object rather than more `@Published`s here, because its
+    /// lifetime is different in the way that matters: everything else on this
+    /// store is derived from the daemon and can be thrown away and re-read,
+    /// while a comment is the only thing in this pane that a person typed and
+    /// that nothing else in the world has a copy of. It persists itself; see
+    /// `ReviewCommentQueue`.
+    let comments: ReviewCommentQueue
+
     init(client: DaemonClient, workspace: Workspace) {
         self.client = client
         self.workspace = workspace
+        // Keyed by worktree, which is what is being reviewed — so two changes
+        // panes in one layout share a queue rather than writing two, and so a
+        // runner that drops and comes back finds the notes still there. That
+        // second case is not hypothetical: `FleetStore` builds a fresh
+        // `DaemonClient` when a runner returns and `ContentView` therefore
+        // builds a fresh store, which would otherwise be an empty outbox.
+        comments = ReviewCommentQueue(workspace: workspace.id) { target, text in
+            guard let message = await client.agentPrompt(terminal: target.id, text: text)
+            else { return nil }
+            return Self.trouble(saying: message)
+        }
+    }
+
+    /// The CLI's failure, as something worth putting beside the notes it kept.
+    ///
+    /// One sentence this app wrote, with `farcooler`'s own words underneath
+    /// rather than as the sentence — the rule `ChangesPane.problem` already
+    /// keeps for the same reason: stderr set as body text under a heading the
+    /// app wrote is the app appearing to say it. The phone reads its FFI's
+    /// error more finely because what IT gets back is a Rust enum's
+    /// description, which is not a sentence at all; a CLI's stderr already is
+    /// one, and paraphrasing it would be this app guessing at a diagnosis it
+    /// was handed.
+    private static func trouble(saying message: String) -> ReviewTrouble {
+        let words = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ReviewTrouble(
+            sentence: "Couldn’t send these. They’re still here.",
+            transcript: words.isEmpty ? nil : words)
     }
 
     /// The files this scope is about.

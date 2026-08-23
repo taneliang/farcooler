@@ -108,6 +108,32 @@ struct Workspace: Decodable, Identifiable, Hashable {
             .joined(separator: " / ")
     }
 
+    /// Which of several identically-labeled terminals each one is, keyed by
+    /// terminal id.
+    ///
+    /// Two `claude` panes in one worktree are genuinely alike, so they get `1`
+    /// and `2` — but only when there is something to tell apart, or a lone
+    /// `shell` would be numbered for no reason.
+    ///
+    /// One method rather than the three private copies this app used to carry
+    /// (the sidebar section, the workspace detail, and — nearly — the review
+    /// note picker). They agreed, which is luck rather than design: the same
+    /// pane numbered differently depending on which view is showing it is a
+    /// disagreement about which terminal you are looking at. The phone ported
+    /// this from here, and its own copy says so.
+    func ordinals() -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for terminal in terminals { counts[terminal.label, default: 0] += 1 }
+        var seen: [String: Int] = [:]
+        var out: [String: Int] = [:]
+        for terminal in terminals where counts[terminal.label, default: 0] > 1 {
+            let next = (seen[terminal.label] ?? 0) + 1
+            seen[terminal.label] = next
+            out[terminal.id] = next
+        }
+        return out
+    }
+
     /// A one-line summary for a collapsed row.
     ///
     /// A collapsed worktree still has to answer "is anything happening here?"
@@ -382,6 +408,19 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Whether a title is the automatic one every terminal is created with.
     private static func isPlaceholder(_ title: String) -> Bool {
         title.hasPrefix("Terminal ") || title == "Terminal"
+    }
+
+    /// `label`, plus its ordinal when it has one.
+    ///
+    /// For the places with nowhere to hang a second view — a menu item, a
+    /// button that says where a note is going. The sidebar keeps the two halves
+    /// as separate `Text`s so it can dim the number; a line of prose cannot.
+    ///
+    /// A named conversation needs no counter: the ordinal exists to tell three
+    /// identical `claude`s apart, and a title the agent chose already has.
+    func displayName(ordinal: Int?) -> String {
+        guard let ordinal, label == Self.name(of: preset) else { return label }
+        return "\(label) \(ordinal)"
     }
 
     /// One word for one thing, wherever a running command is shown.

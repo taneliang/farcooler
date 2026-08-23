@@ -32,6 +32,17 @@ struct AgentComposer: View {
     /// A binding rather than a method, because the composer owns its text and
     /// a second writer would have to reach into `@State` to set it.
     @Binding var prefill: String?
+    /// Text handed in from outside that must not REPLACE what is here — a
+    /// batch of review notes from the diff pane's outbox.
+    ///
+    /// A second binding rather than a flag on the first, because the two are
+    /// different operations rather than one with a mode. Edit means "put this
+    /// message back", which is a replacement by definition: the reader asked to
+    /// change something they already sent. Notes arriving from another pane
+    /// mean "and also this", and a half-typed sentence in the field is
+    /// somebody's work — losing it to a button pressed in a different pane is
+    /// the sort of thing nobody reports and everybody stops trusting.
+    @Binding var appendix: String?
 
     @State private var text = ""
     @State private var cursor = 0
@@ -163,6 +174,19 @@ struct AgentComposer: View {
             text = incoming
             cursor = incoming.count
             prefill = nil
+        }
+        // And the other direction: added to what is here rather than put in
+        // place of it. See `appendix`, and `ComposerHandoff` for what sends it.
+        //
+        // A blank line between, because what arrives is a numbered list with a
+        // heading over it — run onto the end of a sentence in progress it would
+        // read as part of that sentence, and the agent would receive it that
+        // way too.
+        .onChange(of: appendix) { _, incoming in
+            guard let incoming, !incoming.isEmpty else { return }
+            text = text.isEmpty ? incoming : text + "\n\n" + incoming
+            cursor = text.count
+            appendix = nil
         }
         // Debounced by `.task(id:)` itself: a token that changes on every
         // keystroke cancels its predecessor for free, which is the whole

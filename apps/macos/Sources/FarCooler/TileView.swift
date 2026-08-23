@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -227,7 +228,8 @@ struct TileView: View {
             grid: PaneGrid(columns: rect.columns, rows: rect.rows),
             onDrop: { dragged, side in onDropOnPane(dragged, terminal.id, side) },
             onSearchFiles: onSearchFiles,
-            onSwitchPaneMode: onSwitchPaneMode
+            onSwitchPaneMode: onSwitchPaneMode,
+            reviewTargets: workspace.reviewAgentTargets()
         )
         .onTapGesture { if !isFocused { onFocus(terminal.id) } }
     }
@@ -329,6 +331,14 @@ private struct TilePane: View {
     let onSearchFiles: (String) async -> [String]
     /// Switch this pane between its terminal and its chat.
     let onSwitchPaneMode: (Terminal) -> Void
+    /// The agent panes in this worktree a review note can be sent to, for the
+    /// pane showing the diff.
+    ///
+    /// Values rather than the `Workspace` they come from, and worked out by the
+    /// view that already holds it: `ChangesStore` was built once, against the
+    /// worktree as it looked then, and a list of panes made from that snapshot
+    /// would still be offering an agent that exited an hour ago.
+    let reviewTargets: [ReviewAgentTarget]
 
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var drag = PaneDrag.shared
@@ -365,7 +375,7 @@ private struct TilePane: View {
                 // the diff can be read — that comes from the daemon over the
                 // same channel the sidebar's counts do. A pane whose host was
                 // killed still shows the branch; it just cannot be split.
-                ChangesPane(changes: changes, isFocused: isFocused)
+                ChangesPane(changes: changes, isFocused: isFocused, agents: reviewTargets)
                     .id("\(terminal.id)#changes")
             } else if isLive, terminal.isAgentPane {
                 // Same empty `onResize` as the terminal case just below, and

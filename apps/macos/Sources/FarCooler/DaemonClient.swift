@@ -2005,6 +2005,29 @@ final class DaemonClient: ObservableObject {
         _ = await run(["changes", "read", workspace])
     }
 
+    /// Hand a batch of review notes to an agent pane. Nil means it went.
+    ///
+    /// `terminal agent-prompt`, which is the same call `AgentStream.send` makes
+    /// for a typed message — so a batch of notes arrives in that agent's
+    /// transcript exactly as a message typed into its composer does, and there
+    /// is no second "review comment" channel for the daemon and two clients to
+    /// keep in step.
+    ///
+    /// `runRaw` rather than `run`, for both of its differences. The failure
+    /// comes BACK instead of going into `lastError`, because `lastError` draws
+    /// the orange banner across the top of this pane and the outbox is already
+    /// showing this failure beside the notes it kept — the same reason
+    /// `runReportingError` exists for sheets. And `background: true`, because
+    /// `busy` is `@Published` and toggling it re-evaluates every terminal
+    /// surface in the window; the outbox has a spinner of its own that costs
+    /// one popover.
+    func agentPrompt(terminal: String, text: String) async -> String? {
+        let (data, message) = await runRaw(
+            ["terminal", "agent-prompt", terminal, text], background: true)
+        if data != nil { return nil }
+        return message ?? "The command didn’t finish."
+    }
+
     private func run(_ args: [String], background: Bool = false) async -> Data? {
         let (data, message) = await runRaw(args, background: background)
         if let message { lastError = message }

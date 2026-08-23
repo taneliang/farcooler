@@ -1,21 +1,27 @@
 import Foundation
 import SwiftUI
 
-// Where you were, and what you want to say about it.
+// Where you were, and where what you want to say goes.
 //
-// Two things that outlive the process, kept together because they exist for the
-// same reason. `ChangesStore` and everything else in `Changes.swift` hangs off
-// `Connection`, which is torn down whenever iOS decides the app has been in the
-// background long enough — and the situation this review surface is built for
-// is a dozen ninety-second windows across an hour, so that happens roughly a
-// dozen times per session. Anything held only in memory is therefore held only
-// until the next set.
+// Both outlive the process, and for the same reason. `ChangesStore` and
+// everything else in `Changes.swift` hangs off `Connection`, which is torn down
+// whenever iOS decides the app has been in the background long enough — and the
+// situation this review surface is built for is a dozen ninety-second windows
+// across an hour, so that happens roughly a dozen times per session. Anything
+// held only in memory is therefore held only until the next set.
 //
-// So a bookmark and a comment queue live in `UserDefaults`, the same place
-// `RunnerStore` keeps the runners: none of it is secret, none of it is large,
-// and the one thing on this screen that IS secret — the diff itself — is
-// deliberately not written down here. What is stored is a path, a sha, and
-// whatever the reader typed, per workspace.
+// So a bookmark lives in `UserDefaults`, the same place `RunnerStore` keeps the
+// runners and the same place `ReviewCommentQueue` keeps unsent notes: none of
+// it is secret, none of it is large, and the one thing on this screen that IS
+// secret — the diff itself — is deliberately not written down anywhere. What is
+// stored is a path, a sha, and whatever the reader typed, per workspace.
+//
+// The queue itself is no longer declared here. It is in
+// `AgentKit/ReviewComments.swift` now, because the Mac's diff pane grew the
+// same feature and two copies of a comment queue is two ways for one worktree's
+// notes to be filed under two different keys. What is still here is the half
+// that is this app's: the bookmark, the pane filter, and the FFI call the queue
+// is handed.
 //
 // Nothing in this file records a JUDGMENT. There is no "reviewed" flag and no
 // per-file checkmark, and that is a decision rather than an omission: an agent
@@ -106,96 +112,24 @@ enum ReviewBookmarks {
     }
 }
 
-// MARK: - What a comment is attached to
+// MARK: - The comment machinery, which is shared now
 
-/// The part of the diff a comment is about.
-///
-/// The whole difference between a comment and a prompt. "Handle 429 as well"
-/// sent on its own is a sentence with no referent, and an agent receiving it has
-/// to guess which of the eleven files it just wrote is meant; the same sentence
-/// carrying `push.ts`, around lines 120-148, and the line that was on screen is
-/// an instruction that can be acted on without a search.
-///
-/// The quoted line comes out of the diff the daemon already sent and is capped
-/// at `quoteLimit` here — a client-side cut for the size of a prompt, on text
-/// the host had already decided to show. Nothing here re-reads a file, widens a
-/// hunk, or recovers anything the daemon chose to truncate or redact.
-struct ReviewAnchor: Codable, Equatable {
-    var file: String
-    /// The commit it was written against, when it was written against one.
-    /// A comment on the branch as a whole carries no sha, truthfully.
-    var commit: String?
-    /// The hunk's line range in the new file, when the comment was written on a
-    /// hunk rather than on the file as a whole.
-    var firstLine: Int?
-    var lastLine: Int?
-    /// One line of the hunk, so the agent is told WHERE in a 300-line file
-    /// rather than only which file.
-    var quote: String?
+// `ReviewAnchor`, `ReviewComment`, `SentReviewBatch`, `ReviewAgentTarget` and
+// `ReviewCommentQueue` were declared here and now live in
+// `AgentKit/ReviewComments.swift`, which the Mac's diff pane compiles too. The
+// reasoning moved with them, unchanged: why a comment is anchored, why notes
+// are batched rather than sent one at a time, why the queue writes itself down
+// on every change, and why a failed send is never retried on its own.
+//
+// The one thing that could not move is the send. This app calls
+// `terminal.agent_prompt` through the FFI and the Mac shells out to the CLI, so
+// the queue takes a closure — see `ReviewCommentQueue.phone` at the bottom of
+// this file, which is this app's half of it.
+//
+// What stayed above: the bookmark, which is about a process iOS terminates
+// between ninety-second windows and has no meaning on a desktop.
 
-    private static let quoteLimit = 120
-
-    static func quoting(_ text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard trimmed.count > quoteLimit else { return trimmed }
-        return String(trimmed.prefix(quoteLimit)) + "…"
-    }
-
-    /// How this reads in the app, above the composer and in the outbox.
-    var placeDescription: String {
-        guard let firstLine else { return "the whole file" }
-        guard let lastLine, lastLine > firstLine else { return "line \(firstLine)" }
-        return "lines \(firstLine)-\(lastLine)"
-    }
-
-    /// How this reads in the message the agent is sent.
-    ///
-    /// Backticked because the receiver is an agent reading markdown, and a path
-    /// in prose is a path it has to guess the boundaries of.
-    var promptDescription: String {
-        var out = "`\(file)`"
-        if let commit { out += " (commit \(commit.prefix(8)))" }
-        if firstLine != nil { out += ", around \(placeDescription)" }
-        return out
-    }
-}
-
-/// One thing the reader wants to say, not yet said.
-struct ReviewComment: Codable, Equatable, Identifiable {
-    var id: UUID = UUID()
-    var anchor: ReviewAnchor
-    var text: String
-    var writtenAt: Double = Date().timeIntervalSince1970
-}
-
-/// A batch that went, kept so the app can show WHAT was sent.
-///
-/// Required rather than nice: `session/prompt` is sent with `request_no_wait`
-/// and its response signals end-of-turn, not receipt, so nothing anywhere can
-/// confirm that an agent received a prompt. The only honest thing this screen
-/// can offer is the text it handed over and the time it did so, which is what
-/// this is. See `ReviewCommentQueue.send`.
-struct SentReviewBatch: Codable, Equatable, Identifiable {
-    var id: UUID = UUID()
-    var text: String
-    var agentName: String
-    var sentAt: Double
-    var count: Int
-}
-
-// MARK: - The queue
-
-/// An agent pane a review comment can be sent to.
-///
-/// A value rather than a `Terminal`, so `ChangesView` does not have to hold the
-/// `Connection` to know what it can send to — holding it would re-evaluate the
-/// diff list's body on every three-second fleet poll, which is the one thing a
-/// screen built for scrolling a long patch should not do.
-struct ReviewAgentTarget: Identifiable, Equatable {
-    var id: String
-    var name: String
-}
+// MARK: - Where a note can be sent
 
 extension Workspace {
     /// The panes in this worktree a review note can be handed to.
@@ -212,153 +146,43 @@ extension Workspace {
     /// from the inbox (`NeedsYouView`). Two copies of this filter is two
     /// chances for the same worktree to offer different agents depending on
     /// which door you came through.
+    ///
+    /// Not shared with the Mac, though `ReviewAgentTarget` is. `Workspace` and
+    /// `Terminal` are declared once per app and the two do not agree here: a
+    /// Mac's `canSwitchPaneMode` excludes a pane showing a diff, because a Mac
+    /// can put one there and the daemon refuses to switch it. One filter over
+    /// two different meanings of a word would be worse than two filters.
     func reviewAgentTargets() -> [ReviewAgentTarget] {
         let numbering = ordinals()
         return terminals
             .filter { $0.isAgentPane || $0.canSwitchPaneMode }
             .map {
-                ReviewAgentTarget(id: $0.id, name: $0.displayName(ordinal: numbering[$0.id]))
+                ReviewAgentTarget(
+                    id: $0.id, name: $0.displayName(ordinal: numbering[$0.id]),
+                    // Read by the Mac only, where a chat on screen is a
+                    // composer a note can be dropped into. Filled in here
+                    // anyway: a field one platform leaves at its default is a
+                    // field that is wrong the first time this app wants it.
+                    showsChat: $0.isAgentPane)
             }
     }
 }
 
-/// Comments written across a review, collected until they are sent as one.
-///
-/// **Collect, then send** is the whole design, and it is about the receiving end
-/// rather than the sending one. Firing a prompt per thought interrupts an agent
-/// five times over ten minutes and produces five turns, each one re-reading the
-/// files the last one just touched; the same five notes delivered together are
-/// one turn against one snapshot of the branch. It also matches how reviewing
-/// actually goes — the notes are made while reading and the decision to send is
-/// a separate, later one.
-///
-/// Persisted for the reason at the top of this file: the app is very likely
-/// terminated between the set in which a comment was written and the set in
-/// which it would have been sent, and an unsent comment lost to a process death
-/// is worse than no comment feature at all.
-@MainActor
-final class ReviewCommentQueue: ObservableObject {
-    /// Written, not yet sent.
-    @Published private(set) var pending: [ReviewComment] = [] { didSet { save() } }
+// MARK: - This app's half of the send
 
-    /// The last few batches that went, newest first.
-    ///
-    /// Capped at `sentKept`, because this is a receipt and not a history: the
-    /// question it answers is "what did I just send", asked within a minute of
-    /// sending it.
-    @Published private(set) var sent: [SentReviewBatch] = [] { didSet { save() } }
-
-    /// Set while a send is in flight, so the button can say so and cannot be
-    /// pressed twice — the one way this app could produce a duplicate prompt on
-    /// a protocol that has no way to notice one.
-    @Published private(set) var sending = false
-
-    /// A send that did not go, in words worth reading.
-    ///
-    /// NOT cleared by anything on a timer and never acted on automatically.
-    /// There is no acknowledgment on this path — see `SentReviewBatch` — so an
-    /// automatic retry would be the app deciding, with no evidence, that a
-    /// prompt which may well have arrived should be delivered a second time.
-    /// The comments stay in `pending` and the reader is the one who decides.
-    ///
-    /// `ChangesStore.Trouble`, not a second declaration of the same two
-    /// fields: this queue and that store are one screen, and the sentence and
-    /// the runner's words have to stay apart here for the same reason they do
-    /// there.
-    @Published var failure: ChangesStore.Trouble?
-
-    private static let sentKept = 5
-
-    private let core: ClientCore
-    private let workspace: String
-    private var loading = true
-
-    init(core: ClientCore, workspace: String) {
-        self.core = core
-        self.workspace = workspace
-        if let data = UserDefaults.standard.data(forKey: Self.key(workspace)),
-            let stored = try? JSONDecoder().decode(Stored.self, from: data)
-        {
-            pending = stored.pending
-            sent = stored.sent
-        }
-        loading = false
-    }
-
-    func add(_ comment: ReviewComment) {
-        pending.append(comment)
-        // A new comment is evidence the last failure has been read and moved
-        // past. Left up, it would sit above a queue it no longer describes.
-        failure = nil
-    }
-
-    func remove(_ comment: ReviewComment) {
-        pending.removeAll { $0.id == comment.id }
-    }
-
-    func clearPending() {
-        pending = []
-    }
-
-    /// Everything queued, as one message.
-    ///
-    /// Numbered and grouped in the order they were written, which is reading
-    /// order — the order the reader went through the diff in, and therefore the
-    /// order in which the notes make sense to each other.
-    func message(branch: String) -> String {
-        var lines: [String] = []
-        let count = pending.count
-        let noun = count == 1 ? "note" : "notes"
-        if branch.isEmpty {
-            lines.append("Review \(noun) from Far Cooler (\(count)):")
-        } else {
-            lines.append("Review \(noun) on `\(branch)` from Far Cooler (\(count)):")
-        }
-        lines.append("")
-        for (index, comment) in pending.enumerated() {
-            lines.append("\(index + 1). In \(comment.anchor.promptDescription):")
-            if let quote = comment.anchor.quote {
-                lines.append("   > \(quote)")
+extension ReviewCommentQueue {
+    /// The queue as this app builds it: the send is `terminal.agent_prompt`
+    /// over the FFI, the same call `AgentStream.send` makes, so a comment batch
+    /// arrives in the transcript exactly as a typed message does.
+    static func phone(core: ClientCore, workspace: String) -> ReviewCommentQueue {
+        ReviewCommentQueue(workspace: workspace) { target, text in
+            do {
+                _ = try await core.call(
+                    "terminal.agent_prompt", ["terminal": target.id, "text": text])
+                return nil
+            } catch {
+                return trouble(for: error)
             }
-            lines.append("   \(comment.text)")
-            lines.append("")
-        }
-        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Hand the batch to an agent, once.
-    ///
-    /// The call is `terminal.agent_prompt`, the same one `AgentStream.send`
-    /// makes, so a comment batch arrives in the transcript exactly as a typed
-    /// message does — there is no separate "review comment" channel to keep in
-    /// step, and the agent's own history shows what it was told.
-    ///
-    /// On failure the comments STAY in `pending` and nothing is retried. The
-    /// reader can press Try Again, and that is the only thing that ever sends
-    /// this batch a second time: `request_no_wait` means a failure here is
-    /// "this client did not get an answer", which is not the same as "the agent
-    /// did not get the prompt", and only a person can weigh the difference.
-    func send(to target: ReviewAgentTarget, branch: String) async {
-        guard !pending.isEmpty, !sending else { return }
-        let text = message(branch: branch)
-        let count = pending.count
-        sending = true
-        defer { sending = false }
-        do {
-            _ = try await core.call(
-                "terminal.agent_prompt", ["terminal": target.id, "text": text])
-            // Recorded BEFORE the queue is emptied, so a crash between the two
-            // loses the receipt rather than the comments.
-            sent.insert(
-                SentReviewBatch(
-                    text: text, agentName: target.name,
-                    sentAt: Date().timeIntervalSince1970, count: count),
-                at: 0)
-            if sent.count > Self.sentKept { sent = Array(sent.prefix(Self.sentKept)) }
-            pending = []
-            failure = nil
-        } catch {
-            failure = Self.trouble(for: error)
         }
     }
 
@@ -373,41 +197,23 @@ final class ReviewCommentQueue: ObservableObject {
     /// box now, and only on the arm with nothing written about it: under
     /// either of the other two it would be a transcript beneath a sentence
     /// that already names the cause and what to do next.
-    private static func trouble(for error: Error) -> ChangesStore.Trouble {
+    ///
+    /// Here rather than in `AgentKit` because `ClientCore.CoreError` is this
+    /// app's, and because the CLI the Mac runs fails in its own words.
+    private static func trouble(for error: Error) -> ReviewTrouble {
         if let core = error as? ClientCore.CoreError, case .disconnected = core {
-            return ChangesStore.Trouble(
+            return ReviewTrouble(
                 sentence: "The connection to this runner dropped, so these are still here. "
-                    + "Try again once it’s back.")
+                    + "Try again once it\u{2019}s back.")
         }
         let text = error.localizedDescription.lowercased()
         if text.contains("not found") || text.contains("unknown method") {
-            return ChangesStore.Trouble(
+            return ReviewTrouble(
                 sentence:
-                    "That pane isn’t running an agent anymore, so there was nothing to send to.")
+                    "That pane isn\u{2019}t running an agent anymore, so there was nothing to send to.")
         }
-        return ChangesStore.Trouble(
-            sentence: "Couldn’t send these. They’re still here.",
+        return ReviewTrouble(
+            sentence: "Couldn\u{2019}t send these. They\u{2019}re still here.",
             transcript: error.localizedDescription)
-    }
-
-    // MARK: Storage
-
-    private struct Stored: Codable {
-        var pending: [ReviewComment]
-        var sent: [SentReviewBatch]
-    }
-
-    private static func key(_ workspace: String) -> String {
-        "changes.comments.\(workspace)"
-    }
-
-    private func save() {
-        // The `didSet`s above fire while `init` is assigning what was just
-        // read, and writing it straight back would be a round trip through
-        // `UserDefaults` for a value that came out of it.
-        guard !loading else { return }
-        guard let data = try? JSONEncoder().encode(Stored(pending: pending, sent: sent))
-        else { return }
-        UserDefaults.standard.set(data, forKey: Self.key(workspace))
     }
 }

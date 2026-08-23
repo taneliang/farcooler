@@ -649,10 +649,13 @@ final class ChangesStore: ObservableObject {
     /// has kept that text since `776d3e0`, in a `DetailBox` under its own
     /// sentence; see `ChangesPane.problem`. Nothing here speaks it. It is
     /// shown where output goes.
-    struct Trouble: Equatable {
-        let sentence: String
-        var transcript: String?
-    }
+    ///
+    /// A typealias rather than a declaration since the review queue moved into
+    /// `AgentKit`: `ReviewCommentQueue.failure` is the same two fields for the
+    /// same reason, and it now has to be a type the Mac can name too. Keeping
+    /// this name is what keeps `error` and that failure ONE type on this
+    /// screen, which is what they have always been — see `ReviewTrouble`.
+    typealias Trouble = ReviewTrouble
 
     @Published var error: Trouble?
 
@@ -706,7 +709,7 @@ final class ChangesStore: ObservableObject {
     init(core: ClientCore, workspace: String) {
         self.core = core
         self.workspace = workspace
-        self.comments = ReviewCommentQueue(core: core, workspace: workspace)
+        self.comments = ReviewCommentQueue.phone(core: core, workspace: workspace)
     }
 
     /// The files this scope is about.

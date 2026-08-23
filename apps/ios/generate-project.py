@@ -58,8 +58,9 @@ SOURCES = [
     "AdapterEditorView.swift",
     "Changes.swift",
     "ChangesView.swift",
-    # Where the reader was and what they want to say, both of which outlive the
-    # process — see its own doc comment.
+    # Where the reader was, and this app's half of getting what they want to
+    # say to an agent — see its own doc comment. The queue itself is shared with
+    # the Mac now; it is `ReviewComments.swift` in `AGENTKIT_SOURCES` below.
     "ChangesReview.swift",
     "BranchAndStack.swift",
 ]
@@ -146,6 +147,13 @@ AGENTKIT_SOURCES = [
     # had it verbatim; only the device label differs.
     "PushRegistration.swift",
     "RelaySection.swift",
+    # The review comment queue, which the phone wrote and the Mac's diff pane
+    # now shares. Only in THIS list: it holds unsent notes keyed by workspace,
+    # and the watch and the two extensions neither review a diff nor have a
+    # composer to put one in. The send itself is a closure the app supplies —
+    # `ReviewCommentQueue.phone` in `ChangesReview.swift` — so nothing in
+    # AgentKit reaches the FFI.
+    "ReviewComments.swift",
     "TokenStore.swift",
     "VersionSection.swift",
     "Transcript.swift",

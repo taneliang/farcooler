@@ -38,6 +38,14 @@ struct ChangesPane: View {
     /// reader already made to start reading.
     let isFocused: Bool
 
+    /// The agent panes in this worktree a review note can be sent to.
+    ///
+    /// Handed in as values by `TileView`, which holds the live `Workspace`.
+    /// This pane's store was built against the worktree as it looked when the
+    /// pane opened, so asking IT would offer agents that have since exited and
+    /// miss the one started five minutes ago.
+    let agents: [ReviewAgentTarget]
+
     /// The terminal's own font, because this is the same code, read the same
     /// way, a few inches from a pane rendering it. Two monospaced faces side by
     /// side is a difference that means nothing, and someone who has set their
@@ -341,6 +349,13 @@ struct ChangesPane: View {
             }
             navButton("arrow.up.to.line", help: "Previous hunk or file") { moveHunk(-1) }
             navButton("arrow.down.to.line", help: "Next hunk or file") { moveHunk(1) }
+
+            Divider().frame(height: 14).padding(.horizontal, 2)
+            // Last on the strip, because it is where a review ENDS: the notes
+            // are written down the diff and leave from one place.
+            ReviewOutboxButton(
+                comments: changes.comments, agents: agents,
+                branch: changes.changeSet.branch)
         }
         .padding(.horizontal, 6)
         .frame(height: WorkspaceStyle.paneHeaderHeight)
@@ -1421,6 +1436,12 @@ struct ChangesPane: View {
         var hunk = 0
         var previous: Int?
         var beginsHunk = true
+        // Read in one pass ahead of the rows, because a marker is drawn BEFORE
+        // the lines that decide how far its hunk runs — and a note anchored to
+        // a hunk has to name the range. `DiffHunkMark.marks(in:)` finds the
+        // same boundaries this loop does, from the same rule, which is why it
+        // can be indexed by the same counter.
+        let marks = DiffHunkMark.marks(in: lines)
 
         for (i, line) in lines.enumerated() {
             if let above = previous, let below = line.newNumber, below > above + 1 {
@@ -1446,7 +1467,14 @@ struct ChangesPane: View {
                 out.append(
                     DiffRow(
                         id: "\(f.path)!hunk\(hunk)",
-                        kind: .hunk(hunk + 1, line.oldNumber, line.newNumber),
+                        // The fallback cannot happen — one rule, walked twice —
+                        // and is here so that if it ever did, the marker would
+                        // be drawn without its range rather than not at all.
+                        kind: .hunk(
+                            marks.indices.contains(hunk)
+                                ? marks[hunk]
+                                : DiffHunkMark(
+                                    index: hunk + 1, old: line.oldNumber, new: line.newNumber)),
                         path: f.path))
                 hunk += 1
                 beginsHunk = false
@@ -1500,30 +1528,20 @@ struct ChangesPane: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
         case .line(let line):
-            lineRow(line)
+            lineRow(line, in: r.path)
         case .gap(let path, let index, let count):
             gapRow(path, index, count)
-        case .hunk(let index, let old, let new):
-            hunkRow(index: index, old: old, new: new)
+        case .hunk(let mark):
+            DiffHunkRow(
+                mark: mark,
+                gutter: gutter,
+                font: .system(size: max(10.5, preferences.fontSize - 1), design: .monospaced),
+                anchor: ReviewAnchor(
+                    file: r.path, commit: changes.scope == .commit ? changes.selectedCommit : nil,
+                    firstLine: mark.firstNew, lastLine: mark.lastNew,
+                    quote: mark.quote.flatMap(ReviewAnchor.quoting)),
+                comments: changes.comments)
         }
-    }
-
-    private func hunkRow(index: Int, old: Int?, new: Int?) -> some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: gutter * 2 + 12)
-            Text("@@")
-                .foregroundStyle(Color.accentColor.opacity(0.72))
-            Text("  \(old ?? 0) → \(new ?? 0)")
-                .foregroundStyle(.secondary)
-            Rectangle()
-                .fill(WorkspaceStyle.hairline.opacity(0.72))
-                .frame(height: 1)
-                .padding(.leading, 10)
-                .padding(.trailing, 8)
-        }
-        .font(.system(size: max(10.5, preferences.fontSize - 1), design: .monospaced))
-        .padding(.vertical, 2)
-        .accessibilityLabel("Hunk \(index), old line \(old ?? 0), new line \(new ?? 0)")
     }
 
     /// The control that opens a gap.
@@ -1586,6 +1604,15 @@ struct ChangesPane: View {
                 .font(.system(size: WorkspaceStyle.PaneText.body, design: .monospaced))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
+            // Always drawn, unlike the line and hunk anchors, which appear on
+            // hover. One per file is not chrome — and if every way into this
+            // feature were revealed by hovering, the feature would be invisible
+            // to anyone not already looking for it.
+            ReviewNoteButton(
+                anchor: ReviewAnchor(
+                    file: f.path,
+                    commit: changes.scope == .commit ? changes.selectedCommit : nil),
+                comments: changes.comments)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -1598,7 +1625,53 @@ struct ChangesPane: View {
         }
     }
 
-    private func lineRow(_ line: DiffComputation.Line) -> some View {
+    /// One line of the patch, and the way to say something about that line.
+    ///
+    /// A view of its own rather than a function returning one, for the anchor
+    /// alone: the control it carries is revealed by hover, and hover is state.
+    /// See `DiffLineRow`.
+    private func lineRow(_ line: DiffComputation.Line, in path: String) -> some View {
+        DiffLineRow(
+            line: line,
+            gutter: gutter,
+            font: codeFont,
+            anchor: ReviewAnchor(
+                file: path, commit: changes.scope == .commit ? changes.selectedCommit : nil,
+                firstLine: line.newNumber, lastLine: line.newNumber,
+                quote: ReviewAnchor.quoting(line.text)),
+            comments: changes.comments)
+    }
+}
+
+/// One line of the patch, and a hover-revealed way to say something about
+/// exactly it.
+///
+/// The phone anchors a note to a HUNK because a thumb cannot reliably hit a
+/// line. A pointer can, and one line is the better instruction: "around lines
+/// 120-148" leaves an agent working out which of twenty-eight lines was meant,
+/// and "line 133" does not. So the finest anchor here is a line; the hunk's is
+/// still there for a note about a CHANGE rather than about a line.
+///
+/// Hidden until hover, on `DiffGapControl`'s rule — a bubble on every one of
+/// four thousand rows is chrome you have to read the diff through.
+///
+/// Drawn OVER the old-line gutter rather than in a column of its own. A column
+/// would move every line of every file sideways for a control used on two of
+/// them, and the old number is the one number a note never quotes: an anchor is
+/// stated in new-file lines, and those stay visible under the pointer.
+private struct DiffLineRow: View {
+    let line: DiffComputation.Line
+    let gutter: CGFloat
+    let font: Font
+    let anchor: ReviewAnchor
+    /// Passed, NOT observed, for the reason `TileView.changes` gives: this view
+    /// exists once per visible line, and none of them draw the queue. The
+    /// composer this hands it to does, and it exists one at a time.
+    let comments: ReviewCommentQueue
+
+    @State private var hovering = false
+
+    var body: some View {
         HStack(spacing: 0) {
             Rectangle()
                 .fill(line.kind.accent)
@@ -1621,7 +1694,7 @@ struct ChangesPane: View {
                 .fixedSize(horizontal: true, vertical: false)
             Spacer(minLength: 0)
         }
-        .font(codeFont)
+        .font(font)
         .padding(.vertical, 0.5)
         // No syntax highlighting, still. What earns the pixels is which lines
         // changed, and coloring keywords on top of an add/remove background
@@ -1632,6 +1705,219 @@ struct ChangesPane: View {
         // One table now, on the kind itself — see the `DiffComputation.Kind`
         // extension in `DiffView.swift`.
         .background(line.kind.wash)
+        .overlay(alignment: .leading) { note }
+        .onHover { hovering = $0 }
+    }
+
+    /// Only on a line that HAS a place in the new file.
+    ///
+    /// A removed line has no new-side number, so there is nothing to anchor a
+    /// note to except the file — and a note that says "the whole file" while
+    /// the reader was pointing at one deleted line is worse than no control at
+    /// all. The hunk above it covers that case honestly: the range it names
+    /// contains the removal.
+    @ViewBuilder
+    private var note: some View {
+        if hovering, anchor.firstLine != nil {
+            ReviewNoteButton(
+                anchor: anchor, comments: comments,
+                box: CGSize(width: 15, height: 13), onGutter: true)
+                .padding(.leading, 3)
+        }
+    }
+}
+
+/// The seam between two hunks: where the patch resumes, and a way to comment on
+/// the change rather than on one of its lines.
+private struct DiffHunkRow: View {
+    let mark: DiffHunkMark
+    let gutter: CGFloat
+    let font: Font
+    let anchor: ReviewAnchor
+    let comments: ReviewCommentQueue
+
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: gutter * 2 + 12)
+            Text("@@")
+                .foregroundStyle(Color.accentColor.opacity(0.72))
+            Text("  \(mark.old ?? 0) → \(mark.new ?? 0)")
+                .foregroundStyle(.secondary)
+            // Reserved rather than conditional, so the rule beside it does not
+            // jump sideways as the pointer crosses the row.
+            ReviewNoteButton(
+                anchor: anchor, comments: comments, box: CGSize(width: 15, height: 14))
+                .opacity(hovering ? 1 : 0)
+                .padding(.leading, 4)
+            Rectangle()
+                .fill(WorkspaceStyle.hairline.opacity(0.72))
+                .frame(height: 1)
+                .padding(.leading, 6)
+                .padding(.trailing, 8)
+        }
+        .font(font)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .accessibilityLabel(
+            "Hunk \(mark.index), old line \(mark.old ?? 0), new line \(mark.new ?? 0)")
+    }
+}
+
+/// The control that turns a place in the diff into something to say about it.
+///
+/// A popover anchored to the place itself, not a sheet. The phone's composer is
+/// full-screen because a phone has one surface and a keyboard that takes half
+/// of it; here the diff stays on screen beside what is being written about,
+/// which is the whole reason a note is worth writing where it is written.
+private struct ReviewNoteButton: View {
+    let anchor: ReviewAnchor
+    let comments: ReviewCommentQueue
+    /// How much room this may take, which is decided by what it sits in rather
+    /// than by the control.
+    ///
+    /// Not `WorkspaceStyle.controlTarget`, which is 24pt and would make every
+    /// file heading a third taller than it is now and every hunk seam taller
+    /// than the lines around it. The default matches the chevron already in a
+    /// heading; the diff's own rows ask for less.
+    var box = CGSize(width: 16, height: 18)
+    /// Whether to draw a ground of its own — for the one that appears over the
+    /// line-number gutter, where there is nothing else to say it is a control.
+    var onGutter = false
+
+    @State private var writing = false
+
+    var body: some View {
+        Button { writing = true } label: {
+            Image(systemName: "text.bubble")
+                .font(.system(size: box.height >= 16 ? 9.5 : 8.5, weight: .medium))
+                .frame(width: box.width, height: box.height)
+                .contentShape(Rectangle())
+                .background(
+                    onGutter ? AnyShapeStyle(WorkspaceStyle.disclosureHover) : AnyShapeStyle(.clear),
+                    in: RoundedRectangle(cornerRadius: 3))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(helpText)
+        .popover(isPresented: $writing, arrowEdge: .trailing) {
+            ReviewNoteComposer(anchor: anchor, comments: comments) { writing = false }
+        }
+    }
+
+    private var helpText: String {
+        anchor.firstLine == nil
+            ? "Write a note about this file"
+            : "Write a note about \(anchor.placeDescription)"
+    }
+}
+
+/// What the reader wants to say, and what it is about.
+///
+/// The anchor is SHOWN rather than implied, which is the phone's reasoning and
+/// survives the change of surface: what separates a comment from a prompt is
+/// that it is about something, and the reader has to see which something before
+/// deciding what to say about it.
+private struct ReviewNoteComposer: View {
+    let anchor: ReviewAnchor
+    @ObservedObject var comments: ReviewCommentQueue
+    let done: () -> Void
+
+    @State private var text = ""
+    @FocusState private var typing: Bool
+
+    private var trimmed: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            about
+            TextField("What should the agent do about this?", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: WorkspaceStyle.PaneText.body))
+                .lineLimit(3...10)
+                .focused($typing)
+                .padding(6)
+                .background(WorkspaceStyle.document, in: RoundedRectangle(cornerRadius: 5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5).strokeBorder(WorkspaceStyle.hairline))
+            HStack(spacing: 6) {
+                // Says the thing that makes collecting worth the wait, and says
+                // it where the wait is being agreed to.
+                Text(
+                    comments.pending.isEmpty
+                        ? "Notes are sent to an agent together, in one turn."
+                        : waitingLabel
+                )
+                .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 6)
+                Button("Cancel") { done() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Add") {
+                    comments.add(ReviewComment(anchor: anchor, text: trimmed))
+                    done()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(trimmed.isEmpty)
+                .help("Add this note to the outbox (⌘↩)")
+            }
+            .controlSize(.small)
+        }
+        .padding(10)
+        .frame(width: 320)
+        // Immediately, and with no sleep in front of it. The phone waits 250ms
+        // for a sheet's presentation animation to finish, because focus asked
+        // for mid-animation is dropped; a popover has no such animation to
+        // survive, and a composer that opens without a caret costs the click it
+        // was supposed to save.
+        .onAppear { typing = true }
+    }
+
+    private var waitingLabel: String {
+        comments.pending.count == 1
+            ? "1 note waiting, sent together."
+            : "\(comments.pending.count) notes waiting, sent together."
+    }
+
+    /// Where this note is about to be pinned, in the words the agent will get.
+    private var about: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                Text((anchor.file as NSString).lastPathComponent)
+                    .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                if anchor.firstLine != nil {
+                    Text(anchor.placeDescription)
+                        .font(
+                            .system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            // The whole path, because three files are called `mod.rs` and the
+            // leaf above is not enough to be sure which one is being annotated.
+            Text(anchor.file)
+                .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.head)
+            if let quote = anchor.quote {
+                Text(quote)
+                    .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.top, 2)
+            }
+        }
     }
 }
 
@@ -1687,6 +1973,355 @@ private struct DiffGapControl: View {
         .disabled(refused)
         .help(refused ? "This gap is too large to show" : "Show unchanged lines")
         .onHover { hovering = $0 }
+    }
+}
+
+/// Everything written and not yet said, and the two ways it leaves.
+///
+/// In the navigator strip rather than along the bottom of the pane. The phone
+/// puts its review bar at the bottom because the top of a modern iPhone is out
+/// of thumb reach one-handed; a pointer reaches a pane's top edge as easily as
+/// its bottom, and there is already a strip there holding every other control
+/// this pane has.
+private struct ReviewOutboxButton: View {
+    @ObservedObject var comments: ReviewCommentQueue
+    let agents: [ReviewAgentTarget]
+    let branch: String
+
+    @State private var open = false
+
+    var body: some View {
+        Button { open = true } label: {
+            HStack(spacing: 3) {
+                Image(systemName: comments.pending.isEmpty ? "text.bubble" : "text.bubble.fill")
+                    .font(.system(size: 9.5, weight: .medium))
+                if !comments.pending.isEmpty {
+                    Text("\(comments.pending.count)")
+                        .font(
+                            .system(
+                                size: WorkspaceStyle.PaneText.minimum, weight: .semibold,
+                                design: .monospaced))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 5)
+            .frame(height: WorkspaceStyle.controlTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(
+            comments.pending.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.accentColor)
+        )
+        .help(helpText)
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            ReviewOutbox(comments: comments, agents: agents, branch: branch)
+        }
+    }
+
+    private var helpText: String {
+        if comments.pending.isEmpty {
+            return "Notes for an agent. Press the speech bubble on a file heading, or hover a "
+                + "line or a hunk for one there."
+        }
+        return comments.pending.count == 1
+            ? "1 note waiting to be sent"
+            : "\(comments.pending.count) notes waiting to be sent"
+    }
+}
+
+/// The outbox itself.
+///
+/// **Collect, then send**, which is a decision about the agent rather than
+/// about the reader: five notes fired off as five prompts are five turns, each
+/// re-reading the files the last one just touched, and the fifth arrives while
+/// the agent is still acting on the first. The same five delivered together are
+/// one turn against one branch.
+///
+/// **Nothing here is ever resent on its own.** `session/prompt` goes out with
+/// `request_no_wait` and its response signals end-of-turn rather than receipt,
+/// so there is no acknowledgment anywhere on this path that an agent received a
+/// prompt. A failed send therefore means "this client did not get an answer",
+/// which is not the same as "the agent did not get the prompt" — and an
+/// automatic retry would be the app deciding, with no evidence, that a message
+/// which may already have arrived should arrive twice. So the notes stay, the
+/// failure is stated, and the reader is the one who decides.
+///
+/// **Put in Composer is the Mac's own answer to that.** The agent pane is a few
+/// inches away rather than a screen away, so the notes can land in its composer
+/// instead — visible, editable, and sent by a person pressing Return, at which
+/// point the missing receipt stops mattering because the transcript shows what
+/// happened. See `ComposerHandoff`.
+private struct ReviewOutbox: View {
+    @ObservedObject var comments: ReviewCommentQueue
+    let agents: [ReviewAgentTarget]
+    let branch: String
+
+    /// The panes that have a composer on screen to put something in. A pane
+    /// showing its raw terminal is a perfectly good target for a SEND and has
+    /// no field to type into — see `ReviewAgentTarget.showsChat`.
+    private var composerTargets: [ReviewAgentTarget] { agents.filter(\.showsChat) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            // Above the scroll rather than in it. A failure is about the whole
+            // queue, and one that scrolls out of sight while the reader looks
+            // at what it kept is a failure the app stopped saying.
+            if let failure = comments.failure {
+                trouble(failure)
+                Divider()
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if comments.pending.isEmpty {
+                        Text(
+                            "Nothing written yet. Press the speech bubble on a file heading, "
+                                + "or hover a line or a hunk for one there."
+                        )
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(9)
+                    }
+                    ForEach(comments.pending) { note in
+                        row(note)
+                    }
+                    if !comments.sent.isEmpty { receipts }
+                }
+            }
+            .frame(maxHeight: 320)
+            if !comments.pending.isEmpty {
+                Divider()
+                sendControls
+            }
+        }
+        .frame(width: 340)
+    }
+
+    /// No Clear here, deliberately. Everything else in this pane is derived
+    /// from the daemon and can be thrown away because it can be read again; a
+    /// note is the one thing on the screen a person typed, and one button that
+    /// discards all of them is the wrong thing to put an inch from Send. They
+    /// go one at a time, from the row that shows what is being thrown away.
+    private var header: some View {
+        HStack(spacing: 5) {
+            Text("Notes")
+                .font(WorkspaceStyle.paneTitle)
+            Spacer(minLength: 0)
+            if !comments.pending.isEmpty {
+                Text(
+                    comments.pending.count == 1
+                        ? "1 waiting" : "\(comments.pending.count) waiting"
+                )
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+    }
+
+    /// Orange rather than red, and a sentence rather than a banner: nothing was
+    /// lost — the notes are in the list below — and the button underneath
+    /// already reads Try Again.
+    private func trouble(_ failure: ReviewTrouble) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 9.5))
+                Text(failure.sentence)
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(.orange)
+            // The runner's own words, where the app has no account of its own —
+            // the shape `ChangesPane.problem` already uses for exactly this.
+            if let transcript = failure.transcript, !transcript.isEmpty {
+                DetailBox(text: transcript)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(9)
+        .background(.orange.opacity(0.12))
+    }
+
+    private func row(_ note: ReviewComment) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(note.text)
+                    .font(.system(size: WorkspaceStyle.PaneText.body))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(place(note.anchor))
+                    .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            Spacer(minLength: 0)
+            Button {
+                comments.remove(note)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .semibold))
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tertiary)
+            .help("Throw this note away")
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .help(note.anchor.file)
+    }
+
+    private func place(_ anchor: ReviewAnchor) -> String {
+        let leaf = (anchor.file as NSString).lastPathComponent
+        guard anchor.firstLine != nil else { return leaf }
+        return "\(leaf) · \(anchor.placeDescription)"
+    }
+
+    /// What went, and when. There is no delivery receipt to show, so this is
+    /// the whole of what can honestly be said — see `SentReviewBatch`.
+    private var receipts: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().padding(.vertical, 4)
+            Text("Sent")
+                .font(.system(size: WorkspaceStyle.PaneText.minimum, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 9)
+                .padding(.bottom, 2)
+            ForEach(comments.sent) { batch in
+                DisclosureGroup {
+                    Text(batch.text)
+                        .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(batch.count == 1 ? "1 note" : "\(batch.count) notes")
+                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        Text(receiptDetail(batch))
+                            .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+            }
+        }
+    }
+
+    /// Never "sent to" for a batch that was put in a composer: nothing was
+    /// sent, and the reader is the one holding it.
+    private func receiptDetail(_ batch: SentReviewBatch) -> String {
+        let when = Date(timeIntervalSince1970: batch.sentAt)
+            .formatted(date: .omitted, time: .shortened)
+        if batch.placedInComposer == true {
+            return "in \(batch.agentName)’s composer · \(when)"
+        }
+        return "to \(batch.agentName) · \(when)"
+    }
+
+    /// One button when there is one agent, a menu when there are several, and a
+    /// sentence when there are none.
+    ///
+    /// A picker with one entry would be a choice nobody has, and a disabled
+    /// button with no explanation is the app refusing without saying why: a
+    /// worktree whose agent has exited has nowhere to send to, and that is a
+    /// fact about the worktree rather than a fault in the notes.
+    @ViewBuilder
+    private var sendControls: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if comments.sending {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Sending…")
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .foregroundStyle(.secondary)
+                }
+            } else if agents.isEmpty {
+                Text("No agent is running in this worktree, so there’s nowhere to send these yet.")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(spacing: 6) {
+                    send
+                    if !composerTargets.isEmpty { compose }
+                    Spacer(minLength: 0)
+                }
+                Text("Far Cooler can’t tell whether an agent received a prompt, so nothing is "
+                    + "ever resent on its own.")
+                    .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .controlSize(.small)
+        .padding(9)
+    }
+
+    @ViewBuilder
+    private var send: some View {
+        let title = comments.failure == nil ? "Send" : "Try Again"
+        if agents.count == 1, let only = agents.first {
+            Button {
+                Task { await comments.send(to: only, branch: branch) }
+            } label: {
+                Label(
+                    comments.failure == nil ? "Send to \(only.name)" : title,
+                    systemImage: "paperplane")
+            }
+            .buttonStyle(.borderedProminent)
+            .help("Send every note as one message")
+        } else {
+            Menu {
+                ForEach(agents) { agent in
+                    Button(agent.name) {
+                        Task { await comments.send(to: agent, branch: branch) }
+                    }
+                }
+            } label: {
+                Label(title, systemImage: "paperplane")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderedProminent)
+            .fixedSize()
+            .help("Send every note as one message, to the agent you pick")
+        }
+    }
+
+    @ViewBuilder
+    private var compose: some View {
+        if composerTargets.count == 1, let only = composerTargets.first {
+            Button {
+                put(in: only)
+            } label: {
+                Label("Put in Composer", systemImage: "square.and.pencil")
+            }
+            .help("Put these in \(only.name)’s composer, unsent")
+        } else {
+            Menu {
+                ForEach(composerTargets) { agent in
+                    Button(agent.name) { put(in: agent) }
+                }
+            } label: {
+                Label("Put in Composer", systemImage: "square.and.pencil")
+            }
+            .menuStyle(.button)
+            .fixedSize()
+            .help("Put these in an agent’s composer, unsent")
+        }
+    }
+
+    private func put(in target: ReviewAgentTarget) {
+        guard let text = comments.putInComposer(target, branch: branch) else { return }
+        ComposerHandoff.shared.offer(text, to: target.id)
     }
 }
 
@@ -1768,7 +2403,7 @@ struct DiffRow: Identifiable {
         case heading(ChangedFile)
         case note(String)
         case line(DiffComputation.Line)
-        case hunk(Int, Int?, Int?)
+        case hunk(DiffHunkMark)
         /// The unchanged lines a diff left out: which file, which gap, and how
         /// many lines are hiding in it.
         case gap(String, Int, Int)
@@ -1778,6 +2413,80 @@ struct DiffRow: Identifiable {
     let kind: Kind
     /// Which file this row belongs to, so scrolling can say where you are.
     let path: String
+}
+
+/// Where a hunk begins, where it ends, and the first thing it changed.
+///
+/// The last two are here so a note written on a hunk can name the range it
+/// covers rather than only the line it starts at — `push.ts`, around lines
+/// 120-148 is an instruction an agent can act on, and `push.ts` alone leaves it
+/// searching a 300-line file for whatever was meant. The phone's `DiffLayout`
+/// works this out for the same reason; this view builds one flat row list
+/// instead, so it works it out as it goes.
+struct DiffHunkMark {
+    /// Which hunk in the file, counting from one. Only the accessibility label
+    /// says it out loud.
+    var index: Int
+    /// The first line of the hunk, in the old file and in the new one — which
+    /// is to say the numbers its FIRST ROW carries. What the marker prints.
+    var old: Int?
+    var new: Int?
+    /// Where the hunk begins and ends in the new file, filled in once its lines
+    /// have been read, and what a note anchored to the hunk names.
+    ///
+    /// `firstNew` is not always `new`: a hunk that opens with a removed line
+    /// has no new-side number on its first row, and an anchor built from that
+    /// would claim to be about the whole file while the reader was pointing at
+    /// a hunk. It is the first new-side number ANYWHERE in the hunk instead.
+    /// Both are nil only for a hunk that is nothing but removals, which
+    /// genuinely has no extent in the new file to point at.
+    var firstNew: Int?
+    var lastNew: Int?
+    /// The first line the hunk actually CHANGED, for a note to quote.
+    ///
+    /// The first changed line rather than the first line: a hunk opens with
+    /// context, and quoting an untouched line back at an agent points it at the
+    /// line before the thing being talked about.
+    var quote: String?
+
+    /// Every hunk in one file's lines, in order.
+    ///
+    /// A hunk BOUNDARY is found rather than parsed, on the rule
+    /// `ChangesPane.body(of:lines:)` has always used and its comment explains:
+    /// two consecutive lines whose new-side numbers are not consecutive have
+    /// the missing ones between them, so the second begins a new hunk. That
+    /// works without keeping `@@` headers around, which this view deliberately
+    /// does not.
+    ///
+    /// Free of the view on purpose. What it computes is not a layout, it is the
+    /// text of an instruction an agent will act on — "around lines 120-148" —
+    /// and an off-by-one here sends somebody to read the wrong twenty lines of
+    /// their own branch. That is invisible on screen and worth a test.
+    static func marks(in lines: [DiffComputation.Line]) -> [DiffHunkMark] {
+        var out: [DiffHunkMark] = []
+        var previous: Int?
+        var beginsHunk = true
+
+        for line in lines {
+            if let above = previous, let below = line.newNumber, below > above + 1 {
+                beginsHunk = true
+            }
+            if beginsHunk {
+                out.append(
+                    DiffHunkMark(index: out.count + 1, old: line.oldNumber, new: line.newNumber))
+                beginsHunk = false
+            }
+            if line.kind != .context, out[out.count - 1].quote == nil {
+                out[out.count - 1].quote = line.text
+            }
+            if let n = line.newNumber {
+                previous = n
+                if out[out.count - 1].firstNew == nil { out[out.count - 1].firstNew = n }
+                out[out.count - 1].lastNew = n
+            }
+        }
+        return out
+    }
 }
 
 /// Where each realized file heading sits relative to the top of the diff.
