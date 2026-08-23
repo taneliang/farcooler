@@ -30,6 +30,13 @@ export interface Payload {
   /// the snapshot its widgets render so that a lock screen widget agrees with
   /// the banner that just arrived. Optional because a daemon built before them
   /// sends neither, and gets exactly the behavior it always got.
+  ///
+  /// `status` is no longer only forwarded, and the paragraph above was written
+  /// when it was. `androidChannel` DECIDES on it: it is the one field that says
+  /// whether a push may break a Focus on an Android phone, so a daemon that
+  /// stops sending it does not merely lose a widget's glyph — it drops every
+  /// blocked agent back to the quiet channel. `label` and `failed` are still
+  /// only ever forwarded, and only to Apple.
   status?: string
   label?: string
   /// Whether the turn behind a `done` ended badly.
@@ -434,6 +441,44 @@ async function apnsToken(env: any): Promise<string> {
 
 // MARK: - Google
 
+/// The two notification channels the Android app describes, by their ids.
+///
+/// Android's own constants, in `Notifier`, and this is the only place off that
+/// phone that spells them. A coupling worth naming out loud rather than
+/// leaving implicit, because the bug it replaces was this same contract broken
+/// in silence: `FarCoolerMessagingService` read a `data` key no producer had
+/// ever sent under any name, so `CHANNEL_BLOCKED` — the one IMPORTANCE_HIGH
+/// channel, the whole reason a phone in a pocket buzzes — was unreachable from
+/// the push path for its entire existence, and nothing anywhere said so.
+///
+/// Both have existed since the Android client's first commit and `Notifier`
+/// creates them at launch, which is what makes naming one here safe: FCM drops
+/// a notification whose channel the app has not created, and a channel id sent
+/// to an app too old to have it would be a push that silently arrives nowhere.
+/// A phone cannot hold a push token without having signed in, and signing in
+/// runs the launch that creates them.
+const CHANNEL_BLOCKED = 'agents.blocked'
+const CHANNEL_DONE = 'agents.done'
+
+/// Which channel a notice belongs on, by the daemon's own word for it.
+///
+/// `blocked` is the state that has stopped and stays stopped until somebody
+/// answers it, which is what a channel allowed to break a Focus is for.
+/// Everything else — including a status this relay has never heard of, and the
+/// absent status a daemon too old to send one gives — is news that can wait for
+/// the next time the phone is picked up. Deliberately that way round: under-
+/// alerting a blocked agent costs a notification that arrives quietly, while
+/// over-alerting every finished one is the failure people answer by turning the
+/// whole app off, which costs them the blocked ones too.
+///
+/// Mirrors `NotificationCopy.channelFor`, which makes the same decision for the
+/// foreground path from the same word. Two copies because two processes decide
+/// it — this one for the notification Firebase draws, that one for the banner
+/// the app draws — and they must not disagree about a phone's one lock screen.
+export function androidChannel(status: string | undefined): string {
+  return status === 'blocked' ? CHANNEL_BLOCKED : CHANNEL_DONE
+}
+
 async function sendFcm(env: any, token: string, payload: Payload): Promise<boolean> {
   const account = JSON.parse(env.FCM_SERVICE_ACCOUNT)
   const accessToken = await googleAccessToken(account)
@@ -446,8 +491,46 @@ async function sendFcm(env: any, token: string, payload: Payload): Promise<boole
         message: {
           token,
           notification: { title: payload.title, body: payload.subtitle },
-          android: { priority: 'HIGH' },
-          data: { terminal: payload.terminal },
+          android: {
+            priority: 'HIGH',
+            // The half of this that reaches a sleeping phone.
+            //
+            // This is a `notification` message, so Firebase draws the tray card
+            // itself whenever the app is backgrounded or dead and calls
+            // `onMessageReceived` only in the foreground — which is the one case
+            // the app's own banner already covers. `channel_id` is therefore the
+            // only say the relay gets over the notification it most wants to get
+            // right, and it overrides the manifest default the SDK falls back to
+            // when a message names no channel. Without it every push landed on
+            // whichever channel that manifest names, whatever it was about.
+            notification: { channel_id: androidChannel(payload.status) },
+          },
+          // And the half that reaches a phone somebody is holding.
+          //
+          // `status` because the foreground path picks its own channel rather
+          // than being handed one, `terminal` so a tapped push opens the pane it
+          // is about. Firebase copies both into the launch intent verbatim, so
+          // these are the relay's spellings arriving on the phone, not the
+          // app's.
+          //
+          // Neither is content, and that is the whole test for what may go
+          // here: this lands on a lock screen and crosses Google's servers. A
+          // terminal is a UUID the runner minted and says nothing about the work
+          // in the pane; a status is one of three fixed words the daemon chose
+          // from. `label` and `failed` are on the payload and are NOT sent —
+          // nothing on Android reads either, and the title already carries the
+          // agent's name and the word "failed" in a sentence a person can read.
+          // Both are strictly less than the agent's own scraped line that
+          // `title` and `subtitle` already put on that same lock screen.
+          //
+          // An absent status stays absent rather than going as `""`. The daemon
+          // says it outright — an empty or invented status is worse than none —
+          // and a daemon too old to send one must get exactly the behavior it
+          // always got.
+          data: {
+            terminal: payload.terminal,
+            ...(payload.status ? { status: payload.status } : {}),
+          },
         },
       }),
     },

@@ -6,9 +6,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // library: see `varsByEnvironment`.
 import wranglerToml from '../wrangler.toml?raw'
 
+// The Android app's own channel ids, as text. The relay now names them, and
+// nothing between the two languages would notice if either side moved — see
+// `spells both channels the way the Android app creates them`.
+import notifierKt from '../../../apps/android/app/src/main/java/com/farcooler/notify/Notifier.kt?raw'
+
 import worker from '../src/index'
 import { fingerprintOf, parseEd25519 } from '../src/keys'
-import { topicMismatch } from '../src/push'
+import { androidChannel, topicMismatch } from '../src/push'
 import { verifySession } from '../src/workos'
 
 /// What the relay must never get wrong.
@@ -646,6 +651,168 @@ describe('the alert push body', () => {
     expect(alert.body.aps['mutable-content']).toBe(1)
     expect(alert.body.status).toBeUndefined()
     expect(alert.body.label).toBeUndefined()
+  })
+})
+
+// MARK: - Android
+
+/// The Android push body, which had no test at all.
+///
+/// The gap this closes is not a coverage number. `sendFcm` built `data: {
+/// terminal }` and nothing else, `FarCoolerMessagingService` read
+/// `data["activity"]`, and neither end had ever seen the other's bytes — so a
+/// key no producer sent could sit on the reading end for the whole life of the
+/// feature with every test on both sides passing. `FCM_SERVICE_ACCOUNT` was the
+/// empty string in `vitest.config.ts` until now, which meant `sendFcm` died in
+/// `JSON.parse` before it composed anything: this suite could not have caught
+/// it even had it tried.
+///
+/// The stake is the one high-importance channel. `agents.blocked` is the only
+/// notification this app sends that is allowed past a Focus, and it exists for
+/// the case the whole product exists for — an agent stopped three time zones
+/// away, waiting, on a phone in a pocket.
+describe('the Android push body', () => {
+  /// A phone registered the way the Android app registers one.
+  const android = { platform: 'fcm', pushToken: 'android-token' }
+
+  /// The message Google is handed, unwrapped.
+  function fcm(calls: Call[]): any {
+    return pushes(calls).find(call => call.url.includes('fcm.googleapis.com'))?.body.message
+  }
+
+  it('puts a blocked agent on the channel that may break a Focus', async () => {
+    // The defect, end to end. This is a `notification` message, so on a phone
+    // whose app is backgrounded or dead — the only case this push exists for —
+    // Firebase draws the tray card itself and `onMessageReceived` never runs.
+    // `android.notification.channel_id` is the single field that decides where
+    // that card lands, and without it every push took the manifest default,
+    // which names the quiet channel.
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', subtitle: 'Create haiku.txt?', terminal: 'term-1', status: 'blocked', label: 'claude' },
+      'mine',
+    )
+
+    const message = fcm(calls)
+    expect(message.android.notification.channel_id).toBe('agents.blocked')
+    // And the same word in `data`, for the other half of the split: an app in
+    // the foreground gets `onMessageReceived` and picks its own channel from
+    // this, through `NotificationCopy.channelFor`. Two paths, one word.
+    expect(message.data.status).toBe('blocked')
+    expect(message.android.priority).toBe('HIGH')
+  })
+
+  it('leaves a finished agent on the quiet channel', async () => {
+    // The half that must NOT change. Over-alerting every finished agent breaks
+    // a Focus for the normal case, and that is the failure people answer by
+    // turning the whole app off — which costs them the blocked ones too.
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude finished', subtitle: 'Both tests pass.', terminal: 'term-1', status: 'done', failed: false },
+      'mine',
+    )
+
+    const message = fcm(calls)
+    expect(message.android.notification.channel_id).toBe('agents.done')
+    expect(message.data.status).toBe('done')
+  })
+
+  it('sends the pane and the state, and nothing else about the work', async () => {
+    // What may cross. This lands on a lock screen and passes through Google's
+    // servers, so the whole of `data` is pinned rather than spot-checked: a
+    // terminal is a UUID the runner minted and a status is one of three fixed
+    // words, and both are strictly less than the agent's own scraped sentence
+    // that `notification` already carries to the same screen.
+    //
+    // `label` and `failed` are on the payload, were sent to Apple in the same
+    // request, and are deliberately absent here — nothing on Android reads
+    // either, and a field nobody reads is a field on a lock screen for nothing.
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'cursor failed', subtitle: 'add-auth — Its last turn didn’t finish', terminal: 'term-1', status: 'done', label: 'cursor', failed: true },
+      'mine',
+    )
+
+    const message = fcm(calls)
+    expect(message.data).toEqual({ terminal: 'term-1', status: 'done' })
+    // The sentence the daemon composed, unrewritten, because Firebase draws it.
+    expect(message.notification).toEqual({
+      title: 'cursor failed',
+      body: 'add-auth — Its last turn didn’t finish',
+    })
+  })
+
+  it('sends no status at all for a daemon that sends none', async () => {
+    // An absent status stays absent rather than going as `""`. The daemon says
+    // it outright — an empty or invented status is worse than none — and a
+    // runner too old to send one must get exactly the behavior it always got,
+    // which is the quiet channel and a push that still arrives.
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post('/v1/notify', { title: 'Agent stopped', terminal: 'term-1' }, 'mine')
+
+    const message = fcm(calls)
+    expect(message.data).toEqual({ terminal: 'term-1' })
+    expect(message.android.notification.channel_id).toBe('agents.done')
+  })
+
+  it('leaves the Apple push untouched', async () => {
+    // Both phones are served by one `/v1/notify` and one `Payload`, so the risk
+    // in giving Android a field is giving it to iOS and the watch as well —
+    // every Apple device registers as `apns`, and the notification service
+    // extension refuses a body it cannot decode by silently changing nothing.
+    // The Android keys live inside `message`, which APNs never sees.
+    const calls = watchFetch()
+    await register('user_1')
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', subtitle: 'Create haiku.txt?', terminal: 'term-1', status: 'blocked', label: 'claude' },
+      'mine',
+    )
+
+    const apple = pushes(calls).find(call => call.url.includes('push.apple.com'))!.body
+    expect(apple.aps['mutable-content']).toBe(1)
+    expect(apple.aps['interruption-level']).toBe('time-sensitive')
+    expect(apple.status).toBe('blocked')
+    expect(apple.label).toBe('claude')
+    expect(apple.android).toBeUndefined()
+    expect(apple.message).toBeUndefined()
+    // And the Android message carries none of Apple's dictionary either.
+    expect(fcm(calls).aps).toBeUndefined()
+  })
+
+  it('treats a status it has never heard of as news that can wait', async () => {
+    // The daemon ships separately and will eventually send a status this relay
+    // does not know. Falling back to the loud channel would let a word nobody
+    // has written yet break a Focus; falling back to the quiet one costs a
+    // notification that arrives without a sound.
+    expect(androidChannel('blocked')).toBe('agents.blocked')
+    expect(androidChannel('done')).toBe('agents.done')
+    expect(androidChannel('working')).toBe('agents.done')
+    expect(androidChannel('nudged')).toBe('agents.done')
+    expect(androidChannel(undefined)).toBe('agents.done')
+  })
+
+  it('spells both channels the way the Android app creates them', async () => {
+    // The other end of a contract with no compiler across it. These two ids are
+    // `Notifier.CHANNEL_BLOCKED` and `CHANNEL_DONE`, created at launch by
+    // `createChannels`, and FCM DROPS a notification naming a channel the app
+    // has not created — so a typo here is not a wrong channel, it is a push
+    // that arrives nowhere at all and reports success.
+    expect(notifierKt).toContain('const val CHANNEL_BLOCKED = "agents.blocked"')
+    expect(notifierKt).toContain('const val CHANNEL_DONE = "agents.done"')
   })
 })
 
