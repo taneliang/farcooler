@@ -10,6 +10,7 @@
 
 pub mod actions;
 pub mod ceremony;
+pub mod changes_json;
 pub mod ffi;
 pub mod session;
 pub mod ssh;

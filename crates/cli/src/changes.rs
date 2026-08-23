@@ -6,6 +6,7 @@
 //! cannot automate.
 
 use clap::Subcommand;
+use farcooler_client::changes_json::{change_set_json, file_change_json, file_diff_json};
 use farcooler_protocol::v1::{self as pb, request, result};
 
 use crate::{Fallible, connect_to, expect_value, req, req_for, short_bytes, uuid_of, with};
@@ -160,6 +161,20 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
             let result::Value::FileDiff(d) = expect_value(r.value, "file_diff")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
+
+            // The three things below this line that are not patch text —
+            // `unsupported`, `first_parent_of_merge` and `truncated` — are
+            // printed as prose a reader understands and a parser does not. The
+            // Mac used to scrape the human output and so kept none of them,
+            // which is worse than a missing feature: an empty hunk list with no
+            // reason attached reads as "no textual changes", and it said that
+            // about a submodule. `file_diff_json` is what the phones already
+            // receive over the FFI, so both clients now decode one shape and
+            // `AgentKit.DiffComputation` parses both.
+            if json {
+                println!("{}", serde_json::to_string(&file_diff_json(&d))?);
+                return Ok(());
+            }
 
             if let Some(u) = d.unsupported {
                 let why = match pb::DiffUnsupported::try_from(u) {
@@ -322,86 +337,6 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
     Ok(())
 }
 
-fn change_set_json(cs: &pb::ChangeSet) -> serde_json::Value {
-    serde_json::json!({
-        "branch": cs.branch,
-        "base_ref": cs.base_ref,
-        "base_commit": cs.base_commit,
-        "head_commit": cs.head_commit,
-        "insertions": cs.insertions,
-        "deletions": cs.deletions,
-        // The three counts are the commit's OWN, against its first parent, and
-        // a merge's are its first-parent counts rather than a combined diff.
-        // They were zeroes in the daemon until `commits_since` learned to read
-        // `--shortstat`, and were left off the wire because of it; a client that
-        // sums a selected commit's file list to get `+N -M` is now summing to
-        // reach a number it was sent.
-        "commits": cs.commits.iter().map(|c| serde_json::json!({
-            "sha": c.sha, "subject": c.subject, "body": c.body,
-            "author": c.author, "timestamp": c.timestamp,
-            "files_changed": c.files_changed,
-            "insertions": c.insertions,
-            "deletions": c.deletions,
-        })).collect::<Vec<_>>(),
-        "files": cs.files.iter().map(file_change_json).collect::<Vec<_>>(),
-        "working_tree": cs.working_tree.as_ref().map(|w| serde_json::json!({
-            "staged": w.staged.iter().map(|f| &f.path).collect::<Vec<_>>(),
-            "unstaged": w.unstaged.iter().map(|f| &f.path).collect::<Vec<_>>(),
-            "untracked": w.untracked,
-            "conflicted": w.conflicted,
-            // Every dirty path with its own counts, which is what an
-            // "uncommitted" total is a sum of. A file that is staged AND
-            // modified again appears twice, once per group, because those are
-            // two different diffs of it — a reader summing per path gets what
-            // `git diff HEAD` would say, and `change_set::apply_uncommitted_counts`
-            // says where that is exact and where it is an upper bound. Untracked
-            // files are here too: they are uncommitted work, and a client
-            // counting only what git can diff misses the file an agent just
-            // wrote.
-            "changes": w.staged.iter().chain(w.unstaged.iter())
-                .chain(w.untracked_files.iter()).map(|f| serde_json::json!({
-                "path": f.path,
-                "status": file_status_name(f.status),
-                "old_path": f.old_path,
-                "insertions": f.insertions,
-                "deletions": f.deletions,
-                "binary": f.binary,
-            })).collect::<Vec<_>>(),
-        })),
-    })
-}
-
-/// One changed file, in the shape both clients already decode.
-///
-/// Shared by `changes status --json` and `changes files --json` rather than
-/// written twice, and deliberately identical to `file_change_json` in
-/// crates/client/src/session.rs — the phone reaches `changes.commit_files`
-/// through the FFI and the Mac reaches it through this command, so a field
-/// that appears in one and not the other is a difference between platforms
-/// that nothing in the daemon justifies.
-fn file_change_json(f: &pb::FileChange) -> serde_json::Value {
-    serde_json::json!({
-        "path": f.path, "insertions": f.insertions, "deletions": f.deletions,
-        "binary": f.binary,
-        "status": file_status_name(f.status),
-        "old_path": f.old_path,
-    })
-}
-
-fn file_status_name(status: i32) -> &'static str {
-    match pb::FileStatus::try_from(status).unwrap_or(pb::FileStatus::Unspecified) {
-        pb::FileStatus::Added => "added",
-        pb::FileStatus::Modified => "modified",
-        pb::FileStatus::Deleted => "deleted",
-        pb::FileStatus::Renamed => "renamed",
-        pb::FileStatus::Copied => "copied",
-        pb::FileStatus::TypeChanged => "type_changed",
-        pb::FileStatus::Untracked => "untracked",
-        pb::FileStatus::Conflicted => "conflicted",
-        pb::FileStatus::Unspecified => "modified",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,10 +353,11 @@ mod tests {
         }
     }
 
-    /// The shape both apps decode, and the reason this function exists twice:
-    /// `crates/client/src/session.rs` prints the same keys for the phones, and a
-    /// key that appeared in one and not the other would be one worktree
-    /// described two ways.
+    /// The shape both apps decode. It is built in
+    /// `farcooler_client::changes_json` and pinned here, on the side the Mac
+    /// reads: this command is the Mac's whole view of a change set, so a key
+    /// that stopped being printed would be a feature that stopped existing on
+    /// one platform only.
     ///
     /// `changes` is what a client's Uncommitted total is a sum of. It carries
     /// counts because the daemon now has them — `change_set::apply_uncommitted_counts`
@@ -474,5 +410,98 @@ mod tests {
         let changes = v["working_tree"]["changes"].as_array().expect("changes");
         assert_eq!(changes.len(), 2);
         assert!(changes.iter().all(|c| c["path"] == "a.rs"));
+    }
+
+    /// The key that was missing for as long as there were two builders.
+    ///
+    /// A GUESSED base is the only source worth warning about — nothing knew
+    /// what this branch came from, so a local `main` was used, and the diff
+    /// that produces is wrong in a way that looks right. The daemon has said so
+    /// since `BaseSource` existed; the phones were told and the Mac was not,
+    /// because this command's copy of the builder never learned the key.
+    #[test]
+    fn the_base_says_where_it_came_from() {
+        let guessed = pb::ChangeSet {
+            base_ref: "main".to_string(),
+            base_source: pb::BaseSource::Guessed as i32,
+            ..Default::default()
+        };
+        assert_eq!(change_set_json(&guessed)["base_source"], "guessed");
+
+        let pinned = pb::ChangeSet {
+            base_source: pb::BaseSource::Recorded as i32,
+            ..Default::default()
+        };
+        assert_eq!(change_set_json(&pinned)["base_source"], "recorded");
+
+        // A runner older than the field sends the zero, and "unknown" is the
+        // honest answer: not a guess, so not a warning.
+        assert_eq!(change_set_json(&pb::ChangeSet::default())["base_source"], "unknown");
+    }
+
+    /// A submodule is not "no textual changes".
+    ///
+    /// The hunk list is empty for both, and the human output says which by
+    /// printing a sentence instead of a patch — which is why scraping it lost
+    /// the distinction and the Mac told people a submodule was unchanged.
+    #[test]
+    fn an_empty_diff_says_why_it_is_empty() {
+        let d = pb::FileDiff {
+            path: "vendor/thing".to_string(),
+            unsupported: Some(pb::DiffUnsupported::Submodule as i32),
+            ..Default::default()
+        };
+        let v = file_diff_json(&d);
+        assert_eq!(v["path"], "vendor/thing");
+        assert_eq!(v["unsupported"], "submodule");
+        assert_eq!(v["hunks"].as_array().expect("hunks").len(), 0);
+
+        // Nothing wrong with this one: empty really does mean unchanged.
+        let plain = file_diff_json(&pb::FileDiff::default());
+        assert!(plain["unsupported"].is_null());
+        assert_eq!(plain["truncated"], false);
+        assert_eq!(plain["firstParentOfMerge"], false);
+    }
+
+    /// The other two notices the pipe used to swallow.
+    ///
+    /// `truncated` means hunks remain and this is not the whole file;
+    /// `firstParentOfMerge` means the patch is one parent's view of a merge.
+    /// Both change what the diff on screen MEANS, so a client that cannot see
+    /// them draws a confident half-truth.
+    #[test]
+    fn truncation_and_a_merges_first_parent_survive() {
+        let d = pb::FileDiff {
+            path: "src/main.rs".to_string(),
+            truncated: Some(pb::Truncation::HunkCap as i32),
+            first_parent_of_merge: true,
+            hunks: vec![pb::Hunk {
+                index: 0,
+                header: "@@ -1,2 +1,3 @@".to_string(),
+                old_start: 1,
+                new_start: 1,
+                lines: vec![pb::DiffLine {
+                    kind: pb::DiffLineKind::Added as i32,
+                    old_no: None,
+                    new_no: Some(2),
+                    text: "let x = 1;".to_string(),
+                    no_newline: false,
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let v = file_diff_json(&d);
+        assert_eq!(v["truncated"], true);
+        assert_eq!(v["firstParentOfMerge"], true);
+
+        let hunk = &v["hunks"][0];
+        assert_eq!(hunk["header"], "@@ -1,2 +1,3 @@");
+        assert_eq!(hunk["oldStart"], 1);
+        let line = &hunk["lines"][0];
+        assert_eq!(line["kind"], "added");
+        assert!(line["oldNumber"].is_null());
+        assert_eq!(line["newNumber"], 2);
+        assert_eq!(line["text"], "let x = 1;");
     }
 }

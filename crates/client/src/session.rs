@@ -21,6 +21,7 @@ use serde_json::json;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
+use crate::changes_json::{change_set_json, file_change_json, file_diff_json};
 use crate::ssh;
 
 #[derive(Debug, thiserror::Error)]
@@ -1293,121 +1294,6 @@ fn variant_name(value: &result::Value) -> &'static str {
     }
 }
 
-/// A change set, in the shape `farcooler changes status --json` prints.
-///
-/// Kept byte-identical to `crates/cli/src/changes.rs::change_set_json` on
-/// purpose: the Mac decodes that, the phones decode this, and two spellings of
-/// one change set is how the same worktree ends up described two ways.
-fn change_set_json(cs: &farcooler_protocol::v1::ChangeSet) -> serde_json::Value {
-    json!({
-        "branch": cs.branch,
-        "base_ref": cs.base_ref,
-        "base_source": base_source_name(cs.base_source),
-        "base_commit": cs.base_commit,
-        "head_commit": cs.head_commit,
-        "insertions": cs.insertions,
-        "deletions": cs.deletions,
-        // The three counts are the commit's OWN, against its first parent, and
-        // a merge's are its first-parent counts rather than a combined diff.
-        // They were zeroes in the daemon until `commits_since` learned to read
-        // `--shortstat`, and were left off the wire because of it; a client that
-        // sums a selected commit's file list to get `+N -M` is now summing to
-        // reach a number it was sent.
-        "commits": cs.commits.iter().map(|c| json!({
-            "sha": c.sha,
-            "subject": c.subject,
-            // The message under the subject. `commits_since` has always parsed
-            // `%b` into it and nothing ever sent it on, so a phone reading a
-            // branch saw only first lines — which is where an agent puts what
-            // it did, and never why.
-            "body": c.body,
-            "author": c.author,
-            "timestamp": c.timestamp,
-            "files_changed": c.files_changed,
-            "insertions": c.insertions,
-            "deletions": c.deletions,
-        })).collect::<Vec<_>>(),
-        "files": cs.files.iter().map(file_change_json).collect::<Vec<_>>(),
-        "working_tree": cs.working_tree.as_ref().map(|w| json!({
-            "staged": w.staged.iter().map(|f| &f.path).collect::<Vec<_>>(),
-            "unstaged": w.unstaged.iter().map(|f| &f.path).collect::<Vec<_>>(),
-            "untracked": w.untracked,
-            "conflicted": w.conflicted,
-            // Every dirty path with its own counts, which is what an
-            // "uncommitted" total is a sum of. A file that is staged AND
-            // modified again appears twice, once per group, because those are
-            // two different diffs of it — a reader summing per path gets what
-            // `git diff HEAD` would say, and `change_set::apply_uncommitted_counts`
-            // says where that is exact and where it is an upper bound. Untracked
-            // files are here too: they are uncommitted work, and a client
-            // counting only what git can diff misses the file an agent just
-            // wrote.
-            "changes": w.staged.iter().chain(w.unstaged.iter())
-                .chain(w.untracked_files.iter()).map(|f| json!({
-                "path": f.path,
-                "status": file_status_name(f.status),
-                "old_path": f.old_path,
-                "insertions": f.insertions,
-                "deletions": f.deletions,
-                "binary": f.binary,
-            })).collect::<Vec<_>>(),
-        })),
-    })
-}
-
-fn file_change_json(f: &farcooler_protocol::v1::FileChange) -> serde_json::Value {
-    json!({
-        "path": f.path,
-        "status": file_status_name(f.status),
-        "old_path": f.old_path,
-        "insertions": f.insertions,
-        "deletions": f.deletions,
-        "binary": f.binary,
-    })
-}
-
-/// One file's patch, flattened out of its hunks.
-///
-/// The hunk boundaries survive as `gap` markers rather than as nesting: a
-/// client draws a diff as one list and needs to know where the unchanged lines
-/// were left out, which is exactly what the jump between two hunks' line
-/// numbers says. `AgentKit.DiffComputation` already parses this shape.
-fn file_diff_json(d: &farcooler_protocol::v1::FileDiff) -> serde_json::Value {
-    use farcooler_protocol::v1::{DiffLineKind, DiffUnsupported};
-    json!({
-        "path": d.path,
-        // Why there are no hunks, when the reason is not "nothing changed". An
-        // empty list on its own reads as unchanged, which for a binary file is
-        // a lie — see `DiffUnsupported` in the protocol.
-        "unsupported": d.unsupported.and_then(|u| match DiffUnsupported::try_from(u) {
-            Ok(DiffUnsupported::Binary) => Some("binary"),
-            Ok(DiffUnsupported::Submodule) => Some("submodule"),
-            Ok(DiffUnsupported::CombinedDiff) => Some("combined_diff"),
-            Ok(DiffUnsupported::Malformed) => Some("malformed"),
-            _ => None,
-        }),
-        "truncated": d.truncated.is_some(),
-        "firstParentOfMerge": d.first_parent_of_merge,
-        "hunks": d.hunks.iter().map(|h| json!({
-            "index": h.index,
-            "header": h.header,
-            "oldStart": h.old_start,
-            "newStart": h.new_start,
-            "lines": h.lines.iter().map(|l| json!({
-                "kind": match DiffLineKind::try_from(l.kind) {
-                    Ok(DiffLineKind::Added) => "added",
-                    Ok(DiffLineKind::Removed) => "removed",
-                    _ => "context",
-                },
-                "oldNumber": l.old_no,
-                "newNumber": l.new_no,
-                "text": l.text,
-                "noNewline": l.no_newline,
-            })).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>(),
-    })
-}
-
 fn stack_json(l: &farcooler_protocol::v1::StackLinkList) -> serde_json::Value {
     use farcooler_protocol::v1::{CheckState, ParentSource, PrState, ReviewDecision};
     json!({
@@ -1450,35 +1336,6 @@ fn stack_json(l: &farcooler_protocol::v1::StackLinkList) -> serde_json::Value {
             })),
         })).collect::<Vec<_>>(),
     })
-}
-
-fn file_status_name(status: i32) -> &'static str {
-    use farcooler_protocol::v1::FileStatus;
-    match FileStatus::try_from(status).unwrap_or(FileStatus::Unspecified) {
-        FileStatus::Added => "added",
-        FileStatus::Modified => "modified",
-        FileStatus::Deleted => "deleted",
-        FileStatus::Renamed => "renamed",
-        FileStatus::Copied => "copied",
-        FileStatus::TypeChanged => "type_changed",
-        FileStatus::Untracked => "untracked",
-        FileStatus::Conflicted => "conflicted",
-        FileStatus::Unspecified => "modified",
-    }
-}
-
-/// Where the base came from, because only one of these is a guess and only a
-/// guess is worth warning about.
-fn base_source_name(source: i32) -> &'static str {
-    use farcooler_protocol::v1::BaseSource;
-    match BaseSource::try_from(source).unwrap_or(BaseSource::Unspecified) {
-        BaseSource::Recorded => "recorded",
-        BaseSource::Upstream => "upstream",
-        BaseSource::Guessed => "guessed",
-        BaseSource::PrBase => "pr_base",
-        BaseSource::DefaultBranch => "default_branch",
-        BaseSource::Unspecified => "unknown",
-    }
 }
 
 pub fn uuid_of(bytes: &[u8]) -> Uuid {
