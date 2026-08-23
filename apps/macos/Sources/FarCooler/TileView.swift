@@ -365,7 +365,7 @@ private struct TilePane: View {
                 // the diff can be read — that comes from the daemon over the
                 // same channel the sidebar's counts do. A pane whose host was
                 // killed still shows the branch; it just cannot be split.
-                ChangesPane(changes: changes)
+                ChangesPane(changes: changes, isFocused: isFocused)
                     .id("\(terminal.id)#changes")
             } else if isLive, terminal.isAgentPane {
                 // Same empty `onResize` as the terminal case just below, and

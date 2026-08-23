@@ -22,6 +22,13 @@ enum AppCommand: String {
     case search
     case commandPalette
     case toggleSidebar
+    case diffNextHunk
+    case diffPreviousHunk
+    case diffNextFile
+    case diffPreviousFile
+    case diffNextCommit
+    case diffPreviousCommit
+    case diffFirstCommit
 
     static let notification = Notification.Name("farcooler.command")
 
@@ -175,40 +182,85 @@ struct FarCoolerCommands: Commands {
             Button("Terminal ⟷ Chat  ⌃B a") { TileCommand.toggleAgentPane.post() }
         }
 
-        CommandGroup(after: .sidebar) {
-            // ⌘B, because that is what it is in every editor people already have
-            // open next to this one. macOS's own ⌃⌘S still works; this is the one
-            // fingers reach for.
-            //
-            // No collision with the tiling prefix: that is ⌃B, a different
-            // modifier, and ⌘ never reaches a terminal anyway.
-            Button("Toggle Sidebar") { AppCommand.toggleSidebar.post() }
-                .keyboardShortcut("b", modifiers: .command)
+        // The diff pane had not one shortcut in this file, which made the only
+        // keyboard-shaped thing in the app a pane you could only read with a
+        // pointer. The phone needs a thumb-sized button to move through a
+        // branch; a Mac needs a key, and the chevrons in the pane are the
+        // fallback rather than the other way round.
+        //
+        // Three pairs on the same convention the rest of the app already
+        // teaches: `[` and `]` walk a list, and the modifier says WHICH list.
+        // ⌘ is terminals, ⇧⌘ is layouts, so ⌥⌘ is the files in a diff and ⌃⌘ is
+        // the commits behind them — outermost list, outermost modifier.
+        //
+        // Hunks get the arrows instead, because a hunk is not a list you pick
+        // from — it is the next place down the document, which is what ⌥⌘↓
+        // reads as.
+        //
+        // These act on the FOCUSED pane, like every other pane-scoped command
+        // here. Click into a diff and it answers; with a terminal focused they
+        // do nothing, which is the same rule ⌘W and ⌃B z already keep.
+        CommandMenu("Diff") {
+            Button("Next Hunk") { AppCommand.diffNextHunk.post() }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            Button("Previous Hunk") { AppCommand.diffPreviousHunk.post() }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+            Divider()
+            Button("Next File") { AppCommand.diffNextFile.post() }
+                .keyboardShortcut("]", modifiers: [.command, .option])
+            Button("Previous File") { AppCommand.diffPreviousFile.post() }
+                .keyboardShortcut("[", modifiers: [.command, .option])
+            Divider()
+            // The way IN to reading a branch commit by commit, which is
+            // otherwise a thing you can only discover by opening the history
+            // and picking the oldest row.
+            Button("Read Commit by Commit") { AppCommand.diffFirstCommit.post() }
+            Button("Next Commit") { AppCommand.diffNextCommit.post() }
+                .keyboardShortcut("]", modifiers: [.command, .control])
+            Button("Previous Commit") { AppCommand.diffPreviousCommit.post() }
+                .keyboardShortcut("[", modifiers: [.command, .control])
         }
 
-        // Nothing here prints, and the Print item SwiftUI adds for free would
-        // otherwise hold ⌘P against a window whose most useful key it is.
-        CommandGroup(replacing: .printItem) {}
+        // Grouped only to stay inside what `CommandsBuilder` will build: it
+        // takes ten statements and the Diff menu above is the eleventh. `Group`
+        // is one statement holding four, and changes nothing about where these
+        // land in the menu bar.
+        Group {
+            CommandGroup(after: .sidebar) {
+                // ⌘B, because that is what it is in every editor people already have
+                // open next to this one. macOS's own ⌃⌘S still works; this is the one
+                // fingers reach for.
+                //
+                // No collision with the tiling prefix: that is ⌃B, a different
+                // modifier, and ⌘ never reaches a terminal anyway.
+                Button("Toggle Sidebar") { AppCommand.toggleSidebar.post() }
+                    .keyboardShortcut("b", modifiers: .command)
+            }
 
-        CommandGroup(after: .toolbar) {
-            // ⌘P, the shortcut everyone arriving here already has in their
-            // fingers from an editor, for the thing it means there: show me
-            // everything, I will type the part I remember. It is a switcher when
-            // the field is empty and a command list when it is not, which is one
-            // key for the two questions this app is always being asked.
-            Button("Go to Anything…") { AppCommand.commandPalette.post() }
-                .keyboardShortcut("p", modifiers: .command)
-            // Search is navigation here, not a nicety: worktrees are unbounded
-            // and typing is the fastest way to any of them, on any runner.
-            Button("Find Workspace or Agent") { AppCommand.search.post() }
-                .keyboardShortcut("f", modifiers: .command)
-            Button("Reload Fleet") { AppCommand.reload.post() }
-                .keyboardShortcut("0", modifiers: .command)
-        }
+            // Nothing here prints, and the Print item SwiftUI adds for free would
+            // otherwise hold ⌘P against a window whose most useful key it is.
+            CommandGroup(replacing: .printItem) {}
 
-        CommandGroup(replacing: .help) {
-            Button("Keyboard Shortcuts") { AppCommand.showShortcuts.post() }
-                .keyboardShortcut("/", modifiers: .command)
+            CommandGroup(after: .toolbar) {
+                // ⌘P, the shortcut everyone arriving here already has in their
+                // fingers from an editor, for the thing it means there: show me
+                // everything, I will type the part I remember. It is a switcher when
+                // the field is empty and a command list when it is not, which is one
+                // key for the two questions this app is always being asked.
+                Button("Go to Anything…") { AppCommand.commandPalette.post() }
+                    .keyboardShortcut("p", modifiers: .command)
+                // Search is navigation here, not a nicety: worktrees are unbounded
+                // and typing is the fastest way to any of them, on any runner.
+                Button("Find Workspace or Agent") { AppCommand.search.post() }
+                    .keyboardShortcut("f", modifiers: .command)
+                Button("Reload Fleet") { AppCommand.reload.post() }
+                    .keyboardShortcut("0", modifiers: .command)
+            }
+
+            CommandGroup(replacing: .help) {
+                Button("Keyboard Shortcuts") { AppCommand.showShortcuts.post() }
+                    .keyboardShortcut("/", modifiers: .command)
+            }
         }
     }
 }

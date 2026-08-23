@@ -2010,6 +2010,15 @@ struct ContentView: View {
             // behavior set first so the detail pane absorbs the space instead of
             // the window growing.
             Sidebar.toggle()
+
+        // Moving through a diff belongs to the pane showing one, and only to
+        // the FOCUSED one — see `ChangesPane.isFocused`. Listed rather than
+        // caught by a `default` so the next command added to `AppCommand`
+        // still fails to compile until somebody decides where it goes.
+        case .diffNextHunk, .diffPreviousHunk,
+            .diffNextFile, .diffPreviousFile,
+            .diffNextCommit, .diffPreviousCommit, .diffFirstCommit:
+            break
         }
     }
 

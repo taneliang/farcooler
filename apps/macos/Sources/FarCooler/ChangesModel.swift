@@ -42,22 +42,113 @@ struct ChangeSet: Decodable, Equatable {
 
 /// One commit on this branch, as the history picker draws it.
 ///
-/// Four fields and no counts, which is not an oversight and cannot be fixed
-/// here: `ChangeCommit` in the proto carries `files_changed`, `insertions` and
-/// `deletions`, but `commits_since` in the daemon writes 0 into all three, and
-/// `change_set_json` in the CLI does not serialize them at all. So a row says
-/// what is actually known — who, when, and what they called it — and the `+N
-/// -M` for a commit appears once it is SELECTED, summed from the file list that
-/// selection fetches. A number invented from two zeroes would be worse than no
-/// number.
+/// ## Everything past `timestamp` is optional, and has to be
+///
+/// Swift's synthesized `Decodable` throws on a missing key, and this type
+/// decodes INSIDE `ChangeSet` — so a runner whose `farcooler` predates any one
+/// of these fields would fail the decode of the ENTIRE change set, every file
+/// and every commit, over one absent key. Optional is not a nicety here: it is
+/// what lets an older runner draw a commit with no rationale and no counts,
+/// which is exactly what that runner knows.
+///
+/// ## The counts
+///
+/// They were hardcoded zeroes in `commits_since` for as long as that function
+/// existed, and `change_set_json` did not project them — which is why a
+/// commit's `+N −M` used to appear only once it had been SELECTED, summed from
+/// the file list that selection fetches. `--shortstat` on the same `git log`
+/// answers now, with `--diff-merges=first-parent`, so a row agrees with the
+/// file list it opens.
+///
+/// **Zero still means unknown**, which is why `counts` returns nil for it. A
+/// runner on a git older than 2.31 rejects `--diff-merges` and the daemon
+/// retries without it, leaving merges at the zeroes they always had — so
+/// `+0 −0` would be a fact nobody established. A commit that genuinely changed
+/// nothing is rare enough that staying quiet about it is the better trade.
 struct ChangeCommit: Decodable, Equatable, Identifiable {
     var sha: String
     var subject: String
+    /// Everything the author wrote after the subject line.
+    ///
+    /// It matters more for agent work than for human work. An agent's commit
+    /// body is usually the closest thing to a written rationale for what it
+    /// did — why this approach, what it decided against, what it could not
+    /// finish — and it is the cheapest context available before reading a
+    /// single line of diff.
+    var body: String?
     var author: String
     var timestamp: Int
+    var filesChanged: Int?
+    var insertions: Int?
+    var deletions: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case sha, subject, body, author, timestamp, insertions, deletions
+        case filesChanged = "files_changed"
+    }
 
     var id: String { sha }
     var short: String { String(sha.prefix(8)) }
+
+    /// The two line counts, when the daemon actually counted them.
+    ///
+    /// Nil rather than `(0, 0)` for the reason the type comment gives: on this
+    /// wire a zero is indistinguishable from "this runner could not tell you".
+    var counts: (insertions: Int, deletions: Int)? {
+        let plus = insertions ?? 0
+        let minus = deletions ?? 0
+        guard plus > 0 || minus > 0 else { return nil }
+        return (plus, minus)
+    }
+
+    /// The body with its surrounding whitespace gone, or nil if there was none.
+    ///
+    /// Nil rather than an empty string so every caller's `if let` is the same
+    /// shape whether the field was absent (an older runner) or present and
+    /// empty (a commit with only a subject, which is most of them).
+    var bodyText: String? {
+        let trimmed = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The first paragraph worth putting in a history row.
+    ///
+    /// The first paragraph rather than the first line, because a body is prose
+    /// that was wrapped for a terminal and its first line is half a sentence.
+    ///
+    /// Trailer-only paragraphs are skipped. Every commit in this repository
+    /// ends in `Co-Authored-By:` and most agent commits add more of the same,
+    /// so a row whose one line of preview reads `Co-Authored-By: Claude …` has
+    /// spent the most valuable line in the popover saying nothing. Skipped, not
+    /// stripped: nothing here removes a line from a body anyone asks to read.
+    ///
+    /// The same rule the phone applies in its own `ChangeCommit.bodyPreview`,
+    /// written out again rather than shared: `AgentKit` is where one copy of
+    /// this belongs, and moving it there is a change to a module both apps
+    /// compile. It is a hoist waiting to happen, not a rule with two opinions.
+    var bodyPreview: String? {
+        guard let bodyText else { return nil }
+        for paragraph in bodyText.components(separatedBy: "\n\n") {
+            let lines = paragraph.split(separator: "\n", omittingEmptySubsequences: true)
+            guard !lines.isEmpty else { continue }
+            guard lines.allSatisfy({ Self.isTrailer(String($0)) }) else {
+                return lines.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
+    }
+
+    /// `Key: value` at the start of a line, which is git's own shape for a
+    /// trailer. Deliberately loose — this decides what to show first, not what
+    /// to keep, so a false positive costs a paragraph its place in a preview
+    /// and never a line of the body.
+    private static func isTrailer(_ line: String) -> Bool {
+        guard let colon = line.firstIndex(of: ":"), colon > line.startIndex else { return false }
+        let key = line[line.startIndex..<colon]
+        guard line.index(after: colon) < line.endIndex else { return false }
+        guard line[line.index(after: colon)] == " " else { return false }
+        return key.allSatisfy { $0.isLetter || $0 == "-" }
+    }
 
     /// How long ago this commit was made, in the same shorthand a branch row
     /// and a running turn already use: `12m`, `3h`, `2d`.
@@ -245,6 +336,112 @@ enum DiffScope: String, CaseIterable, Identifiable, Codable {
         case .branch: return "Branch"
         case .local: return "Uncommitted"
         case .commit: return "Commit"
+        }
+    }
+}
+
+/// What the end of a file list means, which is not the same question in every
+/// scope.
+enum DiffBoundary: Equatable {
+    /// Round the list. What Branch and Uncommitted have always done and go on
+    /// doing: there is nothing beyond a scope that is already everything, and a
+    /// Next that did nothing at the last file would be a control that stops
+    /// working without saying why.
+    case wrap
+    /// Carry on into this commit. Only while one commit is on screen, and only
+    /// while the branch has another one in that direction.
+    case handOff(String)
+    /// The end of the branch, in that direction. Nothing to wrap to, because
+    /// wrapping from the last file of the last commit to the first file of the
+    /// same commit is a loop pretending to be progress.
+    case stop
+}
+
+/// What one press of a movement control does, decided before anything moves.
+enum DiffStep: Equatable {
+    case hunk(String)
+    /// An index into the reading order — see `ChangesStore.reviewOrder`.
+    case file(Int)
+    case commit(String)
+    case stay
+}
+
+/// Where Next and Previous go.
+///
+/// The arithmetic lived in two methods on the pane until the commit walk
+/// arrived, and it had to come out for one reason: hunk movement FALLS THROUGH
+/// to file movement at both ends of a file, so changing what the end of a file
+/// list means silently changes hunk navigation too. Neither behavior was
+/// observable from a test while the decision was made inside a SwiftUI view,
+/// and the wrap this replaces is behavior two of the three scopes still rely
+/// on.
+///
+/// Deliberately knows nothing about a store, a scope or a view: it is handed
+/// how many files there are, which one is open, which hunks that file has, and
+/// what the end of the list means. See `ChangesPane.boundary(_:)` for who
+/// decides the last of those.
+enum DiffWalk {
+    /// What running out of files in this direction means, given what is on
+    /// screen and what the branch has either side of it.
+    ///
+    /// The policy, separated from the arithmetic below so it can be read and
+    /// tested on its own — it is the one thing this change actually decides.
+    static func boundary(
+        _ direction: Int, scope: DiffScope, next: ChangeCommit?, previous: ChangeCommit?
+    ) -> DiffBoundary {
+        guard scope == .commit else { return .wrap }
+        guard let neighbor = direction > 0 ? next : previous else { return .stop }
+        return .handOff(neighbor.sha)
+    }
+
+    /// `direction` is +1 or −1. `hunks` is empty for a plain file move, which
+    /// is what makes one function serve both controls.
+    static func step(
+        _ direction: Int,
+        hunks: [String],
+        after lastHunk: String?,
+        files: Int,
+        at current: Int?,
+        boundary: DiffBoundary
+    ) -> DiffStep {
+        if !hunks.isEmpty {
+            if let lastHunk, let index = hunks.firstIndex(of: lastHunk) {
+                let next = index + direction
+                if hunks.indices.contains(next) { return .hunk(hunks[next]) }
+                // Off the end of this file's hunks, so this becomes a file
+                // move. The fall-through IS the feature: reading a diff is one
+                // continuous downward motion, and a control that stopped at the
+                // last hunk of every file would need a second control beside it
+                // to get past each one.
+            } else {
+                // No hunk visited in this file yet — either it was just opened
+                // or the last hunk belonged to a file that is no longer on
+                // screen. Enter it from the end the reader is traveling
+                // towards.
+                return .hunk(direction > 0 ? hunks[0] : hunks[hunks.count - 1])
+            }
+        }
+        return fileStep(direction, files: files, at: current, boundary: boundary)
+    }
+
+    private static func fileStep(
+        _ direction: Int, files: Int, at current: Int?, boundary: DiffBoundary
+    ) -> DiffStep {
+        guard files > 0 else {
+            // A commit that changed nothing is one you walk THROUGH, not one
+            // the walk ends in.
+            if case .handOff(let sha) = boundary { return .commit(sha) }
+            return .stay
+        }
+        // No file open yet: Next means the first, Previous means the last. The
+        // −1 is what makes `-1 + 1` the first file rather than the second.
+        let from = current ?? (direction > 0 ? -1 : 0)
+        let next = from + direction
+        if (0..<files).contains(next) { return .file(next) }
+        switch boundary {
+        case .wrap: return .file((next + files) % files)
+        case .handOff(let sha): return .commit(sha)
+        case .stop: return .stay
         }
     }
 }
@@ -446,6 +643,23 @@ final class ChangesStore: ObservableObject {
             }
         }
     }
+
+    /// The files in reading order: the one order the pane draws AND the one
+    /// order Next and Previous walk.
+    ///
+    /// One property rather than a sort inside the view, and that is the whole
+    /// reason it exists while it still returns `files` unchanged. A position
+    /// counts the list the reader is looking at, so a display order that
+    /// differed from the navigation order would make Next jump backwards up the
+    /// screen — and the phone has already learned where that bites: it puts
+    /// generated files last precisely so Next never drops somebody into the
+    /// middle of a regenerated lockfile eleven files before the end.
+    ///
+    /// The Mac has no generated-file rule yet, and this is where it goes when
+    /// it arrives. Naming the seam now costs nothing; discovering it later
+    /// means re-opening the movement arithmetic, which is the part of this pane
+    /// with a test around it for a reason.
+    var reviewOrder: [ChangedFile] { files }
 
     /// Whether git has never seen this file.
     ///
@@ -692,6 +906,80 @@ final class ChangesStore: ObservableObject {
     var selectedCommitInfo: ChangeCommit? {
         guard let selectedCommit else { return nil }
         return changeSet.commits.first { $0.sha == selectedCommit }
+    }
+
+    // MARK: - The branch, one commit at a time
+
+    /// The commits in the order they are READ, which is the order they were
+    /// made: base forward.
+    ///
+    /// The opposite of `commitsNewestFirst`, and both are right for what they
+    /// are for. A picker is reached for with one commit in mind and it is
+    /// almost always the newest, so that list leads with it. Working THROUGH a
+    /// branch is a different activity: each commit is one intention, and an
+    /// agent's intentions only make sense forwards — the third commit fixes
+    /// what the second one introduced, and read backwards it is a repair to
+    /// something that has not happened yet. `commits_since` already logs with
+    /// `--reverse` for exactly this reading, so this is the wire's own order.
+    var commitsInOrder: [ChangeCommit] { changeSet.commits }
+
+    var commitIndex: Int? {
+        guard let sha = selectedCommit else { return nil }
+        return commitsInOrder.firstIndex { $0.sha == sha }
+    }
+
+    /// `3 of 12`, for the strip beside the commit picker.
+    ///
+    /// Shorter than the phone's `Commit 3 of 12` on purpose. The clock glyph
+    /// and the sha immediately to its left already say what is being counted,
+    /// and this strip has a file path and the hunk controls to fit as well; the
+    /// chevrons' tooltips say the whole sentence.
+    ///
+    /// Nil for a commit the branch no longer lists, which an amend mid-review
+    /// produces: it has no position in a sequence it is not in, and inventing
+    /// one would be this strip's one claim that could be flatly wrong.
+    var commitPositionLabel: String? {
+        guard let commitIndex else { return nil }
+        return "\(commitIndex + 1) of \(commitsInOrder.count)"
+    }
+
+    var nextCommit: ChangeCommit? {
+        guard let commitIndex, commitIndex + 1 < commitsInOrder.count else { return nil }
+        return commitsInOrder[commitIndex + 1]
+    }
+
+    var previousCommit: ChangeCommit? {
+        guard let commitIndex, commitIndex > 0 else { return nil }
+        return commitsInOrder[commitIndex - 1]
+    }
+
+    /// Begin the itinerary: the first commit the branch made.
+    ///
+    /// The way in that the history popover is not. A list is the right shape
+    /// for "which one of these", and the wrong shape for "start at the
+    /// beginning and keep going" — which for an agent-authored branch is the
+    /// reading that makes it legible, and the reading the chevrons exist to
+    /// support.
+    func startAtFirstCommit() async {
+        guard let first = commitsInOrder.first else { return }
+        await select(commit: first.sha)
+    }
+
+    /// Move one commit along the branch, without going back out to the picker.
+    ///
+    /// This is what makes commit-by-commit a path rather than a detour: the
+    /// reader finishes a commit's last file and the same control that has been
+    /// moving them through files moves them to the next intention. Returning to
+    /// a list between every commit is twelve extra trips on a branch of twelve,
+    /// and a reason not to read it this way at all.
+    func showNextCommit() async {
+        guard let next = nextCommit else { return }
+        await select(commit: next.sha)
+    }
+
+    func showPreviousCommit() async {
+        guard let previous = previousCommit else { return }
+        await select(commit: previous.sha)
     }
 
     /// Read one file's diff, if it has not been read already.

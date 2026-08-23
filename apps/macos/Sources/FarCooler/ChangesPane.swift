@@ -28,6 +28,16 @@ import SwiftUI
 struct ChangesPane: View {
     @ObservedObject var changes: ChangesStore
 
+    /// Whether this is the pane the keyboard is aimed at.
+    ///
+    /// The Diff menu's shortcuts are pane-scoped, exactly as ⌘W and ⌃B z
+    /// already are: a window can hold a diff and three terminals, and a key
+    /// that moved a diff nobody was looking at would be the layout's most
+    /// surprising control. Clicking anywhere in a pane focuses it — see
+    /// `TileView.pane(_:rect:group:size:)` — so aiming this is the gesture the
+    /// reader already made to start reading.
+    let isFocused: Bool
+
     /// The terminal's own font, because this is the same code, read the same
     /// way, a few inches from a pane rendering it. Two monospaced faces side by
     /// side is a difference that means nothing, and someone who has set their
@@ -44,6 +54,11 @@ struct ChangesPane: View {
     @State private var pickingCommit = false
     @State private var query = ""
     @FocusState private var filtering: Bool
+    @State private var commitQuery = ""
+    @FocusState private var filteringCommits: Bool
+    /// Which commit row Enter will open. See `highlighted`, which is the same
+    /// idea for files.
+    @State private var highlightedCommit = 0
     @State private var lastHunkJump: String?
 
     private var codeFont: Font { Font(preferences.terminalFont() as CTFont) }
@@ -78,6 +93,19 @@ struct ChangesPane: View {
         // Cancelled with the view, which is what keeps this honest: the poll
         // exists only while somebody is reading the diff.
         .task(id: changes.workspace.id) { await changes.follow() }
+        .onCommand { command in
+            guard isFocused else { return }
+            switch command {
+            case .diffNextHunk: moveHunk(1)
+            case .diffPreviousHunk: moveHunk(-1)
+            case .diffNextFile: moveFile(1)
+            case .diffPreviousFile: moveFile(-1)
+            case .diffNextCommit: moveCommit(1)
+            case .diffPreviousCommit: moveCommit(-1)
+            case .diffFirstCommit: Task { await readCommitByCommit() }
+            default: break
+            }
+        }
     }
 
     /// More room when the pane has it, without letting navigation consume the
@@ -228,6 +256,7 @@ struct ChangesPane: View {
             // branch or uncommitted — and this is the third answer it has no
             // room for.
             commitPicker(compact: compact)
+            commitWalk(compact: compact)
             Divider().frame(height: 14).padding(.horizontal, 2)
 
             if compact {
@@ -267,9 +296,15 @@ struct ChangesPane: View {
         .background(WorkspaceStyle.paneChrome.opacity(0.60))
     }
 
-    private func navButton(_ symbol: String, help: String, action: @escaping () -> Void)
-        -> some View
-    {
+    /// `enabled` overrides the default rule, which is that moving is
+    /// meaningless in a pane with no files. Commit movement is the exception it
+    /// exists for: a commit that changed nothing is one you walk THROUGH, and a
+    /// chevron greyed out on it would be the walk ending at the one commit with
+    /// nothing in it to read.
+    private func navButton(
+        _ symbol: String, help: String, enabled: Bool? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 9.5, weight: .medium))
@@ -278,43 +313,143 @@ struct ChangesPane: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .disabled(changes.files.isEmpty)
+        .disabled(!(enabled ?? !changes.files.isEmpty))
         .help(help)
     }
 
+    /// Along the branch, one commit at a time.
+    ///
+    /// Only while a commit is on screen, because that is the only time it means
+    /// anything: from Branch or Uncommitted there is no position to move from.
+    /// The position label goes when the pane is narrow and the chevrons stay —
+    /// a control you can still press is worth more in that space than a number
+    /// you can still read, and the tooltips carry the number anyway.
+    @ViewBuilder
+    private func commitWalk(compact: Bool) -> some View {
+        if changes.scope == .commit {
+            navButton(
+                "chevron.left", help: walkHelp(-1), enabled: changes.previousCommit != nil
+            ) { moveCommit(-1) }
+            if !compact, let position = changes.commitPositionLabel {
+                Text(position)
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .fixedSize()
+                    .help("This commit’s place in the branch, base forward")
+            }
+            navButton(
+                "chevron.right", help: walkHelp(1), enabled: changes.nextCommit != nil
+            ) { moveCommit(1) }
+        }
+    }
+
+    /// The subject of the commit being moved to, because a chevron that says
+    /// "Next commit" answers a question nobody has — the reader knows which
+    /// direction they pressed, and wants to know what is over there.
+    private func walkHelp(_ direction: Int) -> String {
+        let neighbor = direction > 0 ? changes.nextCommit : changes.previousCommit
+        guard let neighbor else {
+            return direction > 0
+                ? "You’re at the newest commit on this branch"
+                : "You’re at the first commit on this branch"
+        }
+        let lead = direction > 0 ? "Next" : "Previous"
+        // A commit with an empty subject is possible and the sha is all there
+        // is left to name it by.
+        let name = neighbor.subject.isEmpty ? neighbor.short : neighbor.subject
+        return "\(lead) commit — \(name)"
+    }
+
+    /// Start at the base of the branch and go forward.
+    ///
+    /// The way in the history list is not: a list is the right shape for "which
+    /// one of these" and the wrong shape for "start at the beginning and keep
+    /// going", which is the reading that makes an agent-authored branch legible
+    /// — each commit is one intention, and the third one only makes sense after
+    /// the second.
+    private func readCommitByCommit() async {
+        await changes.startAtFirstCommit()
+        guard let file = changes.reviewOrder.first else { return }
+        jump(to: file)
+    }
+
+    private func moveCommit(_ direction: Int) {
+        let neighbor = direction > 0 ? changes.nextCommit : changes.previousCommit
+        guard let neighbor else { return }
+        // From the top of it, in both directions. A chevron pressed on purpose
+        // means "show me that commit", which starts where the commit starts —
+        // unlike the hand-off at the end of a file list, which is a journey
+        // already in progress.
+        Task { await show(commit: neighbor.sha, landingOnLast: false) }
+    }
+
     private func moveFile(_ direction: Int) {
-        let files = changes.files
-        guard !files.isEmpty else { return }
-        let current = files.firstIndex { $0.path == changes.selectedFile }
-            ?? (direction > 0 ? -1 : 0)
-        let next = (current + direction + files.count) % files.count
-        jump(to: files[next])
+        perform(
+            DiffWalk.step(
+                direction, hunks: [], after: nil,
+                files: changes.reviewOrder.count, at: currentFileIndex,
+                boundary: boundary(direction)),
+            direction: direction)
     }
 
     private func moveHunk(_ direction: Int) {
-        let targets = hunkTargets
-        guard !targets.isEmpty else {
-            moveFile(direction)
-            return
-        }
+        perform(
+            DiffWalk.step(
+                direction, hunks: hunkTargets, after: lastHunkJump,
+                files: changes.reviewOrder.count, at: currentFileIndex,
+                boundary: boundary(direction)),
+            direction: direction)
+    }
 
-        if let lastHunkJump,
-            let current = targets.firstIndex(of: lastHunkJump)
-        {
-            let next = current + direction
-            guard targets.indices.contains(next) else {
-                moveFile(direction)
-                return
-            }
-            jump(toHunk: targets[next])
-            return
-        }
+    private var currentFileIndex: Int? {
+        changes.reviewOrder.firstIndex { $0.path == changes.selectedFile }
+    }
 
-        guard let target = direction > 0 ? targets.first : targets.last else {
-            moveFile(direction)
-            return
+    /// What running out of files in this direction means.
+    ///
+    /// Branch and Uncommitted wrap, as they always have: each is the whole of
+    /// what it can show, so there is nothing past the last file to hand off to.
+    /// A commit is a position in a sequence, so the end of its file list is
+    /// where the next intention begins — and the end of the LAST commit is the
+    /// end of the branch, which is a place to stop rather than a place to loop.
+    /// The rule itself is `DiffWalk.boundary`; this is where the store answers
+    /// its three questions.
+    private func boundary(_ direction: Int) -> DiffBoundary {
+        DiffWalk.boundary(
+            direction, scope: changes.scope,
+            next: changes.nextCommit, previous: changes.previousCommit)
+    }
+
+    /// `direction` only decides where a hand-off LANDS: forward into a commit
+    /// means its first file, backward means its last, so a reader walking a
+    /// branch in either direction keeps traveling the same way.
+    private func perform(_ step: DiffStep, direction: Int) {
+        switch step {
+        case .stay:
+            break
+        case .hunk(let target):
+            jump(toHunk: target)
+        case .file(let index):
+            let files = changes.reviewOrder
+            guard files.indices.contains(index) else { return }
+            jump(to: files[index])
+        case .commit(let sha):
+            Task { await show(commit: sha, landingOnLast: direction < 0) }
         }
-        jump(toHunk: target)
+    }
+
+    /// Move to another commit and open a file in it, so the hand-off reads as
+    /// one continuous motion rather than as arriving somewhere new.
+    ///
+    /// The jump is what puts the scroll at the top of that file. Without it the
+    /// pane keeps whatever offset the previous commit was scrolled to and draws
+    /// the new commit from the middle of it.
+    private func show(commit sha: String, landingOnLast: Bool) async {
+        await changes.select(commit: sha)
+        let files = changes.reviewOrder
+        guard let file = landingOnLast ? files.last : files.first else { return }
+        jump(to: file)
     }
 
     private func jump(toHunk target: String) {
@@ -436,6 +571,20 @@ struct ChangesPane: View {
         .buttonStyle(.plain)
         .help(commitPickerHelp)
         .popover(isPresented: $pickingCommit, arrowEdge: .bottom) { commitList }
+        .onChange(of: pickingCommit) { _, open in
+            if open {
+                // Opens ON the commit being read, so ↑↓ starts where the reader
+                // is rather than at the newest commit they did not ask about.
+                highlightedCommit =
+                    changes.commitsNewestFirst.firstIndex { $0.sha == changes.selectedCommit } ?? 0
+            } else {
+                // Cleared on DISMISS for the reason the file filter gives:
+                // clearing it on a successful pick leaves Escape with a filter
+                // still set, silently hiding commits the next time it opens.
+                commitQuery = ""
+                highlightedCommit = 0
+            }
+        }
     }
 
     /// Three states and three sentences. The middle one is the case a rebase or
@@ -457,6 +606,7 @@ struct ChangesPane: View {
         // `ChangeCommit.age(at:)`.
         let now = Date()
         let commits = changes.commitsNewestFirst
+        let shown = matchingCommits
         return VStack(alignment: .leading, spacing: 0) {
             Button {
                 changes.showWholeBranch()
@@ -484,6 +634,38 @@ struct ChangesPane: View {
             .buttonStyle(.plain)
             .padding(5)
 
+            // The other way to read a branch, and the one that has no row of
+            // its own to click: a list is reached for with one commit in mind,
+            // and this is for the reader who has none and wants the story.
+            // Greyed out rather than hidden on a branch with no commits, so the
+            // idea is still visible on the branch where it does not yet apply.
+            Button {
+                pickingCommit = false
+                Task { await readCommitByCommit() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                        .font(.system(size: 9, weight: .semibold))
+                        .frame(width: 11)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Read Commit by Commit")
+                            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+                        Text("Start at the first commit; ⌃⌘] for the next")
+                            .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(commits.isEmpty)
+            .padding(.horizontal, 5)
+            .padding(.bottom, 5)
+
             Divider()
 
             if commits.isEmpty {
@@ -500,16 +682,33 @@ struct ChangesPane: View {
                 }
                 .padding(9)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(commits) { c in commitRow(c, now: now) }
+                commitFilterField
+                Divider()
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            if shown.isEmpty {
+                                Text("No commit matches “\(commitQuery)”")
+                                    .font(.system(size: WorkspaceStyle.PaneText.body))
+                                    .foregroundStyle(.secondary)
+                                    .padding(8)
+                            }
+                            ForEach(Array(shown.enumerated()), id: \.element.id) { i, c in
+                                commitRow(c, now: now, highlighted: i == highlightedCommit)
+                                    .id(c.sha)
+                            }
+                        }
+                        .padding(5)
                     }
-                    .padding(5)
+                    // A branch is allowed to be long. Capped and scrolled, a
+                    // hundred commits is a list; uncapped, it is a popover taller
+                    // than the display it opened on.
+                    .frame(maxHeight: 280)
+                    .onChange(of: highlightedCommit) { _, i in
+                        guard shown.indices.contains(i) else { return }
+                        proxy.scrollTo(shown[i].sha, anchor: .center)
+                    }
                 }
-                // A branch is allowed to be long. Capped and scrolled, a
-                // hundred commits is a list; uncapped, it is a popover taller
-                // than the display it opened on.
-                .frame(maxHeight: 280)
             }
 
             Divider()
@@ -528,6 +727,56 @@ struct ChangesPane: View {
                 .padding(.vertical, 6)
         }
         .frame(width: 380)
+        // Arrows move the highlight; the field keeps the keystrokes it wants.
+        // The same three-part deal the file filter makes — see `filterList`.
+        .onMoveCommand { direction in
+            switch direction {
+            case .up: highlightedCommit = max(0, highlightedCommit - 1)
+            case .down:
+                highlightedCommit = min(max(0, shown.count - 1), highlightedCommit + 1)
+            default: break
+            }
+        }
+    }
+
+    /// Type the part you remember.
+    ///
+    /// Over the BODY as well as the subject, which is the half that makes this
+    /// worth having: the phone's experience of the same list is that the
+    /// remembered word — the approach that was tried, the thing that was
+    /// decided against — is usually in the rationale an agent wrote underneath,
+    /// not in the seven words it put on the first line. The sha and the author
+    /// are in too, because `a3f1` and a name are both things people paste.
+    private var commitFilterField: some View {
+        TextField("Filter commits", text: $commitQuery)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: WorkspaceStyle.PaneText.body))
+            .padding(7)
+            .focused($filteringCommits)
+            // A popover does not focus a field on macOS, and a list you have to
+            // click into before typing is just a menu.
+            .onAppear { filteringCommits = true }
+            .onChange(of: commitQuery) { _, _ in highlightedCommit = 0 }
+            .onSubmit { openHighlightedCommit() }
+    }
+
+    /// Every commit whose sha, subject, body or author contains what was typed.
+    private var matchingCommits: [ChangeCommit] {
+        let q = commitQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return changes.commitsNewestFirst }
+        return changes.commitsNewestFirst.filter { c in
+            [c.sha, c.subject, c.body ?? "", c.author].contains {
+                $0.range(of: q, options: .caseInsensitive) != nil
+            }
+        }
+    }
+
+    private func openHighlightedCommit() {
+        let shown = matchingCommits
+        guard shown.indices.contains(highlightedCommit) else { return }
+        let sha = shown[highlightedCommit].sha
+        pickingCommit = false
+        Task { await changes.select(commit: sha) }
     }
 
     private var noCommitsDetail: String {
@@ -537,7 +786,18 @@ struct ChangesPane: View {
             : "Nothing has been committed here since \(base)."
     }
 
-    private func commitRow(_ c: ChangeCommit, now: Date) -> some View {
+    /// One commit: what it is called, why, and how big it was.
+    ///
+    /// The body preview is the row's second line and the reason this list is
+    /// worth reading rather than scanning. An agent's commit body is usually
+    /// the closest thing to a written rationale for what it did, and it costs
+    /// nothing to fetch — it travels in the change set the pane has already
+    /// read.
+    ///
+    /// Two lines of it, not the whole thing. Four commits with eight lines each
+    /// is not a list any more; the tooltip carries the rest, which is the Mac
+    /// having somewhere to put it that a phone does not.
+    private func commitRow(_ c: ChangeCommit, now: Date, highlighted: Bool) -> some View {
         Button {
             Task { await changes.select(commit: c.sha) }
             pickingCommit = false
@@ -547,11 +807,35 @@ struct ChangesPane: View {
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(c.subject)
-                        .font(.system(size: WorkspaceStyle.PaneText.body))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(c.subject)
+                            .font(.system(size: WorkspaceStyle.PaneText.body))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        // Absent rather than `+0 −0` when the runner could not
+                        // count — see `ChangeCommit.counts`.
+                        if let counts = c.counts {
+                            Text(
+                                DiffCounts.pair(
+                                    insertions: counts.insertions, deletions: counts.deletions)
+                            )
+                            .font(
+                                .system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced)
+                            )
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                        }
+                    }
+                    if let preview = c.bodyPreview {
+                        Text(preview)
+                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Text(byline(c, now: now))
                         .font(.system(size: WorkspaceStyle.PaneText.minimum))
                         .foregroundStyle(.tertiary)
@@ -563,20 +847,44 @@ struct ChangesPane: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            // Two different claims, so two different colors, and the keyboard's
+            // wins where they land on the same row: the accent is a promise
+            // about what Enter will do, and the navigator tint is a statement
+            // about what is already on screen.
             .background(
-                changes.selectedCommit == c.sha
-                    ? WorkspaceStyle.navigatorSelection : .clear,
+                highlighted
+                    ? AnyShapeStyle(Color.accentColor.opacity(0.18))
+                    : (changes.selectedCommit == c.sha
+                        ? AnyShapeStyle(WorkspaceStyle.navigatorSelection)
+                        : AnyShapeStyle(Color.clear)),
                 in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
-        .help(c.made)
+        .help(rowHelp(c))
     }
 
-    /// Author and age on one line. A commit with no author name is not worth a
-    /// separator and a gap where a name should be.
+    /// When it was made, and everything the author wrote — trailers and all.
+    ///
+    /// The preview above skips trailer-only paragraphs because it has one line
+    /// to spend. This has no such budget, and on the screen that is ABOUT one
+    /// commit a `Co-Authored-By:` line is part of what the commit says.
+    private func rowHelp(_ c: ChangeCommit) -> String {
+        guard let body = c.bodyText else { return c.made }
+        return "\(c.made)\n\n\(body)"
+    }
+
+    /// Author, age and how many files, on one line. Each part is dropped rather
+    /// than left as a gap where a fact should be: a commit with no author name
+    /// is not worth a separator, and a file count of zero means the runner
+    /// could not tell us — the same rule `ChangeCommit.counts` keeps.
     private func byline(_ c: ChangeCommit, now: Date) -> String {
-        let age = c.age(at: now)
-        return c.author.isEmpty ? age : "\(c.author) · \(age)"
+        var parts: [String] = []
+        if !c.author.isEmpty { parts.append(c.author) }
+        parts.append(c.age(at: now))
+        if let files = c.filesChanged, files > 0 {
+            parts.append(files == 1 ? "1 file" : "\(files) files")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var filterList: some View {
@@ -658,8 +966,8 @@ struct ChangesPane: View {
     /// Every file whose path contains what was typed, case-insensitively.
     private var matches: [ChangedFile] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return changes.files }
-        return changes.files.filter {
+        guard !q.isEmpty else { return changes.reviewOrder }
+        return changes.reviewOrder.filter {
             $0.path.range(of: q, options: .caseInsensitive) != nil
         }
     }
@@ -969,8 +1277,11 @@ struct ChangesPane: View {
     /// size stops mattering.
     private var rows: [DiffRow] {
         var out: [DiffRow] = []
-        out.reserveCapacity(changes.files.count * 8)
-        for f in changes.files {
+        // The reading order, not the daemon's, and the same one `moveFile`
+        // walks — see `ChangesStore.reviewOrder`. Today they are the same list.
+        let files = changes.reviewOrder
+        out.reserveCapacity(files.count * 8)
+        for f in files {
             out.append(DiffRow(id: f.path, kind: .heading(f), path: f.path))
             if changes.collapsedFiles.contains(f.path) { continue }
             if f.binary {

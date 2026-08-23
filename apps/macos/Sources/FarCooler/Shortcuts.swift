@@ -18,6 +18,12 @@ import SwiftUI
 ///             IS the tab here, which is why these walk the pill bar
 ///   ⌘0        reload the fleet
 ///
+/// The brackets are the family: `[` and `]` always walk a list, and the modifier
+/// says which one. ⌘ is terminals, ⇧⌘ is layouts, ⌥⌘ is the files inside a diff
+/// and ⌃⌘ is the commits behind them — the outermost list on the outermost
+/// modifier. Hunks take ⌥⌘↓ and ⌥⌘↑ instead, because a hunk is not a list you
+/// pick from; it is the next place down the document.
+///
 /// Tiling is the exception, and deliberately so. It uses a tmux PREFIX — ⌃B, then
 /// a key — for two reasons. The ⌘ chords are gone: a terminal wants nearly all of
 /// them, and what is left is what nobody can remember. And a very large share of
@@ -56,6 +62,14 @@ enum Shortcut {
             [
                 Item(keys: "⌃H ⌃L", action: "Move to the pane left / right"),
                 Item(keys: "⌃K ⌃J", action: "Move to the pane above / below"),
+            ]
+        ),
+        (
+            "Reading a diff",
+            [
+                Item(keys: "⌥⌘↓ ⌥⌘↑", action: "Next / previous hunk — and on into the next file"),
+                Item(keys: "⌥⌘] ⌥⌘[", action: "Next / previous file"),
+                Item(keys: "⌃⌘] ⌃⌘[", action: "Next / previous commit, base forward"),
             ]
         ),
         (
