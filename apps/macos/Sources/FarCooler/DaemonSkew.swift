@@ -197,11 +197,19 @@ enum DaemonRestartCost {
 /// Shape rather than a new color. `StatusGlyph` sets the rule this follows —
 /// "four colors in an application is already generous", and a hollow ring means
 /// something is missing where a filled dot means something is happening — and
-/// `HostDot` has already spent red on a runner that has given up and amber on
-/// one that is reconnecting. A fifth hue for "answers everything, wrong build"
-/// would be a color nobody could learn; an amber RING beside amber DOTS is a
-/// difference you can see without being told, and it is honest about what it
-/// means: the runner is fine, what it is running is not.
+/// `HostDot` has already spent red on a runner that has given up. A fifth hue
+/// for "answers everything, wrong build" would be a color nobody could learn.
+///
+/// Amber is right for this on its own terms, and that is a newer argument than
+/// the one written here first. This was "an amber RING beside amber DOTS is a
+/// difference you can see without being told" — true while `HostDot` painted
+/// reconnection amber, when the shape was the only thing keeping the two
+/// apart. That dot is neutral now, so this is the only amber in the column and
+/// the ring is no longer carrying the distinction by itself. It is also the
+/// only thing here ASKING a person for something, which is what amber means in
+/// all three apps. The ring stays anyway, because it is honest about what it
+/// means: the runner is fine, what it is running is not, and a filled dot would
+/// say the runner itself had gone wrong.
 ///
 /// `.tooOldToTalk` is the exception and keeps a filled red dot, because that
 /// runner really is unreachable — the color says how bad it is, and the card

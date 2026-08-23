@@ -594,8 +594,19 @@ struct ProjectHeader: View {
 ///
 /// Absent when healthy: a dot that is always there is a dot nobody reads, and
 /// the whole point is that you notice it only when something is wrong.
-/// Reconnection is amber and silent; only a runner that has given up is red,
+/// Reconnection is neutral and silent; only a runner that has given up is red,
 /// and clicking it retries at once rather than waiting out the backoff.
+///
+/// Reconnection was amber, and that was an honest reading of it before the
+/// palette had a rule: amber for the middle state, neither well nor dead. It
+/// cannot stay one, because amber now means exactly one thing across all three
+/// apps — an agent is waiting on you — and a socket coming back up is nobody
+/// waiting. `Status.tint` already paints `working` and `starting` `.secondary`
+/// for that reason; a connection in progress is the fleet-level version of the
+/// same sentence, and iOS says it in the same word. The cost is that this and
+/// `.notInstalled` now draw the same mark, separated only by their help text:
+/// the shape channel that would have split them is not available at 5pt, where
+/// a 1.5pt ring is a soft dot rather than a hollow one.
 ///
 /// A stale daemon is the fourth thing that can be wrong with a runner, and the
 /// first one that is not about whether it answers. It rides in this same column
@@ -604,7 +615,7 @@ struct ProjectHeader: View {
 /// which draws it, and `DaemonSkew`, which decides when there is anything to
 /// draw. Connection always wins: `daemonSkew` is `.unavailable` for every state
 /// but `.connected` (and for the one refused handshake that is really a version),
-/// so a runner that is merely reconnecting cannot lose its amber dot to
+/// so a runner that is merely reconnecting cannot lose its connection dot to
 /// yesterday's version news.
 struct HostDot: View {
     let state: HostState
@@ -629,7 +640,7 @@ struct HostDot: View {
             EmptyView()
         case .connecting, .reconnecting:
             Circle()
-                .fill(Color.orange)
+                .fill(Color.secondary)
                 .frame(width: 5, height: 5)
                 .help("Reconnecting to this runner")
         case .unreachable(let why):
@@ -941,7 +952,16 @@ struct WorkspaceDot: View {
         case .active: return .green
         case .error: return .red
         case .hidden: return Color.secondary.opacity(0.4)
-        case .worktreeMissing: return Color.orange.opacity(0.7)
+        // Red, not a dimmed amber. `StatusGlyph` spends amber on one state —
+        // an agent is waiting on you — and a directory that is gone is not
+        // waiting for anything. It is the workspace-level `Status.lost`, and
+        // `lost` is red. The soft orange was a third reading from before there
+        // was a rule: less alarming than `error`, warmer than `hidden`.
+        //
+        // It shares red with `error` now, which is affordable HERE and would
+        // not be in a list: this dot appears once, beside a 24pt title, never
+        // next to another one, and its help text names the state.
+        case .worktreeMissing: return .red
         default: return .secondary
         }
     }

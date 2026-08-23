@@ -1022,8 +1022,16 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 7) {
+                // Red, not amber, when the runtime is down. Amber means one
+                // thing in this app and in both phones — an agent is waiting
+                // on you — and nobody is waiting here: tmux is the runtime
+                // every pane on every runner lives inside, and a fleet that
+                // cannot reach it cannot show you a single one of them. That
+                // is a failure rather than a request. iOS settled this in
+                // `7e4a4f7` and Android followed in `8481657`, which left this
+                // dot as the last place the three apps disagreed about it.
                 Circle()
-                    .fill(store.fleet.runtimeHealthy ? Color.green : Color.orange)
+                    .fill(store.fleet.runtimeHealthy ? Color.green : Color.red)
                     .frame(width: 7, height: 7)
                 Text(
                     store.fleet.runtimeHealthy
@@ -1047,7 +1055,7 @@ struct ContentView: View {
                 // `EmptyView()` for `.connected`, which is right for a
                 // header naming only whether the RUNNER answers, but wrong
                 // here — a runner can be fully reachable and still be the
-                // reason this row reads orange (reachable, no tmux), and
+                // reason this row reads red (reachable, no tmux), and
                 // that case has to draw a dot. See `troubleColor(for:)`
                 // below for the resulting, deliberately different, palette.
                 if showHosts && !store.unhealthyHosts.isEmpty {
@@ -1117,8 +1125,22 @@ struct ContentView: View {
     private func troubleColor(for host: String) -> Color {
         switch store.state(of: host) {
         case .unreachable: return .red
+        // Reachable, and its tmux is not answering — the one case `HostDot`
+        // has nothing to say about, and the reason this function exists. The
+        // same event as the bar's own dot going red a few lines up, so it
+        // wears the same color: a runner whose every pane is unreadable has
+        // failed at the only job it has here.
+        case .connected: return .red
         case .notInstalled: return .secondary
-        case .connecting, .connected, .reconnecting: return .orange
+        // Neutral rather than amber. Amber would say an agent is waiting on
+        // you; what is waiting is a socket. `Status.tint` paints `working`
+        // and `starting` `.secondary` for exactly that reason, and a
+        // connection coming back up is the fleet-level version of the same
+        // sentence. `.connecting` cannot actually reach this — the list this
+        // colors leaves out a runner nothing is yet known about, see
+        // `FleetStore.unhealthyHosts` — and is named beside `.reconnecting`
+        // because they are one situation and the switch is exhaustive.
+        case .connecting, .reconnecting: return .secondary
         }
     }
 
