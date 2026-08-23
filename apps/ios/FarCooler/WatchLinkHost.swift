@@ -54,7 +54,8 @@ final class WatchLinkHost: NSObject {
     private var lastSentAt = Date.distantPast
 
     /// Per-terminal transcripts, kept only so the SECOND question about one
-    /// agent is cheap. See `pendingPermission(terminal:on:)`.
+    /// agent is cheap — and there are now two questions that read one, so the
+    /// second is routinely asked. See `replay(terminal:on:within:)`.
     private var replays: [String: Replay] = [:]
 
     private struct Replay {
@@ -139,8 +140,20 @@ final class WatchLinkHost: NSObject {
         // the number the glance was added to show. The thirty-second ceiling
         // below still bounds it; this is about not spending that ceiling on a
         // change we already know about.
+        //
+        // `agentsSayTheSame(as:)` rather than `!=` on the arrays, and the
+        // difference is one field: `observedAt` moves on every poll for every
+        // agent, by design, so plain inequality is true every three seconds
+        // forever and this guard would stop guarding anything. The question
+        // here has always been "would the watch draw something different", and
+        // when we last heard about an agent is not something it draws.
+        //
+        // Nothing is lost by leaving it out. The thirty-second floor below
+        // resends regardless, so the wrist's `observedAt` is never more than
+        // thirty seconds behind this phone's — against a `staleAfter` of an
+        // hour.
         let changed =
-            snapshot.agents != lastSent?.agents
+            !snapshot.agentsSayTheSame(as: lastSent)
             || snapshot.reviewsWaiting != lastSent?.reviewsWaiting
         guard changed || Date().timeIntervalSince(lastSentAt) >= Self.refreshInterval else {
             return
@@ -169,7 +182,7 @@ final class WatchLinkHost: NSObject {
 
     // MARK: - Performing what the watch asks
 
-    /// The three requests, each performed through the code path the phone's own
+    /// The four requests, each performed through the code path the phone's own
     /// UI uses.
     ///
     /// Its sentences are read on a WRIST and still name the device by
@@ -258,6 +271,10 @@ final class WatchLinkHost: NSObject {
             // agent is waiting on is.
             if case let .permission(found) = reply { Self.record(found, for: terminal) }
             return reply
+
+        case let .transcript(terminal):
+            return await transcript(
+                terminal: terminal, on: connection, within: Self.replayBudget)
         }
     }
 
@@ -304,13 +321,154 @@ final class WatchLinkHost: NSObject {
     /// What, if anything, this agent is blocked on.
     ///
     /// A permission's id and its options exist only in the agent's event
-    /// stream — the fleet snapshot carries a headline, not a request id — so
-    /// this is the one request that cannot be answered from what the phone
-    /// already holds. There is no cheaper source: the daemon exposes no "what
-    /// is pending" call, and `blocked_question` in `watch.rs` is a line scraped
-    /// off the screen with no id and no options attached to it.
+    /// stream, so this cannot be answered from anything the phone already
+    /// holds; `replay` below is what goes and gets it, and carries the reasoning
+    /// about what that costs.
     ///
-    /// So it replays the stream. Three things make that affordable:
+    /// `nil` is "nothing pending", which the vocabulary already means and the
+    /// watch already renders as such — an agent can be blocked on a trust gate
+    /// or a plain question, and reporting that as a failure would put an error
+    /// in front of somebody when nothing went wrong. It is emphatically NOT
+    /// what a failed replay answers: see `replay`'s two `catch`es.
+    private func pendingPermission(
+        terminal: String, on connection: Connection, within budget: TimeInterval
+    ) async -> WatchReply {
+        switch await replay(terminal: terminal, on: connection, within: budget) {
+        case let .failed(reason):
+            return .failed(reason)
+        case let .folded(transcript, _):
+            guard let pending = transcript.pendingPermission else { return .permission(nil) }
+            // Field for field, which is why `WatchPermission` was written to
+            // match `PendingPermission` exactly: a copy has nothing to decide.
+            return .permission(
+                WatchPermission(
+                    id: pending.id,
+                    toolCall: pending.toolCall,
+                    options: pending.options.map {
+                        WatchPermissionOption(id: $0.id, name: $0.name, kind: $0.kind)
+                    }))
+        }
+    }
+
+    /// What this agent has SAID, cut to what the link will carry.
+    ///
+    /// The same replay `pendingPermission` runs, read for a different fact —
+    /// which is the whole reason that function was split. A watch asking "what
+    /// did it say" and a watch asking "what is it waiting on" are one round
+    /// trip to the runner either way, and the second of them is free because
+    /// the folded transcript is already in hand.
+    ///
+    /// **What is kept: the messages, and only the top-level ones.** The
+    /// transcript's own vocabulary is `message`, `tool`, `subagent` and `gap`,
+    /// and three of those four are dropped here:
+    ///
+    ///   - `tool` rows are `Read crates/core/src/feed.rs` and diffs. The
+    ///     agent's ACTIVITY, which is exactly what `FleetSnapshot.Agent.feed`
+    ///     already carries onto the wrist, already truncated by the host for
+    ///     the purpose. Sending them again as prose would spend the budget
+    ///     re-answering a question the fleet row answered.
+    ///   - `subagent` blocks nest a whole second conversation. A dispatch and
+    ///     its children on a 45mm screen is a tree, and the person opening this
+    ///     wants a sentence.
+    ///   - `gap` says something was lost. It is not words, so it is not an
+    ///     entry — but it does mean this is not the whole conversation, so it
+    ///     is folded into `complete` below rather than discarded.
+    ///
+    /// `Role.thought` goes too, and it is the only judgement call here. Thinking
+    /// is long, it is not addressed to anybody, and it is not what the agent
+    /// answered — "an agent completed answering my question and I want to see
+    /// what it said" is the sentence this screen exists for, and a wrist full
+    /// of reasoning would bury the answer under it.
+    ///
+    /// `Role.user` stays, which is the other half of that sentence. An answer
+    /// with no question above it is a paragraph nobody can place, and a prompt
+    /// is short — the phone's own composer sends one line, and dictation from
+    /// this very watch sends less.
+    private func transcript(
+        terminal: String, on connection: Connection, within budget: TimeInterval
+    ) async -> WatchReply {
+        switch await replay(terminal: terminal, on: connection, within: budget) {
+        case let .failed(reason):
+            return .failed(reason)
+        case let .folded(transcript, _):
+            var entries: [WatchTranscriptEntry] = []
+            var whole = true
+            for row in transcript.rows {
+                switch row.kind {
+                case let .message(role, text, parent):
+                    // `parent` non-nil is an orphaned subagent message — a
+                    // child whose block never arrived. `Transcript` keeps it at
+                    // the top level rather than losing it, and is explicit that
+                    // merging it with the agent's own words would be a
+                    // mis-attribution. So it is dropped here for the same
+                    // reason the blocks are, and counted against `whole`.
+                    guard parent == nil else {
+                        whole = false
+                        continue
+                    }
+                    guard role != .thought else { continue }
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { continue }
+                    entries.append(WatchTranscriptEntry(role: role.rawValue, text: trimmed))
+                case let .gap(reason):
+                    // Words this phone never received. Not an entry, but the
+                    // one thing that makes "these are all the words there were"
+                    // untrue without anything here having dropped a thing.
+                    //
+                    // **Except `loadEmpty`, which is not a loss and is the
+                    // ordinary case.** It means nothing was ever recorded for
+                    // this session — a claude or codex terminal opened as a
+                    // chat before its first turn — so an empty fold IS the
+                    // whole conversation. Counting it would put "there's more
+                    // on your iPhone" under the words of every agent that has
+                    // only just started, which is the reading this screen was
+                    // built to stop somebody making.
+                    //
+                    // The other four do count, `loadUnsupported` and
+                    // `loadFailed` included, even though the phone has no more
+                    // of those words than the watch does. What is on the phone
+                    // in that case is the gap ITSELF, rendered and explained —
+                    // and somebody who came looking for words that are not
+                    // there is better served by finding out why than by a watch
+                    // that quietly presents a fragment as the whole thing.
+                    if reason != .loadEmpty { whole = false }
+                case .tool, .subagent:
+                    continue
+                }
+            }
+            return .transcript(WatchTranscript.fitting(entries, whole: whole))
+        }
+    }
+
+    /// The outcome of one replay: a folded conversation, or a sentence.
+    ///
+    /// A `Result` in all but name, spelled out because the failure side is not
+    /// an `Error` — it is already the sentence a person reads, produced by
+    /// `reason(_:doing:)` or written out beside the timeout it describes.
+    private enum Replayed {
+        /// The transcript, and the epoch it belongs to. The epoch is carried
+        /// for the same reason `Replay` stores it: two folds of two different
+        /// streams are not comparable, and a caller that cached anything off
+        /// one of them needs to know which.
+        case folded(Transcript, epoch: UInt64)
+        case failed(String)
+    }
+
+    /// Bring this terminal's conversation up to date, and hand it over.
+    ///
+    /// This is the body `pendingPermission` used to be, and every word of its
+    /// reasoning still applies — one round trip rather than a poll loop, a
+    /// delta on the second ask, and a timeout that fails in words rather than
+    /// answering "nothing".
+    ///
+    /// A permission's id and its options exist only in the agent's event
+    /// stream — the fleet snapshot carries a headline, not a request id — and
+    /// so does everything the agent said. There is no cheaper source for
+    /// either: the daemon exposes no "what is pending" call, and
+    /// `blocked_question` in `watch.rs` is a line scraped off the screen with no
+    /// id and no options attached to it.
+    ///
+    /// Three things make the replay affordable:
     ///
     ///   - **One round trip, not a poll loop.** `terminal.agent_subscribe`
     ///     answers with the daemon's whole retained window in a single reply —
@@ -320,17 +478,13 @@ final class WatchLinkHost: NSObject {
     ///     question once, so it asks once.
     ///   - **The second question is a delta.** The folded transcript is kept per
     ///     terminal, so a later ask sends the cursor it reached and gets back
-    ///     only what happened since. Checking a blocked agent twice costs one
-    ///     replay, not two.
-    ///   - **A timeout, and the timeout answers `nil`.** See `replayBudget`.
-    ///
-    /// `nil` is "nothing pending", which the vocabulary already means and the
-    /// watch already renders as such — an agent can be blocked on a trust gate
-    /// or a plain question, and reporting that as a failure would put an error
-    /// in front of somebody when nothing went wrong.
-    private func pendingPermission(
+    ///     only what happened since. Reading an agent twice costs one replay,
+    ///     not two — and asking what it said and then what it is waiting on
+    ///     costs one between them.
+    ///   - **A timeout, and the timeout does not lie.** See `replayBudget`.
+    private func replay(
         terminal: String, on connection: Connection, within budget: TimeInterval
-    ) async -> WatchReply {
+    ) async -> Replayed {
         var replay = replays[terminal] ?? Replay(epoch: 0, transcript: Transcript(), askedAt: Date())
         // Read out before the closure captures anything. `replay` is a `var`
         // this function goes on to mutate, and a concurrently-executing closure
@@ -347,14 +501,14 @@ final class WatchLinkHost: NSObject {
                     ["terminal": terminal, "fromSeq": fromSeq, "epoch": epoch])
             }
         } catch is Timeout {
-            // NOT `.permission(nil)`. Twenty lines below, an unreadable reply
-            // is refused that answer because it "would tell them their agent is
-            // not waiting when it may well be" — and a timeout on a slow link
-            // says precisely the same untrue thing. The asking is not idle
-            // either: the watch only asks because the snapshot said `blocked`,
-            // so an agent that IS waiting is the likely case here rather than
-            // the edge one. `.permission(nil)` is kept for what it means — the
-            // replay finished and there was nothing pending.
+            // NOT an empty answer. `.permission(nil)` means the replay finished
+            // and there was nothing pending, and an empty `WatchTranscript`
+            // means the agent has said nothing — both are established facts,
+            // and a timeout establishes neither. The asking is not idle either:
+            // the watch asks about a permission because the snapshot said
+            // `blocked`, and asks for a transcript because somebody wants to
+            // read one, so there is something here in the likely case rather
+            // than the edge one.
             return .failed(
                 "Couldn’t read that agent in time. Open it on your \(DeviceKind.current).")
         } catch {
@@ -362,11 +516,10 @@ final class WatchLinkHost: NSObject {
         }
 
         guard let batch = try? JSONDecoder().decode(AgentStream.Batch.self, from: data) else {
-            // Unreadable is not "nothing pending" — but it is not something a
-            // watch screen can act on either, and there is no third answer in
-            // the vocabulary. Said as a failure so it reaches somebody, rather
-            // than as `nil`, which would tell them their agent is not waiting
-            // when it may well be.
+            // Unreadable is not an empty answer either, for the reason above,
+            // and there is no third case in the vocabulary. Said as a failure
+            // so it reaches somebody rather than as an emptiness that reads
+            // like a fact.
             return .failed("Couldn’t read that agent’s conversation.")
         }
 
@@ -393,16 +546,7 @@ final class WatchLinkHost: NSObject {
         replays[terminal] = replay
         prune()
 
-        guard let pending = replay.transcript.pendingPermission else { return .permission(nil) }
-        // Field for field, which is why `WatchPermission` was written to match
-        // `PendingPermission` exactly: a copy has nothing to decide.
-        return .permission(
-            WatchPermission(
-                id: pending.id,
-                toolCall: pending.toolCall,
-                options: pending.options.map {
-                    WatchPermissionOption(id: $0.id, name: $0.name, kind: $0.kind)
-                }))
+        return .folded(replay.transcript, epoch: replay.epoch)
     }
 
     /// Keep the cache to the handful of agents somebody actually answers from
@@ -561,10 +705,11 @@ final class WatchLinkHost: NSObject {
             // time. Nothing was sent either way.
             await settle(intent, .nothingSent, reason)
             return
-        case .sent:
-            // A `sent` in answer to a question is this build's own vocabulary
-            // contradicting itself. It establishes nothing about what the agent
-            // is waiting on, so it must not be treated as a match.
+        case .sent, .transcript:
+            // A receipt or a conversation in answer to a question about what is
+            // pending is this build's own vocabulary contradicting itself. It
+            // establishes nothing about what the agent is waiting on, so it must
+            // not be treated as a match.
             await settle(
                 intent, .nothingSent,
                 "Your \(DeviceKind.current) couldn’t read that agent’s conversation.")

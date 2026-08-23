@@ -20,11 +20,18 @@ enum FleetSnapshotWriter {
     /// out of order.
     @MainActor
     static func write(fleet: Fleet, inbox: [String: InboxRow]?, machine: String) {
+        // One instant for the whole poll, and it reaches two places: the
+        // snapshot's `capturedAt` and every agent's `observedAt`. They are the
+        // same moment here and only here — a poll hears about the entire fleet
+        // at once, which is precisely what a push does not do — so reading them
+        // off two `Date()` calls a few microseconds apart would be inventing a
+        // difference that does not exist.
+        let now = Date()
         let agents = fleet.workspaces.flatMap(\.terminals).compactMap { terminal in
-            snapshotAgent(terminal, machine: machine)
+            snapshotAgent(terminal, machine: machine, at: now)
         }
         let snapshot = FleetSnapshot(
-            agents: agents, capturedAt: Date(), complete: true,
+            agents: agents, capturedAt: now, complete: true,
             reviewsWaiting: reviewsWaiting(inbox))
         SnapshotStore.write(snapshot)
         // The surfaces are out of process and do not poll. Without this they
@@ -83,7 +90,7 @@ enum FleetSnapshotWriter {
     }
 
     private static func snapshotAgent(
-        _ terminal: Terminal, machine: String
+        _ terminal: Terminal, machine: String, at now: Date
     ) -> FleetSnapshot.Agent? {
         // The host's own word for it. `activity` is `none` for a plain shell and
         // for any pane whose process has exited, and something else only where
@@ -129,6 +136,20 @@ enum FleetSnapshotWriter {
             // `merging` moves to now. Nil from a daemon too old to send it, and
             // nil then falls back to `capturedAt` exactly as before.
             activityChangedAt: terminal.activityChangedAt,
+            // When this phone last heard about this agent, which is now: the
+            // daemon just listed it in a fleet poll. The one field on
+            // `FleetSnapshot.Agent` that is NOT copied from what the host
+            // derived, and deliberately so — the host cannot know when a phone
+            // last managed to reach it. See `FleetSnapshot.observedAt`.
+            //
+            // Every agent in the poll, unconditionally, whether or not anything
+            // about it changed: a daemon that says an agent is still working
+            // has been heard from, and that is the whole question
+            // `confidence(in:at:)` asks. Withholding it for an unchanged agent
+            // would put back exactly the bug this fixes — an agent that has
+            // been working for an hour reading as "last seen working" on a
+            // fleet that is polling every three seconds.
+            observedAt: now,
             // How far the agent is through its own task list, straight across
             // and unchanged. Not defaulted the way `feed` and `turnFailed`
             // above are, and the difference is the point: an empty feed and a

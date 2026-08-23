@@ -192,6 +192,7 @@ WATCH_SOURCES = [
     "AgentDetailView.swift",
     "ComposeView.swift",
     "PermissionView.swift",
+    "TranscriptView.swift",
 ]
 
 # AgentKit files the watch target compiles, named one by one — the same way

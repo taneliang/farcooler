@@ -39,7 +39,59 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         public var turnFailed: Bool
         /// When this state began, when the host said. Nil is "not told", which
         /// is different from "just now" and must not be rendered as it.
+        ///
+        /// **This is not how old the news is**, and reading it as such was a
+        /// shipped bug — see `observedAt` below and `confidence(in:at:)`. An
+        /// agent that has been working for ten minutes has an
+        /// `activityChangedAt` ten minutes old on a snapshot polled one second
+        /// ago, because ten minutes is how long it has been working and not how
+        /// long ago we heard.
         public var activityChangedAt: Date?
+
+        /// When THIS agent was last actually heard about, stamped by whoever
+        /// assembled the snapshot. Nil is "not told", the same way every other
+        /// optional here is.
+        ///
+        /// **The only field on this type nothing on the wire supplies.** Every
+        /// other one is copied across from what the daemon derived — the rule
+        /// at the top of the file — and this one deliberately is not, because
+        /// it is not a fact about the agent at all. It is a fact about this
+        /// client's own knowledge: the daemon has no idea when a phone last
+        /// managed to talk to it. So it is stamped where the knowledge is
+        /// acquired, which is `FleetSnapshotWriter` for a poll and `merging`
+        /// for a push, and it costs the proto nothing.
+        ///
+        /// It exists because the two other dates cannot answer "how old is
+        /// this" between them, and the history is worth keeping:
+        ///
+        ///   - `capturedAt` is when the SNAPSHOT was assembled, so it is one
+        ///     answer for the whole fleet. `merging` moves it to `now` for a
+        ///     push about one agent, which made news about A read as news about
+        ///     B through F. That was a real bug and it is why `age(of:at:)`
+        ///     stopped using it.
+        ///   - `activityChangedAt` is when this agent's STATE began, which is
+        ///     per agent and fixed the above — but it answers a different
+        ///     question. A ten-minute-old `working` reads as stale on a
+        ///     one-second-old poll, and agents work for many minutes here, so
+        ///     that was the ordinary case rather than the edge one. Hence "a
+        ///     lot of last-seen headers".
+        ///
+        /// This is the third thing, and it is the one the staleness rule
+        /// actually wants: how old our INFORMATION is, per agent. It moves
+        /// forward every time the fleet is polled and the agent is still in it,
+        /// whether or not anything about the agent changed — a daemon that says
+        /// "still working" has been heard from.
+        ///
+        /// **Optional, and nil is not "just now".** A snapshot written by a
+        /// build that predates this decodes with nil, and `lastHeard(of:)` then
+        /// falls back down the same ladder this type used before — which
+        /// understates freshness rather than overstating it, and is exactly the
+        /// behavior that build already had.
+        ///
+        /// **Not part of what a surface draws**, which is why
+        /// `saysTheSame(as:)` exists to leave it out of a change test. See
+        /// there.
+        public var observedAt: Date?
         /// How far the agent is through its OWN task list, as the host counted
         /// it. `planDone` of 4 and `planTotal` of 7 is `4/7`.
         ///
@@ -91,6 +143,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             id: String, label: String, machine: String, status: String,
             glyph: String, headline: String, line: String, feed: [String],
             rank: UInt32, turnFailed: Bool, activityChangedAt: Date?,
+            observedAt: Date? = nil,
             planDone: UInt32? = nil, planTotal: UInt32? = nil
         ) {
             self.id = id
@@ -104,6 +157,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             self.rank = rank
             self.turnFailed = turnFailed
             self.activityChangedAt = activityChangedAt
+            self.observedAt = observedAt
             self.planDone = planDone
             self.planTotal = planTotal
         }
@@ -114,6 +168,35 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         /// that only a person un-does. Working is a claim about right now, and
         /// right now passes.
         public var isLatched: Bool { status == "blocked" || status == "done" }
+
+        /// Whether this agent SAYS the same thing as another — everything a
+        /// surface draws, and not when we heard it.
+        ///
+        /// `==` cannot answer this and must not be changed to: `observedAt` is
+        /// genuinely part of the value, `confidence(in:at:)` reads it, and a
+        /// snapshot that compared equal while vouching differently would be a
+        /// worse trap than the one this solves.
+        ///
+        /// It exists for exactly one caller, `WatchLinkHost.send(snapshot:)`,
+        /// whose question is "would the watch draw anything different". Once
+        /// `observedAt` moves on every poll, plain equality answers "no, never"
+        /// — and that guard is what keeps an idle fleet from paying for a
+        /// Bluetooth write twenty times a minute. The watch is not left behind
+        /// by the omission, because that same function resends unconditionally
+        /// every thirty seconds and `staleAfter` is an hour.
+        ///
+        /// **Written by blanking the field rather than by listing the others.**
+        /// A hand-written list of eleven comparisons is a list that silently
+        /// stops covering the twelfth field the day somebody adds one, and the
+        /// failure would be a wrist that never hears about it. Copying two
+        /// small values to reuse the synthesized `==` is the cheaper mistake.
+        public func saysTheSame(as other: Agent) -> Bool {
+            var mine = self
+            var theirs = other
+            mine.observedAt = nil
+            theirs.observedAt = nil
+            return mine == theirs
+        }
     }
 
     public var agents: [Agent]
@@ -205,33 +288,69 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         max(0, now.timeIntervalSince(capturedAt))
     }
 
-    /// How old what is known about ONE agent is.
+    /// When we last actually heard anything about ONE agent.
     ///
-    /// The agent's own timestamp when the host sent one, and the snapshot's
-    /// capture only when it did not. The two part company every time a push
-    /// arrives: `merging` re-assembles the snapshot at `now`, so an age measured
-    /// from `capturedAt` alone said that news about agent A was also news about
-    /// B through F. An agent last actually seen six hours ago came back to
-    /// `.known` and the widget asserted it again — which defeats the staleness
-    /// rule these surfaces are built around.
+    /// The whole of the staleness rule's input, in one place, because three
+    /// things ask it — `age(of:at:)`, `confidence(in:at:)` through it, and
+    /// `stalenessMoments(after:)` — and two spellings of "how old is this" is
+    /// two answers to it.
     ///
-    /// A daemon too old to send `activitySince` falls back to `capturedAt` and
-    /// gets exactly the behavior it always had, including that flaw. There is no
-    /// honest alternative: the only thing that could date it is the host.
+    /// A ladder, most honest first:
+    ///
+    ///   1. **`observedAt`**, which is the actual answer. Stamped per agent by
+    ///      whoever assembled this: `now` for every agent a poll listed, `now`
+    ///      for the one agent a push was about, and left alone for the agents
+    ///      that push was not about.
+    ///   2. **`activityChangedAt`**, for a snapshot written before `observedAt`
+    ///      existed. It is when the STATE began, which is not this question,
+    ///      and using it as the answer is the bug `observedAt` was added to
+    ///      fix. It is kept as the fallback anyway because it is what that
+    ///      build already behaved like, and because it errs toward saying LESS:
+    ///      an agent that has held one state a long time reads as "last seen"
+    ///      when it might not be, which understates rather than overstates.
+    ///   3. **`capturedAt`**, for a snapshot that carries neither — an old file
+    ///      from a daemon too old to send `activitySince` either. It is
+    ///      fleet-wide, so a push about one agent re-dates the rest, which is
+    ///      exactly the flaw rung 2 was introduced to end. Nothing writes this
+    ///      case any more; it is here so an old file still decodes into
+    ///      something rather than into "just now".
+    func lastHeard(of agent: Agent) -> Date {
+        agent.observedAt ?? agent.activityChangedAt ?? capturedAt
+    }
+
+    /// How old what is known about ONE agent is. See `lastHeard(of:)`.
     public func age(of agent: Agent, at now: Date) -> TimeInterval {
-        max(0, now.timeIntervalSince(agent.activityChangedAt ?? capturedAt))
+        max(0, now.timeIntervalSince(lastHeard(of: agent)))
     }
 
     /// Whether a surface may still state this agent's status as current.
     ///
-    /// Judged per agent rather than per snapshot — see `age(of:at:)`.
+    /// Judged per agent rather than per snapshot — see `lastHeard(of:)`, which
+    /// is where the date comes from and where the history of this decision is
+    /// written down.
     ///
-    /// One cost is deliberate and is in the safe direction: an agent that has
-    /// held one state for longer than `staleAfter` reads as "last seen" even on
-    /// a snapshot polled a second ago, because the only date the host gives for
-    /// it is when that state began. Understating what is known makes a widget
-    /// say less; overstating it makes a widget say something false about the one
-    /// thing it exists to report.
+    /// **What this asks is how old our INFORMATION is, and it took two goes to
+    /// say that.** The question is not how long the agent has been in this
+    /// state; a working agent is meant to stay working, and there is nothing
+    /// suspect about one that has done so for an hour. What makes `working`
+    /// unsafe to assert is not having heard lately.
+    ///
+    /// This used to measure from `activityChangedAt` — when the state began —
+    /// and the comment here called that a deliberate cost "in the safe
+    /// direction". It was not safe, because it was not rare: agents here work
+    /// for many minutes, so a fleet that was polling perfectly filled up with
+    /// "last seen working" headers that meant nothing, and a qualifier that
+    /// appears when nothing is wrong is a qualifier nobody reads when
+    /// something is. The two dates are two different facts and the code was
+    /// using one for the other.
+    ///
+    /// What has NOT changed is the rule itself. `.lastSeen` is still the
+    /// answer once nothing has been heard for `staleAfter`, and several
+    /// surfaces depend on that: `stalenessMoments(after:)` schedules a widget
+    /// wake-up for it, `glance(at:)` stops counting a working agent it can no
+    /// longer vouch for, and `stated(_:_:)` prefixes the row. A phone out of
+    /// range still takes every one of them to "last seen" on the hour, which is
+    /// the case the rule was written for.
     public func confidence(in agent: Agent, at now: Date) -> Confidence {
         if agent.isLatched { return .known }
         return age(of: agent, at: now) >= Self.staleAfter ? .lastSeen : .known
@@ -247,7 +366,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// receiving would assert `working` forever.
     ///
     /// All of them rather than the first. Ages are per agent — see
-    /// `age(of:at:)` — so agents go stale at different moments, and a timeline
+    /// `lastHeard(of:)` — so agents go stale at different moments, and a timeline
     /// that stopped at the earliest one would render that entry from then on
     /// with every LATER agent still reading as current. Permanently, on the
     /// exact case this exists for: a working push sends no alert, so there is no
@@ -256,10 +375,17 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// Bounded by construction, which is what makes it safe to return a list:
     /// no timestamp is in the future, so every moment here falls inside
     /// `staleAfter` of `now`.
+    ///
+    /// **A freshly polled fleet now yields ONE moment**, not one per agent,
+    /// because a poll hears about every agent in the same instant and
+    /// `lastHeard(of:)` says so. That is correct rather than a regression — the
+    /// list stayed per agent for the case that still needs it, a snapshot some
+    /// of whose agents were folded in by pushes at different times — but it is
+    /// worth knowing before reading a timeline of one entry as a bug.
     public func stalenessMoments(after now: Date) -> [Date] {
         let moments = agents
             .filter { !$0.isLatched }
-            .map { ($0.activityChangedAt ?? capturedAt).addingTimeInterval(Self.staleAfter) }
+            .map { lastHeard(of: $0).addingTimeInterval(Self.staleAfter) }
             .filter { $0 > now }
         return Array(Set(moments)).sorted()
     }
@@ -458,12 +584,26 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// what vouches for an agent any more: `confidence(in:at:)` asks each agent
     /// for its own timestamp first, so folding in news about one agent no longer
     /// silently re-dates the rest.
+    ///
+    /// **This function is where `observedAt` comes from on the push path, and
+    /// it is the only place that can know it.** It is handed exactly one agent
+    /// and it keeps the rest, so it — and nothing downstream of it — knows
+    /// which row came from fresh news and which was carried over. Stamping the
+    /// fold-in here and leaving the others alone is the entire distinction the
+    /// field exists to draw, and it needs nothing from the wire to draw it.
     public func merging(_ agent: Agent, at now: Date) -> FleetSnapshot {
         var incoming = agent
         // The agent this push is about IS current, whatever else in here is not.
         // Stamped here rather than left to each caller so every path through
         // this function leaves the fold-in vouched for and the others alone.
+        //
+        // Both dates, and they are not the same claim. `activityChangedAt` is
+        // filled in only when the caller had nothing, because a push that DID
+        // date the state began when it says it began. `observedAt` is
+        // overwritten unconditionally: the news arrived now, whenever the state
+        // it describes started, and this is the moment we heard it.
         if incoming.activityChangedAt == nil { incoming.activityChangedAt = now }
+        incoming.observedAt = now
 
         var merged = agents
         if let index = merged.firstIndex(where: { $0.id == incoming.id }) {
@@ -474,5 +614,19 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         return FleetSnapshot(
             agents: merged, capturedAt: now, complete: complete,
             reviewsWaiting: reviewsWaiting)
+    }
+
+    /// Whether two fleets say the same thing about the same agents, in the same
+    /// order — everything a surface draws, and not when any of it was heard.
+    ///
+    /// `Agent.saysTheSame(as:)` per row, and the whole of the reasoning is
+    /// there. What this adds is the count and the order, both of which change
+    /// what a list renders.
+    ///
+    /// Nil is never the same as something. A caller that has sent nothing yet
+    /// has to send this one.
+    public func agentsSayTheSame(as other: FleetSnapshot?) -> Bool {
+        guard let other, agents.count == other.agents.count else { return false }
+        return zip(agents, other.agents).allSatisfy { $0.saysTheSame(as: $1) }
     }
 }

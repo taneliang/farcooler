@@ -298,10 +298,11 @@ struct PermissionView<Client: FleetClient>: View {
             phase = permission.map(Phase.pending) ?? .nothing
         case let .failed(reason):
             phase = .failed(reason)
-        case .sent:
-            // `sent` in answer to a question is a phone speaking a dialect this
-            // build does not know. It is emphatically not `nothing`: nothing was
-            // established about what this agent is waiting on.
+        case .sent, .transcript:
+            // A receipt, or a conversation, in answer to a question about what
+            // is pending: a phone speaking a dialect this build does not know.
+            // Emphatically not `nothing` — nothing was established about what
+            // this agent is waiting on.
             phase = .failed(WatchLinkClient.unreadableReply)
         }
     }
@@ -326,7 +327,7 @@ struct PermissionView<Client: FleetClient>: View {
                 // cache for; re-asking from scratch here would be slower and
                 // would throw away the id we already hold.
                 answerFailure = reason
-            case .permission:
+            case .permission, .transcript:
                 answerFailure = WatchLinkClient.unreadableReply
             }
         }

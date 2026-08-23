@@ -175,12 +175,12 @@ struct ComposeView<Client: FleetClient>: View {
                 phase = .sent
             case let .failed(reason):
                 phase = .failed(reason)
-            case .permission:
-                // A permission in answer to a prompt is a phone speaking a
-                // dialect this build does not know. Reported as a failure rather
-                // than as a success, because nothing here can confirm the prompt
-                // was carried — and the wording is `WatchLinkClient`'s own for
-                // the same condition.
+            case .permission, .transcript:
+                // A permission or a transcript in answer to a prompt is a phone
+                // speaking a dialect this build does not know. Reported as a
+                // failure rather than as a success, because nothing here can
+                // confirm the prompt was carried — and the wording is
+                // `WatchLinkClient`'s own for the same condition.
                 phase = .failed(WatchLinkClient.unreadableReply)
             }
         }

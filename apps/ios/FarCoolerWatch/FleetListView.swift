@@ -96,6 +96,28 @@ struct FleetListView<Client: FleetClient>: View {
             // is still a fleet nobody can act on, and an old one with a link is
             // still live. That is `WatchState`'s whole rule.
             if unreachable { CachedBanner(capturedAt: snapshot.capturedAt) }
+            // The other half of "what needs me", and until now the app never
+            // mentioned it.
+            //
+            // The complication on the very same watch draws "3 to review" — see
+            // `WatchFleetWidget`'s `Rectangular` and `Circular` — and tapping a
+            // complication opens this screen, which had nothing whatsoever to
+            // say about reviews. A face that reports something the app it opens
+            // has never heard of reads as an app that is broken, and it costs
+            // somebody the one glance the complication was supposed to save
+            // them.
+            //
+            // It is a count and not a list, and it is not tappable, because
+            // there is nothing honest to open: `reviewsWaiting` is a number the
+            // host derived per WORKTREE and the snapshot deliberately carries
+            // no rows — see its comment, and see the review section of
+            // `docs/jobs-to-be-done.md`, which puts reviewing on a phone or a
+            // Mac and nowhere near a wrist. Reassure is the watch's job here;
+            // Review is not, and a row that promised otherwise would be worse
+            // than this one.
+            if let reviews = snapshot.needsReview, reviews > 0 {
+                ReviewRow(count: reviews)
+            }
             // Only when a real capture came back with nothing, which on this
             // surface is the only kind of capture there is. The widget's words,
             // deliberately.
@@ -157,6 +179,37 @@ private struct AgentRow: View {
     }
 }
 
+/// How many workspaces have moved since anybody looked at them.
+///
+/// **Every word and the mark come off `FleetSnapshot.Glance.review`**, which is
+/// the table the complication draws from too. That is the point of the case
+/// carrying its own glyph and its own phrasing: a wrist and the face on the
+/// same wrist are looked at within seconds of each other, and two spellings of
+/// one count would be read as two different counts.
+///
+/// **Never amber, and the accent color rather than a fixed one.** The
+/// cross-surface law is that amber means an agent has stopped and is waiting on
+/// a person; a diff waiting to be read is not that. `glanceTint` in
+/// `WatchFleetWidget` makes the identical choice for the identical reason, and
+/// this is the second half of it on the same device.
+///
+/// **Not dimmed by `confidence`, and it takes no date.** A diff nobody has
+/// reviewed is still unreviewed an hour later — `reviewsWaiting` is latched,
+/// the same way `blocked` is — so age does not make this less true, and
+/// graying it would make the one fact somebody raised their wrist for look like
+/// the doubtful part of the screen.
+private struct ReviewRow: View {
+    let count: Int
+
+    var body: some View {
+        Label(
+            FleetSnapshot.Glance.review(count).phrase,
+            systemImage: FleetSnapshot.Glance.review(count).symbol)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(Color.accentColor)
+    }
+}
+
 /// What the watch is showing when it cannot reach the phone.
 ///
 /// Said once and at the top rather than per row, because it is one fact about
@@ -206,6 +259,11 @@ enum WatchRoute: Hashable {
     case agent(terminal: String)
     case compose(terminal: String)
     case permission(terminal: String)
+    /// What the agent said. A terminal id like the rest, and for the same
+    /// reason twice over: the screen asks the phone for the words when it
+    /// opens, so there is nothing to carry, and the snapshot it reads the
+    /// agent's NAME out of has to be the current one.
+    case transcript(terminal: String)
 }
 
 extension View {
@@ -224,6 +282,8 @@ extension View {
                 ComposeView(client: client, terminal: terminal)
             case let .permission(terminal):
                 PermissionView(client: client, terminal: terminal)
+            case let .transcript(terminal):
+                TranscriptView(client: client, terminal: terminal)
             }
         }
     }

@@ -87,6 +87,7 @@
 		EEDA5AE582BB5A6B9C431575 /* AgentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB97AC22DAB45FB1A80F9AF2; };
 		3861EF687C0C51238E68497B /* ComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4B25C493133586C9756E3DA; };
 		BB2C55F262F858A59B97EC60 /* PermissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6468CD6B76FB51BABD3547CC; };
+		2F60CA1CEB8B5A5795640FB6 /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CE7A11BCB0556ABFA30F70; };
 		82C536A0E21C531B8A9F7203 /* WatchLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 516D0CB825B4559CA317F71C; };
 		66D38A1A5DE754DBB08F0767 /* WatchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9FD7C5018885874ABB83E7F; };
 		84C4CDF23A975280B93535E4 /* FleetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C4E587A86625F06BA97600A; };
@@ -170,6 +171,7 @@
 		CB97AC22DAB45FB1A80F9AF2 /* AgentDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDetailView.swift; sourceTree = "<group>"; };
 		C4B25C493133586C9756E3DA /* ComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeView.swift; sourceTree = "<group>"; };
 		6468CD6B76FB51BABD3547CC /* PermissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionView.swift; sourceTree = "<group>"; };
+		D4CE7A11BCB0556ABFA30F70 /* TranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptView.swift; sourceTree = "<group>"; };
 		E9FD7C5018885874ABB83E7F /* WatchState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchState.swift; sourceTree = "<group>"; };
 		D90F4FA1951E5108A198E412 /* WatchFleetWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFleetWidget.swift; sourceTree = "<group>"; };
 		29DA60E46FE1567A99E720AC /* KeyboardTabStripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTabStripTests.swift; sourceTree = "<group>"; };
@@ -290,6 +292,7 @@
 				CB97AC22DAB45FB1A80F9AF2 /* AgentDetailView.swift */,
 				C4B25C493133586C9756E3DA /* ComposeView.swift */,
 				6468CD6B76FB51BABD3547CC /* PermissionView.swift */,
+				D4CE7A11BCB0556ABFA30F70 /* TranscriptView.swift */,
 			);
 			path = FarCoolerWatch;
 			sourceTree = "<group>";
@@ -731,6 +734,7 @@
 				EEDA5AE582BB5A6B9C431575 /* AgentDetailView.swift in Sources */,
 				3861EF687C0C51238E68497B /* ComposeView.swift in Sources */,
 				BB2C55F262F858A59B97EC60 /* PermissionView.swift in Sources */,
+				2F60CA1CEB8B5A5795640FB6 /* TranscriptView.swift in Sources */,
 				82C536A0E21C531B8A9F7203 /* WatchLink.swift in Sources */,
 				66D38A1A5DE754DBB08F0767 /* WatchState.swift in Sources */,
 				84C4CDF23A975280B93535E4 /* FleetSnapshot.swift in Sources */,
@@ -796,10 +800,10 @@
 				FARCOOLER_CHANNEL = local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
 				FARCOOLER_APP_NAME = "FC Local";
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local f8e3aa8)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 965d1f9)";
 				FARCOOLER_WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -823,10 +827,10 @@
 				FARCOOLER_CHANNEL = local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
 				FARCOOLER_APP_NAME = "FC Local";
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local f8e3aa8)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 965d1f9)";
 				FARCOOLER_WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -847,7 +851,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
@@ -867,7 +871,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
@@ -887,7 +891,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerNotify;
@@ -906,7 +910,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerNotify;
@@ -925,7 +929,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatch;
@@ -951,7 +955,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatch;
@@ -977,7 +981,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatchWidgets;
@@ -1001,7 +1005,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 476;
+				CURRENT_PROJECT_VERSION = 491;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatchWidgets;

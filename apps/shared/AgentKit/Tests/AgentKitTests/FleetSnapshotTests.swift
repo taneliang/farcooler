@@ -13,13 +13,14 @@ struct FleetSnapshotTests {
         _ id: String,
         status: String,
         rank: UInt32 = 0,
-        activityChangedAt: Date? = nil
+        activityChangedAt: Date? = nil,
+        observedAt: Date? = nil
     ) -> FleetSnapshot.Agent {
         FleetSnapshot.Agent(
             id: id, label: "claude", machine: "orchard", status: status,
             glyph: "●", headline: "claude 4m", line: "Writing fruit.txt",
             feed: ["Reading watch.rs."], rank: rank, turnFailed: false,
-            activityChangedAt: activityChangedAt)
+            activityChangedAt: activityChangedAt, observedAt: observedAt)
     }
 
     @Test func aSnapshotRoundTripsThroughJson() throws {
@@ -202,6 +203,190 @@ struct FleetSnapshotTests {
             snapshot.confidence(
                 in: snapshot.agents[0], at: old.addingTimeInterval(FleetSnapshot.staleAfter + 1))
                 == .lastSeen)
+    }
+
+    // MARK: - How old the news is, as against how long the state has held
+
+    /// The bug this field was added for, stated as the user stated it.
+    ///
+    /// An agent that has been working for ten hours, on a fleet polled one
+    /// second ago, is an agent we know perfectly well is working. It used to
+    /// read "last seen working", because the only date the snapshot carried for
+    /// it was when the state BEGAN — and since agents here work for many
+    /// minutes at a time, that was the ordinary row rather than the odd one.
+    /// The screen filled with a qualifier that meant nothing, which is how a
+    /// qualifier stops being read on the row where it means something.
+    @Test func anAgentWorkingForHoursIsCurrentIfWeJustHeardFromIt() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let began = now.addingTimeInterval(-FleetSnapshot.staleAfter * 10)
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "working", activityChangedAt: began, observedAt: now)],
+            capturedAt: now, complete: true)
+        #expect(snapshot.confidence(in: snapshot.agents[0], at: now) == .known)
+        // And it still expires an hour after we last HEARD, not an hour after
+        // it started — the staleness rule is intact, it is being measured from
+        // the right date.
+        #expect(
+            snapshot.confidence(
+                in: snapshot.agents[0], at: now.addingTimeInterval(FleetSnapshot.staleAfter + 1))
+                == .lastSeen)
+    }
+
+    /// The other direction, which is the one the rule exists for: a phone out
+    /// of range hears nothing, and nothing is what makes `working` unsafe to
+    /// assert. A state that began recently does not rescue it.
+    @Test func aFreshStateDoesNotVouchForAnAgentNobodyHasHeardFrom() {
+        let heard = Date(timeIntervalSince1970: 1_000_000)
+        let now = heard.addingTimeInterval(FleetSnapshot.staleAfter + 1)
+        let snapshot = FleetSnapshot(
+            agents: [
+                // As if the host had dated this state later than we heard about
+                // it. `observedAt` leads the ladder, so it decides.
+                agent("t1", status: "working", activityChangedAt: now, observedAt: heard)
+            ],
+            capturedAt: heard, complete: true)
+        #expect(snapshot.confidence(in: snapshot.agents[0], at: now) == .lastSeen)
+    }
+
+    /// A poll hears about the whole fleet at once, so every agent expires
+    /// together — one moment, not one per agent.
+    ///
+    /// Worth pinning because the per-agent list was itself a fix, and a reader
+    /// meeting a one-entry timeline could take it for that fix having been
+    /// undone. It has not: the list is per agent, and the agents happen to
+    /// agree because they were genuinely heard about in the same instant.
+    @Test func aPolledFleetGoesStaleAllAtOnce() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let snapshot = FleetSnapshot(
+            agents: [
+                agent(
+                    "t1", status: "working",
+                    activityChangedAt: now.addingTimeInterval(-3_000), observedAt: now),
+                agent(
+                    "t2", status: "working",
+                    activityChangedAt: now.addingTimeInterval(-90), observedAt: now),
+            ],
+            capturedAt: now, complete: true)
+        #expect(
+            snapshot.stalenessMoments(after: now)
+                == [now.addingTimeInterval(FleetSnapshot.staleAfter)])
+    }
+
+    /// `merging` is the one place that knows which row is news, so it is the one
+    /// place that can date it — and it must date only that row.
+    @Test func mergingRecordsWhenWeHeardAboutTheAgentItWasGiven() throws {
+        let heard = Date(timeIntervalSince1970: 1_000_000)
+        let now = heard.addingTimeInterval(FleetSnapshot.staleAfter * 2)
+        let before = FleetSnapshot(
+            agents: [agent("t1", status: "working", activityChangedAt: heard, observedAt: heard)],
+            capturedAt: heard, complete: true)
+
+        let after = before.merging(
+            // Dated by the host as having begun long ago, which is exactly the
+            // case that used to be mis-read: the state is old, the NEWS is not.
+            agent(
+                "t2", status: "working",
+                activityChangedAt: heard.addingTimeInterval(-FleetSnapshot.staleAfter * 9)),
+            at: now)
+
+        let fresh = try #require(after.agents.first { $0.id == "t2" })
+        #expect(fresh.observedAt == now)
+        #expect(after.confidence(in: fresh, at: now) == .known)
+        // Its state date is untouched, because a push that dated the state was
+        // telling the truth about when it began.
+        #expect(fresh.activityChangedAt != now)
+
+        // And the agent this push was not about is left exactly where it was.
+        let carried = try #require(after.agents.first { $0.id == "t1" })
+        #expect(carried.observedAt == heard)
+        #expect(after.confidence(in: carried, at: now) == .lastSeen)
+    }
+
+    /// A snapshot from a build that predates this field decodes, and behaves the
+    /// way that build behaved rather than claiming to have just heard.
+    @Test func aPayloadWithoutWhenWeHeardStillDecodes() throws {
+        let json = """
+        {"agents":[{"id":"t1","label":"claude","machine":"orchard",
+        "status":"working","glyph":"●","headline":"claude 4m","line":"x",
+        "feed":[],"rank":0,"turnFailed":false,"activityChangedAt":0}],
+        "capturedAt":0,"complete":true}
+        """
+        let snapshot = try JSONDecoder().decode(FleetSnapshot.self, from: Data(json.utf8))
+        #expect(snapshot.agents[0].observedAt == nil)
+        // Judged by `activityChangedAt`, which is what that build did. It
+        // understates rather than overstates, which is the right way for a
+        // fallback to be wrong.
+        //
+        // `timeIntervalSinceReferenceDate`, because the zero in that payload is
+        // JSON written by `JSONEncoder`'s default date strategy — seconds since
+        // 2001, not since 1970. Reading it as a Unix epoch puts `now` thirty-one
+        // years BEFORE the snapshot, and `age(of:at:)` floors a negative age at
+        // zero, so the test would pass for the wrong reason.
+        #expect(
+            snapshot.confidence(
+                in: snapshot.agents[0],
+                at: Date(timeIntervalSinceReferenceDate: FleetSnapshot.staleAfter + 1))
+                == .lastSeen)
+    }
+
+    @Test func whenWeHeardSurvivesAJsonRoundTrip() throws {
+        let now = Date(timeIntervalSince1970: 1_234_567)
+        let snapshot = FleetSnapshot(
+            agents: [agent("t1", status: "working", activityChangedAt: now, observedAt: now)],
+            capturedAt: now, complete: true)
+        let decoded = try JSONDecoder().decode(
+            FleetSnapshot.self, from: JSONEncoder().encode(snapshot))
+        #expect(decoded == snapshot)
+        #expect(decoded.agents[0].observedAt == now)
+    }
+
+    // MARK: - Whether a fleet would draw differently
+
+    /// The push guard's question. Two snapshots that differ only in when the
+    /// phone last heard draw identically, and the wrist has no reason to be
+    /// woken for one.
+    @Test func twoAgentsHeardAtDifferentTimesStillSayTheSame() {
+        let then = Date(timeIntervalSince1970: 1_000)
+        let now = Date(timeIntervalSince1970: 2_000)
+        let early = agent("t1", status: "working", activityChangedAt: then, observedAt: then)
+        let late = agent("t1", status: "working", activityChangedAt: then, observedAt: now)
+        #expect(early.saysTheSame(as: late))
+        #expect(early != late)
+    }
+
+    /// …and it is a real test, not one that says yes to everything. Anything a
+    /// surface actually draws is still a difference.
+    @Test func anythingElseIsADifference() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let base = agent("t1", status: "working", activityChangedAt: now, observedAt: now)
+        var blocked = base
+        blocked.status = "blocked"
+        #expect(!base.saysTheSame(as: blocked))
+        var renamed = base
+        renamed.line = "Writing something else"
+        #expect(!base.saysTheSame(as: renamed))
+        var restated = base
+        restated.activityChangedAt = now.addingTimeInterval(-60)
+        #expect(!base.saysTheSame(as: restated))
+    }
+
+    @Test func aFleetComparesRowForRowAndNeverMatchesNothing() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let fleet = { (ids: [String], observed: Date) in
+            FleetSnapshot(
+                agents: ids.map {
+                    self.agent($0, status: "working", activityChangedAt: now, observedAt: observed)
+                },
+                capturedAt: observed, complete: true)
+        }
+        let one = fleet(["t1", "t2"], now)
+        #expect(one.agentsSayTheSame(as: fleet(["t1", "t2"], now.addingTimeInterval(3))))
+        // An agent that left, an agent that arrived, and the same agents in a
+        // different order are all changes to what a list draws.
+        #expect(!one.agentsSayTheSame(as: fleet(["t1"], now)))
+        #expect(!one.agentsSayTheSame(as: fleet(["t1", "t2", "t3"], now)))
+        #expect(!one.agentsSayTheSame(as: fleet(["t2", "t1"], now)))
+        #expect(!one.agentsSayTheSame(as: nil))
     }
 
     /// A widget can only learn it has gone stale from a wake-up it schedules

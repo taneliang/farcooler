@@ -456,13 +456,31 @@ private actor SnapshotSink {
         /// snapshot always yields one answer here — a wall clock would make
         /// this differ from itself between two calls and defeat the compare.
         ///
-        /// It is also the one field that can churn: a daemon too old to send
-        /// `activitySince` leaves `activityChangedAt` nil, and
-        /// `stalenessMoments` then falls back to `capturedAt`, which moves on
-        /// every poll. That fleet reloads at the push cadence, exactly as it
-        /// did before this throttle existed. Nothing is lost, and the fix is
-        /// on the host rather than here.
+        /// **Rounded to `momentGrain`, and that rounding is now load-bearing.**
+        /// These moments are `lastHeard(of:)` plus an hour, and `lastHeard` is
+        /// `observedAt` — which the phone stamps at every poll for every agent,
+        /// deliberately, because that is what makes a long-running agent stop
+        /// reading as "last seen working". So an exact compare finds a
+        /// difference in this field on every single snapshot that lands, and
+        /// this throttle would suppress nothing at all: `reloadAllTimelines`
+        /// every three seconds while anything is working, and every thirty on
+        /// a fleet where nothing is happening at all.
+        ///
+        /// Rounding costs the face at most `momentGrain` of accuracy on when it
+        /// stops asserting `working`, against a `staleAfter` of an hour. That
+        /// is a fifth of a percent, on a judgement whose own threshold is a
+        /// round number somebody picked. It buys back the property this whole
+        /// struct exists for.
+        ///
+        /// This was previously noted as churning only for a daemon too old to
+        /// send `activitySince`. That is no longer the interesting case — it is
+        /// now every fleet — and the fix is here rather than on the host,
+        /// because what changed is what this surface has to notice rather than
+        /// what the host says.
         let moments: [Date]
+
+        /// How finely the reload test reads an expiry. Five minutes.
+        private static let momentGrain: TimeInterval = 5 * 60
 
         init(_ snapshot: FleetSnapshot) {
             // The host's order, not ours — `rank` with the id breaking ties,
@@ -479,7 +497,15 @@ private actor SnapshotSink {
             status = top?.status ?? ""
             needingYou = snapshot.needingYou
             hasSnapshot = snapshot.capturedAt.timeIntervalSince1970 > 0
-            moments = snapshot.stalenessMoments(after: snapshot.capturedAt)
+            // Down rather than to nearest, so a rounded moment is never later
+            // than the real one: the face may stop asserting `working` a little
+            // early, and must not go on asserting it a little late.
+            moments = snapshot.stalenessMoments(after: snapshot.capturedAt).map {
+                let grain = Self.momentGrain
+                return Date(
+                    timeIntervalSince1970: ($0.timeIntervalSince1970 / grain).rounded(.down)
+                        * grain)
+            }
         }
     }
 }

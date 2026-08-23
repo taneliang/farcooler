@@ -76,9 +76,19 @@ struct AgentDetailView<Client: FleetClient>: View {
             Section {
                 Headline(agent: agent, confidence: confidence)
             }
-            // The three most recent things the agent said, oldest first, exactly
-            // as the host ordered them. This is the answer to "what did it do
-            // while I was away", and it is the reason to open this screen at all.
+            // The three most recent things the agent DID, oldest first, exactly
+            // as the host ordered them.
+            //
+            // **Not what it said**, and the difference is worth being exact
+            // about because this section used to claim otherwise. `feed` is the
+            // host's compact activity log — `Read crates/core/src/feed.rs`,
+            // `cargo test -p farcooler-core` — truncated to `feed::WIDTH` for a
+            // widget. It answers "is it getting on with it", which is a real
+            // question and the one this screen can answer with no round trip
+            // and no phone in range. It cannot answer "what did it say", and it
+            // was being read as though it could: the words the agent wrote are
+            // a tap away under Transcript, and the phone has to be asked for
+            // them.
             if !agent.feed.isEmpty {
                 Section("Recent") {
                     // By offset, because two identical steps are two steps. An
@@ -90,6 +100,20 @@ struct AgentDetailView<Client: FleetClient>: View {
                 }
             }
             Section {
+                // First, because reading is the common reason to be here. The
+                // owner's sentence for this whole screen is "an agent completes
+                // answering my question and I want to see what it said" — and
+                // the other two rows are for the rarer case where the answer
+                // needs something back.
+                //
+                // A noun where the other two are verbs, and it is the honest
+                // label rather than a lapse: "Reply" and "Answer" name what you
+                // will do to the agent, and there is nothing you do to an agent
+                // here. Every verb that fits — "Read", "See" — needs an object
+                // to be unambiguous, and a 41mm row has no width for one.
+                NavigationLink(value: WatchRoute.transcript(terminal: agent.id)) {
+                    Label("Transcript", systemImage: "quote.bubble")
+                }
                 NavigationLink(value: WatchRoute.compose(terminal: agent.id)) {
                     Label("Reply", systemImage: "text.bubble")
                 }
@@ -149,6 +173,15 @@ private struct Headline: View {
             // It is when the STATE began, not when the snapshot was taken, so it
             // keeps counting up correctly on a fleet that is polling happily and
             // reporting no change.
+            //
+            // **And it is not how old the news is**, which is why the line says
+            // "Unchanged for" and not "Last seen". Those two used to be the same
+            // date and the confusion cost this screen a headline: an agent
+            // working for ten minutes read "last seen working" on a snapshot a
+            // second old. `confidence` now measures from `observedAt` and this
+            // line still measures from here, because "it has been on this for
+            // ten minutes" is genuinely worth knowing — it is just not the same
+            // sentence as "we have not heard in an hour".
             if let changedAt = agent.activityChangedAt {
                 Text("Unchanged for \(changedAt, style: .relative)")
                     .font(.caption2)
@@ -248,7 +281,13 @@ private struct Headline: View {
                     headline: "gemini is working", line: "Writing docs/superpowers/plans/x.md",
                     ageMinutes: 90),
             ],
-            capturedAt: Date().addingTimeInterval(-90), complete: true)
+            capturedAt: Date().addingTimeInterval(-90), complete: true,
+            // So the review row is on screen in every preview that uses this
+            // fleet. It is the one row on the fleet list that no live watch
+            // will show you on demand — it needs a runner with an unreviewed
+            // diff on it — and it is the row most likely to be forgotten when
+            // this screen is laid out again.
+            reviewsWaiting: 3)
 
         /// A permission worded the way Claude Code words one.
         ///
