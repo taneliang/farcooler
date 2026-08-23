@@ -50,8 +50,12 @@ jobs:
       # baseline to compare against, so without these every check in it would
       # sit unexercised until exactly the moment it mattered.
       - run: ./scripts/proto-lint.py --self-test
-      - run: ./scripts/proto-lint.py --channel beta
-      - run: ./scripts/proto-lint.py --channel release
+      # preview and stable, which are the two channels promote.yml records a
+      # baseline for. These said `beta` and `release` until `2ae5cf3` renamed
+      # the channels — names no promotion has ever written, so both runs found
+      # no baseline and passed without comparing anything.
+      - run: ./scripts/proto-lint.py --channel preview
+      - run: ./scripts/proto-lint.py --channel stable
       # What version.sh answers decides where a daemon installs — its runtime
       # directory, database, tmux server and binary name — so a wrong channel is
       # not a cosmetic version string.

@@ -8,7 +8,7 @@
 # are shipping, and it tags and builds in one run.
 #
 # The split is deliberate. A tag must point at a commit that has been BUILT and
-# RUN as a beta, and a script that bumped the version and tagged in one breath
+# RUN as a preview, and a script that bumped the version and tagged in one breath
 # would be tagging a commit nobody had tried — `.github/workflows/release.yml`
 # builds every component from the single commit a tag points at, so that commit
 # had better be one that already worked.
@@ -92,6 +92,10 @@ cargo update --workspace --offline >/dev/null 2>&1 || cargo update --workspace >
 git add Cargo.toml Cargo.lock
 git commit -q -m "release: $VERSION"
 
+# The channel named below has to be one the Promote dropdown actually offers.
+# It said `beta` until now, which `2ae5cf3` removed when it renamed the channels
+# to local/canary/preview/stable — so these instructions were telling whoever ran
+# them to pick an option that is not in the list.
 cat <<EOF
 
 Moved $CURRENT → $VERSION, build $(scripts/version.sh build).
@@ -101,7 +105,7 @@ Push it, land it on main, then ship from the Actions tab:
     git push origin HEAD
 
     Actions → Promote → Run workflow
-      channel:          beta
+      channel:          preview
       confirm_version:  $VERSION
 
 EOF

@@ -14,8 +14,23 @@
 #
 #   ./scripts/version.sh            0.1.0
 #   ./scripts/version.sh build      1284          (commits — monotonic, for the stores)
-#   ./scripts/version.sh channel    dev|beta|release
-#   ./scripts/version.sh display    0.1.0 (beta 3)   what a human is shown
+#   ./scripts/version.sh channel    local|canary|preview|stable
+#   ./scripts/version.sh display    0.1.0 (preview 3)   what a human is shown
+#
+# Five more take the same optional tag — `scheme`, `app-suffix`, `app-name`,
+# `app-name-short` and `feed-url` — each defined next to the reasoning for its
+# mapping rather than summarized up here, because the reasoning is the part that
+# stops someone copying the mapping into a build script.
+#
+# Those two channel lines used to read `dev|beta|release` and `0.1.0 (beta 3)`,
+# which is what `d8c3877` built and what `2ae5cf3` replaced eleven days ago when
+# it split three channels into local/canary/preview/stable. It renamed every word
+# the code below emits and changed nothing up here, so the map at the top of this
+# file has been naming three channels nothing in the repository can produce.
+# Recorded rather than silently swapped, because those three names are still live
+# in the tree on purpose: `crates/protocol` maps `dev`, `beta` and `release` to
+# `local`, so a binary stamped by an older checkout cannot land on a channel it
+# was never built for.
 #
 # There is deliberately no `full` here. The stamp components report to each
 # other — `0.1.0+a1b2c3` — is computed once, in crates/protocol/build.rs, and
@@ -49,32 +64,42 @@ build() {
   git rev-list --count HEAD 2>/dev/null || echo 0
 }
 
-# Which kind of build this is: dev, beta, or release.
+# Which kind of build this is: local, canary, preview, or stable.
 #
 # Derived from the tag on HEAD rather than a flag someone passes, because a flag
 # is a thing to forget on the build that mattered — and the failure mode here is
-# specific and nasty: a beta and a release that call themselves the same version.
-# Someone reports a bug against "0.2.0" and there is no way to know which 0.2.0
-# they had.
+# specific and nasty: a preview and a stable build that call themselves the same
+# version. Someone reports a bug against "0.2.0" and there is no way to know
+# which 0.2.0 they had.
 #
-#   clean tag v0.2.0         → release
-#   clean tag v0.2.0-beta.3  → beta
-#   anything else            → dev  (untagged, or a dirty tree, which is not
-#                                    something anyone should be shipping)
+#   clean tag v0.2.0            → stable
+#   clean tag v0.2.0-preview.3  → preview
+#   FARCOOLER_CHANNEL=canary    → canary  (a push to main carries no tag, so
+#                                          canary is the one channel that has to
+#                                          be stated outright — see below)
+#   anything else               → local   (untagged, a dirty tree, a name this
+#                                          script does not know, or the older
+#                                          `-beta.` tag shape)
+#
+# This table used to say release, beta and dev, which is what `2ae5cf3` renamed
+# on 2026-08-12 without touching the comment above it. One line of it is worth
+# keeping rather than just correcting: `-beta.` resolves to `local` and not to
+# preview, so a `v0.2.0-beta.1` pushed by hand before the rename cannot fall
+# through the `v*` case and promote itself to stable.
 #
 # Takes an OPTIONAL tag, which is the tag being built. It is needed because
-# promotion puts two tags on one commit: beta and release have different bundle
+# promotion puts two tags on one commit: preview and stable have different bundle
 # identifiers, so they are genuinely different artifacts, and promoting means
-# rebuilding the beta's source at the release channel rather than re-uploading
+# rebuilding the preview's source at the stable channel rather than re-uploading
 # its binary. Without the argument, `git tag --points-at HEAD` returns both and
-# `head -1` picks whichever sorts first — `v0.2.0` before `v0.2.0-beta.3` — so
-# after a promotion that commit would report `release` forever, and anyone
-# rebuilding the beta from it would get a binary that installs at the release
-# path and writes the release runtime directory.
+# `head -1` picks whichever sorts first — `v0.2.0` before `v0.2.0-preview.3` — so
+# after a promotion that commit would report `stable` forever, and anyone
+# rebuilding the preview from it would get a binary that installs at the stable
+# path and writes the stable runtime directory.
 #
 # Not a flag someone remembers: the workflow created the tag one job earlier and
-# passes it through. With no argument the old behaviour stands, so a local build
-# is unaffected and still defaults to dev.
+# passes it through. With no argument the old behavior stands, so a local build
+# is unaffected and still answers `local`.
 channel() {
   if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
     echo local
@@ -105,7 +130,7 @@ channel() {
   #
   # This is not the flag the comment above argues against. Nobody types it: the
   # workflow created the tag one job earlier and passes what it made. Unset — a
-  # local build, always — the behaviour is exactly what it was.
+  # local build, always — the behavior is exactly what it was.
   #
   # `|| true` because `grep` exits 1 when a commit carries no tags, which is the
   # ordinary case for every dev build. Harmless inside the `case` this used to

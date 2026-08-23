@@ -19,9 +19,18 @@ that created the tag. Deliberately NOT derived from git: this repository has no
 tags yet, ci.yml checks out at depth 1 so tags are not even fetched, and
 version.sh already carries a comment about shallow clones failing silently.
 
-    ./scripts/proto-lint.py                 # against the beta baseline
-    ./scripts/proto-lint.py --channel release
+    ./scripts/proto-lint.py                 # against the preview baseline
+    ./scripts/proto-lint.py --channel stable
     ./scripts/proto-lint.py --self-test     # the lint's own tests
+
+The two channels here are the two that ship: `promote.yml` writes
+`proto/baseline/<channel>.proto` for whichever of preview and stable it just
+tagged. They were `beta` and `release` until `2ae5cf3` renamed the channels, and
+this file was not renamed with them — so the two names asked for here were names
+the promotion workflow never wrote, and every run found no baseline and passed
+saying nothing had shipped. A guard that cannot fire, in the one place the
+repository has no second opinion: a wire break is invisible until an app in the
+field decodes it.
 
 Before a first release the baseline is absent and this exits 0 saying so:
 nothing has shipped, so nothing is owed compatibility.
@@ -195,7 +204,7 @@ def self_test():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--channel", default="beta", choices=["beta", "release"])
+    ap.add_argument("--channel", default="preview", choices=["preview", "stable"])
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
