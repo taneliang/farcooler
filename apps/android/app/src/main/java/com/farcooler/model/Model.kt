@@ -625,6 +625,43 @@ data class Repository(
 data class RepositoryList(val repositories: List<Repository> = emptyList())
 
 /**
+ * What a runner is, and whether it is well — `host.health`, key for key.
+ *
+ * **Only [reasons] and [protocolVersion] are new information**, and that is
+ * worth stating because everything else here is already on this phone twice.
+ * The fleet poll carries `runtime_healthy` and `live_panes`, and `loadDaemonBuild`
+ * caches `platform` and `daemonVersion` off the `"host"` method — all three
+ * ultimately from the same `Host` message. What none of them carry is the
+ * daemon's own account of WHY it calls itself degraded, and "something is wrong"
+ * with no next step is the shape this app refuses everywhere else.
+ *
+ * The whole record is decoded anyway rather than just the two, so the section
+ * that draws it makes one call and reads one object instead of assembling a
+ * runner out of three sources that can disagree about which runner they mean.
+ *
+ * Everything defaults: a daemon too old to send a key costs a row, not the
+ * decode. [healthy] defaults TRUE, which is the direction that says nothing —
+ * a runner that never answered must not be drawn as broken.
+ */
+@Serializable
+data class HostHealth(
+    val platform: String = "",
+    @SerialName("daemonVersion") val daemonVersion: String = "",
+    @SerialName("protocolVersion") val protocolVersion: Int = 0,
+    val healthy: Boolean = true,
+    /**
+     * The daemon's own words, one per line, shown rather than summarized.
+     *
+     * This client cannot know which of them matters, and these are the only
+     * sentences on the screen that say what to do about it. They are the
+     * runner's voice and not Far Cooler's, which is why the section that draws
+     * them keeps them apart from its own copy — the rule [Trouble] exists for.
+     */
+    @SerialName("reasons") val reasons: List<String> = emptyList(),
+    @SerialName("livePanes") val livePanes: Int = 0,
+)
+
+/**
  * What one worktree has changed, and whether anybody has looked at it since.
  *
  * The `changes.inbox` row. Routed in Rust since the review surface landed —

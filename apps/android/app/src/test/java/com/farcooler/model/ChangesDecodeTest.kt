@@ -404,12 +404,20 @@ class ChangesDecodeTest {
     // ---- branch.list, which the base picker reads ----
 
     /**
-     * `Session::branches`, transcribed key for key.
+     * `Session::branches`, transcribed key for key — and TYPE for type.
      *
-     * `crates/client/src/session.rs:1074`, and camelCase where the change set is
+     * `crates/client/src/session.rs`, and camelCase where the change set is
      * snake_case — the same two-casings-out-of-one-FFI trap `Changes.kt` records
      * at the top, which is exactly the sort of thing a `@SerialName` gets wrong
      * once and then reports as a permanently-false flag.
+     *
+     * **`remote` is a remote NAME or null, never a boolean**, and that is the
+     * reason this test was rewritten rather than left alone. It used to send
+     * `"remote": true`, which is not a shape the runner can produce:
+     * `git::BranchInfo.remote` is an `Option<String>`. So it asserted the app's
+     * own mistake back at itself and stayed green while the base picker failed
+     * to decode a single real repository. A transcription is only worth having
+     * if it is copied from the producer.
      *
      * `updatedAt` is MILLISECONDS here. The protocol carries seconds and that
      * line multiplies by a thousand, so a client reading it as seconds would put
@@ -427,7 +435,7 @@ class ChangesDecodeTest {
                 {
                   "name": "main",
                   "local": true,
-                  "remote": true,
+                  "remote": "origin",
                   "checkedOut": true,
                   "subject": "fix: green means one thing again, on both phones",
                   "updatedAt": 1755900000000
@@ -435,22 +443,30 @@ class ChangesDecodeTest {
                 {
                   "name": "origin/feat/review",
                   "local": false,
-                  "remote": true,
+                  "remote": "origin",
                   "checkedOut": false,
                   "subject": "",
                   "updatedAt": null
+                },
+                {
+                  "name": "wip/local-only",
+                  "local": true,
+                  "remote": null,
+                  "checkedOut": false,
+                  "subject": "scratch",
+                  "updatedAt": 1755899000000
                 }
               ]
             }
         """.trimIndent()
 
         val reply = json.decodeFromString(BranchListReply.serializer(), payload)
-        assertEquals(2, reply.branches.size)
+        assertEquals(3, reply.branches.size)
 
         val main = reply.branches[0]
         assertEquals("main", main.name)
         assertTrue(main.local)
-        assertTrue(main.remote)
+        assertEquals("origin", main.remote)
         assertTrue(main.checkedOut)
         assertEquals("fix: green means one thing again, on both phones", main.subject)
         assertEquals(1_755_900_000_000, main.updatedAt)
@@ -462,6 +478,43 @@ class ChangesDecodeTest {
         assertEquals("remote", remote.whereItLives)
         // Absent rather than zero, so a row can decline to say rather than lie.
         assertNull(remote.updatedAt)
+
+        // An explicit null is the other half of what an `Option<String>` emits,
+        // and it is the half that used to throw: kotlinx will not put a null
+        // into a non-nullable property, default or no default.
+        val local = reply.branches[2]
+        assertNull(local.remote)
+        assertEquals("local", local.whereItLives)
+    }
+
+    /**
+     * The Mac's `BranchInfo.age` thresholds, off a millisecond clock.
+     *
+     * The `/ 1000` is the whole difference between this and the Mac's line, and
+     * omitting it is the mistake that dates every branch to 1970 — so the first
+     * case here is a real timestamp against a real clock rather than a
+     * hand-picked difference, which is the only arrangement that catches it.
+     */
+    @Test
+    fun `a branch age reads milliseconds and stops at the same thresholds`() {
+        val now = 1_755_900_000_000
+        fun at(ms: Long) = BranchRef(name = "b", updatedAt = ms).age(now)
+
+        assertEquals("", BranchRef(name = "b").age(now))
+        // Zero is git having no committer date, not the epoch.
+        assertEquals("", at(0))
+        // Read as seconds this would be "20323d". The unit is the test.
+        assertEquals("2h", at(now - 7_200_000))
+        assertEquals("now", at(now))
+        // A tip dated in the future is a clock disagreement, not a negative age.
+        assertEquals("now", at(now + 60_000))
+        // Under a minute still rounds up to 1m rather than collapsing to "0m".
+        assertEquals("1m", at(now - 30_000))
+        assertEquals("59m", at(now - 3_599_000))
+        assertEquals("1h", at(now - 3_600_000))
+        assertEquals("23h", at(now - 86_399_000))
+        assertEquals("1d", at(now - 86_400_000))
+        assertEquals("30d", at(now - 30L * 86_400_000))
     }
 
     /** A runner too old to send a key leaves it at its default, not at an error. */
@@ -471,8 +524,9 @@ class ChangesDecodeTest {
             BranchListReply.serializer(), """{"branches":[{"name":"main"}]}"""
         )
         assertEquals("main", reply.branches.single().name)
-        // Neither flag was sent, so neither is claimed — and `whereItLives`
-        // falls to "local", which is what an unqualified branch name means.
+        // Nothing was sent about where it lives, so nothing is claimed — and
+        // `whereItLives` falls to "local", which is what an unqualified branch
+        // name means.
         assertEquals("local", reply.branches.single().whereItLives)
         assertEquals(BranchListReply(), json.decodeFromString(BranchListReply.serializer(), "{}"))
     }

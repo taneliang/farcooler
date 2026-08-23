@@ -160,6 +160,60 @@ class FleetDecodeTest {
         assertEquals("", t.signalLine)
     }
 
+    /**
+     * `host.health`, transcribed key for key.
+     *
+     * Shaped in `crates/client/src/ffi.rs` rather than in `session.rs` — the
+     * only reason it is worth saying is that this file's header points at
+     * `session.rs` for everything else, and a reader checking the spelling has
+     * to be sent to the right producer. This is the same discipline for the same
+     * reason: `ignoreUnknownKeys` means a key spelled wrong here is a runner
+     * that reports itself healthy forever, silently, which for THIS payload
+     * would be the app suppressing the daemon's own account of what is wrong
+     * with it.
+     */
+    @Test
+    fun aRunnersHealthDecodesEveryKeyTheFfiEmits() {
+        val payload = """
+            {
+              "platform": "linux",
+              "daemonVersion": "0.1.0+9f2c1ab",
+              "protocolVersion": 1,
+              "healthy": false,
+              "reasons": ["tmux server is not reachable", "review cache is rebuilding"],
+              "livePanes": 6
+            }
+        """.trimIndent()
+
+        val health = json.decodeFromString(HostHealth.serializer(), payload)
+        assertEquals("linux", health.platform)
+        assertEquals("0.1.0+9f2c1ab", health.daemonVersion)
+        assertEquals(1, health.protocolVersion)
+        assertFalse(health.healthy)
+        // Every one of them, in order, unsummarized. This is the whole field.
+        assertEquals(
+            listOf("tmux server is not reachable", "review cache is rebuilding"),
+            health.reasons,
+        )
+        assertEquals(6, health.livePanes)
+    }
+
+    /**
+     * A runner too old to answer costs a row, not the decode — and the direction
+     * a missing `healthy` falls is the one that says nothing.
+     */
+    @Test
+    fun anEmptyHealthReadsAsWellRatherThanAsBroken() {
+        val health = json.decodeFromString(HostHealth.serializer(), "{}")
+        // Not `false`. A runner that never said is not a runner that said no,
+        // and drawing "Degraded" over silence is the fleet footer's old mistake
+        // in a new place.
+        assertTrue(health.healthy)
+        assertEquals(emptyList<String>(), health.reasons)
+        assertEquals(0, health.livePanes)
+        assertEquals("", health.platform)
+    }
+
     @Test
     fun aKeyThisBuildHasNeverHeardOfIsNotAnError() {
         // The setting that hid seventeen fields is also what lets an older app

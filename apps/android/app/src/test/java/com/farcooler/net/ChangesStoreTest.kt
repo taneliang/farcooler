@@ -797,7 +797,7 @@ class ChangesStoreTest {
         val source = FakeSource().apply {
             branchList = listOf(
                 BranchRef(name = "main", local = true),
-                BranchRef(name = "origin/main", remote = true),
+                BranchRef(name = "origin/main", remote = "origin"),
             )
         }
         val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())

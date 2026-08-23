@@ -582,8 +582,28 @@ data class BranchRef(
     val name: String = "",
     /** Whether a local ref of this name exists. */
     val local: Boolean = false,
-    /** Whether a remote-tracking ref does. A branch can be both. */
-    val remote: Boolean = false,
+    /**
+     * The remote it tracks or came from, by NAME — `origin` — or null.
+     *
+     * **A string, and this was a `Boolean` from the day the base picker
+     * landed.** `git::BranchInfo.remote` is an `Option<String>`
+     * (`crates/daemon/src/git.rs:257`) and `Session::branches` passes it
+     * straight through, so what arrives here is `"origin"` or `null` and never
+     * `true`. kotlinx does not shrug either of those into a `Boolean`: both
+     * throw, one for the wrong token and one because an explicit null cannot
+     * fill a non-nullable property with a default. So the whole reply failed to
+     * decode, `branches()` threw, and [BaseBranchSheet] showed "Couldn't read
+     * this project's branches" against every repository that has a remote —
+     * which is all of them.
+     *
+     * It was covered by a test the whole time. The test built its own payload
+     * with `"remote": true`, which is the same mistake written twice rather
+     * than a check on the first one; `ChangesDecodeTest` now transcribes what
+     * `session.rs` emits. Same bug class as `07e75e8`'s `isMainCheckout` and
+     * `fb79a8c`'s `updatedAt`, and the third in a row: a phone field spelled or
+     * typed from something other than the producer it actually reads.
+     */
+    val remote: String? = null,
     /**
      * Whether some worktree of this repository has it checked out.
      *
@@ -594,7 +614,16 @@ data class BranchRef(
     @SerialName("checkedOut") val checkedOut: Boolean = false,
     /** The subject of its tip commit, so a name is not the only thing to go on. */
     val subject: String = "",
-    /** Milliseconds, per `session.rs`, which multiplies the protocol's seconds. */
+    /**
+     * When the tip was last written, in Unix MILLISECONDS, or null when git had
+     * no committer date for it.
+     *
+     * **The unit is the trap.** `Session::branches` sends `t.seconds * 1000`
+     * (`crates/client/src/session.rs`), which is what this app reads; the CLI
+     * sends `t.seconds` under the same key, which is what the Mac reads. Copying
+     * the Mac's arithmetic here would date every branch to 1970 and print an age
+     * in tens of thousands of days. See [age].
+     */
     @SerialName("updatedAt") val updatedAt: Long? = null,
 ) {
     /**
@@ -607,10 +636,40 @@ data class BranchRef(
      */
     val whereItLives: String
         get() = when {
-            local && remote -> "local and remote"
-            remote -> "remote"
+            local && remote != null -> "local and remote"
+            remote != null -> "remote"
             else -> "local"
         }
+
+    /**
+     * How long ago the tip was written, or empty when nobody said.
+     *
+     * The Mac's `BranchInfo.age` thresholds exactly — minutes under an hour,
+     * hours under a day, days after that — so one branch does not read as "3h"
+     * on a Mac and "today" on the phone beside it. The `/ 1000` is the whole
+     * difference between the two, and it is there because the producers differ
+     * rather than because the platforms do; see [updatedAt].
+     *
+     * Empty rather than "unknown": a row with nothing to say about its age is
+     * better silent than captioned, and [branchAside] draws nothing for "".
+     *
+     * `nowMs` is an ARGUMENT rather than a clock read in here, for the reason
+     * [ChangeCommit.age] gives — and for the same second reason iOS gives: a
+     * branch last touched three days ago will not become four while a picker is
+     * open, so this is read once when the sheet opens rather than ticked.
+     */
+    fun age(nowMs: Long): String {
+        val at = updatedAt ?: return ""
+        if (at <= 0) return ""
+        val seconds = (nowMs - at) / 1_000
+        // A tip dated in the future is a clock disagreement between this phone
+        // and the runner, not a branch from tomorrow. Say "now" rather than a
+        // negative count of minutes.
+        if (seconds <= 0) return "now"
+        if (seconds < 3_600) return "${maxOf(1, seconds / 60)}m"
+        if (seconds < 86_400) return "${seconds / 3_600}h"
+        return "${seconds / 86_400}d"
+    }
 }
 
 /** What `branch.list` answers with. */

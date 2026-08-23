@@ -1067,6 +1067,14 @@ internal fun BaseBranchSheet(
     var filter by rememberSaveable { mutableStateOf("") }
     var branches by remember { mutableStateOf<List<BranchRef>?>(null) }
     var failure by remember { mutableStateOf<Trouble?>(null) }
+    // What the ages in the rows are measured from, fixed when the sheet opens.
+    //
+    // Read once rather than ticked. A terminal row's clock ticks because the
+    // difference between four seconds and forty is the thing being watched; a
+    // branch last touched three days ago will not become four while a picker is
+    // open, and redrawing thirty rows a second to prove it would cost more than
+    // it tells anybody. iOS says the same at `BranchPicker.now`.
+    val now = remember { System.currentTimeMillis() }
 
     LaunchedEffect(repositoryId) {
         val repository = repositoryId ?: return@LaunchedEffect
@@ -1112,7 +1120,11 @@ internal fun BaseBranchSheet(
                 } else {
                     LazyColumn(Modifier.weight(1f, fill = false)) {
                         items(shown, key = { it.name }) { branch ->
-                            BranchRow(branch, current = branch.name == set.baseRef) {
+                            BranchRow(
+                                branch,
+                                current = branch.name == set.baseRef,
+                                nowMs = now,
+                            ) {
                                 onChoose(branch.name)
                                 onDismiss()
                             }
@@ -1124,8 +1136,22 @@ internal fun BaseBranchSheet(
     }
 }
 
+/**
+ * One ref, with the two facts that decide between two names you half-remember.
+ *
+ * The age is trailing and monospaced rather than sitting after the name, so a
+ * column of ages lines up down the list instead of starting wherever each name
+ * happened to end — iOS settled that in `fb79a8c` and this is the same shape.
+ * Drawn only when there is one: [BranchRef.age] is empty for a branch git had no
+ * committer date for, and a blank caption still takes the space it would use.
+ */
 @Composable
-private fun BranchRow(branch: BranchRef, current: Boolean, onClick: () -> Unit) {
+private fun BranchRow(
+    branch: BranchRef,
+    current: Boolean,
+    nowMs: Long,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -1135,13 +1161,26 @@ private fun BranchRow(branch: BranchRef, current: Boolean, onClick: () -> Unit) 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(
-                branch.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    branch.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                val age = branch.age(nowMs)
+                if (age.isNotEmpty()) {
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        age,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
             Text(
                 branchAside(branch),
                 style = MaterialTheme.typography.labelSmall,

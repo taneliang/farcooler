@@ -204,6 +204,11 @@ private fun FleetBody(
     var editingRunner by remember { mutableStateOf<com.farcooler.data.Runner?>(null) }
     var addingRunner by remember { mutableStateOf(false) }
     var newTerminalIn by remember { mutableStateOf<Pair<Connection, Workspace>?>(null) }
+    // The two phase-8 doors off a workspace row. Both hold a `Connection` as
+    // well as the workspace, because a workspace id means nothing without the
+    // runner that minted it — the same rule `ChangesStores` is keyed by.
+    var stackFor by remember { mutableStateOf<FleetEntry?>(null) }
+    var removing by remember { mutableStateOf<FleetEntry?>(null) }
 
     // Naming the runner only earns its place once there is more than one.
     // With a single runner connected its name is on every row and says
@@ -282,6 +287,8 @@ private fun FleetBody(
                         scope.launch { entry.connection.setHidden(entry.workspace, hidden) }
                     },
                     onNewTerminal = { newTerminalIn = entry.connection to entry.workspace },
+                    onStack = { stackFor = entry },
+                    onRemove = { removing = entry },
                 )
             }
             // Creation order, always. Sorting whatever needs you to the top
@@ -383,6 +390,28 @@ private fun FleetBody(
             connection = connection,
             workspace = workspace,
             onDismiss = { newTerminalIn = null },
+        )
+    }
+    // The menu only offers this when the runner named the repository, so the
+    // inner `let` is a compiler obligation rather than a real case — and drawing
+    // nothing is the right answer if it ever becomes one. Deliberately not
+    // clearing `stackFor` here instead: writing state during composition is how
+    // a screen recomposes itself in a loop, and Cancel already clears it.
+    stackFor?.let { entry ->
+        entry.workspace.repository?.let { repository ->
+            StackSheet(
+                connection = entry.connection,
+                repository = repository,
+                branch = entry.workspace.branch,
+                onDismiss = { stackFor = null },
+            )
+        }
+    }
+    removing?.let { entry ->
+        RemoveWorktreeCeremony(
+            connection = entry.connection,
+            workspace = entry.workspace,
+            onFinished = { removing = null },
         )
     }
     if (addingRunner) {
@@ -631,6 +660,8 @@ private fun WorkspaceHeader(
     showRunner: Boolean,
     onHide: (Boolean) -> Unit,
     onNewTerminal: () -> Unit,
+    onStack: () -> Unit,
+    onRemove: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(
@@ -668,6 +699,19 @@ private fun WorkspaceHeader(
                         onNewTerminal()
                     },
                 )
+                // Only offered when the runner said which repository this
+                // worktree belongs to and which branch it is on. An older
+                // daemon's fleet carried neither, and a menu item that cannot
+                // work is worse than one that is not there.
+                if (entry.workspace.repository != null && entry.workspace.branch.isNotBlank()) {
+                    DropdownMenuItem(
+                        text = { Text("Stack & pull request") },
+                        onClick = {
+                            menu = false
+                            onStack()
+                        },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text(if (entry.workspace.isHidden) "Unhide" else "Hide") },
                     onClick = {
@@ -675,6 +719,29 @@ private fun WorkspaceHeader(
                         onHide(!entry.workspace.isHidden)
                     },
                 )
+                // **Never for the repository's own checkout.** Removing it would
+                // offer to delete the directory the repository itself lives in,
+                // and the daemon refuses it twice — the stored flag, then a path
+                // comparison that deliberately does not trust the flag. Keeping
+                // the item off the menu is not what makes that safe; it is what
+                // keeps nobody walking through a destructive ceremony that could
+                // never have succeeded. See `07e75e8`, which is that story on
+                // iOS, and `RemoveWorktreeCeremony`.
+                if (!entry.workspace.isMainCheckout) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                "Remove worktree…",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = {
+                            menu = false
+                            onRemove()
+                        },
+                    )
+                }
             }
         }
     }
@@ -702,16 +769,21 @@ private fun WorkspaceHeader(
  * **Aligned to the top, not the centre.** A one-line row and an eight-line row
  * are in the same list, and a dot centred in the second would sit four lines
  * below the name it belongs to.
- */
-/**
- * Shared with the front door, which is why this is not private.
  *
- * The front door draws agents with THIS row and no other. A second way to draw
- * an agent is a second chance for two screens to say different things about one
- * pane — iOS makes the same call in `NeedsYou.swift` for the same reason, and
- * it is why the front door uses `ListItem` for its other two rows and not for
- * this one: `ListItem`'s three text slots cannot hold four bands, as the note
- * above already argues.
+ * **Shared with the front door, which is why this is not private.** The front
+ * door draws agents with THIS row and no other. A second way to draw an agent is
+ * a second chance for two screens to say different things about one pane — iOS
+ * makes the same call in `NeedsYou.swift` for the same reason, and it is why the
+ * front door uses `ListItem` for its other two rows and not for this one:
+ * `ListItem`'s three text slots cannot hold four bands, as the note above
+ * already argues.
+ *
+ * That paragraph arrived as a SECOND KDoc block stacked under this one when the
+ * front door started sharing the row, and Kotlin binds only the last of those —
+ * so everything above it, the whole argument for four bands and for a `Row`
+ * rather than a `ListItem`, documented nothing. Both halves were right; only the
+ * arrangement was wrong. `Connection.setHidden` had the same thing happen to it
+ * and is fixed the same way.
  */
 @Composable
 internal fun TerminalRow(

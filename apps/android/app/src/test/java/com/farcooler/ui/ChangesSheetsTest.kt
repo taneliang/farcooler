@@ -184,10 +184,10 @@ class ChangesSheetsTest {
                 BranchRef(name = "main", local = true, checkedOut = true, subject = "handle retries")
             ),
         )
-        assertEquals("remote", branchAside(BranchRef(name = "origin/main", remote = true)))
+        assertEquals("remote", branchAside(BranchRef(name = "origin/main", remote = "origin")))
         assertEquals(
             "local and remote",
-            branchAside(BranchRef(name = "main", local = true, remote = true)),
+            branchAside(BranchRef(name = "main", local = true, remote = "origin")),
         )
     }
 

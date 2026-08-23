@@ -16,10 +16,12 @@ import com.farcooler.model.DaemonBuild
 import com.farcooler.model.DiffLayout
 import com.farcooler.model.FileDiffReply
 import com.farcooler.model.Fleet
+import com.farcooler.model.HostHealth
 import com.farcooler.model.InboxReply
 import com.farcooler.model.InboxRow
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryList
+import com.farcooler.model.StackReply
 import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
 import com.farcooler.model.toJson
@@ -893,15 +895,6 @@ class Connection(
     }
 
     /**
-     * Hide or unhide a workspace.
-     *
-     * The Mac has had this since workspace management landed and neither phone
-     * app ever got it, which on a runner that adopts every worktree it already
-     * has means a sidebar of twenty rows and no way to put nineteen away.
-     * Hiding never touches git and is never refused for a running terminal — it
-     * is a view preference, not a lifecycle step.
-     */
-    /**
      * Put a device's key into this runner's `~/.ssh/authorized_keys`.
      *
      * **The daemon owns the write**, and that is the whole reason this is one
@@ -1044,10 +1037,114 @@ class Connection(
     @kotlinx.serialization.Serializable
     private data class AdapterList(val adapters: List<AdapterInfo> = emptyList())
 
+    /**
+     * Hide or unhide a workspace.
+     *
+     * The Mac has had this since workspace management landed and neither phone
+     * app ever got it, which on a runner that adopts every worktree it already
+     * has means a sidebar of twenty rows and no way to put nineteen away.
+     * Hiding never touches git and is never refused for a running terminal — it
+     * is a view preference, not a lifecycle step.
+     *
+     * That paragraph spent a while four hundred lines up this file, stacked on
+     * top of [enroll]'s own — two KDoc blocks in a row, of which Kotlin binds
+     * only the last, so it documented nothing and `setHidden` had no comment at
+     * all. Moved rather than rewritten: it was never wrong, only somewhere else.
+     */
     suspend fun setHidden(workspace: Workspace, hidden: Boolean) {
         val method = if (hidden) "workspace.hide" else "workspace.unhide"
         attempt { core.call(method, args("workspace" to workspace.id)) }
         refresh()
+    }
+
+    /**
+     * What asking to remove a worktree came back with.
+     *
+     * The same three-way distinction the Mac's `RemoveWorktreeResult` and iOS's
+     * make, so all three apps' UIs branch on the same facts. It has to be three
+     * and not two: "the runner wants the name typed" and "the runner refused"
+     * are different events that need different screens, and folding them
+     * together is how somebody ends up reading a sentence about uncommitted
+     * changes after a refusal that had nothing to do with them.
+     */
+    sealed interface RemoveOutcome {
+        /** The worktree is gone. The branch is not — the daemon never deletes it. */
+        data object Removed : RemoveOutcome
+
+        /**
+         * The worktree is dirty, so the daemon wants [Workspace.task] typed back.
+         *
+         * `crates/daemon/src/rpc.rs` decides this with `removal_needs_confirmation`
+         * and compares the typed string against `ws.name()` — which IS the fleet's
+         * `task`, since `wire::workspace` computes that field from the same call.
+         * Worth saying because the comparison is exact and the two names being the
+         * same one is not obvious from either end alone.
+         */
+        data object NeedsTypedName : RemoveOutcome
+
+        /** Anything else the runner said, in its own words. */
+        data class Refused(val message: String?) : RemoveOutcome
+    }
+
+    /**
+     * Remove a worktree. **The most destructive thing this app can ask for.**
+     *
+     * `confirm` must be the workspace's exact name, unless the worktree is
+     * clean, in which case it may be empty.
+     *
+     * ## What the far end refuses, and where
+     *
+     * Worth having written down here, because the caller has to refuse some of
+     * it FIRST — a refusal that lands after somebody has typed a worktree's name
+     * into a destructive confirmation is a refusal that came too late to be
+     * useful, which is the whole of `07e75e8`.
+     *
+     * 1. **Scope.** `workspace.remove_worktree` is `Scope::HostAdmin`
+     *    (`crates/daemon/src/rpc.rs`), and a phone enrolled through the ceremony
+     *    holds `control`. That refusal cannot be predicted from this side — a key
+     *    added to `authorized_keys` by hand carries no scope line and reads as
+     *    host_admin, so two phones with identical settings can get different
+     *    answers — so it is REPORTED rather than pre-empted, and the runner's own
+     *    words go in a box.
+     * 2. **The main checkout**, twice: the `is_main_checkout` flag, and then a
+     *    canonicalized path comparison that deliberately does not trust the flag
+     *    (`Service::remove_worktree`). Both run before any terminal is stopped and
+     *    before any directory is touched. The caller keeps the door shut on
+     *    [Workspace.isMainCheckout] anyway, so nobody is walked through a
+     *    ceremony that could never have succeeded.
+     * 3. **An untrustworthy tmux inventory**, which is refused outright — and
+     *    this is the one that arrives in the WORST order. The confirmation gate
+     *    is in `rpc.rs` and this check is in `service.rs` underneath it, so on a
+     *    dirty worktree the daemon demands the typed name first and only then
+     *    says tmux is unreachable. The caller checks [Fleet.runtimeHealthy] before
+     *    it offers the button.
+     * 4. **A dirty worktree with the wrong name typed**, which is [RemoveOutcome.NeedsTypedName].
+     *
+     * Past all four it closes every terminal in the workspace — not a reason to
+     * refuse, since closing them is part of what was asked for — then runs
+     * `git worktree remove --force` and deletes the workspace row. **The branch
+     * survives, and so does everything committed on it.**
+     */
+    suspend fun removeWorktree(workspace: Workspace, confirm: String): RemoveOutcome {
+        val data = try {
+            core.call(
+                "workspace.remove_worktree",
+                args("workspace" to workspace.id, "confirm" to confirm),
+            )
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            // Refreshed even on a refusal: several of the refusals above are
+            // about state this phone is holding a stale copy of, and the fleet
+            // it draws behind the failure should be the current one.
+            refresh()
+            return RemoveOutcome.Refused(e.message)
+        }
+        refresh()
+        return if (data["confirmationRequired"]?.jsonPrimitive?.booleanOrNull == true) {
+            RemoveOutcome.NeedsTypedName
+        } else {
+            RemoveOutcome.Removed
+        }
     }
 
     /**
@@ -1224,6 +1321,73 @@ class Connection(
     override suspend fun branches(repository: String): List<BranchRef> {
         val data = core.call("branch.list", args("repository" to repository))
         return json.decodeFromJsonElement(BranchListReply.serializer(), data).branches
+    }
+
+    /**
+     * A branch's parent chain, and what GitHub last said along it.
+     *
+     * Repository-scoped and branch-scoped both, which is why the one caller has
+     * to have a [Workspace.repository] AND a branch before it offers the door —
+     * an older runner's fleet carried neither, and a menu item that cannot work
+     * is worse than one that is not there.
+     *
+     * `stack.get` is `Scope::Read` (`crates/daemon/src/rpc.rs`), unlike almost
+     * everything else this file reaches for: a parent chain and a PR number are
+     * metadata about work rather than the work, so a read-scoped phone can
+     * triage a stack without being able to read a line of the code in it.
+     *
+     * Null rather than an empty reply for a failure, because those are
+     * different answers and the sheet says different things about them: a
+     * branch that is not part of a stack has no links, and a runner too old to
+     * answer has no reply at all.
+     */
+    suspend fun stack(repository: String, branch: String): StackReply? {
+        val data = attempt {
+            core.call("stack.get", args("repository" to repository, "branch" to branch))
+        }.getOrNull() ?: return null
+        return runCatching {
+            json.decodeFromJsonElement(StackReply.serializer(), data)
+        }.getOrNull()
+    }
+
+    /**
+     * Ask GitHub again, rather than answering from what was last read.
+     *
+     * The affordance that exists because a cached "passing" is the one reading
+     * that misleads — `PullRequest.stale` is what says a reading is old enough
+     * to doubt, and this is the only thing a phone can do about it.
+     *
+     * Answers with the same shape [stack] does, whole: `pr.refresh` re-reads
+     * every PR in the repository and hands back the chain again, so the caller
+     * REPLACES what it holds rather than merging. `Scope::Control`, unlike
+     * [stack] — this one spends somebody's GitHub rate limit.
+     */
+    suspend fun refreshPullRequests(repository: String): StackReply? {
+        val data = attempt {
+            core.call("pr.refresh", args("repository" to repository))
+        }.getOrNull() ?: return null
+        return runCatching {
+            json.decodeFromJsonElement(StackReply.serializer(), data)
+        }.getOrNull()
+    }
+
+    /**
+     * What this runner is, and whether it says it is well.
+     *
+     * Read on demand rather than cached beside [loadDaemonBuild], and the
+     * difference is [HostHealth.reasons]: the cached build facts cannot change
+     * while connected — a daemon that restarted is a connection that dropped —
+     * but a runner becomes degraded and recovers underneath a live connection,
+     * so the one field worth this call is the one that goes stale.
+     *
+     * Null on any failure. The section that draws this is absent entirely
+     * rather than shown as zeroes, which is what iOS's `healthSection` does with
+     * the same nil.
+     */
+    suspend fun health(): HostHealth? {
+        val data = attempt { core.call("host.health") }.getOrNull() ?: return null
+        return runCatching { json.decodeFromJsonElement(HostHealth.serializer(), data) }
+            .getOrNull()
     }
 
     /**
