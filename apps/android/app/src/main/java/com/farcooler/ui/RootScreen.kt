@@ -32,9 +32,14 @@ import kotlinx.coroutines.launch
 /**
  * The app, and the one decision it makes before anything else: where to open.
  *
- * Onto TERMINALS, not onto a list of runners. A list of runners is
- * onboarding, and onboarding is not a home screen — so it appears exactly when
- * it is the thing to do, which is when there are no runners.
+ * Onto the FRONT DOOR — what needs a person, on every runner at once. It used
+ * to open onto a terminal, chosen by a fleet-wide landing rule, and that is the
+ * right answer to one of the four situations in `docs/jobs-to-be-done.md` and
+ * the wrong answer to three. See [NeedsYouScreen] and [AppModel.landIfNeeded].
+ *
+ * A list of runners is still onboarding, and onboarding is still not a home
+ * screen — so it appears exactly when it is the thing to do, which is when
+ * there are no runners.
  *
  * ## Two layers, not one screen at a time
  *
@@ -101,6 +106,22 @@ fun RootScreen(model: AppModel) {
                 scope.launch { drawer.close() }
             }
 
+            // Back out of a pushed GROUND screen — a workspace, or the fleet
+            // list — to whatever is under it, which is now always something,
+            // because the front door is the root and a terminal is pushed onto
+            // it rather than replacing it.
+            //
+            // The plain handler and not the predictive one, deliberately.
+            // Predictive back needs the screen underneath to be composed, and
+            // composing two ground screens at once would mean either giving up
+            // the drawer's edge swipe on the screen it is most used from — the
+            // gesture and the back gesture want the same edge — or mounting a
+            // second terminal behind the first. Neither is worth an animation.
+            // See [Route.isOverlay].
+            BackHandler(enabled = overlays.isEmpty() && !drawer.isOpen && stack.size > 1) {
+                model.back()
+            }
+
             ModalNavigationDrawer(
                 drawerState = drawer,
                 // A drawer swipe would fight a back swipe from the same edge
@@ -155,8 +176,13 @@ fun RootScreen(model: AppModel) {
 }
 
 /**
- * Whatever is underneath everything: a workspace, the workspace list, or
- * nothing yet.
+ * Whatever is underneath everything: the front door, a workspace, the workspace
+ * list, or nothing yet.
+ *
+ * Exactly one of them is composed at a time, which is what separates a ground
+ * route from an overlay. Back out of a pushed one is the plain handler above;
+ * see [Route.isOverlay] for why the terminal did not become an overlay when it
+ * started being pushed rather than replacing.
  *
  * Keyed on the RUNNER, and on nothing that can change when a chip is tapped.
  * That is the Compose form of the rule iOS wrote down in `09b1e1f`: which pane
@@ -202,9 +228,23 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
                 }
             }
 
-            else -> FleetScreen(
+            is Route.Fleet -> FleetScreen(
                 model = model,
                 onSelect = { model.open(it) },
+                onOpenDrawer = onOpenDrawer,
+                onBack = { model.back() },
+            )
+
+            // The root, and the fallback for anything that has no ground of its
+            // own. An overlay route reaching here would be a bug in
+            // `Route.isOverlay` rather than something to draw; the front door
+            // is what `Backstack.ROOT` degrades to, so it is what this degrades
+            // to as well.
+            else -> NeedsYouScreen(
+                model = model,
+                onSelect = { model.open(it) },
+                onOpenWorkspace = { host, workspace -> model.openWorkspace(host, workspace) },
+                onOpenWorkspaces = { model.navigate(Route.Fleet) },
                 onOpenDrawer = onOpenDrawer,
             )
         }
@@ -253,7 +293,7 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
 
         // The ground's routes never reach here; `Route.isOverlay` is the one
         // place that split is decided.
-        is Route.Onboarding, is Route.Fleet, is Route.Terminal -> Unit
+        is Route.Onboarding, is Route.NeedsYou, is Route.Fleet, is Route.Terminal -> Unit
     }
 }
 

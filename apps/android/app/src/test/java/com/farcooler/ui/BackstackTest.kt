@@ -47,6 +47,7 @@ class BackstackTest {
         // likely to break quietly, so each is named rather than sampled.
         for (route in listOf(
             Route.Onboarding,
+            Route.NeedsYou,
             Route.Fleet,
             Route.Settings,
             Route.Authorize,
@@ -317,11 +318,41 @@ class BackstackTest {
         assertEquals(listOf(Route.Fleet), Backstack.truncate(stack) { it !is Route.Terminal || it in live })
     }
 
+    /**
+     * The root is the front door, and it is a new discriminator on the wire.
+     *
+     * Asserted literally rather than round-tripped for the reason the class
+     * comment gives: a round trip passes happily while both ends rename
+     * together, and this string is read by whichever build is installed when
+     * the process comes back.
+     *
+     * `fleet` is checked alongside it because it did NOT change meaning — it is
+     * still the workspace list, it is simply no longer the root — so a stack
+     * saved before this landed restores to the workspace list rather than being
+     * thrown away.
+     */
+    @Test
+    fun theRootIsTheFrontDoorAndTheFleetRouteStillDecodes() {
+        assertEquals(Route.NeedsYou, Backstack.ROOT)
+        assertTrue(
+            Backstack.encodeStack(listOf(Route.NeedsYou)).contains("needs-you"),
+        )
+        assertEquals(
+            listOf(Route.Fleet, Route.Terminal("h", "w")),
+            Backstack.decodeStack("""[{"type":"fleet"},{"type":"terminal","hostId":"h","workspaceId":"w"}]"""),
+        )
+    }
+
     // ---- The layering RootScreen draws from ----
 
     @Test
     fun onlyPushedScreensAreDrawnOverTheWorkspace() {
-        for (route in listOf(Route.Onboarding, Route.Fleet, Route.Terminal("h", "w"))) {
+        for (route in listOf(
+            Route.Onboarding,
+            Route.NeedsYou,
+            Route.Fleet,
+            Route.Terminal("h", "w"),
+        )) {
             assertTrue("$route should be ground", !route.isOverlay)
         }
         for (route in listOf(

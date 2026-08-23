@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.PauseCircle
@@ -75,9 +76,15 @@ import kotlinx.coroutines.launch
 /**
  * Every workspace on every runner, in one scroll area.
  *
- * Shown two places — as the whole screen when nothing is running anywhere, and
- * inside the drawer over a terminal — so a task started from either one works
- * the same way and neither loses a capability the other has.
+ * Shown two places — as a whole screen pushed from the front door's Workspaces
+ * row, and inside the drawer over anything — so a task started from either one
+ * works the same way and neither loses a capability the other has.
+ *
+ * Not a front door, and this is the list that made that clear: it holds every
+ * worktree whether or not it wants anything, in creation order, with the two
+ * buttons that start new work. That is the right answer to "where is my stuff"
+ * and the wrong answer to "what needs me" — see `NeedsYouScreen`, which asks
+ * the second question and links here for the first.
  *
  * Every state here is DERIVED by the daemon at the moment of asking. This
  * screen never computes a terminal's state, because a client that re-derives
@@ -115,10 +122,26 @@ fun FleetDrawer(
     }
 }
 
-/** The fleet as a whole screen, for a fleet with nothing running to land on. */
+/**
+ * The fleet as a whole screen.
+ *
+ * No longer where the app lands when nothing is running — the front door is,
+ * always — so this is now a destination somebody chose: pushed from the front
+ * door's Workspaces row, which is also the only place in the app that says how
+ * many there are.
+ *
+ * [onBack] is what says so. It carries the back arrow, and the hamburger is
+ * kept only for the case where this screen is the ground with nothing under it,
+ * which the route stack no longer produces but `Ground`'s fallback still can.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FleetScreen(model: AppModel, onSelect: (TerminalRef) -> Unit, onOpenDrawer: () -> Unit) {
+fun FleetScreen(
+    model: AppModel,
+    onSelect: (TerminalRef) -> Unit,
+    onOpenDrawer: () -> Unit,
+    onBack: (() -> Unit)? = null,
+) {
     var refreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -127,8 +150,17 @@ fun FleetScreen(model: AppModel, onSelect: (TerminalRef) -> Unit, onOpenDrawer: 
             TopAppBar(
                 title = { Text("Workspaces") },
                 navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Outlined.Menu, contentDescription = "Show the fleet")
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = onOpenDrawer) {
+                            Icon(Icons.Outlined.Menu, contentDescription = "Show the fleet")
+                        }
                     }
                 },
             )
@@ -392,14 +424,25 @@ private fun liveSummary(connections: List<Connection>): String {
 /**
  * What one runner is doing, when that is not simply "answering".
  *
- * A runner that stops answering keeps its rows, dimmed, rather than dropping
- * them — so this row is what explains why they are stale. Every failure has
- * exactly one useful next move and they are not the same move, which is why
- * this switches on [Connection.Failure] rather than offering "try again" for
- * everything.
+ * A runner that stops answering keeps its rows rather than dropping them, so
+ * this row is what explains why they are stale. It said "dimmed" here for as
+ * long as it has existed and nothing has ever dimmed them — see
+ * [Connection.Phase.Reconnecting] for the drift and what closing it would cost.
+ *
+ * Every failure has exactly one useful next move and they are not the same
+ * move, which is why this switches on [Connection.Failure] rather than offering
+ * "try again" for everything.
+ *
+ * **Shared with the front door, which is why this is not private.** A runner
+ * that failed and a runner that is reconnecting are two states iOS's
+ * single-connection inbox never had to put in a LIST, and they are exactly the
+ * states that stop "nothing needs you" from being a true sentence. The front
+ * door draws THESE rows rather than a second, shorter version of them, because
+ * two screens offering different next moves about the same runner is the drift
+ * this codebase keeps finding.
  */
 @Composable
-private fun RunnerStatusRow(
+internal fun RunnerStatusRow(
     connection: Connection,
     showLabel: Boolean,
     onRetry: () -> Unit,
@@ -660,8 +703,18 @@ private fun WorkspaceHeader(
  * are in the same list, and a dot centred in the second would sit four lines
  * below the name it belongs to.
  */
+/**
+ * Shared with the front door, which is why this is not private.
+ *
+ * The front door draws agents with THIS row and no other. A second way to draw
+ * an agent is a second chance for two screens to say different things about one
+ * pane — iOS makes the same call in `NeedsYou.swift` for the same reason, and
+ * it is why the front door uses `ListItem` for its other two rows and not for
+ * this one: `ListItem`'s three text slots cannot hold four bands, as the note
+ * above already argues.
+ */
 @Composable
-private fun TerminalRow(
+internal fun TerminalRow(
     terminal: Terminal,
     ordinal: Int?,
     onClick: () -> Unit,

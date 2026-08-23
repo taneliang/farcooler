@@ -8,6 +8,8 @@ import com.farcooler.model.AdapterInfo
 import com.farcooler.model.AdapterTestOutcome
 import com.farcooler.model.DaemonBuild
 import com.farcooler.model.Fleet
+import com.farcooler.model.InboxReply
+import com.farcooler.model.InboxRow
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryList
 import com.farcooler.model.Terminal
@@ -80,9 +82,21 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
          * "stopped, waiting for you", and this is not stopped.
          *
          * Rows keep their place through this. A runner that stops answering
-         * keeps its rows, dimmed, rather than dropping them — the rule this
-         * app already follows, and the reason it can afford a phase that means
-         * "stale, on purpose, for the moment".
+         * keeps its rows rather than dropping them — the rule this app already
+         * follows, and the reason it can afford a phase that means "stale, on
+         * purpose, for the moment".
+         *
+         * **They are not dimmed, though this comment and `FleetScreen`'s have
+         * said so since they were written.** Nothing in `app/src/main` ever
+         * applied an alpha to a row belonging to a runner in this phase; what
+         * says a runner is stale is [RunnerStatusRow], which names it and
+         * offers "Reconnect now". Recorded rather than quietly corrected
+         * because the claim is a good one and the front door is where it would
+         * matter most — its sections span every runner, so a stale row there
+         * sits beside a live one with nothing between them. Doing it means one
+         * alpha, in one place, applied on both surfaces at once, and no
+         * emulator was available to judge whether the result reads as stale or
+         * as broken.
          */
         data class Reconnecting(val attempt: Int) : Phase
     }
@@ -166,6 +180,28 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
 
     private val _repositories = MutableStateFlow<List<Repository>>(emptyList())
     val repositories: StateFlow<List<Repository>> = _repositories.asStateFlow()
+
+    /**
+     * What each worktree on this runner has changed, by workspace id, or empty
+     * until the first read.
+     *
+     * Keyed rather than kept as the list the wire sends, because every reader
+     * arrives with one workspace in hand and wants that workspace's row: a
+     * fleet of twenty rows each scanning a twenty-entry array is quadratic work
+     * to answer a question a map answers once.
+     *
+     * Keyed by WORKSPACE alone and not by `host/workspace`, unlike almost
+     * everything else in this app — because this map belongs to one runner and
+     * dies with it. [FleetRepository] is where the runners are merged, and it
+     * carries the counts out on a [FleetEntry], which already names the host.
+     *
+     * Held from the last successful read when a read fails, on the same terms
+     * as [fleet] itself. A count that vanishes reads as "this worktree has no
+     * changes any more", which is a claim, and a call that failed is not
+     * entitled to make one.
+     */
+    private val _inbox = MutableStateFlow<Map<String, InboxRow>>(emptyMap())
+    val inbox: StateFlow<Map<String, InboxRow>> = _inbox.asStateFlow()
 
     private val _daemon = MutableStateFlow<DaemonBuild?>(null)
     val daemon: StateFlow<DaemonBuild?> = _daemon.asStateFlow()
@@ -255,8 +291,10 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
         when (_phase.value) {
             // After two hours away, "connected" is a claim rather than a fact.
             // Testing it now beats waiting out a poll interval to find out, and
-            // if it holds this is one round trip nobody notices.
-            is Phase.Connected -> scope.launch { refresh() }
+            // if it holds this is one round trip nobody notices. Forced,
+            // because every count on screen is a claim about a fleet nobody
+            // has asked since.
+            is Phase.Connected -> scope.launch { refresh(force = true) }
             is Phase.Reconnecting, is Phase.Failed -> reconnectNow()
             // Already in flight, or waiting on a person. Neither is helped by
             // starting over.
@@ -302,7 +340,9 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
 
         if (mine != attempt) return
         _phase.value = Phase.Connected
-        refresh()
+        // Forced, so a fresh link reads the diff counts on its first poll
+        // rather than up to [INBOX_EVERY] polls later. See [loadInboxIfDue].
+        refresh(force = true)
         loadRepositories()
         loadThemes()
         startPolling()
@@ -385,7 +425,7 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
         // Before the reads below, so anything watching for a new link learns
         // about it in the same turn the link exists.
         _reconnects.value += 1
-        refresh()
+        refresh(force = true)
         // Re-read rather than trust what a previous session reported: a
         // runner that dropped and came back may have gained a repository, and
         // staying invisible to the pickers until relaunch is the failure the
@@ -528,7 +568,18 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
     /** What a fleet refresh produced, so the app can announce it exactly once. */
     var onFleet: ((Fleet) -> Unit)? = null
 
-    suspend fun refresh() {
+    /**
+     * Ask the runner what its fleet is doing, and — on the polls that are due
+     * for it — what its worktrees have changed.
+     *
+     * [force] reads the inbox whatever the divisor says. Passed by the three
+     * moments where the last read is not merely old but untrusted: a link that
+     * has just come up, a link that has just come back, and an app returning to
+     * the foreground. Pull-to-refresh forces it too — see
+     * [FleetRepository.refreshAll] — because a person pulling the list down is
+     * asking for everything on it, not for most of it.
+     */
+    suspend fun refresh(force: Boolean = false) {
         if (_phase.value !is Phase.Connected) return
         try {
             val data = core.call("fleet")
@@ -550,6 +601,74 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
             if (e is com.farcooler.core.DisconnectedException) linkDropped()
             return
         }
+
+        // The diff counts, on the same poll as the rows they belong to.
+        //
+        // OUTSIDE the `try` above, deliberately. That block treats a throw as
+        // possible evidence the link is gone, and this call must never be able
+        // to supply that evidence: a daemon too old to know `changes.inbox`
+        // refuses it on every poll forever, and would otherwise reconnect a
+        // perfectly good session every three seconds. [loadInbox] cannot throw
+        // at all, and a failed fleet poll returns above without reaching it, so
+        // a fleet nobody could read is never followed by counts describing it.
+        loadInboxIfDue(force)
+    }
+
+    /**
+     * How many fleet polls have gone by, so the inbox can ride every [INBOX_EVERY]
+     * of them. Not a wall clock: what this bounds is round trips, and the poll
+     * loop is what makes them.
+     */
+    private var polls = 0L
+
+    /**
+     * Read the inbox on the polls that are due for it.
+     *
+     * **This is where the fleet's cost is bounded.** iOS calls `changes.inbox`
+     * on every one of its three-second polls, and can afford to: it holds one
+     * connection. This app holds one per runner, so the same rule would put N
+     * extra SSH round trips on a three-second timer and make the feature the
+     * product is proudest of the most expensive thing on the phone's radio.
+     *
+     * The divisor is not a compromise, it is what the data is worth. The fleet
+     * needs three seconds because it carries agent state — blocked, done — and
+     * that is the perishable half of the front door. The inbox carries a diff
+     * watermark, which is the durable half: it was true before the app was
+     * opened and stays true until somebody reads it. Something that sits still
+     * does not need a three-second clock.
+     *
+     * At three, one runner costs 20 fleet polls and 6.7 inbox polls a minute
+     * against iOS's 20 and 20; three runners cost 60 and 20 — twice iOS's total
+     * call rate for three times the fleet. The counter is per connection, so
+     * runners drift out of phase with each other rather than firing together.
+     */
+    private suspend fun loadInboxIfDue(force: Boolean) {
+        val due = force || polls % INBOX_EVERY == 0L
+        polls += 1
+        if (due) loadInbox()
+    }
+
+    /**
+     * Read what every worktree on this runner has changed, in one call.
+     *
+     * Errors swallowed, as [loadRepositories] and [loadThemes] beside it are,
+     * and with more reason than either: these numbers decorate rows that are
+     * already correct without them. A runner whose daemon predates
+     * `changes.inbox` fails this on every poll forever, and neither that nor
+     * one dropped packet may cost the fleet its screen.
+     *
+     * The last good map is kept when a read fails, rather than blanked. See
+     * [inbox].
+     */
+    private suspend fun loadInbox() {
+        val data = attempt { core.call("changes.inbox") }.getOrNull() ?: return
+        val reply = runCatching {
+            json.decodeFromJsonElement(InboxReply.serializer(), data)
+        }.getOrNull() ?: return
+        // `associateBy` keeps the LAST of any duplicate key, which is what a
+        // runner listing one worktree twice should collapse to — the same
+        // uniquing iOS spells out.
+        _inbox.value = reply.items.associateBy { it.workspaceId }
     }
 
     /**
@@ -888,6 +1007,12 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
         const val DEFAULT_BRANCH_PREFIX = "feat/"
 
         private const val POLL_INTERVAL_MS = 3_000L
+
+        /**
+         * One inbox read per this many fleet polls. See [loadInboxIfDue] for
+         * why the two payloads do not deserve the same cadence.
+         */
+        private const val INBOX_EVERY = 3L
 
         /**
          * How long a runner that answered SSH but not Far Cooler waits.

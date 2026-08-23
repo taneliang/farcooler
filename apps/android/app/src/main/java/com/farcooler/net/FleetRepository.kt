@@ -3,8 +3,9 @@ package com.farcooler.net
 import com.farcooler.data.Runner
 import com.farcooler.data.RunnerStore
 import com.farcooler.data.Settings
+import com.farcooler.model.InboxRow
+import com.farcooler.model.NeedsYouInput
 import com.farcooler.model.Terminal
-import com.farcooler.model.landingTerminal
 import com.farcooler.model.Workspace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -26,12 +27,27 @@ import kotlinx.coroutines.launch
  */
 data class TerminalRef(val hostId: String, val workspaceId: String, val terminalId: String)
 
-/** One workspace, and the runner it is on. */
+/** One workspace, the runner it is on, and what that runner said about its diff. */
 data class FleetEntry(
     val host: Runner,
     val connection: Connection,
     val workspace: Workspace,
-)
+    /**
+     * This worktree's `changes.inbox` row, or null while its runner has not
+     * answered.
+     *
+     * Carried on the entry rather than looked up by the screens that want it,
+     * for the same reason the runner is: this is the app's one merged,
+     * already-observed list of workspaces across every runner, and a front door
+     * that reached back into a per-connection map would have to subscribe to N
+     * more flows and re-key every one of them by host. See [Connection.inbox]
+     * for why that map is keyed by workspace alone.
+     */
+    val counts: InboxRow? = null,
+) {
+    /** This entry as the front door's derivation wants it. See `model/NeedsYou.kt`. */
+    fun needsYouInput() = NeedsYouInput(host.id, host.displayLabel, workspace, counts)
+}
 
 /**
  * Every configured runner, connected at once.
@@ -121,6 +137,11 @@ class FleetRepository(
             watchers[host.id] = listOf(
                 scope.launch { connection.fleet.collect { publish() } },
                 scope.launch { connection.phase.collect { publish() } },
+                // The counts arrive on their own cadence — one read per
+                // [Connection.INBOX_EVERY] fleet polls — so they need a watcher
+                // of their own or a `+82 -13` would wait for the next fleet
+                // change to reach the screen.
+                scope.launch { connection.inbox.collect { publish() } },
             )
         }
 
@@ -131,8 +152,9 @@ class FleetRepository(
         val ordered = hosts.hosts.value.mapNotNull { connections[it.id] }
         _connections.value = ordered
         _entries.value = ordered.flatMap { connection ->
+            val counts = connection.inbox.value
             connection.fleet.value.workspaces.map { workspace ->
-                FleetEntry(connection.host, connection, workspace)
+                FleetEntry(connection.host, connection, workspace, counts[workspace.id])
             }
         }
     }
@@ -170,9 +192,15 @@ class FleetRepository(
         publish()
     }
 
-    /** Refresh every runner at once, for pull-to-refresh. */
+    /**
+     * Refresh every runner at once, for pull-to-refresh.
+     *
+     * Forced, so the diff counts come with it. Somebody pulling the list down
+     * is asking for everything on it, and the one number on it that rides a
+     * slower cadence is the one they would otherwise not get.
+     */
     suspend fun refreshAll() {
-        connections.values.forEach { it.refresh() }
+        connections.values.forEach { it.refresh(force = true) }
     }
 
     /** Retry a runner that failed, without disturbing the others. */
@@ -223,26 +251,18 @@ class FleetRepository(
         connections.values.forEach { it.reconnectNow() }
     }
 
-    /**
-     * The terminal to open on, across every runner.
-     *
-     * The same rule one runner's fleet uses, applied to the union: an agent
-     * waiting on you outranks everything else regardless of which runner it is
-     * on, which is the entire point of connecting to all of them.
-     */
-    fun landing(): TerminalRef? {
-        val all = _entries.value.flatMap { entry ->
-            entry.workspace.terminals.map { entry to it }
-        }
-        // The ordering itself lives in `model/Model.kt`, stated once. What is
-        // this function's own is carrying the runner and the workspace back out
-        // with the pane — which is why it pairs each terminal with its entry
-        // first and finds the pair again after, rather than re-deriving the
-        // owner from an id that is only unique per runner.
-        val chosen = all.map { it.second }.landingTerminal ?: return null
-        return all.first { it.second === chosen }.ref()
-    }
-
-    private fun Pair<FleetEntry, Terminal>.ref() =
-        TerminalRef(first.host.id, first.workspace.id, second.id)
+    // There is no fleet-wide landing rule here any more, and its absence is
+    // the point.
+    //
+    // `landing()` used to answer "which terminal does the app open on", merging
+    // every runner's panes and applying `model/Model.kt`'s ordering to the
+    // union — the cross-runner form of a rule iOS applies to one connection.
+    // The front door replaced the question rather than the answer: the app no
+    // longer opens onto a terminal at all, so nothing asks which one. What was
+    // cross-runner about it survives, better, in `model/NeedsYou.kt`, which
+    // merges the same union and orders it by the host's own `rank` instead of
+    // by first-match.
+    //
+    // The narrower rule is untouched: `List<Terminal>.landingTerminal` still
+    // decides which PANE a workspace opens on, through `Backstack.rule`.
 }

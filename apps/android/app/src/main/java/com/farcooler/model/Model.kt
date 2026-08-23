@@ -616,6 +616,72 @@ data class Repository(
 @Serializable
 data class RepositoryList(val repositories: List<Repository> = emptyList())
 
+/**
+ * What one worktree has changed, and whether anybody has looked at it since.
+ *
+ * The `changes.inbox` row. Routed in Rust since the review surface landed —
+ * `crates/daemon/src/rpc.rs:1424`, answered by `review_ops::inbox`, shaped into
+ * JSON by `Session::changes_inbox` — and never called from Kotlin until the
+ * front door needed a second tier.
+ *
+ * **`@SerialName` on three of the four, because this payload is snake_case and
+ * the fleet is not.** `Session::fleet` builds camelCase keys that happen to
+ * match Kotlin property names; `Session::changes_inbox` builds
+ * `workspace_id` / `task_name` / `changed_since_reviewed`. Two shapes out of one
+ * FFI, and the app decodes both with `ignoreUnknownKeys = true`, so a missing
+ * annotation here would be a permanently-zero count rather than an error. See
+ * `NeedsYouDecodeTest`, which transcribes that `json!` block key for key.
+ *
+ * Four fields of the seven on the wire. `short`, `task_name` and `branch` are
+ * also sent and are deliberately not decoded: this app already has the
+ * workspace from the fleet poll, and a second copy of its name is a second
+ * thing that can be stale by three seconds. What is kept is what the fleet
+ * cannot answer.
+ */
+@Serializable
+data class InboxRow(
+    @SerialName("workspace_id") val workspaceId: String,
+    /**
+     * The change set moved since this worktree was last marked reviewed.
+     *
+     * The daemon's watermark, not a `git status`: three cheap signals — the
+     * two-syscall gate, an agent write this daemon served itself, and the
+     * digest of a change set already in cache. A worktree nobody has ever
+     * marked read is `true` by definition, so this is "new to you" rather than
+     * "new".
+     *
+     * Distinct from [hasDiff]. `hasDiff` is "this branch differs from its
+     * base", which stays true after you have read it; this is what makes the
+     * front door an INBOX rather than a list of every branch in flight.
+     */
+    @SerialName("changed_since_reviewed") val changedSinceReviewed: Boolean = false,
+    val insertions: Int = 0,
+    val deletions: Int = 0,
+) {
+    val hasDiff: Boolean get() = insertions > 0 || deletions > 0
+}
+
+/**
+ * Every worktree on one runner that has something to say, in one call.
+ *
+ * One call rather than one per row, which is what the RPC exists for: the
+ * daemon answers from counts it already holds plus the cheap gate, so a quiet
+ * fleet costs almost nothing, while a call per worktree would put a `git` on
+ * the poll timer for every row on screen.
+ *
+ * **`elsewhere` is on the wire and is deliberately not decoded.** The proto
+ * documents it as "entries in scopes this client cannot see, as an opaque
+ * count", with the argument that a triage surface which silently hides half the
+ * fleet is worse than one that admits it — a good argument, and the code has
+ * drifted off it: `review_ops::inbox` ends `Ok(pb::ChangesInbox { items,
+ * elsewhere: 0 })`, hard-coded, with no path that ever sets it. Decoding it
+ * would put a number on the front door that is zero by construction. Recorded
+ * here rather than acted on, so whoever makes the daemon compute it knows there
+ * is a reader waiting.
+ */
+@Serializable
+data class InboxReply(val items: List<InboxRow> = emptyList())
+
 /** What the daemon on the other end is, asked once per connection. */
 /**
  * What the daemon on the other end said about itself.

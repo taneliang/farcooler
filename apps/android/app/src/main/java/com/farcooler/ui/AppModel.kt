@@ -108,10 +108,14 @@ class AppModel(
      *
      * Saved, because after a process death the app has already decided: the
      * stack that just came back IS the decision, and landing again would throw
-     * it away in the one case restoration exists for. A restored `[Fleet]` is
-     * indistinguishable from a cold start without this, and somebody who had
-     * deliberately gone back to the workspace list would be dropped into a
-     * terminal for it.
+     * it away in the one case restoration exists for. A restored `[NeedsYou]`
+     * is indistinguishable from a cold start without this.
+     *
+     * Now that the front door is the root there is only one decision left for
+     * it to hold — onboarding or not — so the window it protects is much
+     * narrower than it was. Kept, because that decision is still one somebody
+     * can move: [addHost] clears it deliberately, so adding the first runner
+     * from onboarding leaves onboarding.
      */
     private val _landed = MutableStateFlow(saved.get<Boolean>(LANDED) ?: false)
     val landed: StateFlow<Boolean> = _landed.asStateFlow()
@@ -150,44 +154,38 @@ class AppModel(
     }
 
     /**
-     * Open onto TERMINALS, not onto a list of runners.
+     * The one decision left before the first screen: onboarding, or the front
+     * door.
      *
-     * Called once the first fleet has arrived. A list of runners is
-     * onboarding, and onboarding is not a home screen — so the runner list
-     * appears exactly when it is the thing to do, which is when there are no
-     * runners.
+     * This used to choose a TERMINAL. It merged every runner's panes, applied
+     * the landing rule to the union and opened the winner, with the workspace
+     * list as the fallback for a fleet with nothing running — and it had to
+     * wait for a runner to answer before it could, because a slow SSH handshake
+     * would otherwise land on an empty list and stay there.
+     *
+     * All of that is gone with the front door, and the waiting went with it.
+     * [Route.NeedsYou] needs nothing from any runner to be worth showing: with
+     * no answer yet it says every runner is connecting, which is both true and
+     * the thing somebody opening the app during a handshake wants to know.
+     * There is no landing decision to get wrong and no window in which to get
+     * it wrong.
+     *
+     * What is left is the case the old comment was written for and which is
+     * still exactly right: **a list of runners is onboarding, and onboarding is
+     * not a home screen** — so it appears exactly when it is the thing to do,
+     * which is when there are no runners.
      */
     fun landIfNeeded() {
-        // Before landing, and before the pending-notification check, because
-        // both of those read the stack: a route naming a workspace that is gone
-        // has to be off the stack before anything decides whether the app has
-        // somewhere to be.
+        // Before anything that reads the stack: a route naming a workspace that
+        // is gone has to be off the stack before anything decides whether the
+        // app has somewhere to be.
         settle()
 
-        // A notification tap outranks the landing rule: someone who tapped
+        // A notification tap outranks the front door: somebody who tapped
         // "claude needs you" asked for that pane by name.
         resolvePendingTerminal()
         if (_landed.value) return
-        if (hosts.hosts.value.isEmpty()) {
-            land(Route.Onboarding)
-            return
-        }
-        // Only once at least one runner has answered, or a slow SSH handshake
-        // would land on the empty workspace list and stay there.
-        val anySettled = fleet.active.value.any { it.phase.value !is Connection.Phase.Connecting }
-        if (!anySettled) return
-
-        val target = fleet.landing()
-        if (target == null) {
-            land(Backstack.ROOT)
-            return
-        }
-        // The landing rule is the app choosing, not a person choosing, so it
-        // points rather than records — the memory would otherwise be seeded
-        // with its own guess and the rule would never run in this workspace
-        // again.
-        point(target)
-        land(Route.Terminal(target.hostId, target.workspaceId))
+        land(if (hosts.hosts.value.isEmpty()) Route.Onboarding else Backstack.ROOT)
     }
 
     private fun land(route: Route) {
@@ -197,16 +195,31 @@ class AppModel(
     }
 
     /**
-     * Go to a pane somebody was SENT to — a fleet row, the drawer, a push.
+     * Go to a pane somebody was SENT to — a front-door row, a fleet row, the
+     * drawer, a push notification.
      *
-     * Replaces the workspace rather than pushing one, because the workspace IS
-     * the home screen here: a stack of workspaces would give the terminal a
-     * back button that goes to another terminal, and a home screen you can go
-     * back out of is not one.
+     * Pushes onto whatever sent you, and swaps one terminal for another rather
+     * than stacking them. See [goTo].
      */
     fun open(ref: TerminalRef) {
         point(ref)
         goTo(Route.Terminal(ref.hostId, ref.workspaceId))
+    }
+
+    /**
+     * Go to a WORKSPACE, without naming a pane in it.
+     *
+     * The front door's "Review changes" row, which is about the worktree rather
+     * than about any agent in it. Deliberately does not [point] at anything:
+     * `TerminalRef` would need a terminal id and there is no honest one to
+     * give, and writing an empty one into the focus map would put a value in
+     * there that resolves to nothing on every later read.
+     *
+     * So the workspace's own rule chooses the pane — the remembered tab if it
+     * still lives, whatever needs you otherwise. See [paneOf].
+     */
+    fun openWorkspace(hostId: String, workspaceId: String) {
+        goTo(Route.Terminal(hostId, workspaceId))
     }
 
     /**
@@ -228,24 +241,37 @@ class AppModel(
     }
 
     /**
-     * Put a workspace on screen, whatever was on it before.
+     * Put a workspace on screen, over whatever sent you there.
      *
-     * A workspace REPLACES the stack rather than pushing onto it. `RootScreen`
-     * has said since it was written that a terminal is the home screen and that
-     * a home screen with a back button leading somewhere is not one — but the
-     * code had drifted: opening a terminal from the workspace list pushed, so
-     * the list accumulated underneath and only stayed invisible because no
-     * screen on that branch had a back handler to pop it. Now the comment is
-     * true. The workspace list is an edge swipe away in the drawer, which is
-     * what it is for.
+     * **A workspace PUSHES now, where it used to replace the whole stack.** The
+     * old rule — and the comment that argued for it — was right about the app
+     * it was written in: the terminal was the home screen, a home screen with a
+     * back button that goes somewhere is not one, and the workspace list was an
+     * edge swipe away in the drawer. Every clause of that is false now that
+     * [Route.NeedsYou] is the root. A terminal opened from the front door has
+     * somewhere to go back to and it is the screen that sent you, which is the
+     * whole reason the front door is worth having.
+     *
+     * **A terminal replaces a terminal.** Tapping another workspace in the
+     * drawer while already in one must not stack them: the second Back would
+     * then land on a workspace nobody asked to see again. So the trailing run
+     * of terminals is dropped and one is put back — which leaves the front door
+     * one Back away wherever you got here from, and leaves the workspace list
+     * in between when it was the thing that sent you. That is iOS's depth-2
+     * shape, and the Back bug `43a320f` names is precisely the version of this
+     * that replaced instead of appending.
      *
      * Arriving at the workspace already underneath only closes what is over it,
      * so a push for a pane in the workspace you are already in costs no
-     * navigation at all.
+     * navigation at all — which is what keeps a tab tap free. See [choose].
      */
     private fun goTo(target: Route.Terminal) {
         val base = _stack.value.dropLastWhile { it.isOverlay }
-        install(if (base.lastOrNull() == target) base else listOf(target))
+        if (base.lastOrNull() == target) {
+            install(base)
+            return
+        }
+        install(base.dropLastWhile { it is Route.Terminal } + target)
     }
 
     /**
@@ -288,7 +314,15 @@ class AppModel(
         return true
     }
 
-    fun showFleet() {
+    /**
+     * Back to the front door, whatever is stacked up.
+     *
+     * Was `showFleet`, and the rename is the whole of the change: [Backstack.ROOT]
+     * has always been what it installed, and ROOT is no longer the workspace
+     * list. A method named for its old destination is how the next reader ends
+     * up somewhere else.
+     */
+    fun goHome() {
         install(listOf(Backstack.ROOT))
     }
 

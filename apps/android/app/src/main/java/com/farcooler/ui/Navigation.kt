@@ -35,7 +35,37 @@ sealed interface Route {
     @SerialName("onboarding")
     data object Onboarding : Route
 
-    /** The workspace list — what a runner with nothing running shows. */
+    /**
+     * The front door: what needs a person, across every connected runner.
+     *
+     * The root, and the app's answer to three of the four situations
+     * `docs/jobs-to-be-done.md` names. The app used to open into a TERMINAL —
+     * `FleetRepository.landing()` picked one on connect and the workspace list
+     * was the fallback for a fleet with nothing running. That is the right
+     * front door for exactly one of those situations, on the couch about to
+     * drive an agent; in the other three — in transit, standing with the phone
+     * in hand, at the gym between sets — the first question is *what needs me*,
+     * and a terminal is an answer to a question nobody asked. iOS deleted the
+     * same shape in `1be6264`.
+     *
+     * No host and no workspace on it, unlike every other route that names
+     * something: this one names the whole fleet, which is the property the
+     * screen exists for.
+     */
+    @Serializable
+    @SerialName("needs-you")
+    data object NeedsYou : Route
+
+    /**
+     * The workspace list — every worktree on every runner, hidden ones
+     * included.
+     *
+     * No longer the root. It is pushed from the front door's Workspaces row,
+     * and it is also what the navigation drawer holds, which is deliberate
+     * duplication rather than an oversight: the drawer is reachable by an edge
+     * swipe with no target to hit, and the row is reachable by reading. See
+     * `RootScreen`.
+     */
     @Serializable
     @SerialName("fleet")
     data object Fleet : Route
@@ -113,7 +143,15 @@ sealed interface Route {
     val isOverlay: Boolean
         get() = when (this) {
             is Settings, is RunnerSettings, is Authorize, is Join, is AddDevice, is Devices -> true
-            is Onboarding, is Fleet, is Terminal -> false
+            // The three GROUND routes. A terminal is one of them and not an
+            // overlay, even though it is now pushed onto the front door rather
+            // than replacing it: `isOverlay` also decides whether the drawer's
+            // edge swipe is live, and a terminal that gave that edge to the
+            // back gesture would take the fleet drawer away from the one screen
+            // it is most used from. So back out of a terminal is the plain
+            // handler in `RootScreen`, and predictive back stays where it
+            // already was.
+            is Onboarding, is NeedsYou, is Fleet, is Terminal -> false
         }
 }
 
@@ -146,8 +184,16 @@ object Backstack {
      */
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** The root every degraded stack falls back to. */
-    val ROOT: Route = Route.Fleet
+    /**
+     * The root every degraded stack falls back to.
+     *
+     * The front door, since phase 3. It was [Route.Fleet], which was correct
+     * while the app landed on a terminal and used the workspace list as its
+     * fallback; now the fallback and the front door are the same screen, and it
+     * is the one screen in the app that needs nothing from any runner to be
+     * worth showing.
+     */
+    val ROOT: Route = Route.NeedsYou
 
     /** One runner's one workspace, which is the grain a focus is remembered at. */
     fun key(hostId: String, workspaceId: String) = "$hostId/$workspaceId"
