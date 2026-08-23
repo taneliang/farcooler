@@ -1,6 +1,11 @@
-# Cutting a release: tag it, and everything ships from the same commit.
+# Cutting a release: one tag, and everything ships from the commit it points at.
 #
-#   ./scripts/release.sh 0.2.0
+# Nothing here is meant to be started by hand. `scripts/release.sh 0.2.0` moves
+# the version in Cargo.toml and stops; the **Promote** workflow makes the tag and
+# calls this file with it. The two-step is in release.sh's header — a tag must
+# point at a commit somebody has already built and run. The triggers below still
+# accept a tag push and a dispatch, and the last paragraph of this header says
+# what the tag one costs.
 #
 # The one rule this file exists to enforce: the CLI, the daemon, the Mac app and
 # the phone app in a given release are built from ONE commit. They speak a
@@ -8,9 +13,27 @@
 # assembled from four separate builds is a release that can disagree with itself.
 # Everything below therefore checks out once and fans out from there.
 #
-# The relay is deliberately NOT here — see relay.yml. It deploys continuously and
-# must stay compatible with app versions that are months old, because an App
-# Store release cannot be rolled forward on demand.
+# The relay is deliberately NOT here — see relay.yml, which carries its own
+# triggers because it has its own cadence: every push to main deploys the CANARY
+# relay, and promote.yml calls it for preview and stable so a channel's relay
+# moves with that channel's apps.
+#
+# This comment used to say the relay "deploys continuously" and had to, because
+# an App Store release cannot be rolled forward on demand. The second half is
+# still true and the first is no longer what happens. What actually keeps a
+# months-old app working is the relay being ADDITIVE ONLY, which is the argument
+# relay.yml's header makes at length; additive-only is not a reason to put every
+# commit in front of the people running those apps, so the continuous cadence
+# moved to canary. Recorded rather than deleted, because the old sentence is
+# still quoted elsewhere.
+#
+# One consequence worth naming here, since this file has a tag trigger and
+# relay.yml has none: pushing a `v*` tag BY HAND runs everything below — the
+# TestFlight upload, the GitHub release, the Sparkle appcast — and deploys no
+# relay at all, so the stable app would move and the stable relay would not.
+# Promote is the path that moves both, and it is the only path anyone is meant
+# to take: scripts/release.sh stopped tagging for a different reason and closed
+# this door on the way past, so reaching it now takes a deliberate `git tag`.
 name: Release
 
 on:

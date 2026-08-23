@@ -59,6 +59,35 @@ on:
         required: false
         type: string
 
+# One relay deploy at a time per channel, and the older one never lands last.
+#
+# Two pushes to main a minute apart start two of these, and each one applies
+# migrations and then deploys. Ungrouped they interleave, and the way that goes
+# wrong is not subtle: Cloudflare takes whichever upload finishes last, so the
+# OLDER commit can end up being the worker that serves every request until the
+# next relay change happens along — which, on a filtered trigger, can be days.
+# Two `d1 migrations apply` against one database at the same moment is the other
+# half: that command reads a table to decide which files have already run, and
+# two readers deciding at once can run the same file twice.
+#
+# NOT `cancel-in-progress`, which is what canary.yml does and would be wrong
+# here. This job migrates BEFORE it deploys, so a run cancelled between those
+# two steps leaves the database moved and the old code serving it — the one
+# state additive-only cannot rescue, because being additive is a promise about
+# the NEXT schema, not about code that has never seen this one. Queueing costs
+# the thirty-odd seconds a relay deploy takes. The alternative costs someone
+# working out, from a live fault, that they need to run `wrangler deploy` by
+# hand.
+#
+# Keyed by environment, because the four channels are genuinely separate
+# workers with separate databases and nothing to serialise between them. A
+# `workflow_dispatch` putting a fix on the stable relay must not queue behind a
+# canary push it has nothing to do with — that button exists for the moments
+# when waiting is the problem.
+concurrency:
+  group: relay-${{ inputs.environment || 'canary' }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy
