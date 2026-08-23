@@ -256,7 +256,22 @@ struct WorkspaceView: View {
         .preferredColorScheme(Themes.shared.current.colorScheme)
         // The task and its branch: the place you are is the workspace, and that
         // is true regardless of which of its tabs is focused.
+        //
+        // Both lines are the system's now. This screen hand-rolled the pair in a
+        // `.principal` toolbar item — a `VStack(spacing: 0)` holding a
+        // `.headline` over a `.caption2` — ten lines from `NeedsYouView`, which
+        // asks the navigation bar for exactly this shape and gets the platform's
+        // metrics, its truncation and its behavior under the bar for free. A
+        // title built by hand also stops being a title as far as the system is
+        // concerned: it does not participate in the bar's own layout, and
+        // VoiceOver reads it as two loose labels rather than as the name of the
+        // screen.
         .navigationTitle(workspaceName)
+        // Empty rather than absent in the gap before the fleet has answered,
+        // which is the same gap `workspaceName` covers with "Workspace". There
+        // is no way to ask for no subtitle at all, and the branch arrives within
+        // a poll.
+        .navigationSubtitle(currentWorkspace?.branch ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
         .photosPicker(isPresented: $showPhotoPicker, selection: $pickedImage, matching: .images)
@@ -392,20 +407,6 @@ struct WorkspaceView: View {
         if connection.phase != .connected {
             ToolbarItem(placement: .topBarLeading) {
                 LinkStatusChip(connection: connection)
-            }
-        }
-
-        ToolbarItem(placement: .principal) {
-            VStack(spacing: 0) {
-                Text(workspaceName)
-                    .font(.headline)
-                    .lineLimit(1)
-                if let branch = currentWorkspace?.branch {
-                    Text(branch)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
             }
         }
 

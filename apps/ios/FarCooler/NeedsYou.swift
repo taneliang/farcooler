@@ -284,10 +284,30 @@ struct NeedsYouView: View {
                 }
             }
         }
-        // Let the theme's ground show through; a List paints an opaque
-        // background of its own that would sit on top of it. The same reason
-        // `WorkspaceListView` does it.
-        .scrollContentBackground(.hidden)
+        // The list keeps its own grouped ground, and letting the theme through
+        // was a mistake this screen shared with `WorkspaceListView`.
+        //
+        // `.scrollContentBackground(.hidden)` sat here so the terminal palette
+        // showed behind the rows. But an inset-grouped row draws
+        // `secondarySystemGroupedBackground`, and that is a FIXED pair —
+        // `#1C1C1E` in dark, `#FFFFFF` in light — not a theme color. Against
+        // Nord's `#2E3440`, Dracula's `#282A36`, Gruvbox's `#282828`, Solarized
+        // Dark's `#002B36` and Catppuccin's `#1E1E2E`, the card came out DARKER
+        // than the ground it floats on, which inverts the one rule dark mode is
+        // built on: the thing in front is the lighter one. Cards read as wells
+        // sunk into the screen. And against the three light themes that ship a
+        // `#FFFFFF` background — GitHub Light, Tomorrow, High Contrast Light —
+        // card and ground were the same color to the byte, so the card had no
+        // shape at all and the section grouping this screen was rebuilt around
+        // was invisible on every one of them.
+        //
+        // So the theme stops here. It is the TERMINAL's palette — `TerminalView`
+        // paints it, `WorkspaceView` paints it behind the panes — and an inbox
+        // of workspaces is chrome. `preferredColorScheme` still follows the
+        // theme app-wide, so this list goes dark when the terminal does; it just
+        // uses the system's own grouped grounds to do it, which are the two
+        // colors `secondarySystemGroupedBackground` was designed against.
+
         // A row that clears itself, faded rather than snapped.
         //
         // This list only ever gained rows before. A finished agent's row ENDS
@@ -526,7 +546,10 @@ struct NeedsYouView: View {
     /// The symbol is `ChangesChip`'s and the counts get the monospaced
     /// green-and-red treatment `FleetList`'s workspace header gives them, so
     /// this row looks like the tab it opens and `+82 -13` is the same shape
-    /// wherever it appears.
+    /// wherever it appears. That was already the stated rule and the code had
+    /// drifted off it: the three other places this pair appears — the tab
+    /// strip's chip, `FleetList`'s header, the commit rows in `ChangesView` —
+    /// are all `.caption2.monospaced()`, and this one was a full step larger.
     ///
     /// One accessibility element saying one thing, because read aloud the parts
     /// are "plus 82" and "minus 13" — two numbers with nothing attaching them to
@@ -535,8 +558,21 @@ struct NeedsYouView: View {
     /// opens.
     private func changesRow(_ item: Item) -> some View {
         NavigationLink(value: Route.workspace(id: item.workspace.id, focus: .changes)) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label("Review Changes", systemImage: "doc.text.magnifyingglass")
+            HStack(alignment: .firstTextBaseline, spacing: RowGutter.gap) {
+                // In the state dot's column rather than in a `Label`'s. A
+                // `Label` sizes its symbol to the text beside it and adds a gap
+                // of its own, which started these words about 24 points in
+                // while the agent rows above them started at 18 and the
+                // overflow line under them at 0 — three text edges inside one
+                // section. An 8-point frame is exactly the width of the dot a
+                // `TerminalRow` draws, so the symbol sits on that axis and the
+                // words line up with theirs.
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: RowGutter.dot)
+
+                Text("Review Changes")
                     .font(.body)
 
                 Spacer(minLength: 0)
@@ -546,7 +582,7 @@ struct NeedsYouView: View {
                         Text("+\(counts.insertions)").foregroundStyle(.green)
                         Text("-\(counts.deletions)").foregroundStyle(.red)
                     }
-                    .font(.caption.monospaced())
+                    .font(.caption2.monospaced())
                 }
             }
             .accessibilityElement(children: .combine)
@@ -577,10 +613,18 @@ struct NeedsYouView: View {
     }
 
     /// The line a group puts under itself when it ran out of room.
+    ///
+    /// On the same left edge the agents it is counting start on. It sat at 0
+    /// while a `TerminalRow`'s words started at 18, so the sentence summarizing
+    /// a group hung outside the group — and a screen whose whole job is to be
+    /// read at a glance was asking the eye to find three margins in one
+    /// section. `RowGutter` is where that 18 is named, beside the row that sets
+    /// it.
     private func overflowLine(_ sentence: String) -> some View {
         Text(sentence)
             .font(.caption2)
             .foregroundStyle(.tertiary)
+            .padding(.leading, RowGutter.text)
     }
 
     /// The blocked agents this section ran out of room for. A sentence rather

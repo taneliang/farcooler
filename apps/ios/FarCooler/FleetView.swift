@@ -869,45 +869,95 @@ struct FleetView: View {
     /// First contact. The fingerprint is shown and refused until a human says
     /// yes, because silently trusting an unknown key is what makes an
     /// interception invisible.
+    ///
+    /// Built on `failure(_:)`'s skeleton, which is the shape this screen should
+    /// always have had: a mark, a headline, a sentence, and the actions anchored
+    /// at the bottom where a thumb is. What it was instead is the exact layout
+    /// that function's own comment says it was rebuilt to stop being — a
+    /// leading-aligned stack of pill buttons of two different widths floating in
+    /// the middle of the view, a ragged staircase giving the eye no line to
+    /// follow, with the bottom third of a tall screen empty underneath it. Two
+    /// screens one connection apart disagreeing about that shape is bad enough;
+    /// that this is the FIRST screen a newly added runner produces made it the
+    /// worst place in the app to leave the older one standing.
+    ///
+    /// The fingerprint goes in a `DetailBox`, which is where every other piece
+    /// of host output in this app goes — `failure`'s own undiagnosed message
+    /// twenty lines down, the adapter editor's, the task composer's. It was a
+    /// hand-rolled radius-10 rectangle over `secondarySystemBackground`: one
+    /// more invention of a container the app already has, and one that made the
+    /// runner's words look like the app's own prose. `DetailBox` keeps the
+    /// selection, so a fingerprint is still something you can copy and compare.
     private func approval(_ fingerprint: String) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("Unrecognized Runner", systemImage: "questionmark.circle")
-                .font(.headline)
-            Text("\(host.address) presented this key:")
+        VStack(spacing: 0) {
+            Spacer()
+
+            // Neither amber nor red. Nothing has gone wrong and no agent is
+            // waiting on anyone — a runner this device has not met is a
+            // question, which is what the mark and the headline both say.
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 42, weight: .thin))
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 22)
+
+            Text("Unrecognized Runner")
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .padding(.bottom, 8)
+
+            Text("\(host.address) presented a key this device hasn’t seen before.")
                 .font(.callout)
-            Text(fingerprint)
-                .font(.system(.footnote, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+
+            DetailBox(text: fingerprint)
+                .frame(maxWidth: 320)
+                .padding(.top, 14)
+
+            // The one thing that makes the fingerprint above worth showing:
+            // where to get the other copy of it. Selectable, because it is a
+            // command somebody has to run somewhere else.
+            Text("Check it on the host: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
                 .textSelection(.enabled)
-                .padding(12)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            Text(
-                "Check it on the host: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
-            )
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-
-            Button("Trust This Runner") {
-                store.trust(host, fingerprint: fingerprint)
-                var trusted = host
-                trusted.fingerprint = fingerprint
-                Task { await connect(trusted) }
-            }
-            .buttonStyle(.borderedProminent)
-
-            // The other answer. Saying no used to have nowhere to go — this
-            // screen had one button on it — which made "I am not sure about this
-            // fingerprint" and "yes, trust it" the same tap for anyone who just
-            // wanted out. It leaves the host untrusted and lands on the failure
-            // screen, which is where the switcher and the editor are.
-            Button("Not Now") {
-                connection.declineHostKey(host)
-            }
-            .buttonStyle(.bordered)
+                .frame(maxWidth: 320)
+                .padding(.top, 14)
 
             Spacer()
+
+            VStack(spacing: 18) {
+                Button {
+                    store.trust(host, fingerprint: fingerprint)
+                    var trusted = host
+                    trusted.fingerprint = fingerprint
+                    Task { await connect(trusted) }
+                } label: {
+                    Text("Trust This Runner").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                // The other answer. Saying no used to have nowhere to go — this
+                // screen had one button on it — which made "I am not sure about
+                // this fingerprint" and "yes, trust it" the same tap for anyone
+                // who just wanted out. It leaves the host untrusted and lands on
+                // the failure screen, which is where the switcher and the editor
+                // are.
+                //
+                // Plain text rather than a second bordered pill, for the reason
+                // `failure` gives about its own alternatives: two pills give two
+                // things the same weight when only one of them is the answer.
+                Button("Not Now") {
+                    connection.declineHostKey(host)
+                }
+            }
+            .padding(.horizontal, 40)
+            .padding(.bottom, 40)
         }
-        .padding()
+        .padding(.horizontal)
     }
 
     /// What went wrong, and the one thing worth doing about it.
@@ -1295,9 +1345,16 @@ struct WorkspaceListView: View {
             }
         }
         .refreshable { await connection.refresh() }
-        // Let the theme's ground show through; a List paints an opaque
-        // background of its own that would sit on top of it.
-        .scrollContentBackground(.hidden)
+        // No `.scrollContentBackground(.hidden)` any more. It let the terminal
+        // palette show behind these rows, and an inset-grouped row draws
+        // `secondarySystemGroupedBackground` — `#1C1C1E` dark, `#FFFFFF` light,
+        // fixed colors rather than theme ones. On five of the seven dark themes
+        // that made the card DARKER than its own ground, which is dark mode's
+        // elevation rule upside down, and on the three light themes with a
+        // `#FFFFFF` background it made card and ground identical, so the rows
+        // had no card at all. `NeedsYouView` carries the numbers and the full
+        // argument; the short version is that the theme is the terminal's
+        // palette and a list of workspaces is chrome.
         .toolbar {
             // Sparkles for "describe it" (`TaskComposerView`), plain plus for
             // "fill in the form" (`NewWorkspaceView`) — same two flows the
@@ -1443,6 +1500,13 @@ struct HostSwitcherBar: View {
                         .font(.callout.weight(.medium))
                     Image(systemName: "chevron.up.chevron.down").font(.caption2)
                 }
+                // The only way to change runners in the app, and it was about
+                // 21 points tall. The words keep their size; the band around
+                // them is the guideline's 44, and `contentShape` makes that band
+                // live rather than merely occupied — padding on a menu label is
+                // layout only otherwise. Same move the tab strip's chips made.
+                .frame(minHeight: PaneMetrics.target)
+                .contentShape(.rect)
             }
 
             Spacer(minLength: 0)
@@ -1450,7 +1514,11 @@ struct HostSwitcherBar: View {
             LinkStatusChip(connection: connection)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        // The 10 points of vertical padding that used to be here are gone, and
+        // the height moved into the two controls instead. Both are 44 now, so
+        // the bar is 44 rather than the 41 it was — three points for two targets
+        // that clear the floor, on the one strip that is under every phase of
+        // this screen including the ones you cannot otherwise leave.
         .background(.bar)
         .sheet(isPresented: $showAdd) {
             AddView(runners: hosts)
@@ -1482,7 +1550,12 @@ struct HostSwitcherBar: View {
 /// same property that made the bar the app's escape hatch in the first place.
 ///
 /// Connected is a dot and no words. A permanent "Connected" on a phone screen
-/// is noise, and the absence of amber says the same thing in no space at all.
+/// is noise, and the absence of a colored dot says the same thing in no space at
+/// all. It used to say "the absence of amber", and amber is no longer this
+/// chip's to spend: orange means an agent is waiting on you, everywhere in this
+/// app and on the widget, the Live Activity and the complication. A link that is
+/// still coming up is in progress, so it is yellow — the same yellow
+/// `processColor` gives a pane that is starting.
 ///
 /// The tap works from every state, green included. That is the "it's actually
 /// cooked" case: the app believes it is fine and the person holding it can see
@@ -1507,9 +1580,16 @@ struct LinkStatusChip: View {
             }
             // A 7-point dot is not a tap target. The padding is, and it stays
             // there when the label does not so the target does not move.
+            //
+            // The comment was right and the arithmetic was not: 7 points of dot
+            // plus 6 above and 6 below is 19, and with the runner bar's own
+            // padding the whole thing came to about 25. The horizontal padding
+            // still holds the label off the edges; the height is the
+            // guideline's, and `contentShape` makes all of it live.
             .padding(.vertical, 6)
             .padding(.leading, 8)
             .padding(.trailing, label == nil ? 8 : 10)
+            .frame(minHeight: PaneMetrics.target)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -1520,7 +1600,8 @@ struct LinkStatusChip: View {
     private var color: Color {
         switch connection.phase {
         case .connected: return .green
-        case .connecting, .reconnecting: return .orange
+        // In progress, not attention. See the note on amber above.
+        case .connecting, .reconnecting: return .yellow
         case .needsApproval, .failed: return .red
         }
     }
@@ -1632,18 +1713,7 @@ struct FleetList: View {
                     // prevent. The rank only moves when the agent's own state
                     // does, so the list still holds still while you read it.
                     ForEach(workspace.terminals.sorted { $0.sortRank < $1.sortRank }) { terminal in
-                        Button { onSelect(terminal) } label: {
-                            TerminalRow(terminal: terminal, ordinal: numbering[terminal.id])
-                                // A list row's label otherwise sizes to its
-                                // text. Give selection the whole visible row,
-                                // including the blank trailing space a thumb
-                                // naturally lands in.
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("fleet-terminal-\(terminal.id)")
-                        .swipeActions(edge: .trailing) { terminalActions(for: terminal) }
+                        row(terminal, ordinal: numbering[terminal.id])
                     }
                     if workspace.terminals.isEmpty {
                         Text("No terminals").font(.callout).foregroundStyle(.secondary)
@@ -1657,6 +1727,12 @@ struct FleetList: View {
                 } header: {
                     HStack(spacing: 6) {
                         Text(workspace.task)
+                            // First in and last squeezed. Seven things share
+                            // this line and the task is the only one that says
+                            // WHICH worktree this is; without a priority it was
+                            // simply the first `Text` the layout reached for
+                            // when the branch and the counts wanted room.
+                            .layoutPriority(1)
                         // Something under here wants you, said once at the top
                         // rather than left to be inferred from a row further
                         // down that may be scrolled off.
@@ -1673,7 +1749,12 @@ struct FleetList: View {
                         if workspace.worktreeMissing {
                             Text("worktree gone")
                                 .font(.caption2)
-                                .foregroundStyle(.orange)
+                                // Red, not amber. A worktree that is no longer
+                                // on disk is a failure, and amber in this app
+                                // means an agent is waiting on you — which the
+                                // dot two views to the left is already saying,
+                                // in the same color, about something else.
+                                .foregroundStyle(.red)
                         }
                         Spacer()
                         // What this worktree has changed, which is the fact the
@@ -1710,6 +1791,14 @@ struct FleetList: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        // Hide, Unhide, Remove Worktree and the stack all live
+                        // behind this glyph and nowhere else on the phone, and
+                        // it inherited a grouped header's `.footnote` — a
+                        // roughly 22-point target for the only destructive
+                        // action on the screen. The glyph is `.title3` and its
+                        // band is 44, which costs this header about 24 points of
+                        // height per workspace. Worth it: a header is read once
+                        // on the way past and this is the one control in it.
                         Menu {
                             Button {
                                 Task { await connection.createTerminal(workspace: workspace) }
@@ -1751,9 +1840,23 @@ struct FleetList: View {
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
+                                .font(.title3)
                                 .foregroundStyle(.secondary)
+                                .frame(
+                                    minWidth: PaneMetrics.target,
+                                    minHeight: PaneMetrics.target,
+                                    alignment: .trailing)
+                                .contentShape(.rect)
                         }
                     }
+                    // Against the grouped list's uppercasing, which is right for
+                    // the word "SETTINGS" and wrong for both halves of this: the
+                    // task is a sentence somebody wrote, and a branch is an
+                    // identifier whose case is not ours to change —
+                    // `FEAT/ADD-AUTH` is not a branch that exists. `NeedsYouView`
+                    // states this rule for the same two strings one tap away,
+                    // and this header was the copy that never got it.
+                    .textCase(nil)
                 }
             }
 
@@ -1767,15 +1870,7 @@ struct FleetList: View {
                             // be a second answer to "which agent matters most"
                             // living one disclosure triangle away.
                             ForEach(workspace.terminals.sorted { $0.sortRank < $1.sortRank }) { terminal in
-                                Button { onSelect(terminal) } label: {
-                                    TerminalRow(
-                                        terminal: terminal, ordinal: numbering[terminal.id])
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("fleet-terminal-\(terminal.id)")
-                                .swipeActions(edge: .trailing) { terminalActions(for: terminal) }
+                                row(terminal, ordinal: numbering[terminal.id])
                             }
                             HStack {
                                 Text(workspace.task).font(.caption).foregroundStyle(.secondary)
@@ -1784,6 +1879,8 @@ struct FleetList: View {
                                     Task { await connection.unhideWorkspace(workspace) }
                                 }
                                 .font(.caption)
+                                .frame(minHeight: PaneMetrics.target)
+                                .contentShape(.rect)
                             }
                         }
                     }
@@ -1802,6 +1899,10 @@ struct FleetList: View {
                             }
                             Spacer()
                         }
+                        // The only route to a hidden workspace, in a header that
+                        // gave it about 20 points of height.
+                        .frame(minHeight: PaneMetrics.target)
+                        .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                 }
@@ -1810,7 +1911,12 @@ struct FleetList: View {
             Section {
                 HStack {
                     Circle()
-                        .fill(fleet.runtimeHealthy ? .green : .orange)
+                        // Red rather than amber for "tmux unavailable". No
+                        // agent is waiting on anyone; the runtime that every
+                        // pane on this runner lives inside is not answering,
+                        // which is a failure. The audit did not list this one
+                        // and it is the same bug as the six it did.
+                        .fill(fleet.runtimeHealthy ? .green : .red)
                         .frame(width: 8, height: 8)
                     Text(
                         fleet.runtimeHealthy
@@ -1833,6 +1939,40 @@ struct FleetList: View {
         }
     }
 
+    /// One terminal, as a row you tap to open it.
+    ///
+    /// Shared by the visible workspaces and the hidden ones, which drew the same
+    /// row twice with the same identifier and the same swipe actions.
+    private func row(_ terminal: Terminal, ordinal: Int?) -> some View {
+        Button { onSelect(terminal) } label: {
+            HStack(spacing: PaneMetrics.step) {
+                TerminalRow(terminal: terminal, ordinal: ordinal)
+                    // A list row's label otherwise sizes to its text. Give
+                    // selection the whole visible row, including the blank
+                    // trailing space a thumb naturally lands in.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // The same row is a `NavigationLink` on Needs You, where the
+                // system draws this, and was a bare `Button` here — so one row
+                // said "this opens something" and the identical row one tap away
+                // said nothing at all. Drawn by hand because the tap is not a
+                // push: it goes up to `FleetView.show(_:)`, which may replace
+                // the route or dismiss the sheet this list is sitting in.
+                //
+                // Hidden from VoiceOver, which is what the system does with its
+                // own: the row already says where it goes.
+                Image(systemName: "chevron.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("fleet-terminal-\(terminal.id)")
+        .swipeActions(edge: .trailing) { terminalActions(for: terminal) }
+    }
+
     @ViewBuilder
     private func terminalActions(for terminal: Terminal) -> some View {
         let kind = StateKind.parse(terminal.state)
@@ -1853,6 +1993,29 @@ struct FleetList: View {
             Button("Stop", role: .destructive) { onAction(.stop, terminal) }
         }
     }
+}
+
+/// The column every row in a workspace section is built on.
+///
+/// A `TerminalRow` draws an 8-point state dot and then its words 10 points
+/// after it, so its text starts 18 points in. Nothing else on either screen knew
+/// that number: `NeedsYouView`'s overflow line started at 0 and its changes row
+/// at roughly 24, which is three text edges inside one section — three margins
+/// for the eye to find on a screen whose whole job is to be read at a glance.
+/// Named here, beside the row that sets it, so the other two can ask instead of
+/// guessing.
+///
+/// Not on `PaneMetrics`' scale, and deliberately so: that scale is about how far
+/// apart two things sit, and this is the width of one specific column. The 10 is
+/// what shipped and what the rows are drawn to; moving it to the scale's 8 would
+/// re-cut every row in the app to buy one fewer number.
+enum RowGutter {
+    /// The state dot's diameter, and the width of the column it sits in.
+    static let dot: CGFloat = 8
+    /// The gap between that column and what it labels.
+    static let gap: CGFloat = 10
+    /// Where a row's text starts.
+    static let text: CGFloat = dot + gap
 }
 
 struct TerminalRow: View {
@@ -1889,75 +2052,121 @@ struct TerminalRow: View {
     }
 
     private func content(at now: Date) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: RowGutter.gap) {
             Circle()
                 .fill(processColor(kind))
-                .frame(width: 8, height: 8)
+                .frame(width: RowGutter.dot, height: RowGutter.dot)
                 // The dot sits on the first line's baseline rather than in the
                 // middle of a row that is now up to four lines tall.
-                .padding(.top, 6)
+                //
+                // The comment was right and the code only approximated it. It
+                // was a hardcoded `.padding(.top, 6)`, measured against `.body`
+                // at the default Dynamic Type size — and the first line's
+                // baseline moves with the type size while 6 points does not, so
+                // the dot drifted up the line as the text grew and down it as
+                // the text shrank, at every setting but one. Aligned to the
+                // baseline itself now: the dot rests ON it, the way a period
+                // does, and the number is the one SwiftUI computes rather than
+                // one this file remembers.
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
 
-            VStack(alignment: .leading, spacing: 3) {
-                // Band 1: what it is, and how long it has been that.
-                HStack(spacing: 4) {
-                    Text(terminal.label).font(.body)
-                    if let ordinal {
-                        Text("\(ordinal)")
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.tertiary)
+            // A full step between the two groups, a tight one inside each.
+            //
+            // Every band was `spacing: 3` — one distance for everything, which
+            // is a stack with no grouping in it. What the pane IS and where its
+            // agent got to are one thought in two lines; what the agent SAID is
+            // a different thought, and the gap is now the thing that says so.
+            VStack(alignment: .leading, spacing: PaneMetrics.step) {
+                VStack(alignment: .leading, spacing: PaneMetrics.tight) {
+                    // Band 1: what it is, and how long it has been that.
+                    HStack(spacing: 4) {
+                        Text(terminal.label).font(.body)
+                        if let ordinal {
+                            Text("\(ordinal)")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                        }
+                        if let status = statusText(at: now) {
+                            Text(status)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        // The reason to have opened the app. Only the two states
+                        // worth acting on get color, so a list of twenty still
+                        // reads at a glance.
+                        //
+                        // `.footnote`, which is 13 points at the default size —
+                        // the same 13 this was hardcoded to as
+                        // `.system(size: 13)`, and now the same 13 that GROWS
+                        // when the words beside it do. A fixed-size glyph next
+                        // to scaling text is a mark that shrinks relative to its
+                        // own row at every accessibility size, and this one is on
+                        // every row in the app.
+                        if terminal.agent.isAgent && terminal.agent != .unknown {
+                            Label(terminal.activityLabel, systemImage: terminal.activitySymbol)
+                                .labelStyle(.iconOnly)
+                                .font(
+                                    .footnote.weight(
+                                        terminal.agent.wantsAttention ? .semibold : .regular))
+                                .foregroundStyle(attentionColor(terminal))
+                                .accessibilityLabel(terminal.activityLabel)
+                        }
                     }
-                    if let status = statusText(at: now) {
-                        Text(status)
+
+                    // Band 2: where the agent IS — the question it is blocked
+                    // on, its position in its own task list, or what it is
+                    // doing. One line, composed on the host so a Mac, a phone
+                    // and a watch cannot disagree about which of those three to
+                    // show.
+                    //
+                    // This is what replaced `terminal.state.lowercased()`, which
+                    // spent the most valuable line of the row restating the dot
+                    // immediately to its left.
+                    if !terminal.signalLine.isEmpty {
+                        Text(terminal.signalLine)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    // The reason to have opened the app. Only the two states
-                    // worth acting on get color, so a list of twenty still
-                    // reads at a glance.
-                    if terminal.agent.isAgent && terminal.agent != .unknown {
-                        Label(terminal.activityLabel, systemImage: terminal.activitySymbol)
-                            .labelStyle(.iconOnly)
-                            .font(.system(size: 13, weight: terminal.agent.wantsAttention ? .semibold : .regular))
-                            .foregroundStyle(attentionColor(terminal))
-                            .accessibilityLabel(terminal.activityLabel)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
 
-                // Band 2: where the agent IS — the question it is blocked on,
-                // its position in its own task list, or what it is doing. One
-                // line, composed on the host so a Mac, a phone and a watch
-                // cannot disagree about which of those three to show.
+                // Bands 3 and 4: what the agent said it did, and what it
+                // spawned and has not finished with.
                 //
-                // This is what replaced `terminal.state.lowercased()`, which
-                // spent the most valuable line of the row restating the dot
-                // immediately to its left.
-                if !terminal.signalLine.isEmpty {
-                    Text(terminal.signalLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                // `.secondary`, not `.tertiary`. `NeedsYouView` calls these
+                // lines "the part of the row that answers 'what did it do',
+                // which the owner is explicit is most of what reviewing an
+                // agent's work is" — and they were drawn in the faintest tier
+                // the platform offers, at 11 points, in the same tier as the
+                // ordinal beside the title, which nobody reads. The ordinal
+                // stays tertiary; it is a disambiguator and it earns that tier.
+                //
+                // Wrapped rather than left loose, and guarded on being non-empty
+                // — an empty group would otherwise still take the step of
+                // spacing above it and leave a gap under every one-agent row.
+                if !terminal.recentSteps.isEmpty || !terminal.runningSubagents.isEmpty {
+                    VStack(alignment: .leading, spacing: PaneMetrics.tight) {
+                        // Already redacted and cut to a row's width by the
+                        // daemon, so this renders them and decides nothing about
+                        // them.
+                        ForEach(Array(terminal.recentSteps.enumerated()), id: \.offset) { _, step in
+                            Text(step)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
 
-                // Band 3: the agent's own last words, oldest first. Already
-                // redacted and cut to a row's width by the daemon, so this
-                // renders them and decides nothing about them.
-                ForEach(Array(terminal.recentSteps.enumerated()), id: \.offset) { _, step in
-                    Text(step)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-
-                // Band 4: what it spawned and has not finished with.
-                ForEach(terminal.runningSubagents, id: \.self) { name in
-                    Text("\u{2442} \(name)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        ForEach(terminal.runningSubagents, id: \.self) { name in
+                            Text("\u{2442} \(name)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
                 }
             }
         }
@@ -2365,9 +2574,12 @@ struct NewWorkspaceView: View {
         }
     }
 
+    /// Red rather than amber. A name the runner will refuse is a failure, and
+    /// amber in this app means one thing — an agent waiting on you — which is
+    /// not something a text field can be.
     private func refusal(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.triangle")
             .font(.caption)
-            .foregroundStyle(.orange)
+            .foregroundStyle(.red)
     }
 }
