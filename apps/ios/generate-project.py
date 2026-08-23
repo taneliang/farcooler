@@ -29,7 +29,11 @@ SOURCES = [
     # The front door: what on this runner is waiting on a person. See its own
     # doc comment for why the phone stopped opening into a terminal.
     "NeedsYou.swift",
-    "Model.swift",
+    # `Model.swift` was here. It is `CoreModel.swift` in `AGENTKIT_SOURCES`
+    # below now — moved so the AgentKit test target can decode a fixture into
+    # `Fleet`, `Workspace` and `Terminal`, which nothing could while they sat in
+    # this list. See its own header for why that move is not a merge with the
+    # Mac's model.
     "Notifications.swift",
     "LiveActivities.swift",
     "Reachability.swift",
@@ -123,6 +127,17 @@ AGENTKIT_SOURCES = [
     "AnswerPermissionIntent.swift",
     "GlancePermissions.swift",
     "Composer.swift",
+    # The shapes the FFI sends, which this app used to call `Model.swift` and
+    # keep in `SOURCES`. Only in THIS list, and that is the point of the move
+    # rather than a detail of it: everything in the file is `internal`, so the
+    # Mac — which depends on AgentKit as a real module and has its own
+    # `Workspace` and `Terminal` that DISAGREE with these — cannot see a single
+    # name from it. The phone compiles AgentKit's sources into its own module,
+    # so on this side it is exactly the file it was, under a new name. What it
+    # bought is a test: `FleetDecodeTests` decodes a fixture transcribed from
+    # `Session::fleet` into these types on the host, with no simulator, which
+    # the app target's UI-testing bundle could never do.
+    "CoreModel.swift",
     # In this list AND in `WATCH_AGENTKIT_SOURCES` below: the phone and the
     # watch are two binaries that have to agree about these messages down to the
     # key names, which is the whole reason the file exists. A `WatchRequest` the

@@ -1,8 +1,52 @@
 import Foundation
 
-// The shapes the client core returns. Identical to the Mac app's, because both
-// decode what one Rust crate produces — there is one definition of what a
-// workspace looks like on the wire, not one per platform.
+// The shapes the client core returns — the FFI's, and ONLY the FFI's.
+//
+// Every type here decodes something `crates/client/src/session.rs` builds with
+// `json!` and hands back across the C ABI in `ClientCore.swift`. The phone is
+// the only client that reads that producer. The Mac shells out to `farcooler
+// … --json` and decodes the CLI's output into its own `Workspace`, `Terminal`
+// and `Fleet` in `apps/macos/Sources/FarCooler/Model.swift`, and the two
+// producers do not agree: `Session::fleet` sends `isMainCheckout` where the CLI
+// sends `is_main_checkout`, `Session::branches` sends `updatedAt` in
+// MILLISECONDS where the CLI sends it in seconds, and `repository` is a UUID
+// here and a display name there. Same key, different value; same field,
+// different spelling.
+//
+// This file's own header used to say these types were "identical to the Mac
+// app's, because both decode what one Rust crate produces — there is one
+// definition of what a workspace looks like on the wire, not one per platform".
+// That was never true and `07e75e8` is what it cost: `is_main_checkout` was
+// copied across from the Mac, decoded to nil for every workspace on every
+// phone, and put "Remove Worktree…" on the one worktree it must never be
+// offered for. Don't copy a key from the Mac's model. Read the producer this
+// app reads.
+//
+// WHY THESE LIVE IN AgentKit, which the Mac also depends on. Two reasons, and
+// the second is what makes the first safe:
+//
+//  1. So they can be TESTED. The iOS target's only test bundle is a UI-testing
+//     one, which cannot `@testable import` the app module, so nothing could
+//     reach these while they sat in `apps/ios/FarCooler/`. AgentKit has a real
+//     test target that runs on the host with no simulator, and
+//     `FleetDecodeTests` now decodes a fixture transcribed key-for-key from
+//     `Session::fleet` into these exact types. A field renamed on either end
+//     fails a test instead of going quiet on a phone.
+//
+//  2. Everything in this file is INTERNAL, deliberately, and that is load-
+//     bearing rather than incidental. AgentKit vends only its `public` surface
+//     to the Mac, so `import AgentKit` over there brings in nothing from here:
+//     the Mac cannot see these names, cannot shadow its own with them, and
+//     cannot start using them by accident. `302fb73` refused to hoist
+//     `reviewAgentTargets()` for exactly this reason — `Workspace` and
+//     `Terminal` are declared once per app and the declarations DISAGREE, the
+//     phone's `canSwitchPaneMode` being `chatCapable == true` where the Mac's
+//     is that AND `!isChangesPane` — and moving these here does not unify them
+//     and must not be read as trying to. The access level is the enforcement.
+//
+// On iOS there is no `import AgentKit` to write: `generate-project.py` compiles
+// AgentKit's sources straight into the app module, so this file is part of
+// "Far Cooler" exactly as it was when it sat next to `Connection.swift`.
 
 struct Fleet: Decodable {
     var runtimeHealthy: Bool
@@ -21,7 +65,19 @@ struct Fleet: Decodable {
 struct Workspace: Decodable, Identifiable, Hashable {
     var id: String
     var short: String
-    /// Which repository this worktree belongs to.
+    /// Which repository this worktree belongs to, as a UUID STRING — never as
+    /// something to show a person.
+    ///
+    /// One key with two meanings, and this is the half the phone gets.
+    /// `Session::fleet` sends `uuid_of(&w.repository_id).to_string()`, which is
+    /// what `stack.get` and `pr.refresh` take as their repository argument. The
+    /// CLI sends the repository's DISPLAY NAME under this same key, and the
+    /// Mac's `Workspace.repository` is therefore a label it puts in a window
+    /// subtitle and matches searches against. Both clients are right about the
+    /// producer they read, and nothing but this comment says so — which makes
+    /// it the same trap `is_main_checkout` was, standing open. Drawing this
+    /// string in a row would print a UUID; passing the Mac's to `stack.get`
+    /// would ask the daemon about a repository named "overnight".
     ///
     /// Optional because an older daemon's fleet never carried it, and one
     /// missing field must not fail the decode of the whole fleet. Everything
@@ -561,12 +617,56 @@ struct Branch: Decodable, Identifiable, Hashable {
     /// failure after the fact.
     var checkedOut: Bool
     var subject: String
+    /// When the branch's tip was last written, in Unix MILLISECONDS, or nil
+    /// when git had no committer date for it.
+    ///
+    /// `Session::branches` has emitted this since the call existed and this
+    /// side never declared it, so the phone's picker had no way to tell a
+    /// branch from this morning from one abandoned in March — the two most
+    /// useful facts about a branch you are choosing between are its name and
+    /// its age, and only one of them was here. Not a decode failure; a field
+    /// that arrived on every load and was dropped in silence, which is the
+    /// quieter half of the same bug class as `isMainCheckout`.
+    ///
+    /// MILLISECONDS, and the unit is the trap. `Session::branches` sends
+    /// `t.seconds * 1000` (`crates/client/src/session.rs:1085`); the CLI sends
+    /// `t.seconds` under this same name (`crates/cli/src/main.rs:1646`), which
+    /// is what the Mac's `BranchInfo.updatedAt` holds and why its `age`
+    /// subtracts it from `timeIntervalSince1970` directly. Copying that
+    /// arithmetic here would date every branch to 1970 and print an age in
+    /// tens of thousands of days.
+    ///
+    /// Optional for the reason every field here is: a daemon too old to send
+    /// it must cost the row its age, not the whole list its decode.
+    var updatedAt: Double?
 
     var id: String { name }
     /// A branch that exists only on a remote still works: adopting one creates
     /// the local tracking branch. Worth labeling, because it is the difference
     /// between resuming your own work and picking up someone else's.
     var isRemoteOnly: Bool { !local && remote != nil }
+
+    /// How long ago the tip was written, or empty when nobody said.
+    ///
+    /// The Mac's `BranchInfo.age` thresholds exactly — minutes under an hour,
+    /// hours under a day, days after that — so one branch does not read as "3h"
+    /// on a Mac and "today" on the phone beside it. The `/ 1000` is the whole
+    /// difference between the two, and it is there because the producers differ
+    /// rather than because the platforms do; see `updatedAt`.
+    ///
+    /// Empty rather than "unknown": a row that has nothing to say about age is
+    /// better silent than captioned, and the caller draws nothing for "".
+    func age(at now: Date) -> String {
+        guard let updatedAt, updatedAt > 0 else { return "" }
+        let seconds = now.timeIntervalSince1970 - updatedAt / 1000
+        // A tip dated in the future is a clock disagreement between this phone
+        // and the runner, not a branch from tomorrow. Say "now" rather than a
+        // negative count of minutes.
+        guard seconds > 0 else { return "now" }
+        if seconds < 3600 { return "\(max(1, Int(seconds / 60)))m" }
+        if seconds < 86_400 { return "\(Int(seconds / 3600))h" }
+        return "\(Int(seconds / 86_400))d"
+    }
 }
 
 struct BranchList: Decodable {

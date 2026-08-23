@@ -21,6 +21,16 @@ struct BranchPicker: View {
     @State private var branches: [Branch] = []
     @State private var loading = true
     @State private var search = ""
+    /// What the ages in the rows are measured from, fixed when the sheet opens.
+    ///
+    /// Deliberately NOT a `TimelineView` and not a `Date()` read inside the row.
+    /// The clock on a terminal row ticks because the difference between four
+    /// seconds and forty is the thing you are watching; a branch last touched
+    /// three days ago is not going to become four while a picker is open, and a
+    /// timeline redrawing the whole list every second to prove it would cost
+    /// more than it tells anyone. `@State` rather than a stored `let`, because a
+    /// stored one is re-initialized every time the parent re-evaluates its body.
+    @State private var now = Date()
 
     private var shown: [Branch] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -86,6 +96,23 @@ struct BranchPicker: View {
                     Text("remote")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+                // How stale it is, trailing, where a list of branches can be
+                // read down. Between two branches you half-remember, this and
+                // the name are the whole decision — and the runner has been
+                // sending it since this screen existed. Pushed to the trailing
+                // edge rather than sitting after the name, so the column of
+                // ages lines up instead of starting wherever each name ended.
+                //
+                // Drawn only when there is one: `age(at:)` is empty for a
+                // branch git had no committer date for, and a blank caption
+                // still takes the space it would have used.
+                let age = branch.age(at: now)
+                if !age.isEmpty {
+                    Spacer(minLength: 6)
+                    Text(age)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
                 }
             }
             if branch.checkedOut {

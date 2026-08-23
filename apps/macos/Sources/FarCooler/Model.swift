@@ -43,9 +43,23 @@ struct Workspace: Decodable, Identifiable, Hashable {
     var short: String
     var task: String
     var branch: String
-    /// The project this worktree belongs to. Worktrees are grouped by it,
-    /// because there are a handful of projects and potentially hundreds of
-    /// worktrees across them.
+    /// The project this worktree belongs to, as its DISPLAY NAME — never as an
+    /// id to ask the daemon anything with.
+    ///
+    /// Worktrees are grouped by it, because there are a handful of projects and
+    /// potentially hundreds of worktrees across them, and it is what
+    /// `windowSubtitle` prints and `matches(_:)` searches.
+    ///
+    /// One key with two meanings, and this is the half the CLI gives. `farcooler
+    /// workspace list --json` resolves `repository_id` through the repository
+    /// list and sends `display_name` (`crates/cli/src/main.rs:1569`). The FFI
+    /// the PHONE reads sends the repository UUID under this same key, because
+    /// `stack.get` and `pr.refresh` take an id — see `repository` on the iOS
+    /// `Workspace` in `apps/shared/AgentKit/Sources/AgentKit/CoreModel.swift`.
+    /// Both clients are right about the producer they read. Copying a use of
+    /// this field between them is not, and that is the mistake `07e75e8` cost a
+    /// release: printing the phone's would show a UUID, and handing this one to
+    /// `stack.get` would ask about a repository named "overnight".
     var repository: String?
     /// Which runner it is on. Empty means this one.
     ///

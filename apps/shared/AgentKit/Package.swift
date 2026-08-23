@@ -3,10 +3,16 @@ import PackageDescription
 
 // Shared because both apps must agree about one session.
 //
-// The two apps already duplicate Model.swift and VTCore.swift by copy. This
-// body of logic is larger than either, and two copies would drift in exactly
-// the way that makes a phone and a Mac disagree about the same terminal —
-// which is the failure the whole derivation model exists to prevent.
+// The two apps still duplicate VTCore.swift by copy. This body of logic is
+// larger than that, and two copies would drift in exactly the way that makes a
+// phone and a Mac disagree about the same terminal — which is the failure the
+// whole derivation model exists to prevent.
+//
+// This used to say Model.swift was duplicated by copy too, and that was the
+// wrong word for it even then: the two models were never copies, they read
+// DIFFERENT producers. The phone's is `CoreModel.swift` in this package now,
+// and it is here to be tested rather than to be shared — every type in it is
+// internal, so the Mac still cannot see it. Its header has the argument.
 let package = Package(
     name: "AgentKit",
     // iOS 26 is this app's minimum, so the shared code can use what the phone

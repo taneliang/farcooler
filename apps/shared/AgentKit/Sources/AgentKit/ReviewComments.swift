@@ -30,8 +30,11 @@ import Foundation
 // shared code, it is the phone's code stored somewhere further away.
 //
 // `Workspace.reviewAgentTargets()` did not move either, and that one is not a
-// judgment call: `Workspace` and `Terminal` are declared separately in each app
-// and the two declarations do not agree here. The phone's `canSwitchPaneMode`
+// judgment call: `Workspace` and `Terminal` are declared separately per app and
+// the two declarations do not agree here. Still true now that the phone's pair
+// sits in this same package, in `CoreModel.swift` — they are `internal` there
+// precisely so that being package-mates cannot be mistaken for being one type.
+// The phone's `canSwitchPaneMode`
 // is `chatCapable == true`; the Mac's is that AND `!isChangesPane`, because a
 // Mac can put a diff in a pane and the daemon refuses to switch that one. The
 // naming differs too — the phone joins a label to an ordinal, the Mac has only
