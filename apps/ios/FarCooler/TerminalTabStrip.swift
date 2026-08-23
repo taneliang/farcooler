@@ -90,7 +90,10 @@ struct TerminalTabStrip: View {
                 // than the radius and the chip's own capsule pokes out through
                 // the curve, which is what the clip below is really guarding.
                 .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                // No vertical padding here any more. The five points above and
+                // below a chip belong to the CHIP now — see `ChipMetrics` — so
+                // that the band between a 34pt capsule and the 44pt bar is part
+                // of the tap target rather than dead glass sitting on top of it.
             }
             // Scrolled to the open terminal on first layout, not on every
             // fleet refresh: `.onAppear` fires once, `onChange(of: current)`
@@ -118,8 +121,14 @@ struct TerminalTabStrip: View {
         // scrolled chip — and in particular the ring around one that wants
         // attention — carried on straight through the bar's rounded corner and
         // out the side. A background is not a boundary.
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .modifier(GlassSurface(radius: 20))
+        //
+        // Radius 22, inset 10: the one pair every floating surface in this app
+        // uses, so the key row lines up under this bar and both line up with
+        // the composer. 22 is also exactly half of the 44 the strip now stands
+        // at, which is what makes the ends read as a capsule rather than as a
+        // rectangle with the corners taken off.
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .modifier(GlassSurface(radius: 22))
         .padding(.horizontal, 10)
     }
 }
@@ -149,8 +158,11 @@ private struct ChangesChip: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 5) {
+                // `.caption`, not `.system(size: 11)`. A fixed point size beside
+                // text that scales is a symbol that shrinks against its own
+                // label at every Dynamic Type setting but the default.
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(.caption)
                 Text("Changes")
                     .font(.caption)
                     .lineLimit(1)
@@ -168,8 +180,11 @@ private struct ChangesChip: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
+            .frame(minHeight: ChipMetrics.height)
             .modifier(ChipGlass(isCurrent: isCurrent))
-            .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.75))
+            .foregroundStyle(isCurrent ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .padding(.vertical, ChipMetrics.band)
+            .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("workspace-tab-changes")
@@ -219,9 +234,15 @@ private struct TabChip: View {
                 // "Complete D17 authorization decision for Far Cooler" — which
                 // filled the strip with a single tab and pushed every other
                 // pane off the end of it.
+                // One weight, whatever the agent is doing. A chip that turns
+                // semibold when its agent blocks is a chip that gets WIDER, and
+                // a wider chip slides every chip after it sideways with no
+                // animation — which is the reflow the fixed order above exists
+                // to prevent, arriving through the type instead of through the
+                // sort. The ring and the dot already say it, in a channel that
+                // costs no layout.
                 Text(terminal.displayName(ordinal: ordinal))
                     .font(.caption)
-                    .fontWeight(wantsAttention ? .semibold : .regular)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: 150, alignment: .leading)
@@ -229,13 +250,18 @@ private struct TabChip: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
+            .frame(minHeight: ChipMetrics.height)
             .modifier(ChipGlass(isCurrent: isCurrent))
             .overlay(
                 Capsule()
                     .strokeBorder(
                         wantsAttention ? attentionColor(terminal) : .clear, lineWidth: 1.5)
             )
-            .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.75))
+            .foregroundStyle(isCurrent ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            // Outside the ring, so the band is target and not decoration: the
+            // ring stays drawn on the capsule you can see.
+            .padding(.vertical, ChipMetrics.band)
+            .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("terminal-tab-\(terminal.id)")
@@ -297,6 +323,23 @@ private struct TabChip: View {
 }
 
 
+/// What a chip measures, in one place, so the two chips cannot drift apart.
+private enum ChipMetrics {
+    /// The visible capsule.
+    ///
+    /// It was 26 points, which is not a tap target on any phone — the HIG asks
+    /// for 44 and this row is the primary way to move around a workspace. The
+    /// capsule itself does not go to 44: a 44pt chip makes the bar 54 points
+    /// tall, and a strip meant to be glanced at and scrubbed past does not get
+    /// to eat that much of the pane it is a control for.
+    static let height: CGFloat = 34
+    /// The band above and below it, which the strip used to hold as its own
+    /// padding. 34 + 5 + 5 is the 44 the guideline asks for, and it is live
+    /// rather than layout only because each chip claims it with a
+    /// `contentShape` — padding a Button does not otherwise widen what it hits.
+    static let band: CGFloat = 5
+}
+
 /// A chip's surface: glass on iOS 26, the nearest material before it.
 ///
 /// A capsule rather than a rounded rectangle, because that is the shape the
@@ -309,7 +352,14 @@ private struct ChipGlass: ViewModifier {
     func body(content: Content) -> some View {
         // A fill, not a second pane of glass. Glass inside glass has nothing
         // new to refract and just muddies the edge that was doing the work.
+        //
+        // `.quaternary`, not white at 16%. This app ships three LIGHT themes,
+        // two of them on `#FFFFFF`, and `WorkspaceView` puts the whole screen
+        // into that theme's color scheme — so a white wash on a white ground
+        // was the current tab having no mark on it at all. The semantic fill
+        // resolves for both polarities, which is the same reason the labels
+        // above it are `.primary`/`.secondary`.
         content.background(
-            Capsule().fill(isCurrent ? Color.white.opacity(0.16) : Color.clear))
+            Capsule().fill(isCurrent ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear)))
     }
 }

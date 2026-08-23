@@ -289,13 +289,17 @@ struct TerminalView: View {
         case .connecting:
             status(spinner: true, title: "Loading \(currentName)…")
         case .notLive:
+            // Not a failure and not an alarm: a pane that isn't running is the
+            // ordinary end of a pane. Amber on this screen said "an agent is
+            // waiting on you", which is the one thing it means everywhere else
+            // in the product and is not what this is.
             status(
-                symbol: "moon.zzz", title: "Not live",
+                symbol: "moon.zzz", mark: .secondary, title: "Not live",
                 message: "\(currentName) has no running pane right now.")
         case .failed(let message, let transcript):
             status(
-                symbol: "exclamationmark.triangle", title: "Could not load", message: message,
-                transcript: transcript)
+                symbol: "exclamationmark.triangle", mark: .red, title: "Could not load",
+                message: message, transcript: transcript)
         case .live:
             if let grid = session.grid {
                 live(grid: grid, size: size)
@@ -314,33 +318,53 @@ struct TerminalView: View {
     /// a runner that cannot be reached — they just go in the box that means
     /// "output", the one `DaemonUpdateCard`, `RunnersSettings` and
     /// `ChangesPane` already use for exactly this.
+    ///
+    /// Semantic colors throughout, and they resolve correctly here:
+    /// `WorkspaceView` puts this whole pane in the terminal theme's own color
+    /// scheme. That was already written down beside the transcript box, and the
+    /// rest of this view had drifted past it — a hardcoded `.white` headline
+    /// over the two `#FFFFFF` themes this app ships was a screen that said
+    /// nothing at all on a ground it was told the polarity of.
+    ///
+    /// The proportions are `FleetView.failure`'s — a 42pt thin mark, a
+    /// `.title2` headline, a `.callout` sentence, 22 and 8 between them. This
+    /// was `.largeTitle` over `.headline`, and `.headline` is 17pt: a list row's
+    /// title standing in for a full-screen one.
     private func status(
-        spinner: Bool = false, symbol: String? = nil, title: String, message: String? = nil,
-        transcript: String? = nil
+        spinner: Bool = false, symbol: String? = nil, mark: Color = .secondary, title: String,
+        message: String? = nil, transcript: String? = nil
     ) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             if spinner {
-                ProgressView().tint(.white)
+                // The spinner is the mark in this state, so it is sized like
+                // one rather than left at the 20pt a row would use.
+                ProgressView()
+                    .controlSize(.large)
+                    .padding(.bottom, 22)
             } else if let symbol {
-                Image(systemName: symbol).font(.largeTitle).foregroundStyle(.orange)
+                Image(systemName: symbol)
+                    .font(.system(size: 42, weight: .thin))
+                    .foregroundStyle(mark)
+                    .padding(.bottom, 22)
             }
-            Text(title).font(.headline).foregroundStyle(.white)
+            Text(title)
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .padding(.bottom, 8)
             if let message {
                 Text(message)
                     .font(.callout)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+                    .frame(maxWidth: 320)
             }
-            // Semantic colors rather than the hardcoded whites above, and they
-            // resolve correctly here: `WorkspaceView` puts this whole pane in
-            // the terminal theme's own color scheme.
             if let transcript, !transcript.isEmpty {
                 DetailBox(text: transcript)
-                    .frame(maxWidth: 420)
-                    .padding(.horizontal, 32)
+                    .frame(maxWidth: 320)
+                    .padding(.top, 14)
             }
         }
+        .padding(.horizontal, 32)
     }
 
     private func live(grid: TerminalGrid, size: CGSize) -> some View {
@@ -630,11 +654,17 @@ struct TerminalView: View {
 /// The row of keys a terminal needs and a phone's keyboard does not have.
 ///
 /// Styled as a keyboard accessory, not a strip of custom chrome: system
-/// materials and button styles rather than a hand-picked grey and hand-rolled
-/// pressed states, so it reads as part of iOS rather than as a widget
-/// floating on top of it. `.bordered`/`.borderedProminent` are what give
-/// every key its pressed-state animation for free — there is no
-/// `isPressed`-driven fill anywhere here.
+/// materials rather than a hand-picked grey, so it reads as part of iOS rather
+/// than as a widget floating on top of it.
+///
+/// It used to say `.bordered`/`.borderedProminent` gave every key its
+/// pressed-state animation for free, and that there was no `isPressed`-driven
+/// fill anywhere here. Both halves stopped being true when the keys went to
+/// `.buttonStyle(.plain)` with a fill of their own — see the note on the shape
+/// below — and what was left was a key row with NO pressed state, on the one
+/// control in this app where the difference between a keystroke that landed and
+/// one that might have is the whole question. `TerminalKeyStyle` is the fill
+/// the comment was describing, written out.
 private struct TerminalKeyRow: View {
     let ctrlArmed: Bool
     let altArmed: Bool
@@ -650,7 +680,11 @@ private struct TerminalKeyRow: View {
     /// 58pt key. The row did not clip on its own: it widened the stack it was
     /// in, so the terminal ABOVE it lost characters off both edges.
     /// `maxWidth: .infinity` makes overflow impossible to express.
-    private static let keyHeight: CGFloat = 40
+    ///
+    /// 44 tall, the guideline's floor. The width stays whatever nine keys
+    /// divide into — around 31 points — because that is keyboard density and
+    /// the row directly above this one is doing the same thing.
+    private static let keyHeight: CGFloat = 44
 
     var body: some View {
         HStack(spacing: 5) {
@@ -688,8 +722,12 @@ private struct TerminalKeyRow: View {
         //
         // No Return key. The software keyboard already has one, and the row's
         // whole job is the keys a phone keyboard does not have.
-        .modifier(GlassSurface(radius: 18))
-        .padding(.horizontal, 8)
+        //
+        // Radius 22, inset 10 — the tab strip's pair and the composer's, so the
+        // three floating surfaces on this screen share one edge and one corner
+        // instead of three of each.
+        .modifier(GlassSurface(radius: 22))
+        .padding(.horizontal, 10)
         // Clear of the keyboard, not resting on it.
         //
         // A floating bar whose bottom edge is flush against the keyboard's top
@@ -715,24 +753,58 @@ private struct TerminalKeyRow: View {
         onHold: (() -> Void)? = nil,
         @ViewBuilder label: () -> Label
     ) -> some View {
-        Button(action: action) {
-            label()
-                .frame(maxWidth: .infinity, minHeight: Self.keyHeight)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(filled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color(uiColor: .systemGray3)))
-                )
-                .foregroundStyle(filled ? Color.white : Color.primary)
-        }
-        .buttonStyle(.plain)
-        // A long press that fires once, rather than a repeat: these send a
-        // jump, and a jump that repeats while your thumb rests on it would
-        // scroll somewhere nobody asked to be.
-        .onLongPressGesture(minimumDuration: 0.35) { onHold?() }
+        Button(action: action) { label() }
+            .buttonStyle(TerminalKeyStyle(filled: filled, height: Self.keyHeight))
+            // A long press that fires once, rather than a repeat: these send a
+            // jump, and a jump that repeats while your thumb rests on it would
+            // scroll somewhere nobody asked to be.
+            .onLongPressGesture(minimumDuration: 0.35) { onHold?() }
     }
 
     private func glyph(_ symbol: String) -> some View {
         Image(systemName: symbol).font(.system(size: 15, weight: .medium))
+    }
+}
+
+/// One key's fill, and what it does under a thumb.
+///
+/// A style rather than a `.background` inside the label, because the pressed
+/// state is the point: `configuration.isPressed` is only reachable from here,
+/// and a key with no pressed state gives a typist nothing to tell a keystroke
+/// that landed from one that missed. On a row whose keys send Escape and
+/// Control to a shell, that is not a polish item.
+///
+/// The unpressed fill is `.quaternary` and not `systemGray3`. Grey 3 is
+/// OPAQUE, and nine opaque slabs on a glass bar cancel exactly the material
+/// they are sitting on — the bar stops refracting the terminal behind it and
+/// goes back to being the flat strip the glass replaced.
+private struct TerminalKeyStyle: ButtonStyle {
+    /// An armed modifier — Control or Option — which stays lit between presses.
+    let filled: Bool
+    let height: CGFloat
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, minHeight: height)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(fill(pressed: configuration.isPressed))
+            )
+            // White on an opaque accent fill, which is the one place on this
+            // screen a fixed white is right: it is over a color this app
+            // chose, not over a ground the theme did.
+            .foregroundStyle(filled ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
+            // Quick enough to read as the key going down rather than as the
+            // row animating. A press that fades in over a keystroke is worse
+            // than none, because it arrives after the character does.
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+
+    /// Pressed is one step UP the hierarchy, not a lower opacity: a key that
+    /// fades under a finger looks like a key that did not take the press.
+    private func fill(pressed: Bool) -> AnyShapeStyle {
+        if filled { return AnyShapeStyle(Color.accentColor.opacity(pressed ? 0.75 : 1)) }
+        return pressed ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary)
     }
 }
 
