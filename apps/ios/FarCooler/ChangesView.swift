@@ -74,8 +74,8 @@ struct ChangesView: View {
                     // elements of this stack, and any spacing between them
                     // would open a seam across the middle of every card. So the
                     // gap between cards moved into the heading, where it can be
-                    // drawn opaque; see `ChangesFileHeading`. This block keeps
-                    // the spacing it always had.
+                    // given a ground of its own; see `ChangesFileHeading`. This
+                    // block keeps the spacing it always had.
                     VStack(alignment: .leading, spacing: 10) {
                         summary
                             .id(Self.topAnchor)
@@ -1101,6 +1101,14 @@ struct ChangesToolbarMenu: View {
 ///
 /// Derived from the theme's own ground rather than a system grey, so a card
 /// reads as sitting ON the terminal palette instead of next to it.
+///
+/// A flat FILL is not the same claim as a flat surface, and one card on this
+/// screen makes the distinction. A file card's heading pins, so both of its
+/// halves put this wash on `.regularMaterial` and let a blur do the thing a
+/// surface floating over moving content has to do. A material is an ordinary
+/// `ShapeStyle` — no container to satisfy, no live sampling to drop out of —
+/// which is exactly what makes it available where Liquid Glass is not. Every
+/// other card here floats over nothing and stays only this.
 @MainActor
 enum ChangesSurface {
     static var card: Color {
@@ -1140,6 +1148,22 @@ private struct ChangesFileHeading: View {
 
     private var expanded: Bool { store.isExpanded(file.path) }
 
+    /// All four corners while the file is folded, top two while its hunks are
+    /// under it.
+    ///
+    /// Named rather than written at the call site because TWO layers are
+    /// clipped to it now — the wash, and the material under the wash — and a
+    /// card whose blur and whose fill disagreed about a corner would show the
+    /// disagreement precisely at the fold, which is the one moment the corner
+    /// changes.
+    private var cardShape: UnevenRoundedRectangle {
+        .rect(
+            topLeadingRadius: 12,
+            bottomLeadingRadius: expanded ? 0 : 12,
+            bottomTrailingRadius: expanded ? 0 : 12,
+            topTrailingRadius: 12)
+    }
+
     var body: some View {
         Button {
             store.toggle(file.path)
@@ -1149,21 +1173,50 @@ private struct ChangesFileHeading: View {
         .buttonStyle(.plain)
         // Square along the bottom while there are hunks under it, so the
         // heading and the patch read as one card and not two stacked ones.
-        .background(
-            ChangesSurface.card,
-            in: .rect(
-                topLeadingRadius: 12,
-                bottomLeadingRadius: expanded ? 0 : 12,
-                bottomTrailingRadius: expanded ? 0 : 12,
-                topTrailingRadius: 12)
-        )
+        //
+        // The card's own wash, on a MATERIAL — and the material is the
+        // correction to what this heading shipped as, which was the same wash
+        // on a flat opaque fill. The constraint that fill was answering is real
+        // and has not moved: a pinned heading floats over its own diff, and
+        // `ChangesSurface.card` is a six-percent wash that the lines sliding
+        // under it would show straight through. Opacity was the wrong
+        // instrument for a right constraint. What ought to happen to content
+        // behind a floating surface is that it BLURS, and a material is what
+        // the platform hands you to do it — the workspace tab strip floats a
+        // few points above this heading over the same scroll and has been
+        // saying so the whole time.
+        //
+        // `.regularMaterial` in particular. It is already the material this app
+        // holds over moving content: `AgentView`'s plan overlay, held over a
+        // streaming transcript, for this reason and with this note attached.
+        // `.thickMaterial` here is the slash-command popup — a dense panel that
+        // stops the screen behind it, which for a file heading is the flat slab
+        // again by a longer road. `.bar` belongs to the review bar, which sits
+        // on the window's edge rather than inside the content. The thin
+        // materials pass enough luminance that a diff moving under a heading
+        // shows as bands travelling behind its own file's name.
+        //
+        // Not `GlassSurface`, for two reasons and neither of them taste. It
+        // applies `.glassEffect` per view, and a heading is realized and thrown
+        // away by the `LazyVStack` on every scroll — the exact case
+        // `ChangesSurface` documents the effect dropping out of. And
+        // `GlassSurface(radius:)` draws one uniform `.rect(cornerRadius:)`,
+        // which cannot say "square along the bottom while the file is open",
+        // which is the shape the fold turns on. The tab strip has neither
+        // problem: one surface, one radius, nothing lazy underneath it.
+        .background(ChangesSurface.card, in: cardShape)
+        .background(.regularMaterial, in: cardShape)
         // The gap between cards lives here rather than in the stack's spacing,
-        // and it is drawn opaque, which is the part that matters: a pinned
-        // header floats over whatever is scrolling beneath it, and
-        // `ChangesSurface.card` is a six-percent wash that diff lines would show
-        // straight through. The theme's ground is what the scroll view is drawn
-        // on anyway, so the wash over it composites to exactly the card color
-        // this had before it could float.
+        // and it alone is still drawn opaque — which is not the old mistake
+        // left in place, but the one strip where an opaque ground is the
+        // answer. While this heading is pinned, these ten points are the band
+        // at the very top of the scroll, and what they are painted with is the
+        // theme's own ground, which is what the scroll view is drawn on anyway:
+        // above a pinned heading that reads as the page continuing rather than
+        // as a bar of anything, and between two cards it is invisible. Carrying
+        // the material up here instead would tint all forty gaps, turning the
+        // ground between cards into a stripe; leaving the strip clear would run
+        // a ten-point slot of moving diff across the top of the screen.
         .padding(.top, 10)
         .background(TerminalPalette.background)
         // The scroll decides what gets read: a file is fetched when its heading
@@ -1307,6 +1360,17 @@ private struct ChangesFileBody: View {
     private var expanded: Bool { store.isExpanded(file.path) }
     private var lines: [DiffComputation.Line] { store.fileDiffs[file.path] ?? [] }
 
+    /// Square along the top, where the heading is, and rounded at the bottom,
+    /// where the card ends. Named for the reason `ChangesFileHeading.cardShape`
+    /// is: the wash and the material beneath it are clipped to one shape.
+    private var bodyShape: UnevenRoundedRectangle {
+        .rect(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: 12,
+            bottomTrailingRadius: 12,
+            topTrailingRadius: 0)
+    }
+
     var body: some View {
         if expanded {
             VStack(alignment: .leading, spacing: 0) {
@@ -1365,16 +1429,21 @@ private struct ChangesFileBody: View {
                 .padding(.bottom, 10)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Square along the top, where the heading is, and rounded at the
-            // bottom, where the card ends.
-            .background(
-                ChangesSurface.card,
-                in: .rect(
-                    topLeadingRadius: 0,
-                    bottomLeadingRadius: 12,
-                    bottomTrailingRadius: 12,
-                    topTrailingRadius: 0)
-            )
+            // On the same material as the heading, which is the part of the
+            // heading's fix that is not about the heading.
+            //
+            // Nothing ever moves behind a body: it scrolls with its own hunks
+            // and has only the ground behind it, so the blur here has nothing
+            // to blur. What it buys is the join. A material has a tone of its
+            // own, so a material under the heading and none under the body
+            // would put a step in the color straight across the middle of every
+            // card — and that step is on screen constantly, because at most ONE
+            // heading is pinned while the three or four others in view are
+            // ordinary card tops. A blur per realized card is what the two
+            // halves reading as one card costs, and cards are realized a few at
+            // a time; this is not the per-row glass `ChangesSurface` rules out.
+            .background(ChangesSurface.card, in: bodyShape)
+            .background(.regularMaterial, in: bodyShape)
         }
     }
 }
