@@ -1207,14 +1207,44 @@ final class ChangesStore: ObservableObject {
 
     func isExpanded(_ path: String) -> Bool { expandedFile == path }
 
-    /// Open one file, closing whatever was open. See `expandedFile`.
+    /// Open one file, closing whatever was open, and go to it. See `expandedFile`.
+    ///
+    /// **The jump is raised whether or not that file was already the open one**,
+    /// and the `guard expandedFile != path else { return }` this method used to
+    /// begin with was a drift away from `jump`'s own doc comment — which says a
+    /// jump carries a serial precisely so that tapping the same file in the
+    /// index twice "has to move the scroll both times". A guard over the whole
+    /// method made that impossible, and it went unnoticed because for a while
+    /// nothing on screen could ask to open the file that was already open.
+    /// Android hit it first while porting this store and fixed the same guard
+    /// there; see `f003c69`.
+    ///
+    /// Two things ask now. `FileIndexSheet` lists the open file along with
+    /// every other one, and tapping it is somebody asking to be taken back to
+    /// it after scrolling away — which is the likeliest tap in that sheet, not
+    /// an edge of it. And `applyResume` calls this with the bookmarked path: a
+    /// reader who leaves the offer up, opens that file by hand, scrolls into
+    /// it and then presses Continue would have watched the card disappear and
+    /// nothing move.
+    ///
+    /// So the WRITE is still guarded — an unchanged position is not a new
+    /// position and must not cost a `UserDefaults` write on every tap — and the
+    /// scroll is not.
     func expand(_ path: String?) {
-        guard expandedFile != path else { return }
-        expandedFile = path
-        rememberPosition()
+        if expandedFile != path {
+            expandedFile = path
+            rememberPosition()
+        }
         if let path { jump = Jump(path: path) }
     }
 
+    /// Tapping a heading: open that file, or close it if it is the open one.
+    ///
+    /// The closing arm stays here rather than going through `expand`, and now
+    /// that a jump is raised on every call that names a path, the difference
+    /// matters: a heading is already under the thumb that tapped it, so closing
+    /// a file must leave the scroll exactly where it is. Only the index and the
+    /// bookmark ask to be moved.
     func toggle(_ path: String) {
         if expandedFile == path {
             expandedFile = nil
