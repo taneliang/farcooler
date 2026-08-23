@@ -54,7 +54,7 @@ struct RunnersSettings: View {
                     // currently ticking down, or clicking each dot in turn.
                     Button("Reconnect all") { Reachability.shared.retryNow() }
                         .font(.caption)
-                        .buttonStyle(.link)
+                        .buttonStyle(.borderless)
                 }
             } footer: {
                 Text("Connect to any runner you can reach over SSH.")

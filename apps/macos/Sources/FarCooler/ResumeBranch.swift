@@ -131,7 +131,10 @@ struct ResumeBranch: View {
             Divider()
             footer
         }
-        .frame(width: 580, height: 470)
+        // 560, the width `QuickCreate` uses. These two are the same task —
+        // start work here — and one leads to the other, so twenty points of
+        // difference is a jolt mid-flow and nothing else.
+        .frame(width: 560, height: 470)
         .task(id: project) { await reload() }
     }
 

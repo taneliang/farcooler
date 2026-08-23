@@ -143,11 +143,20 @@ final class ScreenPreviews: ObservableObject {
 
 /// A terminal's last few lines, on a terminal's background.
 ///
-/// The background is `Palette.background` and not a material or a system
-/// color, and that is deliberate in an app that follows the system appearance
-/// everywhere else: a terminal is always dark here, `Palette` is fixed for that
-/// reason, and a preview that turned white at noon would be a picture of a
-/// different terminal than the one behind it.
+/// Both colors come from `Palette` and not from a material or a system color,
+/// and that is deliberate in an app that follows the system appearance
+/// everywhere else: a preview drawn in the window's colors rather than the
+/// terminal's would be a picture of a different terminal than the one behind
+/// it.
+///
+/// This comment used to say that a terminal is "always dark here" and that
+/// `Palette` is fixed for that reason. Both halves stopped being true when
+/// `Palette` became live theme reads — see its note — and the text kept a
+/// hardcoded `Color.white`, which is invisible on the three shipped themes
+/// whose ground is `#FFFFFF` and barely there on the fourth light one. The
+/// pairing has to come from the same theme or it cannot be reasoned about at
+/// all, so the text now reads `Palette.foreground` beside the ground's
+/// `Palette.background`.
 struct ScreenPreviewText: View {
     let lines: [String]
     /// The tile's inner width, used to work out where to cut each line.
@@ -194,9 +203,11 @@ struct ScreenPreviewText: View {
             }
         }
         // Dimmed a little. The text is a hint at what is on the screen, not
-        // something to read at this size, and full-strength white in twelve
-        // tiles at once turns the panel into a wall.
-        .foregroundStyle(Color.white.opacity(0.74))
+        // something to read at this size, and twelve tiles at full strength
+        // turn the panel into a wall. The alpha is over the theme's own
+        // foreground, so it dims TOWARD the ground in either polarity rather
+        // than washing out to white on a light one.
+        .foregroundStyle(Color(nsColor: Palette.foreground).opacity(0.74))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -11,6 +11,12 @@ import SwiftUI
 /// The rule now: **nothing in the sidebar sets its own horizontal padding.**
 /// Every row is handed the same band by `SidebarRow`, and indentation inside
 /// that band is expressed in columns, not in numbers a caller invents.
+///
+/// There were two of these. A second enum named `Grid` sat at the top of
+/// `SidebarViews` claiming the same job in the same words; ten of its thirteen
+/// members were unused, including an entire declared indent model, and the
+/// three that were live duplicated values already here. Two single sources of
+/// truth is none, so it is gone and its survivors are below.
 enum SidebarGrid {
     /// The band's inset from the window edge. One number, one place.
     static let edge: CGFloat = 14
@@ -18,11 +24,12 @@ enum SidebarGrid {
     /// The disclosure chevron's column, and therefore one indent level.
     static let gutter: CGFloat = 18
 
-    /// The status dot's column in a terminal row.
-    static let marker: CGFloat = 8
-
     /// Space between a marker and the text it belongs to.
     static let gap: CGFloat = 8
+
+    /// The gap between two trailing cells in a row — the diff counts and the
+    /// text that ends before them.
+    static let cellGap: CGFloat = 6
 
     /// How far a row's selection highlight sits inside the band.
     ///

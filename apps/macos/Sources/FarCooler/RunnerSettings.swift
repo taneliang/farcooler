@@ -162,8 +162,14 @@ struct RunnerSettingsSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    // `.borderless`, not `.link`. Both draw accent-tinted
+                    // text, but `.link` means the button navigates to a URL
+                    // and it brings the pointing hand with it — a web idiom
+                    // that on a Mac tells you this is a destination when it is
+                    // an action on the row you are standing in. Nine buttons in
+                    // Settings claimed to be links; not one of them was.
                     Button("Edit") { editingTheme = row.theme }
-                        .buttonStyle(.link)
+                        .buttonStyle(.borderless)
                     // Only what the file owns can be removed. A built-in has no
                     // table to delete, so offering it would be a button that
                     // does nothing.
@@ -171,7 +177,7 @@ struct RunnerSettingsSheet: View {
                         Button(row.shadowsBuiltIn ? "Revert to Default" : "Delete") {
                             Task { await store.delete(themeNamed: row.theme.name) }
                         }
-                        .buttonStyle(.link)
+                        .buttonStyle(.borderless)
                         .foregroundStyle(.red)
                     }
                 }
@@ -186,7 +192,7 @@ struct RunnerSettingsSheet: View {
             } label: {
                 Label("Duplicate the Current Theme", systemImage: "plus")
             }
-            .buttonStyle(.link)
+            .buttonStyle(.borderless)
         } header: {
             Text("Themes")
         } footer: {
@@ -231,12 +237,12 @@ struct RunnerSettingsSheet: View {
                     }
                     Spacer()
                     Button("Edit") { editingAdapter = adapter }
-                        .buttonStyle(.link)
+                        .buttonStyle(.borderless)
                     if adapter.origin == .override || adapter.origin == .user {
                         Button(adapter.origin == .override ? "Revert to Default" : "Delete") {
                             Task { await store.delete(adapterNamed: adapter.preset) }
                         }
-                        .buttonStyle(.link)
+                        .buttonStyle(.borderless)
                         .foregroundStyle(.red)
                     }
                 }
@@ -253,7 +259,7 @@ struct RunnerSettingsSheet: View {
             } label: {
                 Label("Add an Agent", systemImage: "plus")
             }
-            .buttonStyle(.link)
+            .buttonStyle(.borderless)
         } header: {
             Text("Agents")
         } footer: {

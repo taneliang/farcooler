@@ -81,10 +81,38 @@ enum WorkspaceStyle {
     static let paneHeaderHeight: CGFloat = 28
     static let controlTarget: CGFloat = 24
 
-    static let paneTitle = Font.system(size: 11.5, weight: .medium)
+    static let paneTitle = Font.system(size: PaneText.title, weight: .medium)
     static let sidebarPrimary = Font.system(size: 13, weight: .medium)
     static let sidebarMetadata = Font.system(size: 11)
-    static let sectionTitle = Font.system(size: 11.5, weight: .semibold)
+    static let sectionTitle = Font.system(size: PaneText.title, weight: .semibold)
+
+    /// The four sizes a pane's text is allowed to be.
+    ///
+    /// Sizes rather than whole `Font`s, because half of the text inside a diff
+    /// carries a weight or a monospaced design as well, and a token you have to
+    /// abandon to say `.semibold` is a token nobody keeps using — which is how
+    /// the Changes pane ended up choosing every size by hand: six distinct text
+    /// sizes across forty-odd call sites, stepping by half a point, which is
+    /// finer than the eye resolves and so buys nothing for the second value in
+    /// each pair.
+    ///
+    /// Four steps, because the pane says four kinds of thing: a heading, its
+    /// ordinary text, the supporting text beside it, and the smallest thing it
+    /// is willing to say. Glyph sizes are deliberately NOT on this scale — an
+    /// 8pt chevron is an optical decision about a symbol, not a line of type,
+    /// and `smallSystemFontSize` has nothing to say about it.
+    enum PaneText {
+        /// A heading inside a pane. The same 11.5 `paneTitle` and
+        /// `sectionTitle` are built from, so a pane's own title and a heading
+        /// inside it cannot drift apart.
+        static let title: CGFloat = 11.5
+        /// The pane's ordinary text.
+        static let body: CGFloat = 11
+        /// Supporting text beside the body — counts, bylines, subtitles.
+        static let secondary: CGFloat = 10.5
+        /// The floor. Nothing in a pane is smaller than this.
+        static let minimum: CGFloat = 9.5
+    }
 
     static var canvas: Color {
         Color(nsColor: blend(.windowBackgroundColor, withTheme: 0.05))
@@ -107,7 +135,29 @@ enum WorkspaceStyle {
     /// Selection belongs to navigators, not to structural headings inside a
     /// document. Keeping this semantic stops a file heading, a selected file,
     /// and a focused pane from becoming three equally blue bars.
-    static var navigatorSelection: Color { Color.accentColor.opacity(0.13) }
+    ///
+    /// It was declared here, used once, and hand-written beside it as 0.14 and
+    /// 0.13 — three near-identical values for the one thing that has to look
+    /// the same in every list in the app. 0.13 is the one that survives, since
+    /// it is the one the token already carried.
+    static var navigatorSelection: Color { navigatorSelection(active: true) }
+
+    /// The same wash, grayed when the window is not the key one.
+    ///
+    /// Every macOS source list does this and nothing in this app did:
+    /// `controlActiveState` appeared nowhere, so with two Far Cooler windows
+    /// open both drew an accent-blue selection and neither said which one the
+    /// keyboard was talking to. Gray rather than fainter blue, because the
+    /// question an inactive selection answers is "this is remembered, not
+    /// live", and a paler accent reads as the same claim said more quietly.
+    ///
+    /// Callers pass `controlActiveState == .key`. A sheet takes key from its
+    /// own window, so a sidebar behind one grays too — which is what AppKit
+    /// does natively and is the reason this is a state and not a flag the
+    /// window sets.
+    static func navigatorSelection(active: Bool) -> Color {
+        active ? Color.accentColor.opacity(0.13) : Color.primary.opacity(0.09)
+    }
 
     /// A file boundary inside the diff. Deliberately neutral: it organizes the
     /// document without pretending to be another selected control.
@@ -115,7 +165,13 @@ enum WorkspaceStyle {
 
     /// The old/new line-number columns are supporting information, so they get
     /// just enough surface to separate them from code without becoming a box.
-    static var diffGutter: Color { Color.primary.opacity(0.025) }
+    ///
+    /// 2.5% was not enough surface to separate them from anything: it is under
+    /// the threshold where a flat tint is visible at all on either polarity, so
+    /// the line numbers read as floating on the code's own ground and the
+    /// column the tint exists to draw was not being drawn. 5% is still quiet
+    /// over a thousand lines and is actually there.
+    static var diffGutter: Color { Color.primary.opacity(0.05) }
 
     /// Feedback for an inline disclosure, used only while the pointer is over
     /// it. The resting state stays almost invisible in a long diff.

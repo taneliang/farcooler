@@ -68,7 +68,12 @@ struct ThemeEditor: View {
             Divider()
             footer
         }
-        .frame(width: 560, height: 660)
+        // Shorter than the window it opens from. `RunnerSettings` is
+        // 620x560 and this was 660 tall — a sheet a hundred points taller
+        // than its own host, which either forces the window to grow or hangs
+        // off it. The `Form` is `.grouped` and scrolls, so the height was
+        // never load-bearing; only the preview strip above it is.
+        .frame(width: 560, height: 520)
     }
 
     private var footer: some View {

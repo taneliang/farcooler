@@ -1145,6 +1145,15 @@ enum Palette {
 
     static var backgroundPacked: UInt32 { theme.background }
     static var background: NSColor { theme.backgroundColor }
+    /// The theme's body text, for chrome drawn ON `background`.
+    ///
+    /// Cells never need this — the core resolves each one's own color — but
+    /// anything this app paints over a terminal ground does, and the two have
+    /// to move together. `ScreenPreview` is the case that proves it: it had a
+    /// hardcoded white, which was correct while this enum was `static let`s of
+    /// one dark palette and became invisible the moment `background` started
+    /// following the theme. Three shipped themes are `#FFFFFF`.
+    static var foreground: NSColor { theme.foregroundColor }
     static var cursor: NSColor { theme.cursorColor }
     static var selection: NSColor { theme.selectionColor }
 

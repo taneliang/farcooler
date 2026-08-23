@@ -18,11 +18,46 @@ import SwiftUI
 /// **One shape, one size.** A filled dot. Not a moon for idle and a gearwheel
 /// for working — literal imagery reads as a sticker sheet, and a column of
 /// different silhouettes will not align no matter how carefully it is spaced.
+///
+/// "One size" was the rule and it had stopped being the practice: eleven call
+/// sites passed 6, 7, 8, 10 and 14 between them, and the declared default of 9
+/// was used by nobody, so the app drew six diameters of a glyph whose whole
+/// argument is that it is always the same mark. There are two situations, not
+/// six, and they are named below.
 struct StatusGlyph: View {
+    /// A dot in a row of text — a sidebar row, a palette result, a tool call,
+    /// a pane's header strip. Every one of these sits beside 11–13pt text.
+    ///
+    /// Eight, because the sidebar reserves a marker column of exactly this
+    /// width and the feed lines under a terminal row indent past it; the one
+    /// place in the app where the glyph's size is load-bearing for alignment
+    /// gets to pick the number.
+    static let inline: CGFloat = 8
+
+    /// A dot standing in for a whole pane, centered with nothing else in it.
+    ///
+    /// Two places, and they are the same situation: a pane whose terminal is
+    /// gone, and a tile waiting for one to start. Each shows this mark, a
+    /// label and at most two buttons — at row size that reads as a speck of
+    /// dust rather than as the subject of the screen.
+    static let hero: CGFloat = 14
+
     let status: Status
-    var size: CGFloat = 9
+    var size: CGFloat = StatusGlyph.inline
 
     var body: some View {
+        Group {
+            if status.animates {
+                mark.modifier(Breathing())
+            } else {
+                mark
+            }
+        }
+        .help(status.label)
+        .accessibilityLabel(status.label)
+    }
+
+    private var mark: some View {
         // The column is reserved whether or not anything occupies it, so names
         // align down the list rather than stepping in and out.
         ZStack {
@@ -37,29 +72,70 @@ struct StatusGlyph: View {
                 // because one of them is a problem to act on and the other is a
                 // runner that has not replied yet.
                 Circle()
-                    .strokeBorder(color, lineWidth: 1.5)
+                    .strokeBorder(status.tint, lineWidth: 1.5)
             default:
-                Circle().fill(color)
+                Circle().fill(status.tint)
             }
         }
         .frame(width: size, height: size)
-        .opacity(status == .working ? 0.85 : 1)
-        .symbolEffect(.pulse, options: .repeating, isActive: status.animates)
-        .help(status.label)
-        .accessibilityLabel(status.label)
     }
+}
 
+/// A slow breath on a mark that is still changing.
+///
+/// This used to be `.symbolEffect(.pulse)`, applied to a `ZStack` of `Circle`s.
+/// `symbolEffect` animates the image content of an SF Symbol and nothing else,
+/// so on a shape it is inert — it was the only `symbolEffect` in the app, and
+/// `working` and `starting` had been documented as moving while standing
+/// perfectly still. The static `opacity(0.85)` sitting beside it was the
+/// stand-in for the motion that never arrived, and it survives as what a
+/// reader who has asked for less motion sees.
+///
+/// One `repeatForever` on a real property rather than a clock: this runs on the
+/// render server and rebuilds no views, where `Ticking`'s once-a-second wake-up
+/// would be a blink rather than a breath and would cost a view update per row
+/// per second. The modifier is applied inside an `if`, so leaving the animating
+/// states tears the animation down with the branch instead of leaving a
+/// `repeatForever` oscillating on a dot that has settled.
+private struct Breathing: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            // The value that was on screen before this existed. Motion is the
+            // part being asked for less of, not the dimming.
+            content.opacity(0.85)
+        } else {
+            content
+                .opacity(dim ? 0.45 : 1)
+                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: dim)
+                .onAppear { dim = true }
+        }
+    }
+}
+
+extension Status {
     /// Warm for "you", green for "finished", red for "missing", and nothing
     /// else. Four colors in an application is already generous.
-    private var color: Color {
-        switch status {
+    ///
+    /// On `Status` rather than private to `StatusGlyph`, because the glyph was
+    /// not the only thing painting a status. A collapsed worktree, a hidden
+    /// section and a switcher tile each drew "something in here wants you" as
+    /// solid orange while the glyph for the very same terminal drew red or
+    /// green — so a failed agent was orange collapsed and red expanded, and the
+    /// switcher showed both at once, a red dot inside an orange tile. One rule,
+    /// one place, and there is nowhere left to disagree from.
+    var tint: Color {
+        switch self {
         case .blocked: return .orange
         case .done: return .green
         // `failedRun` and `failedTurn` are filled rather than hollow, like
         // `done`: both are a definite outcome, not a missing answer. Left out
-        // of the shape switch above so they fall to the filled-circle default
-        // there. Red rather than green is the whole point — a turn that died
-        // and a turn that worked were the same dot until this existed.
+        // of the shape switch in `StatusGlyph` so they fall to the
+        // filled-circle default there. Red rather than green is the whole point
+        // — a turn that died and a turn that worked were the same dot until
+        // this existed.
         case .lost, .failed, .failedRun, .failedTurn: return .red
         // Not red. Red is reserved for something that has gone wrong and wants
         // a decision; a runner that has not answered yet is neither, and
@@ -70,6 +146,31 @@ struct StatusGlyph: View {
         default: return .clear
         }
     }
+
+    /// The one status a roll-up should wear, out of everything waiting inside
+    /// it.
+    ///
+    /// A collapsed worktree cannot show six dots, so it shows the one that
+    /// decides the color — and the ranking is by how much a human is being
+    /// waited on right now, which is the question the mark answers. `blocked`
+    /// first: an agent stalled mid-turn is the state this application exists
+    /// for, and it is the only one where the work resumes the moment you look.
+    /// A failure is next, because something stopped; `done` last, because
+    /// nothing is waiting on anything — it is finished and merely unread.
+    ///
+    /// Returns nil when nothing in the group wants attention, which is also
+    /// when nothing should be drawn.
+    static func mostUrgent(in statuses: some Sequence<Status>) -> Status? {
+        statuses.filter(\.wantsAttention).min { rank($0) < rank($1) }
+    }
+
+    private static func rank(_ status: Status) -> Int {
+        switch status {
+        case .blocked: return 0
+        case .lost, .failed, .failedRun, .failedTurn: return 1
+        default: return 2
+        }
+    }
 }
 
 /// The count of everything waiting on you.
@@ -78,14 +179,19 @@ struct StatusGlyph: View {
 /// competes with the one place color is supposed to matter — the row that
 /// actually needs you — and a badge that shouts louder than the thing it points
 /// at is pointing at itself.
+///
+/// Given the statuses rather than a count, so the dot can be the color the row
+/// it points at will turn out to be — see `Status.mostUrgent(in:)`. A header
+/// that says orange and a row that says red are a header pointing somewhere
+/// else.
 struct AttentionBadge: View {
-    let count: Int
+    let waiting: [Status]
 
     var body: some View {
-        if count > 0 {
+        if let status = Status.mostUrgent(in: waiting) {
             HStack(spacing: 4) {
-                Circle().fill(Color.orange).frame(width: 6, height: 6)
-                Text("\(count)")
+                Circle().fill(status.tint).frame(width: 6, height: 6)
+                Text("\(waiting.count)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()

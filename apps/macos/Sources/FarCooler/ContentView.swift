@@ -362,7 +362,12 @@ struct ContentView: View {
         .overlay {
             if showPalette {
                 ZStack {
-                    Color.black.opacity(0.12)
+                    // 0.25, not the 0.12 this shipped with. A scrim's job is
+                    // stated one comment up — read as modal — and 0.12 black
+                    // over a terminal on a dark theme is under the threshold
+                    // where anything looks different, so the panel floated over
+                    // a window that still looked live and clickable.
+                    Color.black.opacity(0.25)
                         .ignoresSafeArea()
                         .onTapGesture { showPalette = false }
                     CommandPalette(
@@ -836,6 +841,18 @@ struct ContentView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.055)))
+            // The field is hand-rolled — a `.plain` `TextField` in a styled box
+            // — so it gets no focus ring from AppKit, and `searchFocused` was
+            // bound and then read by nobody. ⌘F moved the keyboard into this
+            // field and changed not one pixel, which is indistinguishable from
+            // a shortcut that did nothing.
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(
+                        Color.accentColor.opacity(searchFocused ? 0.8 : 0),
+                        lineWidth: 2)
+            )
+            .animation(Motion.snap, value: searchFocused)
 
         }
         .padding(.bottom, 6)
@@ -846,8 +863,8 @@ struct ContentView: View {
     /// The one number the app exists to produce, and it deliberately spans
     /// hosts: an agent blocked on a runner in another room is exactly as
     /// urgent as one on this desk.
-    private var attentionCount: Int {
-        store.fleet.workspaces.flatMap(\.terminals).filter(\.status.wantsAttention).count
+    private var attentionWaiting: [Status] {
+        store.fleet.workspaces.flatMap(\.terminals).map(\.status).filter(\.wantsAttention)
     }
 
     private var sidebarHeader: some View {
@@ -868,17 +885,17 @@ struct ContentView: View {
             // With the actions, not beside the title. It is a button — it jumps
             // to the next agent waiting — and sitting it against the runner
             // name read as part of the name, which is the one thing it is not.
-            if attentionCount > 0 {
+            if !attentionWaiting.isEmpty {
                 // A dot and a number, not a filled capsule. A solid block of
                 // color in the header shouts louder than the row it points at,
                 // which leaves it pointing at itself.
                 Button {
                     AppCommand.nextAttention.post()
                 } label: {
-                    AttentionBadge(count: attentionCount)
+                    AttentionBadge(waiting: attentionWaiting)
                 }
                 .buttonStyle(.plain)
-                .help("\(attentionCount) waiting on you — click to jump there")
+                .help("\(attentionWaiting.count) waiting on you — click to jump there")
             }
             // A menu rather than a button, because "add a repository" has to be
             // reachable at all times. It used to live only in the empty state,

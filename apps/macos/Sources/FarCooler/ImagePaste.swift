@@ -359,8 +359,8 @@ private struct ImagePasteChip: View {
 
                 if let failure = job.failure {
                     Text(failure).font(.callout)
-                    Button("Retry") { job.retry?() }.buttonStyle(.link)
-                    Button("Cancel", action: onDismiss).buttonStyle(.link)
+                    Button("Retry") { job.retry?() }.buttonStyle(.borderless)
+                    Button("Cancel", action: onDismiss).buttonStyle(.borderless)
                 } else {
                     Text("Sending\u{2026}").font(.callout)
                     ProgressView(value: job.fraction)
@@ -372,7 +372,9 @@ private struct ImagePasteChip: View {
             .padding(.vertical, 7)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
-            .shadow(radius: 6, y: 2)
+            // Its own geometry, the app's one alpha. The default was black at
+            // 0.33 — see the banner in `OpenInEditor`.
+            .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
             .transition(.opacity)
         }
     }

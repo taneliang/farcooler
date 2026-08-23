@@ -597,13 +597,13 @@ struct AgentComposer: View {
     private var activity: some View {
         if terminal.agent == .blocked {
             HStack(spacing: 5) {
-                StatusGlyph(status: .blocked, size: 6)
+                StatusGlyph(status: .blocked)
                 Text("Waiting for you")
             }
             .font(.caption)
         } else if let unreachable {
             HStack(spacing: 5) {
-                StatusGlyph(status: .lost, size: 6)
+                StatusGlyph(status: .lost)
                 // The runner's own reason, not a paraphrase: it distinguishes
                 // "asleep" from "Far Cooler is not installed there", and those
                 // have different fixes.
@@ -640,13 +640,21 @@ struct AgentComposer: View {
     }
 
     /// Return sends; this is for the people who look for a button.
+    ///
+    /// 13pt, the paperclip's size, and not the 18 it shipped at. Return is
+    /// what sends a message and this is the affordance for people who go
+    /// looking for a button — so it was the largest interactive glyph in an
+    /// app whose ordinary control glyph is 10 to 12, sitting in the same row
+    /// as a 13pt paperclip, for the least-used of the two ways to do it. It
+    /// keeps the accent fill; being the colored one in the row is enough to
+    /// find it by.
     @ViewBuilder
     private var sendButton: some View {
         let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && attachments.isEmpty
         Button(action: send) {
             Image(systemName: "arrow.up.circle.fill")
-                .font(.system(size: 18))
+                .font(.system(size: 13))
                 .foregroundStyle(empty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.accentColor))
         }
         .buttonStyle(.plain)

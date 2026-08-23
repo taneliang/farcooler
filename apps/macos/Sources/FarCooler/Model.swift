@@ -82,6 +82,13 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// Terminals wanting the user, across this worktree.
     var attention: [Terminal] { terminals.filter(\.status.wantsAttention) }
 
+    /// The color a collapsed row should wear for what is waiting inside it.
+    ///
+    /// Nil when nothing is. See `Status.mostUrgent(in:)` — the point is that
+    /// this and the glyph on the row you get by expanding cannot come out
+    /// different.
+    var attentionStatus: Status? { Status.mostUrgent(in: terminals.map(\.status)) }
+
     /// What the window says you are looking at.
     ///
     /// The task, then the project and branch beneath it. Not the focused

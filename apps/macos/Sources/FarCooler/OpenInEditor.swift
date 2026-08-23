@@ -182,7 +182,12 @@ struct EditorErrorBanner: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(Color.primary.opacity(0.08)))
-        .shadow(radius: 12, y: 4)
+        // The same recipe the other floating banner uses — see the editor error
+        // banner in `ContentView`, which is this layout to the point. The alpha
+        // was left to SwiftUI's default, which is black at 0.33: twice the
+        // heaviest value the app chooses on purpose, and a smudge under a panel
+        // in dark mode.
+        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
     }
 }
 

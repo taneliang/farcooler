@@ -102,13 +102,13 @@ struct ChangesPane: View {
         let old = changes.client.changesSupported == false
         return VStack(alignment: .leading, spacing: 3) {
             Text(old ? "This runner can’t show changes yet" : "Couldn’t read this workspace")
-                .font(.system(size: 11.5, weight: .medium))
+                .font(WorkspaceStyle.paneTitle)
             Text(
                 old
                     ? "Its copy of Far Cooler is older than this. Update it in Settings › Runners."
                     : "The command that reads it didn’t finish."
             )
-            .font(.system(size: 11))
+            .font(.system(size: WorkspaceStyle.PaneText.body))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             // Only where the app has no diagnosis of its own. The old-runner
@@ -237,15 +237,15 @@ struct ChangesPane: View {
             } else if let file = chosen {
                 FileStatusBadge(status: file.status, binary: file.binary)
                 Text(pathLabel(file))
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.head)
                 Text(counts(file))
-                    .font(.system(size: 10.5, design: .monospaced))
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                     .foregroundStyle(.secondary)
             } else {
                 Text(chosenLabel)
-                    .font(.system(size: 11))
+                    .font(.system(size: WorkspaceStyle.PaneText.body))
                     .foregroundStyle(.secondary)
             }
 
@@ -255,7 +255,7 @@ struct ChangesPane: View {
             let hunks = hunkTargets.count
             if hunks > 0 {
                 Text(hunks == 1 ? "1 hunk" : "\(hunks) hunks")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .fixedSize()
             }
@@ -263,7 +263,7 @@ struct ChangesPane: View {
             navButton("arrow.down.to.line", help: "Next hunk or file") { moveHunk(1) }
         }
         .padding(.horizontal, 6)
-        .frame(height: 28)
+        .frame(height: WorkspaceStyle.paneHeaderHeight)
         .background(WorkspaceStyle.paneChrome.opacity(0.60))
     }
 
@@ -350,13 +350,13 @@ struct ChangesPane: View {
                     FileStatusBadge(status: file.status, binary: file.binary)
                 }
                 Text(chosenLabel)
-                    .font(.system(size: 10.5))
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .lineLimit(1)
                     .truncationMode(.head)
                 Spacer(minLength: 0)
                 if let f = chosen {
                     Text(counts(f))
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
                 Image(systemName: "chevron.up.chevron.down")
@@ -407,11 +407,11 @@ struct ChangesPane: View {
                     // identifies anything, and half a sha identifies nothing —
                     // where half a subject line still reads.
                     Text(String(sha.prefix(8)))
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                         .fixedSize()
                     if !compact, let subject = changes.selectedCommitInfo?.subject {
                         Text(subject)
-                            .font(.system(size: 10.5))
+                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -422,7 +422,7 @@ struct ChangesPane: View {
                     }
                 } else {
                     Text("History")
-                        .font(.system(size: 10.5))
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .fixedSize()
                 }
                 Image(systemName: "chevron.up.chevron.down")
@@ -469,9 +469,9 @@ struct ChangesPane: View {
                         .frame(width: 11)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Whole Branch")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                         Text("Every commit at once")
-                            .font(.system(size: 9.5))
+                            .font(.system(size: WorkspaceStyle.PaneText.minimum))
                             .foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 0)
@@ -492,9 +492,9 @@ struct ChangesPane: View {
                 // uncommitted work, which the two segments in the header show.
                 VStack(alignment: .leading, spacing: 2) {
                     Text("No commits yet")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                     Text(noCommitsDetail)
-                        .font(.system(size: 10.5))
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -522,7 +522,7 @@ struct ChangesPane: View {
             // as nonsense. For a merge that means what the merged branch
             // brought, which is not everything the merge contains.
             Text("A commit is shown against its first parent.")
-                .font(.system(size: 9.5))
+                .font(.system(size: WorkspaceStyle.PaneText.minimum))
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
@@ -544,16 +544,16 @@ struct ChangesPane: View {
         } label: {
             HStack(alignment: .top, spacing: 7) {
                 Text(c.short)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(c.subject)
-                        .font(.system(size: 11))
+                        .font(.system(size: WorkspaceStyle.PaneText.body))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(byline(c, now: now))
-                        .font(.system(size: 9.5))
+                        .font(.system(size: WorkspaceStyle.PaneText.minimum))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
@@ -583,7 +583,7 @@ struct ChangesPane: View {
         VStack(spacing: 0) {
             TextField("Filter files", text: $query)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11))
+                .font(.system(size: WorkspaceStyle.PaneText.body))
                 .padding(7)
                 .focused($filtering)
                 // A popover does not focus a field on macOS, and a combo box
@@ -601,7 +601,7 @@ struct ChangesPane: View {
                                     ? "Nothing changed here"
                                     : "No file matches “\(query)”"
                             )
-                            .font(.system(size: 11))
+                            .font(.system(size: WorkspaceStyle.PaneText.body))
                             .foregroundStyle(.secondary)
                             .padding(8)
                         }
@@ -609,12 +609,12 @@ struct ChangesPane: View {
                             Button { jump(to: f) } label: {
                                 HStack(spacing: 6) {
                                     Text(pathLabel(f))
-                                        .font(.system(size: 11))
+                                        .font(.system(size: WorkspaceStyle.PaneText.body))
                                         .lineLimit(1)
                                         .truncationMode(.head)
                                     Spacer(minLength: 4)
                                     Text(counts(f))
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .font(.system(size: WorkspaceStyle.PaneText.body, design: .monospaced))
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(.horizontal, 7)
@@ -677,8 +677,11 @@ struct ChangesPane: View {
     private func counts(_ f: ChangedFile) -> String {
         if f.binary { return "binary" }
         var parts: [String] = []
-        if f.insertions > 0 { parts.append("+\(f.insertions)") }
-        if f.deletions > 0 { parts.append("-\(f.deletions)") }
+        // Through `DiffCounts`, so the minus is the same character and the
+        // separators are the same rule as the sidebar's pair — the two are on
+        // screen together and were spelled differently.
+        if f.insertions > 0 { parts.append(DiffCounts.added(f.insertions)) }
+        if f.deletions > 0 { parts.append(DiffCounts.removed(f.deletions)) }
         // A rename or a mode change touches no lines, and a blank cell would
         // read as a file that failed to load.
         return parts.isEmpty ? "no lines" : parts.joined(separator: " ")
@@ -723,9 +726,9 @@ struct ChangesPane: View {
                     .foregroundStyle(.tertiary)
                 TextField("Filter files", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.system(size: WorkspaceStyle.PaneText.body))
                 Text("\(matches.count)")
-                    .font(.system(size: 9.5, design: .monospaced))
+                    .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
@@ -735,7 +738,7 @@ struct ChangesPane: View {
                 RoundedRectangle(cornerRadius: 5)
                     .fill(Color.primary.opacity(0.045)))
             .padding(.horizontal, 6)
-            .frame(height: 28)
+            .frame(height: WorkspaceStyle.paneHeaderHeight)
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
@@ -746,17 +749,17 @@ struct ChangesPane: View {
                                 VStack(alignment: .leading, spacing: 1) {
                                     HStack(spacing: 5) {
                                         Text(fileNameLabel(f))
-                                            .font(.system(size: 11, weight: .medium))
+                                            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                         Spacer(minLength: 3)
                                         Text(counts(f))
-                                            .font(.system(size: 9.5, design: .monospaced))
+                                            .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
                                             .foregroundStyle(.secondary)
                                             .fixedSize()
                                     }
                                     Text(parentPathLabel(f) ?? " ")
-                                        .font(.system(size: 9.5))
+                                        .font(.system(size: WorkspaceStyle.PaneText.minimum))
                                         .foregroundStyle(.tertiary)
                                         .lineLimit(1)
                                         .truncationMode(.head)
@@ -1170,11 +1173,11 @@ struct ChangesPane: View {
 
             FileStatusBadge(status: f.status, binary: f.binary)
             Text(pathLabel(f))
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.head)
             Text(counts(f))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: WorkspaceStyle.PaneText.body, design: .monospaced))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
@@ -1192,7 +1195,7 @@ struct ChangesPane: View {
     private func lineRow(_ line: DiffComputation.Line) -> some View {
         HStack(spacing: 0) {
             Rectangle()
-                .fill(lineAccent(line.kind))
+                .fill(line.kind.accent)
                 .frame(width: 2)
             HStack(spacing: 0) {
                 Text(line.oldNumber.map(String.init) ?? "")
@@ -1205,8 +1208,8 @@ struct ChangesPane: View {
             .overlay(alignment: .trailing) {
                 Rectangle().fill(WorkspaceStyle.hairline.opacity(0.65)).frame(width: 1)
             }
-            Text(marker(line.kind))
-                .foregroundStyle(lineAccent(line.kind))
+            Text(line.kind.marker)
+                .foregroundStyle(line.kind.accent)
                 .frame(width: 12)
             Text(line.text.isEmpty ? " " : line.text)
                 .fixedSize(horizontal: true, vertical: false)
@@ -1214,34 +1217,15 @@ struct ChangesPane: View {
         }
         .font(codeFont)
         .padding(.vertical, 0.5)
-        .background(background(line.kind))
-    }
-
-    // No syntax highlighting, still. What earns the pixels is which lines
-    // changed, and coloring keywords on top of an add/remove background fights
-    // the one signal that matters.
-    private func marker(_ kind: DiffComputation.Kind) -> String {
-        switch kind {
-        case .added: return "+"
-        case .removed: return "−"
-        case .context: return " "
-        }
-    }
-
-    private func background(_ kind: DiffComputation.Kind) -> Color {
-        switch kind {
-        case .added: return .green.opacity(0.07)
-        case .removed: return .red.opacity(0.07)
-        case .context: return .clear
-        }
-    }
-
-    private func lineAccent(_ kind: DiffComputation.Kind) -> Color {
-        switch kind {
-        case .added: return .green.opacity(0.62)
-        case .removed: return .red.opacity(0.62)
-        case .context: return .clear
-        }
+        // No syntax highlighting, still. What earns the pixels is which lines
+        // changed, and coloring keywords on top of an add/remove background
+        // fights the one signal that matters.
+        //
+        // The marker, the wash and the stripe were three private functions
+        // here and a second, disagreeing copy of two of them in `DiffView`.
+        // One table now, on the kind itself — see the `DiffComputation.Kind`
+        // extension in `DiffView.swift`.
+        .background(line.kind.wash)
     }
 }
 
@@ -1341,7 +1325,7 @@ private struct FileStatusBadge: View {
     /// of what such a runner said; `M` would be a guess reading as a verdict.
     var body: some View {
         Text(binary ? "B" : (status?.mark ?? "•"))
-            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .font(.system(size: WorkspaceStyle.PaneText.minimum, weight: .semibold, design: .monospaced))
             .foregroundStyle(color)
             .frame(width: 12, alignment: .center)
             .help(binary ? "Binary file" : (status?.label ?? "Changed"))
@@ -1355,9 +1339,9 @@ struct PaneNotice: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text(title).font(.system(size: 12, weight: .medium))
+            Text(title).font(WorkspaceStyle.paneTitle)
             Text(detail)
-                .font(.system(size: 11))
+                .font(.system(size: WorkspaceStyle.PaneText.body))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }

@@ -333,7 +333,7 @@ private struct SwitcherTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
-                StatusGlyph(status: status, size: 7)
+                StatusGlyph(status: status)
                 Text(entry.title)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
@@ -388,17 +388,21 @@ private struct SwitcherTile: View {
 
     /// The highlight is the accent ring a focused pane already wears — this
     /// panel exists to move that focus, so it should show what it is about to
-    /// do in the language the window already uses. Attention keeps the orange
-    /// it has everywhere else, and the two never collide: one is a ring, one is
-    /// a wash.
+    /// do in the language the window already uses. Attention washes the tile,
+    /// and the two never collide: one is a ring, one is a wash.
+    ///
+    /// The wash takes the status's own color rather than a fixed orange. This
+    /// tile draws a `StatusGlyph` in its header, so the two were on screen
+    /// together and disagreeing: a failed agent got a red dot inside an orange
+    /// tile, a finished one a green dot inside an orange tile.
     private var border: Color {
         if isHighlighted { return .accentColor }
-        if wantsAttention { return .orange.opacity(0.55) }
+        if wantsAttention { return status.tint.opacity(0.55) }
         return Color.primary.opacity(0.08)
     }
 
     private var fill: Color {
-        wantsAttention ? .orange.opacity(0.07) : Color.primary.opacity(0.04)
+        wantsAttention ? status.tint.opacity(0.07) : Color.primary.opacity(0.04)
     }
 }
 
@@ -411,7 +415,7 @@ private struct PaletteRow: View {
         HStack(spacing: 9) {
             Group {
                 if let terminal = entry.terminal {
-                    StatusGlyph(status: terminal.status, size: 8)
+                    StatusGlyph(status: terminal.status)
                 } else if let symbol = entry.symbol {
                     Image(systemName: symbol)
                         .font(.system(size: 11))

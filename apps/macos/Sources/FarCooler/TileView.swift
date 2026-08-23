@@ -431,7 +431,7 @@ private struct TilePane: View {
             } else {
                 ZStack {
                     Color(nsColor: Palette.background)
-                    StatusGlyph(status: terminal.status, size: 10)
+                    StatusGlyph(status: terminal.status, size: StatusGlyph.hero)
                 }
             }
         }
@@ -578,7 +578,7 @@ private struct TilePane: View {
                     .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
             }
-            StatusGlyph(status: terminal.status, size: 6)
+            StatusGlyph(status: terminal.status)
         }
         .padding(.horizontal, 8)
         .frame(height: Self.headerHeight)

@@ -356,7 +356,7 @@ private struct ToolRowView: View {
             // onto a tool call's own four states — one vocabulary for
             // "something is happening" everywhere it appears, rather than a
             // second one invented for this row.
-            StatusGlyph(status: status, size: 7)
+            StatusGlyph(status: status)
             Text(tool.title)
                 .font(.callout.weight(.medium))
                 // One line, always. An adapter puts the whole absolute path in
@@ -501,7 +501,7 @@ private struct SubagentBlockView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(showing ? 90 : 0))
-            StatusGlyph(status: status, size: 7)
+            StatusGlyph(status: status)
             Text(block.tool.title)
                 .font(.subheadline.weight(running || pending != nil ? .semibold : .medium))
                 .foregroundStyle(running || pending != nil ? .primary : .secondary)

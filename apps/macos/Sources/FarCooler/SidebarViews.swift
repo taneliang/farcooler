@@ -1,75 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The sidebar's layout grid.
-///
-/// Written down because it was not before, and the result was every measurement
-/// chosen locally: a workspace title at one indent, its terminals at another,
-/// and the "new terminal" affordance at a third that sat to the LEFT of the
-/// children it belonged to. Three columns pretending to be a hierarchy.
-///
-/// Everything below positions against these and nothing invents its own.
-enum Grid {
-    /// Every row's own horizontal padding, inside its highlight.
-    ///
-    /// Small on purpose. It used to be wide enough that a selected row's
-    /// highlight began well to the LEFT of its parent's disclosure chevron, so
-    /// children appeared to hang outside the workspace containing them. That is
-    /// what made the list feel off balance: the indent said one thing and the
-    /// highlight said the opposite.
-    /// The sidebar's outer edge.
-    ///
-    /// The search field, the header above it and every `+` in the column share
-    /// this, because they are the sidebar's chrome — the list's own titles sit
-    /// deeper, on `rail`. Three hand-tuned constants used to do this job and
-    /// they had drifted to three different edges.
-    static let edge: CGFloat = 14
-
-    /// What `.menuStyle(.borderlessButton)` insets its own label by.
-    ///
-    /// Invisible, unavoidable, and only partly correctable. A trailing `+`
-    /// lands on `edge` once this is cancelled. A LEADING label does not: the
-    /// control clamps how far a negative pad may move it, so the runner picker
-    /// still sits about 9pt inside the search field below it. Closing that last
-    /// gap means not using `Menu` for the picker at all — a plain `Button`
-    /// presenting an `NSMenu` — which is a deliberate change, not a padding
-    /// tweak, and is why this constant stops where it does.
-    static let menuChromeLeading: CGFloat = 9
-    static let menuChrome: CGFloat = 5
-
-    static let margin: CGFloat = 6
-
-    /// The disclosure chevron's column — a gutter, like every outline view.
-    static let chevron: CGFloat = 18
-
-    /// The rail everything titled aligns to: workspace names, and the section
-    /// header above them.
-    static var rail: CGFloat { margin + chevron }
-
-    /// One indent step, from the rail to a child's TEXT.
-    ///
-    /// The step used to be applied to the child's leading edge and then the
-    /// marker and its gap were added on top, so a terminal's name sat 32pt right
-    /// of its worktree's — two indents for one level of nesting, which is what
-    /// made the hierarchy look wrong. The marker now lives INSIDE the step, the
-    /// way a disclosure triangle lives inside its own.
-    static let indent: CGFloat = 16
-    /// A child row's leading edge: the same rail its parent's title sits on.
-    static var child: CGFloat { rail }
-
-    /// The marker column, reserved whether or not a row has anything to show,
-    /// so titles align down the list.
-    static let marker: CGFloat = 8
-    static let gap: CGFloat = 8
-    static var childText: CGFloat { child + marker + gap }
-
-    /// Space between one workspace and the next.
-    static let group: CGFloat = 12
-
-    /// The gap between two trailing cells.
-    static let cell: CGFloat = 6
-}
-
 /// Measurements the sidebar takes from its own data.
 enum SidebarMetrics {
     /// How wide the diff column has to be for every row in the fleet.
@@ -87,10 +18,11 @@ enum SidebarMetrics {
         let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
         var widest: CGFloat = 0
         for row in rows where row.hasDiff {
-            // Built the same way the row builds it, thousands separators and
-            // all, so the measurement is of the string that gets drawn.
-            let text =
-                "+\(row.insertions.formatted()) -\(row.deletions.formatted())"
+            // Built the same way the row builds it, character for character,
+            // so the measurement is of the string that gets drawn — see
+            // `DiffCounts`, which both of them go through.
+            let text = DiffCounts.pair(
+                insertions: row.insertions, deletions: row.deletions)
             let w = (text as NSString).size(withAttributes: [.font: font]).width
             widest = max(widest, w)
         }
@@ -184,6 +116,13 @@ struct WorkspaceSection: View {
     var countsWidth: CGFloat = 0
 
     @State private var hovering = false
+    /// See `WorkspaceStyle.navigatorSelection(active:)`.
+    ///
+    /// `.key` and not `!= .inactive`: with two Far Cooler windows open the
+    /// second one is `.active` — the app has focus, this window does not — and
+    /// that is precisely the case the dimming exists for.
+    @Environment(\.controlActiveState) private var controlActiveState
+    private var windowActive: Bool { controlActiveState == .key }
 
     private var isSelected: Bool {
         selection == .workspace(host: workspace.host ?? "", id: workspace.id)
@@ -257,7 +196,7 @@ struct WorkspaceSection: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(showsTerminals ? 90 : 0))
-                    .frame(width: Grid.chevron, height: 16, alignment: .leading)
+                    .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -289,12 +228,18 @@ struct WorkspaceSection: View {
 
             Spacer(minLength: 6)
 
-            if !showsTerminals && !workspace.attention.isEmpty {
+            if !showsTerminals, let waiting = workspace.attentionStatus {
                 // Attention is the only collapsed status worth permanent room.
                 // Terminal counts and "no terminals" repeat what expanding the
                 // row already says, while this dot is the reason to expand it.
+                //
+                // Its color comes from the same rule the expanded row's glyph
+                // uses. Hardcoded orange here meant a worktree whose one
+                // pending item was a failed agent showed orange collapsed and
+                // red expanded — the same terminal, two colors, decided by
+                // whether a disclosure triangle happened to be open.
                 Circle()
-                    .fill(Color.orange)
+                    .fill(waiting.tint)
                     .frame(width: 6, height: 6)
                     .accessibilityLabel(
                         "\(workspace.attention.count) waiting on you in \(workspace.task)")
@@ -333,7 +278,13 @@ struct WorkspaceSection: View {
                         .lineLimit(1)
                         .fixedSize()
                         .frame(width: countsWidth, alignment: .trailing)
-                        .opacity(hovering || isSelected ? 0 : 1)
+                        // Hidden on HOVER and on nothing else. `isSelected`
+                        // used to be in here too, which meant the one row you
+                        // had chosen was the one row that could never show its
+                        // own diff — permanently, since selection has no
+                        // pointer to move away. Hover-to-reveal is a pointer
+                        // idiom; selection is not a pointer state.
+                        .opacity(hovering ? 0 : 1)
                         .accessibilityElement(children: .ignore)
                         // Named the arithmetic and not the subject until now:
                         // "6 insertions, 3 deletions" is spoken by a row that
@@ -359,8 +310,8 @@ struct WorkspaceSection: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .help("New terminal in \(workspace.task)")
-                    .opacity(hovering || isSelected ? (usable ? 1 : 0.45) : 0)
-                    .allowsHitTesting((hovering || isSelected) && usable)
+                    .opacity(hovering ? (usable ? 1 : 0.45) : 0)
+                    .allowsHitTesting(hovering && usable)
 
                     Menu {
                         // First, because it is what you do with a worktree you can see
@@ -396,14 +347,14 @@ struct WorkspaceSection: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .opacity(hovering || isSelected ? (usable ? 1 : 0.55) : 0)
-                    .allowsHitTesting((hovering || isSelected) && usable)
+                    .opacity(hovering ? (usable ? 1 : 0.55) : 0)
+                    .allowsHitTesting(hovering && usable)
                 }
             }
             .frame(
                 width: max(countsWidth, WorkspaceStyle.controlTarget * 2 + 2),
                 alignment: .trailing)
-            .padding(.leading, Grid.cell)
+            .padding(.leading, SidebarGrid.cellGap)
         }
         .padding(.vertical, SidebarGrid.rowVerticalPadding)
         .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
@@ -411,10 +362,11 @@ struct WorkspaceSection: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(
                     isSelected
-                        ? Color.accentColor.opacity(0.14)
+                        ? WorkspaceStyle.navigatorSelection(active: windowActive)
                         : (hovering ? Color.primary.opacity(0.045) : .clear))
         )
         .padding(.horizontal, SidebarGrid.highlightInset)
+        .animation(Motion.snap, value: hovering)
         .contentShape(Rectangle())
         .onTapGesture { selection = .workspace(host: workspace.host ?? "", id: workspace.id) }
         .onHover { hovering = $0 }
@@ -443,15 +395,15 @@ struct WorkspaceSection: View {
     /// the fleet would be tracking one.
     private var changesHelp: String? {
         guard let changes, changes.hasDiff else { return nil }
-        return "+\(changes.insertions.formatted()) -\(changes.deletions.formatted()) in this "
+        return "\(DiffCounts.pair(insertions: changes.insertions, deletions: changes.deletions)) in this "
             + "workspace — committed work, uncommitted edits, and untracked files, together. "
             + "The Changes pane splits them: Branch is what’s committed, Uncommitted is what isn’t."
     }
 
     private func changeCountsText(_ changes: InboxRow) -> Text {
-        var additions = AttributedString("+\(changes.insertions.formatted())")
+        var additions = AttributedString(DiffCounts.added(changes.insertions))
         additions.foregroundColor = .green
-        var deletions = AttributedString(" -\(changes.deletions.formatted())")
+        var deletions = AttributedString(" " + DiffCounts.removed(changes.deletions))
         deletions.foregroundColor = .red
         additions.append(deletions)
         return Text(additions)
@@ -587,6 +539,14 @@ struct ProjectHeader: View {
         // Buttons, which take their own clicks ahead of this.
         .onTapGesture { onToggleCollapse?() }
         .onHover { hovering = $0 }
+        // The one hover in the sidebar that changes SHAPE and not just alpha:
+        // the gutter swaps a 10pt folder for a 9pt chevron, and the `+` and `…`
+        // arrive at the same instant. Cut hard, that is three things appearing
+        // out of nothing under a pointer that only grazed the row. `Motion.snap`
+        // is the app's own "instant, but not a cut" — 0.22s — and it was
+        // already in four other files while this file, the one with the most
+        // hover states in the app, had no animation modifier at all.
+        .animation(Motion.snap, value: hovering)
     }
 }
 
@@ -674,6 +634,13 @@ struct TerminalRow: View {
 
     @State private var hovering = false
     @State private var targeted = false
+    /// See `WorkspaceStyle.navigatorSelection(active:)`.
+    ///
+    /// `.key` and not `!= .inactive`: with two Far Cooler windows open the
+    /// second one is `.active` — the app has focus, this window does not — and
+    /// that is precisely the case the dimming exists for.
+    @Environment(\.controlActiveState) private var controlActiveState
+    private var windowActive: Bool { controlActiveState == .key }
 
     private var status: Status { terminal.status }
 
@@ -712,8 +679,8 @@ struct TerminalRow: View {
     ///
     /// Named rather than written twice: the feed's lines below have to begin
     /// in the same column the terminal's name does, and two hand-written 7s is
-    /// exactly how a column goes out of alignment — see `Grid`'s own note on
-    /// the four measurements that used to be chosen locally.
+    /// exactly how a column goes out of alignment — see `SidebarGrid`'s own
+    /// note on the four insets that used to be chosen locally.
     private static let markerGap: CGFloat = 7
 
     var body: some View {
@@ -723,7 +690,7 @@ struct TerminalRow: View {
         // a row with three steps is one taller row rather than four rows.
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: Self.markerGap) {
-                StatusGlyph(status: status, size: Grid.marker)
+                StatusGlyph(status: status)
 
                 Text(terminal.label)
                     .font(.system(size: 12.5))
@@ -789,7 +756,7 @@ struct TerminalRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .padding(.leading, Grid.marker + Self.markerGap)
+                    .padding(.leading, StatusGlyph.inline + Self.markerGap)
                     // Take the width offered and no more — see the transcript
                     // below, where the same modifier keeps the widest line from
                     // setting the sidebar's ideal width.
@@ -830,7 +797,7 @@ struct TerminalRow: View {
                 // Aligned under the terminal's name, not under its status dot,
                 // so the steps read as belonging to the row rather than as a
                 // second column of their own.
-                .padding(.leading, Grid.marker + Self.markerGap)
+                .padding(.leading, StatusGlyph.inline + Self.markerGap)
                 // Take the width offered and no more. Without this the widest
                 // step would set the row's ideal width and the sidebar would
                 // report wanting to be wider than the name ever needed.
@@ -857,7 +824,7 @@ struct TerminalRow: View {
                             .truncationMode(.tail)
                     }
                 }
-                .padding(.leading, Grid.marker + Self.markerGap * 2)
+                .padding(.leading, StatusGlyph.inline + Self.markerGap * 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -870,7 +837,7 @@ struct TerminalRow: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(
                     isSelected
-                        ? Color.accentColor.opacity(0.13)
+                        ? WorkspaceStyle.navigatorSelection(active: windowActive)
                         : (hovering ? Color.primary.opacity(0.045) : .clear))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
@@ -880,6 +847,7 @@ struct TerminalRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
+        .animation(Motion.snap, value: hovering)
         // A row is a drag source for the panes as well as for other rows, so the
         // same gesture grows a layout and rearranges one.
         //
@@ -1074,7 +1042,7 @@ struct WorkspaceDetail: View {
             onOpenTerminal(t)
         } label: {
             HStack(spacing: 12) {
-                StatusGlyph(status: t.status, size: 10)
+                StatusGlyph(status: t.status)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(t.label).font(.system(size: 14, weight: .medium))
@@ -1141,6 +1109,12 @@ struct HiddenWorktrees: View {
         worktrees.flatMap(\.terminals).filter(\.status.wantsAttention).count
     }
 
+    /// The color for that count — the same rule the rows inside use, so
+    /// expanding the section cannot change what it was already saying.
+    private var attentionStatus: Status? {
+        Status.mostUrgent(in: worktrees.flatMap(\.terminals).map(\.status))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(indent: 0) {
@@ -1156,9 +1130,9 @@ struct HiddenWorktrees: View {
                         Text("\(worktrees.count)")
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
-                        if attention > 0 {
+                        if let waiting = attentionStatus {
                             Circle()
-                                .fill(Color.orange)
+                                .fill(waiting.tint)
                                 .frame(width: 5, height: 5)
                                 .help("\(attention) waiting on you, inside a hidden workspace")
                         }
