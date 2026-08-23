@@ -96,16 +96,21 @@
             for every notification that matters most.
 
             Pointed at the FINISHED channel rather than the blocked one, and it
-            is a choice rather than a default: today's push carries no status
-            (see `NotificationCopy.channelFor`), so every one of them would take
-            whichever this names. Under-alerting a blocked agent costs a
-            notification that arrives quietly; over-alerting every finished one
-            breaks a Focus for the normal case, and that is the failure people
-            answer by turning the whole app off.
+            is a choice rather than a default. Under-alerting a blocked agent
+            costs a notification that arrives quietly; over-alerting every
+            finished one breaks a Focus for the normal case, and that is the
+            failure people answer by turning the whole app off.
 
-            The relay sending `android.notification.channel_id` per message
-            overrides this, and is what makes the blocked channel reachable
-            again.
+            It decides much less than it once did. This used to say that the
+            push carried no status at all, so every notification would take
+            whichever channel this names — and `33159fd` made that false:
+            `sendFcm` now sends `android.notification.channel_id` on every
+            message, chosen from the daemon's status by `androidChannel`, and a
+            channel named on the message overrides this default. So this is the
+            fallback for a push that names none, which today means a relay older
+            than that commit. The choice above is unchanged by that, and for the
+            same reason: a fallback that cannot tell a blocked agent from a
+            finished one must not break a Focus for both.
         -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"

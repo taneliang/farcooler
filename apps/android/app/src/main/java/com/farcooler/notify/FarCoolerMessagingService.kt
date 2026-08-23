@@ -31,12 +31,16 @@ import com.google.firebase.messaging.RemoteMessage
  * and calls [onMessageReceived] only while it is in the foreground. So every
  * careful thing below happens in the one case the local [Notifier] already
  * covers, and the case this whole path exists for — a phone asleep in a pocket —
- * is drawn by Firebase out of the manifest's defaults.
+ * is drawn by Firebase itself, out of what the message names and what the
+ * manifest defaults to.
  *
  * That is why the manifest names a default channel and a default icon, and why
  * [Notifier.PUSH_EXTRA_TERMINAL] exists: those three are the only say this app
- * gets over the notification it most wants to get right. Making this method the
- * one that draws it needs the relay to send a data-only message, which is a
+ * gets over the notification it most wants to get right. The channel is a
+ * smaller say than it was — `33159fd` has the relay name one per message, which
+ * overrides the manifest's, so that default now covers only a push that names
+ * none. The icon and the extra are still this app's alone. Making this method
+ * the one that draws it needs the relay to send a data-only message, which is a
  * change with its own costs — Firebase does not wake a force-stopped app for
  * one — and is not this app's to make.
  */
@@ -66,8 +70,14 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
         // sent under any name — so the high-importance channel that exists for
         // "an agent has stopped and is waiting for you" was unreachable from
         // the push path, and had been since it was written. It is spelled the
-        // producer's way now; see [NotificationCopy.channelFor] for what still
-        // has to change on the relay before it carries anything.
+        // producer's way now, and `33159fd` put it on the wire: `sendFcm` sends
+        // `data.status` for exactly this read.
+        //
+        // This used to point at [NotificationCopy.channelFor] for what still had
+        // to change on the relay before that key carried anything. Nothing does.
+        // What that commit could not fix here it fixed elsewhere — a phone
+        // nobody is holding never reaches this line at all, and takes the
+        // `android.notification.channel_id` the same commit added instead.
         val channel = NotificationCopy.channelFor(data[Notifier.PUSH_EXTRA_STATUS])
 
         val intent = Intent(this, MainActivity::class.java).apply {

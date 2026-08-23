@@ -121,15 +121,23 @@ object NotificationCopy {
      * else the daemon chose to send is news that can wait for the next time the
      * phone is picked up.
      *
-     * **It is not on the FCM message today**, and that is recorded rather than
-     * papered over: `sendFcm` builds `data: { terminal: payload.terminal }` and
-     * nothing else, so every push this phone renders lands on [CHANNEL_DONE]
-     * whatever it is about. The fix is one key in that object — the relay
-     * already holds `status` and `failed` on the payload it was given. Until
-     * then a blocked agent's push arrives at default importance, which
-     * under-alerts; the opposite default would put every finished agent through
-     * a Focus, and over-alerting is the failure people answer by turning the
-     * whole app off.
+     * **This decides the foreground case only**, which is less than it sounds.
+     * [FarCoolerMessagingService.onMessageReceived] is the one caller, and
+     * Firebase calls that only while the app is in front of you — the case
+     * [Notifier] already covers with a banner of its own. A phone in a pocket
+     * never reaches this function at all: the tray card Firebase draws takes
+     * the relay's own `android.notification.channel_id`, decided from the same
+     * word by `androidChannel` in `push.ts`.
+     *
+     * This used to say the status was not on the FCM message at all — that
+     * `sendFcm` built `data: { terminal }` and nothing else, and that the fix
+     * was one key in that object. `33159fd` is that fix, and it was two keys
+     * rather than one: `data.status`, which is what this reads, and the
+     * `channel_id` above, which is the half that reaches a sleeping phone.
+     * Neither substitutes for the other. A relay older than that commit sends
+     * neither, and gets what it always got — this function answering
+     * [Notifier.CHANNEL_DONE] for everything, and the manifest's default
+     * channel doing the same for every card this process never sees.
      */
     fun channelFor(status: String?): String =
         if (status == "blocked") Notifier.CHANNEL_BLOCKED else Notifier.CHANNEL_DONE

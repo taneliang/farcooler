@@ -384,6 +384,37 @@ jobs:
         working-directory: apps/android
         run: ./gradlew assembleDebug
 
+      # The only build that reads `proguard-rules.pro` or runs `lintVital`, and
+      # neither had ever run at all.
+      #
+      # `build.gradle.kts` named a rules file that was never committed, and R8
+      # fails outright on a config that is not there — so `assembleRelease` had
+      # not once succeeded, while `apps/android/README.md` documents it as a
+      # command to run. Behind that sat a second failure nothing could reach:
+      # `lintVitalRelease` runs on release and not on debug. `4a0ba97` fixed
+      # both, and this step is what keeps them fixed. A debug build reads
+      # neither, which is exactly why nobody noticed for the life of the
+      # project.
+      #
+      # It needs nothing this job does not already have. The release block has
+      # no signing config, so what comes out is `app-release-unsigned.apk` and
+      # no keystore is involved; the Firebase plugin is applied only when
+      # `google-services.json` is present, which it is in no checkout; and the
+      # WorkOS client id is a Gradle property that defaults to empty. That is
+      # the same configuration the debug build above already runs under — the
+      # question here is whether it BUILDS, not whether it could ship, and a
+      # release anyone installs is built with the property the README names.
+      #
+      # Last, because it costs the most and answers the narrowest question: the
+      # release variant compiles from source again and then pays for R8 and
+      # resource shrinking on top — 24 s for the whole task on a developer's
+      # Mac, and more on a cold runner. A Kotlin error or a transcript reducer
+      # that has drifted from the Apple apps' should be reported by the step
+      # named for it, not out of the middle of a minified build.
+      - name: Build the release APK
+        working-directory: apps/android
+        run: ./gradlew assembleRelease
+
   relay:
     name: Relay
     runs-on: ubuntu-latest
