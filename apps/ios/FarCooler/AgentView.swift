@@ -195,8 +195,8 @@ struct AgentView: View {
         // otherwise: two surfaces a few points apart both sample the background
         // on their own and neither knows the other is there, so they never
         // blend at the seam the way the platform's own stacked controls do.
-        GlassEffectContainer(spacing: 8) {
-            VStack(spacing: 8) {
+        GlassEffectContainer(spacing: PaneMetrics.step) {
+            VStack(spacing: PaneMetrics.step) {
                 // The plan and the queue are ATTACHED to the composer, not
                 // scattered around the screen. The plan used to be pinned at the
                 // top and the queue drawn inline at the transcript's end, which put
@@ -205,7 +205,6 @@ struct AgentView: View {
                 // message is most likely to change.
                 if !transcript.plan.isEmpty {
                     PlanPanel(entries: transcript.plan)
-                        .padding(.horizontal, 12)
                 }
 
                 ForEach(transcript.queue) { queued in
@@ -214,14 +213,12 @@ struct AgentView: View {
                         onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
                         onCancel: { Task { await stream.cancelQueued(queued.id) } },
                         onSteer: { Task { await stream.steerQueued(queued.id) } })
-                        .padding(.horizontal, 12)
                 }
 
                 if let pending = unattachedPermission {
                     ApprovalCard(pending: pending) { optionID in
                         Task { await stream.answer(pending.id, optionID) }
                     }
-                    .padding(.horizontal, 12)
                 }
 
                 // A message that did not go, said so beside the composer.
@@ -231,26 +228,36 @@ struct AgentView: View {
                 // drawn in the transcript looking sent, so the correction
                 // belongs where the eye is — on the thing that would send it
                 // again.
+                //
+                // RED, not amber. A message that did not send is a failure,
+                // and amber in this app means one thing — an agent is waiting
+                // on you — which is the opposite of what this row reports.
                 if let failure = stream.sendFailure {
-                    HStack(spacing: 10) {
+                    HStack(spacing: PaneMetrics.step) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(.red)
                         Text(failure.message)
                             .font(.footnote)
-                        Spacer(minLength: 8)
+                        Spacer(minLength: PaneMetrics.step)
+                        // The row's height is its buttons now, so the padding
+                        // below is only the gap to the glass edge.
                         Button("Retry") { Task { await failure.retry() } }
                             .font(.footnote.weight(.semibold))
+                            .frame(minHeight: PaneMetrics.target)
+                            .contentShape(.rect)
                         Button {
                             stream.sendFailure = nil
                         } label: {
                             Image(systemName: "xmark")
+                                .frame(
+                                    width: PaneMetrics.target, height: PaneMetrics.target)
+                                .contentShape(.rect)
                         }
                         .accessibilityLabel("Dismiss")
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .modifier(GlassSurface(radius: 14))
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, PaneMetrics.edge)
+                    .padding(.vertical, PaneMetrics.tight)
+                    .modifier(GlassSurface())
                 }
 
                     AgentComposer(
@@ -268,6 +275,15 @@ struct AgentView: View {
                     onSetMode: { mode in Task { await stream.setMode(mode) } }
                 )
             }
+            // ONE left edge, said once.
+            //
+            // Every surface in this stack used to carry its own horizontal
+            // padding — 12 on the plan, the queue, the card and the banner,
+            // 10 on the composer — so the container whose whole purpose is
+            // that these "behave as ONE piece of glass" drew them with their
+            // left edges two points apart. Hoisted here, there is one number
+            // and it is the one the tab strip below them uses.
+            .padding(.horizontal, PaneMetrics.surfaceInset)
         }
     }
 
@@ -287,7 +303,7 @@ struct AgentView: View {
             // And one copy of it, not two. A second banner sat here, above
             // `emptyState`, which has an error arm of its own — a triangle, a
             // headline and the same string — so with nothing loaded the reason
-            // was drawn twice on one screen, once as an orange caption and
+            // was drawn twice on one screen, once as a tinted caption and
             // again a few points lower under a heading. The arm that draws it
             // with a headline is the one that reads as an explanation, so it is
             // the one that stayed.
@@ -304,15 +320,19 @@ struct AgentView: View {
                 // trade at thousands of rows, each laying out markdown.
                 // `scrollPosition` below is the missing half: it names the
                 // row to hold still while the estimates around it resolve.
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: PaneMetrics.card) {
                     // A stale error banner rather than a blanked screen: a
                     // failed poll is not a disconnection, the same rule
                     // `Connection.refresh()` follows — the last known
                     // transcript stays up while this device tries again.
+                    //
+                    // Red rather than amber, for the reason the send failure
+                    // beside the composer is: a poll that did not come back is
+                    // a failure, and amber is spoken for.
                     if let trouble = stream.connectionError {
                         Text(trouble.sentence)
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(.red)
                         // Rare by construction, and that is what makes it
                         // bearable here: the failure that actually happens on a
                         // phone is a dropped link, which carries a written
@@ -355,7 +375,7 @@ struct AgentView: View {
                     // nothing new to react to.
                     Color.clear.frame(height: 1).id(Self.endOfTranscript)
                 }
-                .padding(12)
+                .padding(PaneMetrics.card)
             }
             // What the scroll view holds still while content around it
             // changes height — see the stack above.
@@ -452,20 +472,34 @@ struct AgentView: View {
         }
     }
 
+    /// A full-screen state, sized like one.
+    ///
+    /// The proportions are `FleetView.failure`'s, which `TerminalView.status`
+    /// also adopted: a 42-point thin mark, a `.title2` headline, a `.callout`
+    /// sentence, 22 and 8 between them. This was `.largeTitle` over
+    /// `.headline`, and `.headline` is 17 points — a list row's title standing
+    /// in for a page's, on a screen with nothing else on it.
+    ///
+    /// The mark is red rather than amber. A session that would not load is a
+    /// failure; amber in this app means an agent is waiting on you, and a
+    /// screen that cannot show you an agent at all is not that.
     private var emptyState: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 0) {
             Spacer()
             if let trouble = stream.connectionError {
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.largeTitle)
-                    .foregroundStyle(.orange)
+                    .font(.system(size: 42, weight: .thin))
+                    .foregroundStyle(.red)
+                    .padding(.bottom, 22)
                 Text("Could not load this session")
-                    .font(.headline)
+                    .font(.title2.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, PaneMetrics.step)
                 Text(trouble.sentence)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+                    .frame(maxWidth: 320)
                 // The core's own words, below a sentence rather than standing
                 // in for one. Under this headline, in this face, they used to
                 // read as Far Cooler's account of the runner; they are not, and
@@ -473,8 +507,8 @@ struct AgentView: View {
                 // unreachable runner is going to get, so they stay.
                 if let words = trouble.transcript, !words.isEmpty {
                     DetailBox(text: words)
-                        .frame(maxWidth: 360)
-                        .padding(.horizontal, 32)
+                        .frame(maxWidth: 320)
+                        .padding(.top, 14)
                 }
             } else {
                 Text("Say something to begin.")
@@ -483,6 +517,7 @@ struct AgentView: View {
             }
             Spacer()
         }
+        .padding(.horizontal, 32)
         .frame(maxWidth: .infinity)
     }
 }
@@ -573,14 +608,25 @@ private struct MessageRow: View {
             // Right-aligned with a fill — the one voice in the transcript
             // that is not the agent talking, and it has to read as a
             // different speaker at a glance, not on close reading.
+            //
+            // The comment was right and the fill had drifted past it. This was
+            // `Color.primary.opacity(0.07)` and so was every tool card in the
+            // file, so the one thing that had to be a different speaker was
+            // the same grey as a container around some output. It is a full
+            // step above them now — see `TranscriptFill`.
+            //
+            // `.body`, which is the size the agent's own words are: the two
+            // were one step apart, `.callout` here against `AgentReplyText`'s
+            // `.body`, and the only thing that difference said was that what
+            // you wrote matters slightly less than the answer to it.
             HStack {
                 Spacer(minLength: 40)
                 Text(text)
-                    .font(.callout)
+                    .font(.body)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, PaneMetrics.card)
+                    .padding(.vertical, PaneMetrics.step)
+                    .background(TranscriptFill.speaker, in: RoundedRectangle(cornerRadius: 14))
             }
 
         case .agent:
@@ -641,7 +687,7 @@ private struct ToolRowView: View {
 
             if showingDetail {
                 Divider()
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: PaneMetrics.step) {
                     if let content = tool.content, !content.isEmpty {
                         // Bounded, and for the same reason it is bounded on the
                         // Mac: `Text` measures its whole string on every layout
@@ -653,7 +699,7 @@ private struct ToolRowView: View {
                         DiffView(diff: diff)
                     }
                 }
-                .padding(9)
+                .padding(PaneMetrics.card)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -665,13 +711,13 @@ private struct ToolRowView: View {
             if let pending, let onAnswer {
                 Divider()
                 ApprovalControls(options: pending.options, onChoose: onAnswer)
-                    .padding(9)
+                    .padding(PaneMetrics.card)
             }
         }
-        .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .background(TranscriptFill.container, in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             if pending != nil {
-                RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.45))
+                RoundedRectangle(cornerRadius: 8).strokeBorder(TranscriptFill.attentionRing)
             }
         }
         // Driven by the model rather than a timer, exactly as the thought row
@@ -693,8 +739,17 @@ private struct ToolRowView: View {
     /// Still going, as the agent last reported it.
     private var running: Bool { tool.status == .pending || tool.status == .inProgress }
 
+    /// The row, and — where there is anything to open — the thing you tap.
+    ///
+    /// 44 points tall whether it opens or not. The disclosure was 34, which is
+    /// the guideline's floor missed by ten points on the control this
+    /// transcript asks you to hit most often; and a tool row with detail
+    /// standing ten points taller than one without would have made the
+    /// transcript's rhythm depend on whether a command happened to return
+    /// anything. The fill is the row, so the height goes on the label rather
+    /// than on a hit shape spilling into the row above.
     private var label: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: PaneMetrics.step) {
             if expandable {
                 Image(systemName: "chevron.right")
                     .font(.caption2)
@@ -717,12 +772,11 @@ private struct ToolRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: PaneMetrics.tight)
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, PaneMetrics.card)
+        .frame(maxWidth: .infinity, minHeight: PaneMetrics.target, alignment: .leading)
     }
 }
 
@@ -807,12 +861,16 @@ private struct SubagentBlockView: View {
 
             if showing && !block.children.isEmpty {
                 Divider()
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: PaneMetrics.step) {
                     if hidden > 0 {
                         Button("… \(hidden) more") { withAnimation(Self.motion) { showingAll = true } }
                             .buttonStyle(.plain)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .frame(
+                                maxWidth: .infinity, minHeight: PaneMetrics.target,
+                                alignment: .leading)
+                            .contentShape(.rect)
                     }
                     ForEach(shown) { child in
                         // The approval controls are drawn by the child that is
@@ -824,12 +882,14 @@ private struct SubagentBlockView: View {
                             onAnswer: onAnswer)
                     }
                 }
-                .padding(9)
+                .padding(PaneMetrics.card)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        // Working blocks sit at the tool card's tier and finished ones a step
+        // below it, which is what 0.07 and 0.035 were reaching for.
         .background(
-            Color.primary.opacity(running || pending != nil ? 0.07 : 0.035),
+            running || pending != nil ? TranscriptFill.container : TranscriptFill.recessed,
             in: RoundedRectangle(cornerRadius: 8))
         .animation(Self.motion, value: showing)
         // Children arrive one at a time while the subagent works, and a block
@@ -838,8 +898,10 @@ private struct SubagentBlockView: View {
         .animation(Self.motion, value: block.children.count)
     }
 
+    /// 44 points tall, like `ToolRowView`'s: this is the only way into a
+    /// block, and it was 32.
     private var header: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: PaneMetrics.step) {
             Image(systemName: "chevron.right")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -859,12 +921,11 @@ private struct SubagentBlockView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Spacer(minLength: 4)
+            Spacer(minLength: PaneMetrics.tight)
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, PaneMetrics.card)
+        .frame(maxWidth: .infinity, minHeight: PaneMetrics.target, alignment: .leading)
     }
 
     /// What a collapsed block still answers without being opened.
@@ -900,8 +961,8 @@ private struct GapRow: View {
         // `switch` twice, byte for byte, and one gap read on two devices is
         // the only way that drift ever shows itself. The metrics below stay
         // this app's own, which is the part that should differ.
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: PaneMetrics.step) {
+            HStack(spacing: PaneMetrics.step) {
                 Image(systemName: reason.isInformational ? "info.circle" : "scissors")
                     .font(.caption)
                 Text(reason.sentence)
@@ -912,10 +973,14 @@ private struct GapRow: View {
             // its own voice: that text is the adapter's, and coloring it like
             // this row's sentence is this app appearing to have said it.
             //
+            // RED, not amber. A gap is history the transcript could not show
+            // you — a refusal, or a turn cut off — which is a failure and not
+            // "an agent wants you", the one thing amber is kept for here.
+            //
             // `Color.secondary`, not `.secondary` — that shorthand resolves to
-            // `HierarchicalShapeStyle`, a different type from `Color.orange`,
-            // and a ternary needs both branches to agree.
-            .foregroundStyle(reason.isInformational ? Color.secondary : Color.orange)
+            // `HierarchicalShapeStyle`, a different type from `Color.red`, and
+            // a ternary needs both branches to agree.
+            .foregroundStyle(reason.isInformational ? Color.secondary : Color.red)
 
             if let detail = reason.detail, !detail.isEmpty {
                 // No fill of its own: it is already inside one, the same call
@@ -923,11 +988,11 @@ private struct GapRow: View {
                 DetailBox(text: detail, chrome: false)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, PaneMetrics.card)
+        .padding(.vertical, PaneMetrics.step)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            reason.isInformational ? Color.secondary.opacity(0.10) : Color.orange.opacity(0.12),
+            reason.isInformational ? TranscriptFill.container : TranscriptFill.alarm,
             in: RoundedRectangle(cornerRadius: 8))
     }
 }
@@ -945,13 +1010,13 @@ private struct PlanPanel: View {
     @State private var expanded = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: PaneMetrics.step) {
             Button {
                 withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
                     expanded.toggle()
                 }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: PaneMetrics.step) {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
@@ -967,13 +1032,16 @@ private struct PlanPanel: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .contentShape(Rectangle())
+                // The whole width of the panel, 44 points tall: the header is
+                // the only way to fold this away, and it was a caption.
+                .frame(maxWidth: .infinity, minHeight: PaneMetrics.target)
+                .contentShape(.rect)
             }
             .buttonStyle(.plain)
 
             if expanded {
                 ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                    HStack(alignment: .top, spacing: 7) {
+                    HStack(alignment: .top, spacing: PaneMetrics.step) {
                         Image(systemName: PlanStatus(entry.status).symbol)
                             .font(.caption)
                             .foregroundStyle(PlanStatus(entry.status).tint)
@@ -991,10 +1059,15 @@ private struct PlanPanel: View {
         // OPAQUE, because it floats over a scrolling transcript. A tinted
         // overlay let the conversation through, and expanding the list turned
         // both into one unreadable overlap.
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        //
+        // Radius 22 and no inset of its own: it is one of the surfaces in
+        // `composerStack`, and that stack now says the edge once.
+        .padding(.horizontal, PaneMetrics.edge)
+        .padding(.vertical, PaneMetrics.card)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius))
     }
 
 
@@ -1020,14 +1093,19 @@ private struct QueuedRow: View {
     @State private var draft = ""
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: PaneMetrics.step) {
             Spacer(minLength: 40)
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: PaneMetrics.tight) {
+                // `.body` in all three arms. A queued message is the reader's
+                // own words waiting to be sent, so it is set at the size the
+                // transcript sets them — and this row used to hold `.callout`
+                // and `.body` in the SAME row, one step apart, depending on
+                // whether what you queued had any words in it.
                 if editing {
                     TextField("", text: $draft, axis: .vertical)
                         .textFieldStyle(.plain)
-                        .font(.callout)
-                        .frame(minWidth: 140)
+                        .font(.body)
+                        .frame(minWidth: 140, minHeight: PaneMetrics.target)
                         .onSubmit(commit)
                 } else if queued.text.isEmpty && queued.imageCount > 0 {
                     // An image with no words is still a message. Without this
@@ -1037,13 +1115,20 @@ private struct QueuedRow: View {
                         systemImage: "photo")
                         .font(.body)
                 } else {
-                    Text(queued.text).font(.callout)
+                    Text(queued.text).font(.body)
                 }
 
-                HStack(spacing: 10) {
+                // A label and three actions, told apart.
+                //
+                // All four used to be `.caption` in `.secondary` with the
+                // buttons set `.plain`, so "Queued", "Send now", "Edit" and
+                // "Remove" were one line of identical grey words — three of
+                // which do something, with nothing saying which three.
+                HStack(spacing: PaneMetrics.card) {
                     Text("Queued")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Button("Send now", action: onSteer)
-                        .buttonStyle(.plain)
                     Button(editing ? "Save" : "Edit") {
                         if editing {
                             commit()
@@ -1052,19 +1137,21 @@ private struct QueuedRow: View {
                             editing = true
                         }
                     }
-                    .buttonStyle(.plain)
-                    Button("Remove", action: onCancel).buttonStyle(.plain)
+                    Button("Remove", action: onCancel)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .buttonStyle(QueuedActionStyle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, PaneMetrics.edge)
+            .padding(.vertical, PaneMetrics.card)
+            // Radius 22, the corner every surface in `composerStack` draws.
+            // The dashed edge is what says "not sent yet"; the rounding was
+            // never carrying that and only made this bubble a different object
+            // from the composer it is attached to.
             .background {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius)
                     .fill(.regularMaterial)
                     .overlay {
-                        RoundedRectangle(cornerRadius: 14)
+                        RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius)
                             .strokeBorder(
                                 Color.secondary.opacity(0.4),
                                 style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
@@ -1081,12 +1168,34 @@ private struct QueuedRow: View {
     }
 }
 
+/// One of the queue's actions: a word you can tap, drawn as one.
+///
+/// Tinted and semibold, which is what this file already uses for an action
+/// standing in prose — the composer's "Retry" — rather than a fifth grey word
+/// in a row of grey words. The 44-point band is the hit target a 16-point
+/// caption never had, and the `contentShape` is what makes it live: padding
+/// around a `Button`'s label is layout only.
+private struct QueuedActionStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tint)
+            // The press, said by the label rather than by a fill: there is no
+            // fill here to press, and a word that does nothing under a thumb
+            // is a word nobody is sure they hit.
+            .opacity(configuration.isPressed ? 0.55 : 1)
+            .frame(minHeight: PaneMetrics.target)
+            .contentShape(.rect)
+    }
+}
+
 // MARK: - Approval
 
 /// A permission request, blocking the turn until answered — the one place
 /// this surface asks something of you rather than reporting something to
 /// you. Buttons are full-width and tall on purpose: this is the card a thumb
 /// has to hit correctly the first time, on a phone, possibly one-handed.
+///
 /// The answers to a permission request.
 ///
 /// Ordered by what the question actually is. ACP hands back a flat list —
@@ -1101,32 +1210,55 @@ private struct QueuedRow: View {
 ///
 /// Reject is NOT red. Red is for destructive; declining a command destroys
 /// nothing, and spending the alarm color here leaves none for when it matters.
+///
+/// **The sentence above about full-width and tall was right, and the code
+/// under it had drifted.** The decision row said `.controlSize(.small)` and
+/// ended in a `Spacer`, so what shipped was two roughly 28-point pills bunched
+/// against the left edge of the card — neither full-width nor tall, on the one
+/// control in this app where hitting Reject instead of Allow means a command
+/// ran that nobody allowed. `.large` now, each half of the row expands to
+/// share the width, and 44 is the floor under both.
 struct ApprovalControls: View {
     let options: [PermissionOption]
     let onChoose: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: PaneMetrics.step) {
+            HStack(spacing: PaneMetrics.step) {
                 if let allow {
                     Button(allow.name) { onChoose(allow.id) }
                         .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity, minHeight: PaneMetrics.target)
                 }
                 if let reject {
                     Button(reject.name) { onChoose(reject.id) }
                         .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity, minHeight: PaneMetrics.target)
                 }
-                Spacer(minLength: 0)
             }
-            .controlSize(.small)
+            .controlSize(.large)
 
-            ForEach(secondary) { option in
-                Button(option.name) { onChoose(option.id) }
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            // Small type, full-size targets.
+            //
+            // These stay quiet deliberately — a policy change is not the
+            // answer to the question being asked — but quiet is about weight,
+            // not about whether a thumb can land on them. They were 16-point
+            // rows of caption text. The band is 44 and the `contentShape` is
+            // what makes it live rather than merely occupied, so the spacing
+            // between two "always" options belongs to one of them.
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(secondary) { option in
+                    Button(option.name) { onChoose(option.id) }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(
+                            maxWidth: .infinity, minHeight: PaneMetrics.target,
+                            alignment: .leading)
+                        .contentShape(.rect)
+                }
             }
         }
     }
@@ -1165,16 +1297,26 @@ private struct ApprovalCard: View {
     let onChoose: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: PaneMetrics.card) {
+            // The one amber left in this file, with the ring on a gated tool
+            // call: an agent is waiting on you, which is the only thing amber
+            // says anywhere in this app.
             Label("Needs your approval", systemImage: "hand.raised.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.orange)
 
             ApprovalControls(options: pending.options, onChoose: onChoose)
         }
-        .padding(12)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.orange.opacity(0.35)))
+        // Radius 22 and no inset of its own — one of `composerStack`'s
+        // surfaces, and that stack draws the edge now. This was 12, curving at
+        // half the rate of the composer directly beneath it.
+        .padding(PaneMetrics.edge)
+        .background(
+            TranscriptFill.attention,
+            in: RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius)
+                .strokeBorder(TranscriptFill.attentionEdge))
     }
 
 
@@ -1208,7 +1350,7 @@ struct DiffView: View {
 
     var body: some View {
         let rows = lines
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: PaneMetrics.step) {
             header(for: rows)
 
             if rows.count > Self.collapseThreshold && !expanded {
@@ -1229,7 +1371,7 @@ struct DiffView: View {
     private func header(for rows: [DiffComputation.Line]) -> some View {
         let added = rows.filter { $0.kind == .added }.count
         let removed = rows.filter { $0.kind == .removed }.count
-        return HStack(spacing: 6) {
+        return HStack(spacing: PaneMetrics.step) {
             Text(diff.path)
                 .font(.caption.weight(.medium).monospaced())
                 .lineLimit(1)
@@ -1267,15 +1409,20 @@ struct DiffView: View {
                     }
                     .font(.caption2.monospaced())
                     .foregroundStyle(line.kind == .context ? .secondary : .primary)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, PaneMetrics.tight)
+                    // A point, not a step: this is leading between two lines of
+                    // one listing, not a gap between two things. Anything on
+                    // the scale above turns a diff into a list of rows.
                     .padding(.vertical, 1)
                     .background(line.kind.background)
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, PaneMetrics.tight)
         }
         .textSelection(.enabled)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+        // A ground inside a ground: this box is already inside a tool card, so
+        // it takes the tier below the one that card is drawn at.
+        .background(TranscriptFill.recessed, in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -1374,11 +1521,19 @@ private struct AgentComposer: View {
                 attachmentStrip
             }
 
+            // Red, like every other failure on this screen. It was amber,
+            // which in this app means an agent is waiting on you.
+            //
+            // Tap to dismiss, so it is a control and gets a control's height:
+            // it was a caption you had to hit within about 15 points.
             if let attachmentError {
                 Text(attachmentError)
                     .font(.caption)
-                    .foregroundStyle(.orange)
-                    .padding(.bottom, 6)
+                    .foregroundStyle(.red)
+                    .frame(
+                        maxWidth: .infinity, minHeight: PaneMetrics.target,
+                        alignment: .leading)
+                    .contentShape(.rect)
                     .onTapGesture { self.attachmentError = nil }
             }
 
@@ -1393,11 +1548,19 @@ private struct AgentComposer: View {
             // at the end of a row of small secondary controls rather than
             // beside the thing it sends. This is the shape every messaging app
             // on the platform uses, for the same reason.
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: PaneMetrics.step) {
+                // Every control in this row is 44 points tall and none of them
+                // LOOKS 44 points tall — the glyph and the capsules keep the
+                // size they had, and the band around each is what a thumb
+                // actually gets. Before this the row was a 22-point strip of
+                // targets, which is half the floor.
+                HStack(spacing: PaneMetrics.step) {
                     PhotosPicker(selection: $photoPickerItem, matching: .images) {
                         Image(systemName: "photo.badge.plus")
                             .font(.system(size: 15))
+                            .frame(
+                                minWidth: PaneMetrics.chip, minHeight: PaneMetrics.target)
+                            .contentShape(.rect)
                     }
                     .onChange(of: photoPickerItem) { _, item in loadPickedPhoto(item) }
 
@@ -1419,19 +1582,23 @@ private struct AgentComposer: View {
                 // what actually reaches them.
                 .tint(.secondary)
 
-                HStack(alignment: .bottom, spacing: 8) {
+                HStack(alignment: .bottom, spacing: PaneMetrics.step) {
                     fieldWithPlaceholder
 
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 27))
                             .symbolRenderingMode(.hierarchical)
+                            // The glyph stays 27; the target is 44. Send is the
+                            // control this screen exists to press.
+                            .frame(width: PaneMetrics.target, height: PaneMetrics.target)
+                            .contentShape(.circle)
                     }
                     .disabled(!canSend)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
+            .padding(.horizontal, PaneMetrics.edge)
+            .padding(.vertical, PaneMetrics.card)
         }
         // Taps land ON the card, not through it.
         //
@@ -1453,9 +1620,10 @@ private struct AgentComposer: View {
                 .contentShape(Rectangle())
                 .onTapGesture {}
         )
+        // Radius 22, and no horizontal inset here: `composerStack` hoisted it,
+        // so this card and everything stacked above it share one left edge.
         .modifier(GlassSurface())
-        .padding(.horizontal, 10)
-        .padding(.bottom, 8)
+        .padding(.bottom, PaneMetrics.step)
         .onChange(of: text) { _, _ in scheduleMentionSearch() }
         .onChange(of: cursor) { _, _ in scheduleMentionSearch() }
     }
@@ -1467,9 +1635,17 @@ private struct AgentComposer: View {
         // down a box that was itself too tall, which read as a text field that
         // had lost its text rather than one waiting for some.
         ZStack(alignment: .topLeading) {
+            // `.secondary`, not `.tertiary`. A placeholder is the field's
+            // label until you type — the only thing saying which agent this
+            // message goes to — and tertiary on glass is a third level of
+            // grey over a surface that is already sampling whatever scrolled
+            // under it.
             if text.isEmpty {
                 Text("Message \(harness)")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                    // 2 is `ComposerTextView`'s own `textContainerInset`, so
+                    // the placeholder sits exactly where the first typed
+                    // character will land rather than a point above it.
                     .padding(.top, 2)
             }
             ComposerTextView(text: $text, cursor: $cursor, measuredHeight: $fieldHeight)
@@ -1518,13 +1694,19 @@ private struct AgentComposer: View {
             // A bordered chip rather than plain tinted text, which read as a
             // link — something that navigates — rather than a control that
             // changes what the next message costs.
+            //
+            // A fixed 26-point capsule rather than padding around a caption:
+            // this chip and the overflow beside it were sized by two different
+            // fonts plus two different paddings and came out two points apart.
             Text(option.options.first { $0.id == option.currentValue }?.name ?? option.name)
                 .font(.caption)
                 .lineLimit(1)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 3)
+                .padding(.horizontal, PaneMetrics.step)
+                .frame(height: PaneMetrics.chip)
                 .background(Capsule().fill(.quaternary))
+                .frame(minHeight: PaneMetrics.target)
+                .contentShape(.capsule)
         }
     }
 
@@ -1558,9 +1740,11 @@ private struct AgentComposer: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, PaneMetrics.step)
+                    .frame(height: PaneMetrics.chip)
                     .background(Capsule().fill(.quaternary))
+                    .frame(minHeight: PaneMetrics.target)
+                    .contentShape(.capsule)
             }
         } else if availableModes.count > 1 {
             // An older daemon that only reports modes still gets a picker.
@@ -1580,9 +1764,11 @@ private struct AgentComposer: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, PaneMetrics.step)
+                    .frame(height: PaneMetrics.chip)
                     .background(Capsule().fill(.quaternary))
+                    .frame(minHeight: PaneMetrics.target)
+                    .contentShape(.capsule)
             }
         }
     }
@@ -1676,9 +1862,9 @@ private struct AgentComposer: View {
     // protocol grew the block.
 
     private var attachmentStrip: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: PaneMetrics.tight) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                HStack(spacing: PaneMetrics.step) {
                     ForEach(attachments) { attachment in
                         ZStack(alignment: .topTrailing) {
                             Image(uiImage: attachment.image)
@@ -1697,8 +1883,8 @@ private struct AgentComposer: View {
                         }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.top, 6)
+                .padding(.horizontal, PaneMetrics.card)
+                .padding(.top, PaneMetrics.step)
             }
         }
     }
@@ -1787,12 +1973,12 @@ private struct SuggestionList: View {
                     Button {
                         onChoose(item.name)
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: PaneMetrics.step) {
                             Image(systemName: icon)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .frame(width: 14)
-                            VStack(alignment: .leading, spacing: 1) {
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(item.name)
                                     .font(.footnote.monospaced())
                                 // What it does. The adapter has always sent
@@ -1808,12 +1994,14 @@ private struct SuggestionList: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        .frame(
+                            maxWidth: .infinity, minHeight: PaneMetrics.target,
+                            alignment: .leading)
+                        .padding(.horizontal, PaneMetrics.card)
+                        .padding(.vertical, PaneMetrics.step)
                     }
                     .buttonStyle(.plain)
-                    Divider().padding(.leading, 12)
+                    Divider().padding(.leading, PaneMetrics.card)
                 }
             }
         }
@@ -1958,8 +2146,96 @@ enum KeyboardDismissal {
     }
 }
 
+/// The steps this screen's layout is allowed to take.
+///
+/// Written down because it had stopped being a scale. These two files held 3,
+/// 4, 5, 6, 7, 8, 9, 10, 11, 12 and 14 as gaps and insets, in a tree that
+/// argues for every other number it uses — and with eleven values in play
+/// nothing is a step above anything, it is just the number that looked right
+/// the day the view was written. Four values, and the reason each exists.
+///
+/// The two surface constants are the phone's, not this screen's:
+/// `TerminalTabStrip` and `TerminalKeyRow` already draw at 22 and 10, and a
+/// composer floating two points inside a tab strip with corners curving at
+/// half the rate is what made three surfaces on one screen read as three
+/// different objects.
+enum PaneMetrics {
+    /// Inside one control — a glyph and the word next to it.
+    static let tight: CGFloat = 4
+    /// Between two things in one group. The default; reach for another only
+    /// with a reason.
+    static let step: CGFloat = 8
+    /// A transcript card's inner edge, and the gap between cards.
+    static let card: CGFloat = 12
+    /// A radius-22 surface's inner edge. Larger than a card's because the
+    /// corner is: text run to 12 points of a 22-point curve reads as text
+    /// falling out of the rounding.
+    static let edge: CGFloat = 16
+
+    /// Every floating surface's corner, and the inset it sits at — the tab
+    /// strip's pair and the terminal key row's, shipped there first.
+    ///
+    /// The inset is deliberately not a step on the scale above. It is where
+    /// this platform's floating bars sit, and matching the strip 44 points
+    /// below the composer matters more than matching the padding inside it.
+    static let surfaceRadius: CGFloat = 22
+    static let surfaceInset: CGFloat = 10
+
+    /// The smallest a thing you tap is allowed to be, which is the
+    /// guideline's floor and not a preference.
+    ///
+    /// Almost nothing on this screen cleared it: the approve row was 28, the
+    /// composer's chips 22, the queue's actions 16. The pattern throughout is
+    /// the one the tab strip shipped — the visible control keeps the size it
+    /// had, a 44-point frame goes around it, and a `contentShape` makes the
+    /// band between the two live rather than merely occupied.
+    static let target: CGFloat = 44
+
+    /// The visible height of a composer chip, under a 44-point target.
+    ///
+    /// One number for both kinds of chip. The selectors were 3 points of
+    /// vertical padding on `.caption` and the overflow was 4 points on a
+    /// 15-point glyph, so two capsules sitting side by side in one row ended
+    /// up two points different in height — close enough to look like a
+    /// mistake and not close enough to look like anything else.
+    static let chip: CGFloat = 26
+}
+
+/// The fills the transcript draws on, as one scale.
+///
+/// There were eight hand-mixed opacities across these files — 0.035, 0.04,
+/// 0.07 twice, 0.08, 0.10, 0.12, 0.15 — beside `.quaternary` used semantically
+/// a few hundred lines away, so half the file was on the platform's hierarchy
+/// and half was on numbers. Worse than untidy: the user's bubble and every
+/// tool card were the SAME 0.07, directly under a comment saying the bubble
+/// has to read as a different speaker at a glance.
+///
+/// The neutral tiers are the platform's, so they follow the appearance the
+/// theme puts this pane in. The tinted ones are not on that hierarchy — they
+/// are a color that means something — so they stay explicit, and are named
+/// here rather than mixed again at each call site.
+enum TranscriptFill {
+    /// The reader's own words. One full step above anything the agent draws,
+    /// which is what "a different speaker" has to be to survive a glance.
+    static let speaker = AnyShapeStyle(.tertiary)
+    /// A container around the agent's output: a tool call, a subagent still
+    /// working, a gap the transcript is reporting.
+    static let container = AnyShapeStyle(.quaternary)
+    /// A container that has finished, and a ground drawn inside another
+    /// ground — the diff's own bed.
+    static let recessed = AnyShapeStyle(.quinary)
+
+    /// An agent is waiting on you. The one thing amber means in this app.
+    static let attention = AnyShapeStyle(Color.orange.opacity(0.08))
+    static let attentionEdge = AnyShapeStyle(Color.orange.opacity(0.35))
+    /// The stronger edge, for the request drawn ON the call it is about.
+    static let attentionRing = AnyShapeStyle(Color.orange.opacity(0.45))
+    /// Something went wrong. Red, because amber is spoken for.
+    static let alarm = AnyShapeStyle(Color.red.opacity(0.12))
+}
+
 struct GlassSurface: ViewModifier {
-    var radius: CGFloat = 24
+    var radius: CGFloat = PaneMetrics.surfaceRadius
 
     func body(content: Content) -> some View {
         content.glassEffect(.regular, in: .rect(cornerRadius: radius))
@@ -1978,19 +2254,25 @@ private struct ThoughtRow: View {
     @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: PaneMetrics.step) {
             Button {
                 withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) { expanded.toggle() }
             } label: {
-                HStack(spacing: 5) {
+                // A 16-point caption was the entire target for folding a
+                // thought open. The words stay a caption; the band around them
+                // is 44 and runs the width of the row, because there is
+                // nothing else on this line to hit by accident.
+                HStack(spacing: PaneMetrics.step) {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .rotationEffect(.degrees(showing ? 90 : 0))
                     Text(isLive ? "Thinking…" : "Thought")
                         .font(.caption.weight(.medium))
+                    Spacer(minLength: 0)
                 }
                 .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
+                .frame(minHeight: PaneMetrics.target)
+                .contentShape(.rect)
             }
             .buttonStyle(.plain)
 
@@ -2022,22 +2304,41 @@ private struct ThoughtRow: View {
 /// `TimelineView` and a start captured on appear, because a `repeatForever`
 /// animation restarted from zero by every streamed event never visibly moves,
 /// and phase taken from the wall clock starts the sweep mid-word.
+/// Reduce Motion turns the sweep off, and `TimelineView(.animation)` with it.
+///
+/// Required rather than polite: this is a repeating decorative animation with
+/// no information in it — the row says "Working…" whether it shimmers or not —
+/// which is exactly what the setting exists to stop. It also runs at DISPLAY
+/// RATE for the entire length of a turn, so on a phone the check doubles as
+/// the escape hatch from 120 layout passes a second while an agent thinks.
 private struct WorkingRow: View {
     private static let period: TimeInterval = 1.1
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var start: Date?
 
+    @ViewBuilder
     var body: some View {
-        TimelineView(.animation) { context in
+        if reduceMotion {
+            // Secondary rather than the gradient's midpoint: the sweep was the
+            // only thing marking this row as unfinished, so without it the row
+            // has to say so by being quieter than the words above it.
             Text("Working…")
                 .font(.callout)
-                .foregroundStyle(
-                    LinearGradient(
-                        stops: stops(at: phase(now: context.date)),
-                        startPoint: .leading,
-                        endPoint: .trailing))
+                .foregroundStyle(.secondary)
+        } else {
+            TimelineView(.animation) { context in
+                Text("Working…")
+                    .font(.callout)
+                    .foregroundStyle(
+                        LinearGradient(
+                            stops: stops(at: phase(now: context.date)),
+                            startPoint: .leading,
+                            endPoint: .trailing))
+            }
+            .onAppear { if start == nil { start = Date() } }
         }
-        .onAppear { if start == nil { start = Date() } }
     }
 
     private func phase(now: Date) -> Double {

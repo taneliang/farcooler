@@ -217,12 +217,12 @@ struct ImagePasteChips: View {
     @ObservedObject var queue: ImagePasteQueue
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: PaneMetrics.step) {
             ForEach(queue.jobs) { job in
                 ImagePasteChip(job: job) { queue.dismiss(job) }
             }
         }
-        .padding(.bottom, 12)
+        .padding(.bottom, PaneMetrics.card)
         .animation(.easeOut(duration: 0.15), value: queue.jobs.count)
     }
 }
@@ -232,19 +232,25 @@ private struct ImagePasteChip: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: PaneMetrics.step) {
             if let thumbnail = job.thumbnail {
                 Image(uiImage: thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 26, height: 26)
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .frame(width: PaneMetrics.chip, height: PaneMetrics.chip)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
             if let failure = job.failure {
                 Text(failure).font(.footnote).lineLimit(2)
-                Button("Retry") { job.retry?() }.font(.footnote.weight(.semibold))
-                Button("Cancel", action: onDismiss).font(.footnote)
+                Button("Retry") { job.retry?() }
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: PaneMetrics.target)
+                    .contentShape(.rect)
+                Button("Cancel", action: onDismiss)
+                    .font(.footnote)
+                    .frame(minHeight: PaneMetrics.target)
+                    .contentShape(.rect)
             } else {
                 Text("Sending\u{2026}").font(.footnote)
                 ProgressView(value: job.fraction)
@@ -252,9 +258,17 @@ private struct ImagePasteChip: View {
                     .controlSize(.small)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .modifier(GlassSurface(radius: 16))
-        .padding(.horizontal, 12)
+        // One height whether it is sending or has failed, so a chip does not
+        // change size under a thumb the moment the upload gives up. The
+        // buttons set it; the vertical padding is only the gap to the glass.
+        .frame(minHeight: PaneMetrics.target)
+        .padding(.horizontal, PaneMetrics.edge)
+        .padding(.vertical, PaneMetrics.tight)
+        // Radius 22 and inset 10 — the tab strip's pair, the terminal key
+        // row's, and the composer's. This chip floats over the same pane those
+        // do and was drawing at 16 and 12, so it sat two points inside a bar
+        // whose corners curved half again as hard.
+        .modifier(GlassSurface())
+        .padding(.horizontal, PaneMetrics.surfaceInset)
     }
 }
