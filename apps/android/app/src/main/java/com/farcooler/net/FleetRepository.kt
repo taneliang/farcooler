@@ -73,6 +73,15 @@ data class FleetEntry(
 class FleetRepository(
     private val hosts: RunnerStore,
     private val settings: Settings,
+    /**
+     * Handed to every [Connection] for its review stores.
+     *
+     * Threaded through rather than reached for, because this object is
+     * deliberately given the stores it talks to and never the framework — see
+     * the note on `AppModel.reachability`, which is the one thing that could not
+     * be.
+     */
+    private val review: com.farcooler.data.ReviewStorage,
     private val scope: CoroutineScope,
 ) {
     private val connections = mutableMapOf<String, Connection>()
@@ -130,7 +139,7 @@ class FleetRepository(
 
         for (host in wanted) {
             if (connections.containsKey(host.id)) continue
-            val connection = Connection(host, scope)
+            val connection = Connection(host, review, scope)
             connection.onFleet = { fleet -> onFleet?.invoke(host, fleet) }
             connections[host.id] = connection
             starts[host.id] = scope.launch { connection.start() }

@@ -6,7 +6,12 @@ import com.farcooler.data.Identity
 import com.farcooler.data.Theme
 import com.farcooler.model.AdapterInfo
 import com.farcooler.model.AdapterTestOutcome
+import com.farcooler.model.ChangeSet
+import com.farcooler.model.ChangedFile
+import com.farcooler.model.CommitFilesReply
 import com.farcooler.model.DaemonBuild
+import com.farcooler.model.DiffLayout
+import com.farcooler.model.FileDiffReply
 import com.farcooler.model.Fleet
 import com.farcooler.model.InboxReply
 import com.farcooler.model.InboxRow
@@ -47,7 +52,19 @@ import kotlinx.serialization.json.jsonPrimitive
  * has somewhere natural to live instead of being a flag threaded through shared
  * code.
  */
-class Connection(val host: Runner, private val scope: CoroutineScope) {
+class Connection(
+    val host: Runner,
+    /**
+     * Where a review's bookmark and its unsent notes are written down.
+     *
+     * Given rather than reached for, the way [com.farcooler.data.RunnerStore]
+     * and [com.farcooler.data.Settings] are given to [FleetRepository]: this
+     * object is handed the stores it talks to and never the framework, so it
+     * stays constructible without a `Context`.
+     */
+    private val review: com.farcooler.data.ReviewStorage,
+    private val scope: CoroutineScope,
+) : ChangesSource {
 
     sealed interface Phase {
         data object Connecting : Phase
@@ -981,6 +998,109 @@ class Connection(val host: Runner, private val scope: CoroutineScope) {
         }
         refresh()
     }
+
+    // ---- changes ----
+    //
+    // The review surface, reachable from a phone at last. **Every one of these
+    // has been routed in Rust since the review surface landed and never called
+    // from Kotlin**: `crates/daemon/src/rpc.rs` dispatches the family,
+    // `Session::change_set` and its neighbours shape the answers, and
+    // `crates/client/src/ffi.rs` exposes all six under `changes.*`. The whole
+    // feature was a desktop feature by accident rather than by design — the Mac
+    // gets it by shelling out to `farcooler changes … --json`, and a phone has
+    // no CLI to shell out to.
+    //
+    // These THROW where every other read on this object swallows. A count that
+    // decorates a row can go quiet for a poll; a diff cannot, because "this
+    // call failed" and "this branch changed nothing" are the two answers a
+    // review screen must never confuse. See [ChangesSource].
+
+    /** What this worktree changed, against its base. */
+    override suspend fun changeSet(workspace: String, fresh: Boolean): ChangeSet {
+        val data = core.call("changes.change_set", args("workspace" to workspace, "fresh" to fresh))
+        return json.decodeFromJsonElement(ChangeSet.serializer(), data)
+    }
+
+    /**
+     * One file's patch, in the comparison [scope] names.
+     *
+     * `context` is on the wire and is deliberately not sent. Zero means git's
+     * own three lines, which is what a first read wants; the Mac asks for more
+     * to swallow one gap at a time — see its `ChangesStore.open(gap:of:in:)` —
+     * and this app folds the gaps locally instead, in [DiffLayout], so opening
+     * one costs nothing and cannot fail. Recorded because the argument exists
+     * and somebody will wonder why nothing passes it.
+     */
+    override suspend fun fileDiff(
+        workspace: String,
+        path: String,
+        scope: String,
+    ): FileDiffReply {
+        val data = core.call(
+            "changes.file_diff",
+            args("workspace" to workspace, "path" to path, "scope" to scope),
+        )
+        return json.decodeFromJsonElement(FileDiffReply.serializer(), data)
+    }
+
+    /** The files one commit touched, against its first parent. */
+    override suspend fun commitFiles(workspace: String, sha: String): List<ChangedFile> {
+        val data = core.call("changes.commit_files", args("workspace" to workspace, "sha" to sha))
+        return json.decodeFromJsonElement(CommitFilesReply.serializer(), data).files
+    }
+
+    /**
+     * Pin what this worktree is compared against, and get the new change set.
+     *
+     * The affordance that exists because a GUESSED base produces a wrong diff
+     * that looks exactly like a right one.
+     */
+    override suspend fun setBase(workspace: String, baseRef: String): ChangeSet {
+        val data = core.call("changes.set_base", args("workspace" to workspace, "baseRef" to baseRef))
+        return json.decodeFromJsonElement(ChangeSet.serializer(), data)
+    }
+
+    /** Mark a worktree as read, which is what clears its badge everywhere. */
+    override suspend fun markRead(workspace: String) {
+        core.call("changes.mark_read", args("workspace" to workspace))
+    }
+
+    /**
+     * Re-read the diff counts now, rather than on the next due poll.
+     *
+     * The one thing marking a worktree read changes. Public only so
+     * [ChangesStore.markRead] can ask; the poll path still goes through
+     * [loadInboxIfDue].
+     */
+    override suspend fun refreshCounts() {
+        loadInbox()
+    }
+
+    /**
+     * Hand one message to one agent pane.
+     *
+     * The same call [AgentStream.send] makes, so a batch of review notes arrives
+     * in the transcript exactly as a typed message does — there is no separate
+     * "review comment" channel to keep in step. Unlike that one it reports:
+     * `AgentStream.send` wraps this in `attempt` and drops the result on the
+     * floor, which is the defect the parity inventory logged as F-6, and an
+     * outbox that lost somebody's notes silently would be the worst place to
+     * repeat it.
+     */
+    override suspend fun agentPrompt(terminal: String, text: String) {
+        core.call("terminal.agent_prompt", args("terminal" to terminal, "text" to text))
+    }
+
+    /**
+     * The review stores for this runner's worktrees, one each, kept alive past
+     * the screens that show them.
+     *
+     * Held here because a [Connection] is one runner: that makes the host half
+     * of a store's identity structural rather than a key somebody has to
+     * remember to include. See [ChangesStores], and `df87410` for the collision
+     * this shape forecloses.
+     */
+    val changes = ChangesStores(host.id, this, review, scope)
 
     fun terminal(id: String): Terminal? =
         _fleet.value.workspaces.flatMap { it.terminals }.firstOrNull { it.id == id }

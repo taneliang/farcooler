@@ -12,6 +12,7 @@ import com.farcooler.data.Identity
 import com.farcooler.data.Settings
 import com.farcooler.model.Terminal
 import com.farcooler.net.Connection
+import com.farcooler.data.PreferenceReviewStorage
 import com.farcooler.net.FleetRepository
 import com.farcooler.net.Reachability
 import com.farcooler.net.TerminalRef
@@ -54,7 +55,16 @@ class AppModel(
     val account = Account(application)
     val push = PushRegistration(application, account)
 
-    val fleet = FleetRepository(hosts, settings, viewModelScope)
+    /**
+     * Where a review's bookmark and its unsent notes are written down.
+     *
+     * Here rather than inside [FleetRepository] for the same reason
+     * [reachability] is here: it needs a `Context`, and the repository is given
+     * the stores it talks to rather than the framework.
+     */
+    private val reviewStorage = PreferenceReviewStorage(application)
+
+    val fleet = FleetRepository(hosts, settings, reviewStorage, viewModelScope)
 
     /**
      * The network coming back, which no backoff timer can predict.
