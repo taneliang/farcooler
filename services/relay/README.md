@@ -93,14 +93,28 @@ existed must have been.
 The relay URL is a client setting. This code is in the repo and the secrets are
 in `wrangler` bindings, so running your own is a deploy rather than a fork.
 
-## What is not built yet
+## The daemon side, and the one dependency it cost
 
-The daemon side. It needs to POST to `/v1/notify` with its bearer token, and
-this workspace has no HTTPS client — the dependency list is deliberately small
-and every network path so far has been ssh, which is a subprocess. Adding
-`reqwest`/`rustls` is a real decision rather than an oversight, and it is one
-line of `Cargo.toml` once made.
+This section used to be called "what is not built yet", and the thing it said
+was missing was the daemon end of all of the above: it needed to POST to
+`/v1/notify` with its bearer token, the workspace had no HTTPS client, and
+adding `reqwest`/`rustls` was a real decision rather than an oversight — one
+line of `Cargo.toml` once made. That was true for the twenty minutes between
+`a7cf97d`, which wrote this file, and `529fb26`, which made the decision. It has
+been false ever since, and survived four later edits to this file.
 
-The alternative is shelling out to `curl`, which needs no dependency and is
-worse: no timeout control worth the name, no connection reuse across a night of
-notifications, and an error surface that is a string.
+The line is `Cargo.toml:54`. `rustls` rather than the platform's TLS, so a Linux
+runner does not need OpenSSL headers to build the thing that watches its agents,
+and `default-features = false` because nothing else `reqwest` ships is wanted on
+this path. `crates/daemon/src/push.rs` posts to `/v1/notify` and
+`/v1/notify/retire` with `bearer_auth` and the relay from the pairing file;
+`watch.rs` calls the first when an agent starts needing its owner and the second
+when a run stops being behind one.
+
+Still true, and the reason to record all this rather than delete it: this is the
+workspace's ONLY HTTPS client, and every other network path here is ssh, which
+is a subprocess. The alternative considered was shelling out to `curl`, which
+needs no dependency and is worse — no timeout control worth the name, no
+connection reuse across a night of notifications, and an error surface that is a
+string. That argument is the reason not to reach for a subprocess the next time
+something here wants to make a request.
