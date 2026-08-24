@@ -1,5 +1,6 @@
 package com.farcooler.net
 
+import android.os.SystemClock
 import android.util.Base64
 import com.farcooler.core.ClientCore
 import com.farcooler.core.DisconnectedException
@@ -47,8 +48,14 @@ class AgentStream(
     val revision: StateFlow<Long> = _revision.asStateFlow()
 
     /**
-     * Why this pane is not showing a conversation: a sentence this app wrote,
-     * and — only where it has no account of its own — the core's own words.
+     * What this pane can honestly say about itself, and for how long it has
+     * been true. See [AgentPhase].
+     *
+     * This was a nullable [Trouble] and nothing else, so the screen had one bit
+     * to draw four different situations with — and drew a red failure headline
+     * over three of them that were a pane still trying. The sentence and the
+     * core's own words did not go anywhere: they ride [AgentPhase.Failing],
+     * which is the only state that has any.
      *
      * A [Trouble] rather than one string, because one string is how the core's
      * words came to be drawn as the app's. Two of the three assignments below
@@ -56,8 +63,10 @@ class AgentStream(
      * the same `Text` under the same headline as the others, so there was no
      * way to read it as anything but Far Cooler talking.
      */
-    private val _connectionError = MutableStateFlow<Trouble?>(null)
-    val connectionError: StateFlow<Trouble?> = _connectionError.asStateFlow()
+    private val _phase = MutableStateFlow<AgentPhase>(AgentPhase.Opening)
+    val phase: StateFlow<AgentPhase> = _phase.asStateFlow()
+
+    private val phases = AgentPhases()
 
     private var pollTask: Job? = null
 
@@ -68,6 +77,10 @@ class AgentStream(
 
     fun start() {
         pollTask?.cancel()
+        // Nothing was being waited on while nothing was being asked. See
+        // [AgentPhases.resumed] for why a phone that stops polling in a pocket
+        // needs this and iOS does not.
+        phases.resumed(SystemClock.elapsedRealtime())
         pollTask = scope.launch {
             while (isActive) {
                 pump()
@@ -114,9 +127,16 @@ class AgentStream(
             // from the outside like a conversation nobody had started yet. It is
             // not: it is a pane that has no shim behind it, and the two want
             // different words.
+            //
+            // A PHASE, not an error. This used to write a sentence into
+            // [phase]'s predecessor, which put "Could not load this session"
+            // over a pane whose shim was simply still coming up — the daemon
+            // says an empty batch is the honest answer for one that has not run
+            // an agent yet, and this is the client agreeing with it instead of
+            // contradicting it. What that looks like is [com.farcooler.ui]'s
+            // problem, and it changes with how long it has lasted.
             if (batch.epoch == 0L && batch.events.isEmpty() && transcript.rows.isEmpty()) {
-                _connectionError.value = Trouble(
-                    "No agent session on pane ${terminal.take(8)} yet. It may still be starting.")
+                answered()
                 return
             }
 
@@ -129,7 +149,7 @@ class AgentStream(
                 epoch = batch.epoch
                 transcript.resetForNewEpoch()
             } else if (batch.events.isEmpty()) {
-                _connectionError.value = null
+                answered()
                 return
             }
 
@@ -140,7 +160,7 @@ class AgentStream(
                 Sequenced(frame.seq, AgentEvent.decode(frame.payloadJson))
             }
             transcript.apply(decoded)
-            _connectionError.value = null
+            answered()
         } catch (e: Exception) {
             // Leaving this pane cancels the poll. That is not something to tell
             // the reader about, and the banner would outlive the screen it was
@@ -150,7 +170,7 @@ class AgentStream(
             // solve: [Connection] is already reconnecting, so this says so and
             // then goes quiet, which is what clearing on the next good batch
             // does.
-            _connectionError.value = if (e is DisconnectedException) {
+            val trouble = if (e is DisconnectedException) {
                 Trouble("The connection to this runner dropped. Reconnecting…")
             } else {
                 // The one arm with nothing written about it, so the sentence
@@ -162,9 +182,26 @@ class AgentStream(
                 // `Enrollment.note(about:outcome:)` in the Mac app.
                 Trouble("The request that reads it didn’t finish.", e.message)
             }
+            _phase.value = phases.read(Poll.Failed(trouble), SystemClock.elapsedRealtime())
         } finally {
             _revision.value = transcript.revision
         }
+    }
+
+    /**
+     * The daemon answered. Whether that answer holds a session is ITS question
+     * to have answered, and the epoch is where it did.
+     *
+     * One rule in one place, rather than a phase decided separately at each of
+     * the three points a poll can succeed. It also closes a case the two-armed
+     * version could not reach a right answer for: a pane whose shim goes away
+     * mid-conversation replies epoch 0, which resets the transcript and would
+     * otherwise have left the screen inviting a message into a session that had
+     * just ended.
+     */
+    private fun answered() {
+        val poll = if (epoch == 0L) Poll.NoSession else Poll.Served
+        _phase.value = phases.read(poll, SystemClock.elapsedRealtime())
     }
 
     fun send(text: String, images: List<Attachment> = emptyList()) {

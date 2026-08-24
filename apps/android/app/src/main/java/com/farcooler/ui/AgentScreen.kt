@@ -29,6 +29,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -53,6 +57,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
@@ -66,9 +72,11 @@ import com.farcooler.model.ComposerToken
 import com.farcooler.model.ConfigOption
 import com.farcooler.model.QueuedPrompt
 import com.farcooler.model.activeToken
+import com.farcooler.net.AgentPhase
 import com.farcooler.net.AgentStream
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
+import com.farcooler.net.Waited
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.contentOrNull
@@ -122,7 +130,7 @@ fun AgentScreen(
 
     // A class is not a value, so this is what makes the conversation redraw.
     val revision by stream.revision.collectAsStateWithLifecycle()
-    val error by stream.connectionError.collectAsStateWithLifecycle()
+    val phase by stream.phase.collectAsStateWithLifecycle()
     val transcript = stream.transcript
 
     val terminal = model.fleet.terminal(ref)
@@ -154,54 +162,20 @@ fun AgentScreen(
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             if (transcript.rows.isEmpty()) {
-                // The error goes above the empty state, not inside the
-                // transcript. On iOS the banner lived in the scroll view, which
-                // only exists once there are rows — so a session that never
-                // loaded showed "Say something to begin" with the reason it was
-                // empty hidden behind the very condition that made it empty.
-                Column(
-                    Modifier.fillMaxSize().padding(24.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    val trouble = error
-                    if (trouble != null) {
-                        Text(
-                            "Could not load this session",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            trouble.sentence,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
-                        // The core's own words, below a sentence rather than
-                        // standing in for one. Under this headline and in this
-                        // face they used to read as Far Cooler's account of the
-                        // runner; they are not, and for a runner nobody can
-                        // reach they are also the only account anyone gets, so
-                        // they stay.
-                        trouble.transcript?.let {
-                            Spacer(Modifier.height(10.dp))
-                            DetailBox(it)
-                        }
-                    } else {
-                        Text(
-                            "Say something to begin.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                // Whatever this pane is waiting on goes above the empty state,
+                // not inside the transcript. On iOS the banner lived in the
+                // scroll view, which only exists once there are rows — so a
+                // session that never loaded showed "Say something to begin"
+                // with the reason it was empty hidden behind the very condition
+                // that made it empty.
+                AgentEmpty(phase)
             } else {
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    error?.let { trouble ->
+                    (phase as? AgentPhase.Failing)?.trouble?.let { trouble ->
                         item {
                             // A stale error banner rather than a blanked
                             // screen: a failed poll is not a disconnection, so
@@ -277,6 +251,8 @@ fun AgentScreen(
                 availableCommands = transcript.availableCommands,
                 contextFraction = transcript.contextFraction,
                 harness = harness,
+                // Null until a session has said which — see [Transcript.backend].
+                backend = transcript.backend,
                 isWorking = isWorking,
                 workspaceId = ref.workspaceId,
                 terminalId = ref.terminalId,
@@ -299,6 +275,203 @@ private fun attached(
     val block = (row.kind as? com.farcooler.model.TranscriptRow.Kind.Subagent)?.block
         ?: return false
     return block.children.any { names(pending, it) }
+}
+
+/**
+ * What an agent pane with nothing in it may claim, as words and one mark.
+ *
+ * Pure, and separated from the drawing for the reason `a8b13cb` separated the
+ * settings copy: **there is no emulator in this program**, so a screen that can
+ * only be proved by looking at it cannot be proved at all. Every state below
+ * used to be reachable only by owning a runner whose shim was slow or whose
+ * link was down — which is most of why they were all drawn the same and nobody
+ * could see that they were.
+ */
+internal data class AgentEmptyState(
+    val mark: Mark,
+    val title: String,
+    val message: String? = null,
+    /** What the runner itself said, if it said anything. Never rewritten. */
+    val transcript: String? = null,
+) {
+    enum class Mark {
+        /** Still working on it, and no claim either way. */
+        SPINNER,
+
+        /** There is no agent here. Quiet, and NEVER red — see [Waited.TOO_LONG]. */
+        CHAT,
+
+        /** Still trying, past the point where saying nothing is fair. */
+        RETRY,
+
+        /**
+         * A failure, and drawn like one.
+         *
+         * Red rather than amber. A session that would not load is a failure;
+         * amber in this app means an agent is waiting on you, and a screen that
+         * cannot show you an agent at all is not that.
+         */
+        ALARM,
+
+        /**
+         * No mark and no headline — one quiet sentence, which is all this state
+         * has ever wanted to be.
+         */
+        NONE,
+    }
+}
+
+/**
+ * The four honest states, and the two that are still trying change with how
+ * long they have been trying.
+ *
+ * This screen asked one question — is there a connection error — and had two
+ * answers, so it went "Say something to begin." → red failure → transcript, and
+ * was wrong at both of the first two. Before the first poll came back it invited
+ * a message into a session it knew nothing about, which would not have worked:
+ * `AgentSupervisor::send` in `crates/daemon/src/agent_supervisor.rs` looks the
+ * terminal up in its writer map and drops the message when no shim is
+ * registered. A round trip later it called a shim that was still coming up a
+ * failure, and kept calling it one for as long as the shim took.
+ *
+ * [AgentPhase.Live] with no rows is the one state the invitation was ever true
+ * for.
+ *
+ * The words are `40a6cd1`'s, deliberately: the fact being reported is the same
+ * fact on both phones, and this repo has spent several commits this week undoing
+ * two apps disagreeing about one. What is NOT shared is the promise neither of
+ * them makes — no state here tells anybody to send something to start an agent,
+ * because that is the advice that does not work. What starts one is the pane
+ * going into agent mode.
+ */
+internal fun agentEmptyState(phase: AgentPhase): AgentEmptyState = when (phase) {
+    // One round trip, usually. Says nothing about whether a session exists,
+    // because nothing knows yet.
+    is AgentPhase.Opening ->
+        AgentEmptyState(AgentEmptyState.Mark.SPINNER, "Loading this session…")
+
+    is AgentPhase.Starting ->
+        if (phase.waited == Waited.A_MOMENT) {
+            // The Mac's words, not a second set: `AgentComposer.swift` draws
+            // "Starting the agent…" for a chat with no rows and no config
+            // options, which is this exact fact.
+            AgentEmptyState(AgentEmptyState.Mark.SPINNER, "Starting the agent…")
+        } else {
+            // Still true, still not a failure, and no longer spinning — a
+            // spinner that never ends is its own bug.
+            AgentEmptyState(
+                AgentEmptyState.Mark.CHAT,
+                "No agent on this pane yet",
+                "This pane hasn’t started one. The conversation appears here as soon as it does.",
+            )
+        }
+
+    is AgentPhase.Live ->
+        AgentEmptyState(AgentEmptyState.Mark.NONE, "Say something to begin.")
+
+    is AgentPhase.Failing -> when (phase.waited) {
+        // Where the alarm finally belongs, with the runner's own output
+        // unchanged beneath it. Those words are the whole diagnosis of a runner
+        // nobody can reach, so they stay — under a sentence rather than
+        // standing in for one, which is what [DetailBox] is for.
+        Waited.TOO_LONG -> AgentEmptyState(
+            AgentEmptyState.Mark.ALARM,
+            "Could not load this session",
+            phase.trouble.sentence,
+            phase.trouble.transcript,
+        )
+
+        Waited.A_WHILE -> AgentEmptyState(
+            AgentEmptyState.Mark.RETRY, "Still trying", phase.trouble.sentence)
+
+        // A poll that did not come back is not news yet — there is another one
+        // 700 ms behind it. The sentence goes under the spinner so the screen is
+        // not silent about it either.
+        Waited.A_MOMENT -> AgentEmptyState(
+            AgentEmptyState.Mark.SPINNER, "Loading this session…", phase.trouble.sentence)
+    }
+}
+
+/**
+ * One full-screen state, composed the way this app composes them.
+ *
+ * The proportions are [TerminalPane]'s `Status`, which is where every
+ * full-screen state in this app has been settled: a mark, 12, a `titleMedium`
+ * headline, 6, a `bodyMedium` sentence, and the host's own words in a box
+ * below. Not literally shared with it, because that one paints itself onto the
+ * terminal's own black and sets its text in white — a chat pane sits on the
+ * theme's surface, and the copy would have been the only part worth reusing.
+ */
+@Composable
+private fun AgentEmpty(phase: AgentPhase) {
+    val state = agentEmptyState(phase)
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        when (state.mark) {
+            AgentEmptyState.Mark.NONE -> Unit
+
+            AgentEmptyState.Mark.SPINNER -> {
+                CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.height(12.dp))
+            }
+
+            else -> {
+                Icon(
+                    when (state.mark) {
+                        AgentEmptyState.Mark.CHAT -> Icons.Outlined.ChatBubbleOutline
+                        AgentEmptyState.Mark.RETRY -> Icons.Outlined.Refresh
+                        else -> Icons.Outlined.Warning
+                    },
+                    // The headline says it. A mark that repeats its own
+                    // headline into a screen reader is one more thing to listen
+                    // through before reaching the sentence that matters.
+                    contentDescription = null,
+                    tint = if (state.mark == AgentEmptyState.Mark.ALARM) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(28.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+
+        if (state.mark == AgentEmptyState.Mark.NONE) {
+            // The invitation is not a status. It is one quiet line, the way it
+            // has always been drawn here and on iOS, and giving it a headline's
+            // weight would make an empty conversation look like a problem.
+            Text(
+                state.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                state.title,
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        state.message?.let { sentence ->
+            Spacer(Modifier.height(6.dp))
+            Text(
+                sentence,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        state.transcript?.let { words ->
+            Spacer(Modifier.height(10.dp))
+            DetailBox(words)
+        }
+    }
 }
 
 /** A turn in progress, said where the work is appearing. */
@@ -411,6 +584,22 @@ private fun AgentComposer(
     availableCommands: List<AgentChoice>,
     contextFraction: Double?,
     harness: String,
+    /**
+     * Which protocol is carrying this conversation — `acp`, `claude` or
+     * `codex` — or null until a session has said which.
+     *
+     * Straight off [com.farcooler.model.Transcript.backend], which is
+     * `SessionStarted.backend` on the wire. Transcribed from the producers
+     * rather than assumed: the field is declared in
+     * `crates/agent-core/src/event.rs` as a plain `String` with
+     * `#[serde(default = "acp_backend")]` and NO `skip_serializing_if`, so it
+     * is always present going out; the three writers each pass
+     * `BackendKind::as_str()`, which is exactly `"acp"`, `"claude"` or
+     * `"codex"`. It reaches a phone verbatim — `ffi.rs` copies `payload_json`
+     * into the `payloadJson` string this app decodes and touches nothing
+     * inside it. No new field.
+     */
+    backend: String?,
     isWorking: Boolean,
     workspaceId: String,
     /** This pane, so it can pick up anything another pane has left for it. */
@@ -720,6 +909,8 @@ private fun AgentComposer(
                     }
                 }
             }
+
+            AdapterBadge(backend)
         }
 
         Row(verticalAlignment = Alignment.Bottom) {
@@ -770,6 +961,79 @@ private fun AgentComposer(
             }
         }
     }
+}
+
+/**
+ * The Mac's rule, in the Mac's words: anything that is not `acp` is a native
+ * backend.
+ *
+ * "ACP" stays capitalized — it is an acronym, Agent Client Protocol, and
+ * lowercasing it makes a proper noun look like a status word. `cb13d31`'s
+ * sentence case is about sentences and labels, not about spelling a name wrong.
+ *
+ * Null in, null out: a pane nobody has heard from names no protocol.
+ */
+internal fun adapterBadgeLabel(backend: String?): String? = when {
+    backend.isNullOrEmpty() -> null
+    backend != "acp" -> "Native"
+    else -> "ACP"
+}
+
+/** What a screen reader is told, since two words on their own explain nothing. */
+internal fun adapterBadgeDescription(backend: String?): String? = when (adapterBadgeLabel(backend)) {
+    "Native" -> "Native: driven through $backend’s own protocol, with no adapter"
+    "ACP" -> "ACP: driven through an Agent Client Protocol adapter"
+    else -> null
+}
+
+/**
+ * Which protocol is carrying this chat, at the far end of the row that says what
+ * the next message costs.
+ *
+ * HERE because this surface has no header to put it in. The Mac draws it in the
+ * pane's title bar beside the pane's name (`TileView.headerContent`) and a
+ * phone's agent pane deliberately has none — "one card, no second header, no
+ * footer" is the rule this composer already states, and it is why the mode and
+ * the attachments live in here at all. So the nearest true equivalent of
+ * "beside the name" is the composer: the placeholder directly below reads
+ * "Message Claude", and the badge above it finishes that sentence with which
+ * protocol Claude is on. It is also the one piece of chrome on screen for the
+ * whole life of this surface, including while the transcript is still empty —
+ * which is exactly when somebody asking "why is this behaving oddly" is looking.
+ *
+ * PAST THE SELECTORS AND WITHOUT A CAPSULE, because it is not a control. The
+ * chips beside it are: [SelectorChip] wears a capsule and opens a menu, and a
+ * capsule here would promise a menu that does not exist. The selector row takes
+ * `weight(1f)`, so this needs no spacer of its own — the chips give back
+ * whatever they do not use and the badge lands against the trailing edge.
+ *
+ * The COLOR is a hierarchy step rather than the Mac's accent, and that is a
+ * platform decision rather than drift. `TileView` sets Native in
+ * `Color.accentColor` over a wash of it; this pane sits on a theme-chosen
+ * ground, and `ChangesScreen`'s rule — no accent text anywhere, because how
+ * well eleven points of blue reads depends on which theme is in force — is the
+ * finding `353cd80` landed. Every other thing in this row is already a
+ * secondary label besides, so accent here would read as the one link among
+ * them. Native takes the surface's own foreground and ACP the muted one, which
+ * is the same emphasis said in a way this theme can say it.
+ */
+@Composable
+private fun AdapterBadge(backend: String?) {
+    val label = adapterBadgeLabel(backend) ?: return
+    val description = adapterBadgeDescription(backend)
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color = if (label == "Native") MaterialTheme.colorScheme.onSurface
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        // Never the thing that gets truncated: the chips beside it carry
+        // agent-chosen names of any length and already ellipsize, and this is
+        // three to six characters.
+        maxLines = 1,
+        modifier = Modifier
+            .padding(start = 8.dp)
+            .semantics { if (description != null) contentDescription = description },
+    )
 }
 
 private val INLINE_IDS = listOf("mode", "model", "effort")

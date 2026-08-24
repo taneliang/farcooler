@@ -148,9 +148,22 @@ class Transcript {
 
     /**
      * Which protocol is carrying this conversation: `acp`, `claude`, or
-     * `codex`. Defaults to `acp`, which is what a session that never said is.
+     * `codex` — or null until a session has said which.
+     *
+     * NOT defaulted to `acp` here, which is the one place that default would be
+     * a claim rather than a record. [AgentEvent.SessionStarted.backend] keeps
+     * it, correctly: a transcript written before the field existed WAS ACP,
+     * because ACP was the only backend there was. A transcript nobody has heard
+     * from yet is a different thing entirely, and a screen that reads this
+     * before a `SessionStarted` arrives would be told a protocol that nothing
+     * had named — the same shape of wrong answer [com.farcooler.net.AgentPhase]
+     * exists to end one screen earlier.
+     *
+     * Where iOS gates its badge on `AgentStream.hasSession` — a published epoch
+     * — because its transcript does default to `acp`, this needs no second
+     * fact: the transcript already knows whether anything told it.
      */
-    var backend: String = "acp"
+    var backend: String? = null
         private set
 
     /** Context-window usage, or null before the agent has reported any. */
@@ -274,6 +287,18 @@ class Transcript {
         cursor = 0
         nextRowId = 0
         breakBeforeNextMessage = false
+        // A new epoch is a NEW SESSION, and it may be running a different
+        // adapter than the one that just ended — the pane being toggled out of
+        // agent mode and back is how the harness gets changed. Carrying the old
+        // protocol forward would be a claim about a conversation that is over.
+        //
+        // A cost, recorded: the daemon's replay window is the last
+        // `TRANSCRIPT_LIMIT` (4096) events, so a conversation long enough to
+        // have pushed its own `SessionStarted` out of that window comes back
+        // with nothing that names a protocol, and the badge stays away. That is
+        // the honest answer for a client that genuinely was not told; iOS
+        // answers "ACP" there, from the default this one does not have.
+        backend = null
         // An echo names an uncertain send from THIS epoch. Left alive, it can
         // collide with a message replayed into the new epoch — a real row —
         // and the next PromptQueue naming that text would delete restored
