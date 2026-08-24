@@ -456,7 +456,8 @@ struct AgentView: View {
                         queued: queued,
                         onEdit: { text in Task { await stream.editQueued(queued.id, text) } },
                         onCancel: { Task { await stream.cancelQueued(queued.id) } },
-                        onSteer: { Task { await stream.steerQueued(queued.id) } })
+                        onSteer: { Task { await stream.steerQueued(queued.id) } },
+                        hasAgent: hasAgent)
                 }
 
                 if let pending = unattachedPermission {
@@ -532,6 +533,11 @@ struct AgentView: View {
                 // RPC still answers OK, so a Send that stayed live would echo
                 // the message into the transcript looking sent and nothing
                 // would ever answer it. Off, and said out loud, is the pair.
+                //
+                // The queue above is the same fact one surface up: its three
+                // actions are three more `AgentSupervisor::send` calls, so
+                // `QueuedRow` takes `hasAgent` too and this sentence is the
+                // explanation for both.
                 if !hasAgent, !transcript.rows.isEmpty {
                     HStack(spacing: PaneMetrics.step) {
                         // The mark `emptyState` gives this same fact, and
@@ -1552,9 +1558,34 @@ private struct QueuedRow: View {
     /// nothing once the wrong thing has been done. This is the escape hatch:
     /// you looked at what you wrote and decided it should interrupt.
     let onSteer: () -> Void
+    /// Whether there is an agent on the other end — see `AgentView.hasAgent`.
+    ///
+    /// All THREE of this row's actions need it, which was checked in the Rust
+    /// rather than assumed. `terminal.agent_steer_queued`,
+    /// `terminal.agent_edit_queued` and `terminal.agent_cancel_queued` are one
+    /// `svc.agents().send(…)` each in `crates/daemon/src/rpc.rs`, and that call
+    /// looks the terminal up in the supervisor's writer table and returns
+    /// having done nothing when it is not there — the same floor
+    /// `terminal.agent_prompt` drops a message onto.
+    ///
+    /// Remove is the one worth naming, because a queue you can still empty
+    /// would be a fair thing to leave live and it is not one. The queue is not
+    /// this app's; it lives in the shim, beside the backend, and reaches a
+    /// client only as `promptQueue` — which `Transcript` applies WHOLESALE,
+    /// never editing the list itself. So with the shim gone the row is a
+    /// picture of a queue that no longer exists anywhere: Remove would send
+    /// into the same floor, no `promptQueue` would ever answer, and the row it
+    /// was meant to delete would still be sitting there.
+    let hasAgent: Bool
 
     @State private var editing = false
     @State private var draft = ""
+
+    /// Editing needs somewhere to send the result, so a pane that loses its
+    /// agent mid-edit leaves the field rather than keeping a `Save` that
+    /// saves nothing. Read instead of `editing` everywhere, because `@State`
+    /// set before the session went is still `true`.
+    private var isEditing: Bool { editing && hasAgent }
 
     var body: some View {
         HStack(alignment: .top, spacing: PaneMetrics.step) {
@@ -1565,7 +1596,7 @@ private struct QueuedRow: View {
                 // transcript sets them — and this row used to hold `.callout`
                 // and `.body` in the SAME row, one step apart, depending on
                 // whether what you queued had any words in it.
-                if editing {
+                if isEditing {
                     TextField("", text: $draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.body)
@@ -1604,21 +1635,39 @@ private struct QueuedRow: View {
                 // draft and dropping a draft are both things you came here
                 // already meaning to do; interrupting a running turn is the
                 // one this card exists to offer. See `QueuedActionStyle`.
+                //
+                // And all three GO when the pane's agent does. Not greyed:
+                // greying is what the composer does with Send, and it earns it
+                // — the field beside it still holds your draft, so a dead
+                // button is the thing keeping your words on screen. Nothing
+                // here is holding anything. Three unreadable words in a row
+                // are the "grey on grey" complaint in miniature, and they
+                // would be saying, at their most legible, exactly what the
+                // notice a few points below already says.
+                //
+                // What replaces them is one true word. "Queued" is a promise
+                // about the future — this goes next — and on a pane with no
+                // shim it is a promise nothing can keep, so the label says
+                // what actually happened to the message instead. See
+                // `hasAgent` for why none of the three would have worked.
                 HStack(spacing: PaneMetrics.card) {
-                    Text("Queued")
+                    Text(hasAgent ? "Queued" : "Not sent")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Send now", action: onSteer)
-                        .buttonStyle(QueuedActionStyle(prominent: true))
-                    Button(editing ? "Save" : "Edit") {
-                        if editing {
-                            commit()
-                        } else {
-                            draft = queued.text
-                            editing = true
+                        .accessibilityIdentifier("agent-queued-state")
+                    if hasAgent {
+                        Button("Send now", action: onSteer)
+                            .buttonStyle(QueuedActionStyle(prominent: true))
+                        Button(isEditing ? "Save" : "Edit") {
+                            if isEditing {
+                                commit()
+                            } else {
+                                draft = queued.text
+                                editing = true
+                            }
                         }
+                        Button("Remove", action: onCancel)
                     }
-                    Button("Remove", action: onCancel)
                 }
                 .buttonStyle(QueuedActionStyle())
             }
@@ -1644,7 +1693,11 @@ private struct QueuedRow: View {
     private func commit() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         editing = false
-        guard !trimmed.isEmpty, trimmed != queued.text else { return }
+        // `hasAgent` asked again here rather than only where the button is
+        // drawn, for the reason the composer's `send()` re-asks its own
+        // condition: a hardware Return reaches `onSubmit` without passing a
+        // button at all.
+        guard hasAgent, !trimmed.isEmpty, trimmed != queued.text else { return }
         onEdit(trimmed)
     }
 }

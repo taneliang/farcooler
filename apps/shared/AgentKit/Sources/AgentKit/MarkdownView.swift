@@ -523,9 +523,12 @@ public struct DetailBox: View {
     /// Not a display preference — a hang. `Text` measures its WHOLE string on
     /// every layout pass, and a tool that returns a few thousand lines is
     /// inside an animated disclosure that re-measures it many times per frame.
-    /// Expanding one wedged the app on the main thread. The box is 220pt tall
-    /// and scrolls, so nothing beyond this was ever on screen anyway.
+    /// Expanding one wedged the app on the main thread. The box tops out at
+    /// `ceiling` and scrolls, so nothing beyond this was ever on screen anyway.
     private static let maxLines = 400
+
+    /// The tallest this box gets. A CEILING, not a reserve — see `body`.
+    private static let ceiling: CGFloat = 220
 
     public var body: some View {
         let shown = Self.clamp(text)
@@ -547,7 +550,46 @@ public struct DetailBox: View {
             }
             .padding(chrome ? 8 : 0)
         }
-        .frame(maxHeight: 220)
+        .frame(maxHeight: Self.ceiling)
+        // What makes the 220 a ceiling rather than a floor.
+        //
+        // A flexible frame with a `maxHeight` GROWS to whatever it is offered
+        // and stops at the max — so in any container that proposes a definite
+        // height, this box took 220 no matter how little was in it, and a
+        // two-line ssh error got a 42-point block of words with 178 points of
+        // nothing under it.
+        // The `ScrollView` was not what did it; a bare `Text` under the same
+        // frame does the same thing. Measured, with `ImageRenderer` driving a
+        // 320-wide box at three proposals:
+        //
+        //     content   proposal    before    after
+        //     2 lines   nil           42        42
+        //     2 lines   600          220        42
+        //     200 lines nil          220       220
+        //     200 lines 600          220       220
+        //
+        // `fixedSize` in the vertical only. It hands the frame below it a
+        // `nil` proposal whatever it was itself offered, which makes every
+        // container behave the way the ones already proposing `nil` did — and
+        // that is most of them, since every transcript row is inside a scroll
+        // view. Which is why this only ever showed on the centered screens.
+        // The frame stays underneath and is still what resolves that `nil`, so
+        // tall output is still capped at 220 and still scrolls inside it: an
+        // XCUITest on 60 lines of output measures the box at 219.67 and the
+        // first line moving from y=409 to y=-269 on one swipe.
+        //
+        // The one thing given up: a container offering LESS than 220 no longer
+        // squeezes the box into it, since ignoring what it was offered is what
+        // `fixedSize` is. Tall output in a short container overflows rather
+        // than shrinking. Nothing calls it that way today — the height caps
+        // near these, `ChangesPane`'s 320 and `AddDeviceView`'s 460, are on
+        // scroll views ABOVE the box and propose `nil` into it, and the frames
+        // touching the box itself are all `maxWidth`. The alternative —
+        // measuring the content and clamping the frame to it — would keep that
+        // last case, and costs a first layout pass at the wrong height, which
+        // inside `ToolRow`'s spring disclosure is a visible wobble on every
+        // expand.
+        .fixedSize(horizontal: false, vertical: true)
         .background {
             if chrome { RoundedRectangle(cornerRadius: 7).fill(.quinary) }
         }

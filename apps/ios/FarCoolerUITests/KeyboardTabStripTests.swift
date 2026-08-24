@@ -444,4 +444,43 @@ final class AgentEndedSessionTests: XCTestCase {
             app.staticTexts["agent-session-ended"].exists,
             "A live session was announced as ended")
     }
+
+    /// The queue is the same drop, one surface up.
+    ///
+    /// `terminal.agent_steer_queued`, `terminal.agent_edit_queued` and
+    /// `terminal.agent_cancel_queued` are each a single `svc.agents().send(…)`
+    /// in `crates/daemon/src/rpc.rs`, and that call finds no writer for a
+    /// terminal with no shim and returns having done nothing. Remove is the one
+    /// that looks like it should survive and does not: the queue lives in the
+    /// shim, and a client only ever RECEIVES it as `promptQueue`, so with the
+    /// shim gone there is nothing to remove it from and nothing that would ever
+    /// report it removed.
+    ///
+    /// Note the fixture: `-plain` filters `promptQueue` out, so the live half
+    /// runs on the default conversation rather than on that flag.
+    func testTheQueueStopsOfferingActionsNothingCanCarryOut() {
+        let app = launch(["-ended"])
+        let state = app.staticTexts["agent-queued-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30), "The queued message was taken away")
+        XCTAssertEqual(
+            state.label, "Not sent",
+            "A message nothing can send was still described as queued")
+        for action in ["Send now", "Edit", "Remove"] {
+            XCTAssertFalse(
+                app.buttons[action].exists,
+                "\(action) was offered on a queue nothing is reading")
+        }
+    }
+
+    func testALiveSessionKeepsAllThreeQueueActions() {
+        let app = launch([])
+        let state = app.staticTexts["agent-queued-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30), "The queued message was not drawn")
+        XCTAssertEqual(state.label, "Queued", "A live queue did not say it was queued")
+        for action in ["Send now", "Edit", "Remove"] {
+            XCTAssertTrue(
+                app.buttons[action].exists,
+                "\(action) went missing from a queue that can still be acted on")
+        }
+    }
 }
