@@ -152,26 +152,47 @@ struct AgentView: View {
         return preset.capitalized
     }
 
+    /// Whether the daemon is serving a session for this pane RIGHT NOW.
+    ///
+    /// `.starting` and nothing else, which is narrower than `hasSession`: that
+    /// phase is the daemon having ANSWERED and said it holds no session — see
+    /// `AgentStream.answered`. `.opening` and `.failing` are not knowing, and
+    /// they keep Send live on purpose, because the retryable failure a send
+    /// gets from a link that is down is more use than a greyed button, and the
+    /// message is not lost.
+    private var hasAgent: Bool { stream.phase != .starting }
+
     private var isWorking: Bool {
-        #if DEBUG
-        if let fixtureIsWorking { return fixtureIsWorking }
-        #endif
         guard let workspaceID else { return false }
         return connection.terminal(terminalID, in: workspaceID)?.agent == .working
     }
 
     #if DEBUG
-    /// A canned conversation, and the activity the fleet would have reported
-    /// for it. Set only by `AgentLayoutHarness`; `nil` everywhere else.
-    var fixture: [Sequenced]?
-    var fixtureIsWorking: Bool?
-    /// The state an EMPTY fixture stands in. `emptyState` only draws when the
-    /// transcript has no rows, so the four screens the "could not load" report
-    /// is about were unreachable from a harness that always canned a
-    /// conversation.
-    var fixturePhase: AgentStream.Phase?
-    var fixtureWaited: AgentStream.Waited?
-    var fixtureTrouble: AgentStream.Trouble?
+    /// The canned conversation `AgentLayoutHarness` stands this pane on.
+    ///
+    /// A type and a STATIC, where this was five instance properties the harness
+    /// set on an `AgentView` it constructed itself. Constructing the pane is
+    /// what it may no longer do: the harness mounts `WorkspaceView` now, so the
+    /// pane is built by `TerminalView` several levels down and there is nothing
+    /// for an outside caller to reach into. A fixture that has to survive that
+    /// trip is a static, and one value rather than five keeps "there is a
+    /// fixture" a single question.
+    ///
+    /// `phase`, `waited` and `trouble` are here because the states the harness
+    /// could not reach are precisely the ones that were wrong: `emptyState`
+    /// draws only when the transcript has no rows, so every screen the "could
+    /// not load" report is about needs a fixture with nothing in it and a phase
+    /// set by hand. `isWorking` is NOT here — it rides the fleet the harness
+    /// stands up, the way the app reads it.
+    struct Fixture {
+        var events: [Sequenced]
+        var phase: AgentStream.Phase = .live
+        var waited: AgentStream.Waited = .aMoment
+        var trouble: AgentStream.Trouble?
+    }
+
+    /// Set only by `AgentLayoutHarness`; `nil` everywhere else.
+    static var fixture: Fixture?
     #endif
 
     // MARK: Following the tail
@@ -392,10 +413,10 @@ struct AgentView: View {
         // transcript and its scroll offset and costs the host nothing.
         .task(id: isVisible) {
             #if DEBUG
-            if let fixture {
+            if let fixture = Self.fixture {
                 stream.loadFixture(
-                    fixture, phase: fixturePhase ?? .live, waited: fixtureWaited ?? .aMoment,
-                    trouble: fixtureTrouble)
+                    fixture.events, phase: fixture.phase, waited: fixture.waited,
+                    trouble: fixture.trouble)
                 return
             }
             #endif
@@ -495,6 +516,44 @@ struct AgentView: View {
                     .modifier(GlassSurface())
                 }
 
+                // The session under a conversation that is still on screen has
+                // gone, and the pane says so where the eye already is.
+                //
+                // `emptyState` is where this fact is told with no rows, and it
+                // cannot be where it is told with them: a transcript is the one
+                // condition under which that view never draws. Keeping the rows
+                // is deliberate — the daemon has forgotten this conversation,
+                // so what is on screen is the only copy of it left, and
+                // replacing it with an empty state would take a conversation
+                // somebody is reading away to say something about it.
+                //
+                // What does not stay is the invitation. `AgentSupervisor::send`
+                // drops a message for a pane with no shim registered and the
+                // RPC still answers OK, so a Send that stayed live would echo
+                // the message into the transcript looking sent and nothing
+                // would ever answer it. Off, and said out loud, is the pair.
+                if !hasAgent, !transcript.rows.isEmpty {
+                    HStack(spacing: PaneMetrics.step) {
+                        // The mark `emptyState` gives this same fact, and
+                        // secondary like it: a session that ended is not a
+                        // failure, and red in this stack already means the
+                        // message you just sent did not go.
+                        Image(systemName: "bubble.left.and.text.bubble.right")
+                            .foregroundStyle(.secondary)
+                            // The sentence beside it says all of this, and a
+                            // symbol read out as well would say it twice.
+                            .accessibilityHidden(true)
+                        Text("This pane no longer has an agent. The conversation stays here to read.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("agent-session-ended")
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, PaneMetrics.edge)
+                    .padding(.vertical, PaneMetrics.tight)
+                    .modifier(GlassSurface())
+                }
+
                 AgentComposer(
                     availableModes: transcript.availableModes,
                     agentMode: transcript.agentMode,
@@ -508,6 +567,7 @@ struct AgentView: View {
                     // the daemon's own epoch rather than on that default. See
                     // `AgentStream.hasSession`.
                     backend: stream.hasSession ? transcript.backend : nil,
+                    hasAgent: hasAgent,
                     availableCommands: transcript.availableCommands,
                     workspaceID: workspaceID,
                     core: connection.core,
@@ -1964,6 +2024,15 @@ private struct AgentComposer: View {
     /// verbatim: `ffi.rs` copies `payload_json` into the `payloadJson` string
     /// this app decodes and touches nothing inside it.
     let backend: String?
+    /// Whether there is an agent on the other end to send to.
+    ///
+    /// False only where the daemon has SAID there is none — see
+    /// `AgentView.hasAgent`. `AgentSupervisor::send` drops a message for a pane
+    /// with no shim registered and `terminal.agent_prompt` answers OK anyway,
+    /// so a live Send there is a button that files the message into the
+    /// transcript and nothing else. The row above the composer says why it is
+    /// off; this is the half that keeps the draft in the field.
+    let hasAgent: Bool
     let availableCommands: [AgentChoice]
     let workspaceID: String?
     let core: ClientCore
@@ -1990,7 +2059,8 @@ private struct AgentComposer: View {
     /// send button greyed out beside it, and the only way forward was to type
     /// something you did not mean.
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        guard hasAgent else { return false }
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
     var body: some View {
@@ -2110,6 +2180,11 @@ private struct AgentComposer: View {
                             .contentShape(.circle)
                     }
                     .disabled(!canSend)
+                    // Named, for VoiceOver and for the tests: a glyph-only
+                    // button is read out as its symbol otherwise, and "arrow up
+                    // circle fill" is not what this does.
+                    .accessibilityLabel("Send")
+                    .accessibilityIdentifier("agent-send")
                 }
             }
             .padding(.vertical, PaneMetrics.card)
@@ -2510,8 +2585,11 @@ private struct AgentComposer: View {
     }
 
     private func send() {
+        // The button's own condition, asked again here rather than only on
+        // `.disabled`: a hardware Return also lands in this function, and it
+        // reaches it past a greyed button. See `hasAgent`.
+        guard canSend else { return }
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty || !attachments.isEmpty else { return }
         // The attachments GO now. They used to be cleared on the next line
         // without ever being sent: the picker worked, the thumbnail appeared,
         // and the image was dropped on the floor.
@@ -2948,12 +3026,131 @@ private struct WorkingRow: View {
 /// enrolled runner, a workspace, a chat-capable pane and a turn in flight, so
 /// every judgement about its layout had been made by reading the code. Launch
 /// the app with `-agent-layout-harness` to get this instead of `RootView`.
+///
+/// ## It mounts the pane where the app mounts it
+///
+/// This used to construct an `AgentView` and put it on screen BARE — no
+/// navigation stack, no bar, no tab strip — and the app has never once shown
+/// the pane that way. `FleetView` owns a `NavigationStack`, pushes
+/// `WorkspaceView` into it, and `WorkspaceView` gives the pane a title, a
+/// subtitle, a toolbar, a floating tab strip and a top safe-area inset that
+/// holds the conversation clear of all of it. What the harness drew instead was
+/// a transcript running up under the status bar, with a tool-call row crossing
+/// the clock — and screenshots from here are now how this app's iOS layout gets
+/// judged, so a harness that is wrong about the TOP of the screen is a trap for
+/// the next person measuring something at the bottom.
+///
+/// So the route is the app's route, top to bottom: a stack, a push, the real
+/// `WorkspaceView`, the real `TerminalView`, the real `AgentView`. Everything
+/// above the pane is the shipping code reading a canned fleet, which is the
+/// only part that is fixture — `Connection.standIn(on:)` and
+/// `AgentView.fixture` are the two seams, and neither of them draws anything.
+///
+/// ## What is not the app, and says so
+///
+/// The words in the navigation bar. The title and subtitle are a workspace's
+/// task and branch, so the fixture names itself there — "Layout harness" over
+/// "fixture · no runner" — rather than borrowing a plausible worktree name and
+/// leaving somebody to find out later that no runner was involved. The chrome
+/// around them is real; only the words are canned.
+///
+/// The back chevron reads "Fleet" because that is what the stand-in root under
+/// this stack is called. In the app it reads the runner's name, which is
+/// per-runner and would be a longer or shorter word — the one metric here that
+/// a screenshot cannot be measured against.
+///
+/// The Changes chip shows no counts: they come from `Connection.inbox`, which
+/// is a separate round trip this stands nothing in for.
 struct AgentLayoutHarness: View {
     static var isRequested: Bool {
         CommandLine.arguments.contains("-agent-layout-harness")
     }
 
     @StateObject private var connection = Connection()
+
+    /// Empty until `stand()` runs, so the pane is not built before the fixture
+    /// it is to be built from exists.
+    @State private var path: [Pane] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            fleetStandIn
+                // The one route, declared where `FleetView` declares its own:
+                // on the stack's root content. See `FleetView.body`.
+                .navigationDestination(for: Pane.self) { pane in
+                    WorkspaceView(
+                        workspace: Self.workspace.id, initial: pane, connection: connection)
+                }
+        }
+        .task { stand() }
+    }
+
+    /// Fill the fixture in, then push the pane at it.
+    ///
+    /// In this order, and in a `task` rather than in `body`: the fixture has to
+    /// exist before `AgentView` mounts and reads it, and writing to an
+    /// `ObservableObject` from inside a view update is a change published into
+    /// the update that is reading it.
+    private func stand() {
+        AgentView.fixture = Self.fixture
+        connection.standIn(
+            on: Fleet(runtimeHealthy: true, livePanes: 2, workspaces: [Self.workspace]))
+        path = [Pane(Self.agentPane)]
+    }
+
+    /// What the back chevron is pointing at.
+    ///
+    /// Deliberately not a stand-in `FleetView`: that screen needs a runner to
+    /// draw anything at all, and a second fixture for a screen nobody is
+    /// looking at would be a second thing to keep true. It is titled, because
+    /// the title is the only part of it that shows — in the chevron.
+    private var fleetStandIn: some View {
+        ContentUnavailableView(
+            "Agent layout harness",
+            systemImage: "bubble.left.and.text.bubble.right",
+            description: Text(
+                "The pane is pushed onto this stack the way the app pushes it. "
+                + "Nothing behind it is a runner."))
+            .navigationTitle("Fleet")
+            .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The canned pane, and the fleet it lives in.
+    ///
+    /// A chat-capable agent pane and a shell beside it, because the toolbar's
+    /// pane-mode button is drawn from `canSwitchPaneMode` and the tab strip is
+    /// drawn from the workspace's terminals — a one-terminal fixture would have
+    /// quietly dropped both from every screenshot.
+    ///
+    /// The activity is the fleet's, not a flag on the pane: `AgentView.isWorking`
+    /// reads it from here the way it does in the app, so a fixture that says a
+    /// turn is running and a pane drawing "Working…" are one fact rather than
+    /// two that can disagree. Only the live conversation is working: a pane
+    /// with no session behind it — every `-empty-` screen, and `-ended` — is
+    /// not running a turn, and `idle` is the least any of them claims.
+    private static var agentPane: Terminal {
+        Terminal(
+            id: "harness", short: "harness", title: "claude", preset: "claude", state: "running",
+            activity: emptyState == nil && !isEnded ? "working" : "idle",
+            epoch: 1, paneMode: "agent", chatCapable: true)
+    }
+
+    /// The conversation whose session has gone out from under it.
+    private static var isEnded: Bool { CommandLine.arguments.contains("-ended") }
+
+    private static var workspace: Workspace {
+        Workspace(
+            id: "harness-ws", short: "harness",
+            // The two words that say what this is, in the two slots the app
+            // puts a worktree's name and branch in.
+            task: "Layout harness", branch: "fixture · no runner", state: "ready",
+            terminals: [
+                agentPane,
+                Terminal(
+                    id: "harness-shell", short: "shell", title: "shell", preset: "shell",
+                    state: "running", epoch: 1, paneMode: "terminal"),
+            ])
+    }
 
     /// Which empty-transcript screen to stand in, or nil for the conversation.
     ///
@@ -2993,31 +3190,33 @@ struct AgentLayoutHarness: View {
         return nil
     }
 
-    var body: AnyView {
-        var pane = AgentView(terminalID: "harness", workspaceID: nil, connection: connection)
-        if let (phase, waited, trouble) = Self.emptyState {
-            pane.fixture = []
-            pane.fixturePhase = phase
-            pane.fixtureWaited = waited
-            pane.fixtureTrouble = trouble
-            pane.fixtureIsWorking = false
-            return AnyView(pane.ignoresSafeArea(.keyboard, edges: .bottom))
+    /// The conversation, and the state it is in.
+    ///
+    /// The pane no longer takes the container treatment this used to apply —
+    /// `.ignoresSafeArea(.keyboard, edges: .bottom)`, added here to reproduce
+    /// what `WorkspaceView` does so the keyboard was not counted twice.
+    /// `WorkspaceView` is on screen now and does it itself, which is the point
+    /// of mounting it: nothing about the container is reproduced, so nothing
+    /// about it can drift.
+    private static var fixture: AgentView.Fixture {
+        if let (phase, waited, trouble) = emptyState {
+            return AgentView.Fixture(events: [], phase: phase, waited: waited, trouble: trouble)
         }
-        pane.fixture = CommandLine.arguments.contains("-plain")
-            ? Self.conversation.filter {
+        // `-ended` is the conversation whose session has gone: rows on screen
+        // and the daemon answering epoch 0, which is what a shim that goes away
+        // mid-conversation leaves behind. `loadFixture` gives a non-`.live`
+        // phase epoch 0, so this is the daemon's own answer rather than a
+        // fourth thing to set by hand — see `AgentStream.answered`.
+        let phase: AgentStream.Phase =
+            CommandLine.arguments.contains("-ended") ? .starting : .live
+        let events = CommandLine.arguments.contains("-plain")
+            ? conversation.filter {
                 if case .plan = $0.event { return false }
                 if case .promptQueue = $0.event { return false }
                 return true
             }
-            : Self.conversation
-        pane.fixtureIsWorking = true
-        // The container this screen really lives in, reproduced — see
-        // `WorkspaceView`, which refuses the framework's whole-container lift
-        // so the tab strip and the navigation boundary never move. Without it
-        // the harness measures a screen nobody ships: SwiftUI raises the entire
-        // view by the keyboard's height AND the transcript reserves room for
-        // it, and every number comes out doubled.
-        return AnyView(pane.ignoresSafeArea(.keyboard, edges: .bottom))
+            : conversation
+        return AgentView.Fixture(events: events, phase: phase)
     }
 
     private static func choice(_ id: String, _ name: String) -> AgentChoice {

@@ -384,3 +384,64 @@ final class AgentEmptyStateTests: XCTestCase {
             "A pane with no session named a protocol anyway")
     }
 }
+
+/// A session that goes away with a conversation still on the screen.
+///
+/// Android's port of the loading-state fix found the case iOS did not handle
+/// (`83b1682`): the epoch is the daemon's own answer to whether a session
+/// exists, and this app asked it only where the transcript was EMPTY. So a shim
+/// that went away mid-conversation replied epoch 0 with rows on screen, the pane
+/// stayed `.live`, and it went on inviting a message into a session that had
+/// just ended — one `AgentSupervisor::send` drops on the floor, because there is
+/// no shim registered to receive it, while `terminal.agent_prompt` still answers
+/// OK. The message would have been echoed into the transcript looking sent.
+///
+/// `-ended` is that state: the canned conversation, with the daemon answering
+/// epoch 0 underneath it. What it has to show is both halves — the conversation
+/// is still readable, AND nothing can be sent into it.
+final class AgentEndedSessionTests: XCTestCase {
+    private func launch(_ arguments: [String]) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-agent-layout-harness"] + arguments
+        app.launch()
+        return app
+    }
+
+    /// Typing into the pane and finding Send dead is the assertion, because
+    /// with nothing typed Send is dead anyway — that is the composer's own
+    /// rule and it would have passed against the bug.
+    private func sendIsOffered(in app: XCUIApplication) -> Bool {
+        let transcript = app.scrollViews["agent-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 30), "No transcript was drawn")
+        let field = app.textViews.firstMatch
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.typeText("Anything at all")
+        let send = app.buttons["agent-send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5), "The composer had no Send button")
+        return send.isEnabled
+    }
+
+    func testAConversationOutlivesTheSessionThatProducedIt() {
+        let app = launch(["-ended"])
+        XCTAssertTrue(
+            app.scrollViews["agent-transcript"].waitForExistence(timeout: 30),
+            "The conversation was taken away with the session that produced it")
+        XCTAssertTrue(
+            app.staticTexts["agent-session-ended"].waitForExistence(timeout: 5),
+            "A pane with no session behind it said nothing about it")
+        XCTAssertFalse(
+            sendIsOffered(in: app),
+            "A message was offered into a session that had already ended")
+    }
+
+    /// The other half, which is what makes it a distinction rather than a
+    /// deletion: a session that IS being served still takes messages.
+    func testASessionThatStillExistsStillTakesMessages() {
+        let app = launch(["-plain"])
+        XCTAssertTrue(sendIsOffered(in: app), "A live session refused a typed message")
+        XCTAssertFalse(
+            app.staticTexts["agent-session-ended"].exists,
+            "A live session was announced as ended")
+    }
+}

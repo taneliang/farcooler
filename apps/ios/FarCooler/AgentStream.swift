@@ -218,13 +218,50 @@ final class AgentStream: ObservableObject {
     /// daemon's own answer rather than a guess made here, the same rule
     /// `isAgentPane` and `activity` already follow.
     ///
-    /// What it gates is the adapter badge: `Transcript.backend` defaults to
-    /// `acp` for the transcripts written before that field existed, which is
-    /// the right answer for them and the wrong answer for a session nobody has
-    /// heard from yet. Without this the composer would name a protocol before
-    /// anything had named one.
+    /// It gates the adapter badge: `Transcript.backend` defaults to `acp` for
+    /// the transcripts written before that field existed, which is the right
+    /// answer for them and the wrong answer for a session nobody has heard from
+    /// yet. Without this the composer would name a protocol before anything had
+    /// named one.
+    ///
+    /// And it decides `phase` on every poll that succeeds — see `answered`,
+    /// which is where this stopped being one screen's detail and became the
+    /// rule for whether there is a session here at all.
     var hasSession: Bool { epoch != 0 }
 
+
+    /// The daemon answered. Whether that answer holds a session is ITS question
+    /// to have answered, and `epoch` is where it did.
+    ///
+    /// One rule at all three points a poll can succeed, rather than a phase
+    /// decided separately at each. Android's port of this fix wrote it this way
+    /// first (`83b1682`, `AgentPhase.kt`) after finding the case the three-armed
+    /// version could not reach a right answer for: a shim that goes away
+    /// MID-CONVERSATION replies epoch 0 with rows already on screen, and this
+    /// stayed `.live` — a pane inviting a message into a session that had just
+    /// ended, which `AgentSupervisor::send` drops on the floor because no shim
+    /// is registered to receive it.
+    ///
+    /// Epoch 0 with nothing in it is the same fact arriving earlier, and it
+    /// used to be tested for separately here: the daemon has no agent session
+    /// for this terminal at all — `AgentSupervisor::replay` returns exactly
+    /// that for a terminal it has never seen. A client starting at epoch 0
+    /// matches it, finds no events, and returns, which looked from the outside
+    /// like a conversation nobody had started yet. It is not: it is a pane that
+    /// has no shim behind it, and the two want different words.
+    ///
+    /// A PHASE, not an error. This used to set `connectionError` to a written
+    /// sentence, which put a red triangle and "Could not load this session"
+    /// over a pane whose shim was simply still coming up — the daemon says an
+    /// empty batch is "the honest answer for one that has not run an agent
+    /// yet", and this is the client agreeing with it instead of contradicting
+    /// it. `emptyState` decides what that looks like with no rows, the notice
+    /// above the composer decides it with rows, and both change with how long
+    /// it has lasted.
+    private func answered() {
+        enter(hasSession ? .live : .starting)
+        connectionError = nil
+    }
 
     private func pump() async {
         do {
@@ -245,33 +282,22 @@ final class AgentStream: ObservableObject {
             // client does exactly this, and without it a phone looking at a
             // toggled pane shows a conversation that is not the one being
             // served.
-            // Epoch 0 with nothing in it means the daemon has no agent session
-            // for this terminal at all — `AgentSupervisor::replay` returns
-            // exactly that for a terminal it has never seen. A client starting
-            // at epoch 0 matches it, finds no events, and returns, which looked
-            // from the outside like a conversation nobody had started yet. It
-            // is not: it is a pane that has no shim behind it, and the two want
-            // different words.
             //
-            // A PHASE, not an error. This used to set `connectionError` to a
-            // written sentence, which put a red triangle and "Could not load
-            // this session" over a pane whose shim was simply still coming up
-            // — the daemon says an empty batch is "the honest answer for one
-            // that has not run an agent yet", and this is the client agreeing
-            // with it instead of contradicting it. `emptyState` decides what
-            // that looks like, and it changes with how long it has lasted.
-            if batch.epoch == 0 && batch.events.isEmpty && transcript.rows.isEmpty {
-                enter(.starting)
-                connectionError = nil
-                return
-            }
-
+            // ZERO IS NOT ANOTHER RUN. It is the absence of one, and the rows
+            // already on screen are then the only copy of that conversation
+            // anywhere — the daemon has forgotten it, so replacing them would
+            // replace a conversation somebody is reading with nothing at all.
+            // Nothing is lost by keeping them either: an epoch-0 batch is
+            // provably empty, because the shim writes `Established` — which is
+            // what increments the epoch — as the first line of every daemon
+            // connection, before any event (`crates/cli/src/agent_host.rs`,
+            // `serve`). And a shim that comes back comes back at epoch N+1,
+            // which differs from 0 and resets here as it always did.
             if batch.epoch != epoch {
+                if batch.epoch != 0 { transcript.resetForNewEpoch() }
                 epoch = batch.epoch
-                transcript.resetForNewEpoch()
             } else if batch.events.isEmpty {
-                enter(.live)
-                connectionError = nil
+                answered()
                 return
             }
             let decoded = batch.events.map { frame -> Sequenced in
@@ -292,8 +318,7 @@ final class AgentStream: ObservableObject {
             }
             transcript.apply(decoded)
             recordForGlances()
-            enter(.live)
-            connectionError = nil
+            answered()
         } catch {
             enter(.failing)
             // `String(describing:)` on a Swift error prints the CASE, not the

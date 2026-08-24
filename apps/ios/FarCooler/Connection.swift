@@ -1356,4 +1356,27 @@ final class Connection: ObservableObject {
     func seedFocus(_ remembered: [String: Route.Focus]) {
         lastFocus = remembered.merging(lastFocus) { _, live in live }
     }
+
+    #if DEBUG
+    /// Stand this connection on a canned fleet, for `AgentLayoutHarness` —
+    /// the same trick `ChangesStore.standIn(on:)` plays, for the same reason.
+    ///
+    /// `fleet` and `phase` are `private(set)` because nothing outside this file
+    /// may claim to know what a runner said. A harness is the one caller that
+    /// has to, and it has to because of what mounting the REAL screens costs:
+    /// `WorkspaceView` names the worktree in the navigation bar, draws a chip
+    /// per terminal, and asks the pane whether it can switch modes — every one
+    /// of those is a read of this fleet, and a harness that skipped them was a
+    /// harness that drew none of that chrome. See `AgentLayoutHarness`.
+    ///
+    /// `.connected` deliberately: the link chip in `WorkspaceView`'s toolbar is
+    /// drawn only when the link is NOT healthy, and a harness left `.connecting`
+    /// would put a "reconnecting" chip on every screenshot of a screen whose
+    /// runner is fine.
+    func standIn(on fleet: Fleet) {
+        self.fleet = fleet
+        hasFleet = true
+        phase = .connected
+    }
+    #endif
 }
