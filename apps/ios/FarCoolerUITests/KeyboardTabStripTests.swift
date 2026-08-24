@@ -281,3 +281,106 @@ final class AgentTranscriptScrollTests: XCTestCase {
             "The transcript did not make room for the composer it now has")
     }
 }
+
+/// What an agent pane with nothing in it is allowed to SAY.
+///
+/// The reported bug: "'Could not load this session' shows up for quite a long
+/// time... when it's loading it shouldn't say 'could not load this session'."
+/// It was one bit — is `connectionError` set — standing in for four different
+/// true states, and three of the three things that set it are a pane still
+/// trying. `AgentStream.Phase` and `AgentStream.Waited` are the distinction;
+/// these are the assertions that it is real.
+///
+/// `-state` mounts one of those states over an empty transcript, which is the
+/// only condition under which `AgentView.emptyState` draws at all — so before
+/// the harness could reach them, none of these screens had ever been seen.
+final class AgentEmptyStateTests: XCTestCase {
+    private func launch(_ state: String, native: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments =
+            ["-agent-layout-harness", "-empty-\(state)"] + (native ? ["-native"] : [])
+        app.launch()
+        return app
+    }
+
+    /// What the screen currently says, headline and sentence together.
+    ///
+    /// Every one of the five states has a headline under this identifier, which
+    /// is the point: "what is this screen claiming" is one question and it is
+    /// asked of one element whichever state is up.
+    private func words(_ app: XCUIApplication, timeout: TimeInterval = 30) -> String {
+        let title = app.staticTexts["agent-empty-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: timeout), "No empty state was drawn")
+        let message = app.staticTexts["agent-empty-message"]
+        return title.label + " " + (message.exists ? message.label : "")
+    }
+
+    /// THE REPORT. A pane whose agent has not started yet is not a pane that
+    /// failed, and must not borrow one's words.
+    func testALoadingSessionDoesNotWearADeadOnesSentence() {
+        for state in ["opening", "starting", "waiting", "trying"] {
+            let said = words(launch(state))
+            XCTAssertFalse(
+                said.localizedCaseInsensitiveContains("could not load"),
+                "‘\(state)’ is still trying and called itself a failure: \(said)")
+        }
+    }
+
+    /// And the other half, which is what makes it a distinction rather than a
+    /// deletion: a wait that has genuinely gone on too long still says so.
+    func testAWaitThatWentOnTooLongStillSaysItFailed() {
+        XCTAssertTrue(
+            words(launch("failed")).localizedCaseInsensitiveContains("could not load"),
+            "A poll that has been failing past the alarm said nothing about it")
+    }
+
+    /// A spinner that never ends is its own bug: past `patience`, the waiting
+    /// states name what they are waiting on instead of spinning silently.
+    func testAWaitThatLingersExplainsItself() {
+        XCTAssertTrue(
+            words(launch("waiting")).localizedCaseInsensitiveContains("no agent"),
+            "A pane that has been waiting a while did not say what it was waiting for")
+    }
+
+    /// "Say something to begin." belongs to the ONE state it was ever true for:
+    /// a session that exists and has said nothing. It used to be what the
+    /// screen showed before the first poll came back, inviting a message into a
+    /// pane nothing knew anything about.
+    func testTheInvitationBelongsToASessionThatActuallyExists() {
+        XCTAssertTrue(words(launch("live")).localizedCaseInsensitiveContains("say something"))
+        XCTAssertFalse(words(launch("opening")).localizedCaseInsensitiveContains("say something"))
+    }
+
+    /// Which protocol is carrying this chat, in the app's own words — the
+    /// Mac's, which are `TileView`'s "Native" and "ACP".
+    func testTheComposerNamesTheAdapterInUse() {
+        let acp = XCUIApplication()
+        acp.launchArguments = ["-agent-layout-harness", "-plain"]
+        acp.launch()
+        let acpBadge = acp.staticTexts["adapter-badge"]
+        XCTAssertTrue(acpBadge.waitForExistence(timeout: 30), "No adapter badge on an ACP session")
+        XCTAssertTrue(
+            acpBadge.label.hasPrefix("ACP"),
+            "An ACP session did not say ACP: \(acpBadge.label)")
+
+        let native = XCUIApplication()
+        native.launchArguments = ["-agent-layout-harness", "-plain", "-native"]
+        native.launch()
+        let nativeBadge = native.staticTexts["adapter-badge"]
+        XCTAssertTrue(nativeBadge.waitForExistence(timeout: 30))
+        XCTAssertTrue(
+            nativeBadge.label.hasPrefix("Native"),
+            "A native session did not say Native: \(nativeBadge.label)")
+    }
+
+    /// And it says nothing at all until a session has actually named one.
+    /// `Transcript.backend` defaults to `acp`, so without the epoch gate this
+    /// would announce a protocol for a pane nobody has heard from.
+    func testNoBadgeBeforeASessionHasSaid() {
+        let app = launch("starting")
+        _ = words(app)
+        XCTAssertFalse(
+            app.staticTexts["adapter-badge"].exists,
+            "A pane with no session named a protocol anyway")
+    }
+}

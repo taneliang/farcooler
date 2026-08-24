@@ -33,6 +33,118 @@ final class AgentStream: ObservableObject {
 
     @Published private(set) var connectionError: Trouble?
 
+    /// What this pane can honestly say about itself.
+    ///
+    /// It had no such state, and that is the whole of "'Could not load this
+    /// session' shows up for quite a long time". The screen asked one question
+    /// — is `connectionError` set — and drew a red triangle and a failure
+    /// headline whenever it was. But every one of the three things that set it
+    /// is a pane still trying: a daemon that has no session for this terminal
+    /// YET, a link that says in its own sentence that it is reconnecting, and
+    /// a single poll that did not come back out of one every 700ms. Nothing
+    /// here is ever actually dead, so a screen with one bit could only be
+    /// wrong — and it was wrong the same way `TerminalSession` was, where
+    /// silence and death were also one number apart. See `firstPaintGrace`.
+    ///
+    /// Four states, because there are four different true things to say.
+    /// `TerminalSession.Phase` is the same idea on the terminal side and this
+    /// deliberately reads like it.
+    enum Phase: Equatable {
+        /// The first poll has not come back. Nothing is known yet — not that
+        /// there is a session, not that there isn't.
+        case opening
+        /// The daemon answered and holds no agent session for this terminal.
+        ///
+        /// Ordinary while a shim is coming up, and — from this side of an ssh
+        /// link — indistinguishable from a pane that will never have one.
+        /// That indistinguishability is exactly why it is a state and not an
+        /// error: the daemon calls an empty batch "the honest answer for one
+        /// that has not run an agent yet" (`rpc.rs`, `terminal.agent_subscribe`)
+        /// and a client that renders it as a failure is disagreeing with the
+        /// server about what it just said.
+        case starting
+        /// A session is being served, whether or not it has any rows yet.
+        case live
+        /// A poll failed. Still retrying, every 700ms, forever — which is why
+        /// this alone is not enough to draw an alarm with. See `waited`.
+        case failing
+    }
+
+    @Published private(set) var phase: Phase = .opening
+
+    /// How long the current phase has been going on, in the only three widths
+    /// that change what a screen says.
+    ///
+    /// Kept here rather than computed in the view because a view has no clock:
+    /// SwiftUI does not re-render because time passed. `pump` already runs
+    /// every 700ms, so this rides the poll it is describing and needs no timer
+    /// of its own — at the cost of being at most one poll late, which nobody
+    /// can see.
+    enum Waited: Equatable {
+        /// Ordinary. A spinner, and no words about the waiting.
+        case aMoment
+        /// Long enough to deserve a sentence saying what is being waited on.
+        /// NOT long enough to deserve an alarm.
+        case aWhile
+        /// Long enough that calling it a failure is the honest thing.
+        case tooLong
+    }
+
+    @Published private(set) var waited: Waited = .aMoment
+
+    /// How long a phase may look like ordinary loading before it says out loud
+    /// that it is still waiting.
+    ///
+    /// A spinner that never ends is its own bug, so this is what stops one.
+    /// About seven polls.
+    private static let patience: TimeInterval = 5
+
+    /// How long before a screen that is still trying is allowed to look like a
+    /// failure.
+    ///
+    /// A SECOND number, deliberately, and far larger. "Should this say more"
+    /// and "should this raise an alarm" are different questions with different
+    /// right answers, and one constant answering both is the exact shape of
+    /// the bug this file is being changed for — the same shape
+    /// `TerminalSession.firstPaintGrace` was split off `firstByteDeadline` to
+    /// end. Thirty seconds is roughly forty consecutive failed round trips,
+    /// which is past any hiccup and past a `Connection.refresh()` that is
+    /// going to succeed.
+    ///
+    /// Reached only from `.failing`. A pane the daemon says has no agent never
+    /// gets here at all: that is not a failure however long it lasts, and
+    /// painting it red would be the original bug wearing a delay.
+    private static let alarm: TimeInterval = 30
+
+    /// When the current phase began, for the two thresholds above.
+    private var phaseSince = Date()
+
+    /// Move to a phase, and keep the clock honest.
+    ///
+    /// Assigning only on a change matters: `@Published` fires on every set
+    /// regardless of equality, and `pump` runs twice a second, so a phase
+    /// re-asserted each poll would re-render the whole surface at the poll
+    /// cadence for nothing.
+    private func enter(_ next: Phase) {
+        guard phase == next else {
+            phase = next
+            phaseSince = Date()
+            waited = .aMoment
+            return
+        }
+        let elapsed = Date().timeIntervalSince(phaseSince)
+        // `.failing` is the only phase that may reach `.tooLong` — see `alarm`.
+        let now: Waited =
+            if elapsed >= Self.alarm, next == .failing {
+                .tooLong
+            } else if elapsed >= Self.patience {
+                .aWhile
+            } else {
+                .aMoment
+            }
+        if waited != now { waited = now }
+    }
+
     private let terminal: String
     private let core: ClientCore
     private var pollTask: Task<Void, Never>?
@@ -93,7 +205,25 @@ final class AgentStream: ObservableObject {
     /// skip or repeat events after a gap.
 
     /// The run of the stream this transcript was built from.
-    private var epoch: UInt64 = 0
+    ///
+    /// Published, because it is also the one fact that says a session EXISTS.
+    /// See `hasSession`. It is written only inside `batch.epoch != epoch`, so
+    /// this publishes on a change and not on a poll.
+    @Published private(set) var epoch: UInt64 = 0
+
+    /// Whether the daemon has served a session for this pane at all.
+    ///
+    /// `AgentSupervisor::replay` answers epoch 0 for a terminal it has never
+    /// seen and a real, non-zero epoch for one it has — so this is the
+    /// daemon's own answer rather than a guess made here, the same rule
+    /// `isAgentPane` and `activity` already follow.
+    ///
+    /// What it gates is the adapter badge: `Transcript.backend` defaults to
+    /// `acp` for the transcripts written before that field existed, which is
+    /// the right answer for them and the wrong answer for a session nobody has
+    /// heard from yet. Without this the composer would name a protocol before
+    /// anything had named one.
+    var hasSession: Bool { epoch != 0 }
 
 
     private func pump() async {
@@ -122,11 +252,17 @@ final class AgentStream: ObservableObject {
             // from the outside like a conversation nobody had started yet. It
             // is not: it is a pane that has no shim behind it, and the two want
             // different words.
+            //
+            // A PHASE, not an error. This used to set `connectionError` to a
+            // written sentence, which put a red triangle and "Could not load
+            // this session" over a pane whose shim was simply still coming up
+            // — the daemon says an empty batch is "the honest answer for one
+            // that has not run an agent yet", and this is the client agreeing
+            // with it instead of contradicting it. `emptyState` decides what
+            // that looks like, and it changes with how long it has lasted.
             if batch.epoch == 0 && batch.events.isEmpty && transcript.rows.isEmpty {
-                connectionError = Trouble(
-                    sentence:
-                        "No agent session on pane \(terminal.prefix(8)) yet. "
-                        + "It may still be starting.")
+                enter(.starting)
+                connectionError = nil
                 return
             }
 
@@ -134,6 +270,7 @@ final class AgentStream: ObservableObject {
                 epoch = batch.epoch
                 transcript.resetForNewEpoch()
             } else if batch.events.isEmpty {
+                enter(.live)
                 connectionError = nil
                 return
             }
@@ -155,8 +292,10 @@ final class AgentStream: ObservableObject {
             }
             transcript.apply(decoded)
             recordForGlances()
+            enter(.live)
             connectionError = nil
         } catch {
+            enter(.failing)
             // `String(describing:)` on a Swift error prints the CASE, not the
             // message: what reached the chat pane was the literal text
             // `disconnected("not connected")` — a Rust-side word for the FFI's
@@ -352,8 +491,25 @@ final class AgentStream: ObservableObject {
     /// `AgentLayoutHarness` is the only caller. The agent pane cannot
     /// otherwise be LOOKED at without an enrolled runner and a live turn,
     /// which is how it shipped a composer nobody had seen.
-    func loadFixture(_ events: [Sequenced]) {
+    ///
+    /// `phase`, `waited` and `trouble` are here because the states this
+    /// harness could not reach are precisely the ones that were wrong: an
+    /// empty transcript is the ONLY condition under which `emptyState` draws
+    /// at all, so every screen the "could not load" report is about needed a
+    /// fixture with nothing in it and a phase set by hand.
+    ///
+    /// The epoch is set the way the daemon would set it — non-zero once there
+    /// is a session — so `hasSession`, and therefore the adapter badge, is
+    /// exercised rather than special-cased.
+    func loadFixture(
+        _ events: [Sequenced], phase: Phase = .live, waited: Waited = .aMoment,
+        trouble: Trouble? = nil
+    ) {
         transcript.apply(events)
+        self.phase = phase
+        self.waited = waited
+        connectionError = trouble
+        epoch = phase == .live ? 1 : 0
     }
     #endif
 }

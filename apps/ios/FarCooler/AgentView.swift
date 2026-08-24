@@ -165,6 +165,13 @@ struct AgentView: View {
     /// for it. Set only by `AgentLayoutHarness`; `nil` everywhere else.
     var fixture: [Sequenced]?
     var fixtureIsWorking: Bool?
+    /// The state an EMPTY fixture stands in. `emptyState` only draws when the
+    /// transcript has no rows, so the four screens the "could not load" report
+    /// is about were unreachable from a harness that always canned a
+    /// conversation.
+    var fixturePhase: AgentStream.Phase?
+    var fixtureWaited: AgentStream.Waited?
+    var fixtureTrouble: AgentStream.Trouble?
     #endif
 
     // MARK: Following the tail
@@ -294,7 +301,8 @@ struct AgentView: View {
                 .modifier(
                     AgentLayoutProbe(
                         keyboardHeight: keyboard.height, barHeight: barHeight,
-                        appliedInset: appliedInset, followingTail: pinnedToTail))
+                        appliedInset: appliedInset, followingTail: pinnedToTail,
+                        measuring: !transcript.rows.isEmpty))
                 // The composer sits in the transcript's bottom safe area, which
                 // is the framework's own answer to "a control resting on
                 // scrolling content": the conversation runs the full height and
@@ -385,7 +393,9 @@ struct AgentView: View {
         .task(id: isVisible) {
             #if DEBUG
             if let fixture {
-                stream.loadFixture(fixture)
+                stream.loadFixture(
+                    fixture, phase: fixturePhase ?? .live, waited: fixtureWaited ?? .aMoment,
+                    trouble: fixtureTrouble)
                 return
             }
             #endif
@@ -479,6 +489,13 @@ struct AgentView: View {
                     configOptions: transcript.configOptions,
                     onSetConfig: { id, value in Task { await stream.setConfig(id, value) } },
                     harness: harnessName,
+                    // Only once a session has actually said. `Transcript`
+                    // defaults `backend` to `acp` — correct for the
+                    // transcripts written before the field existed, wrong for
+                    // a pane nobody has heard from — so the badge is gated on
+                    // the daemon's own epoch rather than on that default. See
+                    // `AgentStream.hasSession`.
+                    backend: stream.hasSession ? transcript.backend : nil,
                     availableCommands: transcript.availableCommands,
                     workspaceID: workspaceID,
                     core: connection.core,
@@ -704,53 +721,173 @@ struct AgentView: View {
         }
     }
 
-    /// A full-screen state, sized like one.
+    /// A full-screen state, sized like one. `status` below owns the
+    /// proportions, which are `FleetView.failure`'s — they were written out
+    /// here when there was one state to draw and now there are several.
     ///
-    /// The proportions are `FleetView.failure`'s, which `TerminalView.status`
-    /// also adopted: a 42-point thin mark, a `.title2` headline, a `.callout`
-    /// sentence, 22 and 8 between them. This was `.largeTitle` over
-    /// `.headline`, and `.headline` is 17 points — a list row's title standing
-    /// in for a page's, on a screen with nothing else on it.
+    /// The failure mark is red rather than amber. A session that would not
+    /// load is a failure; amber in this app means an agent is waiting on you,
+    /// and a screen that cannot show you an agent at all is not that.
     ///
-    /// The mark is red rather than amber. A session that would not load is a
-    /// failure; amber in this app means an agent is waiting on you, and a
-    /// screen that cannot show you an agent at all is not that.
+    /// A LOADING SESSION MUST NOT WEAR A DEAD ONE'S SENTENCE, which is what
+    /// this used to do for every state it had. There was one question here —
+    /// is `connectionError` set — and two answers, so the screen went
+    /// "Say something to begin." → red triangle → transcript, and was wrong at
+    /// both of the first two. Before the first poll came back it invited you
+    /// to type into a session it knew nothing about; a round trip later it
+    /// called a shim that was still coming up a failure, and kept calling it
+    /// one for as long as the shim took. `AgentStream.Phase` says why nothing
+    /// on this screen is ever actually dead.
+    ///
+    /// Four honest states, and the two that are still trying change with how
+    /// long they have been trying:
+    ///
+    /// - **Loading.** Nothing has come back. A spinner, and no claim either
+    ///   way.
+    /// - **Still trying.** Past `patience`, the spinner stops — a spinner that
+    ///   never ends is its own bug — and a quiet mark takes over with a
+    ///   sentence naming what is being waited on. Not red: this is a pane the
+    ///   daemon has no agent for, which is what a pane that is not in agent
+    ///   mode looks like too, and neither is a failure.
+    /// - **Empty.** There IS a session and it has said nothing yet. The one
+    ///   state "Say something to begin." was ever true for.
+    /// - **Failed.** Only from `.failing`, and only past `alarm` — thirty
+    ///   seconds of a poll that runs twice a second. This is where the red
+    ///   triangle and the headline finally belong, and everything below the
+    ///   headline is exactly what it always was.
+    ///
+    /// Android has the identical screen and the identical bug — the same
+    /// sentence, under the same one-bit condition, at
+    /// `apps/android/.../ui/AgentScreen.kt:170`. Not touched from here.
+    @ViewBuilder
     private var emptyState: some View {
         VStack(spacing: 0) {
             Spacer()
-            if let trouble = stream.connectionError {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 42, weight: .thin))
-                    .foregroundStyle(.red)
-                    .padding(.bottom, 22)
-                Text("Could not load this session")
-                    .font(.title2.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                    .padding(.bottom, PaneMetrics.step)
-                Text(trouble.sentence)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 320)
-                // The core's own words, below a sentence rather than standing
-                // in for one. Under this headline, in this face, they used to
-                // read as Far Cooler's account of the runner; they are not, and
-                // they are also the only account anybody debugging an
-                // unreachable runner is going to get, so they stay.
-                if let words = trouble.transcript, !words.isEmpty {
-                    DetailBox(text: words)
-                        .frame(maxWidth: 320)
-                        .padding(.top, 14)
+            switch stream.phase {
+            case .opening:
+                // One round trip, usually. Deliberately says nothing about
+                // whether a session exists, because nothing knows yet.
+                status(spinner: true, title: "Loading this session…")
+
+            case .starting:
+                if stream.waited == .aMoment {
+                    // The Mac's words, not a second set: `AgentComposer`
+                    // draws "Starting the agent…" for a chat with no rows and
+                    // no config options, which is this exact fact.
+                    status(spinner: true, title: "Starting the agent…")
+                } else {
+                    // Still true, still not a failure, and no longer spinning.
+                    //
+                    // It promises nothing about what to do, because there is
+                    // nothing honest to promise: `terminal.agent_prompt` hands
+                    // the daemon a message for a shim, and `AgentSupervisor::
+                    // send` drops it when no shim is connected — so "send
+                    // something to start it" would be advice that does not
+                    // work. What starts one is the pane going into agent mode.
+                    status(
+                        symbol: "bubble.left.and.text.bubble.right", mark: .secondary,
+                        title: "No agent on this pane yet",
+                        message:
+                            "This pane hasn’t started one. The conversation "
+                            + "appears here as soon as it does.")
                 }
-            } else {
+
+            case .failing:
+                let trouble = stream.connectionError
+                if stream.waited == .tooLong {
+                    status(
+                        symbol: "exclamationmark.triangle", mark: .red,
+                        title: "Could not load this session",
+                        // The core's own words, below a sentence rather than
+                        // standing in for one. Under this headline, in this
+                        // face, they used to read as Far Cooler's account of
+                        // the runner; they are not, and they are also the only
+                        // account anybody debugging an unreachable runner is
+                        // going to get, so they stay.
+                        message: trouble?.sentence, transcript: trouble?.transcript)
+                } else if stream.waited == .aWhile {
+                    status(
+                        symbol: "arrow.clockwise", mark: .secondary,
+                        title: "Still trying", message: trouble?.sentence)
+                } else {
+                    // A poll that did not come back is not news yet — there is
+                    // another one 700ms behind it. The sentence goes under the
+                    // spinner so the screen is not silent about it either.
+                    status(
+                        spinner: true, title: "Loading this session…",
+                        message: trouble?.sentence)
+                }
+
+            case .live:
                 Text("Say something to begin.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    // The same identifier `status` gives its headline. This
+                    // sentence IS this state's headline, and one name for
+                    // "what is this screen claiming" is what lets the states
+                    // be asserted as a set rather than one at a time.
+                    .accessibilityIdentifier("agent-empty-title")
             }
             Spacer()
         }
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity)
+    }
+
+    /// One full-screen state, composed the one way this app composes them.
+    ///
+    /// Lifted verbatim from `TerminalView.status`, which took it from
+    /// `FleetView.failure`: a 42-point thin mark or a `.large` spinner, 22
+    /// points, a `.title2` headline, 8 points, a `.callout` sentence capped at
+    /// 320. `message` is prose this app wrote; `transcript` is what the host
+    /// said, and the two are drawn as different kinds of thing on purpose —
+    /// a lowercase fragment from an ssh channel set in a callout under a
+    /// headline reads as Far Cooler's own account of the pane.
+    ///
+    /// It was already this composition here, written out inline for the one
+    /// state that existed. Now several states draw it, and several copies of
+    /// it is how the proportions drift apart.
+    private func status(
+        spinner: Bool = false, symbol: String? = nil, mark: Color = .secondary, title: String,
+        message: String? = nil, transcript: String? = nil
+    ) -> some View {
+        VStack(spacing: 0) {
+            if spinner {
+                // The spinner is the mark in this state, so it is sized like
+                // one rather than left at the 20pt a row would use.
+                ProgressView()
+                    .controlSize(.large)
+                    .padding(.bottom, 22)
+            } else if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 42, weight: .thin))
+                    .foregroundStyle(mark)
+                    .padding(.bottom, 22)
+            }
+            Text(title)
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .padding(.bottom, PaneMetrics.step)
+                // Named rather than combined into one element. Combining
+                // swallowed the identifier — a synthesized element does not
+                // keep it — and it would also have folded the host's own words
+                // in the box below into this app's sentence, which is the one
+                // thing everything about this composition exists to keep apart.
+                .accessibilityIdentifier("agent-empty-title")
+            if let message {
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+                    .accessibilityIdentifier("agent-empty-message")
+            }
+            if let transcript, !transcript.isEmpty {
+                DetailBox(text: transcript)
+                    .frame(maxWidth: 320)
+                    .padding(.top, 14)
+            }
+        }
     }
 }
 
@@ -765,17 +902,36 @@ private struct AgentLayoutProbe: ViewModifier {
     /// outside the view could read — the two heights above were both correct.
     let appliedInset: CGFloat
     let followingTail: Bool
+    /// Whether there is a transcript here at all.
+    ///
+    /// OFF OVER THE EMPTY STATE, and that is an accessibility fix rather than
+    /// tidiness. An accessibility VALUE on a container makes the container
+    /// itself the element, which hides everything inside it — so with no rows,
+    /// the headline, the sentence and the host's own output collapsed into one
+    /// node whose entire exposed text was `keyboard=0;bar=162;inset=162;
+    /// tail=true`. VoiceOver could not read the screen, and neither could a UI
+    /// test: `agent-empty-title` was findable under `simctl` and invisible to
+    /// XCUITest, which is how this was found.
+    ///
+    /// There is also nothing to measure there. Every number this publishes is
+    /// a scroll view's, and the empty state is not one.
+    let measuring: Bool
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        #if DEBUG
-        content
-            .accessibilityIdentifier("agent-transcript")
-            .accessibilityValue(
-                Text(verbatim:
-                    "keyboard=\(Int(keyboardHeight.rounded()));bar=\(Int(barHeight.rounded()));inset=\(Int(appliedInset.rounded()));tail=\(followingTail ? "true" : "false")"))
-        #else
-        content.accessibilityIdentifier("agent-transcript")
-        #endif
+        if measuring {
+            #if DEBUG
+            content
+                .accessibilityIdentifier("agent-transcript")
+                .accessibilityValue(
+                    Text(verbatim:
+                        "keyboard=\(Int(keyboardHeight.rounded()));bar=\(Int(barHeight.rounded()));inset=\(Int(appliedInset.rounded()));tail=\(followingTail ? "true" : "false")"))
+            #else
+            content.accessibilityIdentifier("agent-transcript")
+            #endif
+        } else {
+            content
+        }
     }
 }
 
@@ -1709,6 +1865,20 @@ private struct AgentComposer: View {
     /// already in the title bar; what a fleet of several harnesses needs is to
     /// tell them apart.
     let harness: String
+    /// Which protocol is carrying this conversation — `acp`, `claude` or
+    /// `codex` — or nil until a session has said which.
+    ///
+    /// Straight off `Transcript.backend`, which is `SessionStarted.backend` on
+    /// the wire. Transcribed from the producers rather than assumed: the field
+    /// is declared in `crates/agent-core/src/event.rs` as a plain `String`
+    /// with `#[serde(default = "acp_backend")]` and NO `skip_serializing_if`,
+    /// so it is always present going out; the three writers are
+    /// `crates/acp/src/session.rs`, `crates/claude/src/backend.rs` and
+    /// `crates/codex/src/backend.rs`, each passing `BackendKind::as_str()`,
+    /// which is exactly `"acp"`, `"claude"` or `"codex"`. It reaches a phone
+    /// verbatim: `ffi.rs` copies `payload_json` into the `payloadJson` string
+    /// this app decodes and touches nothing inside it.
+    let backend: String?
     let availableCommands: [AgentChoice]
     let workspaceID: String?
     let core: ClientCore
@@ -1819,7 +1989,9 @@ private struct AgentComposer: View {
 
                     settingsMenu
 
-                    Spacer(minLength: 0)
+                    Spacer(minLength: PaneMetrics.step)
+
+                    adapterBadge
                 }
                 // Grey, not accent.
                 //
@@ -1915,6 +2087,63 @@ private struct AgentComposer: View {
             }
             ComposerTextView(text: $text, cursor: $cursor, measuredHeight: $fieldHeight)
                 .frame(height: fieldHeight)
+        }
+    }
+
+    // MARK: Which protocol this is
+
+    /// Which protocol is carrying this chat, at the far end of the row that
+    /// says what the next message costs.
+    ///
+    /// HERE because this surface has no header to put it in. The Mac draws it
+    /// in the pane's title bar beside the pane's name (`TileView.headerContent`)
+    /// and a phone's agent pane deliberately has no such bar — "Nothing here is
+    /// new permanent chrome" is the constraint at the top of this file, and it
+    /// is the reason the mode and the attachments live in the composer at all.
+    /// So the nearest true equivalent of "beside the name" is the composer:
+    /// the placeholder directly below this reads "Message Claude", and the
+    /// badge above it finishes that sentence with which protocol Claude is on.
+    /// It is also the one piece of chrome that is on screen for the whole life
+    /// of this surface, including while the transcript is still empty — which
+    /// is exactly when somebody asking "why is this behaving oddly" is looking.
+    ///
+    /// PAST THE SPACER, and with no capsule, because it is not a control. Every
+    /// other thing in this row is: a bordered chip here would be the fifth in a
+    /// line of four tappable ones and would promise a menu it does not have.
+    ///
+    /// The WORDS are the Mac's, and the rule for choosing between them is the
+    /// Mac's: anything that is not `acp` is a native backend. "ACP" stays
+    /// capitalised — it is an acronym, Agent Client Protocol, and lowercasing
+    /// it makes a proper noun look like a status word.
+    ///
+    /// The COLOR is not the Mac's, and that is a platform decision rather than
+    /// drift. `TileView` tints Native with the accent color; on this row that
+    /// would be blue text on dark glass, in the one row this file explicitly
+    /// de-blued — see the `.tint(.secondary)` below it, which exists because a
+    /// `Menu` tinting its own label made this line read as a row of links.
+    /// Same emphasis, one step up the platform's own hierarchy instead: Native
+    /// is the only primary text in the row, ACP sits with the chips.
+    ///
+    /// The Mac's `.help` text is a real explanation and a phone has no hover,
+    /// so it becomes the VoiceOver label. That is the only place it fits
+    /// without turning a label into a button.
+    @ViewBuilder
+    private var adapterBadge: some View {
+        if let backend, !backend.isEmpty {
+            let native = backend != "acp"
+            Text(native ? "Native" : "ACP")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(native ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                // Never the thing that gets truncated: the selectors beside it
+                // carry agent-chosen names of any length, and this is four to
+                // six characters.
+                .fixedSize()
+                .layoutPriority(1)
+                .accessibilityLabel(
+                    native
+                        ? "Native: driven through \(backend)’s own protocol, with no adapter"
+                        : "ACP: driven through an Agent Client Protocol adapter")
+                .accessibilityIdentifier("adapter-badge")
         }
     }
 
@@ -2641,8 +2870,54 @@ struct AgentLayoutHarness: View {
 
     @StateObject private var connection = Connection()
 
+    /// Which empty-transcript screen to stand in, or nil for the conversation.
+    ///
+    /// One BARE flag each — `-empty-starting` — rather than `-state starting`.
+    /// The pair form worked under `simctl launch` and silently did nothing
+    /// under `XCUIApplication.launchArguments`, where a leading-dash argument
+    /// followed by a value is the NSUserDefaults argument domain's own syntax
+    /// and does not arrive as two arguments. `-plain` and `-native` were
+    /// already bare for no reason but taste; now there is a reason.
+    ///
+    /// Every one of these is a screen that used to be reachable only by owning
+    /// a runner whose shim was slow or whose link was down, which is most of
+    /// why they were all drawn the same and nobody could see that they were.
+    private static var emptyState:
+        (AgentStream.Phase, AgentStream.Waited, AgentStream.Trouble?)?
+    {
+        let args = CommandLine.arguments
+        if args.contains("-empty-opening") { return (.opening, .aMoment, nil) }
+        if args.contains("-empty-starting") { return (.starting, .aMoment, nil) }
+        if args.contains("-empty-waiting") { return (.starting, .aWhile, nil) }
+        if args.contains("-empty-trying") {
+            return (
+                .failing, .aWhile,
+                AgentStream.Trouble(
+                    sentence: "The connection to this runner dropped. Reconnecting…")
+            )
+        }
+        if args.contains("-empty-failed") {
+            return (
+                .failing, .tooLong,
+                AgentStream.Trouble(
+                    sentence: "The request that reads it didn’t finish.",
+                    transcript: "ssh: connect to host runner port 22: Operation timed out")
+            )
+        }
+        if args.contains("-empty-live") { return (.live, .aMoment, nil) }
+        return nil
+    }
+
     var body: AnyView {
         var pane = AgentView(terminalID: "harness", workspaceID: nil, connection: connection)
+        if let (phase, waited, trouble) = Self.emptyState {
+            pane.fixture = []
+            pane.fixturePhase = phase
+            pane.fixtureWaited = waited
+            pane.fixtureTrouble = trouble
+            pane.fixtureIsWorking = false
+            return AnyView(pane.ignoresSafeArea(.keyboard, edges: .bottom))
+        }
         pane.fixture = CommandLine.arguments.contains("-plain")
             ? Self.conversation.filter {
                 if case .plan = $0.event { return false }
@@ -2687,7 +2962,12 @@ struct AgentLayoutHarness: View {
                         "thought_level", "Thinking", "normal",
                         [("normal", "Normal"), ("deep", "Deep")]),
                 ],
-                availableCommands: [choice("review", "review")], backend: "acp"),
+                // `-native` to see the other badge. The value is a real
+                // `BackendKind::as_str()` string, not a fixture spelling —
+                // `crates/agent-core/src/backend.rs` writes exactly these
+                // three, and the badge's rule is "anything that is not acp".
+                availableCommands: [choice("review", "review")],
+                backend: CommandLine.arguments.contains("-native") ? "claude" : "acp"),
             .plan(entries: [
                 PlanEntry(content: "Read the failing test", priority: "high", status: "completed"),
                 PlanEntry(content: "Fix the inset", priority: "high", status: "in_progress"),
