@@ -522,6 +522,28 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_turn_stops_the_row_saying_working() {
+        // The owner's report, at the rung it is actually visible on: "there's
+        // a lot of weird space below the 'Working…' indicator, which is also
+        // weird because codex most definitely isn’t working given that it’s
+        // requesting us to log in."
+        //
+        // A backend that cannot run the turn now answers with its own sentence
+        // and then `TurnEnded`, in that order. Folded in order the pane passes
+        // through Working and lands on Done — finished and unseen, which is
+        // what puts it in front of somebody. Reversing those two events would
+        // leave the row on Working, so the order is the assertion.
+        let mut current = AgentActivity::Working;
+        current = fold_activity(current, &AgentEvent::Message {
+            role: Role::Agent,
+            text: "The agent couldn’t run that turn: Not authenticated.".into(),
+            parent: None,
+        });
+        current = fold_activity(current, &AgentEvent::TurnEnded { reason: EndReason::Refusal });
+        assert_eq!(current, AgentActivity::Done, "a stopped agent must not report itself working");
+    }
+
+    #[test]
     fn a_permission_request_blocks_the_row_immediately() {
         let e = AgentEvent::Permission {
             id: "r".into(),

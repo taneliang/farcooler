@@ -14,7 +14,7 @@ use crate::normalize::{relativize, update_to_events};
 use crate::wire::Rpc;
 use farcooler_agent_core::event::{
     AgentChoice, AgentEvent, AgentGapReason, ConfigOption, Diff, EndReason, PermissionOption,
-    PromptImage, ToolStatus,
+    PromptImage, Role, ToolStatus,
 };
 use farcooler_agent_core::backend::BackendKind;
 use farcooler_agent_core::fs_guard::confine;
@@ -750,6 +750,44 @@ impl RunningSession {
                 }
                 return Ok(Vec::new());
             }
+            Incoming::Failure { id, message } => {
+                // The turn's OTHER ending, and just as final. An adapter that
+                // cannot run the turn at all — not signed in, out of quota,
+                // an expired key — answers the prompt's id with `error`
+                // instead of `result`, and until this arm existed the frame
+                // never got this far: `classify_incoming` returned `None` for
+                // it and the reader task dropped it. `pending_prompt` stayed
+                // set, `TurnEnded` never fired, and the pane reported an agent
+                // that had stopped and was waiting on a person as Working.
+                if id.as_u64() != self.pending_prompt {
+                    // Nothing else is sent without waiting for its answer, so
+                    // an id that is not the pending prompt is one nothing is
+                    // waiting on. Reported as the agent speaking would move
+                    // the pane to Working with no turn left to end it — the
+                    // very shape this arm exists to close.
+                    return Ok(Vec::new());
+                }
+                self.pending_prompt = None;
+                // `Refusal` rather than `EndTurn`: the turn did not run. The
+                // distinction is already in the vocabulary and already means
+                // this.
+                //
+                // The adapter's sentence goes in the transcript because it is
+                // the only thing that can tell the user what to do about it —
+                // "Run `codex login`" is actionable, "the turn ended" is not.
+                // The same reasoning as `AgentGapReason::LoadFailed`, and the
+                // message is the ADAPTER's own words rather than a Rust error.
+                // Ordered before `TurnEnded` so folding the batch in order
+                // lands on idle rather than on working.
+                return Ok(vec![
+                    AgentEvent::Message {
+                        role: Role::Agent,
+                        text: format!("The agent couldn’t run that turn: {message}"),
+                        parent: None,
+                    },
+                    AgentEvent::TurnEnded { reason: EndReason::Refusal },
+                ]);
+            }
         };
 
         let worktree = self.worktree.clone();
@@ -887,6 +925,72 @@ mod tests {
             .await
             .expect("next_events must not hang waiting on an adapter that already exited");
         assert!(outcome.is_err(), "closure must be a reported error, not a silently empty batch");
+    }
+
+    #[tokio::test]
+    async fn a_prompt_the_adapter_refuses_ends_the_turn_instead_of_working_forever() {
+        // An owner, looking at a codex pane: "codex most definitely isn’t
+        // working given that it’s requesting us to log in" — under a
+        // "Working…" indicator.
+        //
+        // An adapter that cannot run the turn answers `session/prompt` on its
+        // own id with `error` instead of `result`. That frame used to classify
+        // as nothing at all and the reader task dropped it, so `pending_prompt`
+        // was never cleared and `TurnEnded` never fired. Nothing else rescues
+        // it: a pane’s activity moves only when an event folds into it, and
+        // `STALE_LOG_MS` belongs to the TUI log path, not to this one. The
+        // agent had stopped and the pane said Working, forever.
+        //
+        // Driven from the wire rather than by handing `handle` a frame,
+        // because the drop happened in `classify_incoming` — a test that
+        // starts after classification cannot see it.
+        let launch = farcooler_agent_core::backend::Launch {
+            program: "/bin/sh".into(),
+            // Answers the prompt with a refusal and then blocks on stdin, so
+            // stdout stays open. An adapter that EXITED would close the pipe
+            // and end the turn by the `Closed` path instead, which is a
+            // different arm and would pass without the fix.
+            args: vec![
+                "-c".to_string(),
+                r#"read line; printf '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Not authenticated. Run `codex login`."}}\n'; read done"#
+                    .to_string(),
+            ],
+            env: Default::default(),
+        };
+        let conn =
+            AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
+        let worktree = conn.worktree.clone();
+        let (writer, incoming) = conn.split();
+        let mut session = RunningSession {
+            writer,
+            incoming,
+            session_id: "s".to_string(),
+            pending_prompt: None,
+            worktree,
+        };
+        session.prompt("hello", &[]).await.expect("the prompt goes out");
+        assert_eq!(session.pending_prompt, Some(1));
+
+        let events =
+            tokio::time::timeout(std::time::Duration::from_secs(5), session.next_events())
+                .await
+                .expect("a refused prompt must not hang the turn")
+                .expect("a refusal is handled, not a connection error");
+
+        assert!(
+            matches!(events.last(), Some(AgentEvent::TurnEnded { .. })),
+            "the turn has to end, or activity stays Working: {events:?}"
+        );
+        assert_eq!(session.pending_prompt, None, "the turn is no longer in flight");
+        // The adapter’s own sentence is the only thing that can tell a user
+        // what to do about it, so it reaches the transcript.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::Message { text, .. } if text.contains("Not authenticated")
+            )),
+            "{events:?}"
+        );
     }
 
     #[test]

@@ -38,9 +38,45 @@ pub enum Incoming {
     Notification { method: String, params: serde_json::Value },
     /// The answer to a request we sent and deliberately did not wait on.
     Response { id: serde_json::Value, result: serde_json::Value },
+    /// The same, when the answer is a JSON-RPC error rather than a result.
+    ///
+    /// `turn/start` is the one that matters. It reports its end by the
+    /// `turn/completed` notification, and a `turn/start` that FAILS never
+    /// sends one — so this frame is the only announcement that the turn is
+    /// over. Dropped, the pane says Working for a server that has stopped.
+    Failure { id: serde_json::Value, message: String },
+}
+
+/// What a JSON-RPC `error` object actually says, as one sentence.
+///
+/// `data.details` folded in for the same reason `request` has always folded
+/// it: the codex line puts "Internal error" in `message` and the explanation
+/// underneath. Shared with `request` so a refusal reads the same whether it
+/// answered a request this connection blocked on or one it did not.
+fn error_detail(error: &serde_json::Value) -> String {
+    let message =
+        error.get("message").and_then(|m| m.as_str()).unwrap_or("codex app-server refused");
+    match error.get("data").and_then(|d| d.get("details")).and_then(|d| d.as_str()) {
+        Some(details) if !details.is_empty() => format!("{message}: {details}"),
+        _ => message.to_string(),
+    }
 }
 
 fn classify(value: serde_json::Value) -> Option<Incoming> {
+    // Errors first, and by the `error` member rather than by shape: an error
+    // reply carries an id and no result, which the match below cannot tell
+    // apart from a frame with nothing in it.
+    //
+    // Without this arm an error answering `turn/start` was dropped here, so
+    // `pending_turn` stayed set and no `turn/completed` was ever coming —
+    // activity stayed Working forever for a server that had already refused.
+    // The field comment on `pending_turn` claimed this case was covered ("so a
+    // `turn/start` that fails outright is not mistaken for a running turn");
+    // it described an intent the code did not carry out.
+    if let Some(error) = value.get("error") {
+        let id = value.get("id")?.clone();
+        return Some(Incoming::Failure { id, message: error_detail(error) });
+    }
     let method = value.get("method").and_then(|m| m.as_str()).map(str::to_string);
     let id = value.get("id").cloned();
     let result = value.get("result").cloned();
@@ -195,18 +231,7 @@ impl CodexConnection {
             };
             if value.get("id").and_then(|i| i.as_u64()) == Some(id) {
                 if let Some(error) = value.get("error") {
-                    let message = error
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("codex app-server refused");
-                    let detail = error
-                        .get("data")
-                        .and_then(|d| d.get("details"))
-                        .and_then(|d| d.as_str());
-                    return Err(CodexError::Refused(match detail {
-                        Some(detail) => format!("{message}: {detail}"),
-                        None => message.to_string(),
-                    }));
+                    return Err(CodexError::Refused(error_detail(error)));
                 }
                 return Ok(value.get("result").cloned().unwrap_or(serde_json::Value::Null));
             }
@@ -285,6 +310,28 @@ mod tests {
 
     #[test]
     fn a_frame_that_is_neither_is_dropped_rather_than_guessed_at() {
+        // An error with NO id answers nothing, so there is no turn it could
+        // end and nobody to route it to. It used to be dropped for a weaker
+        // reason — every error frame was — which is what left a refused
+        // `turn/start` reporting itself as work in progress.
         assert!(classify(serde_json::json!({ "error": { "code": -32601 } })).is_none());
+    }
+
+    #[test]
+    fn an_error_answering_a_turn_is_surfaced_rather_than_dropped() {
+        // The `Working` forever bug on the native path. `turn/start` announces
+        // its end with `turn/completed`, and a `turn/start` that fails sends
+        // no such notification — this frame is the only word that the turn is
+        // over. "unauthorized" is in the schema's own `codexErrorInfo` enum,
+        // so an agent asking a human to sign in reaches here for real.
+        let frame = serde_json::json!({
+            "id": 3,
+            "error": { "code": -32000, "message": "unauthorized", "data": { "details": "run `codex login`" } }
+        });
+        let Some(Incoming::Failure { id, message }) = classify(frame) else {
+            panic!("an error answering a request must be surfaced")
+        };
+        assert_eq!(id, serde_json::json!(3));
+        assert_eq!(message, "unauthorized: run `codex login`");
     }
 }

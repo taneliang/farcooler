@@ -30,6 +30,11 @@ pub struct CodexBackend {
     /// reports a turn's end goes unrecognized. Codex also announces the end
     /// with `turn/completed`, which is what `normalize` reads — this exists so
     /// a `turn/start` that fails outright is not mistaken for a running turn.
+    ///
+    /// That last sentence was a claim, not a fact, until `Incoming::Failure`
+    /// existed: a `turn/start` that failed outright was answered with a
+    /// JSON-RPC error, `classify` returned `None` for it, and the frame never
+    /// reached `handle` at all. The field was set and nothing ever cleared it.
     pending_turn: Option<u64>,
     /// Chosen per turn rather than held by the server: `turn/start` takes
     /// `model` and `effort` overrides, so a selector change applies to the next
@@ -230,6 +235,37 @@ impl CodexBackend {
                     self.pending_turn = None;
                 }
                 Ok(Vec::new())
+            }
+            Incoming::Failure { id, message } => {
+                // A `turn/start` the server refused outright. No
+                // `turn/completed` follows one of these, so this frame is the
+                // only announcement the turn is over — and it was dropped in
+                // `classify` until recently, which left the pane reporting an
+                // agent that had stopped as still working.
+                if id.as_u64() != self.pending_turn {
+                    // `turn/start` and `turn/interrupt` are the only requests
+                    // sent without waiting, and an id that is neither's is one
+                    // nothing is waiting on. Reported as the agent speaking it
+                    // would move the pane to Working with no turn left to end
+                    // it — the very shape this arm exists to close.
+                    return Ok(Vec::new());
+                }
+                self.pending_turn = None;
+                // The server's own sentence, because it is the only thing that
+                // can tell a user what to do about it — "unauthorized: run
+                // `codex login`" is actionable and "the turn ended" is not.
+                // Ordered before `TurnEnded` so folding the batch in order
+                // lands on idle rather than on working.
+                Ok(vec![
+                    AgentEvent::Message {
+                        role: farcooler_agent_core::event::Role::Agent,
+                        text: format!("The agent couldn’t run that turn: {message}"),
+                        parent: None,
+                    },
+                    AgentEvent::TurnEnded {
+                        reason: farcooler_agent_core::event::EndReason::Refusal,
+                    },
+                ])
             }
         }
     }
@@ -639,6 +675,70 @@ impl AgentBackend for CodexBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_turn_the_server_refuses_ends_instead_of_working_forever() {
+        // The native twin of the ACP hang. `turn/start` reports its end with
+        // the `turn/completed` notification, and a `turn/start` that FAILS
+        // never sends one — the error reply on its own id is the only word
+        // that the turn is over. `classify` dropped it, so `pending_turn`
+        // stayed set and the pane said Working for a server that had already
+        // refused. "unauthorized" is in the schema's own `codexErrorInfo`
+        // enum, so an agent asking a human to sign in lands here for real.
+        //
+        // Driven from the wire, because the drop happened in `classify`: a
+        // test that starts after classification cannot see it.
+        let args = vec![
+            "-c".to_string(),
+            // Refuses the turn and then blocks on stdin, so stdout stays open.
+            // A server that EXITED would end the turn by the `Closed` path
+            // instead, and this would pass without the fix.
+            r#"read line; printf '{"id":1,"error":{"code":-32000,"message":"unauthorized","data":{"details":"run `codex login`"}}}\n'; read done"#
+                .to_string(),
+        ];
+        let conn = crate::conn::CodexConnection::spawn(
+            std::path::Path::new("/bin/sh"),
+            &args,
+            &Default::default(),
+            std::env::temp_dir(),
+        )
+        .await
+        .expect("spawn a fake app-server");
+        let (writer, incoming) = conn.split();
+        let mut backend = CodexBackend {
+            writer,
+            incoming,
+            thread_id: "t".to_string(),
+            pending_turn: None,
+            model: None,
+            effort: None,
+            approval: None,
+        };
+        backend.prompt("hello", &[]).await.expect("the turn goes out");
+        assert_eq!(backend.pending_turn, Some(1));
+
+        let events =
+            tokio::time::timeout(std::time::Duration::from_secs(5), backend.next_events())
+                .await
+                .expect("a refused turn must not hang the pane")
+                .expect("a refusal is handled, not a connection error");
+
+        assert!(
+            matches!(events.last(), Some(AgentEvent::TurnEnded { .. })),
+            "the turn has to end, or activity stays Working: {events:?}"
+        );
+        assert_eq!(backend.pending_turn, None, "no turn is in flight anymore");
+        // The server's own words, including the half it buried in `data`,
+        // because "run `codex login`" is the only actionable part.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::Message { text, .. }
+                    if text.contains("unauthorized") && text.contains("codex login")
+            )),
+            "{events:?}"
+        );
+    }
 
     #[test]
     fn codex_advertises_native_steering_and_replay_but_not_client_side_files() {

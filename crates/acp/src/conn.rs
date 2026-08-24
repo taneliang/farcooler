@@ -34,7 +34,7 @@ pub enum AcpError {
 
 /// A frame from the adapter that the caller has to deal with.
 ///
-/// All three kinds have to reach the caller, and leaving any one out breaks
+/// All four kinds have to reach the caller, and leaving any one out breaks
 /// something specific:
 ///
 /// - dropping `Request` hangs the agent on its first permission prompt;
@@ -44,6 +44,10 @@ pub enum AcpError {
 ///   end is reported. Without it activity never returns to idle, `Done` never
 ///   happens, and no notification is ever sent — which is the entire reason
 ///   this feature exists.
+/// - dropping `Failure` does the same damage as dropping `Response`, and for
+///   the same reason: a refusal answers the prompt's id too. The turn is just
+///   as over, and a pane that never hears about it says Working for an agent
+///   that has stopped and is waiting on a human.
 #[derive(Debug)]
 pub enum Incoming {
     /// The adapter is asking us something and is blocked until we answer.
@@ -52,6 +56,31 @@ pub enum Incoming {
     Notification { method: String, params: serde_json::Value },
     /// The answer to a request we sent and deliberately did not wait for.
     Response { id: serde_json::Value, result: serde_json::Value },
+    /// The same, when the answer is a JSON-RPC error rather than a result.
+    ///
+    /// Carries the adapter's own words, already folded by `error_detail`,
+    /// because nothing on this side of the wire can say why the agent refused.
+    Failure { id: serde_json::Value, message: String },
+}
+
+/// What a JSON-RPC `error` object actually says, as one sentence.
+///
+/// `message` is not always where the substance is. Probed directly against
+/// `@agentclientprotocol/codex-acp` on 2026-08-03 by sending `session/load`
+/// for an unknown id: it answers `message: "Internal error"` — which says
+/// nothing — and puts the actual explanation at `data.details`: `"no rollout
+/// found for thread id 00000000-0000-7000-8000-000000000000"`. Appended rather
+/// than substituted, so an adapter that puts something useful in both fields
+/// loses neither.
+///
+/// Shared by `request` and by `classify_incoming` so a refusal reads the same
+/// whether it answered a request we blocked on or one we did not.
+fn error_detail(error: &serde_json::Value) -> String {
+    let message = error["message"].as_str().unwrap_or("the adapter refused");
+    match error["data"]["details"].as_str() {
+        Some(details) if !details.is_empty() => format!("{message}: {details}"),
+        _ => message.to_string(),
+    }
 }
 
 /// One frame, as it goes on the wire.
@@ -67,6 +96,20 @@ pub fn encode_frame(value: &serde_json::Value) -> String {
 /// the reader task `split` spawns, so the two can never classify a frame
 /// differently.
 fn classify_incoming(rpc: Rpc) -> Option<Incoming> {
+    // Errors first, and by the `error` field rather than by shape: an error
+    // reply carries an id and no result, which is otherwise indistinguishable
+    // from a frame with nothing in it at all.
+    //
+    // This arm is the fix for a hang. The comment that used to sit on the
+    // catch-all below said an error frame had "nothing to act on and nothing
+    // to report", which had already stopped being true by the time `wire.rs`
+    // modelled `Rpc.error` and warned that ignoring it "presents as a hang".
+    // It did exactly that: an error answering `session/prompt` was dropped
+    // here, so the turn never ended and the pane said Working forever.
+    if let Some(error) = rpc.error {
+        let id = rpc.id?;
+        return Some(Incoming::Failure { id, message: error_detail(&error) });
+    }
     match (rpc.method, rpc.id, rpc.result) {
         // A response to something we sent and did not block on — in
         // practice `session/prompt`, whose result carries `stopReason`.
@@ -77,8 +120,8 @@ fn classify_incoming(rpc: Rpc) -> Option<Incoming> {
         (Some(method), None, _) => {
             Some(Incoming::Notification { method, params: rpc.params.unwrap_or(serde_json::Value::Null) })
         }
-        // An error frame, or something with no method and no result. There is
-        // nothing to act on and nothing to report.
+        // No method, no result and no error either: an empty frame, or a
+        // notification-shaped one with its method missing. Nothing to act on.
         _ => None,
     }
 }
@@ -225,22 +268,7 @@ impl AcpConnection {
                     // failure to attribute. Seen for real: `session/load`
                     // answering "Session not found" for an id whose transcript
                     // does not exist yet.
-                    let message =
-                        error["message"].as_str().unwrap_or("the adapter refused").to_string();
-                    // `message` is not always where the substance is. Probed
-                    // directly against `@agentclientprotocol/codex-acp` on
-                    // 2026-08-03 by sending `session/load` for an unknown id:
-                    // it answers `message: "Internal error"` — which says
-                    // nothing — and puts the actual explanation at
-                    // `data.details`: `"no rollout found for thread id
-                    // 00000000-0000-7000-8000-000000000000"`. Appended rather
-                    // than substituted, so an adapter that puts something
-                    // useful in both fields loses neither.
-                    let detail = match error["data"]["details"].as_str() {
-                        Some(details) if !details.is_empty() => format!("{message}: {details}"),
-                        _ => message,
-                    };
-                    return Err(AcpError::Refused(detail));
+                    return Err(AcpError::Refused(error_detail(&error)));
                 }
                 if rpc.result.is_some() {
                     return Ok(rpc.result.unwrap_or(serde_json::Value::Null));
@@ -383,9 +411,10 @@ impl AcpConnection {
                             break; // nobody is listening anymore
                         }
                     }
-                    // An error frame, or something with no method and no
-                    // result: nothing to act on, so read the next line rather
-                    // than surfacing an empty batch to the caller.
+                    // A frame with no method, no result and no error:
+                    // nothing to act on, so read the next line rather than
+                    // surfacing an empty batch to the caller. This used to
+                    // swallow error replies too — see `classify_incoming`.
                     None => continue,
                 }
             }
@@ -512,6 +541,47 @@ mod tests {
         };
         assert_eq!(id, serde_json::json!(7));
         assert_eq!(result["stopReason"], "end_turn");
+    }
+
+    #[tokio::test]
+    async fn an_error_answering_a_request_we_did_not_block_on_is_surfaced_not_dropped() {
+        // The other half of the same wire fact as the test above: a prompt is
+        // answered on its id either way, and a refusal ends the turn exactly
+        // as a `stopReason` does. Classified as nothing, an error reply was
+        // dropped by the reader task and the turn never ended — an adapter
+        // asking a human to sign in read as an agent still working.
+        let launch = fake_adapter();
+        let mut conn =
+            AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
+        conn.queue(Rpc {
+            method: None,
+            params: None,
+            id: Some(serde_json::json!(7)),
+            result: None,
+            error: Some(serde_json::json!({ "code": -32000, "message": "Not authenticated" })),
+        });
+        let Some(Incoming::Failure { id, message }) = conn.pending_incoming.pop() else {
+            panic!("an error reply must be surfaced")
+        };
+        assert_eq!(id, serde_json::json!(7));
+        assert_eq!(message, "Not authenticated");
+    }
+
+    #[test]
+    fn an_error_reply_keeps_the_detail_the_adapter_buried_in_data() {
+        // `error_detail` is shared with `request`, so the sentence a user sees
+        // is the same whether the refusal answered a request this connection
+        // blocked on or one it did not.
+        assert_eq!(
+            error_detail(&serde_json::json!({
+                "message": "Internal error",
+                "data": { "details": "no rollout found for thread id 0" }
+            })),
+            "Internal error: no rollout found for thread id 0"
+        );
+        // An error object with nothing readable in it still yields a sentence
+        // rather than an empty string, which would render as a blank line.
+        assert_eq!(error_detail(&serde_json::json!({})), "the adapter refused");
     }
 
     #[tokio::test]
