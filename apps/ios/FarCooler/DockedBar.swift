@@ -128,12 +128,30 @@ final class KeyboardInset: ObservableObject {
 
 /// Hosts the bar and keeps it docked.
 final class DockedBarController: UIViewController {
-    private let host: UIHostingController<AnyView>
+    private let host: MeasuredHostingController
     private lazy var bar = AccessoryHostView(host: host)
 
     init(rootView: AnyView) {
-        host = UIHostingController(rootView: rootView)
+        host = MeasuredHostingController(rootView: rootView)
         super.init(nibName: nil, bundle: nil)
+        // The bar re-measuring itself when its OWN content grows.
+        //
+        // `update(rootView:)` below is the only other `setNeedsLayout` there
+        // is, and it runs only when the view that vends the bar is
+        // re-evaluated. The draft, the cursor and the attachments are `@State`
+        // inside the composer — see `AgentComposer` — so typing re-lays this
+        // hosting controller out without `AgentView` hearing about it at all.
+        // The accessory kept the height one line measured, SwiftUI drew four
+        // lines overflowing out of the top of it, and the transcript went on
+        // reserving room for a composer eighty points shorter than the one on
+        // screen. A message grown to the field's ceiling put the last rows of
+        // the conversation back underneath it.
+        //
+        // A UIKit callback rather than a SwiftUI one: this content is hosted in
+        // a SEPARATE SwiftUI graph, so state written from inside it does not
+        // invalidate the view that built it. `onHeightChange` already crosses
+        // the same boundary the same way, and for the same reason.
+        host.onLayout = { [weak self] in self?.bar.setNeedsLayout() }
         // The hosting controller draws its own background, which would sit as an
         // opaque slab behind a bar whose whole design is glass over the
         // conversation.
@@ -209,6 +227,24 @@ final class DockedBarController: UIViewController {
     }
 }
 
+/// A hosting controller that says when it has laid its content out.
+///
+/// `viewDidLayoutSubviews` is the one signal that fires when the SwiftUI inside
+/// changes shape on its own — a line added to the draft, a thumbnail strip
+/// appearing, the slash-command list opening — none of which reach the view
+/// that vends this bar. See `DockedBarController.init`.
+final class MeasuredHostingController: UIHostingController<AnyView> {
+    /// Called after every layout pass. Re-measuring from here is safe because
+    /// `AccessoryHostView` reports only a height that actually CHANGED, so the
+    /// pass this provokes settles rather than repeating.
+    var onLayout: (() -> Void)?
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        onLayout?()
+    }
+}
+
 /// The accessory itself: a plain view whose height is whatever the SwiftUI
 /// content needs.
 ///
@@ -217,7 +253,7 @@ final class DockedBarController: UIViewController {
 /// the bar is drawn at whatever it happened to be born at and clips the moment
 /// the field grows past one line.
 final class AccessoryHostView: UIView {
-    private let host: UIHostingController<AnyView>
+    private let host: MeasuredHostingController
 
     /// The height last measured, so `layoutSubviews` can tell a real change
     /// from being asked again at the same size.
@@ -226,7 +262,7 @@ final class AccessoryHostView: UIView {
     /// Reported upward so the conversation can leave room. See `DockedBar`.
     var onHeightChange: ((CGFloat) -> Void)?
 
-    init(host: UIHostingController<AnyView>) {
+    init(host: MeasuredHostingController) {
         self.host = host
         super.init(frame: .zero)
         autoresizingMask = .flexibleHeight

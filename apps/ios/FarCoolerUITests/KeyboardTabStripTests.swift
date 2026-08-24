@@ -146,3 +146,138 @@ final class KeyboardTabStripTests: XCTestCase {
         XCTAssertFalse(app.buttons["Done"].exists, "The terminal modal did not dismiss")
     }
 }
+
+/// What the agent transcript's scrolling has to do, checked against the layout
+/// harness rather than against a runner.
+///
+/// Unlike the suite above, these run on a simulator: `AgentLayoutHarness` mounts
+/// the real `AgentView` over a canned conversation, which is the only way this
+/// screen can be exercised without an enrolled runner, a workspace and a turn in
+/// flight. The transcript publishes its measurements as its accessibility value
+/// in debug builds — see `AgentLayoutProbe` — and `inset` is the number the
+/// reported bug was: the room the conversation leaves for the composer resting
+/// on it.
+final class AgentTranscriptScrollTests: XCTestCase {
+    private func launch() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-agent-layout-harness", "-plain"]
+        app.launch()
+        return app
+    }
+
+    private func state(_ transcript: XCUIElement) -> [String: Int] {
+        var parsed: [String: Int] = [:]
+        for pair in (transcript.value as? String ?? "").split(separator: ";") {
+            let halves = pair.split(separator: "=")
+            guard halves.count == 2 else { continue }
+            parsed[String(halves[0])] = Int(halves[1]) ?? (halves[1] == "true" ? 1 : 0)
+        }
+        return parsed
+    }
+
+    /// The reported bug: "text can be scrolled behind the message box and
+    /// cannot be read... the scroll area seems to sometimes not have any inset
+    /// area at the bottom."
+    ///
+    /// The composer is an `inputAccessoryView`, so its height is measured in the
+    /// keyboard's window, which runs to the bottom of the screen — the
+    /// home-indicator strip is inside that number. Counting the pane's own safe
+    /// area on top of it reserved 196 points for a composer covering 162, and
+    /// the conversation came to rest with its last row under the glass.
+    func testTheConversationReservesExactlyTheComposerItHas() throws {
+        let app = launch()
+        let transcript = app.scrollViews["agent-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 30))
+        let measured = state(transcript)
+        let covered = max(measured["keyboard"] ?? 0, measured["bar"] ?? 0)
+        XCTAssertGreaterThan(covered, 0, "The composer never reported a height")
+        XCTAssertEqual(
+            measured["inset"] ?? -1, covered, accuracy: 1,
+            "The transcript reserved \(measured["inset"] ?? -1) for a composer covering \(covered)")
+    }
+
+    /// It opens at the tail, and says so.
+    func testItOpensAtTheTailWithNoWayBackOffered() throws {
+        let app = launch()
+        let transcript = app.scrollViews["agent-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 30))
+        XCTAssertEqual(state(transcript)["tail"], 1, "The transcript did not open at its tail")
+        XCTAssertFalse(
+            app.buttons["jump-to-latest"].exists,
+            "A way back was offered to a reader who is already at the bottom")
+    }
+
+    /// Principle 4, which is the one a chat surface is judged on: a reader who
+    /// has scrolled away is never dragged back. The keyboard is the event that
+    /// used to do it — the viewport shortens before the scroll position
+    /// catches up, and the transcript read that transient as the reader's own
+    /// choice.
+    func testTheKeyboardDoesNotDragAnUnpinnedReaderBack() throws {
+        let app = launch()
+        let transcript = app.scrollViews["agent-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 30))
+        transcript.swipeDown(velocity: .fast)
+        transcript.swipeDown(velocity: .fast)
+        XCTAssertEqual(state(transcript)["tail"], 0, "Scrolling away did not unpin the transcript")
+
+        let back = app.buttons["jump-to-latest"]
+        XCTAssertTrue(back.waitForExistence(timeout: 3), "No way back was offered")
+
+        app.textViews.firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        let stayedPut = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value ENDSWITH %@", "tail=false"), object: transcript)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [stayedPut], timeout: 3), .completed,
+            "The keyboard pulled a reader who had scrolled away back to the tail")
+
+        back.tap()
+        let returned = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value ENDSWITH %@", "tail=true"), object: transcript)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returned], timeout: 5), .completed,
+            "Jump to Latest did not return the transcript to its tail")
+    }
+
+    /// Principle 3's other half. A message grown to several lines makes the
+    /// composer taller, and the accessory used to keep the height one line
+    /// measured: the draft is `@State` inside the composer, so typing never
+    /// re-evaluated the view that measures the bar. SwiftUI drew four lines
+    /// overflowing out of a bar UIKit still believed was one, and the transcript
+    /// reserved room for the one.
+    func testTypingAMultiLineMessageMakesRoomForIt() throws {
+        let app = launch()
+        let transcript = app.scrollViews["agent-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 30))
+        let field = app.textViews.firstMatch
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        // The BAR's own number, not the keyboard's: with the keyboard up the
+        // reported keyboard frame contains the bar as it was when the frame was
+        // posted, so it is the bar's measurement that has to move.
+        let oneLine = state(transcript)["bar"] ?? 0
+        XCTAssertGreaterThan(oneLine, 0, "The composer never reported a height")
+
+        app.typeText(
+            "A message long enough to wrap onto five or six separate lines inside the "
+            + "composer card so that the field grows well past its resting height")
+        let grew = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                guard let value = (object as? XCUIElement)?.value as? String,
+                    let bar = value.split(separator: ";").first(where: { $0.hasPrefix("bar=") }),
+                    let height = Int(bar.dropFirst(4))
+                else { return false }
+                return height > oneLine
+            }, object: transcript)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [grew], timeout: 5), .completed,
+            "The composer grew and the bar went on reporting the height of one line: "
+                + "\(String(describing: transcript.value))")
+
+        let measured = state(transcript)
+        XCTAssertEqual(
+            measured["inset"] ?? -1,
+            max(measured["keyboard"] ?? 0, measured["bar"] ?? 0), accuracy: 1,
+            "The transcript did not make room for the composer it now has")
+    }
+}

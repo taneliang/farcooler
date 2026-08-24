@@ -345,4 +345,15 @@ final class AgentStream: ObservableObject {
     func cancel() async {
         _ = try? await core.call("terminal.agent_cancel", ["terminal": terminal])
     }
+
+    #if DEBUG
+    /// Fill this stream from canned events, with no runner behind it.
+    ///
+    /// `AgentLayoutHarness` is the only caller. The agent pane cannot
+    /// otherwise be LOOKED at without an enrolled runner and a live turn,
+    /// which is how it shipped a composer nobody had seen.
+    func loadFixture(_ events: [Sequenced]) {
+        transcript.apply(events)
+    }
+    #endif
 }

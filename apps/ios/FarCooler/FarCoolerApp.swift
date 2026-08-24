@@ -9,7 +9,7 @@ struct FarCoolerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            harnessOrRoot
                 // Whichever way the theme goes, everywhere.
                 //
                 // This was an unconditional `.dark`, and the reasoning was
@@ -32,6 +32,20 @@ struct FarCoolerApp: App {
                 // terminal is the theme applying to half the screen.
                 .background(themes.current.backgroundColor)
         }
+    }
+
+    /// `RootView`, unless this launch asked for the layout harness.
+    @ViewBuilder
+    private var harnessOrRoot: some View {
+        #if DEBUG
+        if AgentLayoutHarness.isRequested {
+            AgentLayoutHarness()
+        } else {
+            RootView()
+        }
+        #else
+        RootView()
+        #endif
     }
 }
 

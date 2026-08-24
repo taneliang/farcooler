@@ -30,24 +30,65 @@ struct AgentView: View {
     @StateObject private var keyboard = KeyboardInset()
     /// How tall the docked composer measured. Reported up out of `DockedBar`.
     @State private var barHeight: CGFloat = 0
-    /// Whether the transcript should follow its own tail — true while the
-    /// reader is parked at the bottom, false once they scroll away.
-    @State private var followingTail = true
-    /// Holds the reader's pre-keyboard intent across the viewport animation.
-    ///
-    /// The keyboard and the scroll view do not update in one layout pass: the
-    /// viewport becomes shorter first, which briefly makes an actually
-    /// tail-following transcript report that it is no longer at the bottom.
-    /// Remembering the intent until the keyboard settles prevents that
-    /// transient geometry from being mistaken for a user scroll.
-    @State private var pinsTailThroughKeyboardResize = false
-    /// Invalidates an older keyboard-settle task when another frame arrives.
-    @State private var keyboardResizeGeneration = 0
+    // MARK: What a conversation's scrolling has to do
+    //
+    // Rebuilt from these, rather than grown one guard at a time. The behavior
+    // this replaced had three pieces of state, a generation counter and a
+    // five-step timer ladder all trying to answer one question — WHO moved the
+    // scroll view — by inference from geometry, which cannot answer it.
+    //
+    // 1. FOLLOWING THE TAIL IS A MODE THE READER OWNS. It turns off when the
+    //    reader scrolls away and on when they come back, and nothing else may
+    //    touch it. Every mistake this surface made was some layout event —
+    //    the keyboard, the composer growing, a lazy row resolving its height —
+    //    being read back as the reader having scrolled.
+    // 2. SO ONLY A FINGER COUNTS. `onScrollPhaseChange` says whether the
+    //    scroll in progress is the reader's or ours; the at-bottom test is
+    //    consulted only while it is theirs. That one distinction is what the
+    //    generation counter was standing in for.
+    // 3. PINNED MEANS RE-ANCHORED WHENEVER EITHER SIDE MOVES. Content growing
+    //    is only half of it: the viewport shrinks too — keyboard, a message
+    //    growing to three lines, a plan panel appearing — and reserving room
+    //    for that WITHOUT re-anchoring is exactly how the tail ended up
+    //    underneath the composer. See `obstruction`.
+    // 4. UNPINNED IS INVIOLABLE. Nothing scrolls a reader who has scrolled
+    //    away. Not a streamed token, not the keyboard, not a finished turn.
+    // 5. THE WAY BACK IS OFFERED, NOT TAKEN. See `jumpToLatest`.
+    // 6. FOLLOWING IS NOT ANIMATED. A reply arrives several events a second
+    //    and an eased scroll per event is the jitter. The content grows at the
+    //    bottom edge, so an unanimated re-anchor is invisible. The one scroll
+    //    worth animating is the one the reader asked for.
+    // 7. IT OPENS AT THE TAIL. First mount and every return.
+
+    /// Whether the transcript is following its own tail.
+    @State private var pinnedToTail = true
+    /// Whether the scroll in progress is one the READER started. See 2 above.
+    @State private var readerIsDriving = false
+    /// Whether anything has arrived since the reader scrolled away.
+    @State private var arrivedWhileAway = false
+    /// The re-anchor that outlives the keyboard's own animation. See
+    /// `anchorToTail(animated:settling:)`.
+    @State private var settleTask: Task<Void, Never>?
     /// The row the scroll view holds still while heights around it resolve.
     @State private var scrollPosition = ScrollPosition(idType: Int.self)
+    /// The bottom content inset actually in force, for the probe below — this
+    /// is the number the regression was about and it was not observable.
+    @State private var appliedInset: CGFloat = 0
     /// The end of the content. `Int` like every row id, because
     /// `scrollPosition(id:)` binds one type.
     private static let endOfTranscript = Int.max
+    /// How far off the bottom still counts as the bottom. A lazy row resolving
+    /// its height moves the tail by a few points at a time, so "at the bottom"
+    /// after a redraw is rarely exact.
+    private static let tailSlack: CGFloat = 40
+    /// When to look again after the keyboard has been asked to move.
+    ///
+    /// `keyboardWillChangeFrame` reports the END rectangle, and iOS 26 then
+    /// animates to it over several layout passes — so a single re-anchor lands
+    /// against geometry still in motion and leaves the last rows underneath the
+    /// keyboard. Kept from the behavior this replaced, which found the same
+    /// thing the hard way; only the bookkeeping around it is new.
+    private static let settleLadder = [80, 180, 300, 440]
 
     init(
         terminalID: String, workspaceID: String?, connection: Connection, isVisible: Bool = true
@@ -112,8 +153,139 @@ struct AgentView: View {
     }
 
     private var isWorking: Bool {
+        #if DEBUG
+        if let fixtureIsWorking { return fixtureIsWorking }
+        #endif
         guard let workspaceID else { return false }
         return connection.terminal(terminalID, in: workspaceID)?.agent == .working
+    }
+
+    #if DEBUG
+    /// A canned conversation, and the activity the fleet would have reported
+    /// for it. Set only by `AgentLayoutHarness`; `nil` everywhere else.
+    var fixture: [Sequenced]?
+    var fixtureIsWorking: Bool?
+    #endif
+
+    // MARK: Following the tail
+
+    /// How much of the transcript is covered by something resting on it.
+    ///
+    /// The larger of the two, because each is right in one state and blind in
+    /// the other. With the keyboard DOWN the accessory is simply on screen and
+    /// posts no keyboard-frame notification at all, so only its measured height
+    /// knows it is there. With the keyboard UP the reported frame already
+    /// includes the accessory and is the taller number, so it wins — and
+    /// nothing is counted twice.
+    ///
+    /// Both are measured in the keyboard's window, which runs to the bottom of
+    /// the SCREEN, so this number already contains the home-indicator strip.
+    /// That is why the transcript below ignores its own bottom safe area
+    /// rather than adding to it.
+    ///
+    /// Nothing reserved by a pane that is not on screen: its bar is not docked,
+    /// so there is nothing down there to clear.
+    private var obstruction: CGFloat {
+        isVisible ? max(keyboard.height, barHeight) : 0
+    }
+
+
+    /// Whether the scroll view is parked at the end of the conversation.
+    ///
+    /// `visibleRect` already accounts for every safe-area inset. Adding
+    /// `containerSize` to `contentOffset` does not, which makes a bottom-inset
+    /// scroll view look permanently short of its tail even after the user has
+    /// reached it.
+    ///
+    /// `>=` rather than a band around the tail, deliberately: a finger holding
+    /// the transcript rubber-banded past its end has not scrolled away from
+    /// anything. What that leniency cannot do is notice a transcript left
+    /// overscrolled by a stale inset — which is why the inset is now correct at
+    /// the source instead of being compensated for here.
+    private static func isAtTail(_ geometry: ScrollGeometry) -> Bool {
+        geometry.visibleRect.maxY >= geometry.contentSize.height - Self.tailSlack
+    }
+
+    /// The one writer of the mode. Reaching the tail is also how "you missed
+    /// something" stops being true — the reader has now seen it.
+    private func setPinned(_ atTail: Bool) {
+        pinnedToTail = atTail
+        if atTail { arrivedWhileAway = false }
+    }
+
+    /// Put the end of the conversation back against the bottom of the viewport.
+    ///
+    /// `settling` is for the changes that do not finish in one layout pass —
+    /// the keyboard above all. See `settleLadder`. Each pass re-checks the
+    /// mode and the finger, so a reader who starts scrolling mid-animation
+    /// takes the transcript from it rather than fighting it.
+    private func anchorToTail(animated: Bool, settling: Bool) {
+        settleTask?.cancel()
+        settleTask = nil
+        if animated {
+            withAnimation(.easeOut(duration: 0.25)) {
+                scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+            }
+        } else {
+            scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+        }
+        guard settling else { return }
+        settleTask = Task { @MainActor in
+            for delay in Self.settleLadder {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard !Task.isCancelled, pinnedToTail, !readerIsDriving else { return }
+                scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+            }
+        }
+    }
+
+    /// The way back, offered rather than taken.
+    ///
+    /// A transcript that yanks the reader to the bottom is the single
+    /// most-hated behavior a chat surface has. A transcript that strands them
+    /// with no way back is the second, and it is the one this screen had: the
+    /// only route to the end of a long conversation was to scroll there by
+    /// hand. So the tail is never taken by force and is always one tap away.
+    ///
+    /// NO COUNT ON IT. A streamed reply coalesces into the row already on
+    /// screen — see `Transcript` — so "3 new" would say one for a four-minute
+    /// answer and nothing at all for a turn that was only tool calls. The
+    /// honest question a count is trying to answer is whether anything has
+    /// happened since you looked away, and a dot answers exactly that and
+    /// claims nothing more.
+    private var jumpToLatest: some View {
+        Button {
+            setPinned(true)
+            // The one scroll worth animating: the reader asked for it, and the
+            // movement is what tells them the tap did something.
+            anchorToTail(animated: true, settling: false)
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 15, weight: .semibold))
+                // Said explicitly, because a `Button` tints its label and
+                // `.foregroundStyle` inside one does not survive it — the
+                // blue-link reading half the controls on this screen have
+                // already been corrected for.
+                .foregroundStyle(.primary)
+                .frame(width: 38, height: 38)
+                .background(.regularMaterial, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(Color.primary.opacity(0.12))
+                }
+                .overlay(alignment: .topTrailing) {
+                    if arrivedWhileAway {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 10, height: 10)
+                            .overlay { Circle().strokeBorder(TerminalPalette.background, lineWidth: 2) }
+                            .offset(x: 1, y: -1)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("jump-to-latest")
+        .accessibilityLabel(arrivedWhileAway ? "Jump to Latest, new messages" : "Jump to Latest")
+        .transition(.scale(scale: 0.6).combined(with: .opacity))
     }
 
     var body: some View {
@@ -122,7 +294,7 @@ struct AgentView: View {
                 .modifier(
                     AgentLayoutProbe(
                         keyboardHeight: keyboard.height, barHeight: barHeight,
-                        followingTail: followingTail))
+                        appliedInset: appliedInset, followingTail: pinnedToTail))
                 // The composer sits in the transcript's bottom safe area, which
                 // is the framework's own answer to "a control resting on
                 // scrolling content": the conversation runs the full height and
@@ -148,21 +320,56 @@ struct AgentView: View {
                 // Adding the bar's height on top of avoidance is not the fix
                 // either: with the keyboard UP, avoidance already counts the
                 // accessory, and adding it again leaves a bar-sized gap. So the
-                // one number that is correct in both states — the keyboard's
-                // own overlap, accessory included — is used for both.
-                .ignoresSafeArea(.keyboard, edges: .bottom)
+                // one number that is correct in both states — `obstruction`,
+                // the keyboard's own overlap with the accessory included — is
+                // used for both.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    // The larger of the two, because each is right in one state
-                    // and blind in the other. With the keyboard DOWN the
-                    // accessory is simply on screen and posts no keyboard-frame
-                    // notification at all, so only its measured height knows it
-                    // is there. With the keyboard UP the reported frame already
-                    // includes the accessory and is the taller number, so it
-                    // wins — and nothing is counted twice.
-                    // Nothing reserved by a pane that is not on screen: its bar
-                    // is not docked, so there is nothing down there to clear.
-                    Color.clear.frame(height: isVisible ? max(keyboard.height, barHeight) : 0)
+                    Color.clear.frame(height: obstruction)
                 }
+                // THE HOME INDICATOR, COUNTED ONCE.
+                //
+                // This is what left the last line under the composer even when
+                // everything else was right. An input accessory is laid out in
+                // the KEYBOARD's window, which runs to the bottom of the SCREEN
+                // — so the height it measures already contains the
+                // home-indicator strip below the card, and this pane's own
+                // container safe area contains that same strip again. The two
+                // added up reserved 196 points where the composer covers 162,
+                // so the transcript came to rest 34 points too low and its last
+                // row sat under the glass.
+                //
+                // Applied OUTSIDE the inset above, which is the whole trick:
+                // the transcript is laid out against the bottom of the SCREEN
+                // with a bottom safe area of nothing, and `obstruction` is then
+                // the only thing put back. One number, taken from the one
+                // window that knows where the composer actually is.
+                //
+                // `.all` rather than `.container`, and that half is load-
+                // bearing too: SwiftUI's own keyboard avoidance is a bottom
+                // safe area as well, and leaving it in place put the keyboard's
+                // height on top of a number that already contained it — 645
+                // points of inset for a keyboard covering 497.
+                //
+                // What it costs is that the transcript now draws into the strip
+                // below the card, so a conversation being scrolled shows a band
+                // of itself under the composer rather than clean ground. That
+                // is what a floating composer does on this platform — it is a
+                // card over content, not a bar with a floor — but it is a real
+                // change and nobody has looked at it on a device.
+                .ignoresSafeArea(.all, edges: .bottom)
+                // The way back, drawn over the conversation rather than in the
+                // bar — the bar is an accessory in another window, and putting
+                // it there would make the transcript reserve room for its own
+                // scroll control. Sits one card's gap above whatever is
+                // covering the transcript, which is the same number the
+                // transcript insets itself by.
+                .overlay(alignment: .bottom) {
+                    if !pinnedToTail {
+                        jumpToLatest
+                            .padding(.bottom, obstruction + PaneMetrics.card)
+                    }
+                }
+                .animation(.spring(response: 0.28, dampingFraction: 0.86), value: pinnedToTail)
                 // How the conversation MEETS the glass over it.
                 //
                 // `safeAreaInset` puts the composer there and tells the scroll
@@ -176,6 +383,12 @@ struct AgentView: View {
         // Polling follows VISIBILITY, not mounting. A hidden pane keeps its
         // transcript and its scroll offset and costs the host nothing.
         .task(id: isVisible) {
+            #if DEBUG
+            if let fixture {
+                stream.loadFixture(fixture)
+                return
+            }
+            #endif
             if isVisible { stream.start() } else { stream.stop() }
         }
     }
@@ -260,7 +473,7 @@ struct AgentView: View {
                     .modifier(GlassSurface())
                 }
 
-                    AgentComposer(
+                AgentComposer(
                     availableModes: transcript.availableModes,
                     agentMode: transcript.agentMode,
                     configOptions: transcript.configOptions,
@@ -377,13 +590,13 @@ struct AgentView: View {
                 }
                 .padding(PaneMetrics.card)
             }
-            // What the scroll view holds still while content around it
-            // changes height — see the stack above.
             // Start at the conversation's tail even when the transcript is too
             // long for the lazy stack to finish laying out before `onAppear`.
-            // The imperative scroll below remains useful when returning to a
-            // mounted pane; this is the reliable first-layout anchor.
-            .defaultScrollAnchor(.bottom)
+            // `.initialOffset` names the ONE role this is for: where the view
+            // opens. It used to be set for every role, which handed the
+            // framework a standing opinion about the bottom on top of the one
+            // this view maintains deliberately below.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
             // Drag the transcript down and the keyboard goes with it.
             //
             // `.interactively`: the keyboard tracks the finger and comes back if
@@ -401,74 +614,93 @@ struct AgentView: View {
             // so the grid was laid out as though the strip were not there and
             // its last line ended up behind it.
             .scrollDismissesKeyboard(.interactively)
+            // What the scroll view holds still while content around it changes
+            // height — see the lazy stack above.
             .scrollPosition($scrollPosition, anchor: .bottom)
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                // `visibleRect` already accounts for every safe-area inset.
-                // Adding `containerSize` to `contentOffset` does not, which
-                // makes a bottom-inset scroll view look permanently short of
-                // its tail even after the user has reached it.
-                // 40pt of slack, because "at the bottom" after a redraw is
-                // rarely exact while a lazy row is resolving its height.
-                geometry.visibleRect.maxY >= geometry.contentSize.height - 40
-            } action: { _, atBottom in
-                // A keyboard resize briefly reports "not at bottom" before
-                // the new content inset and scroll position meet. That is
-                // layout churn, not the reader scrolling away.
-                if pinsTailThroughKeyboardResize {
-                    followingTail = true
-                } else {
-                    followingTail = atBottom
+            // WHO is moving the scroll view — the question everything else
+            // here depends on, asked of the framework rather than guessed at
+            // from geometry. See principle 2 at the top of this file.
+            .onScrollPhaseChange { _, phase, context in
+                switch phase {
+                // A finger, in one of its three states: down and still,
+                // dragging, or coasting after a fling. Only these are the
+                // reader.
+                case .tracking, .interacting, .decelerating:
+                    readerIsDriving = true
+                // Ours. `anchorToTail` produces exactly this, and reading it
+                // back as a decision the reader made is the feedback loop the
+                // generation counter existed to break.
+                case .animating:
+                    break
+                // The end of whichever it was. A fling that coasts to the
+                // bottom finishes here rather than in the geometry callback,
+                // so the verdict is taken here too.
+                case .idle:
+                    guard readerIsDriving else { break }
+                    readerIsDriving = false
+                    setPinned(Self.isAtTail(context.geometry))
+                @unknown default:
+                    break
                 }
+            }
+            // Live while the finger is down, so the button appears the moment
+            // the reader leaves the tail rather than when they let go — and
+            // GATED on the finger, because this fires for every layout change
+            // as well and those are not the reader scrolling.
+            .onScrollGeometryChange(for: Bool.self) { Self.isAtTail($0) } action: { _, atBottom in
+                guard readerIsDriving else { return }
+                setPinned(atBottom)
+            }
+            // What the transcript actually inset itself by, published for the
+            // probe. The regression this screen shipped was a wrong number
+            // here that nothing on the outside could read.
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.bottom } action: { _, inset in
+                appliedInset = inset
             }
             // Keyed on the CURSOR, not the row count. A streamed reply
             // coalesces into the row already on screen, so the count does
             // not change while the text grows off the bottom.
             .onChange(of: transcript.cursor) { _, _ in
-                // Only while the reader is at the tail. Scrolling to the
-                // end on every event meant reading anything older was
-                // impossible — a streamed reply fires several events a
-                // second and each one threw the view back to the bottom.
-                guard followingTail else { return }
-                withAnimation(.easeOut(duration: 0.2)) {
-                    scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+                guard pinnedToTail else {
+                    // Not a nudge, not a flash — one dot on a control that is
+                    // already on screen. See `jumpToLatest`.
+                    arrivedWhileAway = true
+                    return
                 }
+                // Unanimated: see principle 6. This fires several times a
+                // second while a reply streams, and an eased scroll per event
+                // is the jitter, not the smoothness.
+                anchorToTail(animated: false, settling: false)
             }
-            .onChange(of: keyboard.height) { oldHeight, newHeight in
-                let oldInset = max(oldHeight, barHeight)
-                let newInset = max(newHeight, barHeight)
-                guard newInset > oldInset,
-                    followingTail || pinsTailThroughKeyboardResize
-                else { return }
-
-                pinsTailThroughKeyboardResize = true
-                keyboardResizeGeneration += 1
-                let generation = keyboardResizeGeneration
-
-                // Preserve the reader's intent, not the old coordinates. The
-                // keyboard changes its frame over several layout passes. Pin
-                // throughout that animation, then release only after one final
-                // re-anchor at the settled size. A single next-run-loop scroll
-                // is too early on iOS 26 and leaves the final rows underneath
-                // the keyboard.
-                Task { @MainActor in
-                    for delay in [0, 80, 160, 260, 420] {
-                        if delay == 0 {
-                            await Task.yield()
-                        } else {
-                            try? await Task.sleep(for: .milliseconds(delay))
-                        }
-                        guard generation == keyboardResizeGeneration else { return }
-                        scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
-                    }
-                    // Let the final scroll geometry publish while the pin is
-                    // still active, so it cannot undo the preserved intent.
-                    await Task.yield()
-                    guard generation == keyboardResizeGeneration else { return }
-                    followingTail = true
-                    pinsTailThroughKeyboardResize = false
-                }
+            // THE VIEWPORT MOVED. The half that was missing.
+            //
+            // Only the keyboard was watched, and only for growth — so the
+            // composer growing to three lines, an attachment strip appearing, a
+            // plan panel arriving, or the bar simply finishing its first
+            // measurement all changed how much of the transcript was covered
+            // with nothing re-anchoring it. That last one is the reported bug:
+            // the tail is parked against a bare viewport on the frame before
+            // the accessory has measured, the inset then arrives, and the
+            // scroll view keeps the offset it had — leaving the last rows
+            // exactly one composer underneath the composer.
+            //
+            // Shrinking counts as much as growing: the keyboard going away
+            // gives the tail-follower a hundred points of new room and it must
+            // fill them rather than leave a gap it will never close.
+            .onChange(of: obstruction) { _, _ in
+                guard pinnedToTail else { return }
+                anchorToTail(animated: false, settling: true)
             }
-            .onAppear { scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom) }
+            // Deliberately nothing for the UNPINNED case, and it is a choice
+            // rather than an omission. A reader parked mid-conversation keeps
+            // their content offset, so every line they were reading stays
+            // exactly where it was on screen and the keyboard rises over what
+            // was already below the fold. Shifting the content up instead —
+            // which is what a re-anchor would do — moves words under the eye of
+            // somebody who is reading them, to save a scroll they can perform
+            // themselves. Principle 4: unpinned is inviolable.
+            .onAppear { anchorToTail(animated: false, settling: true) }
+            .onDisappear { settleTask?.cancel() }
         }
     }
 
@@ -528,6 +760,10 @@ struct AgentView: View {
 private struct AgentLayoutProbe: ViewModifier {
     let keyboardHeight: CGFloat
     let barHeight: CGFloat
+    /// What the transcript actually inset itself by. The regression this probe
+    /// was written for turned out to be a wrong number HERE, which nothing
+    /// outside the view could read — the two heights above were both correct.
+    let appliedInset: CGFloat
     let followingTail: Bool
 
     func body(content: Content) -> some View {
@@ -536,7 +772,7 @@ private struct AgentLayoutProbe: ViewModifier {
             .accessibilityIdentifier("agent-transcript")
             .accessibilityValue(
                 Text(verbatim:
-                    "keyboard=\(Int(keyboardHeight.rounded()));bar=\(Int(barHeight.rounded()));tail=\(followingTail ? "true" : "false")"))
+                    "keyboard=\(Int(keyboardHeight.rounded()));bar=\(Int(barHeight.rounded()));inset=\(Int(appliedInset.rounded()));tail=\(followingTail ? "true" : "false")"))
         #else
         content.accessibilityIdentifier("agent-transcript")
         #endif
@@ -1555,12 +1791,25 @@ private struct AgentComposer: View {
                 // actually gets. Before this the row was a 22-point strip of
                 // targets, which is half the floor.
                 HStack(spacing: PaneMetrics.step) {
+                    // A chip, like everything else in this row.
+                    //
+                    // It was a bare glyph centered in a 26-point box, which
+                    // put its ink four and a half points inside the left edge
+                    // every other thing in this card starts on — visible
+                    // precisely because the message field sits directly below
+                    // it — and made the one control that adds something to a
+                    // message read as a different KIND of thing from the four
+                    // capsules beside it. Same capsule, same height, same
+                    // 44-point band around it as `settingsMenu`.
                     PhotosPicker(selection: $photoPickerItem, matching: .images) {
                         Image(systemName: "photo.badge.plus")
                             .font(.system(size: 15))
-                            .frame(
-                                minWidth: PaneMetrics.chip, minHeight: PaneMetrics.target)
-                            .contentShape(.rect)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, PaneMetrics.step)
+                            .frame(height: PaneMetrics.chip)
+                            .background(Capsule().fill(.quaternary))
+                            .frame(minHeight: PaneMetrics.target)
+                            .contentShape(.capsule)
                     }
                     .onChange(of: photoPickerItem) { _, item in loadPickedPhoto(item) }
 
@@ -1582,8 +1831,17 @@ private struct AgentComposer: View {
                 // what actually reaches them.
                 .tint(.secondary)
 
+                // Bottom-aligned, so a field grown to four lines keeps Send
+                // beside its LAST line rather than floating halfway up the
+                // box. What that alone could not do is the resting state: an
+                // empty field is one 26-point line and Send is a 44-point
+                // target, so bottom-aligning them put the glyph's centre nine
+                // points above the text's. The field carries the same
+                // 44-point minimum now, and a single line sits centred in it,
+                // which is what puts the two on one line.
                 HStack(alignment: .bottom, spacing: PaneMetrics.step) {
                     fieldWithPlaceholder
+                        .frame(minHeight: PaneMetrics.target, alignment: .leading)
 
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
@@ -1597,9 +1855,16 @@ private struct AgentComposer: View {
                     .disabled(!canSend)
                 }
             }
-            .padding(.horizontal, PaneMetrics.edge)
             .padding(.vertical, PaneMetrics.card)
         }
+        // ONE left edge inside the card, said once — the same correction
+        // `composerStack` already made for the surfaces stacked above it, and
+        // it had to be made twice because it was three different numbers in
+        // here: 16 on the two control rows, 12 on the suggestion list and the
+        // attachment strip, and nothing at all on the attachment error, which
+        // therefore ran into a 22-point corner. Four things in one card at
+        // four left edges is most of what "everything is not aligned" was.
+        .padding(.horizontal, PaneMetrics.edge)
         // Taps land ON the card, not through it.
         //
         // A glass surface is a background, and a background is not a hit target
@@ -1883,7 +2148,9 @@ private struct AgentComposer: View {
                         }
                     }
                 }
-                .padding(.horizontal, PaneMetrics.card)
+                // No horizontal inset of its own: the card says the edge
+                // once now. The vertical gap stays, because it is the space
+                // between the thumbnails and whatever is above them.
                 .padding(.top, PaneMetrics.step)
             }
         }
@@ -1997,7 +2264,9 @@ private struct SuggestionList: View {
                         .frame(
                             maxWidth: .infinity, minHeight: PaneMetrics.target,
                             alignment: .leading)
-                        .padding(.horizontal, PaneMetrics.card)
+                        // Horizontal inset comes from the card, so a
+                        // suggestion's glyph starts on the same column as the
+                        // message being typed under it.
                         .padding(.vertical, PaneMetrics.step)
                     }
                     .buttonStyle(.plain)
@@ -2357,3 +2626,102 @@ private struct WorkingRow: View {
         ]
     }
 }
+
+#if DEBUG
+/// The agent pane, with a canned conversation and no runner behind it.
+///
+/// Exists because this screen could not be LOOKED at: reaching it needs an
+/// enrolled runner, a workspace, a chat-capable pane and a turn in flight, so
+/// every judgement about its layout had been made by reading the code. Launch
+/// the app with `-agent-layout-harness` to get this instead of `RootView`.
+struct AgentLayoutHarness: View {
+    static var isRequested: Bool {
+        CommandLine.arguments.contains("-agent-layout-harness")
+    }
+
+    @StateObject private var connection = Connection()
+
+    var body: AnyView {
+        var pane = AgentView(terminalID: "harness", workspaceID: nil, connection: connection)
+        pane.fixture = CommandLine.arguments.contains("-plain")
+            ? Self.conversation.filter {
+                if case .plan = $0.event { return false }
+                if case .promptQueue = $0.event { return false }
+                return true
+            }
+            : Self.conversation
+        pane.fixtureIsWorking = true
+        // The container this screen really lives in, reproduced — see
+        // `WorkspaceView`, which refuses the framework's whole-container lift
+        // so the tab strip and the navigation boundary never move. Without it
+        // the harness measures a screen nobody ships: SwiftUI raises the entire
+        // view by the keyboard's height AND the transcript reserves room for
+        // it, and every number comes out doubled.
+        return AnyView(pane.ignoresSafeArea(.keyboard, edges: .bottom))
+    }
+
+    private static func choice(_ id: String, _ name: String) -> AgentChoice {
+        AgentChoice(id: id, name: name)
+    }
+
+    private static func selector(
+        _ id: String, _ name: String, _ current: String, _ options: [(String, String)]
+    ) -> ConfigOption {
+        ConfigOption(
+            id: id, name: name, description: "", category: id, kind: "select",
+            currentValue: current, options: options.map { choice($0.0, $0.1) })
+    }
+
+    /// Long enough to overflow the screen, so the bottom inset is testable.
+    private static var conversation: [Sequenced] {
+        var events: [AgentEvent] = [
+            .sessionStarted(
+                sessionID: "harness", agentMode: "manual",
+                availableModes: [choice("manual", "Manual"), choice("auto", "Auto")],
+                model: "sonnet", availableModels: [],
+                configOptions: [
+                    selector("mode", "Mode", "manual", [("manual", "Manual"), ("auto", "Auto")]),
+                    selector("model", "Model", "sonnet", [("sonnet", "Sonnet"), ("opus", "Opus")]),
+                    selector("effort", "Effort", "high", [("high", "High"), ("low", "Low")]),
+                    selector(
+                        "thought_level", "Thinking", "normal",
+                        [("normal", "Normal"), ("deep", "Deep")]),
+                ],
+                availableCommands: [choice("review", "review")], backend: "acp"),
+            .plan(entries: [
+                PlanEntry(content: "Read the failing test", priority: "high", status: "completed"),
+                PlanEntry(content: "Fix the inset", priority: "high", status: "in_progress"),
+                PlanEntry(content: "Run the build", priority: "medium", status: "pending"),
+            ]),
+        ]
+        for turn in 1...4 {
+            events.append(
+                .message(
+                    role: .user,
+                    text: "Turn \(turn): the bottom of this transcript has to stay readable.",
+                    parent: nil))
+            events.append(
+                .message(
+                    role: .agent,
+                    text: """
+                        Answer \(turn). This paragraph exists to push the conversation past \
+                        the height of the screen so the last line can be checked against the \
+                        composer resting over it. A line that comes to rest underneath the \
+                        glass is the bug being looked for.
+                        """,
+                    parent: nil))
+            events.append(
+                .toolCall(
+                    id: "tool-\(turn)", title: "Read AgentView.swift", kind: "read",
+                    status: .completed, locations: [], parent: nil, subagent: false))
+        }
+        events.append(
+            .message(
+                role: .agent,
+                text: "This is the LAST line of the transcript. It must be fully readable.",
+                parent: nil))
+        events.append(.promptQueue(items: [QueuedPrompt(id: "q1", text: "And then run the tests")]))
+        return events.enumerated().map { Sequenced(seq: UInt64($0.offset + 1), event: $0.element) }
+    }
+}
+#endif
