@@ -680,6 +680,35 @@ final class ChangesStore: ObservableObject {
         self.comments = ReviewCommentQueue.phone(core: core, workspace: workspace)
     }
 
+    #if DEBUG
+    /// Stand this store on canned data, for `ChangesLayoutHarness`.
+    ///
+    /// Every screen this pane draws needs a runner, a worktree and a branch an
+    /// agent has already written to — which is why nothing on it had ever been
+    /// looked at, and why two rounds of "the diff view is a wall of blue" were
+    /// answered by reading the code. `hasLoaded` is what keeps `loadIfNeeded`
+    /// from replacing all of this with a failed round trip, and pre-filled
+    /// `fileDiffs` are what keep `ensure` from making one per file.
+    ///
+    /// `scope` first: its `didSet` throws away the diffs, the file list and the
+    /// open file, so anything set before it would be dropped on the way past.
+    func standIn(
+        on set: ChangeSet,
+        scope: DiffScope = .branch,
+        commitFiles: [ChangedFile] = [],
+        diffs: [String: [DiffComputation.Line]] = [:],
+        expanded: String? = nil
+    ) {
+        hasLoaded = true
+        hasOfferedResume = true
+        self.scope = scope
+        changeSet = set
+        self.commitFiles = commitFiles
+        fileDiffs = diffs
+        expandedFile = expanded
+    }
+    #endif
+
     /// The files this scope is about.
     ///
     /// Branch is what the branch COMMITTED — the same thing the summary card

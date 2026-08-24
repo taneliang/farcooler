@@ -26,6 +26,33 @@ import SwiftUI
 /// for the agent — is collected here rather than requiring a trip to another
 /// screen to type.
 ///
+/// ## Where the accent goes on this screen
+///
+/// Reading a diff is almost entirely movement — next file, next commit, back to
+/// the whole branch, open the body, open the index — and every one of those was
+/// a `.bordered` button, which paints its label in the tint. So a commit card
+/// carried four accent controls at once (two chevrons, Whole Branch, History)
+/// with a fifth, More, right under them, none of which is what anybody came
+/// here to do. That is the "blue text buttons on dark backgrounds" report, and
+/// it is the same failure `FleetList` names: color spent on everything says
+/// nothing about anything.
+///
+/// The rule here is narrower than that file's, because this screen's shape
+/// allows it. **Moving through a diff is grey; producing something is blue.**
+/// Movement is found by position — the chevrons live in fixed corners, the bar
+/// is always at the bottom — and it repeats on every commit and every file.
+/// What does not repeat is the one thing reading a diff is FOR: a note for the
+/// agent. Exactly one file is open at a time, so "Comment on This File" is on
+/// screen once, and it keeps the accent. Continue, on the resume card, keeps a
+/// filled accent for the same reason `FleetList` gives about a control that
+/// appears once — it is a one-time offer with one obvious answer.
+///
+/// Grey here means `.tint(.secondary)` with `.foregroundStyle(.primary)` over
+/// it: the tint is the part that reliably reaches a system button style, and
+/// the foreground style is what keeps the label at full label contrast instead
+/// of the 60%-of-grey a greyed tint would leave. Losing the second one fails
+/// quiet; losing the first fails back to blue, which is why both are said.
+///
 /// What this screen never records is a JUDGMENT. There is no "reviewed" tick on
 /// a file, and that is deliberate: an agent is still editing these files, so a
 /// tick on a file that has changed twice since would be a claim the app is in
@@ -327,8 +354,14 @@ struct ChangesView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 Spacer(minLength: 4)
+                // Grey beside a filled Continue. `.bordered` paints its label
+                // in the tint, so declining an offer was accent text an inch
+                // from an accent fill — two blues for a yes/no. See the accent
+                // rule in `ChangesView`'s own doc comment.
                 Button("Not Now") { store.dismissResume() }
                     .buttonStyle(.bordered)
+                    .tint(.secondary)
+                    .foregroundStyle(.primary)
             }
             .font(.footnote)
             .controlSize(.small)
@@ -707,6 +740,12 @@ struct ChangesView: View {
             }
             .font(.footnote)
             .buttonStyle(.bordered)
+            // Grey. Two accent chevrons and an accent position label is a
+            // traffic sign where a pair of arrows will do — and these two are
+            // the most-repeated controls on the screen, one pair per commit
+            // for as long as the branch is. See the accent rule above.
+            .tint(.secondary)
+            .foregroundStyle(.primary)
             .controlSize(.small)
             .padding(.top, 2)
         }
@@ -723,6 +762,12 @@ struct ChangesView: View {
         }
         .font(.footnote)
         .buttonStyle(.bordered)
+        // Grey, with the chevrons above them. Both are ways back to a list you
+        // have already seen — the definition of movement on this screen — and
+        // they are also the two widest controls in the card, so they were most
+        // of what made a commit header read as a row of links.
+        .tint(.secondary)
+        .foregroundStyle(.primary)
         .controlSize(.small)
         .padding(.top, 2)
     }
@@ -766,11 +811,19 @@ private struct CommitBodyText: View {
                 // thinnest contrast, and no ground of its own. A real button
                 // style brings a ground with it, and the size goes up one step
                 // to `.caption` because a control is not a footnote.
+                //
+                // What that fix did NOT do is stop it being blue: a bordered
+                // button paints its label in the tint too, so the smallest
+                // control in the card simply gained a ground under its accent.
+                // Unfolding a paragraph you can already see four lines of is
+                // the most incidental thing on this screen. Grey.
                 Button(expanded ? "Less" : "More") {
                     withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
                 }
                 .font(.caption)
                 .buttonStyle(.bordered)
+                .tint(.secondary)
+                .foregroundStyle(.primary)
                 .controlSize(.small)
             }
         }
@@ -1414,6 +1467,15 @@ private struct ChangesFileBody: View {
                 // than on a system background — so how well it could be read
                 // depended on which theme was in force. A real button style
                 // brings its own ground with it and clears whatever is behind.
+                //
+                // **The one control on this screen that keeps the accent**,
+                // and the sweep that greyed the rest of them left it
+                // deliberately. It is the only thing here that produces
+                // something rather than moving you somewhere, and it is on
+                // screen exactly once: one file is open at a time, so this
+                // does not repeat down the scroll the way a per-card control
+                // would. If everything on a screen is grey, grey has stopped
+                // meaning anything either.
                 Button {
                     onComment(
                         ReviewAnchor(
@@ -2276,3 +2338,98 @@ private struct CommitHistorySheet: View {
         .contentShape(Rectangle())
     }
 }
+
+#if DEBUG
+
+/// The review pane over a canned change set, so it can be looked at.
+///
+/// `-changes-layout-harness`, with `-commit` for the commit-by-commit reading.
+/// The sibling of `AgentLayoutHarness`, added for the same reason and after
+/// the same failure: this screen's controls had twice been argued about from
+/// the code — accent text became `.bordered`, which is still accent text — and
+/// nobody had put the result on a screen. The commit arm is the one that
+/// matters most, because it is the only place four of these controls are drawn
+/// at once.
+///
+/// Deliberately NOT a full stand-in. `resume` and `commitFiles` are
+/// `private(set)` for good reasons and the harness does not reach around them,
+/// so the commit arm shows its header over "nothing changed here". The header
+/// is the part being looked at.
+struct ChangesLayoutHarness: View {
+    static var isRequested: Bool {
+        CommandLine.arguments.contains("-changes-layout-harness")
+    }
+
+    @StateObject private var connection = Connection()
+
+    var body: some View {
+        let store = connection.changesStores.store(for: "harness")
+        let commit = Self.changeSet.commits[1]
+        store.standIn(
+            on: Self.changeSet,
+            scope: CommandLine.arguments.contains("-commit") ? .commit(commit.sha) : .branch,
+            diffs: Self.diffs,
+            expanded: CommandLine.arguments.contains("-commit") ? nil : "crates/daemon/src/file_diff.rs")
+        return NavigationStack {
+            ChangesView(store: store, workspaceName: "add-retries")
+                .navigationTitle("add-retries")
+                .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private static let changeSet = ChangeSet(
+        branch: "feat/handle-retries-on-429",
+        baseRef: "origin/main",
+        baseSource: "tracked",
+        baseCommit: "9f21c0d4",
+        headCommit: "a1b2c3d4",
+        insertions: 182,
+        deletions: 47,
+        commits: [
+            ChangeCommit(
+                sha: "a1b2c3d4e5f6", subject: "Back off on 429 instead of retrying immediately",
+                body: nil, author: "claude", timestamp: 1_755_800_000,
+                filesChanged: 2, insertions: 96, deletions: 12),
+            ChangeCommit(
+                sha: "b2c3d4e5f607",
+                subject: "Read the Retry-After header when the server sends one",
+                body: """
+                    The server is allowed to say how long to wait and usually does. \
+                    Honoring it is both politer and faster than a fixed ladder, which \
+                    on a 429 storm is either far too eager or far too patient.
+
+                    What this does not do is trust the header blindly: a runner that \
+                    answers with an hour would otherwise park the queue for an hour.
+                    """,
+                author: "claude", timestamp: 1_755_790_000,
+                filesChanged: 1, insertions: 86, deletions: 35),
+        ],
+        files: [
+            ChangedFile(
+                path: "crates/daemon/src/file_diff.rs", status: nil, oldPath: nil,
+                insertions: 96, deletions: 12, binary: false),
+            ChangedFile(
+                path: "crates/client/src/changes_json.rs", status: nil, oldPath: nil,
+                insertions: 86, deletions: 35, binary: false),
+        ],
+        workingTree: nil)
+
+    private static let diffs: [String: [DiffComputation.Line]] = [
+        "crates/daemon/src/file_diff.rs": DiffComputation.compute(
+            old: """
+                fn backoff(attempt: u32) -> Duration {
+                    Duration::from_millis(200)
+                }
+                """,
+            new: """
+                fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
+                    if let Some(after) = retry_after {
+                        return after.min(Duration::from_secs(30));
+                    }
+                    Duration::from_millis(200 << attempt.min(6))
+                }
+                """)
+    ]
+}
+
+#endif

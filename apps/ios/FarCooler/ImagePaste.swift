@@ -247,8 +247,15 @@ private struct ImagePasteChip: View {
                     .font(.footnote.weight(.semibold))
                     .frame(minHeight: PaneMetrics.target)
                     .contentShape(.rect)
+                // Grey, beside an accent "Retry" — the same pair, and the same
+                // reasoning, as the send-failure row in `AgentView`. Retry is
+                // what somebody who came back to this chip wants; giving up on
+                // one attachment is the incidental half, and two accent words
+                // an inch apart on the composer's glass is what "lots of blue"
+                // means. `.tint`, because a `Button` tints its own label.
                 Button("Cancel", action: onDismiss)
                     .font(.footnote)
+                    .tint(.secondary)
                     .frame(minHeight: PaneMetrics.target)
                     .contentShape(.rect)
             } else {

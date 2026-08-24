@@ -468,6 +468,17 @@ struct AgentView: View {
                             .font(.footnote.weight(.semibold))
                             .frame(minHeight: PaneMetrics.target)
                             .contentShape(.rect)
+                        // Grey, beside an accent "Retry".
+                        //
+                        // Two accent controls in one banner is the row-of-blue
+                        // pattern in miniature: Retry is what this row is FOR
+                        // and keeps the color, and closing the row without
+                        // sending anything is the incidental half. `.tint`
+                        // rather than a foreground style on the glyph, because
+                        // a `Button` tints its own label and a style set inside
+                        // it does not survive — the finding `4458dcb` made in
+                        // the composer and `af7d229` made again on the fleet's
+                        // `…` menu.
                         Button {
                             stream.sendFailure = nil
                         } label: {
@@ -476,6 +487,7 @@ struct AgentView: View {
                                     width: PaneMetrics.target, height: PaneMetrics.target)
                                 .contentShape(.rect)
                         }
+                        .tint(.secondary)
                         .accessibilityLabel("Dismiss")
                     }
                     .padding(.horizontal, PaneMetrics.edge)
@@ -1516,11 +1528,28 @@ private struct QueuedRow: View {
                 // buttons set `.plain`, so "Queued", "Send now", "Edit" and
                 // "Remove" were one line of identical grey words — three of
                 // which do something, with nothing saying which three.
+                //
+                // The correction to THAT was a full accent on all three, and
+                // it is what the owner photographed: "Send now", "Edit" and
+                // "Remove" side by side in bright blue on a dark card, which
+                // is the same failure with the contrast turned up. Three
+                // equally loud words say nothing about which one you want,
+                // and `FleetList` already states the rule this row broke —
+                // accent is spent per screen, not per control.
+                //
+                // So the weight carries "these do something" — it is what
+                // separates them from the `.caption` regular "Queued" beside
+                // them — and the color carries "this is the one worth
+                // finding", which is `onSteer` and only `onSteer`. Editing a
+                // draft and dropping a draft are both things you came here
+                // already meaning to do; interrupting a running turn is the
+                // one this card exists to offer. See `QueuedActionStyle`.
                 HStack(spacing: PaneMetrics.card) {
                     Text("Queued")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Send now", action: onSteer)
+                        .buttonStyle(QueuedActionStyle(prominent: true))
                     Button(editing ? "Save" : "Edit") {
                         if editing {
                             commit()
@@ -1562,16 +1591,32 @@ private struct QueuedRow: View {
 
 /// One of the queue's actions: a word you can tap, drawn as one.
 ///
-/// Tinted and semibold, which is what this file already uses for an action
-/// standing in prose — the composer's "Retry" — rather than a fifth grey word
-/// in a row of grey words. The 44-point band is the hit target a 16-point
-/// caption never had, and the `contentShape` is what makes it live: padding
-/// around a `Button`'s label is layout only.
+/// Semibold, which is what this file already uses for an action standing in
+/// prose — the composer's "Retry" — rather than a fifth grey word in a row of
+/// grey words. The 44-point band is the hit target a 16-point caption never
+/// had, and the `contentShape` is what makes it live: padding around a
+/// `Button`'s label is layout only.
+///
+/// **Weight says "control"; color says "this one".** This style used to paint
+/// every label `.tint`, which on a queued card is three accent words in a row
+/// — the thing the owner photographed. `prominent` is now what spends the
+/// accent, and exactly one of the three asks for it.
+///
+/// `Color.accentColor` and `Color.secondary` rather than `.tint` and a
+/// hierarchical style, for the reason `FleetList` gives about its own `+`: a
+/// hierarchical style resolves against whatever foreground is in force, so
+/// `.secondary` under a tinted control is a paler accent and not grey at all.
+/// A custom `ButtonStyle` does not tint its label, so both of these reach —
+/// and if a future edit puts a tint back over this row, it goes grey rather
+/// than blue, which is the safe direction to fail in.
 private struct QueuedActionStyle: ButtonStyle {
+    /// Whether this is the one action on the card worth finding by color.
+    var prominent = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.tint)
+            .foregroundStyle(prominent ? Color.accentColor : Color.secondary)
             // The press, said by the label rather than by a fill: there is no
             // fill here to press, and a word that does nothing under a thumb
             // is a word nobody is sure they hit.
@@ -1610,6 +1655,13 @@ private struct QueuedActionStyle: ButtonStyle {
 /// control in this app where hitting Reject instead of Allow means a command
 /// ran that nobody allowed. `.large` now, each half of the row expands to
 /// share the width, and 44 is the floor under both.
+///
+/// **And it had drifted a second time, in the half nobody could see.** That
+/// fix put `.frame(maxWidth: .infinity)` on the buttons, which widened the
+/// boxes and not the capsules — so what shipped was still two intrinsic pills,
+/// merely centred in the halves instead of bunched at the left. Reasoning from
+/// the code found neither round of this. `AgentLayoutHarness` now draws the
+/// card under `-approval`, which is where both were finally seen.
 struct ApprovalControls: View {
     let options: [PermissionOption]
     let onChoose: (String) -> Void
@@ -1617,15 +1669,48 @@ struct ApprovalControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PaneMetrics.step) {
             HStack(spacing: PaneMetrics.step) {
+                // `maxWidth` on the LABEL, not on the button.
+                //
+                // Seen at last, in the harness: the sentence above about
+                // full-width was still not true. A frame around a `Button`
+                // whose style draws its own capsule stretches the button's
+                // box; the capsule inside it keeps its intrinsic width and
+                // sits centred in the space, which is what shipped — two
+                // ordinary pills floating in a row twice their width, on the
+                // one card where a thumb has to hit the right half the first
+                // time. Stretching the label is what stretches the capsule.
                 if let allow {
-                    Button(allow.name) { onChoose(allow.id) }
-                        .buttonStyle(.borderedProminent)
-                        .frame(maxWidth: .infinity, minHeight: PaneMetrics.target)
+                    Button { onChoose(allow.id) } label: {
+                        Text(allow.name).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity, minHeight: PaneMetrics.target)
                 }
                 if let reject {
-                    Button(reject.name) { onChoose(reject.id) }
-                        .buttonStyle(.bordered)
-                        .frame(maxWidth: .infinity, minHeight: PaneMetrics.target)
+                    // NOT a second blue.
+                    //
+                    // `.bordered` paints its label in the tint, so Reject was
+                    // accent text on a translucent grey capsule directly
+                    // beside Allow's solid accent fill: two blues, one of them
+                    // the hardest thing on the card to read, in the one place
+                    // this app cannot afford a misread. Allow carries the
+                    // color because it is the answer that lets something
+                    // happen; Reject carries the same capsule and the ordinary
+                    // label color, which is how a decision reads as two equal
+                    // choices rather than as one recommendation and one link.
+                    //
+                    // Both said, in this order, on purpose. `.tint` is what
+                    // reliably reaches a system button style; the foreground
+                    // style is what lifts the label off the greyed tint to
+                    // full label contrast. If the second one is ever
+                    // overridden the button goes grey, not back to blue.
+                    Button { onChoose(reject.id) } label: {
+                        Text(reject.name).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.secondary)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, minHeight: PaneMetrics.target)
                 }
             }
             .controlSize(.large)
@@ -3001,6 +3086,27 @@ struct AgentLayoutHarness: View {
                 text: "This is the LAST line of the transcript. It must be fully readable.",
                 parent: nil))
         events.append(.promptQueue(items: [QueuedPrompt(id: "q1", text: "And then run the tests")]))
+        // `-approval` stands the whole screen on a blocked turn instead.
+        //
+        // The card is unreachable from every other fixture — a permission
+        // arrives from a runner mid-turn and nothing here can ask for one —
+        // which is why `ApprovalControls` has twice been reasoned about from
+        // the code and twice been wrong about what shipped. One turn rather
+        // than four, so the card and the composer are on screen together and
+        // the decision row can be read against the ground it actually sits on.
+        if CommandLine.arguments.contains("-approval") {
+            events = Array(events.prefix(5))
+            events.append(
+                .permission(
+                    id: "perm-1", toolCall: "tool-1",
+                    options: [
+                        PermissionOption(id: "allow", name: "Allow", kind: "allow_once"),
+                        PermissionOption(id: "reject", name: "Reject", kind: "reject_once"),
+                        PermissionOption(
+                            id: "allow-always", name: "Allow always for this session",
+                            kind: "allow_always"),
+                    ]))
+        }
         return events.enumerated().map { Sequenced(seq: UInt64($0.offset + 1), event: $0.element) }
     }
 }

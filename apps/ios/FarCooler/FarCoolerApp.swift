@@ -40,6 +40,8 @@ struct FarCoolerApp: App {
         #if DEBUG
         if AgentLayoutHarness.isRequested {
             AgentLayoutHarness()
+        } else if ChangesLayoutHarness.isRequested {
+            ChangesLayoutHarness()
         } else {
             RootView()
         }
