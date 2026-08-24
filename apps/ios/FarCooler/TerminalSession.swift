@@ -93,6 +93,9 @@ final class TerminalSession: ObservableObject {
     /// Watches for a stream that opened and then said nothing. See
     /// ``waitForTheFirstByte()``.
     private var silence: Task<Void, Never>?
+    /// Watches for a stream that has not painted anything yet — the short half
+    /// of the same wait. See ``waitForTheFirstByte()``.
+    private var firstPaint: Task<Void, Never>?
     /// The size the emulator was built at, which is the pane's size as of the
     /// last time anything looked.
     private var paneSize: (columns: Int, rows: Int)?
@@ -202,6 +205,42 @@ final class TerminalSession: ObservableObject {
     /// a spinner held longer on a pane that was going to fail anyway. The cost
     /// of firing early is a working terminal that quietly stops scrolling.
     private static let firstByteDeadline: Duration = .seconds(12)
+
+    /// How long a stream may stay silent before this screen paints SOMETHING —
+    /// which is a different question from how long before it gives up, and
+    /// used to be answered by the same number.
+    ///
+    /// `firstByteDeadline` was doing two jobs. One is "when do we conclude this
+    /// channel is wedged and tear it down", and everything the constant above
+    /// argues for that is still true: firing early swaps a working terminal for
+    /// a poll loop that has no scrollback to scroll. The other is "how long does
+    /// a person stare at a spinner", and twelve seconds is a catastrophic answer
+    /// to it. Tying them together meant the cautious answer to the first
+    /// question was charged to the second, on every pane, on every open.
+    ///
+    /// What made that stop being theoretical is measured in the comment on
+    /// `attach`: on a device enrolled the way this product enrolls devices, the
+    /// stream's first byte never comes at all. So every pane paid the full
+    /// twelve seconds, every time, and then polled — which is the report this
+    /// number exists to answer, "spins on Loading shell… for about fifteen
+    /// seconds".
+    ///
+    /// Split, each answer can be right. Nothing is torn down here: the poll loop
+    /// simply starts painting, exactly as it does through every re-attach, and
+    /// `consume` hands the screen back the instant a byte arrives — with the
+    /// stream's own replay and its scrollback intact. So a stream that is merely
+    /// slow loses nothing but the capture this drew over, while a pane whose
+    /// stream will never speak is live in a round trip instead of twelve
+    /// seconds.
+    ///
+    /// 700ms is chosen against the healthy case rather than the broken one. A
+    /// stream that works delivers its replay in about 60ms over loopback ssh —
+    /// measured, see `attach` — so a working pane never reaches this at all and
+    /// never sees the re-flow flash `open` refuses to show. It is far enough
+    /// above that to leave room for a real network and a large scrollback, and
+    /// short enough that a person reads it as the screen arriving rather than as
+    /// waiting.
+    private static let firstPaintGrace: Duration = .milliseconds(700)
 
     /// How long the first re-attach waits after a stream fails, and how long
     /// the longest one waits.
@@ -617,6 +656,8 @@ final class TerminalSession: ObservableObject {
         geometry = nil
         silence?.cancel()
         silence = nil
+        firstPaint?.cancel()
+        firstPaint = nil
         streamRetry?.cancel()
         streamRetry = nil
         resizeDebounce?.cancel()
@@ -782,6 +823,14 @@ final class TerminalSession: ObservableObject {
     /// difference between this being a safety net and being the thing that
     /// breaks scrolling — the constant says why. It costs nothing when it does
     /// not fire, and the first byte cancels it: see `consume`.
+    ///
+    /// Two waits, not one, and the shorter one is the one a person feels. The
+    /// deadline above decides whether this CHANNEL is dead; `firstPaintGrace`
+    /// decides only whether this SCREEN has waited long enough to be shown
+    /// something, and answers it by starting the poll loop rather than by
+    /// tearing anything down. Both are cancelled by the first byte, and both go
+    /// with `teardownExceptPolling`. See `firstPaintGrace` for why they were one
+    /// number and must not be.
     private func waitForTheFirstByte() {
         silence?.cancel()
         silence = Task { [weak self] in
@@ -789,6 +838,30 @@ final class TerminalSession: ObservableObject {
             guard !Task.isCancelled else { return }
             await self?.streamSaidNothing()
         }
+        firstPaint?.cancel()
+        firstPaint = Task { [weak self] in
+            try? await Task.sleep(for: Self.firstPaintGrace)
+            guard !Task.isCancelled else { return }
+            await self?.streamHasNotPaintedYet()
+        }
+    }
+
+    /// The grace passed with the screen still blank, and the stream still open.
+    ///
+    /// Deliberately the smallest possible response: start polling, change
+    /// nothing else. The stream keeps its channel, keeps its emulator waiting in
+    /// `streamCore`, and keeps its twelve seconds to prove itself — this is not
+    /// a downgrade and must not read as one. It is the same arrangement every
+    /// re-attach already runs in, where polling paints while a stream opens
+    /// behind it and `consume` performs the handover on the first byte; the only
+    /// pane that never got it was the one being opened for the first time, which
+    /// is the pane a person is actually watching.
+    ///
+    /// `render` will take `phase` to `.live` a round trip from now, which is why
+    /// `streamSaidNothing` can no longer ask `phase` whether a byte has arrived.
+    private func streamHasNotPaintedYet() {
+        guard streaming, streamCore != nil else { return }
+        startLoop()
     }
 
     /// The deadline passed with the screen still blank.
@@ -807,11 +880,19 @@ final class TerminalSession: ObservableObject {
     /// `scheduleStreamRetry`, which stops the channel awaited, because there
     /// is now a start for a late stop to arrive after and cancel.
     private func streamSaidNothing() {
-        // Only while nothing has been painted. A stream that delivered and then
-        // went quiet is an idle pane, which is the ordinary state of most of
-        // them, and tearing that down would swap a working stream for polling
-        // every two seconds of quiet.
-        guard streaming, phase == .connecting else { return }
+        // Only while this STREAM has said nothing. A stream that delivered and
+        // then went quiet is an idle pane, which is the ordinary state of most
+        // of them, and tearing that down would swap a working stream for polling
+        // every twelve seconds of quiet.
+        //
+        // Asked of `streamCore` rather than of `phase`, which is what this used
+        // to read and can no longer: `firstPaintGrace` puts the poll loop on the
+        // screen a round trip in, so by the time this fires `phase` is `.live`
+        // on a pane whose stream is as silent as it ever was — and the guard
+        // would bail, leaving a wedged channel open and never retried. The
+        // emulator `prime` built and `consume` installs on the first byte is the
+        // exact fact wanted: still waiting means no byte has arrived.
+        guard streaming, streamCore != nil else { return }
         teardownExceptPolling()
         startLoop()
         scheduleStreamRetry()
@@ -917,6 +998,35 @@ final class TerminalSession: ObservableObject {
     }
 
     /// Open the byte stream, and say whether it opened.
+    ///
+    /// **True here does not mean bytes are coming, and on a real device it
+    /// currently means the opposite.** The core opens the stream by exec'ing
+    /// `~/.local/bin/farcoolerd --stream <id>` on a second ssh channel
+    /// (`crates/client/src/session.rs`, `open_stream`). Every key this product
+    /// enrolls is written by `crates/fence` as
+    /// `restrict,command="~/.local/bin/farcoolerd --stdio --client … --scope …"`,
+    /// and a forced command is OpenSSH's promise that the client's own command
+    /// is discarded — the very promise
+    /// `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` exists to pin. So
+    /// what runs on the stream channel is a second `--stdio` protocol relay, and
+    /// a protocol server says nothing until it is spoken to. The channel opens,
+    /// this returns true, and no byte ever arrives.
+    ///
+    /// Measured against a loopback sshd, same daemon, same pane, the only
+    /// difference being the `authorized_keys` line: with a plain key the first
+    /// replayed byte lands 62ms after `stream_start`; with the forced-command
+    /// line this product writes, nothing arrives in 25 seconds and no end
+    /// signal either. That is what `firstPaintGrace` was added to survive, and
+    /// surviving it is not fixing it — the pane runs on captures, so it has no
+    /// scrollback and cannot scroll.
+    ///
+    /// The fix is not here. `proto/farcooler.proto` retired `TerminalAttach`
+    /// (tag 28) with the note "streaming a terminal is a second SSH exec of
+    /// `farcoolerd --stream <id>`, not a wire method" — which was true when it
+    /// was written and stopped being true when enrollment started forcing a
+    /// command. Either the stream becomes a wire method again, carried on a
+    /// second `--stdio` session the way `farcooler events` already is, or the
+    /// forced command learns to dispatch one. Both are protocol decisions.
     private func attach() async -> Bool {
         let inbox = Inbox()
         self.inbox = inbox
@@ -955,6 +1065,11 @@ final class TerminalSession: ObservableObject {
         // to get this right.
         silence?.cancel()
         silence = nil
+        // And the grace, for the same reason and one more: it starts a poll
+        // loop, and starting one after the stream has taken the screen is the
+        // two painters this method exists to keep down to one.
+        firstPaint?.cancel()
+        firstPaint = nil
         // And so is the interval the failures before it had widened. A stream
         // that delivered is evidence about this link that the tally of what
         // came before it is not, so the next failure starts over at half a

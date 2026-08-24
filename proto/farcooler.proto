@@ -92,6 +92,28 @@ message Request {
     // `farcoolerd --stream <id>`, not a wire method — see
     // `crates/client/src/session.rs` — so this had no handler, no scope entry
     // and no caller. Retired rather than reused, like 30 below.
+    //
+    // That premise no longer holds, and nothing has replaced it. Every key
+    // `crates/fence` enrolls carries
+    // `restrict,command="~/.local/bin/farcoolerd --stdio --client … --scope …"`,
+    // and a forced command is OpenSSH discarding whatever the client asked to
+    // run — which `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` pins as
+    // a security property. So the second exec lands on a `--stdio` relay, which
+    // is a protocol server and says nothing until spoken to: the channel opens,
+    // the client reads success, and no byte ever arrives. Measured on a loopback
+    // sshd against one daemon and one pane, the only variable being the
+    // `authorized_keys` line: 62ms to the first replayed byte on a plain key,
+    // nothing at all in 25 seconds on the line this product writes. Every phone
+    // and every Android device is therefore on the capture-polling fallback,
+    // which carries no scrollback (`crates/tmux/src/windows.rs`), so those panes
+    // cannot scroll.
+    //
+    // Whoever fixes it chooses between bringing this tag back as a wire method —
+    // carried on a second `--stdio` session, the way `farcooler events` already
+    // streams over ssh, so the control connection is still not shared — and
+    // teaching the forced command to dispatch a stream. The tag stays retired
+    // until that is decided; reusing it by accident meanwhile would be worse
+    // than the bug.
     TerminalAttach terminal_attach = 28 [deprecated = true];
     LayoutUpdate layout_update = 29;
     // 30 was WorktreeImport. Worktrees are adopted by the daemon's reconciler
