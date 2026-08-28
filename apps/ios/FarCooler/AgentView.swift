@@ -1977,6 +1977,8 @@ struct DiffView: View {
         .foregroundStyle(.secondary)
     }
 
+    @State private var diffRowWidth: CGFloat = 0
+
     private func diffBody(_ rows: [DiffComputation.Line]) -> some View {
         // A narrower gutter than the Mac's: a phone has far fewer points to
         // spend on line numbers before the code column itself is squeezed
@@ -2004,9 +2006,25 @@ struct DiffView: View {
                     // one listing, not a gap between two things. Anything on
                     // the scale above turns a diff into a list of rows.
                     .padding(.vertical, 1)
-                    .background(line.kind.background)
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: DiffRowWidth.self, value: geometry.size.width)
+                        }
+                    )
+                    // As wide as the widest row, so a run of added lines is one
+                    // band rather than a staircase. See `DiffRowWidth`.
+                    .frame(minWidth: diffRowWidth, alignment: .leading)
+                    // `in: .rect`, stated rather than defaulted, for the reason
+                    // `ChangesView.DiffLineRow` states it: a bare
+                    // `.background(_ style:)` takes its shape from the container
+                    // it sits in, and this one sits in a 6pt rounded box — so
+                    // every row was drawing that box's corners at its own
+                    // bottom edge.
+                    .background(line.kind.background, in: .rect)
                 }
             }
+            .onPreferenceChange(DiffRowWidth.self) { diffRowWidth = $0 }
             .padding(.vertical, PaneMetrics.tight)
         }
         .textSelection(.enabled)

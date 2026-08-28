@@ -1661,6 +1661,9 @@ private struct HunkView: View {
     /// the card is folded, which is right: the reason to open a fold is the
     /// question being asked right now.
     @State private var revealed: Set<Int> = []
+    /// The widest row in this hunk, so every row can be drawn that wide. See
+    /// the note on `onPreferenceChange` below.
+    @State private var rowWidth: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1672,11 +1675,30 @@ private struct HunkView: View {
                             foldRow(segment, count: folded)
                         } else {
                             ForEach(segment.lines) { line in
-                                DiffLineRow(line: line)
+                                DiffLineRow(line: line, width: rowWidth)
                             }
                         }
                     }
                 }
+                // Every row as wide as the widest, so the tint behind them is
+                // one shape.
+                //
+                // A row is an `HStack` of two `Text`s inside a horizontal
+                // `ScrollView`, so it sizes to ITS OWN line and the coloured
+                // background sizes with it. Nine added lines of nine different
+                // lengths were therefore nine differently-sized green blocks
+                // stacked on each other, and the steps between them read as
+                // stray rounded corners down the edge of the diff — which is
+                // exactly what they were reported as.
+                //
+                // Measured rather than guessed at, because the width that
+                // matters is the widest LAID OUT row and only the layout knows
+                // it: the font is the user's terminal face at the user's
+                // terminal size, and a tab is not a character wide. The
+                // feedback settles in one pass — each row is asked for at
+                // least the running maximum, and a row already at the maximum
+                // reports the maximum.
+                .onPreferenceChange(DiffRowWidth.self) { rowWidth = $0 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
             }
@@ -1746,8 +1768,24 @@ private struct HunkView: View {
     }
 }
 
+/// The widest row a hunk has laid out, reduced by `max`.
+///
+/// Not private: this app draws diffs in two places — here, and the tool cards
+/// in `AgentView.diffBody` — and both are a horizontally scrolling stack of
+/// rows that size to their own line. One key so the two cannot answer the
+/// question differently.
+struct DiffRowWidth: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 private struct DiffLineRow: View {
     let line: DiffComputation.Line
+    /// The widest row in this hunk. Zero on the first pass, before anything
+    /// has been measured, which draws exactly what this drew before.
+    var width: CGFloat = 0
 
     // The terminal's own face and size, from the same `@AppStorage` keys the
     // grid reads.
@@ -1776,7 +1814,27 @@ private struct DiffLineRow: View {
                 .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.vertical, 0.5)
-        .background(background)
+        // Report this row's natural width, then take at least the widest.
+        //
+        // `minWidth`, not `width`: a row longer than the running maximum must
+        // still be allowed to be itself, or the measurement it is about to
+        // report would be the clamped value and the maximum could never grow.
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(key: DiffRowWidth.self, value: geometry.size.width)
+            }
+        )
+        .frame(minWidth: width, alignment: .leading)
+        // `in: .rect` stated, not left to the default.
+        //
+        // `.background(_ style:)` resolves its shape against the container it
+        // finds itself in, and the container here is a card clipped to an
+        // `UnevenRoundedRectangle` with 12pt bottom corners — so every row was
+        // inheriting the CARD's bottom corners and drawing them at the bottom
+        // of each line. That is the scalloped left edge: eight-odd points of
+        // curve on every row of every diff, which reads as rounded corners
+        // scattered down the gutter because that is exactly what it was.
+        .background(background, in: .rect)
     }
 
     private var marker: String {
