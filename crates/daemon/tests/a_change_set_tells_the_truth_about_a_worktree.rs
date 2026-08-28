@@ -680,3 +680,64 @@ async fn a_change_set_against_master_counts_what_the_branch_changed() {
     assert_eq!(cs.insertions, 2);
     assert_eq!(cs.commits.len(), 1);
 }
+
+#[tokio::test]
+async fn a_default_branch_name_is_qualified_to_the_remote_so_a_stale_local_main_is_not_the_base() {
+    // The regression: `gh repo view --json defaultBranchRef` answers with a bare
+    // `main`, so the merge base was taken against the LOCAL `main` — whatever tip
+    // it was last pulled to. A branch made from an up-to-date `origin/main` then
+    // wore every commit the remote had gained since as its own. With the bare
+    // name this repository reports 2 commits, 2 files and 4 insertions for a
+    // branch that made one commit of one line.
+    let dir = repo();
+    let p = dir.path();
+
+    // `origin/main` moves ahead. Local `main` stays at the initial commit, which
+    // is what "behind the remote" means.
+    run(p, &["checkout", "-q", "-b", "remote-work"]);
+    write(p, "theirs.txt", "one\ntwo\nthree\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "a commit only origin/main has"]);
+    run(p, &["update-ref", "refs/remotes/origin/main", "refs/heads/remote-work"]);
+
+    // The branch is cut from the remote's tip, the way a fresh worktree is.
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    run(p, &["branch", "-q", "-D", "remote-work"]);
+    write(p, "mine.txt", "mine\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "a commit the branch made"]);
+
+    let base = farcooler_daemon::change_set::remote_qualified(p, "main").await;
+    assert_eq!(base, "origin/main", "a bare default branch name is qualified to the remote");
+
+    let cs = change_set(p, "feature", &base, BaseSource::DefaultBranch).await.expect("change set");
+    let subjects: Vec<&str> = cs.commits.iter().map(|c| c.subject.as_str()).collect();
+    assert_eq!(subjects, vec!["a commit the branch made"], "the remote's commit is not this branch's");
+    assert_eq!(cs.files.len(), 1);
+    assert_eq!((cs.insertions, cs.deletions), (1, 0));
+
+    // Already qualified — the `origin/HEAD` road hands back `origin/main` whole,
+    // and it must survive the same call rather than become `origin/origin/main`.
+    let again = farcooler_daemon::change_set::remote_qualified(p, &base).await;
+    assert_eq!(again, base);
+}
+
+#[tokio::test]
+async fn a_repository_with_no_remote_keeps_the_bare_default_branch_name() {
+    // The other half: no `origin/main` to qualify to, so the bare name is the
+    // right answer and must still resolve a merge base. Qualifying blindly would
+    // name a ref that is not there and turn a working diff into no diff at all.
+    let dir = repo();
+    let p = dir.path();
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    write(p, "a.txt", "one\ntwo\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "add a"]);
+
+    let base = farcooler_daemon::change_set::remote_qualified(p, "main").await;
+    assert_eq!(base, "main");
+
+    let cs = change_set(p, "feature", &base, BaseSource::DefaultBranch).await.expect("change set");
+    assert_eq!(cs.commits.len(), 1);
+    assert_eq!(cs.insertions, 2);
+}

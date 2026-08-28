@@ -647,6 +647,46 @@ pub async fn default_branch_local(repo: &Path) -> Option<String> {
     None
 }
 
+/// `origin/<name>` when that remote-tracking ref exists, and `<name>` when it
+/// does not.
+///
+/// A default branch arrives here by two roads and only one of them was
+/// remote-qualified. `default_branch_local` above reads `origin/HEAD` and hands
+/// back `origin/main` whole, for the reason its comment gives. `gh repo view
+/// --json defaultBranchRef` (`stack.rs:405`) answers with a BARE `main`, and
+/// `Service::default_branch` (`service.rs:458`) prefers it — so on every runner
+/// with a working `gh`, which is nearly all of them, the base was the LOCAL
+/// `main`. A worktree branched off an up-to-date `origin/main` while the local
+/// `main` sat where it was last pulled then took its merge base at that stale
+/// tip, and every commit `origin/main` had gained since was counted as the
+/// branch's own — commits, files and +/- all inflated, and nothing in the diff
+/// looking wrong.
+///
+/// So both roads end here, at one call site in `Service::default_branch`, rather
+/// than each qualifying its own answer and drifting apart again.
+///
+/// No network: `rev-parse` reads refs this clone already has. `resolve_base`
+/// (`review_ops.rs:160`) forbids a fetch on the path of drawing a diff, and this
+/// keeps that true. A name that is already remote-qualified passes through
+/// untouched, because `refs/remotes/origin/origin/main` is not a ref.
+///
+/// The bare name is the right answer, not a failure, for a repository with no
+/// `origin/<name>` to name — one that was `git init`ed and never pushed, or one
+/// whose remote is called something else — so it is returned rather than
+/// refused. Qualifying blindly there would hand `merge_base` a ref that does not
+/// exist, and a diff that fails to resolve shows nothing at all, which is the
+/// louder bug of the two.
+pub async fn remote_qualified(repo: &Path, name: &str) -> String {
+    let qualified = format!("origin/{name}");
+    let full = format!("refs/remotes/{qualified}");
+    if let Ok(r) = git(repo, &["rev-parse", "--verify", "--quiet", &full]).await {
+        if r.ok {
+            return qualified;
+        }
+    }
+    name.to_string()
+}
+
 /// The last resort: a local `main` or `master`.
 ///
 /// Returns `None` when neither exists, so the caller can ask the user to pick a

@@ -450,11 +450,18 @@ impl Service {
     }
 
     /// A repository's default branch: GitHub's answer when `gh` can give one,
-    /// `origin/HEAD` when it cannot.
+    /// `origin/HEAD` when it cannot, and remote-qualified either way.
     ///
     /// Asked at most once per repository per daemon lifetime, including the
     /// misses — a runner without `gh` must not pay for a process launch every
     /// time somebody scrolls a diff.
+    ///
+    /// The qualification is the LAST step here, over whichever answer arrived,
+    /// because `gh` returns a bare `main` and `origin/HEAD` returns
+    /// `origin/main`: two roads that were free to disagree, and did. See
+    /// `change_set::remote_qualified` (`change_set.rs:676`) for what the
+    /// disagreement cost. It is one local `rev-parse`, behind the same cache as
+    /// the rest of this, so it costs nothing per diff.
     pub async fn default_branch(&self, repository_id: Uuid, worktree: &Path) -> Option<String> {
         if let Some(cached) =
             self.default_branches.lock().unwrap_or_else(|e| e.into_inner()).get(&repository_id)
@@ -471,6 +478,10 @@ impl Service {
         let found = match found {
             Some(name) => Some(name),
             None => crate::change_set::default_branch_local(worktree).await,
+        };
+        let found = match found {
+            Some(name) => Some(crate::change_set::remote_qualified(worktree, &name).await),
+            None => None,
         };
 
         self.default_branches
