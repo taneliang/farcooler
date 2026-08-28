@@ -1806,6 +1806,12 @@ impl Service {
         self.runtime().screen(id).await
     }
 
+    /// The scrollback above a pane's screen, as bytes ready to feed. See
+    /// `TerminalScreen.history`.
+    pub async fn history(&self, id: Uuid, lines: u32) -> Result<Vec<u8>> {
+        self.runtime().history(id, lines).await
+    }
+
     pub async fn stream(&self, id: Uuid) -> Result<()> {
         self.runtime().stream(id).await
     }

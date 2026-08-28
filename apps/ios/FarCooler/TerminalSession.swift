@@ -82,6 +82,28 @@ final class TerminalSession: ObservableObject {
     /// anything actually changed. See `poll()` for what that buys.
     private var lastScreen: ScreenResponse?
 
+    /// The pane's scrollback, as bytes ready to feed straight into an
+    /// emulator: CRLF-repaired, colour-reset and terminated by the host, with
+    /// the alternate-screen case already decided there. See `historyLines` for
+    /// why this is held rather than re-fetched, and `render` for where it goes.
+    ///
+    /// Empty is the honest default and the common case — a pane that has
+    /// printed less than a screenful has no history, and neither does one on
+    /// the alternate screen.
+    private var history: [UInt8] = []
+
+    /// Where the view sits in the pane's history, republished with the grid.
+    ///
+    /// Read by `TerminalView` for the accessibility value, which is what lets a
+    /// UI test assert that a swipe moved something — there is no other way to
+    /// ask a `Canvas` what it is showing. It is also exactly what a scrollbar
+    /// would need, if this ever grows one.
+    @Published private(set) var scrollPosition = TerminalScrollPosition()
+
+    /// An in-flight scrollback refresh, so two of them cannot race and the
+    /// last one cannot outlive the pane.
+    private var historyRefresh: Task<Void, Never>?
+
     // MARK: - Streaming
 
     /// True once a second ssh channel is carrying this pane's bytes.
@@ -298,6 +320,32 @@ final class TerminalSession: ObservableObject {
     /// a handful of polls rather than taking as long to slow down as it took
     /// to speed up.
     private static let backoffFactor: Double = 1.6
+
+    /// How much scrollback a polled pane asks the host for.
+    ///
+    /// A poll carries `capture-pane -e -p` — the visible screen and no history
+    /// (`crates/tmux/src/windows.rs:251`, against `capture_scrollback` at
+    /// `:365`, which only the stream path calls). Fed into a fresh emulator
+    /// that is exactly as tall as the screen, that leaves `history_size` at
+    /// zero, and a core with no history is a core whose `scroll` moves
+    /// nothing. Measured against the real `farcooler-vt`: a 24-line capture
+    /// into an 80x24 terminal reports `history_size == 0`, and `scroll(5)`
+    /// leaves `display_offset` at 0. That is the whole of "swiping the
+    /// terminal does nothing".
+    ///
+    /// So the poll path asks for history explicitly. Not on every poll —
+    /// history costs a second `capture-pane` on the runner and it is the same
+    /// lines every time — but once when the pane opens, so the first swipe
+    /// moves immediately rather than after a round trip, and again whenever
+    /// the reader actually enters scrollback, so what they are reading is
+    /// current rather than however stale the pane has grown since it opened.
+    ///
+    /// Two thousand rather than the emulator's full `SCROLLBACK_LINES` of
+    /// 10,000: this crosses a phone's link base64'd, and at roughly 200 bytes
+    /// a line the full history is a couple of megabytes to answer a swipe.
+    /// Two thousand lines is far more than a thumb travels in one session and
+    /// costs a few hundred kilobytes once per pane.
+    private static let historyLines = 2_000
 
     private var interval: Double = TerminalSession.fastInterval
 
@@ -631,6 +679,12 @@ final class TerminalSession: ObservableObject {
     private func teardown() {
         poller?.cancel()
         poller = nil
+        // The scrollback refresh goes with the loop it was lining up work
+        // for. Left running it would answer into a pane nobody is looking at,
+        // holding an ssh round trip open on a connection whose sessions are
+        // the scarce thing here.
+        historyRefresh?.cancel()
+        historyRefresh = nil
         teardownExceptPolling()
     }
 
@@ -954,9 +1008,15 @@ final class TerminalSession: ObservableObject {
     /// if nothing better is coming — something to draw.
     private func prime() async -> ScreenResponse? {
         do {
-            let data = try await core.call("terminal.screen", ["terminal": terminalID])
+            // History is asked for HERE and not in `poll`, which is the whole
+            // cost discipline: once per pane rather than ten times a second.
+            // See `historyLines`.
+            let data = try await core.call(
+                "terminal.screen",
+                ["terminal": terminalID, "historyLines": Self.historyLines])
             let response = try JSONDecoder().decode(ScreenResponse.self, from: data)
             revision = response.revision
+            history = Self.decodedHistory(response)
             paneSize = (response.columns, response.rows)
             // The pane's actual shape, straight from the host, seeds the
             // baseline `scheduleResize` compares against — so a `configure`
@@ -1258,6 +1318,22 @@ final class TerminalSession: ObservableObject {
     }
 
     private func poll() async {
+        // A pane the reader has scrolled back is a pane they are READING, and
+        // the loop's job while they do is to leave it alone.
+        //
+        // `render` preserves the offset across a rebuild, so this is not what
+        // keeps the view from snapping to the bottom. What it prevents is
+        // subtler and worse: the offset is a count of lines from the live
+        // screen, so every line the program prints while somebody is reading
+        // history slides the text they are reading up by one. Ten lines of
+        // output and the paragraph they were halfway through is gone. Holding
+        // the capture still holds the words still.
+        //
+        // Nothing is lost by waiting. Returning to the bottom wakes the loop
+        // (see `resumeAfterScrollback`), and the first thing it does is ask
+        // for a screen — so the pane is current within one round trip of the
+        // moment anybody wants it to be.
+        guard (vt?.scrollPosition.offset ?? 0) == 0 else { return }
         do {
             let data = try await core.call("terminal.screen", ["terminal": terminalID])
             // The stream may have taken the screen while this call was in
@@ -1337,12 +1413,39 @@ final class TerminalSession: ObservableObject {
                 "The host sent a screen this device could not decode.", transcript: nil)
             return
         }
+        // Where the reader was looking, so rebuilding does not yank them back
+        // to the bottom.
+        //
+        // This method builds a WHOLE NEW core on every changed capture, which
+        // is fine while the view is live and destroys a scrolled-back view
+        // otherwise: a polled pane repaints several times a second, so without
+        // this a swipe would move the screen and the next poll would move it
+        // straight back. Reapplied after the feed below, once there is history
+        // to apply it to.
+        let wasScrolledBackTo = vt?.scrollPosition.offset ?? 0
+
         let emulator = VTCore(columns: response.columns, rows: response.rows)
         // A fresh core starts on the VT crate's own default palette, not the
         // theme in force. Without this the chrome would be themed and every
         // character would not.
         emulator.setPalette(Themes.shared.current.packed)
         applyModes(response.modes, to: emulator)
+        // The scrollback, before the screen and separated from it by a clear.
+        //
+        // This is the same order, and for the same reasons, that the daemon's
+        // own `replay` writes down a stream — see `replay` in
+        // `crates/daemon/src/runtime.rs`. The host has already done the parts
+        // that need tmux to answer for them: repairing bare line feeds,
+        // resetting the colour the last history line left set, and deciding
+        // that an alternate screen has no history worth sending. What is left
+        // here is the clear, and the clear is not cosmetic — erasing the
+        // display is what pushes the lines just written UP into history rather
+        // than discarding them, which is what makes the two captures add up to
+        // a pane you can scroll.
+        if !history.isEmpty {
+            emulator.feed(history)
+            emulator.feed(Array("\u{1b}[H\u{1b}[2J".utf8))
+        }
         // A capture separates its lines with a bare line feed, which to a
         // terminal means "down one row" and nothing about which column. Fed
         // straight in, every line starts where the previous one ended and the
@@ -1352,6 +1455,9 @@ final class TerminalSession: ObservableObject {
         // exactly the same reason; a capture arriving by any other route needs
         // the same repair. Live pty bytes never do — a pty already emits both.
         emulator.feed(carriageReturned(withoutTrailingNewlines([UInt8](bytes))))
+        if wasScrolledBackTo > 0 {
+            emulator.scroll(lines: Int32(wasScrolledBackTo))
+        }
         vt = emulator
         paneSize = (response.columns, response.rows)
         // The host's cursor, not the emulator's: a capture is text, so feeding
@@ -1363,13 +1469,37 @@ final class TerminalSession: ObservableObject {
         // goes through `publish`, which has no response to read it off and
         // used the emulator's own. See `capturedCursor`.
         capturedCursor = (response.cursorRow, response.cursorColumn)
-        grid = emulator.withSnapshot {
-            TerminalGrid(
-                snapshot: $0,
+        scrollPosition = TerminalScrollPosition(emulator.scrollPosition)
+        grid = emulator.withSnapshot { snapshot in
+            // The host's caret only means anything on a view that is showing
+            // the host's screen. Scrolled back, the rows on screen are history
+            // and the prompt is somewhere below them, so drawing the host's
+            // row and column would put a caret in the middle of text nobody is
+            // typing into. The emulator knows where the caret really sits
+            // relative to the view; `grid.rs` reports it off-screen and this
+            // clamps it, which is the honest answer.
+            guard snapshot.displayOffset == 0 else { return TerminalGrid(snapshot: snapshot) }
+            return TerminalGrid(
+                snapshot: snapshot,
                 cursorRow: response.cursorRow,
                 cursorColumn: response.cursorColumn)
         }
         phase = .live
+    }
+
+    /// The scrollback out of a screen response, or nothing.
+    ///
+    /// Nothing is the ordinary answer and not a failure: a pane that has
+    /// printed less than a screenful has no history, one on the alternate
+    /// screen has none the host will send, and a runner too old to know the
+    /// field at all simply omits it — which is exactly the behaviour that
+    /// keeps this working against a daemon that has not been updated.
+    private static func decodedHistory(_ response: ScreenResponse) -> [UInt8] {
+        guard
+            let encoded = response.history, !encoded.isEmpty,
+            let bytes = Data(base64Encoded: encoded)
+        else { return [] }
+        return [UInt8](bytes)
     }
 
     /// Drop the newline a captured screen ends with.
@@ -1421,6 +1551,7 @@ final class TerminalSession: ObservableObject {
         // while the emulator holds a capture, its own is at the end of the
         // text and the host's is at the prompt.
         let host = capturedCursor
+        scrollPosition = TerminalScrollPosition(vt.scrollPosition)
         grid = vt.withSnapshot { snapshot in
             guard let host else { return TerminalGrid(snapshot: snapshot) }
             return TerminalGrid(
@@ -1503,13 +1634,20 @@ final class TerminalSession: ObservableObject {
     }
 
     /// Typing means "act on the live screen", so it always returns there
-    /// first — the same rule the Mac's `keyDown` follows. Unlike the Mac,
-    /// this does not guard on whether the view was actually scrolled: there
-    /// is no per-frame redraw loop here to spare the cost of an unnecessary
-    /// one, so the guard would only add a branch without saving anything.
+    /// first — the same rule the Mac's `keyDown` follows.
+    ///
+    /// It DOES read the offset first, where it used to say there was no point.
+    /// That was true while returning to the bottom was only a redraw; it stopped
+    /// being true when a scrolled-back pane started holding its poll loop
+    /// still. Typing is one of the two ways back to the live screen — the other
+    /// is swiping down, in `scrollLocally` — and a pane that resumed painting
+    /// only when swiped would go dead under a reader who scrolled up, gave up,
+    /// and typed instead.
     private func jumpToBottom(_ vt: VTCore) {
+        let wasScrolledBack = vt.scrollPosition.offset > 0
         vt.scrollToBottom()
         publish()
+        if wasScrolledBack { resumeAfterScrollback() }
     }
 
     /// Scroll by `lines`, positive back into history. Mirrors the Mac's
@@ -1534,13 +1672,89 @@ final class TerminalSession: ObservableObject {
                     mouse: button, action: UInt32(FARCOOLER_VT_MOUSE_PRESS),
                     column: column, row: row, modifiers: [])
             else {
-                vt.scroll(lines: Int32(lines))
-                publish()
+                await scrollLocally(vt, lines: lines)
                 return
             }
             bytes.append(contentsOf: chunk)
         }
         await write(bytes)
+    }
+
+    /// Move this device's own view of the pane, and keep the poll loop in step
+    /// with where the reader now is.
+    ///
+    /// Reached only when the program running in the pane has declined the
+    /// wheel — a shell, not a full-screen TUI. See `scroll`.
+    private func scrollLocally(_ vt: VTCore, lines: Int) async {
+        // Read BEFORE the scroll, because "we are at the bottom" and "we have
+        // just arrived at the bottom" are different questions and only the
+        // second one is worth a round trip.
+        //
+        // A drag reports every line it crosses, and the core clamps at zero.
+        // So a downward swipe on a view that is already live reports a dozen
+        // times, arrives at zero a dozen times, and without this fires a
+        // scrollback refresh for each of them — a dozen ssh round trips for a
+        // gesture that changed nothing.
+        let wasScrolledBack = vt.scrollPosition.offset > 0
+        vt.scroll(lines: Int32(lines))
+        publish()
+        // Back at the live screen. Start painting again, and take the chance
+        // to refresh the scrollback while sitting somewhere a rebuild cannot
+        // be seen.
+        if vt.scrollPosition.offset == 0 {
+            if wasScrolledBack { resumeAfterScrollback() }
+            return
+        }
+        // Scrolled back, so stop painting. `poll` refuses to run in this state
+        // as well; this stops the loop rather than leaving it spinning through
+        // a guard several times a second.
+        poller?.cancel()
+        poller = nil
+    }
+
+    /// Resume the poll loop, and line up fresh scrollback for the next time
+    /// somebody swipes.
+    ///
+    /// The refresh happens HERE, at the bottom, rather than on the way INTO
+    /// scrollback, and the reason is that `display_offset` counts lines from
+    /// the live screen. Replacing the history under a reader who is already
+    /// twenty lines up moves those twenty lines somewhere else — they would
+    /// watch the paragraph they were reading jump. At the bottom there is
+    /// nothing to move: the screen is the same screen, and the only difference
+    /// is that there is now more above it than there was.
+    ///
+    /// The cost is bounded and worth naming: within one continuous visit to
+    /// the scrollback, anything that scrolled off since the reader was last at
+    /// the bottom is not there. Nothing scrolls off while they are up there —
+    /// this pane has stopped polling — so the gap can only be as old as their
+    /// last look at the live screen.
+    private func resumeAfterScrollback() {
+        guard started, !streaming else { return }
+        startLoop()
+        historyRefresh?.cancel()
+        historyRefresh = Task { [weak self] in await self?.refreshHistory() }
+    }
+
+    /// Ask for the pane's scrollback again and keep it for the next swipe.
+    ///
+    /// Deliberately does not paint. A screen arrives with the answer and
+    /// drawing it here would put a second painter beside the poll loop, racing
+    /// it to show whichever capture happened to be older. The loop is running
+    /// by the time this lands and will fold the new history in on its next
+    /// pass, which is at most `fastInterval` away.
+    private func refreshHistory() async {
+        guard
+            let data = try? await core.call(
+                "terminal.screen",
+                ["terminal": terminalID, "historyLines": Self.historyLines]),
+            let response = try? JSONDecoder().decode(ScreenResponse.self, from: data),
+            !Task.isCancelled
+        else { return }
+        // Only while the reader is still at the bottom. A swipe can land
+        // during the round trip, and the paragraph above is exactly why that
+        // history must not be swapped in underneath it.
+        guard (vt?.scrollPosition.offset ?? 0) == 0 else { return }
+        history = Self.decodedHistory(response)
     }
 
     private func write(_ bytes: [UInt8]) async {
@@ -1598,6 +1812,30 @@ private struct ScreenResponse: Decodable, Equatable {
     /// The escape sequences that put a fresh emulator into the modes the
     /// program is in. See `applyModes`.
     var modes: String?
+    /// The pane's scrollback, base64, ready to feed. Present only when it was
+    /// asked for — see `historyLines` — and empty for a pane that has none or
+    /// is on the alternate screen, which has no history of its own.
+    var history: String?
+}
+
+/// How far back the view is scrolled, and how far back it COULD be.
+///
+/// `history == 0` is the whole scrolling bug in one number: a pane with no
+/// history has nothing a swipe can move to, however well the gesture works.
+///
+/// Named for the terminal rather than plain `ScrollPosition`, which is
+/// SwiftUI's own type — `AgentView` uses the real one and a shadowing struct
+/// here broke it at a distance.
+struct TerminalScrollPosition: Equatable {
+    var offset = 0
+    var history = 0
+
+    init() {}
+
+    init(_ position: (offset: Int, history: Int)) {
+        offset = position.offset
+        history = position.history
+    }
 }
 
 /// A plain-data copy of one screen, safe to publish and hold past the moment

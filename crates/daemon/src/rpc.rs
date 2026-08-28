@@ -1135,10 +1135,20 @@ impl Rpc {
             // terminals and act on them but never show one.
             "terminal.screen" => {
                 let id = Self::target(&req)?;
-                let known = match req.payload {
-                    Some(request::Payload::TerminalScreenRequest(p)) => p.known_revision,
-                    _ => 0,
+                let (known, history_lines) = match req.payload {
+                    Some(request::Payload::TerminalScreenRequest(p)) => {
+                        (p.known_revision, p.history_lines)
+                    }
+                    _ => (0, 0),
                 };
+
+                // Only when it was asked for. The scrollback is a second
+                // `capture-pane` on the runner and a second capture on the wire,
+                // and a client showing a pane polls this several times a second
+                // — so a poll that wants only the screen has to cost exactly
+                // what it cost before scrollback existed. `Runtime::history`
+                // spawns nothing at zero.
+                let history = bytes::Bytes::from(svc.history(id, history_lines).await?);
 
                 let (contents, columns, rows) = svc.screen(id).await?;
                 let (cursor_column, cursor_row) = svc.cursor(id).await.unwrap_or((0, 0));
@@ -1162,6 +1172,13 @@ impl Rpc {
                             revision,
                             unchanged: true,
                             modes: modes.clone(),
+                            // Still sent, unlike the contents. A client asks
+                            // for scrollback because it has none, and "your
+                            // screen has not moved" is not an answer to "give
+                            // me your history" — withheld here, a client whose
+                            // screen happened to be current would have to dirty
+                            // the pane to be allowed to scroll.
+                            history,
                         },
                     ));
                 }
@@ -1175,6 +1192,7 @@ impl Rpc {
                     revision,
                     unchanged: false,
                     modes,
+                    history,
                 }))
             }
 
@@ -1948,6 +1966,13 @@ mod tests {
 /// correctness — a collision means one stale frame until the next change, which
 /// is a redraw, not corruption — and it is compared only against a value this
 /// same runner produced moments earlier.
+///
+/// The scrollback is deliberately not in it. This number answers "is the screen
+/// I hold still the screen?", and history is not diffed against anything: it is
+/// asked for explicitly, by a client that has none, and sent whenever it is
+/// asked for. Hashing it in would change the revision every time a line scrolled
+/// off — resending screens a client already holds, which is the whole cost this
+/// number exists to avoid.
 fn screen_revision(contents: &str, cursor_column: u32, cursor_row: u32) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {

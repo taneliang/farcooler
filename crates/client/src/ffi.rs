@@ -1557,8 +1557,14 @@ async fn dispatch(
         // emulator waiting for exactly these bytes.
         "terminal.screen" => {
             let known = args.get("knownRevision").and_then(|v| v.as_u64()).unwrap_or(0);
+            // Zero means "no scrollback", which is what a poll wants: it is a
+            // second capture on the runner and a second one on the wire, so a
+            // client asks once as it opens a pane and leaves this out forever
+            // after.
+            let history_lines =
+                args.get("historyLines").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             let screen =
-                session.screen(id("terminal")?, known).await?;
+                session.screen(id("terminal")?, known, history_lines).await?;
             Ok(json!({
                 // Absent when unchanged, so an idle pane costs a few bytes on
                 // the wire instead of a whole capture several times a second.
@@ -1570,6 +1576,12 @@ async fn dispatch(
                 "revision": screen.revision,
                 "unchanged": screen.unchanged,
                 "modes": screen.modes,
+                // Base64 for the same reason the contents are: this is a
+                // capture too, escapes and all, and it is fed to the same
+                // emulator. Empty unless `historyLines` asked for it — and
+                // present even when `unchanged` is true, because a client asks
+                // for scrollback exactly when it does not have any.
+                "history": farcooler_core::base64::encode(&screen.history),
             }))
         }
 

@@ -1279,6 +1279,26 @@ message TerminalScreen {
   // replay carried the modes may have gone into one that was then discarded.
   // Sent with the screen, they arrive with the state they describe.
   string modes = 8;
+  // The pane's retained scrollback, as bytes ready to feed to an emulator ABOVE
+  // the screen in `contents`.
+  //
+  // Empty unless `TerminalScreenRequest.history_lines` asked for it. Empty even
+  // then when the pane is on the alternate screen — which has no history of its
+  // own, so tmux answers that question with a copy of the visible screen, and a
+  // copy of a full-screen program sitting above itself is worse than nothing —
+  // and empty when the pane has simply not scrolled yet.
+  //
+  // Ready to feed, not a raw capture: the bare LFs `capture-pane` emits have
+  // already been turned into CRLF pairs, so a client does not get a staircase,
+  // and the last line already ends in a reset so that the clear a client writes
+  // next does not paint the whole screen in whatever color the history happened
+  // to end mid-way through. The clear is the client's to write, between this
+  // and `contents`, because erasing the display is exactly what scrolls these
+  // lines into the emulator's own history instead of leaving them on screen.
+  //
+  // Sent even when `unchanged` is set. A client asks for history because it has
+  // none, and "your screen has not moved" is not an answer to that question.
+  bytes history = 9;
 }
 
 // Exact bytes for a pane's input.
@@ -1335,6 +1355,20 @@ message TerminalFilePutResult {
 message TerminalScreenRequest {
   // The `revision` from the last screen received. Zero means "send it whatever".
   uint64 known_revision = 1;
+  // How many lines of scrollback to send above the screen, newest first. Zero
+  // means none, which is what an ordinary poll asks for.
+  //
+  // Asked for rather than sent with every screen because it costs a second
+  // `capture-pane` on the runner and a second capture on the wire, and a client
+  // showing a pane polls it several times a second. So a client asks once per
+  // pane — when it opens one — and polls with zero from then on, at exactly the
+  // cost a poll has always had.
+  //
+  // Bounded, and by the client, because the whole answer rides in one control
+  // envelope: a pane sitting on tmux's full history limit is megabytes of
+  // colored capture, and the client is the only side that knows how many lines
+  // it can actually use.
+  uint32 history_lines = 2;
 }
 
 message TerminalAttach {

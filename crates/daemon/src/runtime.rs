@@ -109,6 +109,36 @@ impl Runtime {
         Ok((text, pane.columns, pane.rows))
     }
 
+    /// A bounded slice of the pane's scrollback, as bytes a client can feed
+    /// straight into its emulator above the screen. See `TerminalScreen.history`.
+    ///
+    /// Bytes rather than the capture, because assembling them is where the
+    /// knowledge is: the alternate screen has no history to send, a bare LF is a
+    /// staircase, and a capture that ends mid-color paints the client's next
+    /// clear. That is `history_bytes`, and a stream's `replay` uses the same
+    /// one — a client polling and a client streaming must not end up holding
+    /// different scrollback for the same pane.
+    ///
+    /// Zero lines is not "all of it": it is the ordinary poll, and it costs
+    /// nothing. Nothing is spawned, because the caller that asked for no history
+    /// must pay exactly what it paid before this existed.
+    pub async fn history(&self, id: Uuid, lines: u32) -> Result<Vec<u8>> {
+        if lines == 0 {
+            return Ok(Vec::new());
+        }
+        let snapshot = self.inventory.snapshot();
+        let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
+
+        // Both reads at once, for the reason `stream` gives above: they are two
+        // `tmux` processes and neither depends on the other, so awaiting them in
+        // turn is two spawns and two connects end to end where one will do.
+        let (modes, scrollback) = tokio::join!(
+            self.tmux.pane_modes(&pane.pane_id),
+            self.tmux.capture_scrollback_tail(&pane.pane_id, lines),
+        );
+        Ok(history_bytes(modes.ok(), scrollback.ok().as_deref()))
+    }
+
     /// The pane's modes, as the sequences that restore them.
     pub async fn pane_modes(&self, id: Uuid) -> Result<String> {
         let snapshot = self.inventory.snapshot();
@@ -499,6 +529,57 @@ pub fn fanout_binary() -> Option<std::path::PathBuf> {
     fanout_binary_beside(&std::env::current_exe().ok()?)
 }
 
+/// capture-pane separates lines with a bare LF. To a terminal that is line feed
+/// WITHOUT carriage return, so every line starts where the previous one ended
+/// and the capture arrives as a staircase. The live pipe does not need this
+/// because a pty already emits CRLF.
+fn normalized(text: &str) -> String {
+    text.replace('\n', "\r\n")
+}
+
+/// A pane's retained history, as the bytes that put it into a fresh emulator
+/// ABOVE whatever screen is written next. Empty when there is nothing to write.
+///
+/// Shared rather than written twice. `replay` writes this, then the clear, then
+/// the screen, all down one stream; `Runtime::history` hands the identical bytes
+/// to a client that is polling and writes those three things itself. Every rule
+/// below was learned from a bug that reached a screen, and a second copy of them
+/// is a second place for one to be quietly dropped.
+///
+/// NOT the clear. `\x1b[H\x1b[2J` belongs between this and the screen, and it is
+/// the caller that knows whether a screen is coming — a polling client that was
+/// told `unchanged` has its screen already and must not have it erased.
+fn history_bytes(
+    modes: Option<farcooler_tmux::windows::PaneModes>,
+    scrollback: Option<&str>,
+) -> Vec<u8> {
+    // Only on the primary screen, and only when tmux said so rather than merely
+    // failing to say otherwise. An alternate screen has no history of its own,
+    // so tmux answers that question with a copy of the visible screen — which
+    // written here would sit directly above itself, and would still be sitting
+    // there, stale, after the program exited the alternate screen.
+    if !matches!(modes, Some(m) if !m.alternate_screen) {
+        return Vec::new();
+    }
+    let Some(history) = scrollback.map(str::trim_end).filter(|h| !h.is_empty()) else {
+        return Vec::new();
+    };
+
+    let mut out = normalized(history).into_bytes();
+    // A trailing newline HERE, unlike after the screen. These lines belong above
+    // the screen, so the last of them has to be finished before the clear that
+    // pushes them all into history.
+    //
+    // And a reset with it. `capture-pane -e` states the color a line starts in
+    // and leaves it set, because the line after it states its own — but the last
+    // line of the history has no line after it, only the clear, and a clear
+    // paints every cell it erases in whatever background is current. Left off,
+    // opening a pane whose scrollback happened to end mid-color painted the
+    // whole screen in it.
+    out.extend_from_slice(b"\x1b[m\r\n");
+    out
+}
+
 /// The bytes that put a fresh emulator into the state a pane is already in.
 ///
 /// Split out from `stream` because it is the whole of what a client sees when
@@ -513,14 +594,6 @@ fn replay(
     screen: Option<&str>,
     cursor: Option<(u32, u32)>,
 ) -> Vec<u8> {
-    // capture-pane separates lines with a bare LF. To a terminal that is line
-    // feed WITHOUT carriage return, so every line starts where the previous one
-    // ended and the capture arrives as a staircase. The live pipe does not need
-    // this because a pty already emits CRLF.
-    fn normalized(text: &str) -> String {
-        text.replace('\n', "\r\n")
-    }
-
     let mut out = Vec::new();
 
     // The modes first, because a capture is contents and modes are not
@@ -539,29 +612,10 @@ fn replay(
         out.extend_from_slice(modes.restore_sequence().as_bytes());
     }
 
-    // Then the scrollback, so the client opens able to scroll back.
-    //
-    // Only on the primary screen, and only when tmux said so rather than merely
-    // failing to say otherwise. An alternate screen has no history of its own,
-    // so tmux answers that question with a copy of the visible screen — which
-    // replayed here would sit directly above itself, and would still be sitting
-    // there, stale, after the program exited the alternate screen.
-    if matches!(modes, Some(m) if !m.alternate_screen) {
-        if let Some(history) = scrollback.map(str::trim_end).filter(|h| !h.is_empty()) {
-            out.extend_from_slice(normalized(history).as_bytes());
-            // A trailing newline HERE, unlike after the screen below. These
-            // lines belong above the screen, so the last of them has to be
-            // finished before the clear that pushes them all into history.
-            //
-            // And a reset with it. `capture-pane -e` states the color a line
-            // starts in and leaves it set, because the line after it states its
-            // own — but the last line of the history has no line after it, only
-            // the clear, and a clear paints every cell it erases in whatever
-            // background is current. Left off, opening a pane whose scrollback
-            // happened to end mid-color painted the whole screen in it.
-            out.extend_from_slice(b"\x1b[m\r\n");
-        }
-    }
+    // Then the scrollback, so the client opens able to scroll back. See
+    // `history_bytes`, which is the same assembly a polling client gets when it
+    // asks for scrollback without a stream to carry it.
+    out.extend_from_slice(&history_bytes(modes, scrollback));
 
     if let Some(screen) = screen {
         // Home the cursor and clear, so the replay paints a clean screen.
@@ -726,6 +780,88 @@ mod replay_tests {
         let t = opened(&bytes, 2);
         let snapshot = farcooler_vt::grid::snapshot(&t);
         assert_eq!((snapshot.cursor_column, snapshot.cursor_row), (3, 0));
+    }
+}
+
+#[cfg(test)]
+mod history_bytes_tests {
+    use super::history_bytes;
+    use farcooler_tmux::windows::PaneModes;
+
+    fn primary() -> PaneModes {
+        PaneModes { cursor_visible: true, wrap: true, ..Default::default() }
+    }
+
+    fn alternate() -> PaneModes {
+        PaneModes { alternate_screen: true, cursor_visible: true, wrap: true, ..Default::default() }
+    }
+
+    /// On the bytes, not on an emulator, unlike `replay_tests` above. These are
+    /// handed to a client that writes them itself, between a clear this code
+    /// does not emit and a screen it never sees, so what is under test is the
+    /// bytes leaving here rather than the picture some particular caller builds
+    /// from them.
+    #[test]
+    fn a_bare_line_feed_becomes_a_carriage_return_pair() {
+        // `capture-pane` separates lines with a bare LF, which to a terminal is
+        // a line feed without a carriage return: fed as captured, every line
+        // starts where the last one ended and the history arrives as a
+        // staircase running off the right edge.
+        let out = history_bytes(Some(primary()), Some("one\ntwo\nthree"));
+        let text = String::from_utf8(out).expect("utf-8");
+        assert_eq!(text, "one\r\ntwo\r\nthree\x1b[m\r\n");
+    }
+
+    /// The last line is finished, and finished with the color turned off.
+    ///
+    /// The newline because these lines belong ABOVE the screen, so the last of
+    /// them has to end before the clear that pushes them into history. The reset
+    /// because `capture-pane -e` leaves the last line's color set — the line
+    /// after it would have stated its own, and there is no line after it — and
+    /// the caller's clear paints every cell it erases in whatever background is
+    /// current.
+    #[test]
+    fn the_history_ends_reset_and_finished() {
+        let out = history_bytes(Some(primary()), Some("\x1b[41mred and never turned off"));
+        assert!(out.ends_with(b"\x1b[m\r\n"), "{}", String::from_utf8_lossy(&out));
+    }
+
+    /// An alternate screen has no history of its own, so tmux answers the
+    /// question with a copy of the visible screen. Sent, it would sit directly
+    /// above itself — and would still be sitting there, stale, after the program
+    /// left the alternate screen.
+    #[test]
+    fn a_full_screen_program_has_no_history_to_send() {
+        assert!(history_bytes(Some(alternate()), Some("copy1\ncopy2")).is_empty());
+    }
+
+    /// And only when tmux SAID which screen it is. A pane whose modes could not
+    /// be read is a pane that might be on the alternate screen, and the cost of
+    /// guessing wrong is the duplicate above.
+    #[test]
+    fn modes_that_could_not_be_read_send_nothing() {
+        assert!(history_bytes(None, Some("old1\nold2")).is_empty());
+    }
+
+    /// A pane that has not scrolled yet. tmux answers with a run of newlines
+    /// rather than nothing, and sent as-is they are blank lines a client would
+    /// have to scroll up through to reach a scrollback that is not there.
+    #[test]
+    fn a_pane_with_nothing_behind_it_sends_nothing() {
+        assert!(history_bytes(Some(primary()), Some("\n\n\n")).is_empty());
+        assert!(history_bytes(Some(primary()), None).is_empty());
+    }
+
+    /// The clear is the caller's. `replay` writes one because a screen follows
+    /// it down the same stream; a polling client told `unchanged` already holds
+    /// its screen and must not have it erased by the scrollback it asked for.
+    #[test]
+    fn the_clear_is_not_in_here() {
+        let out = history_bytes(Some(primary()), Some("old1\nold2"));
+        assert!(
+            !out.windows(4).any(|w| w == b"\x1b[2J".as_slice()),
+            "the history erased a screen it does not own"
+        );
     }
 }
 

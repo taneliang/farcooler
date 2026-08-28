@@ -296,7 +296,7 @@ WATCH_WIDGET_SOURCES = ["WatchFleetWidget.swift"]
 # symmetry would claim a capability it does not have.
 WATCH_WIDGET_AGENTKIT_SOURCES = ["FleetSnapshot.swift", "SnapshotStore.swift"]
 
-UI_TEST_SOURCES = ["KeyboardTabStripTests.swift"]
+UI_TEST_SOURCES = ["KeyboardTabStripTests.swift", "TerminalScrollTests.swift"]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
 

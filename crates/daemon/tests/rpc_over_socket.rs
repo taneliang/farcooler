@@ -1575,7 +1575,7 @@ async fn an_image_pasted_in_chunks_lands_as_one_file_and_is_typed_into_the_pane(
             let mut req = request("terminal.screen");
             req.target_resource_id = Some(terminal.id.clone());
             req.payload = Some(request::Payload::TerminalScreenRequest(
-                farcooler_protocol::v1::TerminalScreenRequest { known_revision: 0 },
+                farcooler_protocol::v1::TerminalScreenRequest { known_revision: 0, history_lines: 0 },
             ));
             if let Ok(result) = client.call(req).await {
                 if let Some(result::Value::TerminalScreen(s)) = result.value {
@@ -2281,4 +2281,176 @@ async fn this_runner_names_itself_so_a_device_can_record_what_it_enrolled_on() {
     // The same identity the message already carries in bytes, as text — not a
     // second identifier that could disagree with the first.
     assert_eq!(host.runner_id, uuid::Uuid::from_slice(&host.id).unwrap().to_string());
+}
+
+/// Ask a pane for a screen, optionally with `history_lines` of scrollback.
+async fn screen_of(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    terminal: &bytes::Bytes,
+    history_lines: u32,
+) -> farcooler_protocol::v1::TerminalScreen {
+    let mut req = request("terminal.screen");
+    req.target_resource_id = Some(terminal.clone());
+    req.payload = Some(request::Payload::TerminalScreenRequest(
+        farcooler_protocol::v1::TerminalScreenRequest { known_revision: 0, history_lines },
+    ));
+    let result = client.call(req).await.expect("terminal.screen");
+    let Some(result::Value::TerminalScreen(s)) = result.value else { panic!("wrong result") };
+    s
+}
+
+/// A shell pane with two hundred numbered lines behind it, which is more than
+/// the pane is tall, so most of them are scrollback by the time this returns.
+///
+/// The lines are printed by a pipeline rather than a loop because the pane runs
+/// the developer's own login shell — `preset_command` in
+/// `crates/daemon/src/service.rs` — and a `for` loop is spelled differently in
+/// fish than in bash. A pipeline is the same sentence in all of them.
+///
+/// The `TempDir` comes back to be held, for the reason `registered_repository`
+/// gives: dropping it deletes the worktree out from under the running pane.
+async fn pane_with_scrollback(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+) -> (tempfile::TempDir, bytes::Bytes) {
+    let (repo_dir, repository) = registered_repository(client).await;
+    let ws = create_workspace(client, repository, "scroll", "feat/scroll", "shell").await;
+    let terminal = terminals(client)
+        .await
+        .into_iter()
+        .find(|t| t.workspace_id == ws.id)
+        .expect("terminal");
+
+    let mut write = request("terminal.write");
+    write.target_resource_id = Some(terminal.id.clone());
+    write.payload = Some(request::Payload::TerminalWrite(
+        farcooler_protocol::v1::TerminalWrite {
+            payload: bytes::Bytes::from_static(b"seq 1 200 | sed 's/.*/L&-END/'\n"),
+        },
+    ));
+    client.call(write).await.expect("terminal.write");
+
+    // Wait for the last line rather than sleeping: a login shell's startup is
+    // whatever this developer's rc files do, and a fixed wait is either flaky
+    // or slow.
+    let printed = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let s = screen_of(client, &terminal.id, 0).await;
+            if String::from_utf8_lossy(&s.contents).contains("L200-END") {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert_eq!(printed, Ok(true), "the pane never printed the lines this test scrolls through");
+
+    // And then wait for it to stop moving.
+    //
+    // The shell draws its prompt AFTER the last line of output, so a screen
+    // caught the instant `L200-END` appears is a screen that is about to
+    // change again. A caller comparing two screens across that moment sees
+    // them differ for reasons that have nothing to do with what it is testing
+    // — which is how `an_unchanged_screen_still_carries_the_history_that_was_asked_for`
+    // failed its own precondition rather than its assertion.
+    //
+    // Two identical revisions in a row is the pane at rest, and waiting for
+    // that beats sleeping for a number: what is being waited on is somebody's
+    // login shell finishing whatever their rc files do.
+    let settled = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        let mut previous = 0u64;
+        loop {
+            let now = screen_of(client, &terminal.id, 0).await.revision;
+            if now != 0 && now == previous {
+                return true;
+            }
+            previous = now;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert_eq!(settled, Ok(true), "the pane never stopped repainting");
+
+    (repo_dir, terminal.id)
+}
+
+/// The point of the whole field: a client that asks gets lines it can no longer
+/// see.
+///
+/// Asserting on a line that is NOT in `contents`, not merely on a non-empty
+/// `history`. tmux answers the history question for an alternate screen with a
+/// copy of the visible screen, and a test that only checked for bytes would
+/// pass on exactly that duplicate — which is the failure this field exists to
+/// avoid, not one it can be allowed to ship.
+#[tokio::test]
+async fn a_screen_can_carry_the_scrollback_that_scrolled_off_it() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_repo_dir, terminal) = pane_with_scrollback(&mut client).await;
+
+    let s = screen_of(&mut client, &terminal, 400).await;
+    let history = String::from_utf8_lossy(&s.history).to_string();
+    let contents = String::from_utf8_lossy(&s.contents).to_string();
+
+    assert!(!history.is_empty(), "the scrollback was asked for and did not arrive");
+    assert!(
+        !contents.contains("L1-END"),
+        "the first line is still on the screen, so this test proves nothing: {contents}"
+    );
+    assert!(
+        history.contains("L1-END"),
+        "the history is not the history — it carries no line that left the screen"
+    );
+    // Ready to feed, not a raw capture: a client writes these bytes straight
+    // into an emulator, and a bare LF there is a staircase.
+    assert!(!s.history.windows(2).any(|w| w[0] != b'\r' && w[1] == b'\n'), "a bare LF survived");
+    assert!(s.history.ends_with(b"\x1b[m\r\n"), "the color the history ended in was left set");
+}
+
+/// The ordinary poll, which is nearly every call this method serves.
+///
+/// The same pane as above, so an empty `history` here is the daemon declining
+/// to capture rather than a pane with nothing to capture — the second capture
+/// is guarded by this number, and a phone polls several times a second.
+#[tokio::test]
+async fn a_poll_that_asks_for_no_scrollback_is_sent_none() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_repo_dir, terminal) = pane_with_scrollback(&mut client).await;
+
+    let asked = screen_of(&mut client, &terminal, 400).await;
+    assert!(!asked.history.is_empty(), "this pane does have scrollback to decline");
+
+    let polled = screen_of(&mut client, &terminal, 0).await;
+    assert!(polled.history.is_empty(), "a poll paid for a capture it did not ask for");
+}
+
+/// A client that already holds the screen still needs the scrollback it asked
+/// for. "Your screen has not moved" is not an answer to "give me your history".
+#[tokio::test]
+async fn an_unchanged_screen_still_carries_the_history_that_was_asked_for() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_repo_dir, terminal) = pane_with_scrollback(&mut client).await;
+
+    let first = screen_of(&mut client, &terminal, 0).await;
+
+    let mut req = request("terminal.screen");
+    req.target_resource_id = Some(terminal.clone());
+    req.payload = Some(request::Payload::TerminalScreenRequest(
+        farcooler_protocol::v1::TerminalScreenRequest {
+            known_revision: first.revision,
+            history_lines: 400,
+        },
+    ));
+    let result = client.call(req).await.expect("terminal.screen");
+    let Some(result::Value::TerminalScreen(again)) = result.value else { panic!("wrong result") };
+
+    // The screen did not move — nothing was typed into the pane between the two
+    // calls — so this is the branch under test rather than a fresh screen.
+    assert!(again.unchanged, "the pane changed under the test; the branch was not exercised");
+    assert!(again.contents.is_empty(), "an unchanged screen still resent its contents");
+    assert!(
+        String::from_utf8_lossy(&again.history).contains("L1-END"),
+        "the history was withheld because the screen happened to be current"
+    );
 }

@@ -371,6 +371,39 @@ impl TmuxServer {
         Ok(out.stdout)
     }
 
+    /// The newest `lines` of that same scrollback, for a caller that can only
+    /// carry so much of it.
+    ///
+    /// `-E -1` and `-J` for exactly the reasons above: `-1` stops where
+    /// `capture_screen` begins, so the visible screen is not captured a second
+    /// time and shown to the user as a copy of itself sitting above itself; and
+    /// `-J` hands over the logical line rather than the line tmux happened to
+    /// hard-wrap at the width it was written, because reflowing it at the
+    /// reader's own width is the client emulator's job.
+    ///
+    /// Bounded, where `capture_scrollback` is not, because of who asks. That one
+    /// feeds a stream that then stays open and pours out bytes for as long as
+    /// the pane lives, so one large capture at the head of it changes nothing.
+    /// This one answers a single request whose whole reply rides in one control
+    /// envelope — `MAX_CONTROL_ENVELOPE_BYTES`, a megabyte — over a phone's
+    /// link, and a pane sitting on tmux's full history limit is several
+    /// megabytes of colored capture. Unbounded, the answer would be refused by
+    /// the transport, or arrive after the user had given up scrolling.
+    ///
+    /// `-S -<lines>` counts back from the top of the screen, so what comes back
+    /// is the part of the history nearest what the user is looking at — the
+    /// lines a scroll gesture reaches first, rather than the oldest ones it
+    /// would have to travel past everything else to see.
+    pub async fn capture_scrollback_tail(&self, pane_id: &str, lines: u32) -> Result<String> {
+        let start = format!("-{lines}");
+        let args = ["capture-pane", "-e", "-p", "-J", "-S", &start, "-E", "-1", "-t", pane_id];
+        let out = self.run(&args).await?;
+        if !out.ok() {
+            return Err(DomainError::TmuxUnavailable);
+        }
+        Ok(out.stdout)
+    }
+
     /// Retained pane contents, used to resynchronize after a gap.
     pub async fn capture_pane(&self, pane_id: &str, lines: u32) -> Result<String> {
         let start = format!("-{lines}");

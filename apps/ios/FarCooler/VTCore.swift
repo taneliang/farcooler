@@ -82,9 +82,23 @@ final class VTCore {
                 rows: Int(raw.rows),
                 cursorRow: Int(raw.cursor_row),
                 cursorColumn: Int(raw.cursor_column),
-                cursorVisible: raw.cursor_visible
+                cursorVisible: raw.cursor_visible,
+                displayOffset: Int(raw.display_offset),
+                historySize: Int(raw.history_size)
             )
         )
+    }
+
+    /// How far back the view is scrolled, and how much there is to scroll
+    /// through. Both zero on a core that has only ever been fed a captured
+    /// screen — which is the whole shape of the scrolling bug, and why this is
+    /// worth a call of its own rather than being read off a grid.
+    ///
+    /// `withSnapshot` already carries both, but every caller of it is building
+    /// a `TerminalGrid` to draw. Asking "where are we" should not require
+    /// copying four thousand cells to find out.
+    var scrollPosition: (offset: Int, history: Int) {
+        withSnapshot { ($0.displayOffset, $0.historySize) } ?? (0, 0)
     }
 
     /// Text the program asked to put on the clipboard (OSC 52), or nil.
@@ -195,6 +209,15 @@ struct VTSnapshot {
     let cursorRow: Int
     let cursorColumn: Int
     let cursorVisible: Bool
+    /// How many lines above the live screen the view is showing. Zero is live.
+    let displayOffset: Int
+    /// How many lines sit above the screen and could be scrolled to.
+    ///
+    /// Zero means a swipe has nowhere to go, and saying so is the difference
+    /// between a scroll that does nothing and a scroll that cannot do
+    /// anything. A capture-only core reports zero here forever; see
+    /// `TerminalSession.render`.
+    let historySize: Int
 
     subscript(row: Int, column: Int) -> FarCoolerVtCell {
         cells[row * columns + column]

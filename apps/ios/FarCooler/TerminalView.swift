@@ -370,6 +370,25 @@ struct TerminalView: View {
     private func live(grid: TerminalGrid, size: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
             Canvas { context, canvasSize in draw(grid: grid, into: context, size: canvasSize) }
+                // The one way to ask this pane what it is showing.
+                //
+                // A `Canvas` is pixels: there are no child views for a UI test
+                // to read, so without this "did the swipe scroll anything"
+                // cannot be answered except by a person looking. Both numbers
+                // are here because both are needed to tell the two failures
+                // apart — a gesture that never fired leaves `offset` at 0 with
+                // history behind it, and a pane the host sent no scrollback for
+                // leaves `history` at 0, which is a swipe that correctly did
+                // nothing.
+                //
+                // On the `Canvas` rather than the `ZStack`, deliberately:
+                // giving the stack an accessibility value would make the STACK
+                // the element and hide the keyboard sink inside it.
+                .accessibilityElement()
+                .accessibilityIdentifier("terminal-surface")
+                .accessibilityValue(
+                    "offset=\(session.scrollPosition.offset) "
+                        + "history=\(session.scrollPosition.history)")
             // A UIKit view whose only job is to be the thing the software
             // keyboard is attached to. It carries no visible state of its
             // own — every character it reports goes straight to the host and

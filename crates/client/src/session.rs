@@ -687,13 +687,21 @@ impl Session {
     ///
     /// `known_revision` is the last one received; the runner answers `unchanged`
     /// rather than resending a screen already held. Pass 0 to always get one.
+    ///
+    /// `history_lines` is how much of the pane's scrollback to send above that
+    /// screen, and 0 — an ordinary poll — is none. It costs a second capture on
+    /// the runner and a second one on the wire, so a client asks once, when it
+    /// opens a pane, and polls with 0 from then on. The answer arrives in
+    /// `history` even when the screen comes back `unchanged`: a client asking
+    /// for scrollback is asking because it has none.
     pub async fn screen(
         &mut self,
         terminal: Uuid,
         known_revision: u64,
+        history_lines: u32,
     ) -> Result<farcooler_protocol::v1::TerminalScreen, SessionError> {
         let payload = request::Payload::TerminalScreenRequest(
-            farcooler_protocol::v1::TerminalScreenRequest { known_revision },
+            farcooler_protocol::v1::TerminalScreenRequest { known_revision, history_lines },
         );
         match self.value("terminal.screen", Some(terminal), Some(payload)).await? {
             result::Value::TerminalScreen(s) => Ok(s),
