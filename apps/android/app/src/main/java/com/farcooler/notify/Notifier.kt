@@ -99,10 +99,20 @@ class Notifier(private val context: Context, private val settings: Settings) {
         system.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_DONE,
-                "Agents that finished",
+                // "or failed", because this channel has always carried both: a
+                // turn that failed is reported as `done` with failure beside
+                // it, so muting this is muting the pair, and the name has to
+                // say so before somebody mutes it expecting otherwise.
+                //
+                // The ID does not move. `createNotificationChannel` on an
+                // existing id updates the name and description in place, while
+                // a NEW id resets everyone's mute back to default — silently
+                // un-silencing people who had turned this off.
+                "Agents that finished or failed",
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
-                description = "An agent finished the task you gave it."
+                description =
+                    "An agent finished the task you gave it, or its last turn didn’t finish."
             }
         )
     }

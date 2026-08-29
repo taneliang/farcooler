@@ -253,7 +253,12 @@ class Account(context: Context) {
      * pushes reach zero addresses, and the settings screen goes on saying
      * notifications can reach this device.
      */
-    suspend fun registerDevice(pushToken: String, platform: String, label: String): Boolean {
+    suspend fun registerDevice(
+        pushToken: String,
+        platform: String,
+        label: String,
+        notifyOnDone: Boolean = true,
+    ): Boolean {
         val token = accessToken() ?: return false
         val body = post(
             "/v1/devices",
@@ -264,6 +269,19 @@ class Account(context: Context) {
                 // So the devices screen can show which of your runners is
                 // behind, without anyone having to go and look.
                 put("version", JsonPrimitive(AppVersion.reported))
+                // "When an agent finishes or fails", so the toggle reaches the
+                // pushes too. It used to be read only by this app's own
+                // `Notifier`, which runs when the app is running — the case the
+                // product is not about. With the phone asleep the tray card
+                // comes from the relay, and the relay had never heard of the
+                // setting: silence with the app open, banners with the phone in
+                // a pocket.
+                //
+                // Always sent, never omitted. The relay COALESCEs an absent
+                // field into what it already holds, which is right for a build
+                // too old to know about this and wrong for one turning the
+                // setting back ON.
+                put("notifyOnDone", JsonPrimitive(notifyOnDone))
             },
             bearer = token,
         )

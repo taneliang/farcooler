@@ -53,7 +53,7 @@ class AppModel(
     val settings = Settings(application)
     val notifier = Notifier(application, settings)
     val account = Account(application)
-    val push = PushRegistration(application, account)
+    val push = PushRegistration(application, account, settings)
 
     /**
      * Where a review's bookmark and its unsent notes are written down.

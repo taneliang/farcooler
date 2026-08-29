@@ -398,8 +398,19 @@ fun SettingsScreen(
             SettingRow("When an agent needs you", onAttention) {
                 model.settings.setNotifyOnAttention(it)
             }
-            SettingRow("When an agent finishes", onDone, enabled = onAttention) {
+            // "or fails", because a turn that failed IS a turn that ended: the
+            // runner reports both as `done` with failure carried beside it, and
+            // one toggle has always governed the pair. The label said only half
+            // of that, which made a silenced app look broken the first time a
+            // failure did not arrive.
+            SettingRow("When an agent finishes or fails", onDone, enabled = onAttention) {
                 model.settings.setNotifyOnDone(it)
+                // Registration runs when a push token arrives, which is at
+                // launch — so without this the relay keeps whatever it was told
+                // last time and the toggle appears to do nothing until the app
+                // happens to re-register. That is exactly the bug this setting
+                // had, in a new place.
+                scope.launch { model.push.sendIfPossible() }
             }
             Text(
                 "A working agent never notifies you.",

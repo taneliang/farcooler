@@ -22,7 +22,11 @@ import kotlinx.coroutines.launch
  * nothing on the server had to change for Android — this is the client half
  * that was missing.
  */
-class PushRegistration(private val context: android.content.Context, private val account: Account) {
+class PushRegistration(
+    private val context: android.content.Context,
+    private val account: Account,
+    private val settings: com.farcooler.data.Settings,
+) {
 
     /**
      * Whether the relay has this device's address.
@@ -93,11 +97,27 @@ class PushRegistration(private val context: android.content.Context, private val
         scope?.launch { sendIfPossible() }
     }
 
-    /** Called after signing in, for the case where the token arrived first. */
+    /**
+     * Called after signing in, for the case where the token arrived first — and
+     * after the notification toggles change, for the case below.
+     *
+     * Registration runs when a push token arrives, which is at launch. A
+     * preference the relay only hears about then is one that appears to do
+     * nothing until the app happens to re-register, so the settings screen calls
+     * this on the setter. That is the same bug this whole change is about, one
+     * level up.
+     */
     suspend fun sendIfPossible() {
         val token = token ?: return
         if (!account.isSignedIn) return
-        val ok = account.registerDevice(pushToken = token, platform = "fcm", label = label())
+        val ok = account.registerDevice(
+            pushToken = token,
+            platform = "fcm",
+            label = label(),
+            // Read here rather than held, so a re-registration triggered by the
+            // toggle carries the answer the person just gave.
+            notifyOnDone = settings.notifyOnDone.value,
+        )
         _registered.value = ok
         _lastError.value =
             if (ok) null else "Could not tell the relay how to reach this device."

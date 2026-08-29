@@ -34,6 +34,16 @@ public final class PushRegistration: ObservableObject {
     /// will set `fcm`.
     public var platform = "apns"
 
+    /// Whether this device wants to hear that a turn ended — the "finishes or
+    /// fails" toggle, read at registration time.
+    ///
+    /// A closure and not a value, and set once at launch by each app the way
+    /// `label` is, because the two apps store the preference under different
+    /// keys and neither of them is AgentKit's to know. Defaults to true: an
+    /// app that never sets it registers as wanting notifications, which is what
+    /// every install has always had.
+    public var notifyOnDone: () -> Bool = { true }
+
     /// ActivityKit's push-to-start token, when the app has one.
     ///
     /// Filed with the device rather than on a route of its own because it is
@@ -62,7 +72,14 @@ public final class PushRegistration: ObservableObject {
         Task { await sendIfPossible() }
     }
 
-    /// Called after signing in, for the case where the token arrived first.
+    /// Called after signing in, for the case where the token arrived first —
+    /// and after the notification toggles change, for the case below.
+    ///
+    /// Registration runs when a push token arrives, which is at launch. A
+    /// preference the relay only hears about then is one that appears to do
+    /// nothing until the app happens to re-register, so the settings screen
+    /// calls this on the setter. That is the same bug this whole change is
+    /// about, one level up.
     public func sendIfPossible() async {
         guard let token, Account.shared.isSignedIn else { return }
         let ok = await Account.shared.registerDevice(
@@ -70,7 +87,8 @@ public final class PushRegistration: ObservableObject {
             platform: platform,
             label: label(),
             environment: Self.environment,
-            liveActivityStartToken: liveActivityStartToken)
+            liveActivityStartToken: liveActivityStartToken,
+            notifyOnDone: notifyOnDone())
         registered = ok
         lastError = ok ? nil : "Could not tell the relay how to reach this device."
     }

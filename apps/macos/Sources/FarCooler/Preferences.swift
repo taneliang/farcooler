@@ -138,9 +138,11 @@ final class Preferences: ObservableObject {
     /// does not quietly change what this Mac opens.
     @AppStorage("editors.lastUsed") var lastUsedEditor = ""
 
-    /// Notify when an agent needs you, or finishes.
+    /// Notify when an agent needs you, or its turn ends.
     @AppStorage("notifications.enabled") var notifyOnAttention = true
-    /// Also notify when an agent finishes, not only when it is blocked.
+    /// Also notify when an agent's turn ends — whether it finished or failed —
+    /// not only when it is blocked. Both endings arrive as `done`, so this one
+    /// toggle governs the pair.
     @AppStorage("notifications.onDone") var notifyOnDone = true
 
     static let defaultFontName = "SF Mono"
@@ -414,8 +416,21 @@ struct SettingsView: View {
             // and a `Text` written beside them would become a third setting.
             Section {
                 Toggle("Notify when an agent needs you", isOn: $preferences.notifyOnAttention)
-                Toggle("Notify when an agent finishes", isOn: $preferences.notifyOnDone)
+                // "or fails", because a turn that failed IS a turn that ended:
+                // the daemon reports both as `done` with failure carried beside
+                // it, and one toggle has always governed the pair. The label
+                // said only half of that, which made a silenced app look broken
+                // the first time a failure did not arrive.
+                Toggle("Notify when an agent finishes or fails", isOn: $preferences.notifyOnDone)
                     .disabled(!preferences.notifyOnAttention)
+                    // Registration runs when a push token arrives, which is at
+                    // launch — so without this the relay keeps whatever it was
+                    // told last time and the toggle appears to do nothing until
+                    // the app happens to re-register. That is exactly the bug
+                    // this setting had, in a new place.
+                    .onChange(of: preferences.notifyOnDone) { _, _ in
+                        Task { await PushRegistration.shared.sendIfPossible() }
+                    }
             } footer: {
                 Text("Far Cooler doesn’t send notifications while an agent is working.")
             }

@@ -249,10 +249,22 @@ public final class Account: NSObject, ObservableObject {
         platform: String,
         label: String,
         environment: String,
-        liveActivityStartToken: String? = nil
+        liveActivityStartToken: String? = nil,
+        notifyOnDone: Bool = true
     ) async -> Bool {
         var payload: [String: Any] = [
             "pushToken": pushToken, "platform": platform, "label": label,
+            // "When an agent finishes or fails", so the toggle reaches the
+            // pushes too. It used to be read only by this app's own `Notifier`,
+            // which runs when the app is running — the case the product is not
+            // about. With the phone asleep the banner comes from the relay, and
+            // the relay had never heard of the setting: silence with the app
+            // open, banners with the phone in a pocket.
+            //
+            // Always sent, never omitted. The relay COALESCEs an absent field
+            // into what it already holds, which is right for a build too old to
+            // know about this and wrong for one turning the setting back ON.
+            "notifyOnDone": notifyOnDone,
             // So the devices screen can show which of your runners is
             // behind, without anyone having to go and look.
             "version": AppVersion.reported,

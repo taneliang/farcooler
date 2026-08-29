@@ -187,8 +187,21 @@ struct SettingsView: View {
 
             Section {
                 Toggle("When an agent needs you", isOn: $notifyOnAttention)
-                Toggle("When an agent finishes", isOn: $notifyOnDone)
+                // "or fails", because a turn that failed IS a turn that ended:
+                // the daemon reports both as `done` with failure carried
+                // beside it, and one toggle has always governed the pair. The
+                // label said only half of that, which made a silenced app look
+                // broken the first time a failure did not arrive.
+                Toggle("When an agent finishes or fails", isOn: $notifyOnDone)
                     .disabled(!notifyOnAttention)
+                    // Registration runs when a push token arrives, which is at
+                    // launch — so without this the relay keeps whatever it was
+                    // told last time and the toggle appears to do nothing until
+                    // the app happens to re-register. That is exactly the bug
+                    // this setting had, in a new place.
+                    .onChange(of: notifyOnDone) { _, _ in
+                        Task { await PushRegistration.shared.sendIfPossible() }
+                    }
             } header: {
                 Text("Notifications")
             } footer: {

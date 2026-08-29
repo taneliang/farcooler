@@ -191,6 +191,10 @@ struct ContentView: View {
         .task {
             Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
+            // Beside the label and for the same reason: AgentKit files this
+            // with the device so the relay can honor it while the app is
+            // closed, and the key it lives under is this app's, not AgentKit's.
+            PushRegistration.shared.notifyOnDone = { Preferences.shared.notifyOnDone }
             AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
             // Before the first read, not after: a stale daemon left over from an
             // earlier build would otherwise answer it, and everything from that

@@ -281,11 +281,14 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
     }
   }
 
-  // `version`, `environment`, the push-to-start token and now the fingerprint
-  // are all optional and all COALESCEd: an App Store build from before a column
-  // existed still registers, and — this is the part that bit `version` first —
-  // re-registering from that older build must not erase what a newer one
-  // reported. `label` is assigned rather than coalesced because every build has
+  // `version`, `environment`, the push-to-start token, the fingerprint and now
+  // the done preference are all optional and all COALESCEd: an App Store build
+  // from before a column existed still registers, and — this is the part that
+  // bit `version` first — re-registering from that older build must not erase
+  // what a newer one reported. For `notify_on_done` the COALESCE is also what
+  // keeps an absent field reading as "notify" rather than "off", which is the
+  // difference between a deploy that changes nothing for old builds and one
+  // that silences them. `label` is assigned rather than coalesced because every build has
   // always sent it, so an absent one is a rename to the default and not an old
   // client.
   //
@@ -308,8 +311,8 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
   await env.DB.prepare(
     `INSERT INTO devices
        (id, account_id, platform, push_token, label, version, environment,
-        live_activity_start_token, key_a_fingerprint, state, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        live_activity_start_token, key_a_fingerprint, notify_on_done, state, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (platform, push_token)
      DO UPDATE SET account_id = excluded.account_id,
                    label = excluded.label,
@@ -319,6 +322,8 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
                      excluded.live_activity_start_token, devices.live_activity_start_token),
                    key_a_fingerprint = COALESCE(
                      excluded.key_a_fingerprint, devices.key_a_fingerprint),
+                   notify_on_done = COALESCE(
+                     excluded.notify_on_done, devices.notify_on_done),
                    state = CASE
                              WHEN excluded.key_a_fingerprint IS NULL THEN devices.state
                              WHEN devices.key_a_fingerprint IS NULL THEN devices.state
@@ -340,6 +345,10 @@ async function registerDevice(request: Request, env: Env): Promise<Response> {
         ? body.liveActivityStartToken
         : null,
       proven,
+      // Only a real boolean says anything. Anything else — absent, null, a
+      // string an old or confused client sent — is NULL, which the fan-out
+      // reads as "notify".
+      typeof body.notifyOnDone === 'boolean' ? (body.notifyOnDone ? 1 : 0) : null,
       // A new row is `pending`: it proves possession of a key, which is not a
       // ceremony having enrolled it. `verified` for a registration with no key
       // at all, matching the column's default — such a row carries no
@@ -374,6 +383,13 @@ interface Registration {
   /// A raw ed25519 signature over `deviceId`, base64.
   signature?: unknown
   liveActivityStartToken?: unknown
+  /// Whether this device wants to be told a turn ended — the "When an agent
+  /// finishes or fails" toggle, sent up so it reaches pushes as well as the
+  /// banners the app draws itself.
+  ///
+  /// Absent means notify. A build that predates the field sends nothing and
+  /// keeps the behavior it has; see the COALESCE below and migration 0007.
+  notifyOnDone?: unknown
 }
 
 /// The fingerprint this registration PROVED it holds, or the response to send
@@ -850,6 +866,10 @@ interface Device {
   push_token: string
   environment: string | null
   live_activity_start_token: string | null
+  /// 0 when this device has turned "When an agent finishes or fails" off. 1 or
+  /// NULL both mean notify — NULL is every row that predates migration 0007 and
+  /// every build too old to send the field.
+  notify_on_done: number | null
 }
 
 /// The machine holding this token, or the response to send instead.
@@ -911,7 +931,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   }
 
   const devices = await env.DB.prepare(
-    `SELECT platform, push_token, environment, live_activity_start_token
+    `SELECT platform, push_token, environment, live_activity_start_token, notify_on_done
      FROM devices WHERE account_id = ?`,
   )
     .bind(daemon.account_id)
@@ -924,10 +944,21 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // blocked and done ones with it.
   //
   // `delivered` therefore stays 0 for a working notify, which the daemon treats
-  // as a success: the 200 is what it checks, not the count.
+  // as a success: the 200 is what it checks, not the count. The same is now true
+  // of a `done` notify where every device has opted out, and for the same
+  // reason — nothing is wrong, nobody wanted to hear it.
   let delivered = 0
   if (body.status !== 'working') {
     for (const device of devices.results ?? []) {
+      // "When an agent finishes or fails", off. Per device inside the loop and
+      // not per request outside it, because one account can hold devices that
+      // disagree: a phone that should stay quiet and a watch that should not.
+      //
+      // Only on `done`. A `blocked` agent has stopped and is waiting, which is
+      // the other toggle's business and the reason this product exists — reading
+      // this column on any other branch would take failures away from someone
+      // who only silenced the endings.
+      if (body.status === 'done' && device.notify_on_done === 0) continue
       const ok = await sendPush(
         env,
         device.platform,
@@ -959,6 +990,12 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // the alert, and swallowed so that a dead activity token cannot turn a
   // notification that WAS delivered into a 500 — the daemon would retry it, and
   // the user would be interrupted twice for one event.
+  //
+  // Every device, including one that just had its alert skipped. `done` is the
+  // only thing that has ever taken a live card down — see `watch.rs` — so a
+  // device that silenced the banner and kept the card would be left with a lock
+  // screen reading "Working" over an agent that stopped ten minutes ago. Skip
+  // the alert, never the card.
   try {
     await pushActivity(env, daemon, body, devices.results ?? [])
   } catch (error) {

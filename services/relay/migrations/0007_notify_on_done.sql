@@ -1,0 +1,29 @@
+-- Whether this device wants to hear about a turn that ended.
+--
+-- Additive only, same as 0002 through 0006 and for the same reason: the previous
+-- worker is still serving requests while a deploy rolls out, and an App Store
+-- build from months ago still calls these routes.
+--
+-- The setting has existed in all three apps since the beginning — "When an agent
+-- finishes or fails" — and until now it lived only inside each app's own
+-- in-process notifier, which runs when the app is running. That is the case the
+-- product is NOT about. With the phone asleep the banner is drawn from a push
+-- this relay sends, and nothing on this side had ever heard of the preference:
+-- toggle off meant silence with the app open and a banner with the phone in a
+-- pocket. The common case was the broken one.
+--
+-- Per DEVICE and not per account, because that is the scope the person is
+-- acting in: one account can hold a watch that should say when an agent
+-- finished and a phone that should not, and the toggle is on each device's own
+-- settings screen.
+
+-- 0 is "do not send this device a `done` alert". 1 is send it.
+--
+-- NULL is send it too, and that is the important half. Every row that exists
+-- when this migration runs gets NULL, and so does every registration from a
+-- build that predates the field — see `registerDevice`, which COALESCEs it like
+-- every other optional column. An absent answer has to read as "notify": the
+-- alternative is that deploying this silences every installed app until it
+-- happens to update, which is the product's central promise going missing on
+-- the strength of a column nobody asked for.
+ALTER TABLE devices ADD COLUMN notify_on_done INTEGER;

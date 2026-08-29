@@ -124,6 +124,10 @@ struct RootView: View {
             // already missed it.
             Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { UIDevice.current.name }
+            // Beside the label and for the same reason: AgentKit files this
+            // with the device so the relay can honor it while the app is
+            // closed, and the key it lives under is this app's, not AgentKit's.
+            PushRegistration.shared.notifyOnDone = { NotificationSettings.onDone }
             AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
             // Alongside the push token and for the same reason: the tokens that
             // let the relay raise and dismiss a lock screen card can only be

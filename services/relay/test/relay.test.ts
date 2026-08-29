@@ -553,6 +553,161 @@ describe('/v1/notify', () => {
   })
 })
 
+// MARK: - "When an agent finishes or fails", off
+
+/// The toggle that only ever worked while the app was open.
+///
+/// It has always been read by each app's own in-process notifier, which by
+/// definition runs when the app is running — and the case this product exists
+/// for is the phone in a pocket, where the banner is drawn from a push this
+/// route sends. So the setting meant silence with the app open and a banner
+/// otherwise: the common case was the broken one.
+///
+/// Two things must survive the fix, and both are here because both have been
+/// broken before. A `blocked` agent has stopped and is waiting for an answer;
+/// reading this column on that branch would take the product's one promise away
+/// from someone who only silenced the endings. And the `done` push is the only
+/// thing that has ever taken a Live Activity card down, so skipping it wholesale
+/// leaves a lock screen reading "Working" over an agent that stopped ten minutes
+/// ago — the bug `5398dba` was written to close.
+describe('a device that has turned finishing off', () => {
+  /// Give the account a card that is up, addressable, and leading `terminal`.
+  ///
+  /// Written straight into the row rather than raised through a `working`
+  /// notify, so the pushes a test counts are only the ones the `done` produced.
+  async function carded(terminal: string) {
+    await env.DB.prepare(
+      `INSERT INTO install_cards
+         (id, account_id, update_token, leader_terminal, leader_status, updated_at)
+       VALUES (?, 'user_1', 'update-token', ?, 'working', ?)`,
+    )
+      .bind(crypto.randomUUID(), terminal, Date.now())
+      .run()
+  }
+
+  /// The alerts, which are the pushes this preference is about. A Live Activity
+  /// push goes to the same host and is told apart by its type.
+  function alerts(calls: Call[]): Call[] {
+    return pushes(calls).filter(call => call.headers['apns-push-type'] !== 'liveactivity')
+  }
+
+  it('is skipped on a finished agent while the other device is not', async () => {
+    // The case the whole change is about. One account, two phones, one of them
+    // opted out: the push goes to exactly one of them, and to the right one.
+    const calls = watchFetch()
+    await register('user_1', { pushToken: 'quiet-phone', notifyOnDone: false })
+    await register('user_1', { pushToken: 'loud-phone', notifyOnDone: true })
+    await pair('user_1', 'mine')
+
+    const response = await post(
+      '/v1/notify',
+      { title: 'claude finished', terminal: 'term-1', status: 'done' },
+      'mine',
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ delivered: 1 })
+    const sent = alerts(calls)
+    expect(sent.length).toBe(1)
+    expect(sent[0].url).toContain('/device/loud-phone')
+  })
+
+  it('still has its Live Activity card taken down', async () => {
+    // Skip the ALERT, never the notify. `done` is the only thing that retires a
+    // card, and a device that silenced the banner and kept the card would be
+    // left with a lock screen reading "Working" over an agent that has stopped.
+    const calls = watchFetch()
+    await register('user_1', {
+      pushToken: 'quiet-phone',
+      notifyOnDone: false,
+      liveActivityStartToken: 'start-token',
+    })
+    await pair('user_1', 'mine')
+    await carded('term-1')
+
+    const response = await post(
+      '/v1/notify',
+      { title: 'claude finished', terminal: 'term-1', status: 'done' },
+      'mine',
+    )
+
+    // Nothing buzzed, and 200 with nothing delivered is the established
+    // contract — the `working` branch has always answered this way, and the
+    // daemon checks the status, not the count.
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ delivered: 0 })
+    expect(alerts(calls).length).toBe(0)
+
+    const ended = pushes(calls).filter(call => call.headers['apns-push-type'] === 'liveactivity')
+    expect(ended.length).toBe(1)
+    expect(ended[0].body.aps.event).toBe('end')
+    // And the row goes with the run, or this install is refused a card forever.
+    expect(await env.DB.prepare(`SELECT id FROM install_cards`).first()).toBe(null)
+  })
+
+  it('is still told an agent needs it', async () => {
+    // The failure mode this column must not have. Someone who silenced the
+    // endings has said nothing about an agent that stopped and is waiting, which
+    // is the notification the product exists to deliver.
+    const calls = watchFetch()
+    await register('user_1', { pushToken: 'quiet-phone', notifyOnDone: false })
+    await pair('user_1', 'mine')
+
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    expect(alerts(calls).length).toBe(1)
+  })
+
+  it('is a device that said so, not one that has never been asked', async () => {
+    // An absent field reads as notify. Every row that existed before migration
+    // 0007 has NULL here, as does every registration from a build too old to
+    // send it — and the alternative is that deploying this silences every
+    // installed app until it happens to update.
+    const calls = watchFetch()
+    await register('user_1', { pushToken: 'old-build' })
+    await pair('user_1', 'mine')
+
+    await post('/v1/notify', { title: 'claude finished', status: 'done' }, 'mine')
+
+    expect(alerts(calls).length).toBe(1)
+  })
+
+  it('keeps its answer when an older build re-registers over it', async () => {
+    // The COALESCE, for the same reason `version` and the push-to-start token
+    // have one: a build that predates the field re-registering the same phone
+    // must not erase what a newer one reported. Getting this wrong un-silences
+    // somebody who deliberately went quiet.
+    watchFetch()
+    await register('user_1', { notifyOnDone: false })
+    await register('user_1', { label: 'Renamed' })
+
+    const row = await env.DB.prepare(
+      `SELECT label, notify_on_done FROM devices`,
+    ).first<{ label: string; notify_on_done: number | null }>()
+    expect(row?.label).toBe('Renamed')
+    expect(row?.notify_on_done).toBe(0)
+  })
+
+  it('changes its mind by re-registering', async () => {
+    // What the apps do when the toggle flips. Registration runs when a push
+    // token arrives, not when a preference changes, so each app re-registers on
+    // the setter — without that the relay's copy goes stale and the setting
+    // appears to do nothing.
+    const calls = watchFetch()
+    await register('user_1', { notifyOnDone: false })
+    await register('user_1', { notifyOnDone: true })
+    await pair('user_1', 'mine')
+
+    await post('/v1/notify', { title: 'claude finished', status: 'done' }, 'mine')
+
+    expect(pushes(calls).length).toBe(1)
+  })
+})
+
 // MARK: - What the phone's extension is handed
 
 /// The three fields that decide whether the widgets are updated at all.
