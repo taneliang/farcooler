@@ -230,3 +230,80 @@ fn base_source_name(source: i32) -> &'static str {
         pb::BaseSource::Unspecified => "unknown",
     }
 }
+
+/// A branch's place in its stack, and what GitHub says about it.
+///
+/// Here rather than in `session.rs` for the reason at the top of this file, and
+/// because `changes stack --json` was silently printing the human form: the flag
+/// parsed, the arm ignored it, and the Mac had no shape to read. That is the
+/// same defect this module's header records about `changes diff`.
+pub fn stack_json(l: &farcooler_protocol::v1::StackLinkList) -> serde_json::Value {
+    use farcooler_protocol::v1::{CheckState, ParentSource, PrState, ReviewDecision};
+    json!({
+        // Reported rather than followed: a parent chain that loops is walked as
+        // far as it was walked, and a client that silently drew it would draw a
+        // stack that does not exist.
+        "cycleDetected": l.cycle_detected,
+        // Whether `gh` answered at all. "There is no pull request for this
+        // branch" and "we could not ask GitHub" both arrive as an absent `pr`
+        // on every link, and only this separates them.
+        //
+        // It decides whether an app may offer to CREATE a pull request. Offering
+        // that while a PR exists behind a logged-out `gh` is the app being
+        // confidently wrong about the one action on the row. False means show
+        // neither PR state nor an offer: show nothing, say nothing.
+        "prKnown": l.pr_known,
+        // The repository's page on GitHub, for building a compare link for a
+        // branch that has no PR yet. Null rather than "" when `gh` has not
+        // answered for this repository yet — a client must get nothing rather
+        // than a link to nowhere.
+        "repoUrl": if l.repo_url.is_empty() { serde_json::Value::Null } else { json!(l.repo_url) },
+        "links": l.items.iter().map(|k| json!({
+            "branch": k.branch,
+            "parentBranch": k.parent_branch,
+            // Only a GUESS is worth labeling. The others are recorded facts;
+            // a guessed parent produces a wrong diff and looks like a right one.
+            "parentGuessed": ParentSource::try_from(k.parent_source) == Ok(ParentSource::Guessed),
+            "ahead": k.ahead,
+            "behind": k.behind,
+            "pr": k.pr.as_ref().map(|p| json!({
+                "number": p.number,
+                "url": p.url,
+                "state": match PrState::try_from(p.state) {
+                    Ok(PrState::Open) => "open",
+                    Ok(PrState::Draft) => "draft",
+                    Ok(PrState::Merged) => "merged",
+                    Ok(PrState::Closed) => "closed",
+                    _ => "unknown",
+                },
+                "checks": match CheckState::try_from(p.checks) {
+                    Ok(CheckState::Passing) => "passing",
+                    Ok(CheckState::Failing) => "failing",
+                    Ok(CheckState::Pending) => "pending",
+                    _ => "unknown",
+                },
+                "review": match ReviewDecision::try_from(p.review_decision) {
+                    Ok(ReviewDecision::Approved) => "approved",
+                    Ok(ReviewDecision::ChangesRequested) => "changes_requested",
+                    Ok(ReviewDecision::ReviewRequired) => "review_required",
+                    _ => "unknown",
+                },
+                // The PR head as GitHub last saw it. The only thing that can
+                // establish that a SQUASH-merged branch holds nothing unmerged:
+                // its commits never appear in main with these SHAs, so local
+                // ancestry can never prove it.
+                "headOid": p.head_oid,
+                // When it landed, in unix milliseconds, or null if it has not.
+                "mergedAt": p.merged_at,
+                // When the daemon last read this from GitHub, in unix
+                // milliseconds. `stale` below is derived from it — by the
+                // DAEMON, so three platforms cannot disagree about what "a
+                // while ago" means — and this is here so a client can say how
+                // long ago rather than only that it was a while.
+                "fetchedAt": p.fetched_at,
+                // Whether this was read from GitHub long enough ago to doubt.
+                "stale": p.stale,
+            })),
+        })).collect::<Vec<_>>(),
+    })
+}

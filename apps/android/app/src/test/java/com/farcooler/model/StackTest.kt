@@ -27,6 +27,8 @@ class StackTest {
         val payload = """
             {
               "cycleDetected": false,
+              "prKnown": true,
+              "repoUrl": "https://github.com/o/overnight",
               "links": [
                 {
                   "branch": "feat/review-notes",
@@ -40,6 +42,9 @@ class StackTest {
                     "state": "open",
                     "checks": "failing",
                     "review": "changes_requested",
+                    "headOid": "9f21c0d4e5f6",
+                    "mergedAt": null,
+                    "fetchedAt": 1785925800000,
                     "stale": true
                   }
                 },
@@ -58,6 +63,11 @@ class StackTest {
         val reply = json.decodeFromString(StackReply.serializer(), payload)
         assertFalse(reply.cycleDetected)
         assertEquals(2, reply.links.size)
+        // `gh` answered, and said what this repository is. The two facts that
+        // decide whether an app may offer to create a pull request, and where
+        // that offer would go.
+        assertTrue(reply.prKnown)
+        assertEquals("https://github.com/o/overnight", reply.repoUrl)
 
         val top = reply.links[0]
         assertEquals("feat/review-notes", top.branch)
@@ -72,6 +82,11 @@ class StackTest {
         assertEquals("open", pr.state)
         assertEquals("failing", pr.checks)
         assertEquals("changes_requested", pr.review)
+        assertEquals("9f21c0d4e5f6", pr.headOid)
+        // Null and not zero: a pull request that has not landed has no date,
+        // and 0 would date it to 1970.
+        assertNull(pr.mergedAt)
+        assertEquals(1_785_925_800_000L, pr.fetchedAt)
         assertTrue(pr.stale)
 
         val bottom = reply.links[1]
@@ -85,6 +100,12 @@ class StackTest {
     @Test
     fun `a stack with nothing in it still decodes`() {
         assertEquals(StackReply(), json.decodeFromString(StackReply.serializer(), "{}"))
+        // The default that matters most. A runner that never sends `prKnown`
+        // cannot have told us `gh` answered, and `false` is the reading that
+        // keeps an app from offering to create a pull request that may already
+        // exist.
+        assertFalse(json.decodeFromString(StackReply.serializer(), "{}").prKnown)
+        assertNull(json.decodeFromString(StackReply.serializer(), "{}").repoUrl)
         val one = json.decodeFromString(
             StackReply.serializer(), """{"links":[{"branch":"main"}]}"""
         )

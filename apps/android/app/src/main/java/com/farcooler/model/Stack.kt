@@ -69,6 +69,25 @@ data class PullRequest(
      * it is indistinguishable from a fresh one without this.
      */
     val stale: Boolean = false,
+    /**
+     * The PR head as GitHub last saw it.
+     *
+     * The only thing that can establish that a SQUASH-merged branch holds
+     * nothing unmerged: its commits never appear in the base with these SHAs,
+     * so local ancestry can never prove it.
+     */
+    @SerialName("headOid") val headOid: String = "",
+    /** When it landed, in unix MILLISECONDS, or null while it has not. */
+    @SerialName("mergedAt") val mergedAt: Long? = null,
+    /**
+     * When the daemon last read this from GitHub, in unix MILLISECONDS.
+     *
+     * What [stale] is derived from — by the DAEMON, so three platforms cannot
+     * disagree about what "a while ago" means — and carried as well as the
+     * bool so a client can eventually say how long ago rather than only that
+     * it was a while.
+     */
+    @SerialName("fetchedAt") val fetchedAt: Long? = null,
 )
 
 /** What `stack.get` and `pr.refresh` both answer with. */
@@ -83,6 +102,31 @@ data class StackReply(
      */
     @SerialName("cycleDetected") val cycleDetected: Boolean = false,
     val links: List<StackLink> = emptyList(),
+    /**
+     * Whether `gh` answered at all.
+     *
+     * "There is no pull request for this branch" and "we could not ask GitHub"
+     * both arrive as an absent `pr` on every link, and this is the only thing
+     * that separates them. It decides whether an app may offer to CREATE a
+     * pull request: offering that while a PR exists behind a logged-out `gh`
+     * is the app being confidently wrong about the one action on the row.
+     *
+     * It rides the LIST rather than each link, because the fact being reported
+     * is "did `gh` answer", which is a property of the whole read.
+     *
+     * Defaults to false like everything else here, and the default is the safe
+     * one: a runner too old to send it is a runner that cannot tell us `gh`
+     * answered, which is exactly the case the offer must not be made in.
+     */
+    @SerialName("prKnown") val prKnown: Boolean = false,
+    /**
+     * The repository's page on GitHub, for building a compare link for a
+     * branch that has no pull request yet.
+     *
+     * Empty when `gh` has not answered for this repository — a client must get
+     * nothing rather than a link to nowhere.
+     */
+    @SerialName("repoUrl") val repoUrl: String? = null,
 )
 
 // ---- the words, where a test can read them ----

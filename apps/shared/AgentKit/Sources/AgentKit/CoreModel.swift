@@ -695,12 +695,218 @@ struct PullRequest: Decodable, Hashable {
     var review: String
     /// Read from GitHub long enough ago to doubt. Shown rather than hidden: a
     /// stale "passing" is the one reading that would mislead.
+    ///
+    /// Derived from `fetchedAt` by the DAEMON — fifteen minutes — so three
+    /// platforms cannot disagree about what "a while ago" means. It arrived
+    /// hardwired `false` until `99e78f8`, which is to say the sentence three
+    /// apps have long drawn from it has only just become possible to see.
     var stale: Bool
+
+    /// The PR head as GitHub last saw it.
+    ///
+    /// Optional, like every field added to these types after the first
+    /// release — see `FleetDecodeTests`. A key an older runner never sends
+    /// must leave a nil rather than fail the decode of the whole stack.
+    var headOid: String?
+    /// When it landed, in Unix MILLISECONDS, or nil while it has not.
+    ///
+    /// Milliseconds, and the unit is the trap `Branch.updatedAt` documents at
+    /// length: this side of the wire sends epoch millis where the CLI sends
+    /// seconds, and `Date(timeIntervalSince1970:)` on the raw number would
+    /// date everything to 1970.
+    var mergedAt: Double?
+    /// When the daemon last read this from GitHub, in Unix MILLISECONDS.
+    ///
+    /// What `stale` is derived from, carried as well as the bool so a client
+    /// can eventually say how long ago rather than only that it was a while.
+    var fetchedAt: Double?
 }
 
 struct StackResponse: Decodable {
     var cycleDetected: Bool
     var links: [StackLink]
+
+    /// Whether `gh` answered at all.
+    ///
+    /// "There is no pull request for this branch" and "we could not ask
+    /// GitHub" both arrive as an absent `pr` on every link, and this is the
+    /// only thing that separates them. It decides whether this app may offer
+    /// to CREATE a pull request: offering that while a PR exists behind a
+    /// logged-out `gh` is the app being confidently wrong about the one action
+    /// on the row.
+    ///
+    /// It rides the LIST rather than each link because the fact being reported
+    /// is "did `gh` answer", which is a property of the whole read.
+    ///
+    /// Optional, and every reader must go through `prAnswered`: a runner too
+    /// old to send this is a runner that cannot tell us `gh` answered, which
+    /// is exactly the case the offer must not be made in.
+    var prKnown: Bool?
+    /// The repository's page on GitHub, for building a compare link for a
+    /// branch that has no pull request yet.
+    ///
+    /// Nil when `gh` has not answered for this repository. A client must get
+    /// nothing rather than a link to nowhere.
+    var repoUrl: String?
+
+    /// Whether `gh` answered, read the only safe way. See `prKnown`.
+    var prAnswered: Bool { prKnown == true }
+}
+
+// ---- what a pull request says on the branch header, where a test can read it
+// ----
+//
+// Free of SwiftUI and out here rather than assembled inside a view body, for
+// the reason Android's `Stack.kt` gives at the same place: there is no test
+// bundle that can reach into a rendered row, so a sentence built inside one is
+// a sentence nothing can check. The iOS app's only test bundle is a UI-testing
+// one; AgentKit's runs on the host, which is why these live in this file.
+
+/// How much the pull-request row should raise its voice.
+///
+/// Three levels and no more, because the row is a single line and the rule it
+/// is built on is that a healthy pull request must be a grey line you skim
+/// past. A signal that is always lit has stopped carrying information — the
+/// position `71934f8` took when it turned the last permanent green dot
+/// neutral, and the one Android's `PullRequestRows` took again for checks.
+enum PullRequestEmphasis {
+    /// Grey, and most of them. Open, approved, checks passed: nothing here
+    /// wants you.
+    case quiet
+    /// Orange, and only ever this: nothing has been decided yet.
+    case pending
+    /// Red. The one thing on this header that should catch the eye.
+    case alarm
+}
+
+extension PullRequest {
+    /// Whether this pull request is still something anybody can act on.
+    ///
+    /// A merged or closed one is history: its checks and its review describe a
+    /// decision already taken, so a red on either would be shouting about a
+    /// question nobody is being asked.
+    var isLive: Bool { state != "merged" && state != "closed" }
+
+    /// The state half of the row's sentence, or nil when there is nothing to
+    /// say.
+    ///
+    /// A draft or a landed PR names itself; an OPEN one is better described by
+    /// where its review got to, which is the fact that decides what happens
+    /// next. `review_required` cannot be shown raw — an underscore mid-sentence
+    /// is a leaked wire value, which is what the Apple copy conventions rule
+    /// out — and that is why this maps rather than capitalizes.
+    var headerStateWord: String? {
+        switch state {
+        case "draft": return "Draft"
+        case "merged": return "Merged"
+        case "closed": return "Closed"
+        case "open":
+            switch review {
+            case "approved": return "Approved"
+            case "changes_requested": return "Changes requested"
+            case "review_required": return "Review required"
+            default: return "Open"
+            }
+        default: return nil
+        }
+    }
+
+    /// The checks half, or nil where GitHub had nothing to report — a
+    /// repository with no CI at all is most of them, and "Checks unknown" on
+    /// every row would be a word spent to say nothing.
+    var headerChecksWord: String? {
+        switch checks {
+        case "passing": return "Checks passed"
+        case "failing": return "Checks failed"
+        case "pending": return "Checks running"
+        default: return nil
+        }
+    }
+
+    /// The whole line, after the number.
+    ///
+    /// Two facts at most, in the order they are asked about: what state it is
+    /// in, then whether it builds. Empty when GitHub told us neither, in which
+    /// case the row is the number and the way through to it, which is still
+    /// worth a line.
+    var headerSentence: String {
+        [headerStateWord, headerChecksWord].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// See `PullRequestEmphasis`.
+    var emphasis: PullRequestEmphasis {
+        guard isLive else { return .quiet }
+        if checks == "failing" || review == "changes_requested" { return .alarm }
+        if checks == "pending" { return .pending }
+        return .quiet
+    }
+
+    /// The one glyph the row may carry, or nil.
+    ///
+    /// Failing checks get it because they are the thing this row exists to
+    /// make glanceable, and a merged PR gets one because it is notable without
+    /// being actionable. Nothing else does: an icon on every row is a column
+    /// of icons, and then none of them means anything.
+    var headerSymbol: String? {
+        if state == "merged" { return "arrow.triangle.merge" }
+        if isLive && checks == "failing" { return "xmark.circle.fill" }
+        return nil
+    }
+}
+
+/// Ways into GitHub that this app builds rather than being handed.
+enum PullRequestLink {
+    /// GitHub's compare page, for a branch that has no pull request yet.
+    ///
+    /// Nil rather than a guess whenever any half is missing: `repoURL` is
+    /// absent exactly when `gh` could not say what this repository is, and a
+    /// button that opens a broken page is worse than no button.
+    ///
+    /// A branch compared against itself is nil too. The repository's own
+    /// checkout sits on the base branch, and `main...main` is a compare page
+    /// with nothing on it and a Create button that GitHub itself refuses.
+    static func compare(repoURL: String?, baseRef: String, head: String) -> URL? {
+        guard let repoURL, !repoURL.isEmpty, !head.isEmpty else { return nil }
+        let base = branchName(baseRef)
+        guard !base.isEmpty, base != head else { return nil }
+        let root = repoURL.hasSuffix("/") ? String(repoURL.dropLast()) : repoURL
+        let allowed = CharacterSet.urlPathAllowed
+        guard
+            let base = base.addingPercentEncoding(withAllowedCharacters: allowed),
+            let head = head.addingPercentEncoding(withAllowedCharacters: allowed)
+        else { return nil }
+        // `expand=1` is what opens the compare page with the pull request form
+        // already unfolded, which is the difference between landing on a diff
+        // and landing on the thing you came to fill in.
+        return URL(string: "\(root)/compare/\(base)...\(head)?expand=1")
+    }
+
+    /// A ref as GitHub names the branch behind it.
+    ///
+    /// `ChangeSet.baseRef` is a git ref and arrives as `origin/main` about as
+    /// often as `main` — `resolve_base` hands back a recorded ref, a PR's base,
+    /// or a default branch, and only some of those are remote-qualified. A
+    /// compare URL takes branch NAMES, so the remote has to come off.
+    ///
+    /// Only a leading remote is dropped, not every component, and that is the
+    /// difference from `default_branch`'s `rsplit('/')` in `review_ops.rs`:
+    /// that one is peeling `origin/HEAD`, where the last component is the
+    /// whole answer. Here `origin/release/2.0` is one branch on one remote,
+    /// and rsplit would leave `2.0`, which names nothing.
+    static func branchName(_ ref: String) -> String {
+        var ref = ref
+        for prefix in ["refs/heads/", "refs/remotes/"] where ref.hasPrefix(prefix) {
+            ref.removeFirst(prefix.count)
+        }
+        // The two remote names a client can safely assume. Nothing on the wire
+        // says what this repository's remotes are called, so a ref beginning
+        // with anything else is left whole: a wrong strip invents a branch,
+        // and a missed one is a compare page that still resolves.
+        for remote in ["origin/", "upstream/"] where ref.hasPrefix(remote) {
+            ref.removeFirst(remote.count)
+        }
+        return ref
+    }
 }
 
 /// What the runner says about itself.

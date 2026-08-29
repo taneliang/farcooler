@@ -6,7 +6,9 @@
 //! cannot automate.
 
 use clap::Subcommand;
-use farcooler_client::changes_json::{change_set_json, file_change_json, file_diff_json, inbox_json};
+use farcooler_client::changes_json::{
+    change_set_json, file_change_json, file_diff_json, inbox_json, stack_json,
+};
 use farcooler_protocol::v1::{self as pb, request, result};
 
 use crate::{Fallible, connect_to, expect_value, req, req_for, short_bytes, uuid_of, with};
@@ -302,6 +304,15 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
             let result::Value::StackLinkList(l) = expect_value(r.value, "stack_link_list")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
+            // `--json` parsed here and then did nothing: the flag was accepted,
+            // this arm printed the human form regardless, and anything reading
+            // it had to scrape sentences. The shape comes from
+            // `changes_json::stack_json`, the same one the phones decode, so
+            // the two cannot drift — which is what that module exists for.
+            if json {
+                println!("{}", serde_json::to_string(&stack_json(&l))?);
+                return Ok(());
+            }
             if l.cycle_detected {
                 println!("WARNING: these branches list each other as parents. Showing what was walked.\n");
             }

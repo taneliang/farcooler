@@ -159,6 +159,12 @@ final class Connection: ObservableObject {
     /// finds out there is.
     @Published private(set) var reconnectGeneration = 0
 
+    /// How many fleet polls have landed since this object was made.
+    ///
+    /// Only ever read as "has it changed". See where it is incremented in
+    /// `refresh()` for what it is for.
+    @Published private(set) var pollGeneration = 0
+
     // Not private: a pushed `TerminalView` talks to the same host through this
     // same core, rather than opening a second SSH session just to poll one
     // terminal's screen.
@@ -604,6 +610,19 @@ final class Connection: ObservableObject {
             // and THEN await this call, so there is a whole round trip during
             // which the app is connected and knows nothing.
             hasFleet = true
+
+            // One more poll has landed.
+            //
+            // Not a second clock and not a timer: a counter on the ONE loop
+            // this app runs, so a screen that has to re-read something the
+            // fleet does not carry can hang it off this cadence instead of
+            // starting a cadence of its own. `WorkspaceView` re-reads
+            // `stack.get` on it, because the daemon fills an empty pull
+            // request cache in the BACKGROUND and has no way to tell a phone
+            // it landed — `stack_changed` is emitted and the FFI has no event
+            // surface for any event at all. Asking again three seconds later
+            // is the whole delivery mechanism. See `99e78f8`.
+            pollGeneration += 1
 
             // The glance surfaces render from this and cannot fetch it
             // themselves. Written on every poll rather than on change, because

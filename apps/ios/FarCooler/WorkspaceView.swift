@@ -142,6 +142,9 @@ struct WorkspaceView: View {
     /// Height of the floating strip and its breathing room, used as scroll
     /// content inset without shortening the full-bleed scroll surface.
     @State private var tabStripHeight: CGFloat = 0
+    /// What GitHub says about this worktree's branch, for the Changes tab's
+    /// header. Nil until the first read answers, which draws nothing.
+    @State private var pullRequest: BranchPullRequest?
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -182,6 +185,55 @@ struct WorkspaceView: View {
     /// Only ever shown in the gap between this screen appearing and the next
     /// poll answering, which `WorkspaceRoute` has usually already closed.
     private var workspaceName: String { currentWorkspace?.task ?? "Workspace" }
+
+    /// When to read the pull request again: on arriving at the Changes tab,
+    /// and on every fleet poll while it is up.
+    ///
+    /// Deliberately NOT a timer of this screen's own. The daemon fills an empty
+    /// pull request cache in the background on the first `stack.get` and emits
+    /// `stack_changed` when it lands, and no app can receive that — the FFI is
+    /// request/response and `Session`'s event loop reads the stream for
+    /// terminal frames alone, discarding fleet news, which is true of every
+    /// event and always has been. So the update arrives the way every other
+    /// update on this screen arrives: by asking again on the one cadence this
+    /// app already runs. See `Connection.pollGeneration` and `99e78f8`.
+    /// The branch is in the key as well as the poll, so a worktree that changes
+    /// branch under you re-reads at once rather than at the next poll — and
+    /// `onChange` below drops the old answer in the same turn, because a pull
+    /// request row describing the branch you just left is worse than none.
+    private var pullRequestReadKey: String {
+        "\(current.id)|\(currentWorkspace?.branch ?? "")|\(connection.pollGeneration)"
+    }
+
+    /// Read `stack.get` for this worktree's branch, for the Changes header.
+    ///
+    /// Here rather than in `ChangesView`, for two reasons that point the same
+    /// way. This view has `currentWorkspace` and therefore the repository UUID
+    /// the call takes — see `Workspace.repository`, which is the phone's half
+    /// of a key with two meanings — and `ChangesView` must not be handed a
+    /// `Connection` at all: its body is a forty-card lazy stack somebody is
+    /// mid-scroll through, and observing the connection there would rebuild it
+    /// every three seconds. It gets the resolved value instead.
+    ///
+    /// Only while the Changes tab is the one on screen. A read that nobody is
+    /// looking at is an SSH round trip a phone paid for out of its battery —
+    /// and, on the daemon side, possibly somebody's GitHub rate limit.
+    private func readPullRequest() async {
+        guard case .changes = current, let workspace = currentWorkspace else { return }
+        guard let repository = workspace.repository, !workspace.branch.isEmpty else { return }
+        // A failed read leaves the last answer on screen rather than blanking
+        // the row. The link dropping is not news about this pull request, and
+        // `refresh` is the one call that treats a throw as evidence about the
+        // link.
+        guard let reply = await connection.stack(
+            repository: repository, branch: workspace.branch)
+        else { return }
+        // The link for THIS branch out of the whole parent chain. The header is
+        // about the branch in front of you, not about the stack under it.
+        let mine = reply.links.first { $0.branch == workspace.branch }
+        pullRequest = BranchPullRequest(
+            pr: mine?.pr, known: reply.prAnswered, repoURL: reply.repoUrl)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -355,6 +407,10 @@ struct WorkspaceView: View {
         // The Changes tab is never pruned: nothing on the runner has to exist
         // for it, so nothing can stop existing.
         .onChange(of: liveTerminalIDs) { _, ids in prune(to: ids) }
+        // The pull request on the Changes tab's header, re-read on the fleet's
+        // own poll. See `readPullRequest`.
+        .task(id: pullRequestReadKey) { await readPullRequest() }
+        .onChange(of: currentWorkspace?.branch) { _, _ in pullRequest = nil }
         // Keyboard room is owned by each pane below. The outer host remains
         // full-height so its navigation boundary and tab overlay never move.
         .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -395,7 +451,8 @@ struct WorkspaceView: View {
             ChangesView(
                 store: connection.changesStores.store(for: workspaceID),
                 workspaceName: workspaceName,
-                agents: currentWorkspace?.reviewAgentTargets() ?? [])
+                agents: currentWorkspace?.reviewAgentTargets() ?? [],
+                pullRequest: pullRequest)
         }
     }
 

@@ -239,9 +239,17 @@ struct StackView: View {
         LabeledContent("Pull request") {
             HStack(spacing: 6) {
                 Text("#\(pr.number)")
+                // No color on the state at all, where this used to paint an
+                // open pull request green, a merged one purple and a closed one
+                // red. Three colors spent on a word that already says itself,
+                // and the green was the one that mattered: a signal that is lit
+                // on almost every pull request has stopped carrying
+                // information. Android says exactly this a few lines below in
+                // `PullRequestRows`, and iOS was the outlier holding the
+                // opposite opinion in the same app family.
                 Text(pr.state.capitalized)
                     .font(.caption)
-                    .foregroundStyle(Self.tint(forState: pr.state))
+                    .foregroundStyle(.secondary)
             }
         }
         LabeledContent("Checks") {
@@ -262,19 +270,16 @@ struct StackView: View {
         }
     }
 
-    private static func tint(forState state: String) -> Color {
-        switch state {
-        case "open": return .green
-        case "merged": return .purple
-        case "draft": return .secondary
-        case "closed": return .red
-        default: return .secondary
-        }
-    }
-
+    /// Color is spent on the reading that is NEWS.
+    ///
+    /// A failing check is news and a passing one is the ordinary outcome, which
+    /// the word "Passing" already reports; pending keeps orange because "nobody
+    /// knows yet" is a third answer and not a quiet version of the first two.
+    /// The same table the branch header's row draws from — see
+    /// `PullRequestEmphasis` — so one app does not hold two opinions about the
+    /// same pull request on two screens.
     private static func tint(forChecks checks: String) -> Color {
         switch checks {
-        case "passing": return .green
         case "failing": return .red
         case "pending": return .orange
         default: return .secondary

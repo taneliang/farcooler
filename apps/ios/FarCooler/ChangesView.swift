@@ -1,5 +1,27 @@
 import SwiftUI
 
+/// What the branch header knows about this branch's pull request.
+///
+/// Three facts rather than a bare `PullRequest?`, because the ABSENCE of one is
+/// two different situations and only one of them may be acted on: `gh` said
+/// there is no pull request, or `gh` could not be asked at all. See
+/// `StackResponse.prKnown`, which is the only thing on the wire that separates
+/// them, and `ChangesView.pullRequestRow`, which is where it decides what is
+/// drawn.
+///
+/// A plain value, assembled by `WorkspaceView` from one `stack.get`. Everything
+/// this row needs and nothing that would pull a `Connection` into a lazy stack.
+struct BranchPullRequest: Equatable {
+    /// GitHub's answer for this branch, or nil when there is none to have.
+    var pr: PullRequest?
+    /// Whether `gh` answered at all — the gate on offering to create one.
+    var known: Bool
+    /// The repository's page on GitHub, for the compare link. Nil when `gh`
+    /// has not said what this repository is, and then there is no offer to
+    /// make: a button that opens a broken page is worse than no button.
+    var repoURL: String?
+}
+
 /// Reviewing what a worktree changed, on a phone.
 ///
 /// The Mac shows this in a pane beside the agent that did the changing. A phone
@@ -73,6 +95,17 @@ struct ChangesView: View {
     /// three-second fleet poll, and this is the one screen in the app whose
     /// body is a forty-card lazy stack somebody is mid-scroll through.
     var agents: [ReviewAgentTarget] = []
+
+    /// What GitHub says about this branch, and the way in to act on it.
+    ///
+    /// Resolved by `WorkspaceView` — which holds `currentWorkspace` and
+    /// therefore the repository id `stack.get` takes — and handed down as a
+    /// plain value for exactly the reason `agents` is one, above.
+    ///
+    /// Nil until the first read answers, and nil draws nothing. A row that
+    /// appears a moment later is better than a placeholder somebody has to
+    /// read and then read again.
+    var pullRequest: BranchPullRequest?
 
     @State private var showingIndex = false
     @State private var showingComments = false
@@ -489,6 +522,18 @@ struct ChangesView: View {
 
         generatedNote
 
+        // Below the comparison and above the warnings, because it is the same
+        // KIND of fact as the line above it — something true of this branch as
+        // a whole — and because the first thing anyone wants to know about a
+        // branch an agent wrote overnight is whether it is already a pull
+        // request and whether that pull request is in trouble.
+        //
+        // Under Uncommitted too, unlike the guessed-base warning below. That
+        // warning is about the COMPARISON, which uncommitted work does not
+        // make; this is about the branch, which is the same branch whichever
+        // segment is showing.
+        pullRequestRow
+
         // Only a GUESSED base is called out. The others are recorded facts;
         // a guess is the one that can silently produce a wrong diff that
         // looks exactly like a right one.
@@ -521,6 +566,146 @@ struct ChangesView: View {
         .padding(.top, 2)
 
         commitEntry
+    }
+
+    /// The pull request on this branch in one line, or the way to open one.
+    ///
+    /// Three outcomes, and the third is the one this row is careful about:
+    ///
+    /// - There is a pull request, so it is drawn and the whole line opens it.
+    /// - `gh` answered and there is none, so the line offers to create one.
+    /// - `gh` could not be asked, so the line says NOTHING. "There is no pull
+    ///   request" and "we could not find out" arrive as the same absent value
+    ///   on every link, and offering to create one while a pull request exists
+    ///   behind a logged-out `gh` is this app confidently proposing the wrong
+    ///   action. `StackResponse.prAnswered` is the whole difference and it is
+    ///   read the safe way — a runner too old to answer counts as a no.
+    @ViewBuilder
+    private var pullRequestRow: some View {
+        if let info = pullRequest {
+            if let pr = info.pr {
+                pullRequestState(pr)
+            } else if info.known,
+                let url = PullRequestLink.compare(
+                    repoURL: info.repoURL,
+                    baseRef: store.changeSet.baseRef,
+                    head: store.changeSet.branch)
+            {
+                createPullRequest(url)
+            }
+        }
+    }
+
+    /// What GitHub says, and a tap anywhere on it to go there.
+    ///
+    /// The whole row is the link rather than a chevron at the end of it, since
+    /// the row has nothing else it could do.
+    ///
+    /// **Quiet when healthy.** An open, approved, green pull request is drawn
+    /// entirely in `.secondary` with no glyph at all: it is the ordinary case,
+    /// it wants nothing, and a color spent on it would be a color that says
+    /// nothing anywhere. That is this codebase's existing position — `71934f8`
+    /// turned the last permanent green dot neutral for it — and it is what
+    /// makes the red one glanceable at arm's length. Green appears nowhere on
+    /// this row, including on a passing check.
+    @ViewBuilder
+    private func pullRequestState(_ pr: PullRequest) -> some View {
+        if let url = URL(string: pr.url) {
+            Link(destination: url) { pullRequestLine(pr, linked: true) }
+                // The row's own colors are set on every element inside it, so
+                // the accent never reaches the label. This is the same pairing
+                // the file header describes for greyed controls, and losing it
+                // fails back to blue.
+                .tint(.secondary)
+                .accessibilityIdentifier("changes-pr-row")
+                .accessibilityLabel(Self.spokenPullRequest(pr))
+                .accessibilityHint("Opens this pull request on GitHub")
+        } else {
+            // A pull request whose URL did not parse is still a pull request,
+            // and its state is the half of this row that matters. Drawn without
+            // the arrow, because there is nowhere to go.
+            pullRequestLine(pr, linked: false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityIdentifier("changes-pr-row")
+                .accessibilityLabel(Self.spokenPullRequest(pr))
+        }
+    }
+
+    private func pullRequestLine(_ pr: PullRequest, linked: Bool) -> some View {
+        let tint = Self.tint(for: pr.emphasis)
+        return HStack(spacing: 6) {
+            // The number first, because it is the identifier — the thing you
+            // say out loud and the thing you match against a browser tab.
+            Text("#\(pr.number)")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+            if let symbol = pr.headerSymbol {
+                Image(systemName: symbol)
+                    .font(.caption2)
+                    .foregroundStyle(tint)
+            }
+            Text(pr.headerSentence)
+                .font(.caption)
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            if linked {
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        // The Spacer is part of the target, not a hole in it.
+        .contentShape(Rectangle())
+    }
+
+    /// The one thing to offer when there is no pull request yet.
+    ///
+    /// Blue, and the only blue on this header. This screen's rule is that
+    /// moving through a diff is grey and PRODUCING something is blue, and the
+    /// accent is affordable here for the reason the resume card's Continue
+    /// gives: it appears once, and it is a one-time offer with one obvious
+    /// answer.
+    ///
+    /// A link and not a button, deliberately. `gh pr create --web` would open
+    /// a browser on the RUNNER, which is a machine nobody is looking at.
+    private func createPullRequest(_ url: URL) -> some View {
+        Link(destination: url) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle")
+                    .font(.caption2)
+                Text("Create Pull Request")
+                    .font(.caption.weight(.medium))
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2)
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("changes-pr-create")
+        .accessibilityLabel("Create Pull Request")
+        .accessibilityHint("Opens GitHub with a new pull request for this branch")
+    }
+
+    /// Grey, orange, red — and never green. See `PullRequestEmphasis`.
+    private static func tint(for emphasis: PullRequestEmphasis) -> Color {
+        switch emphasis {
+        case .quiet: return .secondary
+        case .pending: return .orange
+        case .alarm: return .red
+        }
+    }
+
+    /// The row, said rather than spelled.
+    ///
+    /// The number reads as "Pull request 412" and not "hash four one two", and
+    /// the middle dot that separates the two halves on screen is a pause here
+    /// rather than a character VoiceOver has to make something of.
+    private static func spokenPullRequest(_ pr: PullRequest) -> String {
+        let sentence = pr.headerSentence.replacingOccurrences(of: " · ", with: ", ")
+        return sentence.isEmpty
+            ? "Pull request \(pr.number)" : "Pull request \(pr.number), \(sentence)"
     }
 
     /// The card's top line, said rather than spelled.
@@ -1684,7 +1869,7 @@ private struct HunkView: View {
                 // one shape.
                 //
                 // A row is an `HStack` of two `Text`s inside a horizontal
-                // `ScrollView`, so it sizes to ITS OWN line and the coloured
+                // `ScrollView`, so it sizes to ITS OWN line and the colored
                 // background sizes with it. Nine added lines of nine different
                 // lengths were therefore nine differently-sized green blocks
                 // stacked on each other, and the steps between them read as
@@ -2429,10 +2614,65 @@ struct ChangesLayoutHarness: View {
             diffs: Self.diffs,
             expanded: CommandLine.arguments.contains("-commit") ? nil : "crates/daemon/src/file_diff.rs")
         return NavigationStack {
-            ChangesView(store: store, workspaceName: "add-retries")
+            ChangesView(
+                store: store, workspaceName: "add-retries", pullRequest: Self.pullRequest)
                 .navigationTitle("add-retries")
                 .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    /// The pull request row's states, one launch argument each.
+    ///
+    /// The DEFAULT is the case the row exists to be careful about: `gh` could
+    /// not be asked, so the header says nothing about a pull request and offers
+    /// nothing. Making that the argument-free case is deliberate — it is the
+    /// one a screenshot has to prove, and the one that is wrong if anybody
+    /// reaches for a `PullRequest?` alone.
+    ///
+    /// | argument | what the row shows |
+    /// | --- | --- |
+    /// | none | nothing at all — `gh` could not answer |
+    /// | `-pr-none` | Create Pull Request |
+    /// | `-pr-healthy` | #335 Approved · Checks passed, all grey |
+    /// | `-pr-failing` | #335 Changes requested · Checks failed, red |
+    /// | `-pr-pending` | #335 Draft · Checks running, orange |
+    /// | `-pr-merged` | #335 Merged, grey, with the merge glyph |
+    private static var pullRequest: BranchPullRequest? {
+        let args = CommandLine.arguments
+        // `gh` answered and there is no pull request on this branch.
+        if args.contains("-pr-none") {
+            return BranchPullRequest(
+                pr: nil, known: true, repoURL: "https://github.com/o/overnight")
+        }
+        func known(_ pr: PullRequest) -> BranchPullRequest {
+            BranchPullRequest(pr: pr, known: true, repoURL: "https://github.com/o/overnight")
+        }
+        func canned(state: String, checks: String, review: String) -> PullRequest {
+            PullRequest(
+                number: 335,
+                url: "https://github.com/o/overnight/pull/335",
+                state: state,
+                checks: checks,
+                review: review,
+                stale: false,
+                headOid: "a1b2c3d4e5f6",
+                mergedAt: state == "merged" ? 1_785_925_777_000 : nil,
+                fetchedAt: 1_785_925_800_000)
+        }
+        if args.contains("-pr-healthy") {
+            return known(canned(state: "open", checks: "passing", review: "approved"))
+        }
+        if args.contains("-pr-failing") {
+            return known(canned(state: "open", checks: "failing", review: "changes_requested"))
+        }
+        if args.contains("-pr-pending") {
+            return known(canned(state: "draft", checks: "pending", review: "review_required"))
+        }
+        if args.contains("-pr-merged") {
+            return known(canned(state: "merged", checks: "passing", review: "approved"))
+        }
+        // Nothing was said about `gh` at all, so nothing is said on the row.
+        return nil
     }
 
     private static let changeSet = ChangeSet(
