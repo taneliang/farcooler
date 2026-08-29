@@ -1457,11 +1457,23 @@ final class TerminalSession: ObservableObject {
         // `crates/daemon/src/runtime.rs`. The host has already done the parts
         // that need tmux to answer for them: repairing bare line feeds,
         // resetting the colour the last history line left set, and deciding
-        // that an alternate screen has no history worth sending. What is left
-        // here is the clear, and the clear is not cosmetic — erasing the
-        // display is what pushes the lines just written UP into history rather
-        // than discarding them, which is what makes the two captures add up to
-        // a pane you can scroll.
+        // that an alternate screen has no history worth sending.
+        //
+        // What is left here is the clear, and what it buys is ALIGNMENT, not
+        // history. This comment used to say the clear is what pushes the
+        // history lines up into scrollback; measured against the real
+        // emulator, that is not true — feeding lines past the bottom of the
+        // region scrolls them into history on its own, and a full-height
+        // capture reports the same 100 lines of history and the same top row
+        // either way.
+        //
+        // It earns its place on a capture SHORTER than the screen, which tmux
+        // makes the common case by trimming trailing blanks: a quiet pane
+        // answers with two lines, not twenty-four. Fed without the clear,
+        // those two lines land at the bottom of whatever the history left on
+        // screen — 40 lines of history collapse to 18, and the top row reads
+        // `history line 18` instead of the screen. With it: 40, and the screen
+        // where it belongs.
         if !history.isEmpty {
             emulator.feed(history)
             emulator.feed(Array("\u{1b}[H\u{1b}[2J".utf8))

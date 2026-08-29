@@ -39,4 +39,20 @@ data class ScreenResponse(
     val unchanged: Boolean = false,
     /** The escape sequences that put a fresh emulator into the program's modes. */
     val modes: String? = null,
+    /**
+     * The pane's scrollback, base64, and ready to feed.
+     *
+     * Present only when it was asked for — see `TerminalSession.HISTORY_LINES`
+     * — and empty for a pane that has none, or one on the alternate screen,
+     * which has no history of its own. The host has already repaired the bare
+     * line feeds, appended the colour reset the last history line left set, and
+     * decided the alternate-screen case, so what arrives here needs no repair:
+     * it is the same assembly the daemon writes down a stream (`replay` in
+     * `crates/daemon/src/runtime.rs`).
+     *
+     * Nullable because a runner too old to know the field omits it entirely,
+     * which is exactly the behaviour that keeps this app working against a
+     * daemon that has not been updated.
+     */
+    val history: String? = null,
 )

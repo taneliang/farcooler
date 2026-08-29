@@ -172,6 +172,24 @@ class TerminalSession(
     /** The last screen decoded, so the next poll can tell whether anything changed. */
     private var lastScreen: ScreenResponse? = null
 
+    /**
+     * The pane's scrollback, as bytes ready to feed straight into an emulator:
+     * CRLF-repaired, colour-reset and terminated by the host, with the
+     * alternate-screen case already decided there. See [HISTORY_LINES] for why
+     * this is held rather than re-fetched, and [render] for where it goes.
+     *
+     * Empty is the honest default and the common case — a pane that has
+     * printed less than a screenful has no history, and neither does one on the
+     * alternate screen.
+     */
+    private var history: ByteArray = ByteArray(0)
+
+    /**
+     * An in-flight scrollback refresh, so two of them cannot race and the last
+     * one cannot outlive the pane.
+     */
+    private var historyRefresh: Job? = null
+
     private var streaming = false
     private val inbox = Inbox()
     private var geometry: Job? = null
@@ -504,9 +522,13 @@ class TerminalSession(
      * nothing better is coming — something to draw.
      */
     private suspend fun prime(): ScreenResponse? = try {
-        val data = core.call("terminal.screen", Connection.args("terminal" to terminalId))
+        // History is asked for HERE and not in [poll], which is the whole cost
+        // discipline: once per pane rather than ten times a second. See
+        // [HISTORY_LINES].
+        val data = core.call("terminal.screen", screenArgs(terminalId))
         val response = json.decodeFromJsonElement(ScreenResponse.serializer(), data)
         revision = response.revision
+        history = decodedHistory(response)
         paneSize = response.columns to response.rows
         // The pane's actual shape, straight from the host, seeds the baseline
         // `scheduleResize` compares against — so a `configure` that asks for
@@ -698,6 +720,22 @@ class TerminalSession(
     }
 
     private suspend fun poll() {
+        // A pane the reader has scrolled back is a pane they are READING, and
+        // the loop's job while they do is to leave it alone.
+        //
+        // [render] preserves the offset across a rebuild, so this is not what
+        // keeps the view from snapping to the bottom. What it prevents is
+        // subtler and worse: the offset is a count of lines from the live
+        // screen, so every line the program prints while somebody is reading
+        // history slides the text they are reading up by one. Ten lines of
+        // output and the paragraph they were halfway through is gone. Holding
+        // the capture still holds the words still.
+        //
+        // Nothing is lost by waiting. Returning to the bottom wakes the loop
+        // (see [resumeAfterScrollback]), and the first thing it does is ask for
+        // a screen — so the pane is current within one round trip of the moment
+        // anybody wants it to be.
+        if (scrolledBackBy() > 0) return
         try {
             val data = core.call("terminal.screen", Connection.args("terminal" to terminalId))
             val response = json.decodeFromJsonElement(ScreenResponse.serializer(), data)
@@ -763,6 +801,16 @@ class TerminalSession(
             _phase.value = Phase.Failed("The host sent a screen this device could not decode.")
             return
         }
+        // Where the reader was looking, so rebuilding does not yank them back
+        // to the bottom.
+        //
+        // This method builds a WHOLE NEW emulator on every changed capture,
+        // which is fine while the view is live and destroys a scrolled-back
+        // view otherwise: a polled pane repaints several times a second, so
+        // without this a swipe would move the screen and the next poll would
+        // move it straight back. Reapplied after the feed below, once there is
+        // history to apply it to.
+        val wasScrolledBackTo = scrolledBackBy()
         vt?.free()
         val emulator = VtCore(response.columns, response.rows)
         // A fresh core starts on the VT crate's own default palette, not the
@@ -770,56 +818,56 @@ class TerminalSession(
         // character would not.
         emulator.setPalette(com.farcooler.data.Themes.current.packed())
         applyModes(response.modes, emulator)
-        // A capture separates its lines with a bare line feed, which to a
-        // terminal means "down one row" and nothing about which column. Fed
-        // straight in, every line starts where the previous one ended and the
-        // screen arrives as a staircase — text broken mid-word at a different
-        // place on each row. The daemon repairs this for the replay it sends
-        // down a stream, for exactly the same reason; a capture arriving by any
-        // other route needs the same repair. Live pty bytes never do.
-        emulator.feed(carriageReturned(withoutTrailingNewlines(bytes)))
+        emulator.feed(CapturedPane.feed(history, bytes))
+        if (wasScrolledBackTo > 0) emulator.scroll(wasScrolledBackTo)
         vt = emulator
         paneSize = response.columns to response.rows
+        val grid = emulator.snapshot()
         // The host's cursor, not the emulator's: a capture is text, so feeding
         // it leaves the caret wherever the last character landed — the bottom
         // left — rather than at the prompt someone is typing into.
-        _grid.value = emulator.snapshot()?.withCursor(response.cursorRow, response.cursorColumn)
+        //
+        // Only while the view is showing the host's screen, though. Scrolled
+        // back, the rows on screen are history and the prompt is somewhere
+        // below them, so drawing the host's row and column would put a caret in
+        // the middle of text nobody is typing into. The emulator knows where
+        // the caret really sits relative to the view, and leaving its answer
+        // alone is the honest one.
+        _grid.value = if (grid != null && grid.displayOffset == 0) {
+            grid.withCursor(response.cursorRow, response.cursorColumn)
+        } else {
+            grid
+        }
         _phase.value = Phase.Live
     }
 
     /**
-     * Drop the newline a captured screen ends with.
+     * The scrollback out of a screen response, or nothing.
      *
-     * A capture is as many lines as the screen is tall, so feeding the last
-     * one's line feed moves the caret off the bottom row and scrolls the whole
-     * screen up by one: the top line goes into history and every remaining row
-     * is drawn one higher than it belongs. The caret then comes from the host,
-     * which knows nothing about that scroll, so it lands a row below the text
-     * it should be sitting in.
+     * Nothing is the ordinary answer and not a failure: a pane that has printed
+     * less than a screenful has no history, one on the alternate screen has
+     * none the host will send, and a runner too old to know the field at all
+     * simply omits it — which is exactly the behaviour that keeps this working
+     * against a daemon that has not been updated.
      */
-    private fun withoutTrailingNewlines(bytes: ByteArray): ByteArray {
-        var end = bytes.size
-        while (end > 0 && (bytes[end - 1] == 0x0A.toByte() || bytes[end - 1] == 0x0D.toByte())) {
-            end -= 1
-        }
-        return bytes.copyOf(end)
+    private fun decodedHistory(response: ScreenResponse): ByteArray {
+        val encoded = response.history
+        if (encoded.isNullOrEmpty()) return ByteArray(0)
+        return runCatching { Base64.decode(encoded, Base64.DEFAULT) }.getOrNull() ?: ByteArray(0)
     }
 
     /**
-     * Give every bare line feed the carriage return a captured screen left out.
-     * One that already has one is left alone, so this is safe to apply to
-     * anything.
+     * How many lines above the live screen this device is currently showing.
+     *
+     * Read off the published grid rather than asked of the core, because the
+     * JNI bridge has no cheap way to ask: the only question it answers is
+     * `nativeSnapshot`, which copies every cell of the screen. Answering "where
+     * are we" by copying four thousand cells, several times a second, in a
+     * guard whose usual answer is zero, is not a trade worth making — and the
+     * published grid is the same number, since every path that moves the view
+     * ends in [publish] or [render].
      */
-    private fun carriageReturned(bytes: ByteArray): ByteArray {
-        val out = ArrayList<Byte>(bytes.size + bytes.size / 40)
-        var previous: Byte = 0
-        for (byte in bytes) {
-            if (byte == 0x0A.toByte() && previous != 0x0D.toByte()) out.add(0x0D)
-            out.add(byte)
-            previous = byte
-        }
-        return out.toByteArray()
-    }
+    private fun scrolledBackBy(): Int = _grid.value?.displayOffset ?: 0
 
     /** Show what the emulator currently holds, cursor included. */
     private fun publish() {
@@ -937,10 +985,20 @@ class TerminalSession(
 
     /**
      * Typing means "act on the live screen", so it always returns there first.
+     *
+     * It reads the offset before doing so, where it used to just scroll. That
+     * was fine while returning to the bottom was only a redraw; it stopped
+     * being fine when a scrolled-back pane started holding its poll loop still.
+     * Typing is one of the two ways back to the live screen — the other is
+     * swiping down, in [scrollLocally] — and a pane that resumed painting only
+     * when swiped would go dead under a reader who scrolled up, gave up, and
+     * typed instead.
      */
     private fun jumpToBottom(emulator: VtCore) {
+        val wasScrolledBack = scrolledBackBy() > 0
         emulator.scrollToBottom()
         publish()
+        if (wasScrolledBack) resumeAfterScrollback()
     }
 
     /**
@@ -963,14 +1021,101 @@ class TerminalSession(
             repeat(abs(lines)) {
                 val chunk = emulator.encodeMouse(button, Vt.MOUSE_PRESS, column, row, 0)
                 if (chunk == null) {
-                    emulator.scroll(lines)
-                    publish()
+                    scrollLocally(emulator, lines)
                     return@launch
                 }
                 bytes.addAll(chunk.toList())
             }
             write(bytes.toByteArray())
         }
+    }
+
+    /**
+     * Move this device's own view of the pane, and keep the poll loop in step
+     * with where the reader now is.
+     *
+     * Reached only when the program running in the pane has declined the wheel
+     * — a shell, not a full-screen TUI. See [scroll].
+     */
+    private fun scrollLocally(emulator: VtCore, lines: Int) {
+        // Read BEFORE the scroll, because "we are at the bottom" and "we have
+        // just arrived at the bottom" are different questions and only the
+        // second one is worth a round trip.
+        //
+        // A drag reports every line it crosses, and the core clamps at zero. So
+        // a downward swipe on a view that is already live reports a dozen
+        // times, arrives at zero a dozen times, and without this fires a
+        // scrollback refresh for each of them — a dozen SSH round trips for a
+        // gesture that changed nothing.
+        val wasScrolledBack = scrolledBackBy() > 0
+        emulator.scroll(lines)
+        publish()
+        // Back at the live screen. Start painting again, and take the chance to
+        // refresh the scrollback while sitting somewhere a rebuild cannot be
+        // seen.
+        if (scrolledBackBy() == 0) {
+            if (wasScrolledBack) resumeAfterScrollback()
+            return
+        }
+        // Scrolled back, so stop painting. [poll] refuses to run in this state
+        // as well; this stops the loop rather than leaving it spinning through
+        // a guard several times a second.
+        poller?.cancel()
+        poller = null
+    }
+
+    /**
+     * Resume the poll loop, and line up fresh scrollback for the next time
+     * somebody swipes.
+     *
+     * The refresh happens HERE, at the bottom, rather than on the way INTO
+     * scrollback, and the reason is that the display offset counts lines from
+     * the live screen. Replacing the history under a reader who is already
+     * twenty lines up moves those twenty lines somewhere else — they would
+     * watch the paragraph they were reading jump. At the bottom there is
+     * nothing to move: the screen is the same screen, and the only difference
+     * is that there is now more above it than there was.
+     *
+     * The cost is bounded and worth naming: within one continuous visit to the
+     * scrollback, anything that scrolled off since the reader was last at the
+     * bottom is not there. Nothing scrolls off while they are up there — this
+     * pane has stopped polling — so the gap can only be as old as their last
+     * look at the live screen.
+     *
+     * [wake] rather than [startLoop], because this is reached from typing as
+     * well as from swiping and the loop may never have stopped: `startLoop`
+     * would overwrite the job reference and leave two loops polling the same
+     * pane. Snapping back to the fast interval is right either way — a pane
+     * somebody has just returned to is the least acceptable moment to be a
+     * second behind.
+     */
+    private fun resumeAfterScrollback() {
+        if (!started || streaming) return
+        wake()
+        historyRefresh?.cancel()
+        historyRefresh = scope.launch { refreshHistory() }
+    }
+
+    /**
+     * Ask for the pane's scrollback again and keep it for the next swipe.
+     *
+     * Deliberately does not paint. A screen arrives with the answer and drawing
+     * it here would put a second painter beside the poll loop, racing it to
+     * show whichever capture happened to be older. The loop is running by the
+     * time this lands and will fold the new history in on its next pass, which
+     * is at most [FAST_INTERVAL_MS] away.
+     */
+    private suspend fun refreshHistory() {
+        val data = attempt { core.call("terminal.screen", screenArgs(terminalId)) }
+            .getOrNull() ?: return
+        val response = attempt {
+            json.decodeFromJsonElement(ScreenResponse.serializer(), data)
+        }.getOrNull() ?: return
+        // Only while the reader is still at the bottom. A swipe can land during
+        // the round trip, and the paragraph above is exactly why that history
+        // must not be swapped in underneath it.
+        if (scrolledBackBy() > 0) return
+        history = decodedHistory(response)
     }
 
     private suspend fun write(bytes: ByteArray) {
@@ -1004,6 +1149,12 @@ class TerminalSession(
     private fun teardown() {
         poller?.cancel()
         poller = null
+        // The scrollback refresh goes with the loop it was lining up work for.
+        // Left running it would answer into a pane nobody is looking at,
+        // holding an SSH round trip open on a connection whose sessions are the
+        // scarce thing here.
+        historyRefresh?.cancel()
+        historyRefresh = null
         geometry?.cancel()
         geometry = null
         resizeDebounce?.cancel()
@@ -1039,7 +1190,50 @@ class TerminalSession(
         fun clear() = synchronized(lock) { buffer.reset() }
     }
 
-    private companion object {
+    internal companion object {
+        /**
+         * How much scrollback a polled pane asks the host for.
+         *
+         * A poll carries `capture-pane -e -p` — the visible screen and no
+         * history (`crates/tmux/src/windows.rs:251`, against
+         * `capture_scrollback` at `:365`, which only the stream path calls).
+         * Fed into a fresh emulator that is exactly as tall as the screen, that
+         * leaves the core's history size at zero, and a core with no history is
+         * a core whose `scroll` moves nothing. That is the whole of "swiping
+         * the terminal does nothing", and every enrolled device is on this path
+         * — `crates/fence` writes a forced SSH command, so the second exec for
+         * `farcoolerd --stream <id>` never delivers a byte.
+         *
+         * So the poll path asks for history explicitly. Not on every poll —
+         * history costs a second `capture-pane` on the runner and it is the
+         * same lines every time — but once when the pane opens, so the first
+         * swipe moves immediately rather than after a round trip, and again
+         * whenever the reader returns to the bottom, so what they scroll into
+         * next is current rather than however stale the pane has grown since it
+         * opened.
+         *
+         * Two thousand rather than the emulator's full scrollback of 10,000:
+         * this crosses a phone's link base64'd, and at roughly 200 bytes a line
+         * the full history is a couple of megabytes to answer a swipe. Two
+         * thousand lines is far more than a thumb travels in one session and
+         * costs a few hundred kilobytes once per pane.
+         */
+        const val HISTORY_LINES = 2_000
+
+        /**
+         * What an ask for this pane's screen carries.
+         *
+         * One builder for the two callers that want scrollback with their
+         * screen — [prime] on the way in and [refreshHistory] on the way back
+         * to the bottom — because a request that asked for history in one place
+         * and forgot in the other is a pane that scrolls until you look away
+         * from it. [poll] and [checkGeometry] deliberately do not use this:
+         * they run repeatedly, and the history would be the same lines every
+         * time.
+         */
+        fun screenArgs(terminal: String) =
+            Connection.args("terminal" to terminal, "historyLines" to HISTORY_LINES)
+
         /**
          * The busiest a poll loop gets: about as fast as a human can perceive a
          * screen redrawing, and comfortably above the host's own ~16 ms capture
@@ -1075,5 +1269,101 @@ class TerminalSession(
         const val MAX_ATTACH_ATTEMPTS = 3
 
         val HEX = "0123456789abcdef".toCharArray()
+    }
+}
+
+/**
+ * The bytes that turn a pair of captures — a pane's scrollback and its visible
+ * screen — into an emulator somebody can scroll.
+ *
+ * Its own object rather than three methods on the session, because the order
+ * here is the entire fix and the order is the one thing a test can pin without
+ * a device: the assembly is pure bytes in, pure bytes out.
+ */
+internal object CapturedPane {
+    /**
+     * Home the cursor, then erase the display.
+     *
+     * Not cosmetic, and not decoration between the two captures. Erasing the
+     * display pushes the lines just written UP into history rather than
+     * discarding them, and homing the cursor puts the screen that follows at
+     * the top-left corner rather than wherever the last history line ended.
+     *
+     * Both halves are load-bearing, and the case that shows it is the ordinary
+     * one: tmux trims a capture's trailing blank lines, so a quiet pane answers
+     * with two lines rather than twenty-four. Measured against `crates/vt` with
+     * 40 history lines and a two-line capture — without this, the two lines
+     * land at the bottom of a screen still showing history, the top row reads
+     * "history line 18" and the core reports a history of 18. With it, the top
+     * row is "screen line 0" and the history is the whole 40.
+     */
+    private val CLEAR = "\u001B[H\u001B[2J".toByteArray(Charsets.US_ASCII)
+
+    /**
+     * The scrollback, the clear, then the screen.
+     *
+     * The same order, and for the same reasons, that the daemon's own `replay`
+     * writes down a stream — see `replay` in `crates/daemon/src/runtime.rs`.
+     * The host has already done the parts that need tmux to answer for them:
+     * repairing the history's bare line feeds, resetting the colour its last
+     * line left set, and deciding that an alternate screen has no history worth
+     * sending. What is left here is the clear, and the repair the SCREEN still
+     * needs.
+     *
+     * An empty history is the common case and produces exactly what this method
+     * produced before it existed: the repaired screen and nothing else. A clear
+     * with no history above it would be bytes that erase nothing.
+     */
+    fun feed(history: ByteArray, screen: ByteArray): ByteArray {
+        val repaired = carriageReturned(withoutTrailingNewlines(screen))
+        if (history.isEmpty()) return repaired
+        val out = ByteArray(history.size + CLEAR.size + repaired.size)
+        history.copyInto(out)
+        CLEAR.copyInto(out, history.size)
+        repaired.copyInto(out, history.size + CLEAR.size)
+        return out
+    }
+
+    /**
+     * Drop the newline a captured screen ends with.
+     *
+     * A capture is as many lines as the screen is tall, so feeding the last
+     * one's line feed moves the caret off the bottom row and scrolls the whole
+     * screen up by one: the top line goes into history and every remaining row
+     * is drawn one higher than it belongs. The caret then comes from the host,
+     * which knows nothing about that scroll, so it lands a row below the text
+     * it should be sitting in.
+     */
+    fun withoutTrailingNewlines(bytes: ByteArray): ByteArray {
+        var end = bytes.size
+        while (end > 0 && (bytes[end - 1] == 0x0A.toByte() || bytes[end - 1] == 0x0D.toByte())) {
+            end -= 1
+        }
+        return bytes.copyOf(end)
+    }
+
+    /**
+     * Give every bare line feed the carriage return a captured screen left out.
+     *
+     * A capture separates its lines with a bare line feed, which to a terminal
+     * means "down one row" and nothing about which column. Fed straight in,
+     * every line starts where the previous one ended and the screen arrives as
+     * a staircase — text broken mid-word at a different place on each row. The
+     * daemon repairs this for the replay it sends down a stream, for exactly
+     * the same reason; a capture arriving by any other route needs the same
+     * repair. Live pty bytes never do.
+     *
+     * One that already has a carriage return is left alone, so this is safe to
+     * apply to anything.
+     */
+    fun carriageReturned(bytes: ByteArray): ByteArray {
+        val out = ArrayList<Byte>(bytes.size + bytes.size / 40)
+        var previous: Byte = 0
+        for (byte in bytes) {
+            if (byte == 0x0A.toByte() && previous != 0x0D.toByte()) out.add(0x0D)
+            out.add(byte)
+            previous = byte
+        }
+        return out.toByteArray()
     }
 }
