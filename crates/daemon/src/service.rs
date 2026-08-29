@@ -328,6 +328,13 @@ pub struct Service {
     /// lifecycle at least as strongly as to our own. After a restart every PR
     /// reads Unknown until a refresh succeeds.
     pr_cache: std::sync::Mutex<std::collections::HashMap<Uuid, Option<Vec<crate::stack::PrInfo>>>>,
+    /// When a background PR fill was last STARTED for a repository.
+    ///
+    /// Started, not finished, and that is the point: it is written before the
+    /// subprocess is spawned, so five clients opening the same repository in the
+    /// same second fork one `gh` between them rather than five. See
+    /// `claim_pr_fill`.
+    pr_fills: std::sync::Mutex<std::collections::HashMap<Uuid, std::time::Instant>>,
     /// How many `gh` processes may run at once, across every repository.
     gh_limit: Arc<tokio::sync::Semaphore>,
     /// Each repository's default branch, once discovered.
@@ -337,6 +344,14 @@ pub struct Service {
     /// restarted daemon confidently diffing against a default that has since
     /// been renamed. Cheap to rediscover, so it is.
     default_branches: std::sync::Mutex<std::collections::HashMap<Uuid, Option<String>>>,
+    /// Each repository's page on GitHub, from the same `gh repo view` the line
+    /// above is filled by and written in the same pass.
+    ///
+    /// A separate map rather than a wider value on `default_branches`, because
+    /// the two answers are not interchangeable: the branch has a local fallback
+    /// (`origin/HEAD`) and is remote-qualified afterwards, and the URL has
+    /// neither. Held for the same lifetime and for the same reason.
+    repo_urls: std::sync::Mutex<std::collections::HashMap<Uuid, Option<String>>>,
     /// One mutex per repository, created on first use and never removed.
     ///
     /// Held across any sequence that mutates git and then writes a workspace
@@ -412,8 +427,10 @@ impl Service {
             agents: agent_supervisor::AgentSupervisor::new(),
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pr_fills: std::sync::Mutex::new(std::collections::HashMap::new()),
             gh_limit: Arc::new(tokio::sync::Semaphore::new(crate::stack::GH_MAX_CONCURRENT)),
             default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
+            repo_urls: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
@@ -456,6 +473,12 @@ impl Service {
     /// misses — a runner without `gh` must not pay for a process launch every
     /// time somebody scrolls a diff.
     ///
+    /// It also records the repository's web URL, which the same `gh repo view`
+    /// answers in the same response — see `repo_web_url`. One extra JSON field
+    /// on a subprocess that already runs, rather than a hand-written parser for
+    /// `git@github.com:o/r.git` that would be wrong for every GitHub Enterprise
+    /// host. That is why this is the only writer of either map.
+    ///
     /// The qualification is the LAST step here, over whichever answer arrived,
     /// because `gh` returns a bare `main` and `origin/HEAD` returns
     /// `origin/main`: two roads that were free to disagree, and did. See
@@ -469,13 +492,13 @@ impl Service {
             return cached.clone();
         }
 
-        let found = {
+        let facts = {
             let _permit = self.gh_permit().await;
-            crate::stack::fetch_default_branch(worktree).await
+            crate::stack::fetch_repo_facts(worktree).await
         };
         // `origin/HEAD` records the same fact without a network, and is right
         // whenever the clone has ever been told.
-        let found = match found {
+        let found = match facts.default_branch {
             Some(name) => Some(name),
             None => crate::change_set::default_branch_local(worktree).await,
         };
@@ -484,11 +507,36 @@ impl Service {
             None => None,
         };
 
+        // The URL first, so the early return above can never hand a caller a
+        // cached default branch for a repository whose URL has not been
+        // recorded yet — the two are written by this function alone, and a
+        // reader that saw one without the other would report an empty compare
+        // link for a repository the daemon does know the URL of.
+        self.repo_urls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(repository_id, facts.url);
         self.default_branches
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(repository_id, found.clone());
         found
+    }
+
+    /// A repository's page on GitHub, if `gh` has ever answered for it.
+    ///
+    /// Cache-only, and deliberately so: this is read on the `stack.get` path,
+    /// where nothing may wait on a subprocess. `None` before the first
+    /// `default_branch` call for this repository has landed — which the
+    /// background fill in `review_ops::fill_prs_in_background` makes, so the
+    /// answer follows on the `stack_changed` event a moment later.
+    pub fn repo_web_url(&self, repository_id: Uuid) -> Option<String> {
+        self.repo_urls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&repository_id)
+            .cloned()
+            .flatten()
     }
 
     /// PR state as last read, or `None` when it has never been read since this
@@ -504,6 +552,56 @@ impl Service {
 
     pub fn pr_cache_put(&self, repository_id: Uuid, prs: Option<Vec<crate::stack::PrInfo>>) {
         self.pr_cache.lock().unwrap_or_else(|e| e.into_inner()).insert(repository_id, prs);
+    }
+
+    /// Whether `gh` has ever ANSWERED about this repository since this process
+    /// started.
+    ///
+    /// The distinction `pr_cache_get` erases by flattening, and the one the
+    /// whole of `pr_known` rests on: an entry holding `None` is a `gh` that ran
+    /// and failed, and no entry at all is a `gh` that was never run. Both come
+    /// back from `pr_cache_get` as `None`, and both reach a client as an absent
+    /// `pr` on every link — so without this, an app cannot tell "there is no
+    /// pull request" from "we could not ask", and offering to create one is a
+    /// coin flip.
+    pub fn pr_answer_is_known(&self, repository_id: Uuid) -> bool {
+        matches!(
+            self.pr_cache.lock().unwrap_or_else(|e| e.into_inner()).get(&repository_id),
+            Some(Some(_))
+        )
+    }
+
+    /// Whether this caller should fill the PR cache for `repository_id` now.
+    ///
+    /// True at most once per `GH_MIN_INTERVAL` per repository, and never at all
+    /// while the cache already holds an answer from `gh`. A read FILLS an empty
+    /// cache; it does not poll a full one — the daemon-wide timer this could
+    /// have been is deliberately not built, and what makes that affordable is
+    /// that no client looking at a repository means no `stack.get`, means no
+    /// fetch.
+    ///
+    /// A repository `gh` failed for is retried, subject to the same interval,
+    /// rather than poisoned until somebody calls `pr.refresh`. That call is
+    /// `Scope::Control` and the client this exists for is a read-scoped phone
+    /// (`rpc.rs`'s scope table): if one timeout meant an empty row forever, the
+    /// phone would be back where decision 2 found it.
+    ///
+    /// The cache is inspected while the attempt map is held, not before it. Two
+    /// connections arriving together would otherwise both see an empty cache,
+    /// both take the lock in turn, and both record an attempt — which is the
+    /// stampede this is here to prevent.
+    pub fn claim_pr_fill(&self, repository_id: Uuid) -> bool {
+        let mut attempts = self.pr_fills.lock().unwrap_or_else(|e| e.into_inner());
+        if self.pr_answer_is_known(repository_id) {
+            return false;
+        }
+        if let Some(started) = attempts.get(&repository_id) {
+            if started.elapsed() < crate::stack::GH_MIN_INTERVAL {
+                return false;
+            }
+        }
+        attempts.insert(repository_id, std::time::Instant::now());
+        true
     }
 
     /// The supervisor for every terminal's agent session.

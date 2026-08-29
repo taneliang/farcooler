@@ -1634,7 +1634,33 @@ impl Rpc {
                 let Some(request::Payload::StackGet(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                Ok(result::Value::StackLinkList(crate::review_ops::stack_get(svc, &p).await?))
+                let list = crate::review_ops::stack_get(svc, &p).await?;
+                // Fill on first read, and never block the read.
+                //
+                // PR state is in memory and nowhere else, written until now only
+                // by an explicit `pr.refresh` — which is `Scope::Control`. So a
+                // read-scoped phone could DISPLAY PR state and never populate
+                // it, and every client saw an empty row after a daemon restart
+                // until somebody found a sheet and pressed Refresh. A status row
+                // that is blank until tapped is not glanceable.
+                //
+                // This stays `Scope::Read`. The split in `required_scope` is
+                // about who may FORCE a refresh; one bounded fill of an empty
+                // cache is not that, and it is self-limiting by construction —
+                // no client looking at a repository means no `stack.get`, means
+                // no fetch. That is what makes it affordable where the
+                // daemon-wide poll it could have been would not be.
+                //
+                // Spawned, never awaited. See `fill_prs_in_background`.
+                if let Ok(repository_id) = Uuid::from_slice(&p.repository_id) {
+                    crate::review_ops::fill_prs_in_background(
+                        self.service.clone(),
+                        self.watcher.clone(),
+                        repository_id,
+                        p.branch.clone(),
+                    );
+                }
+                Ok(result::Value::StackLinkList(list))
             }
 
             "stack.set_parent" => {

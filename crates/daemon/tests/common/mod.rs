@@ -59,7 +59,34 @@ pub async fn spawn_with(
     dir: &std::path::Path,
     extra: &[&str],
 ) -> (DaemonChild, Client<ChildStdout, ChildStdin>) {
-    let mut child = stdio_command(dir, extra)
+    spawn_command(stdio_command(dir, extra), dir).await
+}
+
+/// The same, with extra environment.
+///
+/// For a test that has to put its own `gh` ahead of the real one on `PATH`.
+/// The daemon resolves that binary through the environment it was STARTED
+/// with, and setting it in the test process would not do: the environment is
+/// process-global and this suite runs in parallel, so a test that changed it
+/// would change it under every other test in the binary. That is the same trap
+/// `Harness` documents about `FARCOOLER_HOME`.
+pub async fn spawn_with_env(
+    dir: &std::path::Path,
+    env: &[(&str, &str)],
+) -> (DaemonChild, Client<ChildStdout, ChildStdin>) {
+    let mut command = stdio_command(dir, &[]);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    spawn_command(command, dir).await
+}
+
+/// Spawn a prepared invocation and complete the handshake over its pipes.
+async fn spawn_command(
+    mut command: Command,
+    dir: &std::path::Path,
+) -> (DaemonChild, Client<ChildStdout, ChildStdin>) {
+    let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

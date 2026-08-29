@@ -392,6 +392,18 @@ message Event {
     // looking at it and a lockfile regeneration would otherwise fan out
     // thousands of file records to everyone.
     ChangeSetChanged change_set_changed = 19;
+    // A repository's stack was re-read: `gh` answered, or failed to.
+    //
+    // Carries the whole list rather than an id, like `layout_changed` and
+    // unlike `change_set_changed`. A stack is a handful of links and a PR
+    // status each — bounded by the length of somebody's branch chain, not by
+    // the size of a diff — so there is nothing here worth a second round trip,
+    // and the client that asked is the one holding a row it cannot fill.
+    //
+    // Emitted when `stack.get` finds a repository whose PR cache has never
+    // been filled and fills it in the background. The read itself never waits
+    // on `gh`: it answers from cache at local speed and this arrives a moment
+    // later. See `review_ops::fill_prs_in_background`.
     StackLinkList stack_changed = 21;
     // Live bytes from a terminal this connection attached to.
     //
@@ -1891,6 +1903,28 @@ message StackLinkList {
   // The parent chain formed a loop. Reported rather than followed, and the
   // links returned are the ones walked before it was noticed.
   bool cycle_detected = 3;
+  // Whether `gh` answered at all for this read.
+  //
+  // Without this a client cannot tell "GitHub says there is no PR for this
+  // branch" from "we could not ask" — both arrive as an absent `pr` on every
+  // link. The daemon can always tell the two apart, and the difference decides
+  // whether offering to CREATE a pull request is helpful or is confidently
+  // wrong about a PR that already exists behind a logged-out `gh`.
+  //
+  // On the list rather than on each link on purpose: the fact reported is "did
+  // the subprocess answer", which is a property of the whole read, not of one
+  // branch. False means show neither PR state nor an offer to create one.
+  bool pr_known = 4;
+  // The repository's page on GitHub, e.g. `https://github.com/o/r`, as `gh`
+  // reports it. Empty when `gh` has not answered for this repository yet.
+  //
+  // From `gh repo view --json url`, which the daemon already runs and already
+  // caches per repository, rather than from parsing a git remote by hand — the
+  // parse is wrong for GitHub Enterprise hosts and the call is free.
+  //
+  // A client builds the compare link for a branch with no PR from this plus the
+  // base and head refs it already holds.
+  string repo_url = 5;
 }
 
 message StackGet {

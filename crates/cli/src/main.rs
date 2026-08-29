@@ -1836,6 +1836,21 @@ async fn events(runner: Option<&str>) -> Fallible {
                 "short": short_bytes(&c.workspace_id),
                 "version": c.version,
             }),
+            // A repository's PR state was re-read, because somebody's
+            // `stack.get` found a cache nobody had filled. `known` is the field
+            // that matters: false means GitHub could not be asked, and an
+            // absent `pr` on a link means nothing at all in that case.
+            farcooler_protocol::v1::event::Payload::StackChanged(s) => serde_json::json!({
+                "kind": "stack",
+                "repository": uuid_of(&s.repository_id).to_string(),
+                "short": short_bytes(&s.repository_id),
+                "known": s.pr_known,
+                "prs": s.items.iter().filter_map(|l| l.pr.as_ref().map(|p| serde_json::json!({
+                    "branch": l.branch,
+                    "number": p.number,
+                    "url": p.url,
+                }))).collect::<Vec<_>>(),
+            }),
             // Other resources have no events yet. Skipping is right: a client
             // that reacts to a line it cannot read would be worse.
             _ => continue,

@@ -319,9 +319,15 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
                             Ok(pb::PrState::Closed) => "closed",
                             _ => "unknown",
                         };
-                        format!("  #{} {}", p.number, state)
+                        let stale = if p.stale { " (read a while ago)" } else { "" };
+                        format!("  #{} {}{}", p.number, state, stale)
                     }
-                    None => "  (no PR state — GitHub not read)".to_string(),
+                    // Two different facts, and they used to print as one. A
+                    // branch GitHub says has no pull request is not a branch we
+                    // failed to ask about, and only the first is a branch it
+                    // would help to open a PR for.
+                    None if l.pr_known => "  (GitHub has no PR for this branch)".to_string(),
+                    None => "  (no PR state — GitHub could not be read)".to_string(),
                 };
                 println!("{} <- {}{}{}", link_.branch, link_.parent_branch, src, pr);
                 println!("    +{} ahead, {} behind", link_.ahead, link_.behind);

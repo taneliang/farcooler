@@ -1488,6 +1488,20 @@ fn stack_json(l: &farcooler_protocol::v1::StackLinkList) -> serde_json::Value {
         // far as it was walked, and a client that silently drew it would draw a
         // stack that does not exist.
         "cycleDetected": l.cycle_detected,
+        // Whether `gh` answered at all. "There is no pull request for this
+        // branch" and "we could not ask GitHub" both arrive as an absent `pr`
+        // on every link, and only this separates them.
+        //
+        // It decides whether an app may offer to CREATE a pull request. Offering
+        // that while a PR exists behind a logged-out `gh` is the app being
+        // confidently wrong about the one action on the row. False means show
+        // neither PR state nor an offer: show nothing, say nothing.
+        "prKnown": l.pr_known,
+        // The repository's page on GitHub, for building a compare link for a
+        // branch that has no PR yet. Null rather than "" when `gh` has not
+        // answered for this repository yet — a client must get nothing rather
+        // than a link to nowhere.
+        "repoUrl": if l.repo_url.is_empty() { serde_json::Value::Null } else { json!(l.repo_url) },
         "links": l.items.iter().map(|k| json!({
             "branch": k.branch,
             "parentBranch": k.parent_branch,
@@ -1518,6 +1532,19 @@ fn stack_json(l: &farcooler_protocol::v1::StackLinkList) -> serde_json::Value {
                     Ok(ReviewDecision::ReviewRequired) => "review_required",
                     _ => "unknown",
                 },
+                // The PR head as GitHub last saw it. The only thing that can
+                // establish that a SQUASH-merged branch holds nothing unmerged:
+                // its commits never appear in main with these SHAs, so local
+                // ancestry can never prove it.
+                "headOid": p.head_oid,
+                // When it landed, in unix milliseconds, or null if it has not.
+                "mergedAt": p.merged_at,
+                // When the daemon last read this from GitHub, in unix
+                // milliseconds. `stale` below is derived from it — by the
+                // DAEMON, so three platforms cannot disagree about what "a
+                // while ago" means — and this is here so a client can say how
+                // long ago rather than only that it was a while.
+                "fetchedAt": p.fetched_at,
                 // Whether this was read from GitHub long enough ago to doubt.
                 "stale": p.stale,
             })),
@@ -1852,6 +1879,75 @@ mod tests {
         let missing = SessionError::DaemonMissing { daemon: daemon_binary() };
         assert!(missing.is_disconnect());
         assert!(missing.to_string().contains("installed"));
+    }
+
+    /// The three fields the daemon computes and this used to throw away.
+    ///
+    /// `head_oid` is the only thing that can prove a squash-merged branch holds
+    /// nothing unmerged, `merged_at` is when it landed, and `fetched_at` is what
+    /// `stale` is derived from — all three already crossed the wire and stopped
+    /// at this function. Pinned here because this is the shape both apps decode:
+    /// a key that stops being written is a feature that stops existing on every
+    /// client at once.
+    #[test]
+    fn a_pr_carries_every_field_the_daemon_computed_for_it() {
+        let list = farcooler_protocol::v1::StackLinkList {
+            repository_id: bytes::Bytes::new(),
+            items: vec![farcooler_protocol::v1::StackLink {
+                branch: "feat/x".into(),
+                parent_branch: "main".into(),
+                parent_source: farcooler_protocol::v1::ParentSource::Recorded as i32,
+                head_commit: "aaa".into(),
+                ahead: 1,
+                behind: 0,
+                pr: Some(farcooler_protocol::v1::PrStatus {
+                    number: 335,
+                    url: "https://github.com/o/r/pull/335".into(),
+                    state: farcooler_protocol::v1::PrState::Open as i32,
+                    checks: farcooler_protocol::v1::CheckState::Passing as i32,
+                    review_decision: farcooler_protocol::v1::ReviewDecision::Approved as i32,
+                    head_oid: "deadbeef".into(),
+                    merged_at: Some(1_785_925_777_000),
+                    fetched_at: 1_785_925_800_000,
+                    stale: true,
+                }),
+            }],
+            cycle_detected: false,
+            pr_known: true,
+            repo_url: "https://github.com/o/r".into(),
+        };
+
+        let json = stack_json(&list);
+        let pr = &json["links"][0]["pr"];
+        assert_eq!(pr["headOid"], "deadbeef");
+        assert_eq!(pr["mergedAt"], 1_785_925_777_000i64);
+        assert_eq!(pr["fetchedAt"], 1_785_925_800_000i64);
+        assert_eq!(pr["stale"], true);
+    }
+
+    /// "GitHub says there is no PR" and "we could not ask GitHub" are the same
+    /// absent `pr` on every link, and a client that could not tell them apart
+    /// would offer to create a pull request that already exists.
+    #[test]
+    fn a_read_says_whether_github_answered_at_all() {
+        let mut list = farcooler_protocol::v1::StackLinkList {
+            repository_id: bytes::Bytes::new(),
+            items: Vec::new(),
+            cycle_detected: false,
+            pr_known: false,
+            repo_url: String::new(),
+        };
+        let json = stack_json(&list);
+        assert_eq!(json["prKnown"], false);
+        // Empty is not a URL. A client must get nothing rather than a link to
+        // nowhere, so the key is null and not "".
+        assert!(json["repoUrl"].is_null(), "an unknown repository URL is absent, not empty");
+
+        list.pr_known = true;
+        list.repo_url = "https://github.example/o/r".into();
+        let json = stack_json(&list);
+        assert_eq!(json["prKnown"], true);
+        assert_eq!(json["repoUrl"], "https://github.example/o/r");
     }
 
     #[test]

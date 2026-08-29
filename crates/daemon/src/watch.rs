@@ -2521,6 +2521,28 @@ impl Watcher {
         });
     }
 
+    /// A repository's stack was re-read.
+    ///
+    /// Carries the whole list, unlike `announce_change_set` above and like
+    /// `publish_layout`. The reason the change set does not is that it is
+    /// unbounded — a lockfile regeneration fans thousands of file records out to
+    /// every connected device — and a stack is not: it is one link per branch in
+    /// somebody's chain, with a PR status each. There is nothing here worth a
+    /// second round trip, and the client waiting for it is holding a row it
+    /// could not fill.
+    ///
+    /// Emitted from `review_ops::fill_prs_in_background`, which is what a
+    /// `stack.get` against a repository nobody has read GitHub for kicks off.
+    /// Without this the fill lands in a cache nobody re-reads, and filling on
+    /// first read does nothing at all.
+    pub fn announce_stack_changed(&self, list: farcooler_protocol::v1::StackLinkList) {
+        let _ = self.events.send(Event {
+            event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+            sequence: 0,
+            payload: Some(farcooler_protocol::v1::event::Payload::StackChanged(list)),
+        });
+    }
+
     /// Start a change-set pass, unless one is still going.
     ///
     /// Detached rather than awaited inside the tick loop, because this is the

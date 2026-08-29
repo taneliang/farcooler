@@ -40,7 +40,44 @@ pub const GH_MAX_CONCURRENT: usize = 4;
 
 /// The least time between automatic refreshes of one repository. A user pressing
 /// Refresh is exempt.
+///
+/// The caller is `Service::claim_pr_fill` (`service.rs`), reached from
+/// `stack.get`. It bounds two different things at once. The first is a
+/// stampede: five clients opening the same repository in the same second would
+/// otherwise each see an empty cache and each fork a `gh`. The second is a
+/// repository `gh` cannot answer for at all — logged out, or no remote — where
+/// the cache never fills and every read would otherwise try again.
 pub const GH_MIN_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How old a read of GitHub may be before a client should say so.
+///
+/// Decided here rather than in each app, so iOS, Android and macOS cannot hold
+/// three different opinions about what "a while ago" means — which is what
+/// would have happened, because all three already render that sentence and none
+/// of them could ever show it: `stale` was hardwired false at both construction
+/// sites and never once set true.
+///
+/// Fifteen minutes, for what it has to separate. It is not `GH_MIN_INTERVAL`:
+/// sixty seconds would mark almost every PR stale almost immediately, since a
+/// read fills the cache once and nothing polls it afterwards, and a warning
+/// that is always on is a warning nobody reads — the same reason `71934f8`
+/// turned the last permanent green dot neutral. It is short enough to still be
+/// true: a CI run finishes in minutes, so a check state read a quarter of an
+/// hour ago is genuinely worth doubting, and the sentence appearing is what
+/// tells someone their Refresh would not be pointless.
+pub const PR_STALE_AFTER: Duration = Duration::from_secs(15 * 60);
+
+/// Whether a PR read at `fetched_at` is old enough to say so, at `now`. Both in
+/// unix milliseconds.
+///
+/// A reading from the FUTURE is current, not stale. `fetched_at` is the
+/// runner's own wall clock and a phone is comparing it against that same
+/// runner's clock a moment later, but an NTP correction between the two lands
+/// here as a negative age — and the arithmetic must not turn that into a large
+/// positive one.
+pub fn is_stale(fetched_at: i64, now: i64) -> bool {
+    now.saturating_sub(fetched_at) > PR_STALE_AFTER.as_millis() as i64
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParentSource {
@@ -70,8 +107,15 @@ pub struct PrStatus {
     pub review_decision: ReviewDecision,
     pub head_oid: String,
     pub merged_at: Option<i64>,
+    /// When this was read from GitHub, in unix milliseconds.
+    ///
+    /// There is deliberately no `stale` beside it. There was one, `false` at
+    /// every construction site and set true by nothing, behind a sentence three
+    /// apps already knew how to render — so the field existed, crossed the wire,
+    /// and could never be true. Staleness is a fact about how long ago this
+    /// happened, which changes while the value sits in the cache; it is derived
+    /// at the moment of answering, by `review_ops::pb_pr` from `is_stale`.
     pub fetched_at: i64,
-    pub stale: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,7 +340,6 @@ fn parse_pr(p: GhPr) -> PrInfo {
             head_oid: p.head_ref_oid,
             merged_at,
             fetched_at: crate::review::now_millis(),
-            stale: false,
         },
     }
 }
@@ -397,17 +440,53 @@ pub fn discard_verdict(i: &DiscardInputs<'_>) -> DiscardVerdict {
     DiscardVerdict::Safe
 }
 
-/// The repository's default branch, according to GitHub.
+/// What one `gh repo view` says about a repository.
 ///
-/// One short call, and it degrades to `None` for every reason `fetch_prs` does —
-/// `gh` absent, logged out, offline, rate limited. The caller falls back to
-/// `origin/HEAD`, so a runner without `gh` is not a runner without review.
-pub async fn fetch_default_branch(worktree: &Path) -> Option<String> {
+/// Two fields from one subprocess. The web URL rides along with the default
+/// branch rather than being parsed out of a git remote, because parsing
+/// `git@github.com:o/r.git` by hand is a guess that is wrong for every GitHub
+/// Enterprise host — and `gh` already knows, already runs, and is already
+/// cached per repository for the daemon's lifetime.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RepoFacts {
+    /// GitHub's default branch, bare (`main`), never remote-qualified.
+    pub default_branch: Option<String>,
+    /// The repository's page, e.g. `https://github.com/o/r`.
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhRepo {
+    #[serde(rename = "defaultBranchRef", default)]
+    default_branch_ref: Option<GhBranchRef>,
+    #[serde(default)]
+    url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhBranchRef {
+    #[serde(default)]
+    name: String,
+}
+
+/// The repository's default branch and web URL, according to GitHub.
+///
+/// One short call, and every field degrades to `None` for every reason
+/// `fetch_prs` does — `gh` absent, logged out, offline, rate limited. The caller
+/// falls back to `origin/HEAD` for the branch, so a runner without `gh` is not a
+/// runner without review; there is no fallback for the URL, and a client shows
+/// no link rather than a link to the wrong host.
+///
+/// Parsed as JSON rather than asked for with `-q`, which is what this used to
+/// do. `-q` can only pull one value out, and a second `gh` process to learn a
+/// string that arrived in the same response would be a network round trip for
+/// nothing.
+pub async fn fetch_repo_facts(worktree: &Path) -> RepoFacts {
     let out = tokio::time::timeout(
         GH_TIMEOUT,
         tokio::process::Command::new("gh")
             .current_dir(worktree)
-            .args(["repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"])
+            .args(["repo", "view", "--json", "defaultBranchRef,url"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -416,12 +495,27 @@ pub async fn fetch_default_branch(worktree: &Path) -> Option<String> {
     )
     .await;
 
-    match out {
-        Ok(Ok(o)) if o.status.success() => {
-            let name = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if name.is_empty() { None } else { Some(name) }
+    let out = match out {
+        Ok(Ok(o)) if o.status.success() => o,
+        _ => return RepoFacts::default(),
+    };
+
+    let repo: GhRepo = match serde_json::from_slice(&out.stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read gh repo output");
+            return RepoFacts::default();
         }
-        _ => None,
+    };
+
+    // An empty string is not an answer. `gh` can report a repository with no
+    // default branch ref at all — a repository with no commits — and a caller
+    // that took `""` for a branch name would run every later git command
+    // against nothing.
+    let non_empty = |s: String| if s.trim().is_empty() { None } else { Some(s.trim().to_string()) };
+    RepoFacts {
+        default_branch: repo.default_branch_ref.and_then(|r| non_empty(r.name)),
+        url: repo.url.and_then(non_empty),
     }
 }
 
@@ -454,7 +548,6 @@ mod tests {
             head_oid: head_oid.into(),
             merged_at: Some(1),
             fetched_at: 0,
-            stale: false,
         }
     }
 
@@ -660,6 +753,35 @@ mod tests {
         };
         assert_eq!(parse_pr(mk(true)).status.state, PrState::Draft);
         assert_eq!(parse_pr(mk(false)).status.state, PrState::Open);
+    }
+
+    /// The sentence three apps already render, given something to render it
+    /// for.
+    ///
+    /// The threshold is decided HERE and nowhere else. `stale` crosses the wire
+    /// as a bool precisely so iOS, Android and macOS cannot hold three
+    /// different opinions about what "a while ago" means.
+    #[test]
+    fn a_pr_read_longer_ago_than_the_threshold_is_stale() {
+        let now = 1_785_925_777_000;
+        let ms = PR_STALE_AFTER.as_millis() as i64;
+
+        assert!(!is_stale(now, now), "a read that just happened is current");
+        assert!(!is_stale(now - ms + 1_000, now), "a second inside the threshold is current");
+        assert!(is_stale(now - ms - 1_000, now), "a second past it is stale");
+        assert!(is_stale(now - 24 * 3_600_000, now), "yesterday is certainly stale");
+    }
+
+    /// A clock that went backwards must not make a fresh read look ancient.
+    ///
+    /// `fetched_at` is this runner's own wall clock, and a phone asking a runner
+    /// whose clock was just corrected by NTP would otherwise be told a PR read
+    /// four seconds ago was read in the future — which, subtracted, is a large
+    /// positive age on some other arrangement of this arithmetic.
+    #[test]
+    fn a_reading_from_the_future_is_not_stale() {
+        let now = 1_785_925_777_000;
+        assert!(!is_stale(now + 3_600_000, now));
     }
 
     #[test]

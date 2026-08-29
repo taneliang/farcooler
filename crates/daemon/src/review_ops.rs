@@ -402,6 +402,15 @@ pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
 // stacks and PR state
 // ---------------------------------------------------------------------------
 
+/// One PR's state on the wire.
+///
+/// `stale` is DERIVED here, at the moment of answering, and there is no longer a
+/// field on the record to copy it from. It has to be derived: it is a fact about
+/// how long ago the read happened, and that changes while the value sits in the
+/// cache. The field it used to be copied from was written `false` at both of
+/// `stack.rs`'s construction sites and set true by nothing, so "Last read from
+/// GitHub a while ago" — which iOS and Android both already render — was a
+/// sentence that could not appear.
 fn pb_pr(p: &crate::stack::PrStatus) -> pb::PrStatus {
     use crate::stack as st;
     pb::PrStatus {
@@ -429,7 +438,7 @@ fn pb_pr(p: &crate::stack::PrStatus) -> pb::PrStatus {
         head_oid: p.head_oid.clone(),
         merged_at: p.merged_at,
         fetched_at: p.fetched_at,
-        stale: p.stale,
+        stale: crate::stack::is_stale(p.fetched_at, now_millis()),
     }
 }
 
@@ -500,7 +509,19 @@ async fn build_stack(
     };
     if refresh_prs {
         svc.pr_cache_put(repository_id, prs.clone());
+        // A forced refresh is already spending somebody's rate limit and is
+        // already `Scope::Control`, so it is the right moment to learn the
+        // repository's web URL as well. Cached for the daemon's lifetime, so
+        // this is one subprocess the first time and nothing afterwards.
+        let _ = svc.default_branch(repository_id, worktree).await;
     }
+    // Whether `gh` ANSWERED, which is not whether there are any PRs.
+    //
+    // Read back from the cache rather than from `prs` above, because `prs` has
+    // already been flattened: a failed `gh` and a `gh` nobody ran are both
+    // `None` there, and telling them apart is the entire point of this field.
+    // See `Service::pr_answer_is_known`.
+    let pr_known = svc.pr_answer_is_known(repository_id);
 
     let recorded: Vec<(String, String)> = Vec::new();
     let parent_of = |b: &str| -> Option<(String, crate::stack::ParentSource)> {
@@ -540,7 +561,66 @@ async fn build_stack(
         repository_id: id_bytes(repository_id),
         items: links.iter().map(pb_link).collect(),
         cycle_detected: cycle,
+        pr_known,
+        // Cache-only. Nothing on this path may wait on `gh`, so a repository
+        // nobody has asked about yet reports no URL and gets one on the
+        // `stack_changed` event the fill below pushes.
+        repo_url: svc.repo_web_url(repository_id).unwrap_or_default(),
     })
+}
+
+/// Fill an empty PR cache for `repository_id`, off the caller's thread, and
+/// announce the result.
+///
+/// Decision 2 of `pr-status-at-a-glance.md`, and its first constraint is what
+/// this shape is for: `stack.get` must return what is cached — empty — at local
+/// speed, and the answer must arrive later as an event. Awaiting `gh` inside the
+/// read would put GitHub's latency on the path of drawing a fleet, which is the
+/// same thing `resolve_base` refuses to do and for the same reason.
+///
+/// Detached rather than awaited, and claimed rather than merely spawned:
+/// `claim_pr_fill` is what stops five clients opening the same repository from
+/// forking five `gh` processes, and what bounds a repository `gh` can never
+/// answer for to one attempt per `GH_MIN_INTERVAL`.
+///
+/// It announces even when `gh` failed. A client that got an empty first read is
+/// otherwise waiting on an event that will never come, with no way to tell that
+/// from an answer still in flight — and `pr_known: false` on the event is a
+/// different statement from `pr_known: false` on the read: the first says
+/// GitHub was asked and could not answer, the second says nobody has asked yet.
+pub fn fill_prs_in_background(
+    service: std::sync::Arc<Service>,
+    watcher: std::sync::Arc<crate::watch::Watcher>,
+    repository_id: Uuid,
+    branch: String,
+) {
+    if !service.claim_pr_fill(repository_id) {
+        return;
+    }
+    tokio::spawn(async move {
+        let Ok(worktree_path) = any_worktree(&service, repository_id).await else { return };
+        let worktree = Path::new(&worktree_path);
+
+        // The repository's default branch and web URL, from one cached
+        // `gh repo view`. Before the PR list rather than after, so a client that
+        // acts on this event has the compare link's other half in the same
+        // message it learns there is no PR from.
+        let _ = service.default_branch(repository_id, worktree).await;
+
+        let prs = {
+            let _permit = service.gh_permit().await;
+            crate::stack::fetch_prs(worktree).await
+        };
+        // An `Err` here is not a `gh` that failed — those are `Ok(None)` on
+        // purpose — so there is nothing to record and nothing to say.
+        let Ok(prs) = prs else { return };
+        service.pr_cache_put(repository_id, prs);
+
+        match build_stack(&service, repository_id, &branch, false).await {
+            Ok(list) => watcher.announce_stack_changed(list),
+            Err(e) => tracing::warn!(error = %e, "could not rebuild a stack after filling it"),
+        }
+    });
 }
 
 pub async fn stack_get(svc: &Service, req: &pb::StackGet) -> Result<pb::StackLinkList> {
@@ -571,4 +651,49 @@ pub async fn pr_refresh(svc: &Service, req: &pb::PrRefresh) -> Result<pb::StackL
         .unwrap_or_else(|| "HEAD".into());
     let _ = worktree_path;
     build_stack(svc, repository_id, &branch, true).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn a_pr_read_at(fetched_at: i64) -> crate::stack::PrStatus {
+        crate::stack::PrStatus {
+            number: 335,
+            url: "https://github.com/o/r/pull/335".into(),
+            state: crate::stack::PrState::Open,
+            checks: crate::stack::CheckState::Passing,
+            review_decision: crate::stack::ReviewDecision::Approved,
+            head_oid: "deadbeef".into(),
+            merged_at: None,
+            fetched_at,
+        }
+    }
+
+    /// `stale` is answered from the clock, not copied from the record.
+    ///
+    /// It used to be copied, from a field written `false` at both construction
+    /// sites in `stack.rs` and set true by nothing — so "Last read from GitHub a
+    /// while ago", which iOS and Android both render, was a sentence that could
+    /// not appear. The threshold lives in the daemon so three platforms cannot
+    /// hold three opinions about what "a while" is.
+    #[test]
+    fn how_stale_a_pr_is_comes_from_when_it_was_read() {
+        let now = now_millis();
+        let threshold = crate::stack::PR_STALE_AFTER.as_millis() as i64;
+
+        assert!(!pb_pr(&a_pr_read_at(now)).stale, "a read that just happened is current");
+        assert!(
+            pb_pr(&a_pr_read_at(now - threshold - 60_000)).stale,
+            "a read past the threshold must say so, or the warning can never appear"
+        );
+    }
+
+    /// And the timestamp it is derived from crosses the wire too, so a client
+    /// can say how long ago rather than only that it was a while.
+    #[test]
+    fn the_timestamp_stale_is_derived_from_crosses_the_wire_as_well() {
+        let read_at = 1_785_925_800_000;
+        assert_eq!(pb_pr(&a_pr_read_at(read_at)).fetched_at, read_at);
+    }
 }
