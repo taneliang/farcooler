@@ -45,11 +45,20 @@ final class TerminalScrollTests: XCTestCase {
         guard surface.exists, let value = surface.value as? String else { return nil }
         let parts = value.split(separator: " ")
         guard
-            parts.count == 2,
+            parts.count == 3,
             let offset = Int(parts[0].replacingOccurrences(of: "offset=", with: "")),
             let history = Int(parts[1].replacingOccurrences(of: "history=", with: ""))
         else { return nil }
         return (offset, history)
+    }
+
+    /// "stream" or "poll" — which painter is feeding the pane.
+    private func source(_ app: XCUIApplication) -> String? {
+        let surface = app.otherElements["terminal-surface"]
+        guard surface.exists, let value = surface.value as? String else { return nil }
+        return value.split(separator: " ").last.map {
+            $0.replacingOccurrences(of: "source=", with: "")
+        }
     }
 
     /// Walk from wherever the app opens to a terminal pane.
@@ -142,5 +151,37 @@ final class TerminalScrollTests: XCTestCase {
             surface.swipeUp(velocity: .fast)
         }
         XCTAssertEqual(position(app)?.offset, 0, "the view never came back to the live screen")
+    }
+
+    /// On a runner that advertises `terminal_stream`, a pane must actually
+    /// stream — not merely look fine.
+    ///
+    /// This is the assertion the whole streaming defect went years without.
+    /// A polled pane repaints several times a second and reads perfectly, so
+    /// "the terminal works" was true and useless: every enrolled device had
+    /// silently fallen back, and the only visible symptom was scrollback that
+    /// did not exist. Asserting on the PAINTER rather than on the picture is
+    /// what makes that observable.
+    ///
+    /// Skipped rather than failed on a runner without the capability — that is
+    /// a legitimate configuration and the fallback has its own tests above.
+    func testAPaneOnACapableRunnerStreams() throws {
+        let app = launch()
+        try openATerminal(app)
+
+        let painter = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value ENDSWITH %@", "source=stream"),
+            object: app.otherElements["terminal-surface"]
+        )
+        guard XCTWaiter.wait(for: [painter], timeout: 30) == .completed else {
+            throw XCTSkip(
+                """
+                This pane is on \(source(app) ?? "an unknown painter"), which is \
+                correct for a runner that does not advertise `terminal_stream`. \
+                Rebuild the demo host to exercise the attach path.
+                """
+            )
+        }
+        XCTAssertEqual(source(app), "stream")
     }
 }

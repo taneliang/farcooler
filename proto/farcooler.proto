@@ -88,33 +88,42 @@ message Request {
     TerminalResize terminal_resize = 25;
     TerminalStop terminal_stop = 26;
     TypedConfirmation typed_confirmation = 27;
-    // 28 was TerminalAttach. Streaming a terminal is a second SSH exec of
-    // `farcoolerd --stream <id>`, not a wire method — see
-    // `crates/client/src/session.rs` — so this had no handler, no scope entry
-    // and no caller. Retired rather than reused, like 30 below.
+    // Attach to one terminal's live bytes, on the connection this arrives on.
     //
-    // That premise no longer holds, and nothing has replaced it. Every key
-    // `crates/fence` enrolls carries
+    // `terminal.attach`, and the reason it is a wire method rather than the
+    // second SSH exec it used to be. This tag was retired once, with the note
+    // "streaming a terminal is a second SSH exec of `farcoolerd --stream <id>`,
+    // not a wire method". That was true when it was written and stopped being
+    // true when enrollment started forcing a command: every key `crates/fence`
+    // enrolls carries
     // `restrict,command="~/.local/bin/farcoolerd --stdio --client … --scope …"`,
     // and a forced command is OpenSSH discarding whatever the client asked to
     // run — which `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` pins as
-    // a security property. So the second exec lands on a `--stdio` relay, which
-    // is a protocol server and says nothing until spoken to: the channel opens,
-    // the client reads success, and no byte ever arrives. Measured on a loopback
-    // sshd against one daemon and one pane, the only variable being the
-    // `authorized_keys` line: 62ms to the first replayed byte on a plain key,
-    // nothing at all in 25 seconds on the line this product writes. Every phone
-    // and every Android device is therefore on the capture-polling fallback,
-    // which carries no scrollback (`crates/tmux/src/windows.rs`), so those panes
-    // cannot scroll.
+    // a security property. So the second exec landed on a `--stdio` relay, which
+    // is a protocol server and says nothing until it is spoken to: the channel
+    // opened, the client read success, and no byte ever arrived. Every enrolled
+    // phone and every Android device sat on the capture-polling fallback, which
+    // carries no scrollback (`crates/tmux/src/windows.rs`), so those panes could
+    // not scroll — and retried the doomed attach forever against sshd's
+    // ten-session ceiling.
     //
-    // Whoever fixes it chooses between bringing this tag back as a wire method —
-    // carried on a second `--stdio` session, the way `farcooler events` already
-    // streams over ssh, so the control connection is still not shared — and
-    // teaching the forced command to dispatch a stream. The tag stays retired
-    // until that is decided; reusing it by accident meanwhile would be worse
-    // than the bug.
-    TerminalAttach terminal_attach = 28 [deprecated = true];
+    // Speaking the protocol on the second channel is what ends that, because
+    // `--stdio` is the one command BOTH key types run: a forced-command key has
+    // sshd substitute it, and a plain key matches it in `main.rs` before
+    // `--stream`. The client stops depending on which line it holds — the
+    // difference that made this bug invisible on the Mac, which enrolls a plain
+    // shell key beside its restricted one, and in every loopback test.
+    //
+    // Still a SECOND `--stdio` session rather than events on the control
+    // connection: `Client::call` reads frames until it sees its own response, so
+    // a scrollback replay carried there would sit in front of every fleet
+    // refresh. `farcooler events` already streams over ssh this way.
+    //
+    // `--stream` is not replaced. It is what the Mac's CLI uses and the only
+    // path a plain-key client has on a runner too old to advertise
+    // `terminal_stream`; a client that does not see that capability keeps
+    // exec'ing it, and keeps the poll fallback behind it.
+    TerminalAttach terminal_attach = 28;
     LayoutUpdate layout_update = 29;
     // 30 was WorktreeImport. Worktrees are adopted by the daemon's reconciler
     // now, so there is nothing for a client to import. The tag is retired
@@ -182,8 +191,7 @@ message Result {
     TerminalList terminal_list = 9;
     Operation operation = 10;
     DaemonVersion daemon_version = 11;
-    // 12 was TerminalAttachResult. See `Request`'s tag 28.
-    TerminalAttachResult terminal_attach = 12 [deprecated = true];
+    TerminalAttachResult terminal_attach = 12;
     BranchList branch_list = 13;
     PaneGroupList pane_group_list = 14;
     WorktreeList worktree_list = 15;
@@ -385,6 +393,23 @@ message Event {
     // thousands of file records to everyone.
     ChangeSetChanged change_set_changed = 19;
     StackLinkList stack_changed = 21;
+    // Live bytes from a terminal this connection attached to.
+    //
+    // The only arm in this oneof addressed to ONE connection rather than
+    // broadcast to every one of them. A pane's output is not fleet news: it is
+    // the answer to this session's `terminal.attach`, it arrives in whatever
+    // volume the program writes, and a client that never attached has no
+    // emulator to feed it to. So the daemon pushes these down the attaching
+    // connection alone — see `Handler::pushes` in `crates/transport` — while
+    // everything else here rides the broadcast every connection subscribes to.
+    //
+    // `TerminalFrame` rather than a message of its own, because it is already
+    // the frame this stream was designed around: the terminal, the epoch, a run
+    // of bytes at a byte offset, and a `Gap` for the day a runner can resume an
+    // attachment and finds it cannot cover one. Only `output` and `gap` are
+    // ever sent this way — the input and resize arms are a client talking, and
+    // an `Event` is only ever the daemon.
+    TerminalFrame terminal_frame = 20;
   }
 }
 
@@ -1371,7 +1396,35 @@ message TerminalScreenRequest {
   uint32 history_lines = 2;
 }
 
+// Start this connection's live view of one terminal. The terminal is named by
+// `Request.target_resource_id`, the way `terminal.screen` names it.
+//
+// The answer is a `TerminalAttachResult` and then a run of
+// `Event.terminal_frame` frames on this same connection: first the replay —
+// the pane's modes, its scrollback, a clear, its visible screen and its cursor,
+// in that order — and then every byte the program writes, for as long as the
+// connection lives. Detaching is closing the connection; there is no second
+// method for it, because the only client that attaches gives the attachment a
+// session of its own.
+//
+// One attachment per connection. A second `terminal.attach` replaces the first
+// rather than adding to it: two panes' bytes interleaved on one connection
+// would be two streams a client has to demultiplex for no gain, when opening a
+// second connection costs one ssh channel and keeps them apart.
 message TerminalAttach {
+  // Where this client stopped reading, if it is coming back to a stream it
+  // already had. `resume_token` says which stream that was.
+  //
+  // NOT YET SERVED. Resuming means the runner retained the bytes written while
+  // nobody was attached, and it retains nothing: the pane's fanout ends a few
+  // seconds after its last watcher leaves, which is exactly the moment a
+  // reconnecting client would want to resume across. A runner that cannot
+  // resume says so by answering with an empty `resume_token` and
+  // `oldest_sequence` equal to `next_sequence`, and sends a full replay — which
+  // is correct, just more expensive. The fields are here rather than added
+  // later because the shape a resume needs was worked out with them, and
+  // because a client that starts sending them today gets the replay it would
+  // have got anyway.
   optional uint64 last_acked_sequence = 1;
   optional string resume_token = 2;
 }
@@ -1406,12 +1459,27 @@ message LayoutUpdate {
   optional uint32 rows = 15;
 }
 
+// The attachment exists; bytes follow as `Event.terminal_output`.
 message TerminalAttachResult {
+  // The run these bytes belong to. A restarted pane is a new epoch, so a client
+  // that reattaches and gets a different one is holding a picture of a program
+  // that no longer exists and must replace rather than append.
   uint64 epoch = 1;
+  // Where this attachment's numbering starts, and the oldest offset the runner
+  // could still hand back. Equal to each other means "nothing is retained for
+  // you": the replay that follows is the whole of what there is, and a
+  // `last_acked_sequence` from a previous attachment could not have been
+  // honored. Both are zero today, because no runner retains bytes for an
+  // absent client — see `TerminalAttach.last_acked_sequence`.
   uint64 next_sequence = 2;
   uint64 oldest_sequence = 3;
+  // The pane's size right now, so a client can build its emulator at the shape
+  // the replay was captured at rather than at the shape it last asked for.
   uint32 columns = 4;
   uint32 rows = 5;
+  // Empty when this runner cannot resume an attachment, which is every runner
+  // today. A client stores it and hands it back; an empty one means the next
+  // attach starts over.
   string resume_token = 6;
 }
 

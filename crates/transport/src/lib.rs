@@ -82,6 +82,32 @@ pub trait Handler: Send + Sync + 'static {
         None
     }
 
+    /// Events addressed to THIS connection, if the handler produces any.
+    ///
+    /// The pair to `events` above, and deliberately not the same channel. A
+    /// broadcast is the right shape for fleet news — every connection wants it,
+    /// and a receiver that falls behind may drop and reconcile, which
+    /// `next_event` does on purpose. Neither holds for a terminal attachment:
+    /// the bytes belong to the one connection that asked for them, and dropping
+    /// some is not a stale screen but an escape sequence cut in half, which a
+    /// client cannot detect or recover from.
+    ///
+    /// So this is an mpsc, and it is unbounded on purpose: the ceiling that
+    /// matters is already downstream, in rule 4's `queued_bytes` watchdog, which
+    /// disconnects a client that cannot keep up rather than letting the daemon
+    /// grow without limit. A second ceiling here would be a second, quieter
+    /// answer to the same question.
+    ///
+    /// Taken once, before the first request, so a handler hands out its receiver
+    /// exactly once and a second `serve_connection` on the same handler gets
+    /// none rather than half the bytes.
+    ///
+    /// Defaulted to none, so a handler with nothing to push — a test, a one-shot
+    /// session — needs no change.
+    fn pushes(&self) -> Option<tokio::sync::mpsc::UnboundedReceiver<farcooler_protocol::v1::Event>> {
+        None
+    }
+
     /// Resolves when this connection must stop being served.
     ///
     /// The seam revocation needs and could not otherwise have: removing a

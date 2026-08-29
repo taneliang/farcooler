@@ -330,6 +330,13 @@ where
     // connected client as it happens and an idle fleet costs nothing.
     let mut events = handler.events();
 
+    // And what is addressed to this connection alone: an attached terminal's
+    // bytes. Kept off the broadcast above because that one drops frames from a
+    // slow reader by design, and a dropped run of terminal output is an escape
+    // sequence cut in half rather than a screen one refresh out of date. See
+    // `Handler::pushes`.
+    let mut pushes = handler.pushes();
+
     loop {
         tokio::select! {
             // Biased so a pending request is always answered before events are
@@ -379,8 +386,45 @@ where
                     body: Some(wire_envelope::Body::Event(event)),
                 }).await?;
             }
+
+            // Last in the biased order, behind the broadcast, so a pane writing
+            // as fast as it can cannot starve the fleet news this connection is
+            // also carrying. The other way round would be the wrong risk:
+            // broadcast events are rare, so putting them first costs a busy
+            // stream nothing measurable, while a `yes` in a pane would otherwise
+            // keep a workspace change waiting indefinitely.
+            pushed = next_push(&mut pushes) => {
+                let Some(event) = pushed else {
+                    // Whatever was pushing has stopped — an attachment ended, or
+                    // this handler never had one. Not a reason to drop a working
+                    // connection: the client can attach again on it.
+                    pushes = None;
+                    continue;
+                };
+                conn.send(&WireEnvelope {
+                    protocol_version: PROTOCOL_VERSION,
+                    message_id: ids::new_id(),
+                    body: Some(wire_envelope::Body::Event(event)),
+                }).await?;
+            }
         }
     }
+}
+
+/// Await the next event addressed to this connection, or never, when there is
+/// nothing pushing to it. The `pending` arm is there for the reason
+/// `next_event` gives above: `select!` needs every branch to be a future.
+async fn next_push(
+    pushes: &mut Option<mpsc::UnboundedReceiver<Event>>,
+) -> Option<Event> {
+    let Some(receiver) = pushes else {
+        std::future::pending::<()>().await;
+        unreachable!("pending never resolves");
+    };
+    // No lag arm to handle, which is the whole reason this is an mpsc: a sender
+    // that outruns this connection queues, and the rule-4 watchdog decides when
+    // that has gone on too long. `None` means every sender is gone.
+    receiver.recv().await
 }
 
 /// Await the next event, or never, when this handler emits none.

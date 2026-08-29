@@ -71,3 +71,8 @@ farcooler-transport.workspace = true
 # ends up holding rather than which bytes were written at it. A dev-dependency
 # only: the daemon itself never parses a screen.
 farcooler-vt = { path = "../vt" }
+# The client the phone actually runs, so the streaming test drives
+# `Session::open_stream` rather than a second idea of what it does. A
+# dev-dependency cycle — `farcooler-client` depends on this crate — which cargo
+# permits precisely for this: a test that needs the real caller.
+farcooler-client.workspace = true

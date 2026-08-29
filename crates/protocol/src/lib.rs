@@ -217,6 +217,23 @@ pub mod capability {
     /// Absent means the runner notifies exactly as it always did, which is why
     /// a client can simply not send it.
     pub const WATCHING: &str = "watching";
+    /// Streaming a terminal's live bytes as a wire method: `terminal.attach`,
+    /// answered with `Event.terminal_output` frames on the attaching
+    /// connection.
+    ///
+    /// Its own capability rather than part of `TERMINALS`, for the reason
+    /// `WATCHING` above is its own, and here it is load-bearing rather than
+    /// tidy. Streaming has always been reachable — by exec'ing
+    /// `farcoolerd --stream <id>` on a second ssh channel — so every daemon
+    /// that ever shipped advertises `terminals` and cannot serve this method.
+    /// A client that could not tell would have to try the attach and read the
+    /// refusal, which costs a round trip on a runner where the exec still works
+    /// perfectly well.
+    ///
+    /// Absent means the client execs `--stream` exactly as it always did, and
+    /// falls back to polling if that stays silent. See
+    /// `Session::open_stream` in `crates/client`.
+    pub const TERMINAL_STREAM: &str = "terminal_stream";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -225,7 +242,7 @@ pub mod capability {
     pub const ALL: &[&str] =
         &[
             WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
-            ENROLLMENT, WATCHING,
+            ENROLLMENT, WATCHING, TERMINAL_STREAM,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -285,6 +302,7 @@ pub mod capability {
             "theme.list" | "theme.upsert" | "theme.delete" | "settings.set_branch_prefix" => THEMES,
             "client.list" | "client.enroll" | "client.revoke" => ENROLLMENT,
             "terminal.watching" => WATCHING,
+            "terminal.attach" => TERMINAL_STREAM,
             _ => return None,
         })
     }
@@ -388,6 +406,7 @@ mod tests {
             "adapter.list",
             "theme.list",
             "client.enroll",
+            "terminal.attach",
         ] {
             let cap = capability::for_method(method).expect("a known method");
             assert!(capability::ALL.contains(&cap), "{method} names {cap}, which is not advertised");

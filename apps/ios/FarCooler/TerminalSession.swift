@@ -189,8 +189,24 @@ final class TerminalSession: ObservableObject {
     /// polls instead. See ``waitForTheFirstByte()``.
     ///
     /// Measured against what the first byte is actually waiting for, which is
-    /// not a round trip. `open_stream` execs `farcoolerd --stream <id>` on the
-    /// runner (`crates/client/src/session.rs:184`), and that is a cold process:
+    /// not a round trip.
+    ///
+    /// **On a runner that advertises `terminal_stream` the cold process below is
+    /// gone.** `open_stream` opens the second channel with `--stdio` and speaks
+    /// `terminal.attach` on it, and `--stdio` finds a daemon already listening
+    /// and becomes a pipe to it (`crates/daemon/src/main.rs`, `serve_stdio_session`)
+    /// — no second `Service`, no second SQLite handle, no migrations, no second
+    /// inventory refresh. What is left is a handshake, one round trip, and the
+    /// four `tmux` captures: 67ms end to end over loopback ssh, measured in
+    /// `crates/daemon/tests/a_forced_command_still_streams.rs`.
+    ///
+    /// The deadline stays where it is, because the paragraph below is still the
+    /// worst case and this must survive the worst case: a runner too old for the
+    /// method still gets the exec, and the pane with the most scrollback is
+    /// still the one anybody opens.
+    ///
+    /// The exec, then. `farcoolerd --stream <id>` on the
+    /// runner (`crates/client/src/session.rs`) is a cold process:
     /// it opens a `Service` — a second SQLite handle, migrations included — and
     /// refreshes the whole tmux inventory before it looks at this pane at all
     /// (`crates/daemon/src/main.rs:304`). Only then does the replay begin, and
@@ -276,14 +292,19 @@ final class TerminalSession: ObservableObject {
     /// dropped channel on a link that is otherwise fine, and half a second is
     /// the right answer to it. The ceiling is a different question, and it is
     /// deliberately NOT `slowInterval`. A poll is one `terminal.screen` RPC
-    /// answered by a daemon already running. An attach execs `farcoolerd
-    /// --stream` on the runner: a cold process that opens a second SQLite
-    /// handle with its migrations, refreshes the whole tmux inventory, and
-    /// only then captures the pane's entire scrollback — the work
-    /// `firstByteDeadline` allows twelve seconds for. Retrying that once a
-    /// second would not be a retry, it would be a load generator aimed at a
-    /// runner already having a bad time, and every attempt spends one of the
-    /// ten ssh sessions a default sshd gives this whole phone.
+    /// answered by a daemon already running. An attach on a runner too old to
+    /// advertise `terminal_stream` execs `farcoolerd --stream` there: a cold
+    /// process that opens a second SQLite handle with its migrations, refreshes
+    /// the whole tmux inventory, and only then captures the pane's entire
+    /// scrollback — the work `firstByteDeadline` allows twelve seconds for.
+    /// Retrying that once a second would not be a retry, it would be a load
+    /// generator aimed at a runner already having a bad time, and every attempt
+    /// spends one of the ten ssh sessions a default sshd gives this whole phone.
+    ///
+    /// And a runner too old for the method is exactly the runner that retries
+    /// forever: on one that has it, an enrolled device's attach now succeeds, so
+    /// there is nothing to retry. This ceiling is what kept those doomed retries
+    /// affordable while every enrolled device in the field was making them.
     ///
     /// Thirty seconds is therefore the ceiling. It is comfortably longer than
     /// one attach's own worst case, so attempts cannot overlap or queue behind
@@ -1059,34 +1080,33 @@ final class TerminalSession: ObservableObject {
 
     /// Open the byte stream, and say whether it opened.
     ///
-    /// **True here does not mean bytes are coming, and on a real device it
-    /// currently means the opposite.** The core opens the stream by exec'ing
-    /// `~/.local/bin/farcoolerd --stream <id>` on a second ssh channel
-    /// (`crates/client/src/session.rs`, `open_stream`). Every key this product
-    /// enrolls is written by `crates/fence` as
-    /// `restrict,command="~/.local/bin/farcoolerd --stdio --client … --scope …"`,
-    /// and a forced command is OpenSSH's promise that the client's own command
-    /// is discarded — the very promise
+    /// **True here still does not mean bytes are coming**, and the reason it
+    /// used to mean the opposite is worth keeping. The core opened the stream by
+    /// exec'ing `~/.local/bin/farcoolerd --stream <id>` on a second ssh channel,
+    /// while every key this product enrolls is written by `crates/fence` as
+    /// `restrict,command="~/.local/bin/farcoolerd --stdio --client … --scope …"`
+    /// — and a forced command is OpenSSH's promise that the client's own command
+    /// is discarded, the very promise
     /// `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` exists to pin. So
-    /// what runs on the stream channel is a second `--stdio` protocol relay, and
-    /// a protocol server says nothing until it is spoken to. The channel opens,
-    /// this returns true, and no byte ever arrives.
+    /// what ran on the stream channel was a second `--stdio` protocol relay, and
+    /// a protocol server says nothing until it is spoken to: the channel opened,
+    /// this returned true, and no byte ever arrived. On a loopback sshd with the
+    /// same daemon and the same pane, the only difference being the
+    /// `authorized_keys` line, a plain key reached its first replayed byte in
+    /// 62ms and the line this product writes reached nothing in 25 seconds.
     ///
-    /// Measured against a loopback sshd, same daemon, same pane, the only
-    /// difference being the `authorized_keys` line: with a plain key the first
-    /// replayed byte lands 62ms after `stream_start`; with the forced-command
-    /// line this product writes, nothing arrives in 25 seconds and no end
-    /// signal either. That is what `firstPaintGrace` was added to survive, and
-    /// surviving it is not fixing it — the pane runs on captures, so it has no
-    /// scrollback and cannot scroll.
+    /// The stream is a wire method now. `crates/client`'s `open_stream` opens
+    /// the second channel with `--stdio` — the one command BOTH key types run —
+    /// and speaks `terminal.attach` on it, so which line this device holds is no
+    /// longer something the stream depends on. Measured the same way, on the
+    /// same harness (`a_forced_command_still_streams.rs`): 67ms on the forced
+    /// command against 64ms on a plain key.
     ///
-    /// The fix is not here. `proto/farcooler.proto` retired `TerminalAttach`
-    /// (tag 28) with the note "streaming a terminal is a second SSH exec of
-    /// `farcoolerd --stream <id>`, not a wire method" — which was true when it
-    /// was written and stopped being true when enrollment started forcing a
-    /// command. Either the stream becomes a wire method again, carried on a
-    /// second `--stdio` session the way `farcooler events` already is, or the
-    /// forced command learns to dispatch one. Both are protocol decisions.
+    /// What is left is the ordinary reason a stream can open and stay quiet — a
+    /// runner too old to advertise `terminal_stream`, where the client still
+    /// execs `--stream` and a forced command still swallows it. That is what
+    /// `firstPaintGrace` and the poll fallback below are for, and they are not
+    /// dead code: an app ships ahead of the runners it talks to.
     private func attach() async -> Bool {
         let inbox = Inbox()
         self.inbox = inbox
@@ -1469,7 +1489,7 @@ final class TerminalSession: ObservableObject {
         // goes through `publish`, which has no response to read it off and
         // used the emulator's own. See `capturedCursor`.
         capturedCursor = (response.cursorRow, response.cursorColumn)
-        scrollPosition = TerminalScrollPosition(emulator.scrollPosition)
+        scrollPosition = TerminalScrollPosition(emulator.scrollPosition, streaming: streaming)
         grid = emulator.withSnapshot { snapshot in
             // The host's caret only means anything on a view that is showing
             // the host's screen. Scrolled back, the rows on screen are history
@@ -1551,7 +1571,7 @@ final class TerminalSession: ObservableObject {
         // while the emulator holds a capture, its own is at the end of the
         // text and the host's is at the prompt.
         let host = capturedCursor
-        scrollPosition = TerminalScrollPosition(vt.scrollPosition)
+        scrollPosition = TerminalScrollPosition(vt.scrollPosition, streaming: streaming)
         grid = vt.withSnapshot { snapshot in
             guard let host else { return TerminalGrid(snapshot: snapshot) }
             return TerminalGrid(
@@ -1829,12 +1849,22 @@ private struct ScreenResponse: Decodable, Equatable {
 struct TerminalScrollPosition: Equatable {
     var offset = 0
     var history = 0
+    /// Which of the two painters is feeding this pane: the byte stream, or the
+    /// capture poll.
+    ///
+    /// Carried here because it is otherwise unobservable from outside, and the
+    /// two look identical on a screen — a polled pane repaints several times a
+    /// second and is perfectly readable. That is exactly what let streaming be
+    /// broken on every enrolled device for as long as it was: nothing anybody
+    /// could see said which path a pane was on.
+    var streaming = false
 
     init() {}
 
-    init(_ position: (offset: Int, history: Int)) {
+    init(_ position: (offset: Int, history: Int), streaming: Bool) {
         offset = position.offset
         history = position.history
+        self.streaming = streaming
     }
 }
 

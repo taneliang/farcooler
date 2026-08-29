@@ -1816,6 +1816,17 @@ impl Service {
         self.runtime().stream(id).await
     }
 
+    /// Which run of this terminal a client is looking at.
+    ///
+    /// From the record rather than from tmux, because that is where a restart
+    /// increments it — see `restart_terminal`. A client that reattaches and gets
+    /// a different epoch is holding a picture of a program that no longer
+    /// exists, and must replace rather than append. See
+    /// `TerminalAttachResult.epoch`.
+    pub fn terminal_epoch(&self, id: Uuid) -> Result<u64> {
+        Ok(self.store.get_terminal(id)?.epoch)
+    }
+
     pub async fn input_channel(&self, id: Uuid) -> Result<()> {
         self.runtime().input_channel(id).await
     }

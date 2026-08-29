@@ -165,18 +165,46 @@ impl Session {
     /// Open a second ssh channel carrying nothing but one terminal's bytes.
     ///
     /// The data plane, kept off the control connection on purpose. That
-    /// connection answers one request at a time, so a stream sharing it would
-    /// sit behind every fleet refresh and every refresh behind a stream's bytes.
-    /// ssh already multiplexes channels; letting it do that is both simpler and
-    /// faster than teaching the control protocol to interleave.
+    /// connection answers one request at a time — `Client::call` reads frames
+    /// until it sees its own response — so a stream sharing it would sit behind
+    /// every fleet refresh and every refresh behind a scrollback replay. ssh
+    /// already multiplexes channels; letting it do that is both simpler and
+    /// faster than teaching the client to interleave.
     ///
     /// The latency floor becomes the network round trip. Measured at 19ms over a
     /// loopback ssh connection, against a second of polling before it — and the
     /// second was never the network, it was the interval.
+    ///
+    /// **Which command runs on that channel is the whole of this method.** For
+    /// most of this product's life it was `farcoolerd --stream <id>`, and on
+    /// every enrolled device that was silence: `crates/fence` writes
+    /// `restrict,command="~/.local/bin/farcoolerd --stdio …"`, a forced command
+    /// is OpenSSH discarding what the client asked to run, and what actually ran
+    /// was a `--stdio` protocol relay — which says nothing until it is spoken
+    /// to. The channel opened, this returned a reader, and no byte ever arrived.
+    /// It worked on a Mac and in every loopback test because both hold a plain
+    /// key, which forces nothing.
+    ///
+    /// So a runner that speaks `terminal_stream` is spoken to. `--stdio` is the
+    /// command BOTH key types run — sshd substitutes it on a forced-command
+    /// line, and `main.rs` matches it before `--stream` on a plain one — so
+    /// which line this device holds stops being something the stream depends on.
     pub async fn open_stream(
         &mut self,
         terminal: Uuid,
     ) -> Result<Box<dyn AsyncRead + Unpin + Send>, SessionError> {
+        if self.capabilities().iter().any(|c| c == farcooler_protocol::capability::TERMINAL_STREAM)
+        {
+            return self.attach_stream(terminal).await;
+        }
+
+        // A runner too old to know the method. `--stream` still works there for
+        // a client whose key forces nothing — a Mac's plain shell line, a local
+        // test — and for one whose key does, this is the silence that was there
+        // before, which the caller already survives by falling back to polling.
+        // Not an error: a runner that cannot stream is not a runner that cannot
+        // show a terminal, and refusing here would take the poll fallback's
+        // trigger away from it.
         let ssh = self._ssh.as_mut().ok_or_else(|| {
             SessionError::Protocol("streaming needs an ssh session".into())
         })?;
@@ -194,6 +222,107 @@ impl Session {
         // Held open, the same closure means what it should: this stream ends
         // when the session holding it goes away.
         Ok(Box::new(StreamReader { reader: streams.reader, _writer: streams.writer }))
+    }
+
+    /// The stream as a wire method: a second `--stdio` session, one
+    /// `terminal.attach`, and the `Event` frames that follow it.
+    ///
+    /// A whole second protocol session rather than a bare byte pipe, which is
+    /// more than the old exec cost — a handshake and one round trip before the
+    /// first byte. That is the price of the second channel running the one
+    /// command sshd cannot substitute away, and it is paid once per pane
+    /// opened, against a replay that has to be captured anyway.
+    ///
+    /// The result is read and discarded on purpose. Its `epoch`,
+    /// `next_sequence` and `resume_token` describe a resume no runner serves
+    /// yet, and reading them into a reader that has nowhere to put them would
+    /// be inventing a client-side model of something the daemon does not do.
+    /// Awaiting it is not optional, though: it is what turns "this terminal is
+    /// not running" into an error the caller can report, rather than a stream
+    /// that opens and immediately ends looking exactly like a pane that
+    /// finished.
+    async fn attach_stream(
+        &mut self,
+        terminal: Uuid,
+    ) -> Result<Box<dyn AsyncRead + Unpin + Send>, SessionError> {
+        let ssh = self._ssh.as_mut().ok_or_else(|| {
+            SessionError::Protocol("streaming needs an ssh session".into())
+        })?;
+        // The same command the control connection runs, and deliberately so.
+        let streams = ssh.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
+        let mut client = Client::over(
+            Box::new(streams.reader) as Reader,
+            Box::new(streams.writer) as Writer,
+            "farcooler-mobile",
+            env!("CARGO_PKG_VERSION"),
+        )
+        .await?;
+
+        let mut attach = farcooler_transport::request("terminal.attach");
+        attach.target_resource_id = Some(bytes::Bytes::copy_from_slice(terminal.as_bytes()));
+        // Named even though `capabilities()` was already checked, for the reason
+        // `Request.required_capabilities` exists: the check above reads a hello
+        // this session took at connect time, and the runner may have been
+        // upgraded — or downgraded — since.
+        attach.required_capabilities =
+            vec![farcooler_protocol::capability::TERMINAL_STREAM.to_string()];
+        attach.payload = Some(request::Payload::TerminalAttach(
+            farcooler_protocol::v1::TerminalAttach {
+                // Nothing to resume from. See `TerminalAttach` in the proto.
+                last_acked_sequence: None,
+                resume_token: None,
+            },
+        ));
+        let result = client.call(attach).await?;
+        let Some(result::Value::TerminalAttach(_)) = result.value else {
+            return Err(SessionError::WrongResult {
+                expected: "TerminalAttachResult",
+                got: "something else",
+            });
+        };
+
+        // The seam back to a reader, so the FFI and both apps see the shape they
+        // always saw: bytes arriving, and an end when they stop. Only one
+        // direction of the duplex is used — nothing is ever written back to the
+        // daemon on this channel, because input goes through the control
+        // connection's `terminal.write`.
+        //
+        // Dropping the far half is what gives the reader its end of stream, and
+        // it happens exactly when the task below returns: on a closed ssh
+        // channel, on a daemon that stopped, or on the reader itself being
+        // dropped, which fails the write. The last of those is what returns the
+        // ssh session slot — `ChannelGuard` in `ssh.rs` — so a client that stops
+        // reading stops holding one of sshd's ten.
+        let (mine, theirs) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let mut sink = theirs;
+            loop {
+                let Ok(event) = client.next_event().await else { break };
+                let Some(farcooler_protocol::v1::event::Payload::TerminalFrame(frame)) =
+                    event.payload
+                else {
+                    // Fleet news on this connection. It is subscribed to the
+                    // broadcast like any other, and nothing here wants it.
+                    continue;
+                };
+                // A frame for a pane this session did not attach to could only
+                // come from an attachment that was replaced, and feeding its
+                // tail to this emulator would paint another terminal's output.
+                if frame.terminal_id.as_ref() != terminal.as_bytes() {
+                    continue;
+                }
+                let Some(farcooler_protocol::v1::terminal_frame::Kind::Output(output)) = frame.kind
+                else {
+                    continue;
+                };
+                if sink.write_all(&output.payload).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        Ok(Box::new(mine))
     }
 
     /// Connect to a daemon on this runner. Used by tests and by any desktop

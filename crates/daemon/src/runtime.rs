@@ -11,7 +11,7 @@
 //! That split is why `farcooler terminal stream` can run as its own process
 //! while the daemon serves everything else.
 
-use farcooler_core::{DomainError, Result, inventory::RuntimeInventory, validate};
+use farcooler_core::{DomainError, Result, inventory::{RuntimeInventory, TaggedPane}, validate};
 use farcooler_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
@@ -168,6 +168,60 @@ impl Runtime {
         self.tmux.cursor_position(&pane.pane_id).await
     }
 
+    /// The pane that proves this terminal is alive, as a watcher needs it.
+    ///
+    /// `proves_life` rather than the first claimant, which is what the poll
+    /// path takes: a capture of a dead pane is still a picture worth showing,
+    /// and a stream of one is a channel that will never say anything.
+    ///
+    /// Synchronous, and that is what makes it useful to `terminal.attach`: it
+    /// reads the in-memory inventory and nothing else, so the handler can
+    /// answer with the pane's real size and refuse a terminal that is not
+    /// running WITHOUT waiting on tmux — and then leave the four captures the
+    /// replay costs to the task that streams them.
+    pub fn live_pane(&self, id: Uuid) -> Result<TaggedPane> {
+        let snapshot = self.inventory.snapshot();
+        Ok(snapshot
+            .claimants(id)
+            .into_iter()
+            .find(|p| p.proves_life())
+            .ok_or(DomainError::NotFound)?
+            .clone())
+    }
+
+    /// Everything a client must see before the first live byte, in order.
+    ///
+    /// Shared by both ways in — `stream` below writes it to stdout, `attach`
+    /// sends it as an `Event` — and shared deliberately rather than copied. The
+    /// ORDER is the whole meaning: modes, then scrollback, then clear, then
+    /// contents, then cursor. A second copy of it would work on the day it was
+    /// written and drift the first time one of the five moved, and the symptom
+    /// would be a pane that looks subtly wrong on one transport only.
+    ///
+    /// Asked for together, written in order.
+    ///
+    /// These are four separate `tmux` processes, and they used to be awaited
+    /// one after another purely because that is the order their answers are
+    /// written in. Nothing in the second depends on the first, so the wait
+    /// was four process spawns and four connects end to end when it only
+    /// ever needed to be one — and on a busy server, where each of those
+    /// queues behind whatever the sampler is doing, four queues hurt four
+    /// times as much as one.
+    ///
+    /// Only the READS overlap. `replay` orders the writes.
+    async fn opening_replay(&self, pane_id: &str) -> Vec<u8> {
+        let (modes, scrollback, screen, cursor) = tokio::join!(
+            self.tmux.pane_modes(pane_id),
+            self.tmux.capture_scrollback(pane_id),
+            self.tmux.capture_screen(pane_id),
+            self.tmux.cursor_position(pane_id),
+        );
+
+        let scrollback = scrollback.ok();
+        let screen = screen.ok();
+        replay(modes.ok(), scrollback.as_deref(), screen.as_deref(), cursor.ok())
+    }
+
     /// Stream a terminal's live output to this process's stdout.
     ///
     /// Emits the retained history first so the client opens onto the session as
@@ -176,14 +230,7 @@ impl Runtime {
     pub async fn stream(&self, id: Uuid) -> Result<()> {
         use tokio::io::AsyncWriteExt;
 
-        let snapshot = self.inventory.snapshot();
-        let pane = snapshot
-            .claimants(id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .ok_or(DomainError::NotFound)?
-            .clone();
-
+        let pane = self.live_pane(id)?;
         let mut stdout = tokio::io::stdout();
 
         // 1. Replay the pane: its scrollback, then its visible screen.
@@ -218,31 +265,7 @@ impl Runtime {
         // It was pure latency, and it was the largest single component of it:
         // every pane opened — every layout switch, every tab, every reconnect —
         // sat blank for those 120ms before a byte could be sent.
-
-        // Asked for together, written in order.
-        //
-        // These are three separate `tmux` processes, and they used to be awaited
-        // one after another purely because that is the order their answers are
-        // written in. Nothing in the second depends on the first, so the wait
-        // was three process spawns and three connects end to end when it only
-        // ever needed to be one — and on a busy server, where each of those
-        // queues behind whatever the sampler is doing, three queues hurt three
-        // times as much as one.
-        //
-        // Only the READS overlap. `replay` below orders the writes, because the
-        // order is the whole meaning: modes, then scrollback, then clear, then
-        // contents, then cursor.
-        let (modes, scrollback, screen, cursor) = tokio::join!(
-            self.tmux.pane_modes(&pane.pane_id),
-            self.tmux.capture_scrollback(&pane.pane_id),
-            self.tmux.capture_screen(&pane.pane_id),
-            self.tmux.cursor_position(&pane.pane_id),
-        );
-
-        let scrollback = scrollback.ok();
-        let screen = screen.ok();
-        let bytes =
-            replay(modes.ok(), scrollback.as_deref(), screen.as_deref(), cursor.ok());
+        let bytes = self.opening_replay(&pane.pane_id).await;
         let _ = stdout.write_all(&bytes).await;
         let _ = stdout.flush().await;
 
@@ -309,6 +332,73 @@ impl Runtime {
         // Nothing to stop. The pipe belongs to the fanout, which is still
         // serving whoever else is watching, and which ends itself once nobody
         // is — a watcher leaving must not take the others' output with it.
+        Ok(())
+    }
+
+    /// The same stream, delivered to a client over the protocol.
+    ///
+    /// `stream` above is this written to a pipe; this is it written to a
+    /// connection. What they share is the part that must never diverge — which
+    /// pane counts as live (`live_pane`) and what the replay is and in what
+    /// order (`opening_replay`). What they do not share is nine lines of read
+    /// loop, and deliberately so: the differences are the sink and the hangup,
+    /// and both of those are exactly what makes one a command and the other a
+    /// method. `stream` watches stdin because a closed stdin is how ssh tells a
+    /// PROCESS its peer is gone; here the sink itself carries that signal, so
+    /// there is nothing to watch and nothing to get wrong about `/dev/null` or
+    /// a terminal.
+    ///
+    /// Takes the pane rather than the id because the caller has already
+    /// resolved it — that is what let it answer `terminal.attach` with the
+    /// pane's real size before any of this ran.
+    ///
+    /// Ends when the sink says its peer is gone, which is the whole hangup
+    /// mechanism: `serve_connection` drops the receiving end when the connection
+    /// ends. A quiet pane costs nothing while that happens — this sits in
+    /// `read`, and the first byte to arrive is the one that discovers it — where
+    /// the stdout path needed a second signal for the same thing, because a
+    /// process's peer leaves without touching anything the process holds.
+    ///
+    /// The sink is a closure and not a channel so that nothing in this file has
+    /// to know what a `TerminalFrame` is. Runtime speaks only to tmux — that is
+    /// the property the module header opens with — and the caller is the one
+    /// place that already owns both a connection and the protocol.
+    pub async fn attach(
+        &self,
+        pane: TaggedPane,
+        mut sink: impl FnMut(Vec<u8>) -> bool,
+    ) -> Result<()> {
+        use tokio::io::AsyncReadExt;
+
+        // The replay first, exactly as `stream` sends it. Handed over in one
+        // piece rather than chunked, because it is one picture: a client that
+        // painted half of it would show a screen with no cursor and no modes.
+        let bytes = self.opening_replay(&pane.pane_id).await;
+        if !sink(bytes) {
+            return Ok(());
+        }
+
+        // Then live bytes, shared with every other watcher of this pane through
+        // the same fanout the stdout path uses — tmux allows one `pipe-pane`
+        // per pane, so a second watcher starting its own would end the first
+        // one's stream. A pane being watched over ssh and over the wire at once
+        // is not a special case; it is two clients.
+        let mut reader = self.attach_to_fanout(&pane.pane_id).await?;
+        let mut buf = vec![0u8; 16 * 1024];
+        loop {
+            match reader.read(&mut buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if !sink(buf[..n].to_vec()) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Nothing to stop, for the reason `stream` gives: the pipe belongs to
+        // the fanout, which is still serving whoever else is watching and ends
+        // itself once nobody is.
         Ok(())
     }
 

@@ -388,7 +388,8 @@ struct TerminalView: View {
                 .accessibilityIdentifier("terminal-surface")
                 .accessibilityValue(
                     "offset=\(session.scrollPosition.offset) "
-                        + "history=\(session.scrollPosition.history)")
+                        + "history=\(session.scrollPosition.history) "
+                        + "source=\(session.scrollPosition.streaming ? "stream" : "poll")")
             // A UIKit view whose only job is to be the thing the software
             // keyboard is attached to. It carries no visible state of its
             // own — every character it reports goes straight to the host and

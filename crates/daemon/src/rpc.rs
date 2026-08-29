@@ -28,9 +28,42 @@ use uuid::Uuid;
 use crate::service::Service;
 use crate::wire;
 
+/// One connection's terminal stream, ended when nothing holds it any more.
+///
+/// A guard rather than a bare `JoinHandle`, so the abort cannot be forgotten by
+/// one of the two things that must cause it: a second `terminal.attach`, which
+/// replaces this, and the connection ending, which drops the last `Rpc` and the
+/// factory that built them and takes this with it.
+///
+/// Dropping the push receiver already ends the stream — `Runtime::attach` stops
+/// the moment a send fails — but only on the NEXT byte, and a pane sitting at a
+/// shell prompt may not write one for hours. Until then the task waits in `read`
+/// on the fanout, and a fanout with a watcher that will never leave keeps the
+/// pane's `pipe-pane` alive for nobody. Two of those were once found still
+/// running from sessions whose app had been relaunched; see `Runtime::stream`.
+struct Attachment(tokio::task::JoinHandle<()>);
+
+impl Drop for Attachment {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 pub struct Rpc {
     service: Arc<Service>,
     watcher: Arc<crate::watch::Watcher>,
+    /// Where `terminal.attach` sends this connection's terminal bytes.
+    ///
+    /// Per connection, not per runner: an attachment is the answer to one
+    /// session's request, and the broadcast every connection subscribes to is
+    /// the wrong shape for it twice over — it would hand a pane's output to
+    /// clients that never asked, and it drops frames from a slow reader, which
+    /// for terminal bytes is an escape sequence cut in half. See
+    /// `Handler::pushes`.
+    push: tokio::sync::mpsc::UnboundedSender<farcooler_protocol::v1::Event>,
+    /// The attachment this connection is currently serving, so a second
+    /// `terminal.attach` can end the first rather than interleave with it.
+    attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
     /// Who this request's connection belongs to: its scope, and which enrolled
     /// device it is.
     ///
@@ -45,11 +78,17 @@ pub struct Rpc {
 }
 
 impl Rpc {
-    pub fn new(
+    /// Private, and it has to be: the attachment guard it takes is this
+    /// module's own, and `RpcFactory` is the only thing that should be building
+    /// one anyway — a handler constructed anywhere else is a connection
+    /// revocation cannot find.
+    fn new(
         service: Arc<Service>,
         watcher: Arc<crate::watch::Watcher>,
         peer: Peer,
         stop: Arc<tokio::sync::Notify>,
+        push: tokio::sync::mpsc::UnboundedSender<farcooler_protocol::v1::Event>,
+        attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
     ) -> Self {
         Self {
             service,
@@ -57,6 +96,8 @@ impl Rpc {
             peer,
             daemon_version: farcooler_protocol::BUILD.to_string(),
             stop,
+            push,
+            attachment,
         }
     }
 
@@ -99,6 +140,28 @@ pub struct RpcFactory {
     /// clone is gone, rather than until whichever clone happened to be dropped
     /// first.
     session: Arc<crate::sessions::Session>,
+    /// This connection's own push channel, for `terminal.attach`.
+    ///
+    /// Built here rather than by the attach handler because `serve_connection`
+    /// asks for the receiving half once, before the first request — a handler
+    /// that only had one after somebody attached would have nothing to hand it.
+    push: tokio::sync::mpsc::UnboundedSender<farcooler_protocol::v1::Event>,
+    /// The receiving half, until `Handler::pushes` takes it.
+    ///
+    /// A `std::sync::Mutex` and not a `tokio` one: it is locked once, held for
+    /// the length of an `Option::take`, and `pushes` is not async. `Option`
+    /// because a receiver can only be taken once — a second
+    /// `serve_connection` on the same handler gets `None` and pushes nothing,
+    /// rather than half of every attachment's bytes.
+    pushes: Arc<
+        std::sync::Mutex<
+            Option<tokio::sync::mpsc::UnboundedReceiver<farcooler_protocol::v1::Event>>,
+        >,
+    >,
+    /// The attachment this connection is serving, so a second attach can end
+    /// the first. Shared with every `Rpc` this builds, for the reason `session`
+    /// is: the clones are one connection, not several.
+    attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
 }
 
 impl RpcFactory {
@@ -114,7 +177,17 @@ impl RpcFactory {
         peer: Peer,
     ) -> Self {
         let session = service.sessions().open(peer.client_id.clone());
-        Self { service, watcher, stop, peer, session }
+        let (push, pushes) = tokio::sync::mpsc::unbounded_channel();
+        Self {
+            service,
+            watcher,
+            stop,
+            peer,
+            session,
+            push,
+            pushes: Arc::new(std::sync::Mutex::new(Some(pushes))),
+            attachment: Arc::new(std::sync::Mutex::new(None)),
+        }
     }
 }
 
@@ -129,6 +202,8 @@ impl Handler for RpcFactory {
             self.watcher.clone(),
             self.peer.clone(),
             self.stop.clone(),
+            self.push.clone(),
+            self.attachment.clone(),
         );
         let session = self.session.clone();
         async move {
@@ -154,6 +229,13 @@ impl Handler for RpcFactory {
     /// event. Cost is zero on a quiet runner, because only changes are sent.
     fn events(&self) -> Option<tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>> {
         Some(self.watcher.subscribe())
+    }
+
+    /// This connection's own channel, taken once. See the field.
+    fn pushes(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<farcooler_protocol::v1::Event>> {
+        self.pushes.lock().ok().and_then(|mut held| held.take())
     }
 
     fn closed(&self) -> impl std::future::Future<Output = ()> + Send {
@@ -226,6 +308,12 @@ fn required_scope(method: &str) -> Option<Scope> {
         // and tokens — and `read` is the scope handed to something that should
         // only see the shape of the fleet.
         | "terminal.screen"
+        // And a stream is that same screen, continuously, plus every byte
+        // between one screen and the next. Anything looser than `terminal.screen`
+        // would hand a read-scoped client strictly more than one call of it
+        // already gives — so this sits here rather than reasoning from "watching
+        // is not writing", which is not the axis this table splits on.
+        | "terminal.attach"
         // Pasting a file writes bytes to a pane and a file to the runner.
         //
         // The bytes are the same privilege as `terminal.write`, and so is the
@@ -1194,6 +1282,105 @@ impl Rpc {
                     modes,
                     history,
                 }))
+            }
+
+            // Attach this connection to a pane's live bytes.
+            //
+            // Answers, then streams: the result goes back through
+            // `serve_connection`'s request arm, and the frames this spawns are
+            // only drained on a later turn of that loop, so the client is told
+            // the attachment exists before the first byte of it arrives.
+            //
+            // The pane is resolved HERE and the four captures the replay costs
+            // are left to the task, which is what keeps a terminal that is not
+            // running an error a client can act on rather than an attachment
+            // that opens and immediately ends — while still answering in the
+            // time an in-memory lookup takes.
+            "terminal.attach" => {
+                let id = Self::target(&req)?;
+                let pane = svc.runtime().live_pane(id)?;
+                let (columns, rows) = (pane.columns, pane.rows);
+                // Zero for a pane the daemon has no record of, which a runtime
+                // handle can legitimately see: the epoch says which RUN this is,
+                // and "the one I have" is a better answer than refusing to
+                // stream a pane that is plainly alive.
+                let epoch = svc.terminal_epoch(id).unwrap_or(0);
+
+                let service = self.service.clone();
+                let push = self.push.clone();
+                let terminal_id = bytes::Bytes::copy_from_slice(id.as_bytes());
+                let task = tokio::spawn(async move {
+                    // The byte offset of the next run, which is what makes
+                    // `TerminalOutput.start_sequence` mean anything. Counted
+                    // here rather than in `Runtime`, because it is a property of
+                    // this attachment and not of the pane: two clients watching
+                    // the same pane attached at different moments.
+                    let mut sequence = 0u64;
+                    let _ = service
+                        .runtime()
+                        .attach(pane, |chunk| {
+                            let start = sequence;
+                            sequence += chunk.len() as u64;
+                            push
+                                .send(farcooler_protocol::v1::Event {
+                                    event_id: farcooler_protocol::ids::new_id(),
+                                    // Zero, like every other event. The offset
+                                    // that matters for a terminal is a byte
+                                    // count, and it rides in the frame where it
+                                    // has a documented unit.
+                                    sequence: 0,
+                                    payload: Some(
+                                        farcooler_protocol::v1::event::Payload::TerminalFrame(
+                                            farcooler_protocol::v1::TerminalFrame {
+                                                terminal_id: terminal_id.clone(),
+                                                epoch,
+                                                kind: Some(
+                                                    farcooler_protocol::v1::terminal_frame::Kind::Output(
+                                                        farcooler_protocol::v1::TerminalOutput {
+                                                            start_sequence: start,
+                                                            payload: bytes::Bytes::from(chunk),
+                                                        },
+                                                    ),
+                                                ),
+                                            },
+                                        ),
+                                    ),
+                                })
+                                .is_ok()
+                        })
+                        .await;
+                });
+
+                // One attachment per connection, so this ends whatever the last
+                // one was streaming. Two panes' bytes interleaved on one
+                // connection would be two streams a client has to demultiplex
+                // for no gain — and the client that attaches gives every
+                // attachment a session of its own anyway.
+                // The previous one is dropped here, and `Attachment`'s own
+                // `Drop` is what ends it — the same line that ends this one when
+                // the connection goes away, rather than a second place that has
+                // to remember to.
+                if let Ok(mut held) = self.attachment.lock() {
+                    held.replace(Attachment(task));
+                }
+
+                Ok(result::Value::TerminalAttach(
+                    farcooler_protocol::v1::TerminalAttachResult {
+                        epoch,
+                        // Equal, which is this runner saying it retained nothing
+                        // for you: the replay that follows is the whole of what
+                        // there is. See `TerminalAttach.last_acked_sequence` for
+                        // what it would take to answer otherwise, and why no
+                        // runner does yet.
+                        next_sequence: 0,
+                        oldest_sequence: 0,
+                        columns,
+                        rows,
+                        // Empty for the same reason. A client stores it and
+                        // hands it back; an empty one means start over.
+                        resume_token: String::new(),
+                    },
+                ))
             }
 
             "terminal.write" => {

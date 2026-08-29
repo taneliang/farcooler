@@ -26,13 +26,24 @@
 #   default   the line `crates/fence` writes for every enrolled device —
 #             `restrict,command="~/.local/bin/farcoolerd-<channel> --stdio …"`.
 #             sshd DISCARDS whatever command the client asked for and runs that
-#             one, so the second channel the app opens for a terminal's bytes
-#             (`--stream <uuid>`) never runs: the stream stays silent and the
-#             pane falls back to polling for captures. This is what a real
-#             enrolled device does, and the configuration a scrolling bug has to
-#             be reproduced against.
-#   --plain   the key with no options in front of it. sshd runs what it is asked,
-#             so `--stream` streams. The same pane, scrolling, for comparison.
+#             one. This is what a real enrolled device does, and it is the
+#             configuration anything about streaming or scrollback has to be
+#             reproduced against — a bug that only reproduces on a plain key
+#             has not been reproduced.
+#   --plain   the key with no options in front of it. sshd runs what it is
+#             asked, so the `--stream <uuid>` exec is reachable too. That is
+#             the path a Mac takes through the CLI, and the contrast is the
+#             reason both lines are here.
+#
+# What the restricted line USED to mean is worth knowing, because most of this
+# script was written to reproduce it: the app's second channel asked for
+# `--stream <uuid>`, sshd substituted `--stdio`, and a protocol server says
+# nothing until spoken to — so the stream opened, reported success, and stayed
+# silent forever while the pane fell back to capture polling. Streaming is a
+# wire method now (`terminal.attach`, carried on a second `--stdio` session, so
+# it runs whichever line the key carries), and a pane reports which painter it
+# is on: see `terminal-surface`'s accessibility value and
+# `TerminalScrollTests.testAPaneOnACapableRunnerStreams`.
 #
 # Both lines are rendered by the shipped `fence::render` rather than assembled
 # here — see the helper this script builds below for why, and for the one thing
@@ -573,10 +584,13 @@ xcrun simctl launch booted "$BUNDLE" -farcoolerDemoHost "$USER@127.0.0.1:$PORT" 
 echo
 if [ "$GRANT" = "fenced" ]; then
     echo "Key line: RESTRICTED, as every enrolled device's is."
-    echo "  sshd runs the forced command and discards the one the app asked for,"
-    echo "  so a terminal's --stream channel never streams and the pane polls."
+    echo "  sshd runs the forced command and discards the one the app asked for."
+    echo "  A pane still streams: the client speaks the terminal.attach wire"
+    echo "  method over a second --stdio session, which is the command sshd"
+    echo "  substitutes anyway. Older runners fall back to capture polling."
 else
-    echo "Key line: PLAIN. sshd runs what the app asks for, so --stream streams."
+    echo "Key line: PLAIN. sshd runs what the app asks for, so the --stream"
+    echo "  exec is available too — the path a Mac uses through the CLI."
 fi
 echo "  $(printf '%s' "$LINE" | cut -c1-120)…"
 echo
