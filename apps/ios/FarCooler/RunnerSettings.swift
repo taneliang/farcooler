@@ -23,6 +23,20 @@ final class RunnerSettingsModel: ObservableObject {
     @Published var failure: String?
     @Published private(set) var loading = false
 
+    /// Whether this connection may ask for the calls that change the runner —
+    /// its branch prefix, its themes, its agents.
+    ///
+    /// Learned in the handshake, so it is known before anything on this screen
+    /// is pressed. That is the whole difference between this and `failure`:
+    /// that one reports a call that already went wrong and cannot say why, this
+    /// one dims a call that would.
+    ///
+    /// Starts `true` and stays there for a runner that gives no answer, which
+    /// is `DaemonBuild.mayAdministerRunner`'s own rule — and it means this
+    /// screen never opens dimmed and then un-dims a moment later. The controls
+    /// are honest either way: the runner enforces this, not the app.
+    @Published private(set) var mayAdminister = true
+
     private let connection: Connection
 
     init(connection: Connection) {
@@ -32,6 +46,12 @@ final class RunnerSettingsModel: ObservableObject {
     func load() async {
         loading = true
         defer { loading = false }
+        // No round trip after the first: the handshake already carried both the
+        // capabilities and this session's grant, and this is cached per
+        // connection. Asked here anyway so the screen never draws a control
+        // live that the connection cannot use, whatever order it was reached in.
+        await connection.loadDaemonBuild()
+        mayAdminister = connection.daemon?.mayAdministerRunner ?? true
         branchPrefix = connection.branchPrefix
         themes = await connection.hostThemes()
         adapters = await connection.adapters()
@@ -166,6 +186,34 @@ struct AdapterInfo: Identifiable, Equatable {
     }
 }
 
+/// Why a section's own controls are dimmed rather than live.
+///
+/// Said BEFORE anything is pressed, which is what lets it name a cause at all:
+/// the handshake carried what this session may ask for, so the screen knows in
+/// advance that these calls are not for this device. The sheets' failure
+/// sentences are the other half and are untouched — a call that has already come
+/// back with nothing could be a runner asleep, a daemon too old, or a socket
+/// that went away, and that stays unknowable.
+///
+/// Says what to do about it, because a dimmed button with no way forward teaches
+/// exactly as little as a hidden one. The runner's own command line is named and
+/// the Mac app is not, and that is the honest half: the Mac's Add Device flow
+/// adds a phone with the same access this one already has, so sending somebody
+/// there would send them in a circle.
+///
+/// **It does not promise the change takes effect at once, and must not.** sshd
+/// reads `authorized_keys` when a connection authenticates and never again, so a
+/// device added again stays dimmed on its current connection until it
+/// reconnects. "Add it again" is true; "and these light up" would not be.
+///
+/// Plain product words on purpose. Android holds the same sentence to a banned
+/// word list in `RunnerSettingsCopyTest` — the wire's own vocabulary for this
+/// means nothing to the person reading it, and half of it would be a claim about
+/// the runner this app has no business making.
+private let restrictedSentence =
+    "This device can’t change this runner’s settings. Add it again from the runner’s own "
+    + "command line, with full access, to change them from here."
+
 /// The runner's own settings, as a screen.
 struct RunnerSettingsView: View {
     let name: String
@@ -197,12 +245,24 @@ struct RunnerSettingsView: View {
                         Button("Save") { commitPrefix() }
                     }
                 }
+                // The field as well as Save. `settings.set_branch_prefix` is
+                // the only thing this section does, so a field that still typed
+                // would collect an edit with nowhere to go — and a draft that
+                // can never differ from the stored value is what takes Save
+                // away without a second condition.
+                //
+                // On the row rather than on the whole Section, so the footer
+                // that says why stays at full contrast. A dimmed explanation of
+                // a dimmed control is the one thing here that has to stay
+                // readable.
+                .disabled(!model.mayAdminister)
             } header: {
                 Text("Branches")
             } footer: {
                 Text(
                     "Added to branch names created from task descriptions. Leave it empty for "
-                    + "no prefix.")
+                    + "no prefix."
+                    + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
             }
 
             Section {
@@ -227,11 +287,18 @@ struct RunnerSettingsView: View {
                     // the chevron inherit the button's accent tint. See
                     // `CommitHistorySheet` in `ChangesView`.
                     .buttonStyle(.plain)
+                    // The row leads to an editor whose only button is Save, and
+                    // `theme.upsert` is a call this connection may not make.
+                    // Opening it anyway would spend somebody's whole edit before
+                    // telling them.
+                    .disabled(!model.mayAdminister)
                 }
-                .onDelete { offsets in
-                    let names = offsets.map { model.themes[$0].name }
-                    Task { for name in names { await model.delete(themeNamed: name) } }
-                }
+                // Only where the delete can actually land. A swipe that opens a
+                // row and then reports a failure is the version of this that
+                // teaches somebody the app is broken; `theme.delete` is one of
+                // the calls this connection may not make, and it is known now
+                // rather than after the fact.
+                .onDelete(perform: model.mayAdminister ? deleteThemes : nil)
                 Button {
                     var copy = Themes.shared.current
                     copy.name = unusedThemeName(like: copy.name)
@@ -239,12 +306,17 @@ struct RunnerSettingsView: View {
                 } label: {
                     Label("Duplicate the Current Theme", systemImage: "plus")
                 }
+                .disabled(!model.mayAdminister)
             } header: {
                 Text("Themes on this runner")
             } footer: {
+                // The list is still real: `theme.list` is `Scope::Read` and only
+                // the writes over it are not. So this section reads normally and
+                // dims what it cannot do, rather than emptying.
                 Text(
                     "This list includes themes saved on this runner. Saving a theme with a "
-                    + "built-in name overrides it.")
+                    + "built-in name overrides it."
+                    + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
             }
 
             Section {
@@ -269,16 +341,25 @@ struct RunnerSettingsView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .disabled(!model.mayAdminister)
                 }
                 Button {
                     editingAdapter = AdapterInfo(preset: unusedAdapterName())
                 } label: {
                     Label("Add an Agent", systemImage: "plus")
                 }
+                .disabled(!model.mayAdminister)
             } header: {
                 Text("Agents")
             } footer: {
-                Text("Adapters let Far Cooler show supported agents in chat.")
+                // `adapter.list` is host_admin too, so on such a connection this
+                // section is usually empty as well as dimmed — a read that
+                // reports paths, arguments and sometimes an API key sits behind
+                // the same gate as the writes. The sentence is about the
+                // buttons; the empty list speaks for itself.
+                Text(
+                    "Adapters let Far Cooler show supported agents in chat."
+                    + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
             }
 
             if let failure = model.failure {
@@ -427,6 +508,15 @@ struct RunnerSettingsView: View {
     private func commitPrefix() {
         guard prefixDraft != model.branchPrefix else { return }
         Task { await model.setBranchPrefix(prefixDraft) }
+    }
+
+    /// The swipe-to-delete on the theme list, as a named function so the list
+    /// can be handed `nil` instead of it. `onDelete(perform: nil)` is how
+    /// SwiftUI is told there is no swipe at all, which is what a connection
+    /// that may not call `theme.delete` should get.
+    private func deleteThemes(_ offsets: IndexSet) {
+        let names = offsets.map { model.themes[$0].name }
+        Task { for name in names { await model.delete(themeNamed: name) } }
     }
 
     private func subtitle(_ adapter: AdapterInfo) -> String {

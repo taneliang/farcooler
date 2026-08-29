@@ -48,3 +48,37 @@ import Testing
     #expect(!different.matches)
     #expect(different.can("stack"))
 }
+
+@Test func aNarrowerGrantIsWhatDimsARunnerControl() {
+    // The two grants that are genuinely narrower than host_admin.
+    let read = DaemonBuild(
+        version: "1.0.0", matches: true, platform: "linux", grantedScope: "read")
+    let control = DaemonBuild(
+        version: "1.0.0", matches: true, platform: "linux", grantedScope: "control")
+    #expect(!read.mayAdministerRunner)
+    #expect(!control.mayAdministerRunner)
+
+    let admin = DaemonBuild(
+        version: "1.0.0", matches: true, platform: "linux", grantedScope: "host_admin")
+    #expect(admin.mayAdministerRunner)
+}
+
+@Test func anUnrecognizedGrantKeepsEveryControlOffered() {
+    // "No answer", never "no permission" — the distinction the whole predicate
+    // turns on, and the reason it is written as a deny-list of the two narrow
+    // grants rather than as `== "host_admin"`.
+    //
+    // `unspecified` is what a runner too old to name a scope sends, and what a
+    // NEWER runner naming a scope this build has no word for looks like from
+    // here. Reading either as a refusal would let a new runner silently strip
+    // controls off an older app — a regression that would arrive without
+    // anybody changing this app at all.
+    let silent = DaemonBuild(version: "1.0.0", matches: true, platform: "linux")
+    #expect(silent.grantedScope == "unspecified")
+    #expect(silent.mayAdministerRunner)
+
+    let fromTheFuture = DaemonBuild(
+        version: "9.0.0", matches: false, platform: "linux",
+        grantedScope: "some_scope_this_build_has_never_heard_of")
+    #expect(fromTheFuture.mayAdministerRunner)
+}

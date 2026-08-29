@@ -104,13 +104,61 @@ public struct DaemonBuild: Equatable, Sendable {
     /// than as a runner that can do nothing.
     public let capabilities: Set<String>
 
+    /// What THIS connection may ask that runner for, as `authorized_keys`
+    /// spells it: `read`, `control`, `host_admin`, or `unspecified`.
+    ///
+    /// The pair to `capabilities` and not a substitute for it — a capability is
+    /// what the runner can serve, this is what this connection may ask it for,
+    /// and a control needs both. It rides the handshake, so it is known before
+    /// the first request; see `Session::granted_scope` in
+    /// `crates/client/src/session.rs`.
+    ///
+    /// A fact about the CONNECTION, not about the daemon, which is why it is
+    /// read fresh on every connect rather than cached: sshd applies
+    /// `authorized_keys` once at authentication, so this is fixed for the life
+    /// of the session and a re-enrollment does not reach it.
+    ///
+    /// `unspecified` is "no answer", NEVER "no permission" — see
+    /// `mayAdministerRunner`.
+    public let grantedScope: String
+
     public init(
-        version: String, matches: Bool, platform: String, capabilities: Set<String> = []
+        version: String, matches: Bool, platform: String, capabilities: Set<String> = [],
+        grantedScope: String = "unspecified"
     ) {
         self.version = version
         self.matches = matches
         self.platform = platform
         self.capabilities = capabilities
+        self.grantedScope = grantedScope
+    }
+
+    /// Whether this connection may ask for the calls that change the runner
+    /// itself — its watched folders, its branch prefix, its themes, its agents.
+    ///
+    /// `can(_:)`'s sibling, and read the same way: a control this answers
+    /// `false` for is shown DIMMED with a reason, never hidden. Hiding it would
+    /// make the same app look different on two runners for no stated cause, and
+    /// leaving it live would teach people that buttons sometimes do nothing.
+    ///
+    /// Written as a list of the grants known to be NARROWER than what those
+    /// calls need, rather than as `grantedScope == "host_admin"`, and that
+    /// direction is the whole point. `unspecified` is what a runner NEWER than
+    /// this build answers when it names a grant this build has no word for —
+    /// reading that as a refusal would let a new runner silently strip controls
+    /// off an older app. So anything this build cannot recognize keeps offering
+    /// exactly what it offers today, which is the shape `can(_:)` already has
+    /// for capabilities.
+    ///
+    /// **The Mac never reaches `false` here, and that is not an oversight.** It
+    /// talks to a runner through the CLI over its own plain shell key, which
+    /// carries no forced command, so `Session::granted` in
+    /// `crates/daemon/src/main.rs` reads it as host_admin — and `DaemonBuild`
+    /// on that side is built without this field at all, which defaults to
+    /// `unspecified` and lands in the same place. There is nothing to dim on a
+    /// Mac. Only the two phones enroll at `control`.
+    public var mayAdministerRunner: Bool {
+        grantedScope != "read" && grantedScope != "control"
     }
 
     /// Whether this runner can do something, by name.

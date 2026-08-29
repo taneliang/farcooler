@@ -609,6 +609,15 @@ class Connection(
                 ?.mapNotNull { it.jsonPrimitive.contentOrNull }
                 ?.toSet()
                 .orEmpty(),
+            // What THIS session may ask for, computed by the daemon from the
+            // real grant and carried in the handshake, so it costs no round
+            // trip on top of the one this call already makes.
+            //
+            // Absent — and "unspecified" — both mean "no answer", never "no
+            // permission". `DaemonBuild.mayAdministerRunner` reads either as
+            // "keep offering what we offer today", so a runner newer than this
+            // build cannot silently strip controls off it.
+            grantedScope = body["grantedScope"]?.jsonPrimitive?.contentOrNull ?: "unspecified",
         )
         // Read from the same call, which is already made once per connection.
         //

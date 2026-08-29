@@ -561,7 +561,16 @@ final class Connection: ObservableObject {
             // Absent from a daemon older than capabilities. `DaemonBuild.can`
             // reads an empty set as the features that existed then, so an old
             // runner keeps working rather than going dark.
-            capabilities: Set(body["capabilities"] as? [String] ?? []))
+            capabilities: Set(body["capabilities"] as? [String] ?? []),
+            // What THIS session may ask for, computed by the daemon from the
+            // real grant and carried in the handshake, so it costs no round
+            // trip on top of the one this call already makes.
+            //
+            // Absent — and "unspecified" — both mean "no answer", never "no
+            // permission". `DaemonBuild.mayAdministerRunner` reads either as
+            // "keep offering what we offer today", so a runner newer than this
+            // build cannot silently strip controls off it.
+            grantedScope: body["grantedScope"] as? String ?? "unspecified")
         // Read from the same call, which is already made once per connection.
         //
         // Defaulted to the daemon's own default rather than to no prefix: an

@@ -95,6 +95,21 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     // sidebar's.
     val repositories by connection.repositories.collectAsStateWithLifecycle()
 
+    // Whether this connection may ask for the calls that change the runner —
+    // its branch prefix, its themes, its agents. Learned in the handshake, so
+    // it is known before anything on this screen is pressed, which is the whole
+    // difference between this and the trouble boxes below: those report a call
+    // that already failed, this dims a call that would.
+    //
+    // Null while `loadDaemonBuild` is still on its way, and that reads as
+    // "yes" — the same direction [DaemonBuild.mayAdministerRunner] takes for a
+    // grant this build has no word for. A screen that starts out dimmed and
+    // un-dims a moment later is worse than one that never flickers, and the
+    // controls are honest either way: the runner is the one enforcing this, not
+    // the app.
+    val daemon by connection.daemon.collectAsStateWithLifecycle()
+    val mayAdminister = daemon?.mayAdministerRunner() ?: true
+
     var editingTheme by remember { mutableStateOf<Theme?>(null) }
     var editingAdapter by remember { mutableStateOf<AdapterInfo?>(null) }
     var adapterIsNew by remember { mutableStateOf(false) }
@@ -116,6 +131,11 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     }
 
     suspend fun reload() {
+        // No round trip after the first: the handshake already carried both the
+        // capabilities and this session's grant, and this is cached per
+        // connection. Asked here anyway so the screen never draws a control
+        // live that the connection cannot use, whatever order it was reached in.
+        connection.loadDaemonBuild()
         storedPrefix = connection.branchPrefix.value
         prefix = storedPrefix
         // First, because it is what says whether the rest of the screen can be
@@ -211,12 +231,18 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             WatchedFoldersSection(roots, rootsTrouble) { addingRepository = true }
 
             SectionTitle("Branches")
+            // The field itself, not just Save. `settings.set_branch_prefix` is
+            // the only thing this section does, so a field that still typed
+            // would collect an edit with nowhere to go — and with it disabled
+            // the draft can never differ from the stored value, which is what
+            // takes Save away below without a second condition.
             OutlinedTextField(
                 value = prefix,
                 onValueChange = { prefix = it },
                 label = { Text("Branch prefix") },
                 placeholder = { Text("feat/") },
                 singleLine = true,
+                enabled = mayAdminister,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
@@ -225,6 +251,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (!mayAdminister) RestrictedNote()
             if (prefix != storedPrefix) {
                 Button(onClick = {
                     scope.launch {
@@ -248,6 +275,11 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // The list still loads: `theme.list` is `Scope::Read` and only the
+            // writes underneath it are not. So this section reads normally and
+            // dims its three buttons, rather than emptying — which is the same
+            // rule `adapters()` follows one section down for the opposite case.
+            if (!mayAdminister) RestrictedNote()
             for (theme in themes) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -256,14 +288,20 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                 ) {
                     ThemeStrip(theme)
                     Text(theme.name, Modifier.weight(1f))
-                    TextButton(onClick = { editingTheme = theme }) { Text("Edit") }
-                    TextButton(onClick = {
-                        scope.launch { connection.deleteTheme(theme.name)?.let { themes = it }
-                            connection.reloadThemes() }
-                    }) { Text("Delete") }
+                    TextButton(
+                        onClick = { editingTheme = theme },
+                        enabled = mayAdminister,
+                    ) { Text("Edit") }
+                    TextButton(
+                        onClick = {
+                            scope.launch { connection.deleteTheme(theme.name)?.let { themes = it }
+                                connection.reloadThemes() }
+                        },
+                        enabled = mayAdminister,
+                    ) { Text("Delete") }
                 }
             }
-            OutlinedButton(onClick = {
+            OutlinedButton(enabled = mayAdminister, onClick = {
                 val taken = themes.map { it.name }.toSet()
                 var name = "${Themes.current.name} Copy"
                 var n = 2
@@ -286,6 +324,13 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             // happen, and this is what makes the difference visible. `adapters()`
             // used to swallow it and answer the empty list, which said the
             // opposite of the truth in the runner's name.
+            //
+            // Both halves, and they are not the same statement. The note says
+            // what this connection may not ask for, ahead of asking. The box
+            // says what actually came back — `adapter.list` is host_admin too,
+            // so on this runner it is usually the same cause, but "usually" is
+            // the reason neither one stands in for the other.
+            if (!mayAdminister) RestrictedNote()
             adaptersTrouble?.let { SheetFailure(it) }
             for (adapter in adapters) {
                 Row(
@@ -302,22 +347,28 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                             maxLines = 1,
                         )
                     }
-                    TextButton(onClick = {
-                        adapterIsNew = false
-                        editingAdapter = adapter
-                    }) { Text("Edit") }
+                    TextButton(
+                        onClick = {
+                            adapterIsNew = false
+                            editingAdapter = adapter
+                        },
+                        enabled = mayAdminister,
+                    ) { Text("Edit") }
                     // Only what the file owns can be removed. A built-in has no
                     // table to delete, so offering it would do nothing.
                     if (adapter.origin == "override" || adapter.origin == "user") {
-                        TextButton(onClick = {
-                            scope.launch {
-                                connection.deleteAdapter(adapter.preset)?.let { adapters = it }
-                            }
-                        }) { Text(if (adapter.origin == "override") "Revert" else "Delete") }
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    connection.deleteAdapter(adapter.preset)?.let { adapters = it }
+                                }
+                            },
+                            enabled = mayAdminister,
+                        ) { Text(if (adapter.origin == "override") "Revert" else "Delete") }
                     }
                 }
             }
-            OutlinedButton(onClick = {
+            OutlinedButton(enabled = mayAdminister, onClick = {
                 val taken = adapters.map { it.preset }.toSet()
                 var name = "my-agent"
                 var n = 2
@@ -517,6 +568,48 @@ internal fun rootRemovalNote(): String =
  */
 internal fun deniedSentence(what: String): String =
     "Couldn’t read this runner’s $what."
+
+/**
+ * Why a section's own buttons are dimmed rather than live.
+ *
+ * The other half of [deniedSentence], and deliberately a different sentence
+ * about a different moment. That one is spoken AFTER a call came back with
+ * nothing, where a runner asleep, a daemon too old and a socket that went away
+ * all look identical — so it names what is missing and blames nothing. This one
+ * is spoken BEFORE anything is pressed, and it can afford to say why: the
+ * handshake carried what this session may ask for, so the app knows in advance
+ * that these calls are not for this device. Neither sentence replaces the other,
+ * and the failure one is untouched.
+ *
+ * Says what to do about it, because a dimmed button with no way forward teaches
+ * exactly as little as a hidden one. The runner's own command line is named
+ * rather than the Mac app, and that is the honest half: the Mac's Add Device
+ * flow adds a phone with the same access this one already has, so sending
+ * somebody there would send them in a circle.
+ *
+ * **It does not promise the change takes effect at once, and must not.** sshd
+ * reads `authorized_keys` when a connection authenticates and never again, so a
+ * device added again stays dimmed on its current connection until it
+ * reconnects. "Add it again" is true; "and these light up" would not be.
+ *
+ * Written in plain product words on purpose, and pinned that way by
+ * `RunnerSettingsCopyTest` — the wire's own vocabulary for this means nothing to
+ * the person reading it, and half of it would be a claim about the runner this
+ * app has no business making.
+ */
+internal fun restrictedSentence(): String =
+    "This device can’t change this runner’s settings. Add it again from the runner’s own " +
+        "command line, with full access, to change them from here."
+
+/** [restrictedSentence], in the voice the rest of a section's help text uses. */
+@Composable
+private fun RestrictedNote() {
+    Text(
+        restrictedSentence(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
 
 /**
  * Whether this runner says it is well, and what it is.
