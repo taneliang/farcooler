@@ -36,6 +36,10 @@
 		F230819A70605327976EA2BC /* AdapterEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81B3FFFD38BC535DA1105E27; };
 		E1D175A7B1405C9EABF1E458 /* Changes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A8FED8736D857F49A57514C; };
 		647A6FEEEEBD5050AB2C691A /* ChangesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A76186484953E7A3889007; };
+		3FF0E180D9AF5212BADB9C3C /* ShellBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712BFC5C6B4F5D0E80562C7F; };
+		7115BE0DFAAC5DCA9935C729 /* ShellOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5E4D0B3420C55888D0DCF04; };
+		D6F4A14A2101594794EE0A52 /* ShellRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A851CC8EA9C75506AE04F139; };
+		25877588360854AC87D9BB37 /* ShellHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90B7569A5F745E6B85EC796E; };
 		A1B3F2CD76435C6A8F0447CB /* ChangesReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = E698DD929C2052D1A09BB24C; };
 		1173213E2CCC5934AA16F910 /* BranchAndStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8F01ACAD5F54C5A52C3E03; };
 		2C981294B410584F82B1C2B4 /* CodeImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58A133A2D68D5C69BACD7F1F; };
@@ -63,6 +67,7 @@
 		CBDDC5EC069D53FC8EB3004A /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BD8F54D5B935B33A810D490; };
 		6ED88B8CE5605E7382A93B98 /* RelaySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35606FB34F805ACB98820C9C; };
 		BD7B2D26321E585587138792 /* ReviewComments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DDD1614AA2D572DB2546B75; };
+		1D2E1EBB71985A1CBA44AEEC /* ShellNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A109ED1973485D5680C3F889; };
 		A4677749D2C9588EB8FA703D /* TokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F21B2F4E7305C52A6B39A5D; };
 		A057A865719A51ED8C536CF7 /* VersionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B7BC3FED5259D183C18D69; };
 		739934EC2264588692457640 /* Transcript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F7004A6B092527BAE191DD2; };
@@ -99,6 +104,7 @@
 		59D256C95C545020AA02BE79 /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DDC26E14F651988BDDC06B; };
 		30D3C69564595EDCAD1985DD /* ChangesPullRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC8800ABD8150F4953E299C; };
 		B5DE26931A0854B5A557FE8A /* KeyboardTabStripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29DA60E46FE1567A99E720AC; };
+		3DBFDF50799652A98D596E96 /* ShellGestureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79289F71F44556998261DE65; };
 		3E68F15DECF855E2AC954924 /* TerminalScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5F87A8855875DBA804ED023; };
 		5E56AE26EA37573BB9DA7ADB /* FarCoolerActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 519B5ED0E0F35300BA7F8EDA; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CD1C3BF2A4E55CE8B3C554C3 /* FarCoolerNotify.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 258C0C0EE4395DF7B38D4BD7; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -137,6 +143,10 @@
 		81B3FFFD38BC535DA1105E27 /* AdapterEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdapterEditorView.swift; sourceTree = "<group>"; };
 		0A8FED8736D857F49A57514C /* Changes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Changes.swift; sourceTree = "<group>"; };
 		27A76186484953E7A3889007 /* ChangesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangesView.swift; sourceTree = "<group>"; };
+		712BFC5C6B4F5D0E80562C7F /* ShellBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellBar.swift; sourceTree = "<group>"; };
+		E5E4D0B3420C55888D0DCF04 /* ShellOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellOverview.swift; sourceTree = "<group>"; };
+		A851CC8EA9C75506AE04F139 /* ShellRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRootView.swift; sourceTree = "<group>"; };
+		90B7569A5F745E6B85EC796E /* ShellHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellHarness.swift; sourceTree = "<group>"; };
 		E698DD929C2052D1A09BB24C /* ChangesReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangesReview.swift; sourceTree = "<group>"; };
 		0B8F01ACAD5F54C5A52C3E03 /* BranchAndStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BranchAndStack.swift; sourceTree = "<group>"; };
 		58A133A2D68D5C69BACD7F1F /* CodeImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeImage.swift; sourceTree = "<group>"; };
@@ -164,6 +174,7 @@
 		1BD8F54D5B935B33A810D490 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
 		35606FB34F805ACB98820C9C /* RelaySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySection.swift; sourceTree = "<group>"; };
 		3DDD1614AA2D572DB2546B75 /* ReviewComments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewComments.swift; sourceTree = "<group>"; };
+		A109ED1973485D5680C3F889 /* ShellNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellNavigation.swift; sourceTree = "<group>"; };
 		9F21B2F4E7305C52A6B39A5D /* TokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStore.swift; sourceTree = "<group>"; };
 		E5B7BC3FED5259D183C18D69 /* VersionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionSection.swift; sourceTree = "<group>"; };
 		3F7004A6B092527BAE191DD2 /* Transcript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcript.swift; sourceTree = "<group>"; };
@@ -182,6 +193,7 @@
 		D90F4FA1951E5108A198E412 /* WatchFleetWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFleetWidget.swift; sourceTree = "<group>"; };
 		2BC8800ABD8150F4953E299C /* ChangesPullRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangesPullRequestTests.swift; sourceTree = "<group>"; };
 		29DA60E46FE1567A99E720AC /* KeyboardTabStripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTabStripTests.swift; sourceTree = "<group>"; };
+		79289F71F44556998261DE65 /* ShellGestureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellGestureTests.swift; sourceTree = "<group>"; };
 		F5F87A8855875DBA804ED023 /* TerminalScrollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScrollTests.swift; sourceTree = "<group>"; };
 		C58051F3AA0C5DE2A3B15416 /* farcooler_vt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_vt.xcframework; path = Frameworks/farcooler_vt.xcframework; sourceTree = "<group>"; };
 		78C00FC7C5AC5565A723E44C /* farcooler_client.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = farcooler_client.xcframework; path = Frameworks/farcooler_client.xcframework; sourceTree = "<group>"; };
@@ -264,6 +276,10 @@
 				81B3FFFD38BC535DA1105E27 /* AdapterEditorView.swift */,
 				0A8FED8736D857F49A57514C /* Changes.swift */,
 				27A76186484953E7A3889007 /* ChangesView.swift */,
+				712BFC5C6B4F5D0E80562C7F /* ShellBar.swift */,
+				E5E4D0B3420C55888D0DCF04 /* ShellOverview.swift */,
+				A851CC8EA9C75506AE04F139 /* ShellRootView.swift */,
+				90B7569A5F745E6B85EC796E /* ShellHarness.swift */,
 				E698DD929C2052D1A09BB24C /* ChangesReview.swift */,
 				0B8F01ACAD5F54C5A52C3E03 /* BranchAndStack.swift */,
 				EEF1BECD777654A58B89B364 /* Ceremony */,
@@ -317,6 +333,7 @@
 			children = (
 				2BC8800ABD8150F4953E299C /* ChangesPullRequestTests.swift */,
 				29DA60E46FE1567A99E720AC /* KeyboardTabStripTests.swift */,
+				79289F71F44556998261DE65 /* ShellGestureTests.swift */,
 				F5F87A8855875DBA804ED023 /* TerminalScrollTests.swift */,
 			);
 			path = FarCoolerUITests;
@@ -366,6 +383,7 @@
 				1BD8F54D5B935B33A810D490 /* PushRegistration.swift */,
 				35606FB34F805ACB98820C9C /* RelaySection.swift */,
 				3DDD1614AA2D572DB2546B75 /* ReviewComments.swift */,
+				A109ED1973485D5680C3F889 /* ShellNavigation.swift */,
 				9F21B2F4E7305C52A6B39A5D /* TokenStore.swift */,
 				E5B7BC3FED5259D183C18D69 /* VersionSection.swift */,
 				3F7004A6B092527BAE191DD2 /* Transcript.swift */,
@@ -680,6 +698,10 @@
 				F230819A70605327976EA2BC /* AdapterEditorView.swift in Sources */,
 				E1D175A7B1405C9EABF1E458 /* Changes.swift in Sources */,
 				647A6FEEEEBD5050AB2C691A /* ChangesView.swift in Sources */,
+				3FF0E180D9AF5212BADB9C3C /* ShellBar.swift in Sources */,
+				7115BE0DFAAC5DCA9935C729 /* ShellOverview.swift in Sources */,
+				D6F4A14A2101594794EE0A52 /* ShellRootView.swift in Sources */,
+				25877588360854AC87D9BB37 /* ShellHarness.swift in Sources */,
 				A1B3F2CD76435C6A8F0447CB /* ChangesReview.swift in Sources */,
 				1173213E2CCC5934AA16F910 /* BranchAndStack.swift in Sources */,
 				2C981294B410584F82B1C2B4 /* CodeImage.swift in Sources */,
@@ -707,6 +729,7 @@
 				CBDDC5EC069D53FC8EB3004A /* PushRegistration.swift in Sources */,
 				6ED88B8CE5605E7382A93B98 /* RelaySection.swift in Sources */,
 				BD7B2D26321E585587138792 /* ReviewComments.swift in Sources */,
+				1D2E1EBB71985A1CBA44AEEC /* ShellNavigation.swift in Sources */,
 				A4677749D2C9588EB8FA703D /* TokenStore.swift in Sources */,
 				A057A865719A51ED8C536CF7 /* VersionSection.swift in Sources */,
 				739934EC2264588692457640 /* Transcript.swift in Sources */,
@@ -772,6 +795,7 @@
 			files = (
 				30D3C69564595EDCAD1985DD /* ChangesPullRequestTests.swift in Sources */,
 				B5DE26931A0854B5A557FE8A /* KeyboardTabStripTests.swift in Sources */,
+				3DBFDF50799652A98D596E96 /* ShellGestureTests.swift in Sources */,
 				3E68F15DECF855E2AC954924 /* TerminalScrollTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -816,10 +840,10 @@
 				FARCOOLER_CHANNEL = local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
 				FARCOOLER_APP_NAME = "FC Local";
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 99e78f8)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local e0dd82f)";
 				FARCOOLER_WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -843,10 +867,10 @@
 				FARCOOLER_CHANNEL = local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
 				FARCOOLER_APP_NAME = "FC Local";
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 99e78f8)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local e0dd82f)";
 				FARCOOLER_WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -867,7 +891,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
@@ -887,7 +911,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
@@ -907,7 +931,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerNotify;
@@ -926,7 +950,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerNotify;
@@ -945,7 +969,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatch;
@@ -971,7 +995,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatch;
@@ -997,7 +1021,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatchWidgets;
@@ -1021,7 +1045,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 543;
+				CURRENT_PROJECT_VERSION = 544;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatchWidgets;

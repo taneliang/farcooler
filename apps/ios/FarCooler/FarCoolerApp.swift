@@ -42,6 +42,13 @@ struct FarCoolerApp: App {
             AgentLayoutHarness()
         } else if ChangesLayoutHarness.isRequested {
             ChangesLayoutHarness()
+        } else if ShellHarness.isRequested {
+            // The navigation shell, over a canned fleet. A branch here and
+            // nothing else: the shell does not replace this app's navigation
+            // in this commit and `RootView` below is untouched, because wiring
+            // it to a real fleet and flipping the root are two separate things
+            // and neither of them should ride in on the commit that builds it.
+            ShellHarness()
         } else {
             RootView()
         }
