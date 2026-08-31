@@ -553,6 +553,76 @@ class ShellTest {
         assertEquals(ShellPosition(1, 0), fleet.first)
     }
 
+    // MARK: - The track, and the commit that must not move anything
+
+    /**
+     * **The no-bounce guarantee, as arithmetic.**
+     *
+     * Committing a page turn changes two things at once: which pane is current,
+     * and the track's offset. If those two writes disagree by so much as a
+     * frame, the page visibly jumps back — which is the bug the web prototype
+     * works around with two `requestAnimationFrame`s and iOS works around with a
+     * completion callback and a transaction that disables animations.
+     *
+     * This asserts that they cannot disagree, because the pair is a pure
+     * re-parameterisation: after a commit, **every** pane is drawn at exactly
+     * the pixel it was drawn at before — not just the incoming one. So the swap
+     * frame is identical to the frame before it and there is nothing for a race
+     * to be wrong about.
+     */
+    @Test
+    fun committingMovesNothing() {
+        val width = 412f
+        for (offset in listOf(0f, -30f, -90f, 45f, 200f, -411f)) {
+            for (direction in ShellDirection.entries) {
+                val after = ShellTrackGeometry.residual(offset, direction, width)
+                // Every slot the track can draw, not only the one arriving.
+                for (slot in -2..2) {
+                    val before = ShellTrackGeometry.x(slot, width, offset)
+                    // The commit moves the current index one step, so a pane
+                    // that was at `slot` is now at `slot + trackSign`.
+                    val nowAt = ShellTrackGeometry.x(
+                        slot + direction.trackSign.toInt(), width, after)
+                    assertEquals(
+                        "offset=$offset $direction slot=$slot moved",
+                        before, nowAt, 1e-3f,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * The residual is a whole page, in the direction that undoes the index move.
+     * Stated separately from [committingMovesNothing] because that test would
+     * also pass if both halves were zero.
+     */
+    @Test
+    fun `the residual is one page against the direction of travel`() {
+        assertEquals(412f, ShellTrackGeometry.residual(0f, ShellDirection.NEXT, 412f))
+        assertEquals(-412f, ShellTrackGeometry.residual(0f, ShellDirection.PREVIOUS, 412f))
+        // Dragged 90 to the left and released: the incoming pane is 322 to the
+        // right of centre and settles from there rather than from a page away.
+        assertEquals(322f, ShellTrackGeometry.residual(-90f, ShellDirection.NEXT, 412f))
+    }
+
+    /**
+     * Dragging left brings the NEXT pane in from the right. A sign error here is
+     * invisible in a screenshot and obvious in a hand: the page would come from
+     * the wrong side.
+     */
+    @Test
+    fun `dragging left brings the next pane in from the right`() {
+        val width = 400f
+        // At rest the neighbours are exactly one page off-screen either side.
+        assertEquals(400f, ShellTrackGeometry.x(1, width, 0f))
+        assertEquals(-400f, ShellTrackGeometry.x(-1, width, 0f))
+        // Dragging left (negative) pulls the next one toward centre.
+        assertEquals(300f, ShellTrackGeometry.x(1, width, -100f))
+        assertEquals(-100f, ShellTrackGeometry.x(0, width, -100f))
+        assertEquals(ShellDirection.NEXT, ShellGesture.direction(-100f))
+    }
+
     /** The rail tracks a measured page rather than a constant one. */
     @Test
     fun `the rail is the page less its two insets`() {

@@ -611,3 +611,75 @@ fun ShellFleet.contentRelease(
     val step = step(at, direction, ShellTrack.CONTENT) ?: return ShellRelease.SpringBack
     return ShellRelease.Commit(step)
 }
+
+/**
+ * Where the track's panes sit, and what a commit does to them.
+ *
+ * Three panes side by side — the one you are on, with a real previous and a real
+ * next — each the width of a page, the whole track slid by however far your
+ * thumb has gone. The neighbours are genuinely mounted and genuinely drawn,
+ * which is the entire difference between an incoming terminal and a placeholder
+ * that turns into one after you commit.
+ *
+ * ## Why the commit is arithmetic here rather than an animation trick
+ *
+ * The prototype animates the track to the neighbour, then re-centres it on the
+ * new item with transitions disabled for one frame and restores them two
+ * `requestAnimationFrame`s later. Skip that and the transform animates back to
+ * zero and you watch the page jump back. iOS reaches for
+ * `completionCriteria: .logicallyComplete` and a `Transaction` with
+ * `disablesAnimations` to do the same thing properly.
+ *
+ * Both are working around the same thing: changing which pane is current and
+ * resetting the offset are two writes, and a frame that lands between them
+ * renders a lie.
+ *
+ * **[residual] removes the gap instead of racing it.** Moving the current index
+ * one way and shifting the offset one page the other way are the SAME transform
+ * — see [committingMovesNothing] in the tests, which asserts it for every slot
+ * rather than for the incoming pane alone. So the commit does not animate to the
+ * neighbour and then reset; it re-parameterises in place, at which point every
+ * pane is drawn at exactly the pixel it was already at, and the settle animates
+ * the residual to zero from there. There is no frame that can be wrong, because
+ * the swap frame is pixel-identical to the one before it.
+ *
+ * That is not a cleverness the other platforms lack the ability to copy — it is
+ * available to all three, and it is written down here because it is the version
+ * that does not need a completion callback to be correct.
+ */
+object ShellTrackGeometry {
+
+    /**
+     * Where a pane sits, in pixels from the current pane's resting place.
+     *
+     * @param slot 0 for the pane you are on, −1 for the previous, +1 for the
+     *   next. A mounted pane that is on neither side of you has no slot and is
+     *   not drawn — see `PaneTrack`.
+     * @param offset how far the track has been dragged, in pixels. Negative is
+     *   dragging left, which brings the NEXT pane in from the right.
+     */
+    fun x(slot: Int, pageWidth: Float, offset: Float): Float = slot * pageWidth + offset
+
+    /**
+     * The offset that leaves every pane exactly where it already is, once the
+     * current pane has moved one step in [direction].
+     *
+     * Committing to the next pane shifts every slot down by one, so the offset
+     * has to grow by one page to compensate; committing to the previous does the
+     * reverse. [ShellDirection.trackSign] is the same −1/+1 the track slides by,
+     * which is why this is a subtraction rather than a `when`.
+     */
+    fun residual(offset: Float, direction: ShellDirection, pageWidth: Float): Float =
+        offset - direction.trackSign * pageWidth
+
+    /**
+     * How much of an incoming neighbour is drawn while it is on its way.
+     *
+     * The prototype's 0.72, and it is doing a job: a pane at full strength
+     * sliding under your thumb reads as already yours, and a page turn you have
+     * not committed to should not. It resolves to 1 the instant the commit lands,
+     * because the incoming pane becomes the current one and current panes are
+     * never dimmed.
+     */
+    const val NEIGHBOUR_ALPHA = 0.72f
+}

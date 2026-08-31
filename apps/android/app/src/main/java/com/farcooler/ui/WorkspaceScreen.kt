@@ -311,12 +311,49 @@ fun WorkspaceScreen(
             .background(Color(TerminalPalette.BACKGROUND))
             .imePadding()
     ) {
-        Box(Modifier.weight(1f)) {
+        // The shell's content track. The fleet is rebuilt from the workspace on
+        // every poll, so a pane that appears becomes a neighbour without anyone
+        // telling the track; `rememberUpdatedState` inside `paneTrack` is what
+        // makes an in-flight swipe see it.
+        val fleet = trackFleet(workspace, route.workspaceId, route.hostId)
+        val position = fleet.position(panes.current.id)
+        val track = rememberPaneTrack()
+
+        Box(
+            Modifier
+                .weight(1f)
+                // Only once the deck's current pane is somewhere in the fleet.
+                // Between a runner answering and this screen agreeing with it
+                // there is a frame where it is not, and a track with no position
+                // has no neighbours to offer.
+                .then(
+                    if (position == null) Modifier
+                    else Modifier.paneTrack(track, fleet, position) { step ->
+                        // `choose`, exactly as the strip does: a swipe is a
+                        // person saying where they want to be, which is what
+                        // makes it the remembered focus. The deck's `select`
+                        // then mounts whatever was not mounted, and evicts
+                        // nothing that is on the track — see
+                        // `PaneDeckTest.aTrackWithBothNeighboursEvictsNothing`.
+                        fleet.tab(step.position)?.let {
+                            model.choose(route.hostId, route.workspaceId, Pane.parse(it.id))
+                        }
+                    }
+                )
+        ) {
             for (pane in panes.mounted) {
                 val showing = pane == panes.current
+                // Null for a mounted pane that is not a neighbour: composed,
+                // alive, holding its scrollback, and not drawn.
+                val slot = position?.let { trackSlot(fleet, it, pane) }
                 key(pane.id) {
                     holder.SaveableStateProvider(pane.id) {
-                        Box(Modifier.fillMaxSize().mountedPane(showing)) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .trackedPane(track, slot, showing)
+                                .mountedPane(showing)
+                        ) {
                             when (pane) {
                                 is Pane.Terminal -> TerminalPane(
                                     model = model,
@@ -384,10 +421,10 @@ fun WorkspaceScreen(
 /**
  * Hidden, not removed.
  *
- * `alpha` keeps the pane in the hierarchy — which is what preserves its state —
- * while the rest of this stops a pane nobody can see from taking anything meant
- * for the one on top of it. Three separate leaks to close, because Compose has
- * no single `allowsHitTesting`:
+ * The pane stays in the hierarchy — which is what preserves its state — while
+ * this stops a pane that is not yours from taking anything meant for the one
+ * that is. Three separate leaks to close, because Compose has no single
+ * `allowsHitTesting`:
  *
  * - **Touches.** `zIndex` puts the showing pane first in both draw order and
  *   hit-test order, but hit testing continues past a child that does not
@@ -399,11 +436,25 @@ fun WorkspaceScreen(
  *   which is the only place that knows a tab changed.
  * - **Accessibility.** Without `clearAndSetSemantics`, TalkBack reads three
  *   transcripts stacked on top of each other, all of them invisible.
+ *
+ * **Visibility is no longer this modifier's business.** It used to set
+ * `alpha(if (showing) 1f else 0f)`, and that is now `trackedPane`'s job: a
+ * neighbour mid-swipe is deliberately drawn, at
+ * `ShellTrackGeometry.NEIGHBOUR_ALPHA`, and an alpha of zero here would multiply
+ * it back to nothing. Two modifiers writing one channel is how a pane ends up
+ * invisible for a reason nobody can find, so there is exactly one writer.
+ *
+ * **What has NOT changed is which pane is `showing`.** Everything below still
+ * keys on the pane the deck says is current, and it does not follow the drag —
+ * a neighbour is visible without being yours. That is the same line iOS draws
+ * with `isVisible`, and it is load-bearing for the same reason: a pane that is
+ * merely on screen must not take first responder, must not claim the runner's
+ * watch, and must not put its composer over the pane you are actually in. The
+ * `live` flag each pane is given is `showing && foreground` and nothing else.
  */
 private fun Modifier.mountedPane(showing: Boolean): Modifier =
     this
         .zIndex(if (showing) 1f else 0f)
-        .alpha(if (showing) 1f else 0f)
         .then(if (showing) Modifier else HIDDEN_PANE)
 
 private val HIDDEN_PANE: Modifier = Modifier
