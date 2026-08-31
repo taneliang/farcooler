@@ -139,12 +139,46 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         public var planDone: UInt32?
         public var planTotal: UInt32?
 
+        /// This terminal's activity trace, **as the wire's 66 bytes and not as
+        /// anything decoded**. §04's thirteen buckets; see `ActivityTrace`.
+        ///
+        /// `Data` and not three arrays, and that is the one decision this field
+        /// exists to preserve. `proto/farcooler.proto` chose bytes over three
+        /// `repeated uint32` fields for a consumer that is exactly this type:
+        /// `FleetWidget` holds a whole snapshot per timeline entry, up to
+        /// thirteen entries, in an extension with a hard memory ceiling, so the
+        /// arithmetic is buckets x series x agents x entries on the DECODED
+        /// size. Twelve agents over thirteen entries is 44,928 bytes across 468
+        /// heap objects as arrays and 17,472 across 156 as `Data`. A field here
+        /// typed `[UInt16]` would hand that saving straight back.
+        ///
+        /// So the bytes are carried, and `ActivityTrace` reads them **where the
+        /// drawing happens** — a `body` that runs once per rendered row rather
+        /// than a decode held for every entry of every timeline.
+        ///
+        /// **Carrying is not recomputing.** The rule at the top of this file is
+        /// that the fields ARE the wire's fields; this one is the wire's field
+        /// byte for byte. What would break the rule is deriving activity the
+        /// daemon did not send — summing these into a fleet trace on the phone,
+        /// for instance, which is why `FleetSnapshot.fleetTrace` is its own wire
+        /// field and says so.
+        ///
+        /// **Optional, and nil is not 66 zeroes.** The proto: "Empty when the
+        /// terminal has done nothing the trace can see, rather than 66 zero
+        /// bytes: a fleet at rest costs nothing." Those are different drawings —
+        /// nil is no trace at all, and 66 zeroes is a trace of thirteen quiet
+        /// buckets, which §04 says are "Drawn, not omitted". `ActivityTrace`
+        /// keeps them apart and `traceDrawsAsAbsentRatherThanFlatZero` holds it
+        /// down.
+        public var trace: Data?
+
         public init(
             id: String, label: String, machine: String, status: String,
             glyph: String, headline: String, line: String, feed: [String],
             rank: UInt32, turnFailed: Bool, activityChangedAt: Date?,
             observedAt: Date? = nil,
-            planDone: UInt32? = nil, planTotal: UInt32? = nil
+            planDone: UInt32? = nil, planTotal: UInt32? = nil,
+            trace: Data? = nil
         ) {
             self.id = id
             self.label = label
@@ -160,6 +194,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             self.observedAt = observedAt
             self.planDone = planDone
             self.planTotal = planTotal
+            self.trace = trace
         }
 
         /// Whether this status stays true as the snapshot ages.
@@ -190,6 +225,35 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         /// stops covering the twelfth field the day somebody adds one, and the
         /// failure would be a wrist that never hears about it. Copying two
         /// small values to reuse the synthesized `==` is the cheaper mistake.
+        ///
+        /// **`trace` IS compared, and that is the answer rather than an
+        /// oversight.** It was the one field added since where the question had
+        /// to be asked again, so here is the working:
+        ///
+        ///   - The wrist DRAWS it, which is the whole test this function
+        ///     applies. `observedAt` is blanked precisely because no surface
+        ///     draws it; a field the watch renders and this ignored would let
+        ///     the guard suppress a write that changes the picture.
+        ///   - The case the guard exists for survives. Its own caller says so:
+        ///     "This buys an IDLE fleet only" (`WatchLinkHost.send(snapshot:)`).
+        ///     An idle terminal records nothing, and `farcooler_core::trace`
+        ///     buckets on ABSOLUTE wall-clock rather than backwards from now, so
+        ///     two polls of a quiet agent inside one bucket produce byte-
+        ///     identical output. That property is in the producer for exactly
+        ///     this reason and its module header names this function.
+        ///   - The only churn a quiet fleet gains is one bucket boundary per
+        ///     window width, and the narrowest width is five minutes — against
+        ///     a floor in that same caller that resends unconditionally every
+        ///     thirty seconds. So it cannot add a write that the floor was not
+        ///     already paying for.
+        ///   - A BUSY fleet's bytes do move on nearly every poll. That is not a
+        ///     regression either: `line` and `feed` are in this comparison and
+        ///     already churn on nearly every poll while an agent works, so a
+        ///     working fleet has always pushed at the full poll rate, and the
+        ///     caller calls that "the right way round".
+        ///
+        /// Written down because the cheap-looking edit is to blank it beside
+        /// `observedAt`, and that would trade a correct wrist for nothing.
         public func saysTheSame(as other: Agent) -> Bool {
             var mine = self
             var theirs = other
@@ -253,13 +317,39 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// means "stop what you are doing and answer me".
     public var reviewsWaiting: Int?
 
+    /// The whole fleet's trace, summed **on the runner**, as the wire's bytes.
+    ///
+    /// `TerminalList.fleet_trace`, carried across exactly like every agent's own
+    /// `trace` and empty on the same terms.
+    ///
+    /// **Nothing here may add the rows up instead, and the reason is arithmetic
+    /// rather than tidiness.** Each terminal's row snaps to the shortest of
+    /// §04's three windows that holds its own activity, so bucket 4 of a
+    /// five-minute row and bucket 4 of a two-hour row are two different spans of
+    /// time and adding them adds unlike things. The daemon holds every ring and
+    /// can pick one width for all of them; a client holding only the rendered
+    /// rows cannot. `proto/farcooler.proto` states this at the field and
+    /// `farcooler_core::trace::Trace::absorb` is where it is done.
+    ///
+    /// Summing is legitimate at all only because it stays inside one channel —
+    /// code with code, output with output. §04: "Never sum the two channels.
+    /// Different units; the total would mean nothing."
+    ///
+    /// **Optional, and nil is not zero**, the same rule `reviewsWaiting` states
+    /// above: a snapshot written by a build that predates this, or by a phone
+    /// talking to a daemon too old to send it, decodes and simply draws no
+    /// fleet trace.
+    public var fleetTrace: Data?
+
     public init(
-        agents: [Agent], capturedAt: Date, complete: Bool, reviewsWaiting: Int? = nil
+        agents: [Agent], capturedAt: Date, complete: Bool, reviewsWaiting: Int? = nil,
+        fleetTrace: Data? = nil
     ) {
         self.agents = agents
         self.capturedAt = capturedAt
         self.complete = complete
         self.reviewsWaiting = reviewsWaiting
+        self.fleetTrace = fleetTrace
     }
 
     /// Nothing known yet. `complete` is false, which is the honest answer
@@ -613,7 +703,16 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         }
         return FleetSnapshot(
             agents: merged, capturedAt: now, complete: complete,
-            reviewsWaiting: reviewsWaiting)
+            reviewsWaiting: reviewsWaiting,
+            // Carried, not recomputed and not cleared, for `reviewsWaiting`'s
+            // reason sharpened by the arithmetic at the field: a push is about
+            // one agent and carries no trace of its own, and the fleet sum is
+            // summable only at one width chosen across every ring on the runner
+            // — which this process cannot do. Carried means the compact Island
+            // keeps drawing the last summed history rather than blanking each
+            // time an unrelated agent notifies; the trace is history, and
+            // history does not stop being true.
+            fleetTrace: fleetTrace)
     }
 
     /// Whether two fleets say the same thing about the same agents, in the same
@@ -629,6 +728,155 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         guard let other, agents.count == other.agents.count else { return false }
         return zip(agents, other.agents).allSatisfy { $0.saysTheSame(as: $1) }
     }
+}
+
+// MARK: - The activity trace, as the wire carries it
+
+/// §04's thirteen buckets, read out of the wire's bytes and not out of anything
+/// this process worked out for itself.
+///
+/// **A reader over `Data`, never a decode into arrays.** It holds the 66 bytes
+/// it was handed and pulls a bucket out on demand; there is no `[UInt16]`
+/// anywhere in this type. That is not a micro-optimisation, it is the entire
+/// reason the field is bytes on the wire: `proto/farcooler.proto` sets out the
+/// arithmetic — buckets x series x agents x entries, on the DECODED size, in a
+/// widget extension holding a snapshot per timeline entry — and a struct that
+/// materialised three arrays at init would give that saving back the moment a
+/// snapshot was held rather than drawn. So construct one where you draw, let it
+/// go, and keep the bytes.
+///
+/// # The layout
+///
+/// `farcooler_core::trace::Trace::encode`, which is the only producer:
+///
+/// ```text
+///  0        version << 4 | width code (0 = 5min, 1 = 30min, 2 = 2h)
+///  1..27    13 x u16 LITTLE-endian, code lines, oldest first
+/// 27..53    13 x u16 little-endian, output lines, oldest first
+/// 53..66    13 x u8, commits, oldest first
+/// ```
+///
+/// # What this refuses, and why refusing is the feature
+///
+/// `init?` returns nil for anything that is not a version-1 trace, and every
+/// surface then draws NOTHING rather than a trace of thirteen zeroes. There are
+/// two separate cases and they are worth naming apart:
+///
+///   - **Empty is absent.** The producer sends no bytes at all when a terminal
+///     has done nothing the trace can see, deliberately rather than 66 zeroes,
+///     "so a fleet at rest costs nothing". A surface that drew that as a flat
+///     line at zero would be asserting thirteen buckets of observed silence
+///     about a terminal nobody has observed. Note that 66 zeroes IS a valid
+///     trace and does draw — thirteen quiet buckets, "Drawn, not omitted" per
+///     §04 — so the two cannot be collapsed.
+///   - **An unknown version is refused whole.** The proto: "A client that does
+///     not recognize the version must draw an empty trace rather than read the
+///     rest." A partial parse of an encoding we do not know is a bar chart of
+///     somebody else's bytes, and it would look entirely plausible.
+///
+/// The width code is checked on the same terms. Within version 1 it is one of
+/// three values because `WIDTHS` has three entries, so a fourth is not a
+/// version-1 trace — it is a later encoding whose author forgot the nibble
+/// above it, and guessing at its span is the same mistake one paragraph up.
+public struct ActivityTrace: Sendable, Equatable {
+    /// §04: "Buckets 13. Fixed count at every size." Matches
+    /// `farcooler_core::trace::BUCKETS`.
+    public static let buckets = 13
+
+    /// `1 + 13*2 + 13*2 + 13`. Matches `farcooler_core::trace::ENCODED_LEN`.
+    public static let encodedLength = 1 + buckets * 2 + buckets * 2 + buckets
+
+    /// The encoding this build knows. `farcooler_core::trace::ENCODING_VERSION`.
+    static let version: UInt8 = 1
+
+    /// Which of the three windows this row snapped to.
+    ///
+    /// §04: "Snaps to 1h / 6h / 24h — the shortest window containing the
+    /// activity — with the span printed as two mono characters beside the
+    /// trace."
+    ///
+    /// **The buckets are five minutes, thirty minutes and two hours, so the
+    /// windows are 65 minutes, six and a half hours and twenty-six.** That is
+    /// the producer's own departure from the round numbers and its reason is
+    /// the one property everything here rests on: 3600 does not divide by 13, so
+    /// an exactly-one-hour window of thirteen buckets cannot be aligned to
+    /// wall-clock at all, and the alignment is what makes two polls inside one
+    /// bucket produce identical bytes. `farcooler_core::trace`'s header states
+    /// it and tells clients to print the round number anyway, "because that is
+    /// what the span means to a person, and nobody can see the extra five
+    /// minutes on a bar 12pt wide". So `label` is the spec's word and the
+    /// comment here is the truth behind it.
+    public enum Span: UInt8, Sendable, Equatable, CaseIterable {
+        case hour = 0
+        case sixHours = 1
+        case day = 2
+
+        /// The span beside the trace. §04 says two mono characters; `24h` is
+        /// three, which is the spec's own count being one short rather than a
+        /// third window being available to pick.
+        public var label: String {
+            switch self {
+            case .hour: "1h"
+            case .sixHours: "6h"
+            case .day: "24h"
+            }
+        }
+    }
+
+    /// The 66 bytes, held whole. Indexing goes through `byte(_:)` because a
+    /// `Data` sliced out of a larger buffer does not start at zero.
+    private let bytes: Data
+    public let span: Span
+
+    /// The wire's bytes, or nil for anything this build may not draw.
+    ///
+    /// Nil for: no bytes (a terminal with nothing to show), the wrong length, a
+    /// version this build does not know, a width code version 1 does not have.
+    public init?(_ encoded: Data?) {
+        guard let encoded, encoded.count == Self.encodedLength else { return nil }
+        let header = encoded[encoded.startIndex]
+        guard header >> 4 == Self.version, let span = Span(rawValue: header & 0x0F) else {
+            return nil
+        }
+        self.bytes = encoded
+        self.span = span
+    }
+
+    private func byte(_ offset: Int) -> UInt8 { bytes[bytes.startIndex + offset] }
+
+    /// One little-endian `u16` out of a series. `bucket` is 0…12, oldest first.
+    private func pair(_ base: Int, _ bucket: Int) -> UInt16 {
+        let at = base + bucket * 2
+        return UInt16(byte(at)) | (UInt16(byte(at + 1)) << 8)
+    }
+
+    /// Lines of code touched in this bucket. **The upper half.**
+    ///
+    /// §04: "up is code". The growth of the worktree's insertions plus
+    /// deletions, split among the panes the daemon saw working while it grew —
+    /// see `proto/farcooler.proto`, which is careful that this is a texture and
+    /// not an accounting figure.
+    public func code(_ bucket: Int) -> UInt16 { pair(1, bucket) }
+
+    /// Lines the terminal put in front of the person. **The lower half.**
+    public func output(_ bucket: Int) -> UInt16 { pair(1 + Self.buckets * 2, bucket) }
+
+    /// Commits landed in this bucket. A mark on the axis, never a bar.
+    public func commits(_ bucket: Int) -> UInt8 { byte(1 + Self.buckets * 4 + bucket) }
+
+    /// The busiest bucket of one half, which is what full height means there.
+    ///
+    /// §04, and the wording is the spec's own correction of an earlier draft
+    /// that "never said what full height meant": "Tallest bar = that row's
+    /// busiest bucket, per half. Each half therefore reaches full height, so the
+    /// two halves are not comparable to one another — only each against its own
+    /// past. Never cross-row."
+    ///
+    /// Zero when the half is silent, which is the case §05 draws: "docs-sweep
+    /// has an empty upper half — it has talked and touched nothing, drawn rather
+    /// than omitted."
+    public var tallestCode: UInt16 { (0..<Self.buckets).reduce(0) { max($0, code($1)) } }
+    public var tallestOutput: UInt16 { (0..<Self.buckets).reduce(0) { max($0, output($1)) } }
 }
 
 // MARK: - What the OTHER runners had

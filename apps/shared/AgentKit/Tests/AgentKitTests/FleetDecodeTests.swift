@@ -241,6 +241,85 @@ struct FleetDecodeTests {
     /// file necessary and is also the behavior we want: a phone that refused to
     /// draw a fleet because the runner had learned a new word would be worse
     /// than one that draws it without the new word.
+    /// The trace's two keys, which `Session::fleet` does NOT send yet.
+    ///
+    /// **Deliberately not in `fleetJSON`.** That fixture's contract is that it
+    /// is transcribed from the producer, key for key, and adding a key the
+    /// producer does not write would make the one payload in this file that
+    /// claims to be real stop being real. So the shape is asserted on its own
+    /// payload, and the absence is asserted on the real one.
+    ///
+    /// What this holds down is the SPELLING and the ENCODING, which are the two
+    /// ways this can go quiet: `Data` decodes from base64, which is what JSON
+    /// has for bytes, and a key that does not match leaves an optional nil with
+    /// no error anywhere. When the trace is projected into `Session::fleet` —
+    /// one line beside `"planDone"` — this is the test that says the two ends
+    /// agree.
+    @Test func theTraceDecodesFromBase64UnderTheseTwoKeys() throws {
+        // A version-1, five-minute-bucket trace whose thirteenth code bucket is
+        // 1 and whose rest is zero: `0x10`, then 24 zero bytes, `01 00`, then
+        // 39 zeroes. Sixty-six bytes exactly, base64 on the wire.
+        var wire = Data([0x10])
+        wire.append(contentsOf: Array(repeating: UInt8(0), count: 24))
+        wire.append(contentsOf: [0x01, 0x00])
+        wire.append(contentsOf: Array(repeating: UInt8(0), count: 39))
+        let base64 = wire.base64EncodedString()
+
+        let json = #"""
+            {
+              "runtime_healthy": true,
+              "live_panes": 1,
+              "fleetTrace": "BASE64",
+              "workspaces": [
+                {
+                  "id": "w", "short": "w", "task": "t", "branch": "b",
+                  "state": "ready",
+                  "terminals": [
+                    {
+                      "id": "t1", "short": "t1", "title": "claude",
+                      "preset": "claude", "state": "running", "epoch": 1,
+                      "activityTrace": "BASE64"
+                    }
+                  ]
+                }
+              ]
+            }
+            """#.replacingOccurrences(of: "BASE64", with: base64)
+
+        let fleet = try Self.decodeFleet(json)
+        #expect(fleet.fleetTrace == wire)
+        let terminal = try #require(fleet.workspaces.first?.terminals.first)
+        #expect(terminal.activityTrace == wire)
+        // And it is a trace this build will draw, rather than 66 bytes that
+        // happen to survive the trip.
+        let trace = try #require(ActivityTrace(terminal.activityTrace))
+        #expect(trace.span == .hour)
+        #expect(trace.code(12) == 1)
+        #expect(trace.tallestOutput == 0)
+    }
+
+    /// And the producer as it stands today: no key, so no trace, so no drawing.
+    ///
+    /// Not a placeholder assertion. `Session::fleet` has no line for either
+    /// field, so every Apple surface draws no trace on every runner right now —
+    /// and the thing that must NOT happen is that a missing key decodes into
+    /// sixty-six zeroes and every row grows a flat line at zero.
+    /// A fleet with no trace keys at all decodes as ABSENT, not as a zeroed
+    /// row. Older runners send nothing here, and a flat zero trace and "this
+    /// pane has no history" are different claims — only one of them is true of
+    /// a runner that has never heard of the field.
+    ///
+    /// Named for what it guards rather than for the state of the producer: it
+    /// was written when `Session::fleet` sent no trace at all, and that gap is
+    /// since closed.
+    @Test func aFleetWithNoTraceKeysDecodesAsAbsent() throws {
+        let fleet = try Self.decodeFleet()
+        #expect(fleet.fleetTrace == nil)
+        let terminal = try #require(fleet.workspaces.first?.terminals.first)
+        #expect(terminal.activityTrace == nil)
+        #expect(ActivityTrace(terminal.activityTrace) == nil)
+    }
+
     @Test func aNewerDaemonSendingAnUnknownKeyStillDecodes() throws {
         let fleet = try Self.decodeFleet("""
         {

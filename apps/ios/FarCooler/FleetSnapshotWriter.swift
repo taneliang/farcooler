@@ -32,7 +32,16 @@ enum FleetSnapshotWriter {
         }
         let snapshot = FleetSnapshot(
             agents: agents, capturedAt: now, complete: true,
-            reviewsWaiting: reviewsWaiting(inbox))
+            reviewsWaiting: reviewsWaiting(inbox),
+            // The fleet's rows summed at ONE width, as the runner summed them.
+            // Not added up here out of the per-agent traces above, and that is
+            // arithmetic rather than deference: each row snapped to the shortest
+            // of §04's three windows that held its own activity, so bucket 4 of
+            // a five-minute row and bucket 4 of a two-hour row are different
+            // spans of time and adding them adds unlike things. The daemon holds
+            // every ring and can pick one width across all of them. See
+            // `FleetSnapshot.fleetTrace`.
+            fleetTrace: fleet.fleetTrace)
         SnapshotStore.write(snapshot)
         // The surfaces are out of process and do not poll. Without this they
         // keep drawing the previous snapshot until the system next decides to
@@ -159,6 +168,19 @@ enum FleetSnapshotWriter {
             // logs record nothing task-shaped — leaves both nil, and every
             // surface downstream draws nothing rather than an empty bar.
             planDone: terminal.planDone,
-            planTotal: terminal.planTotal)
+            planTotal: terminal.planTotal,
+            // §04's thirteen buckets, straight across as the wire's bytes and
+            // not decoded on the way. Decoding here would produce three Swift
+            // arrays per agent inside a value the widget extension holds once
+            // per timeline entry, which is exactly the cost the bytes encoding
+            // was chosen to avoid — `proto/farcooler.proto` does the arithmetic
+            // at the field. `ActivityTrace` reads them where the drawing is.
+            //
+            // Nil for a terminal with nothing to show, which is what the
+            // producer sends rather than sixty-six zeroes, and nil today for
+            // every terminal on every runner: `Session::fleet` does not project
+            // this field into the JSON the phone decodes. See
+            // `Terminal.activityTrace`.
+            trace: terminal.activityTrace)
     }
 }

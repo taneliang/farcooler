@@ -114,6 +114,24 @@ struct AgentActivityWidget: Widget {
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.tertiary)
                         }
+                        // §04's "44 · island row": the leader's own thirteen
+                        // buckets, in the one Island presentation with a row to
+                        // put them in. Absent when the runner sent no trace for
+                        // this terminal, which draws nothing at all rather than
+                        // a flat line at zero.
+                        //
+                        // The span is not printed beside it here. §04 asks for
+                        // it "beside the trace", and the reason it is worth the
+                        // width elsewhere is that rows at different windows are
+                        // otherwise incomparable — there is exactly one row
+                        // here, so there is nothing to compare it against, and
+                        // an Island is the surface with the least room in the
+                        // product.
+                        if let trace = ActivityTrace(tail.leaderTrace) {
+                            GlanceTraceView(trace, size: .islandRow)
+                                .environment(\.colorScheme, .dark)
+                                .padding(.top, 2)
+                        }
                         // The rest of the fleet gets one line here, the same
                         // line the lock screen card ends with. Expanded is the
                         // presentation with room for it, and without it the
@@ -148,18 +166,42 @@ struct AgentActivityWidget: Widget {
                 GlanceMarkView(status.mark, size: .header)
                     .environment(\.colorScheme, .dark)
             } compactTrailing: {
-                // The leader's name, and how many agents are behind it.
+                // §07's compact presentation, which is about the FLEET: "Count
+                // leading, fleet trace trailing, thirteen buckets like every
+                // other." §04's 40pt size exists for this slot and no other.
                 //
-                // The name alone was right when there was a card per terminal
-                // and the only question was which card this is. With one card
-                // the question changed: the icon carries the leader's state and
-                // the name carries who it is, so the fact worth the remaining
-                // few points is that the leader is not the whole story.
-                Text(tail.others > 0 ? "\(context.state.label) +\(tail.others)" : context.state.label)
+                // The name is what this drew before, and it is kept as the
+                // fallback rather than deleted. The two are not alternatives
+                // that were weighed: the trace is what §07 asks for, and the
+                // name is what there is to say when the runner has sent no
+                // fleet trace — a blank trailing region would be worse than
+                // either. A fleet at rest sends no bytes at all, deliberately,
+                // so this fallback is a state the product will really be in and
+                // not a defensive branch.
+                //
+                // Forced dark for `compactLeading`'s reason: the Island is a
+                // black pill whatever the phone's appearance is.
+                if let trace = ActivityTrace(tail.fleetTrace) {
+                    GlanceTraceView(trace, size: .island)
+                        .environment(\.colorScheme, .dark)
+                } else {
+                    // The leader's name, and how many agents are behind it.
+                    //
+                    // The name alone was right when there was a card per
+                    // terminal and the only question was which card this is.
+                    // With one card the question changed: the icon carries the
+                    // leader's state and the name carries who it is, so the
+                    // fact worth the remaining few points is that the leader is
+                    // not the whole story.
+                    Text(
+                        tail.others > 0
+                            ? "\(context.state.label) +\(tail.others)" : context.state.label
+                    )
                     .font(.caption2)
                     .foregroundStyle(status.tint)
                     .lineLimit(1)
                     .frame(maxWidth: 74)
+                }
             } minimal: {
                 // §07, verbatim: "MINIMAL: The ring alone at 15pt. No count, no
                 // trace — history is unreadable at this size." The lone
@@ -253,6 +295,18 @@ struct FleetTail {
     let blocked: Int
     /// Whether this is a claim or a recollection.
     let qualified: Bool
+    /// The leader's own thirteen buckets, as the wire's bytes.
+    ///
+    /// **Off the snapshot and not off the push**, which is not a preference:
+    /// ActivityKit caps a content state at 4KB and the trace is 66 bytes per
+    /// agent, but the deciding fact is that the push is assembled by the relay
+    /// from one notification and has never held a trace at all. The snapshot in
+    /// the App Group is the only thing on this phone that has one, and this
+    /// function is already reading it.
+    var leaderTrace: Data? = nil
+    /// The whole fleet's buckets, summed on the runner. §07's compact Island:
+    /// "Count leading, fleet trace trailing, thirteen buckets like every other."
+    var fleetTrace: Data? = nil
 
     /// Nothing known, which draws nothing.
     static let unknown = FleetTail(others: 0, blocked: 0, qualified: false)
@@ -262,13 +316,23 @@ struct FleetTail {
             snapshot.capturedAt.timeIntervalSince1970 > 0
         else { return .unknown }
 
+        // Both traces, read before the early return below. A fleet whose only
+        // agent IS the leader has no tail and still has a history, and the two
+        // questions are not the same one — `others` counts everybody else and
+        // the trace is about time.
+        let leaderTrace = snapshot.agents.first { $0.id == leader }?.trace
+
         // `done` agents are not "more working" — they are finished runs the
         // snapshot has not dropped yet, and counting them would make a card
         // claim an idle fleet is busy.
         let rest = snapshot.agents.filter {
             $0.id != leader && ($0.status == "working" || $0.status == "blocked")
         }
-        guard !rest.isEmpty else { return .unknown }
+        guard !rest.isEmpty else {
+            return FleetTail(
+                others: 0, blocked: 0, qualified: false,
+                leaderTrace: leaderTrace, fleetTrace: snapshot.fleetTrace)
+        }
 
         return FleetTail(
             others: rest.count,
@@ -279,7 +343,13 @@ struct FleetTail {
             // it qualifies the number instead: there may be agents in it that
             // nothing has ever told this phone about.
             qualified: !snapshot.complete
-                || rest.contains { snapshot.confidence(in: $0, at: now) == .lastSeen })
+                || rest.contains { snapshot.confidence(in: $0, at: now) == .lastSeen },
+            leaderTrace: leaderTrace,
+            // Carried, never summed here. The rows do not share a window width,
+            // so adding bucket 4 of a five-minute row to bucket 4 of a two-hour
+            // one would add two different spans of time — see
+            // `FleetSnapshot.fleetTrace`, which is the runner's own sum.
+            fleetTrace: snapshot.fleetTrace)
     }
 
     /// The one line the card gives everyone else, or nil when there is nobody
@@ -528,7 +598,7 @@ private struct LockScreenCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            LeaderRow(state: state, ask: ask)
+            LeaderRow(state: state, ask: ask, trace: tail.leaderTrace)
             if let rest = tail.line {
                 Divider()
                 Text(rest)
@@ -561,6 +631,9 @@ private struct LockScreenCard: View {
 private struct LeaderRow: View {
     let state: AgentActivityAttributes.ContentState
     let ask: LeaderAsk
+    /// The leader's thirteen buckets, off the snapshot. See `FleetTail`, which
+    /// is where a card gets anything the push could not carry.
+    let trace: Data?
 
     var body: some View {
         let status = AgentStatus(state.status)
@@ -606,6 +679,17 @@ private struct LeaderRow: View {
                     }
                 }
                 Spacer(minLength: 0)
+                // §07 gives the card's rows columns of "11 / flex / 52 / 64",
+                // and this is the 52: §04's card-row trace, between the agent's
+                // words and its mark.
+                //
+                // Dropped while there is an answer on offer, along with the turn
+                // clock and the fleet line above. The card's own rule is that a
+                // question outranks everything that is merely true, and history
+                // is the most merely-true thing on it.
+                if !ask.isPresent, let trace = ActivityTrace(trace) {
+                    GlanceTraceView(trace, size: .cardRow)
+                }
                 StatusBadge(status: status)
             }
             // Guarded at the call site as well as inside the view. A `VStack`

@@ -273,6 +273,31 @@ public enum GlancePalette {
         scheme == .dark ? text2.darkColor : .secondary
     }
 
+    /// The commit mark's ink, on exactly the argument `ink1` makes.
+    ///
+    /// **§01 gives `commit` ONE figure — L 0.96 — and it is a light ink for a
+    /// dark surface.** That is fine on the card, the widget in dark mode and the
+    /// Island, where a near-white block on the L 0.44 axis is the brightest
+    /// thing in the trace and reads as a commit. Rendering §04 in LIGHT mode is
+    /// what turned §09's standing note — "Light mode is specified as values but
+    /// not drawn. Worth one pass before build." — into a defect, and it is
+    /// worse than faint: on a pale widget an L 0.96 block sits inside a mid-grey
+    /// axis and reads as a HOLE punched in the rule. A gap means "nothing here";
+    /// a commit is the opposite of nothing.
+    ///
+    /// So this defers to the system's own label colour in light mode and keeps
+    /// the spec's figure in dark, which is the same trade `ink1` makes two
+    /// declarations up and for the same stated reason: inventing a thirteenth
+    /// oklch here is the mistake §01 forbids, and `Color.primary` is correct on
+    /// any appearance by construction. `commit` above is untouched — the spec's
+    /// value still lives in exactly one place — and this is the resolver.
+    ///
+    /// When the design document draws light mode, this becomes a literal like
+    /// every other value in this file.
+    public static func commitInk(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? commit.darkColor : .primary
+    }
+
     // MARK: - What a surface with room for one thing is about
 
     /// The tint for one rung of `FleetSnapshot.Glance`.

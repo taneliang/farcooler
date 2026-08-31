@@ -31,6 +31,15 @@ import SwiftUI
 // `apps/ios/generate-project.py:274-281`: the watch compiles AgentKit one file
 // at a time and never the package. Plain SwiftUI shapes and `Double`
 // arithmetic only.
+//
+// **The activity trace is in here too, at the bottom.** The spec's title is
+// "One mark, one graphic": §03's mark and §04's trace are the only two drawings
+// in the system, and they are here together because a third file would have to
+// be added to four separate lists in `generate-project.py` — the phone's, the
+// watch's, the complication's and the Live Activity extension's — and every one
+// of the five binaries that draws a mark also draws a trace. The two share
+// nothing but `GlancePalette` and that rule; if this file ever grows a third
+// drawing, split it then.
 
 /// What one mark says, on all three of its axes.
 public struct GlanceMark: Hashable, Sendable {
@@ -468,6 +477,296 @@ public struct GlanceMarkView: View {
     }
 }
 
+// MARK: - §04 · The activity trace
+
+/// Where the trace is drawn, and how big it is there.
+///
+/// §04 names four and says so: "40 · island / 44 · island row / 52 · card row /
+/// 76 · widget. Four shipping sizes, one form." Those figures are WIDTHS — the
+/// floor a few lines above them is stated as "36pt wide", and §07's card row
+/// gives its columns as "11 / flex / 52 / 64", where the 52 is this.
+///
+/// **The heights are derived here, and they are the one thing §04 does not
+/// state.** It gives the specimen's box (156×41) and the band formula ((h−3)/2)
+/// and then leaves `h` to the surface. Four numbers invented independently would
+/// be four chances to draw the same graphic four shapes, so there is ONE rule
+/// instead: hold the specimen's proportion. Its band is (41−3)/2 = 19 at 156
+/// wide, so a band is `width * 19 / 156` and the height is that twice plus the
+/// axis. It is a derivation rather than a quotation and it is flagged as one
+/// wherever it appears; the design document is where it should be settled.
+public enum GlanceTraceSize: Hashable, Sendable, CaseIterable {
+    /// 40pt. The Dynamic Island's compact presentation, which §07 gives to the
+    /// fleet trace: "Count leading, fleet trace trailing, thirteen buckets like
+    /// every other."
+    case island
+    /// 44pt. A row of the Island's expanded presentation.
+    case islandRow
+    /// 52pt. A row of the Live Activity card. §07's third column.
+    case cardRow
+    /// 76pt. A row of a home screen widget. §05's medium and large tiles.
+    case widget
+
+    /// §04's four figures, quoted.
+    public var width: CGFloat {
+        switch self {
+        case .island: 40
+        case .islandRow: 44
+        case .cardRow: 52
+        case .widget: 76
+        }
+    }
+
+    /// The specimen's proportion, held. See the type's own comment — this is
+    /// derived, not quoted.
+    public var height: CGFloat {
+        GlanceTraceLayout.axis + 2 * (width * 19 / 156).rounded()
+    }
+}
+
+/// §04's geometry, as arithmetic — separated from the drawing so it can be
+/// asserted against the spec without rendering anything.
+///
+/// Every figure in here is quoted from §04 except `minimumBar`, which is
+/// flagged where it is declared. The same discipline `GlanceMarkSize` keeps for
+/// §03: the spec's numbers land in exactly one place, and a test reads them back.
+public struct GlanceTraceLayout: Sendable, Equatable {
+    /// Which half a bar belongs to. §04: "up is code, down is chat".
+    public enum Half: Hashable, Sendable, CaseIterable {
+        /// The upper half — lines of code touched.
+        case code
+        /// The lower half — output to the person.
+        case output
+    }
+
+    /// §04: "Bands (h−3)/2 — Equal halves either side of a 3pt axis."
+    public static let axis: CGFloat = 3
+
+    /// §04: "Commits 3pt block. On the axis."
+    public static let commitBlock: CGFloat = 3
+
+    /// §04: "Floor 36pt wide — Below this, commit marks stop separating and
+    /// come off."
+    public static let commitFloor: CGFloat = 36
+
+    /// The shortest a bar may be drawn.
+    ///
+    /// **The one figure here §04 does not give**, and it is forced by two of the
+    /// ones it does. "A bucket with no activity" has a colour of its own in §01
+    /// and §04 says it is "Drawn, not omitted", so a silent bucket has to be
+    /// something rather than nothing — and a scaled height can be a hundredth of
+    /// a point, which is nothing. 1pt, matching §03's hairline, is the smallest
+    /// thing this system draws anywhere.
+    ///
+    /// It applies to LIT bars too: a bucket with one line of output beside a
+    /// bucket with nine hundred scales to well under a point, and rounding it
+    /// away would delete a real observation rather than an absent one.
+    public static let minimumBar: CGFloat = 1
+
+    public let size: CGSize
+
+    public init(size: CGSize) {
+        self.size = size
+    }
+
+    /// Half the drawable height, either side of the axis. §04's `(h−3)/2`.
+    public var band: CGFloat { max(0, (size.height - Self.axis) / 2) }
+
+    /// §04's floor, applied. Below it "commit marks stop separating and come
+    /// off" — they are not shrunk, they are removed.
+    public var drawsCommits: Bool { size.width >= Self.commitFloor }
+
+    /// The x-range of one bucket's column, 0…12 oldest first.
+    ///
+    /// §04: "Bars are flex: 1, so they always fill the width exactly" and "Gap
+    /// 0. No gaps. The fused silhouette is the point."
+    ///
+    /// Computed as two multiplications rather than one width times an index, so
+    /// thirteen columns tile the box EXACTLY: `width/13` rounded and multiplied
+    /// leaves a sliver of dead space at the recent end, which is precisely what
+    /// §04's last NEVER forbids — "Never leave the container wider than the
+    /// bars — trailing space sits at the recent end and reads as dead activity."
+    public func column(_ bucket: Int) -> (x: CGFloat, width: CGFloat) {
+        let leading = size.width * CGFloat(bucket) / CGFloat(ActivityTrace.buckets)
+        let trailing = size.width * CGFloat(bucket + 1) / CGFloat(ActivityTrace.buckets)
+        return (leading, trailing - leading)
+    }
+
+    /// How tall one bucket's bar is, and whether anything was in it.
+    ///
+    /// §04's scaling rule, and the whole of it: "Tallest bar = that row's
+    /// busiest bucket, per half. Each half therefore reaches full height, so the
+    /// two halves are not comparable to one another — only each against its own
+    /// past. Never cross-row." So the denominator is `tallestCode` for the upper
+    /// half and `tallestOutput` for the lower, and never the other, and never
+    /// another row's.
+    ///
+    /// `lit` is false for a bucket that recorded nothing, which is what picks
+    /// §01's `empty` tone over `code` or `chat`. It is NOT the same as a short
+    /// bar: a bucket with one line in a row whose busiest has nine hundred is
+    /// lit, at `minimumBar`.
+    public func bar(_ bucket: Int, _ half: Half, in trace: ActivityTrace)
+        -> (height: CGFloat, lit: Bool)
+    {
+        let value: UInt16
+        let tallest: UInt16
+        switch half {
+        case .code:
+            value = trace.code(bucket)
+            tallest = trace.tallestCode
+        case .output:
+            value = trace.output(bucket)
+            tallest = trace.tallestOutput
+        }
+        guard value > 0, tallest > 0 else { return (min(Self.minimumBar, band), false) }
+        let scaled = band * CGFloat(value) / CGFloat(tallest)
+        return (min(band, max(Self.minimumBar, scaled)), true)
+    }
+
+    /// Where that bar sits. The upper half grows up from the axis, the lower
+    /// half down from it.
+    public func barRect(_ bucket: Int, _ half: Half, in trace: ActivityTrace) -> CGRect {
+        let column = column(bucket)
+        let height = bar(bucket, half, in: trace).height
+        switch half {
+        case .code:
+            return CGRect(x: column.x, y: band - height, width: column.width, height: height)
+        case .output:
+            return CGRect(
+                x: column.x, y: band + Self.axis, width: column.width, height: height)
+        }
+    }
+
+    /// The centre rule. §01: "The trace centre rule. Continuous, never dotted."
+    public var axisRect: CGRect {
+        CGRect(x: 0, y: band, width: size.width, height: Self.axis)
+    }
+
+    /// A commit mark, or nil where this bucket has none or this size has no
+    /// room for any.
+    ///
+    /// §04: "Commits 3pt block. On the axis. Unlit buckets get height 0 — an
+    /// unset height stretches." The block is the column's own width and sits in
+    /// the axis rather than beside it, so a commit reads as the rule brightening
+    /// under that bucket. §01 gives it the lightest neutral in the table, which
+    /// is what makes it visible against the axis it replaces.
+    public func commitRect(_ bucket: Int, in trace: ActivityTrace) -> CGRect? {
+        guard drawsCommits, trace.commits(bucket) > 0 else { return nil }
+        let column = column(bucket)
+        return CGRect(x: column.x, y: band, width: column.width, height: Self.commitBlock)
+    }
+}
+
+/// The trace, drawn. §04's one form, at whichever of its four sizes.
+///
+/// **It takes an `ActivityTrace` and not a `Data?`, and that is the contract
+/// rather than an inconvenience.** A terminal with nothing to show sends no
+/// bytes at all — see `ActivityTrace.init?` — and "no trace" and "a trace of
+/// thirteen quiet buckets" are two different drawings. Making the absent case
+/// unrepresentable here means a caller has to write `if let trace =
+/// ActivityTrace(agent.trace)`, and the surface that forgets draws nothing
+/// rather than a flat line at zero.
+///
+/// **Six shapes and no more**, which is the memory half of the same argument the
+/// wire format makes. Thirteen buckets times two halves plus thirteen commit
+/// marks is thirty-nine views per trace if each bar is one; at six rows per
+/// widget family that is a view tree a memory-capped extension pays for on every
+/// timeline rebuild. One `Path` per TONE collapses it to six, and a `Path` of
+/// thirteen rectangles is a handful of points.
+public struct GlanceTraceView: View {
+    /// Same reason as `GlanceMarkView`: light mode is a different palette and
+    /// §01 says so in as many words. The two trace tones swap ends of the scale.
+    @Environment(\.colorScheme) private var scheme
+
+    private let trace: ActivityTrace
+    private let size: CGSize
+
+    /// One of §04's four shipping sizes.
+    public init(_ trace: ActivityTrace, size: GlanceTraceSize) {
+        self.trace = trace
+        self.size = CGSize(width: size.width, height: size.height)
+    }
+
+    /// An explicit box, for a preview or a surface measuring its own row.
+    public init(_ trace: ActivityTrace, size: CGSize) {
+        self.trace = trace
+        self.size = size
+    }
+
+    public var body: some View {
+        ZStack {
+            // Order matters and it is the spec's silhouette: the two halves
+            // first, then the axis over them so a bar that reaches the rule does
+            // not eat it, then the commits over the axis because a commit is
+            // drawn IN the rule rather than beside it.
+            layer(.bars(.code, lit: false)).fill(GlancePalette.empty(scheme))
+            layer(.bars(.code, lit: true)).fill(GlancePalette.code(scheme))
+            layer(.bars(.output, lit: false)).fill(GlancePalette.empty(scheme))
+            layer(.bars(.output, lit: true)).fill(GlancePalette.chat(scheme))
+            layer(.axis).fill(GlancePalette.axis(scheme))
+            layer(.commits).fill(GlancePalette.commitInk(scheme))
+        }
+        .frame(width: size.width, height: size.height)
+        // History, spoken as what it covers. The bars themselves cannot be
+        // read out — thirteen unlabelled figures in two units is not a
+        // sentence — and every surface that draws one already says what the
+        // agent is doing beside it.
+        .accessibilityLabel("Activity over the last \(trace.span.spoken)")
+    }
+
+    private func layer(_ kind: TraceLayer.Kind) -> TraceLayer {
+        TraceLayer(trace: trace, kind: kind)
+    }
+}
+
+/// One tone's worth of the trace, as a single path.
+private struct TraceLayer: Shape {
+    enum Kind {
+        case bars(GlanceTraceLayout.Half, lit: Bool)
+        case axis
+        case commits
+    }
+
+    let trace: ActivityTrace
+    let kind: Kind
+
+    func path(in rect: CGRect) -> Path {
+        // Geometry off the rect SwiftUI actually laid out rather than off the
+        // size asked for, so a surface that constrains this draws a correct
+        // trace at the size it got instead of one clipped from a larger one.
+        let layout = GlanceTraceLayout(size: rect.size)
+        var path = Path()
+        switch kind {
+        case let .bars(half, lit):
+            for bucket in 0..<ActivityTrace.buckets
+            where layout.bar(bucket, half, in: trace).lit == lit {
+                path.addRect(layout.barRect(bucket, half, in: trace).offsetBy(dx: rect.minX, dy: rect.minY))
+            }
+        case .axis:
+            path.addRect(layout.axisRect.offsetBy(dx: rect.minX, dy: rect.minY))
+        case .commits:
+            for bucket in 0..<ActivityTrace.buckets {
+                if let mark = layout.commitRect(bucket, in: trace) {
+                    path.addRect(mark.offsetBy(dx: rect.minX, dy: rect.minY))
+                }
+            }
+        }
+        return path
+    }
+}
+
+extension ActivityTrace.Span {
+    /// The span in words, for VoiceOver. `label` is the two mono characters §04
+    /// prints; this is the same fact said out loud, where "1h" would be read as
+    /// a letter.
+    public var spoken: String {
+        switch self {
+        case .hour: "hour"
+        case .sixHours: "six hours"
+        case .day: "24 hours"
+        }
+    }
+}
+
 #if DEBUG
     /// §03's matrix, drawn — every state at every size, which is the only way
     /// to check a drawing whose whole vocabulary is half-point differences in
@@ -501,6 +800,68 @@ public struct GlanceMarkView: View {
                             }
                         }
                         .grayscale(mono ? 1 : 0)
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+
+    /// §04's trace, at all four shipping sizes and in the three cases that are
+    /// easy to draw wrong.
+    ///
+    /// **The three cases are the point of the preview.** A busy row shows the
+    /// silhouette; a row with an empty upper half is §05's `docs-sweep`, "it has
+    /// talked and touched nothing, drawn rather than omitted"; and sixty-six
+    /// zero bytes is a real trace of thirteen quiet buckets, which is a
+    /// different drawing from no trace at all — an absent one has no view here
+    /// because `ActivityTrace.init?` refuses it, which is exactly the contract.
+    ///
+    /// **Look at it in light mode too.** The commit mark is the one tone §01
+    /// gives a single figure that does not survive inversion; see
+    /// `GlancePalette.commitInk`.
+    #Preview("The trace · four sizes, three cases") {
+        func encoded(
+            code: [UInt16] = Array(repeating: 0, count: 13),
+            output: [UInt16] = Array(repeating: 0, count: 13),
+            commits: [UInt8] = Array(repeating: 0, count: 13),
+            width: UInt8 = 0
+        ) -> Data {
+            var bytes = Data([(1 << 4) | width])
+            for v in code { bytes.append(UInt8(v & 0xFF)); bytes.append(UInt8(v >> 8)) }
+            for v in output { bytes.append(UInt8(v & 0xFF)); bytes.append(UInt8(v >> 8)) }
+            bytes.append(contentsOf: commits)
+            return bytes
+        }
+        let cases: [(String, Data)] = [
+            (
+                "busy",
+                encoded(
+                    code: [0, 0, 40, 210, 180, 30, 0, 90, 420, 260, 55, 0, 12],
+                    output: [4, 30, 120, 260, 300, 180, 60, 140, 380, 500, 220, 90, 40],
+                    commits: [0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 1, 0, 0])
+            ),
+            (
+                "empty upper half",
+                encoded(output: [0, 12, 40, 90, 60, 30, 110, 200, 90, 20, 5, 0, 0], width: 1)
+            ),
+            ("66 zeroes · all quiet", encoded(width: 2)),
+        ]
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(cases, id: \.0) { name, bytes in
+                    Text(name).font(.caption2)
+                    ForEach(GlanceTraceSize.allCases, id: \.self) { size in
+                        HStack(spacing: 6) {
+                            Text("\(Int(size.width))")
+                                .font(.caption2.monospacedDigit())
+                                .frame(width: 24, alignment: .trailing)
+                            if let trace = ActivityTrace(bytes) {
+                                GlanceTraceView(trace, size: size)
+                                Text(trace.span.label).glanceType(.monoFigures)
+                            }
+                            Spacer(minLength: 0)
+                        }
                     }
                 }
             }

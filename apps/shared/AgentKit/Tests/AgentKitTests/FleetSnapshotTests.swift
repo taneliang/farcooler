@@ -370,6 +370,48 @@ struct FleetSnapshotTests {
         #expect(!base.saysTheSame(as: restated))
     }
 
+    /// The guard that keeps a wrist off Bluetooth twenty times a minute has to
+    /// survive the trace joining the value, and this is what "survive" means.
+    ///
+    /// Three separate claims, because the interesting one is the middle:
+    ///
+    ///   1. A trace the watch would draw differently is a difference.
+    ///      `saysTheSame` asks "would the watch draw anything different", the
+    ///      wrist's `accessoryRectangular` is a row and §03 says a row is "mark,
+    ///      label, trace" — so bytes that changed are news. Blanking them beside
+    ///      `observedAt` would be a wrist drawing last hour's history.
+    ///   2. **The idle case still says the same**, which is the entire point of
+    ///      the guard: `WatchLinkHost.send(snapshot:)` says it "buys an IDLE
+    ///      fleet only". `farcooler_core::trace` buckets on absolute wall-clock
+    ///      precisely so two polls of a quiet agent inside one bucket produce
+    ///      byte-identical output, and its module header names this function as
+    ///      the reason. If that ever stopped holding, this assertion is where it
+    ///      shows.
+    ///   3. Absent and quiet are still different values, all the way up.
+    @Test func aChangedTraceIsNewsAndAnUnchangedOneIsNot() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let quiet = ActivityTraceTests.encoded()
+        let busy = ActivityTraceTests.encoded(code: Array(repeating: 300, count: 13))
+
+        func withTrace(_ trace: Data?) -> FleetSnapshot.Agent {
+            var one = agent("t1", status: "working", activityChangedAt: now, observedAt: now)
+            one.trace = trace
+            return one
+        }
+
+        // Two polls three seconds apart, inside one bucket: byte-identical, and
+        // the watch is not written to.
+        var later = withTrace(quiet)
+        later.observedAt = now.addingTimeInterval(3)
+        #expect(withTrace(quiet).saysTheSame(as: later))
+
+        // A bucket that moved is a picture that moved.
+        #expect(!withTrace(quiet).saysTheSame(as: withTrace(busy)))
+        // And an agent that has started producing something the trace can see
+        // is not the same as one that never has.
+        #expect(!withTrace(nil).saysTheSame(as: withTrace(quiet)))
+    }
+
     @Test func aFleetComparesRowForRowAndNeverMatchesNothing() {
         let now = Date(timeIntervalSince1970: 2_000)
         let fleet = { (ids: [String], observed: Date) in

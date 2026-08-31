@@ -633,10 +633,14 @@ private struct RowsFleet: View {
             ForEach(entry.snapshot.ranked.prefix(limit)) { agent in
                 if let url = terminalURL(agent) {
                     Link(destination: url) {
-                        AgentLine(agent: agent, snapshot: entry.snapshot, at: entry.date)
+                        AgentLine(
+                            agent: agent, snapshot: entry.snapshot, at: entry.date,
+                            showsTrace: true)
                     }
                 } else {
-                    AgentLine(agent: agent, snapshot: entry.snapshot, at: entry.date)
+                    AgentLine(
+                        agent: agent, snapshot: entry.snapshot, at: entry.date,
+                        showsTrace: true)
                 }
             }
             // The large family's whole reason for being: three lines of what
@@ -655,12 +659,19 @@ private struct RowsFleet: View {
     }
 }
 
-/// One agent: its mark, its name, and where it is.
+/// One agent: its mark, its name, where it is, and what it has been doing.
 private struct AgentLine: View {
     @Environment(\.colorScheme) private var scheme
     let agent: FleetSnapshot.Agent
     let snapshot: FleetSnapshot
     let at: Date
+    /// Whether this row has the width for §04's trace.
+    ///
+    /// True on the two families §05 draws it in — the medium tile's rows and
+    /// the large one's — and false on `systemSmall`, whose specimens show a
+    /// ribbon and a count and never a trace. A 76pt graphic on a 155pt tile is
+    /// half the row, and §05 spends that width on the agent's own line instead.
+    var showsTrace = false
 
     var body: some View {
         let confidence = snapshot.confidence(in: agent, at: at)
@@ -719,6 +730,38 @@ private struct AgentLine: View {
                 }
             }
             Spacer(minLength: 0)
+            // §04's trace, at §04's widget width. Drawn only when the wire
+            // carried one: `ActivityTrace` refuses an absent field, so a
+            // terminal that has done nothing the trace can see gets no graphic
+            // rather than a flat line at zero — those are different facts and
+            // the second one is a claim nobody made.
+            //
+            // §05's medium specimen is the argument for putting it in the row
+            // and for what it replaces: "No per-row age: the trace already shows
+            // where activity stopped, so a date column beside it would restate
+            // it."
+            if showsTrace, let trace = ActivityTrace(agent.trace) {
+                HStack(spacing: 4) {
+                    GlanceTraceView(trace, size: .widget)
+                    // §04: "with the span printed as two mono characters beside
+                    // the trace". Without it two rows at different windows are
+                    // silently incomparable, which is the one way this graphic
+                    // can mislead — §04 allows rows to "sit at different
+                    // scales", so the scale has to be on the row.
+                    Text(trace.span.label)
+                        .glanceType(.monoFigures)
+                        .foregroundStyle(GlancePalette.ink2(scheme))
+                }
+                // A shape has no baseline. The mark at the head of this row
+                // hangs its BOTTOM on the text baseline, which is right for an
+                // 10pt dot; a 21pt graphic hung the same way floats above the
+                // row and reads as belonging to nothing. Its CENTRE on the
+                // baseline is what puts §04's axis level with the name, and it
+                // holds whether or not the row has its second line — which is
+                // the case that made the difference visible. Rendered both ways
+                // before choosing.
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] }
+            }
         }
         .opacity(confidence == .lastSeen ? 0.6 : 1)
     }
@@ -773,7 +816,7 @@ private struct StaleFooter: View {
 
         static func agent(
             _ id: String, _ status: String, _ headline: String, _ line: String,
-            _ glyph: String, rank: UInt32
+            _ glyph: String, rank: UInt32, trace: Data? = nil
         ) -> FleetSnapshot.Agent {
             FleetSnapshot.Agent(
                 id: id, label: "claude", machine: "orchard", status: status,
@@ -783,24 +826,79 @@ private struct StaleFooter: View {
                     "Ran cargo test — 214 passed.",
                     "Writing the inbox gate.",
                 ],
-                rank: rank, turnFailed: false, activityChangedAt: now)
+                rank: rank, turnFailed: false, activityChangedAt: now, trace: trace)
         }
+
+        /// The wire's 66 bytes, built the way `farcooler_core::trace::encode`
+        /// builds them: a version-and-width byte, thirteen little-endian `u16`
+        /// of code, thirteen of output, thirteen `u8` of commits.
+        ///
+        /// Here rather than off a real runner because the canvas has no runner,
+        /// and because the three rows below are the three cases §04 and §05
+        /// argue about: a busy row, a row winding down, and a row with an empty
+        /// upper half. A preview whose every trace looked alike would be a
+        /// preview that cannot show the drawing failing.
+        static func trace(
+            code: [UInt16] = Array(repeating: 0, count: 13),
+            output: [UInt16] = Array(repeating: 0, count: 13),
+            commits: [UInt8] = Array(repeating: 0, count: 13),
+            width: UInt8 = 0
+        ) -> Data {
+            var bytes = Data([(1 << 4) | width])
+            for v in code { bytes.append(UInt8(v & 0xFF)); bytes.append(UInt8(v >> 8)) }
+            for v in output { bytes.append(UInt8(v & 0xFF)); bytes.append(UInt8(v >> 8)) }
+            bytes.append(contentsOf: commits)
+            return bytes
+        }
+
+        /// An afternoon's work: code in bursts, output running ahead of it,
+        /// three commits along the way.
+        static let busyTrace = trace(
+            code: [0, 0, 40, 210, 180, 30, 0, 90, 420, 260, 55, 0, 12],
+            output: [4, 30, 120, 260, 300, 180, 60, 140, 380, 500, 220, 90, 40],
+            commits: [0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 1, 0, 0])
+
+        /// §05's docs-sweep: "an empty upper half — it has talked and touched
+        /// nothing, drawn rather than omitted." At the six-hour window, so the
+        /// rows in one preview genuinely sit at different scales — which §04
+        /// allows and which is what the span label beside each is for.
+        static let talkedOnlyTrace = trace(
+            output: [0, 12, 40, 90, 60, 30, 110, 200, 90, 20, 5, 0, 0], width: 1)
 
         /// Two stopped, two getting on with it. `rank` ascending puts the
         /// blocked pair first, exactly as the host would.
         static let blocked: [FleetSnapshot.Agent] = [
-            agent("t1", "blocked", "claude asks", "Run the migration?", "▲", rank: 10),
-            agent("t2", "blocked", "codex asks", "Overwrite fruit.txt?", "▲", rank: 20),
+            agent(
+                "t1", "blocked", "claude asks", "Run the migration?", "▲", rank: 10,
+                trace: busyTrace),
+            agent(
+                "t2", "blocked", "codex asks", "Overwrite fruit.txt?", "▲", rank: 20,
+                trace: talkedOnlyTrace),
+            // No trace at all, which is what a terminal that has done nothing
+            // the trace can see sends — and which must draw as absent rather
+            // than as a flat line at zero. Deliberately in the fixture: the
+            // canvas is where that is checked by looking.
             agent("t3", "working", "claude 4m", "Writing review_ops.rs", "●", rank: 300),
-            agent("t4", "working", "claude 1m", "Reading watch.rs", "●", rank: 310),
+            agent(
+                "t4", "working", "claude 1m", "Reading watch.rs", "●", rank: 310,
+                trace: busyTrace),
         ]
 
         /// Nobody stopped. Whether anything is waiting is the review count's
         /// business, which is the whole point of the middle two states.
         static let quiet: [FleetSnapshot.Agent] = [
-            agent("t3", "working", "claude 4m", "Writing review_ops.rs", "●", rank: 300),
-            agent("t4", "working", "claude 1m", "Reading watch.rs", "●", rank: 310),
-            agent("t5", "working", "codex 12m", "Running cargo test", "●", rank: 320),
+            agent(
+                "t3", "working", "claude 4m", "Writing review_ops.rs", "●", rank: 300,
+                trace: busyTrace),
+            agent(
+                "t4", "working", "claude 1m", "Reading watch.rs", "●", rank: 310,
+                trace: talkedOnlyTrace),
+            // Sixty-six zero bytes: a real trace of thirteen quiet buckets,
+            // which §04 draws rather than omits, and which is NOT the same
+            // drawing as the traceless agent below it.
+            agent(
+                "t5", "working", "codex 12m", "Running cargo test", "●", rank: 320,
+                trace: trace(width: 2)),
             agent("t6", "working", "claude 2m", "Reading FleetWidget.swift", "●", rank: 330),
         ]
 

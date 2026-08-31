@@ -52,11 +52,26 @@ struct Fleet: Decodable {
     var runtimeHealthy: Bool
     var livePanes: Int
     var workspaces: [Workspace]
+    /// Every terminal's trace added together, at one width for the whole fleet.
+    ///
+    /// `TerminalList.fleet_trace` on the proto wire. **Summed on the runner and
+    /// never here**, because the rows do not share a width: each snaps to the
+    /// shortest window holding its own activity, so bucket 4 of a five-minute
+    /// row and bucket 4 of a two-hour row are different spans of time. The
+    /// daemon holds every ring and can pick one width across all of them; a
+    /// client holding only the rendered rows cannot. See
+    /// `FleetSnapshot.fleetTrace`, which carries this to the surfaces.
+    ///
+    /// Optional and nil-when-absent on the same terms as
+    /// `Terminal.activityTrace`, including the last paragraph of its comment:
+    /// `Session::fleet` sends no key for this yet either.
+    var fleetTrace: Data?
 
     enum CodingKeys: String, CodingKey {
         case runtimeHealthy = "runtime_healthy"
         case livePanes = "live_panes"
         case workspaces
+        case fleetTrace
     }
 
     static let empty = Fleet(runtimeHealthy: false, livePanes: 0, workspaces: [])
@@ -279,6 +294,32 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// `plan_done` in `proto/farcooler.proto`.
     var planDone: UInt32?
     var planTotal: UInt32?
+    /// §04's thirteen buckets, as the wire's 66 bytes. See `ActivityTrace`,
+    /// which is the only thing that reads them, and `crates/core/src/trace.rs`,
+    /// which is the only thing that writes them.
+    ///
+    /// `Data` decodes from a base64 string, which is what JSON has for bytes and
+    /// what `serde_json` writes for a `Vec<u8>` behind `serde_bytes`. Carried as
+    /// bytes rather than as three arrays for the memory reason set out at
+    /// `FleetSnapshot.Agent.trace`; nothing between the socket and the drawing
+    /// unpacks them.
+    ///
+    /// **Optional, and nil is not a quiet terminal.** Absent means either "this
+    /// terminal has done nothing the trace can see" — the producer sends no
+    /// bytes at all in that case, deliberately — or "the daemon on the other end
+    /// is too old to have a trace". Both draw as no trace, which is the honest
+    /// answer to both. Sixty-six zero bytes would be a third thing and is not
+    /// this.
+    ///
+    /// **`Session::fleet` does not send this key yet.** The daemon puts the
+    /// trace on the proto wire — `Terminal.activity_trace`, field 35, and
+    /// `crates/daemon/src/rpc.rs` fills it — but the JSON projection the phone
+    /// actually decodes (`crates/client/src/session.rs`) has no line for it, so
+    /// on today's runner this is nil for every terminal and every Apple surface
+    /// draws no trace. That is the correct behaviour for a field nobody sends;
+    /// it is not the intended end state. One `"activityTrace": t.activity_trace`
+    /// beside `"planDone"` over there lights all of this up.
+    var activityTrace: Data?
     /// The agents this agent spawned and has not finished with, named.
     /// Their COUNT is already inside `line`; these are the names.
     var subagents: [String]?
