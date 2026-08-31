@@ -405,8 +405,22 @@ struct ShellRootView<Pane: View, Actions: View>: View {
         _cropped = State(initialValue: openingOnOverview ? 1 : 0)
     }
 
-    /// While tracking: the page follows the finger, with just enough spring
-    /// that a fast flick does not look linear.
+    /// The put-back in `carriedX`, and nothing else any more.
+    ///
+    /// **This was once wrapped around every tracked write, and that was the
+    /// lag.** `lift`, `trackX`, `carryX` and `crossing` are continuous
+    /// functions of the finger, and a spring on them is a low-pass filter
+    /// between the thumb and the pixels: measured at **43-45 points of offset
+    /// for the whole of a drag**, with the page still travelling 24 more
+    /// points 75ms after the finger stopped. `ShellFlight.offset` promises
+    /// "one point of page for one point of drag" and could not keep that
+    /// promise while its own input was smoothed. Putting the spring back
+    /// reproduces the 43-point lag exactly, which is how we know.
+    ///
+    /// What survives is the correction in `carriedX` — a couple of points the
+    /// shell should never have taken once a pane claimed the drag. That is not
+    /// the finger's position, it is an apology for having moved, and easing an
+    /// apology is right.
     static var tracking: Animation { .interactiveSpring }
 
     /// On release, when what moved was one pane inside a workspace.

@@ -46,35 +46,61 @@ extension ShellRootView {
                 let dx = value.translation.width
                 let up = -value.translation.height
                 decideAxis(dx: dx, up: up)
-                withAnimation(Self.tracking) {
-                    switch axis {
-                    case .horizontal:
-                        trackX = ShellGesture.translation(dx: dx, rubberBanding: rubberBands(dx))
-                        crossing = crossProgress(trackX)
-                    case .vertical:
-                        let up = max(0, up)
-                        lift = up
-                        reveal = ShellGesture.overviewProgress(up: up, tabCount: tabCount)
-                        // The other axis, and only once there is something in
-                        // your hand to move. The axis lock is NOT released
-                        // here — this is still the vertical gesture — the
-                        // lift simply owns both directions from the moment the
-                        // page leaves the display, which is the decision
-                        // written down at `ShellGesture.pageIsHeld`.
-                        carryX =
-                            ShellGesture.pageIsHeld(up: up, tabCount: tabCount)
-                            ? ShellGesture.translation(dx: dx, rubberBanding: rubberBands(dx))
-                            : 0
-                    case nil:
-                        break
-                    }
+                // NOT inside an animation, and that is the whole of "one point
+                // of page for one point of drag".
+                //
+                // Every value written here is a continuous function of where
+                // the finger is right now, so every one of them is already the
+                // answer — there is nothing for a spring to interpolate
+                // TOWARD except a target the finger has since left. Wrapped in
+                // `Self.tracking`, as this was, `lift` reached the screen
+                // through an `interactiveSpring`, which is a low-pass filter
+                // on the input: the page settled about 44 points behind the
+                // thumb for the whole of a 1300 pt/s lift and kept travelling
+                // for ~90ms after the thumb stopped. That is the lag the owner
+                // reported, and WWDC 2018 803 is unambiguous about it — "the
+                // moment the touch and content stop tracking one-to-one, we
+                // immediately notice it".
+                //
+                // The discrete things a lift changes are all animated
+                // ELSEWHERE and on their own transactions, which is why there
+                // is nothing left in here that wants easing: the column pops
+                // whole on `ShellMotion.menu` through `syncMenu` below, and
+                // every release spring is `apply`'s. What is left is the
+                // tracked path, and the tracked path is not animated.
+                switch axis {
+                case .horizontal:
+                    trackX = ShellGesture.translation(dx: dx, rubberBanding: rubberBands(dx))
+                    crossing = crossProgress(trackX)
+                case .vertical:
+                    let up = max(0, up)
+                    lift = up
+                    reveal = ShellGesture.overviewProgress(up: up, tabCount: tabCount)
+                    // The other axis, and only once there is something in
+                    // your hand to move. The axis lock is NOT released
+                    // here — this is still the vertical gesture — the
+                    // lift simply owns both directions from the moment the
+                    // page leaves the display, which is the decision
+                    // written down at `ShellGesture.pageIsHeld`.
+                    carryX =
+                        ShellGesture.pageIsHeld(up: up, tabCount: tabCount)
+                        ? ShellGesture.translation(dx: dx, rubberBanding: rubberBands(dx))
+                        : 0
+                case nil:
+                    break
                 }
-                // Outside the tracking spring, deliberately. See `syncMenu`.
+                // Its own transaction, and now the only one here. See
+                // `syncMenu`.
                 syncMenu()
             }
             .onEnded { value in
                 let decided = axis
                 let dx = value.translation.width
+                // The lift the page is actually AT, which it now is: `lift` is
+                // written straight in `onChanged`, so this is the number on
+                // screen rather than a spring's target the finger had never
+                // visually reached. It used to decide a release against a lift
+                // nobody had seen.
                 let up = lift
                 let openedBefore = wasOpen
                 // Read BEFORE `rest()`, which zeroes the lift the column's
@@ -130,11 +156,19 @@ extension ShellRootView {
     /// then convert `translation.y` to zero lines and do nothing. A terminal
     /// was a pane you could swipe into and never swipe out of, silently.
     ///
-    /// It refuses to begin on a sideways drag now — see
-    /// `TerminalView.gestureRecognizerShouldBegin`. Both directions are pinned
-    /// by tests on a real runner: `testTheShellDoesNotStealTheTerminalsScroll`
-    /// and `testTheShellStillTurnsThePageOverALiveTerminal` are the two
-    /// opposite failures this sits between, and they fail one at a time.
+    /// It is `.simultaneousGesture` that resolves this, not a refusal on the
+    /// terminal's side. There WAS a `gestureRecognizerShouldBegin` that claimed
+    /// to refuse sideways drags, and this comment used to point at it — but it
+    /// was never called, because no delegate was ever set. It was proved dead,
+    /// and deleted rather than wired up: switching it on would have made a
+    /// scroll-killing rule real for the first time and newly killed a scroll
+    /// whose first ten points lean sideways.
+    ///
+    /// Both directions are pinned by tests on a real runner:
+    /// `testTheShellDoesNotStealTheTerminalsScroll` and
+    /// `testTheShellStillTurnsThePageOverALiveTerminal` are the two opposite
+    /// failures this sits between, and they fail one at a time. Both pass
+    /// without the dead rule, which is how we know it was never arbitrating.
     ///
     /// **And a terminal turned out to be the easy pane.** The line that stood
     /// here said `.gesture` rather than `.highPriorityGesture` was right
@@ -172,11 +206,12 @@ extension ShellRootView {
                 // cross twice, no way to be handed a page turn that starts a
                 // hundred points in.
                 let carried = carriedX(dx)
-                withAnimation(Self.tracking) {
-                    trackX = ShellGesture.translation(
-                        dx: carried, rubberBanding: rubberBands(carried))
-                    crossing = crossProgress(trackX)
-                }
+                // Unanimated, for the reason the bar's `onChanged` gives at
+                // length: both of these are the finger's position arithmetic,
+                // and a spring over them is lag over a page turn.
+                trackX = ShellGesture.translation(
+                    dx: carried, rubberBanding: rubberBands(carried))
+                crossing = crossProgress(trackX)
             }
             .onEnded { value in
                 let decided = axis
@@ -239,6 +274,16 @@ extension ShellRootView {
             // shell before the hunk has said anything. Put back rather than
             // left standing: a page parked two points off centre for the rest
             // of a read is a page nobody asked to move.
+            //
+            // **The one write in this file that is still animated, and the
+            // only remaining use of `Self.tracking`.** Everything else in both
+            // `onChanged`s is the finger's position and is now written raw —
+            // see the bar's, at length — but this is not that. It is a
+            // CORRECTION of a couple of points the shell should never have
+            // taken, it is not a function of where the finger is, and the
+            // finger is not moving the thing it moves. Snapped it reads as a
+            // twitch; eased it reads as the pane taking its drag back, which
+            // is what happened.
             if trackX != 0 || crossing != 0 {
                 withAnimation(Self.tracking) {
                     trackX = 0
