@@ -625,7 +625,15 @@ impl Session {
     /// decodes one set of types no matter which one it is talking to.
     pub async fn fleet(&mut self) -> Result<serde_json::Value, SessionError> {
         let workspaces = self.workspaces().await?;
-        let terminals = self.terminals().await?;
+        // The whole list, not `self.terminals()`, because the FLEET's trace
+        // hangs off the wrapper rather than off any one terminal — and
+        // `terminals()` throws the wrapper away. The fleet's row is summed by
+        // the daemon on purpose: each terminal's row snaps to the shortest
+        // window that holds its own activity, so adding bucket 4 of a
+        // five-minute row to bucket 4 of a two-hour row would add two different
+        // spans of time. A phone holding only the rendered rows cannot do it.
+        let list = self.terminal_list().await?;
+        let terminals = &list.items;
         let host = self.host().await?;
         let healthy =
             host.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
@@ -717,6 +725,22 @@ impl Session {
                             // comments in `proto/farcooler.proto`.
                             "planDone": t.plan_done,
                             "planTotal": t.plan_total,
+                            // Thirteen buckets of what this pane has been
+                            // doing, base64 because JSON has no bytes. Passed
+                            // straight across without being unpacked: the
+                            // widget holds a whole snapshot per timeline entry
+                            // across thirteen entries in a memory-capped
+                            // extension, and decoding 66 bytes into three
+                            // arrays per agent is the cost the bytes encoding
+                            // exists to avoid. `farcooler_core::trace`
+                            // documents the layout.
+                            //
+                            // ABSENT, not an empty string, when the pane has
+                            // done nothing the trace can see — a flat zero row
+                            // and "no history" are different claims and only
+                            // one of them is true of a pane nobody has used.
+                            "activityTrace": (!t.activity_trace.is_empty())
+                                .then(|| farcooler_core::base64::encode(&t.activity_trace)),
                             // How the last turn ended, which `activity` cannot
                             // say: a turn that died reads as `done` there. The
                             // rungs above already carry it, and this is what
@@ -742,6 +766,11 @@ impl Session {
         Ok(json!({
             "runtime_healthy": healthy,
             "live_panes": host.live_terminal_count,
+            // Every pane's trace added together at one width, summed by the
+            // daemon. Same encoding and the same absent-not-empty rule as a
+            // terminal's own. See the comment on `activityTrace` above.
+            "fleetTrace": (!list.fleet_trace.is_empty())
+                .then(|| farcooler_core::base64::encode(&list.fleet_trace)),
             "workspaces": items,
         }))
     }
@@ -761,8 +790,20 @@ impl Session {
     }
 
     pub async fn terminals(&mut self) -> Result<Vec<Terminal>, SessionError> {
+        Ok(self.terminal_list().await?.items)
+    }
+
+    /// The terminal list with its wrapper intact.
+    ///
+    /// `terminals()` is the right shape for every caller that wants panes, and
+    /// throws away the one field that belongs to the LIST rather than to any
+    /// pane in it: `fleet_trace`. `fleet` needs both, so it asks for both here
+    /// rather than making a second round trip for one field.
+    async fn terminal_list(
+        &mut self,
+    ) -> Result<farcooler_protocol::v1::TerminalList, SessionError> {
         match self.value("terminal.list", None, None).await? {
-            result::Value::TerminalList(l) => Ok(l.items),
+            result::Value::TerminalList(l) => Ok(l),
             other => Err(wrong("terminals", &other)),
         }
     }
