@@ -190,13 +190,84 @@ final class AgentTranscriptScrollTests: XCTestCase {
     }
 
     private func state(_ transcript: XCUIElement) -> [String: Int] {
+        Self.parse(transcript.value as? String)
+    }
+
+    /// Every field of `AgentLayoutProbe`'s value, read BY NAME.
+    ///
+    /// `static`, so the block predicates below can use the same reader the
+    /// assertions do rather than each picking the value apart by hand. That is
+    /// not tidiness: the sibling suite's waits asked `NOT (value ENDSWITH
+    /// "history=0")` of a value that ends in `source=…`, so the predicate was
+    /// true before the app had drawn anything and every guard built on it
+    /// passed instantly. A position in this string is not a fact about the
+    /// screen; the key is.
+    private static func parse(_ value: String?) -> [String: Int] {
         var parsed: [String: Int] = [:]
-        for pair in (transcript.value as? String ?? "").split(separator: ";") {
+        for pair in (value ?? "").split(separator: ";") {
             let halves = pair.split(separator: "=")
             guard halves.count == 2 else { continue }
             parsed[String(halves[0])] = Int(halves[1]) ?? (halves[1] == "true" ? 1 : 0)
         }
         return parsed
+    }
+
+    /// The keys alone, which is the one number on this screen that no layout
+    /// here can move.
+    ///
+    /// `keyboard` is the keyboard's whole overlap with the display WITH the
+    /// accessory inside it, and `bar` is that accessory — so the difference is
+    /// the software keyboard proper. The same subtraction `AgentView
+    /// .keyboardBehindTheBar` makes, and for the same reason: either number on
+    /// its own contains whatever padding the composer is currently applying.
+    private static func keys(_ value: String?) -> Int? {
+        let measured = parse(value)
+        guard let keyboard = measured["keyboard"], let bar = measured["bar"] else { return nil }
+        return max(0, keyboard - bar)
+    }
+
+    /// Put a REAL software keyboard on screen, and prove it is up.
+    ///
+    /// **`app.keyboards.firstMatch.waitForExistence` cannot do this, and every
+    /// test that used it for it was measuring the keyboard-DOWN screen.** The
+    /// composer is an `inputAccessoryView`, so the instant the field takes
+    /// focus a `Keyboard` element exists whether or not any key is drawn — and
+    /// on a Mac with a hardware keyboard attached, which is every machine this
+    /// suite runs on, that element sits PARKED OFF SCREEN. Measured on the
+    /// iPhone 17 simulator: after `field.tap()` the keyboard element's frame is
+    /// y 952…1185 on an 874-point display, `app.keys.count` is 35, and the
+    /// composer has not moved a point — `keyboard=218;bar=218` four seconds
+    /// later, which is the docked accessory and nothing else.
+    ///
+    /// Typing is what actually raises it. So the tap is followed by one
+    /// character, and then by a wait on the only evidence that distinguishes
+    /// the two states: `keys`, the keyboard's overlap minus the accessory's own
+    /// height. Nothing about that number is affected by the padding the
+    /// composer adds or drops as the keyboard comes and goes, which is exactly
+    /// why it is the one asked.
+    ///
+    /// The 100 points are slack, matching `AgentView.keyboardBehindTheBar`: the
+    /// gap being told apart is between nothing at all and the ~290 points of
+    /// the shortest iPhone keyboard.
+    private func raiseTheKeyboard(in app: XCUIApplication, over transcript: XCUIElement) {
+        let field = app.textViews.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "The composer drew no field")
+        field.tap()
+        // This one IS a fair check — that SOMETHING took keyboard focus, which
+        // is what `typeText` needs. It is only the reading of it as "the keys
+        // are up" that was wrong.
+        XCTAssertTrue(
+            app.keyboards.firstMatch.waitForExistence(timeout: 10),
+            "Tapping the composer gave nothing keyboard focus")
+        app.typeText(" ")
+        let keysAreUp = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                (Self.keys((object as? XCUIElement)?.value as? String) ?? 0) > 100
+            }, object: transcript)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [keysAreUp], timeout: 10), .completed,
+            "No software keyboard ever came up behind the composer: "
+                + "\(String(describing: transcript.value))")
     }
 
     /// The reported bug: "text can be scrolled behind the message box and
@@ -218,6 +289,50 @@ final class AgentTranscriptScrollTests: XCTestCase {
         XCTAssertEqual(
             measured["inset"] ?? -1, covered, accuracy: 1,
             "The transcript reserved \(measured["inset"] ?? -1) for a composer covering \(covered)")
+    }
+
+    /// **The docked composer never sits on top of the shell's bar.**
+    ///
+    /// The owner's report: "in the GUI agent experience, the Message Claude box
+    /// shows up directly on top of the workspace slider". The two live in
+    /// different WINDOWS — the composer is an `inputAccessoryView` and is laid
+    /// out in the keyboard's, the bar in the app's — so neither can see the
+    /// other and, with the keyboard down, both want the strip at the bottom of
+    /// the display. `AgentView.barClearance` is the resolution, and it is a
+    /// number this file cannot check by reading it: what matters is the two
+    /// rectangles.
+    ///
+    /// So both are MEASURED, one launch each, and neither number is written
+    /// down here. The bar comes from `-shell-harness`, which mounts the real
+    /// `ShellRootView` over a canned fleet; the composer from
+    /// `-agent-layout-harness`, which mounts the real `AgentView` over a canned
+    /// conversation. Same simulator, same display, so the two frames are in one
+    /// coordinate space.
+    ///
+    /// Negative control, run: with the `.padding(.bottom, ...)` removed from
+    /// `composerStack`, this fails with `the composer's Send button ends at
+    /// 820.0, and the shell's bar starts at 784.0`.
+    func testTheDockedComposerClearsTheShellsBar() throws {
+        let shell = XCUIApplication()
+        shell.launchArguments = ["-shell-harness"]
+        shell.launch()
+        let bar = shell.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the shell never drew its bar")
+        let barTop = bar.frame.minY
+        let display = shell.frame.height
+        shell.terminate()
+
+        let app = launch()
+        let send = app.buttons["agent-send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 30), "the composer never docked")
+        XCTAssertEqual(
+            app.frame.height, display, accuracy: 0.5,
+            "the two launches were measured on different displays")
+        XCTAssertEqual(app.keyboards.count, 0, "this is the keyboard-DOWN case")
+        XCTAssertLessThanOrEqual(
+            send.frame.maxY, barTop,
+            "the composer's Send button ends at \(send.frame.maxY), and the shell's bar "
+                + "starts at \(barTop)")
     }
 
     /// It opens at the tail, and says so.
@@ -247,8 +362,11 @@ final class AgentTranscriptScrollTests: XCTestCase {
         let back = app.buttons["jump-to-latest"]
         XCTAssertTrue(back.waitForExistence(timeout: 3), "No way back was offered")
 
-        app.textViews.firstMatch.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        // Through the helper, because this test is ABOUT the keyboard: the
+        // version that tapped the field and waited on `app.keyboards` was
+        // asserting that a keyboard which had never come up did not drag
+        // anybody anywhere.
+        raiseTheKeyboard(in: app, over: transcript)
         let stayedPut = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value ENDSWITH %@", "tail=false"), object: transcript)
         XCTAssertEqual(
@@ -269,13 +387,33 @@ final class AgentTranscriptScrollTests: XCTestCase {
     /// re-evaluated the view that measures the bar. SwiftUI drew four lines
     /// overflowing out of a bar UIKit still believed was one, and the transcript
     /// reserved room for the one.
+    ///
+    /// **Both numbers are taken with the keys already up, and that is the
+    /// correction.** `bar` is not the composer's content height — it is the
+    /// whole accessory, and the accessory carries two things that appear and
+    /// vanish with the keyboard: `AgentView.barClearance`, the 56 points the
+    /// composer yields to the shell's bar and drops the moment there is a
+    /// keyboard behind it, and the home-indicator strip, which is inside the
+    /// keyboard's window only while the keys are down. Measured on the iPhone
+    /// 17 simulator, one line of text throughout: 218 with the keyboard down
+    /// (128 of composer + 56 of clearance + 34 of home indicator) and 128 with
+    /// it up.
+    ///
+    /// So a baseline read before the keys came up was 218, the message grew the
+    /// composer from 128 to 176, and the test asked whether 176 was more than
+    /// 218 — two numbers a keyboard apart, neither of them wrong. It reported
+    /// `the bar went on reporting the height of one line` while printing
+    /// `bar=176`, which is not one line's height and never was.
+    ///
+    /// `raiseTheKeyboard` is what makes the two comparable, and the predicate
+    /// re-checks `keys` so that a keyboard going away mid-wait cannot pass this
+    /// by putting the clearance and the home indicator back.
     func testTypingAMultiLineMessageMakesRoomForIt() throws {
         let app = launch()
         let transcript = app.scrollViews["agent-transcript"]
         XCTAssertTrue(transcript.waitForExistence(timeout: 30))
-        let field = app.textViews.firstMatch
-        field.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        raiseTheKeyboard(in: app, over: transcript)
+
         // The BAR's own number, not the keyboard's: with the keyboard up the
         // reported keyboard frame contains the bar as it was when the frame was
         // posted, so it is the bar's measurement that has to move.
@@ -287,16 +425,16 @@ final class AgentTranscriptScrollTests: XCTestCase {
             + "composer card so that the field grows well past its resting height")
         let grew = XCTNSPredicateExpectation(
             predicate: NSPredicate { object, _ in
-                guard let value = (object as? XCUIElement)?.value as? String,
-                    let bar = value.split(separator: ";").first(where: { $0.hasPrefix("bar=") }),
-                    let height = Int(bar.dropFirst(4))
-                else { return false }
-                return height > oneLine
+                let value = (object as? XCUIElement)?.value as? String
+                guard let bar = Self.parse(value)["bar"], let keys = Self.keys(value) else {
+                    return false
+                }
+                return keys > 100 && bar > oneLine
             }, object: transcript)
         XCTAssertEqual(
             XCTWaiter.wait(for: [grew], timeout: 5), .completed,
-            "The composer grew and the bar went on reporting the height of one line: "
-                + "\(String(describing: transcript.value))")
+            "The composer grew past one line and the bar went on reporting the \(oneLine) "
+                + "points it measured at one: \(String(describing: transcript.value))")
 
         let measured = state(transcript)
         XCTAssertEqual(

@@ -340,6 +340,22 @@ jobs:
         env:
           NSUnbufferedIO: YES
 
+      # NOT run here: FarCoolerUITests. Every test in it that proves anything
+      # needs a live runner — an sshd, a daemon and a tmux fleet, which is what
+      # scripts/demo-host.sh stands up on a laptop and what this job has none of.
+      # So the iOS suite's coverage of the app's behavior is a LOCAL guarantee,
+      # and CI's silence about it is absence of evidence, not evidence of
+      # absence. Run it before landing anything that touches a pane:
+      #
+      #   ./scripts/demo-host.sh
+      #   ./scripts/ios-ui-tests.sh
+      #
+      # Use that script and not xcodebuild directly. It puts the TEST_RUNNER_*
+      # assignments where xcodebuild actually reads them, and it fails a run in
+      # which every test skipped — which xcodebuild calls a success, and which
+      # is how eight green scroll tests once covered for a terminal that would
+      # not scroll.
+
   android:
     name: Android
     runs-on: ubuntu-latest

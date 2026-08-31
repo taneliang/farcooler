@@ -613,7 +613,74 @@ struct AgentView: View {
             // left edges two points apart. Hoisted here, there is one number
             // and it is the one the tab strip below them uses.
             .padding(.horizontal, PaneMetrics.surfaceInset)
+            // AND ROOM FOR THE SHELL'S BAR, WHICH THIS COMPOSER CANNOT SEE.
+            //
+            // The composer is an `inputAccessoryView`, so it is laid out in the
+            // KEYBOARD's window (`DockedBar`); the shell's bar is laid out in
+            // the app's. Neither window knows the other exists, and with the
+            // keyboard DOWN they both want the same strip at the bottom of the
+            // display. Measured on an iPhone 17: the composer's Send button
+            // came out at y 776…820 and `shell-bar` at 784…828 — the "Message
+            // Claude" box drawn straight over the workspace slider, which is
+            // the owner's report.
+            //
+            // The bar is the half that must not move. `ShellRootView` keeps the
+            // whole shell full height precisely so the bar and the track never
+            // travel under a keyboard, and a bar that hopped whenever a
+            // composer docked would be the one surface in the app you are meant
+            // to put a thumb on moving out from under it. So the composer
+            // yields: it clears the bar and the gap the bar floats in, and the
+            // order is then fixed — bar at the bottom, composer above it,
+            // always, in every pane and every state.
+            //
+            // Only while there is no keyboard behind it. With the keyboard up
+            // the bar is already covered by the keyboard — that is the design,
+            // not a bug — so the same padding there would open a 56-point strip
+            // of nothing between the composer and the keys.
+            //
+            // `keyboardBehindTheBar` and NOT `keyboard.height <= barHeight`,
+            // which is the version that was written first and hung the app.
+            // The accessory posts its own keyboard-frame notification whenever
+            // it changes height, so `keyboard.height` CONTAINS this padding —
+            // a test against `barHeight` is a test against a number this line
+            // moves, and the two settled into an oscillation 56 points wide
+            // that never converged. `testTypingAMultiLineMessageMakesRoomForIt`
+            // stopped finishing at all: the runner was killed rather than
+            // failed, which is what a layout loop looks like from outside.
+            .padding(.bottom, keyboardBehindTheBar ? 0 : Self.barClearance)
         }
+    }
+
+    /// How far the docked composer sits above the bottom of the display, so
+    /// that the shell's bar is never underneath it.
+    ///
+    /// The bar's own height plus the gap it floats in — `ShellRootView`'s
+    /// `safeArea.bottom + barGap` minus the safe area, which is the only part
+    /// of that sum the keyboard's window already has. Named here rather than
+    /// taken from the shell because a composer in the keyboard's window has no
+    /// way to ask the shell anything; `AgentTranscriptScrollTests
+    /// .testTheDockedComposerClearsTheShellsBar` is what keeps the two numbers
+    /// honest, by measuring both rectangles rather than trusting this one.
+    private static let barClearance: CGFloat = ShellMetrics.barRow + PaneMetrics.card
+
+    /// Whether there is a real software keyboard under the composer, as
+    /// opposed to the composer simply being docked.
+    ///
+    /// **A difference, and that is the whole point.** `keyboard.height` is the
+    /// keyboard's overlap with the screen WITH the accessory inside it, and
+    /// `barHeight` is that accessory — so both carry `barClearance` and the
+    /// subtraction cancels it. What is left is the keys alone, which is the
+    /// one quantity here that no layout on this screen can move. Any condition
+    /// written on either number by itself is a condition that feeds back into
+    /// the padding that produced it.
+    ///
+    /// The 100 points are slack, not a measurement. The two numbers are
+    /// published by different notifications and can be one frame apart while
+    /// the keyboard animates; the gap they have to tell apart is between
+    /// nothing at all and the ~290 points of the shortest iPhone keyboard, so
+    /// anything in the middle does.
+    private var keyboardBehindTheBar: Bool {
+        max(0, keyboard.height - barHeight) > 100
     }
 
     @ViewBuilder

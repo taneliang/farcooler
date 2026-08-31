@@ -1501,7 +1501,8 @@ final class TerminalSession: ObservableObject {
         // goes through `publish`, which has no response to read it off and
         // used the emulator's own. See `capturedCursor`.
         capturedCursor = (response.cursorRow, response.cursorColumn)
-        scrollPosition = TerminalScrollPosition(emulator.scrollPosition, streaming: streaming)
+        scrollPosition = TerminalScrollPosition(
+            emulator.scrollPosition, streaming: streaming, wantsMouse: emulator.wantsMouse)
         grid = emulator.withSnapshot { snapshot in
             // The host's caret only means anything on a view that is showing
             // the host's screen. Scrolled back, the rows on screen are history
@@ -1583,7 +1584,8 @@ final class TerminalSession: ObservableObject {
         // while the emulator holds a capture, its own is at the end of the
         // text and the host's is at the prompt.
         let host = capturedCursor
-        scrollPosition = TerminalScrollPosition(vt.scrollPosition, streaming: streaming)
+        scrollPosition = TerminalScrollPosition(
+            vt.scrollPosition, streaming: streaming, wantsMouse: vt.wantsMouse)
         grid = vt.withSnapshot { snapshot in
             guard let host else { return TerminalGrid(snapshot: snapshot) }
             return TerminalGrid(
@@ -1694,6 +1696,35 @@ final class TerminalSession: ObservableObject {
     /// the host at all.
     func scroll(lines: Int, column: Int, row: Int) async {
         guard let vt, lines != 0 else { return }
+
+        // Who gets the wheel: the program, or this device's own view.
+        //
+        // The old rule was "whoever will take it" — if the core could encode a
+        // wheel event, the program had mouse reporting on and the bytes went
+        // out. That is wrong on the primary screen, and it is the reason
+        // "scroll is broken for terminals" was reported from a real phone
+        // while every scroll test stayed green.
+        //
+        // A full-screen TUI turns mouse reporting ON and then decides for
+        // itself what a wheel means. Several do nothing visible with it. The
+        // swipe left, the program ignored it, and the pane sat still — with no
+        // other scroll affordance on a phone, that pane simply could not be
+        // scrolled. No test could see it, because the demo runner's idle bash
+        // prompt has mouse reporting OFF and so only ever took the local path.
+        // The symptom is intermittent by nature: it depends entirely on which
+        // program happens to be running in the pane you are looking at.
+        //
+        // The rule is now about WHAT IS BEHIND the screen, not about who is
+        // willing to take the bytes. On the alternate screen there is no
+        // scrollback to reach, so the wheel can only mean something to the
+        // program. On the primary screen there is history, reaching it is what
+        // a swipe means on a phone, and it wins — even from a program that
+        // asked for the mouse.
+        guard vt.isAlternateScreen else {
+            await scrollLocally(vt, lines: lines)
+            return
+        }
+
         let button: UInt32 =
             lines > 0 ? UInt32(FARCOOLER_VT_MOUSE_WHEEL_UP) : UInt32(FARCOOLER_VT_MOUSE_WHEEL_DOWN)
 
@@ -1715,8 +1746,9 @@ final class TerminalSession: ObservableObject {
     /// Move this device's own view of the pane, and keep the poll loop in step
     /// with where the reader now is.
     ///
-    /// Reached only when the program running in the pane has declined the
-    /// wheel — a shell, not a full-screen TUI. See `scroll`.
+    /// Reached whenever the pane is on the primary screen, which is where the
+    /// scrollback lives — whether or not the program asked for the mouse. See
+    /// `scroll` for why that is the rule.
     private func scrollLocally(_ vt: VTCore, lines: Int) async {
         // Read BEFORE the scroll, because "we are at the bottom" and "we have
         // just arrived at the bottom" are different questions and only the
@@ -1871,12 +1903,23 @@ struct TerminalScrollPosition: Equatable {
     /// could see said which path a pane was on.
     var streaming = false
 
+    /// Whether the program in this pane has asked for mouse events.
+    ///
+    /// Published for the same reason `streaming` is: it is invisible from
+    /// outside and it is exactly the axis a regression hid along. A pane whose
+    /// program wants the mouse and one whose program does not are pixel-for-
+    /// pixel identical, and `scroll` used to treat them completely differently
+    /// — so the suite could reach only the harmless case and stayed green while
+    /// a phone could not scroll at all. A test can now ask for the other one.
+    var wantsMouse = false
+
     init() {}
 
-    init(_ position: (offset: Int, history: Int), streaming: Bool) {
+    init(_ position: (offset: Int, history: Int), streaming: Bool, wantsMouse: Bool) {
         offset = position.offset
         history = position.history
         self.streaming = streaming
+        self.wantsMouse = wantsMouse
     }
 }
 

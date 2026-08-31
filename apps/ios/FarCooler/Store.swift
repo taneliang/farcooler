@@ -132,7 +132,18 @@ enum Identity {
         insert[kSecAttrAccessible as String] =
             kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(insert as CFDictionary, nil)
-        if status != errSecSuccess {
+        // Cleared on success, not merely set on failure.
+        //
+        // It only ever recorded failures, so the value was permanent: nothing
+        // removed it once the entitlement that caused it was in place. A
+        // simulator that had been broken weeks ago still had -34018 sitting in
+        // its preferences, and a night went into re-deriving a diagnosis from
+        // it while the keychain underneath was writing and reading perfectly.
+        // A field that says "this is broken" and never says "it is not" is not
+        // a diagnostic, it is a rumor.
+        if status == errSecSuccess {
+            UserDefaults.standard.removeObject(forKey: "keychainWriteStatus")
+        } else {
             UserDefaults.standard.set(Int(status), forKey: "keychainWriteStatus")
         }
         return status

@@ -303,7 +303,21 @@ DAEMON_PID=$(cat "$DIR/daemon.pid")
 
 # Polled, not slept on: the socket is bound after the database opens and the tmux
 # inventory is taken, which is fast on an idle Mac and not on a busy one.
-for _ in $(seq 1 60); do
+#
+# Two minutes, and the old thirty seconds was not merely tight — it was BELOW
+# the number measured here. A locally built, ad-hoc signed binary is assessed by
+# `syspolicyd` and scanned by XProtect on launch, and that assessment is not
+# always cached between runs: the daemon then sits in dyld, before `main`, for
+# half a minute at a stretch. Measured cold on this Mac: 32 seconds, against a
+# 30-second limit, so the script reported "the daemon never opened its socket"
+# about a daemon that was two seconds away from opening it and went on to run
+# perfectly. The tail of an empty `daemon.log` printed underneath said nothing,
+# because there was nothing yet to say.
+#
+# A wait that is too long costs nothing here — the loop exits the moment the
+# socket appears — and a wait that is too short costs an hour of looking for a
+# bug in the daemon.
+for _ in $(seq 1 240); do
     [ -S "$FC_HOME/farcoolerd.sock" ] && break
     sleep 0.5
 done
@@ -399,7 +413,60 @@ EOF
 chmod +x "$DIR/scrollback.sh"
 fc terminal send "$TERMINAL" "bash '$DIR/scrollback.sh'
 " >/dev/null
-echo "fleet:  repository 'scrollback', workspace 'scrolling', 400 lines in its pane"
+
+# A SECOND pane, identical except that its program has asked for the mouse.
+#
+# This is a fixture for one test — `testAPaneThatAskedForTheMouseStillScrolls`
+# — and it is here rather than in the test because a UI test runs inside the
+# simulator and cannot reach this Mac's tmux. It is the state no runner
+# produces on its own at an idle prompt, and it is the state the bug lived in:
+# a full-screen TUI turns mouse reporting ON, `TerminalSession.scroll` used to
+# hand it every wheel event on that basis, the program did nothing visible with
+# them, and the pane could not be scrolled at all. A phone has no second scroll
+# affordance to fall back on.
+#
+# Both panes carry the same 400 lines, so the ONLY difference between them is
+# the mouse mode — which is what makes the pair evidence rather than two
+# unrelated observations. The app publishes which is which as `mouse=on|off` on
+# `terminal-surface`, and the test walks to the one it needs.
+#
+# `\e[?1000h` written by the pane's own shell, not by tmux: the byte has to
+# travel the whole path a real program's would — through tmux, the daemon and
+# the wire into the phone's VT core — or the pane the test finds would be in
+# mouse mode on this Mac and not on the device, which is a fixture that proves
+# the opposite of what it claims.
+MOUSY=$(fc --json workspace list \
+    | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .terminals[1].id // empty) // empty')
+if [ -z "$MOUSY" ]; then
+    WORKSPACE=$(fc --json workspace list \
+        | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .id) // empty')
+    # Not silenced. The first version sent this to /dev/null and polled for ten
+    # seconds, and when the daemon had not listed the new pane by then the whole
+    # fixture vanished with no message at all — leaving a test that skipped and
+    # a script that said everything was fine. Whatever this prints is the reason
+    # the fixture is missing.
+    fc terminal create "$WORKSPACE" --preset shell || true
+    for _ in $(seq 1 40); do
+        MOUSY=$(fc --json workspace list \
+            | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .terminals[1].id // empty) // empty')
+        [ -n "$MOUSY" ] && break
+        sleep 0.5
+    done
+fi
+if [ -n "${MOUSY:-}" ]; then
+    # Re-sent on every run, not only when the pane is created: the mode belongs
+    # to the pane's terminal state, and anything that reset it — a program that
+    # exited cleanly, a `clear`, a previous test tidying up after itself — would
+    # otherwise leave the fixture looking exactly like the pane it is supposed
+    # to be the opposite of, and the test would skip rather than fail.
+    fc terminal send "$MOUSY" "bash '$DIR/scrollback.sh'; printf '\\e[?1000h'
+" >/dev/null
+    echo "fleet:  repository 'scrollback', workspace 'scrolling', two panes of 400 lines"
+    echo "        — one at an ordinary prompt, one that has asked for the mouse"
+else
+    echo "fleet:  repository 'scrollback', workspace 'scrolling', 400 lines in its pane"
+    echo "        (no second pane: testAPaneThatAskedForTheMouseStillScrolls will skip)"
+fi
 
 # ---------------------------------------------------------------------------
 # The app, built here and installed, so it is what the checkout says.
@@ -502,12 +569,11 @@ ln -sfn "$TARGET/farcoolerd" "$DAEMON_AT"
 
 # Keep it in step with whatever key the app is actually using.
 #
-# The simulator's keychain does not reliably hand an app back the item it stored
-# — across relaunches the device sometimes finds its key and sometimes generates
-# a new one. That is a real problem for the app and is tracked separately; here
-# it just means a fixed `authorized_keys` goes stale under you mid-demo. So this
-# follows the key rather than snapshotting it, and re-renders through the same
-# helper so that the line it writes is the line this run asked for.
+# A reinstall is the case this exists for. `xcodebuild test` builds and installs
+# its own copy on every run, and the app's identity is only as durable as the
+# keychain item behind it — so a fixed `authorized_keys`, snapshotted once, goes
+# stale under you mid-run. This follows the key instead, and re-renders through
+# the same helper so the line it writes is the line this run asked for.
 #
 # It authorizes whatever this simulator currently claims, which is fine for a
 # throwaway sshd on the loopback that nothing else can reach, and would be
@@ -519,19 +585,41 @@ ln -sfn "$TARGET/farcoolerd" "$DAEMON_AT"
 # grep for it never matches — which would have this loop rewriting a file nothing
 # had changed, with an fsync and a fresh backup, every two seconds.
 printf '%s\n' "$PUBKEY" > "$DIR/synced-key"
-cat > "$DIR/sync-key.sh" <<SYNC
+cat > "$DIR/sync-key.sh" <<'SYNC'
 #!/bin/bash
+# Everything varying arrives as an argument. The body used to be written through
+# an UNQUOTED heredoc, which expanded `$PREFIX` into it — and `$PREFIX` is a
+# string that itself contains double quotes:
+#
+#   environment="HOME=…",environment="FARCOOLER_HOME=…",environment="PATH=…"
+#
+# Pasted inside the "…" of the render call below, those inner quotes closed the
+# outer ones, and bash stripped them when it read the generated file back. The
+# renderer was handed `environment=HOME=…` with no quotes at all and wrote that
+# into `authorized_keys` — where sshd, which requires the argument of
+# `environment=` to be quoted, refuses to parse the line and rejects the key on
+# it. The log then says `Failed publickey` for a key that is byte-for-byte the
+# one in the file, which is the most misleading pair of facts this demo can
+# produce, and it is what made every UI test that needs a pane skip.
+dir=$1; render=$2; grant=$3; bundle=$4; prefix=$5
+
 while true; do
-    key=\$(plutil -extract publicKey raw -o - "$PREFS" 2>/dev/null || true)
-    if [ -n "\$key" ] && [ "\$key" != "\$(cat "$DIR/synced-key" 2>/dev/null)" ]; then
-        printf '%s\n' "\$key" | "$RENDER" "$DIR/authorized_keys" "$GRANT" "$PREFIX" >/dev/null \
-            && printf '%s\n' "\$key" > "$DIR/synced-key"
+    # Resolved every pass rather than baked in once. A reinstall can move the app
+    # to a new data container, after which a remembered path names a file that no
+    # longer exists: the follower then reads nothing, forever, and silently stops
+    # tracking the device it exists to track.
+    prefs="$(xcrun simctl get_app_container booted "$bundle" data 2>/dev/null)"
+    prefs="$prefs/Library/Preferences/$bundle.plist"
+    key=$(plutil -extract publicKey raw -o - "$prefs" 2>/dev/null || true)
+    if [ -n "$key" ] && [ "$key" != "$(cat "$dir/synced-key" 2>/dev/null)" ]; then
+        printf '%s\n' "$key" | "$render" "$dir/authorized_keys" "$grant" "$prefix" >/dev/null \
+            && printf '%s\n' "$key" > "$dir/synced-key"
     fi
     sleep 2
 done
 SYNC
 chmod +x "$DIR/sync-key.sh"
-nohup "$DIR/sync-key.sh" >/dev/null 2>&1 &
+nohup "$DIR/sync-key.sh" "$DIR" "$RENDER" "$GRANT" "$BUNDLE" "$PREFIX" >/dev/null 2>&1 &
 echo $! > "$DIR/sync-key.pid"
 
 cat > "$DIR/sshd_config" <<EOF

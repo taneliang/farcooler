@@ -101,6 +101,43 @@ final class VTCore {
         withSnapshot { ($0.displayOffset, $0.historySize) } ?? (0, 0)
     }
 
+    /// Whether the program has swapped to the alternate screen.
+    ///
+    /// The alternate screen has no scrollback by definition — it is a fresh
+    /// buffer the program paints and later discards, which is why leaving
+    /// `vim` puts your shell back exactly as it was. So it is the one place
+    /// where "scroll" cannot mean "look at what came before": there is nothing
+    /// before it, and the wheel can only sensibly go to the program.
+    ///
+    /// Read live rather than cached: a program enters and leaves it whenever
+    /// it likes, and a stale answer sends a swipe to the wrong place.
+    var isAlternateScreen: Bool {
+        guard let handle else { return false }
+        return farcooler_vt_alt_screen(handle)
+    }
+
+    /// Whether the program running in this pane has asked for mouse events.
+    ///
+    /// Asked by trying to encode one and seeing whether the core produces
+    /// bytes: `farcooler_vt_encode_mouse` returns nothing when the program has
+    /// mouse reporting off, which makes "would this encode" and "does the
+    /// program want the mouse" the same question. No new FFI for a fact the
+    /// core already answers.
+    ///
+    /// It exists to be OBSERVED, not to decide anything. `TerminalSession.scroll`
+    /// deliberately no longer branches on it — that was the bug — and it is
+    /// published on the surface so a UI test can tell the two panes apart. A
+    /// pane with mouse reporting on and one without look identical on a screen,
+    /// and the difference between them was the whole of "scroll is broken for
+    /// terminals": untestable while nothing could say which kind of pane was in
+    /// front of you.
+    var wantsMouse: Bool {
+        encode(
+            mouse: UInt32(FARCOOLER_VT_MOUSE_WHEEL_UP),
+            action: UInt32(FARCOOLER_VT_MOUSE_PRESS),
+            column: 0, row: 0, modifiers: []) != nil
+    }
+
     /// Text the program asked to put on the clipboard (OSC 52), or nil.
     ///
     /// This matters more here than it does on the Mac: there is no text

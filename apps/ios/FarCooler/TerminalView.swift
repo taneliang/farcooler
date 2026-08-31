@@ -233,6 +233,31 @@ struct TerminalView: View {
                 // it belongs to is first responder.
             }
         }
+        // THE PANE'S OWN GROUND, PAINTED FROM INSIDE THE NAVIGATION STACK.
+        //
+        // `ShellPaneRealView` already says `.background(TerminalPalette
+        // .background.ignoresSafeArea())`, and it is OUTSIDE the pane's
+        // `NavigationStack` — which is a `UINavigationController`, and a
+        // navigation controller's view carries its own opaque
+        // `systemBackground`. Under the terminal's dark scheme that is pure
+        // black, and it is drawn straight over the ground the shell asked for.
+        //
+        // A diff never showed it: `ChangesView` puts `TerminalPalette
+        // .background` on its own scroll view, and a scroll view fills the
+        // whole pane including the safe areas. A VT grid does not — it is a
+        // `GeometryReader` sized to the SAFE region — so everything the grid
+        // does not cover was the navigation controller's black.
+        //
+        // Measured on an iPhone 17, keyboard down: the grid ran 116…750 in
+        // this app's `#2E3440` and the two strips either side of it — 0…116
+        // under the pane's bar, and 750…874 behind the shell's — read
+        // (0, 0, 0). That is the owner's "black bars above and below
+        // terminals". Keyboard up the lower strip is 424…513, between the grid
+        // and the key row, and just as black.
+        //
+        // Inside the stack rather than a second copy outside it, because
+        // outside is where the one that loses already is.
+        .background(TerminalPalette.background.ignoresSafeArea())
         // The link a long press landed on. Titled with the URL itself, because
         // "Open Link" without saying which link is a button that asks you to
         // trust output an agent produced.
@@ -417,10 +442,18 @@ struct TerminalView: View {
                 // the element and hide the keyboard sink inside it.
                 .accessibilityElement()
                 .accessibilityIdentifier("terminal-surface")
+                // `mouse=` last, and every reader of this value parses it by
+                // KEY rather than by position — see `field` in
+                // TerminalScrollTests. The first version of that parser
+                // required exactly three space-separated parts and matched
+                // `history=0` with ENDSWITH, so appending a fourth field would
+                // have silently turned three guards into no-ops. Naming the
+                // fields is what makes this string safe to extend.
                 .accessibilityValue(
                     "offset=\(session.scrollPosition.offset) "
                         + "history=\(session.scrollPosition.history) "
-                        + "source=\(session.scrollPosition.streaming ? "stream" : "poll")")
+                        + "source=\(session.scrollPosition.streaming ? "stream" : "poll") "
+                        + "mouse=\(session.scrollPosition.wantsMouse ? "on" : "off")")
             // A UIKit view whose only job is to be the thing the software
             // keyboard is attached to. It carries no visible state of its
             // own — every character it reports goes straight to the host and
@@ -1022,13 +1055,35 @@ private final class KeystrokeSink: UIView, UIKeyInput {
     /// swipe out of, and it is silent — the drag is recognized, so nothing
     /// anywhere reports a conflict.
     ///
-    /// **Measured, not reasoned about.**
+    /// **AND IT NEVER RUNS. Measured, 2026-08-30, and the claim that stood
+    /// here was wrong.**
+    ///
+    /// What this said was that
     /// `TerminalScrollTests.testTheShellStillTurnsThePageOverALiveTerminal`
-    /// fails without this and passes with it, on the same runner, over the
-    /// same pane; `testTheShellDoesNotStealTheTerminalsScroll` is the opposite
-    /// assertion and passes either way. Refusing to begin is the whole fix,
-    /// and it is the same rule a `UIScrollView` with no horizontal content
-    /// applies.
+    /// fails without it and passes with it. It does not: with the body of this
+    /// method replaced by a bare `return false` — refuse every pan, which is
+    /// as broken as this rule can be made — the pan still began (`handlePan`
+    /// logged `state = 1` and then `state = 2` sixteen times), the terminal
+    /// still scrolled, and both of the tests named below still passed.
+    /// `NSLog` on the first line of this method printed for
+    /// `UIKitResponderGestureRecognizer` — SwiftUI's own, from the shell above
+    /// — and never once for the `UIPanGestureRecognizer` this file adds.
+    /// `UIView.gestureRecognizerShouldBegin(_:)` is simply not consulted for
+    /// it, and a delegate is what would be.
+    ///
+    /// **Left standing deliberately rather than deleted or wired up.** Wiring
+    /// it up (`pan.delegate = self`) would make the rule real for the first
+    /// time, and a rule that refuses a pan whose first ten points lean
+    /// sideways is a rule that can silently kill a scroll — the very bug being
+    /// chased. Nothing in the suite can tell the two apart, which is exactly
+    /// why it must not be switched on off the back of an argument.
+    ///
+    /// What actually arbitrates is `.simultaneousGesture` on the track
+    /// (`ShellRootView.paneTrack`): the shell's page turn runs alongside the
+    /// terminal's pan rather than instead of it, so a sideways drag turns the
+    /// page and moves the grid by the zero lines its `translation.y` is worth.
+    /// That is why the page turn works today, and it works whatever this
+    /// method returns.
     ///
     /// It costs nothing on the screens that have no page turn behind them: a
     /// sideways drag there used to scroll by zero lines and now falls through

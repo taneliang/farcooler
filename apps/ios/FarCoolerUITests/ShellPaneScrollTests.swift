@@ -314,16 +314,37 @@ final class ShellPaneScrollTests: XCTestCase {
     /// tests above are what run everywhere; this is what says the mechanism
     /// reached the pane the owner was actually complaining about.
     func testAHorizontalSwipeOverTheLiveDiffTurnsThePage() throws {
+        // Forwarded by xcodebuild from an assignment written BEFORE the
+        // command, never after it — see the long note in `TerminalScrollTests`,
+        // and use ./scripts/ios-ui-tests.sh, which gets it right.
         let user = ProcessInfo.processInfo.environment["DEMO_USER"] ?? ""
         let host = ProcessInfo.processInfo.environment["DEMO_HOST"] ?? "127.0.0.1:2222"
+        let runner = "\(user)@\(host)"
         // No shell flag: the shell IS the app. The only argument is the runner
         // to stand on.
-        let app = launch(["-farcoolerDemoHost", "\(user)@\(host)"])
+        let app = launch(["-farcoolerDemoHost", runner])
 
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        guard probe.waitForExistence(timeout: 60) else {
+        // 180 seconds, not 60, and the number is measured rather than chosen.
+        //
+        // `xcodebuild test` installs a fresh build, and the first launches of a
+        // freshly installed app on the simulator are far slower than the rest:
+        // in one run of TerminalScrollTests the first three launches never rendered
+        // inside 60s, the fourth took about 40, and the last four took about
+        // five each. So a 60-second probe did not test the app, it tested how
+        // recently the app had been installed — and it failed that test by
+        // SKIPPING, which is the one outcome that looks like nothing is wrong.
+        //
+        // The cost is that a genuinely absent runner now takes three minutes
+        // per test to say so. That is the right way round: a slow correct
+        // answer beats a fast one that reads as success, and
+        // `scripts/ios-ui-tests.sh` now makes an all-skipped run red, so this
+        // path is only reached when something really is broken.
+        guard probe.waitForExistence(timeout: 180) else {
             print(app.debugDescription)
-            throw XCTSkip("The shell never rendered; run ./scripts/demo-host.sh first.")
+            throw XCTSkip(
+                "The shell never rendered against \(runner); run "
+                    + "./scripts/demo-host.sh first, then ./scripts/ios-ui-tests.sh.")
         }
         // The diff is tab 0 of every workspace — `ShellFleetMap` puts Changes
         // first — so walking backward inside this workspace reaches it, and
