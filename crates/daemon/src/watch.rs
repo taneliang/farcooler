@@ -493,6 +493,60 @@ fn orphaned_pane(
 }
 
 /// The daemon's live view of what every agent is doing.
+/// What the last probe of one workspace left behind for the trace.
+///
+/// Two running positions rather than two counts: the trace records CHANGE, and
+/// both sources here report a total. `lines` is `insertions + deletions` for
+/// the whole diff against the base, so its growth is the code written since the
+/// last look; `reflog` is a byte offset into `<git dir>/logs/HEAD`, so
+/// everything past it is HEAD moves nobody has counted yet.
+#[derive(Debug, Clone, Copy, Default)]
+struct TraceLevel {
+    /// `None` until this workspace has been probed once.
+    ///
+    /// The distinction is the whole correctness of the upper half: a worktree
+    /// already carrying a 4,000-line diff when the daemon starts has not just
+    /// gained 4,000 lines, and recording the first reading as growth would draw
+    /// a bar on every workspace on the runner at every restart.
+    lines: Option<u32>,
+    /// How far into `<git dir>/logs/HEAD` the commit marks have been read.
+    ///
+    /// `None` on the first pass, and that one deliberately reads the file whole
+    /// — unlike `lines` above, a reflog is a list of dated events rather than a
+    /// level, so the day already in it belongs in the buckets it happened in.
+    /// A daemon that has just started therefore has real commit marks
+    /// immediately rather than a blank axis until the next commit.
+    reflog: Option<u64>,
+}
+
+/// What each pane observed working gets out of a worktree's diff growing.
+///
+/// Pulled out of `record_workspace_trace` so the arithmetic can be argued with
+/// directly, because every one of its four answers is a decision:
+///
+/// - **No previous reading gives nothing.** A worktree already carrying a
+///   4,000-line diff when the daemon starts has not just gained 4,000 lines.
+/// - **A shrinking diff gives nothing, never a negative.** A commit does not
+///   shrink it — the counts are base-to-worktree — but a rebase, a reset or a
+///   base change does, and none of those is work being undone in the last three
+///   seconds.
+/// - **No observed worker gives nothing.** A person editing in their own editor
+///   moves the diff with no pane to put it on, and it is dropped rather than
+///   shared out among whoever happens to have a terminal in that worktree.
+/// - **Several workers split it evenly.** Neither git nor this daemon can say
+///   which pane wrote a line, and several terminals routinely share a worktree.
+///   An even split keeps the fleet sum exact and makes each row an
+///   approximation, which is the direction that loses least; the alternative,
+///   giving the whole to each, would multiply the fleet's upper half by however
+///   many panes happened to be open.
+fn code_share(previous: Option<u32>, total: u32, workers: usize) -> u32 {
+    if workers == 0 {
+        return 0;
+    }
+    let Some(previous) = previous else { return 0 };
+    total.saturating_sub(previous) / workers as u32
+}
+
 pub struct Watcher {
     service: Arc<Service>,
     /// One client for the life of the daemon, so a night of notifications
@@ -536,6 +590,66 @@ pub struct Watcher {
     /// A std mutex, and written under the `state` lock without ever being held
     /// across an await — a map insert of two words.
     change_set_activity: std::sync::Mutex<HashMap<Uuid, i64>>,
+    /// Which terminals were seen working in each workspace since the last
+    /// change-set probe.
+    ///
+    /// `change_set_activity` above answers "did anyone work here", which is all
+    /// its gate needs. The activity trace needs "who", because the upper half
+    /// of a row's trace is that row's code — and a worktree's diff growing is a
+    /// fact about the WORKSPACE. Several terminals routinely share one, and git
+    /// records no author per pane, so the growth is split evenly among the panes
+    /// this loop actually observed working while it happened. See
+    /// `probe_change_sets`, which is the only reader, and the note on
+    /// `Terminal.activity_trace` in the proto, which states the approximation
+    /// to clients.
+    ///
+    /// A std mutex on the same terms as the map above: written under the
+    /// `state` lock, never held across an await.
+    trace_workers: std::sync::Mutex<HashMap<Uuid, HashSet<Uuid>>>,
+    /// Each terminal's thirteen buckets of code, output and commits.
+    ///
+    /// The daemon's copy is a ring of 312 five-minute slots — 3.7KB a terminal —
+    /// and the wire carries the 66-byte rendering of thirteen of them. See
+    /// `farcooler_core::trace`, and in particular why the bucket edges are
+    /// absolute wall-clock seconds and must stay that way.
+    ///
+    /// A std mutex: every use is a map lookup and an array add, never an await.
+    traces: std::sync::Mutex<HashMap<Uuid, farcooler_core::trace::Trace>>,
+    /// The shape of each terminal's screen as of the previous tick.
+    ///
+    /// One `u64` per visible row, which is what `trace::lines_produced` compares
+    /// to tell how far a pane scrolled. Nothing else survives a tick — a pane's
+    /// worth of text held per terminal for a fleet of thirty is exactly the kind
+    /// of quiet cost this loop is careful about.
+    trace_shapes: std::sync::Mutex<HashMap<Uuid, farcooler_core::trace::ScreenShape>>,
+    /// The last `insertions + deletions` seen for each workspace, and how far
+    /// into its reflog the commit marks have been read.
+    ///
+    /// Levels, not events: `ReviewCache::counts` reports a worktree's whole
+    /// diff against its base, so what the trace wants is its GROWTH between two
+    /// probes. Absent for a workspace nothing has probed, which is what stops
+    /// the first sighting of an existing diff from being drawn as if the agent
+    /// had written all of it in the last five minutes.
+    trace_levels: std::sync::Mutex<HashMap<Uuid, TraceLevel>>,
+    /// Commit marks, per WORKSPACE rather than per terminal.
+    ///
+    /// Kept apart from `traces` because a commit is not a pane's. Several
+    /// terminals share a worktree and git records nothing about which one a
+    /// commit was typed in, so the honest statement is "a commit landed in this
+    /// worktree" — which is what the axis mark means, and which is the same
+    /// true statement on every row of that worktree.
+    ///
+    /// It also keeps the fleet trace right. Terminal rings are summed for the
+    /// fleet, so a commit copied onto three panes would be three marks; held
+    /// here it is added exactly once.
+    commit_traces: std::sync::Mutex<HashMap<Uuid, farcooler_core::trace::Trace>>,
+    /// Which workspace each terminal's trace should take its commit marks from.
+    ///
+    /// The poll and push finishers are handed a terminal id and nothing else,
+    /// and both have to reach the same ring. Maintained by `tick_traces` off
+    /// the same sample that maintains the rings themselves, so it cannot name a
+    /// workspace the fleet no longer has.
+    trace_workspaces: std::sync::Mutex<HashMap<Uuid, Uuid>>,
     /// Whether a change-set pass is still running.
     ///
     /// See `spawn_change_set_probe`, which is the only thing that reads or
@@ -2124,6 +2238,12 @@ impl Watcher {
             worktree_reconciles: std::sync::Mutex::new(HashMap::new()),
             change_set_probes: std::sync::Mutex::new(HashMap::new()),
             change_set_activity: std::sync::Mutex::new(HashMap::new()),
+            trace_workers: std::sync::Mutex::new(HashMap::new()),
+            traces: std::sync::Mutex::new(HashMap::new()),
+            trace_shapes: std::sync::Mutex::new(HashMap::new()),
+            trace_levels: std::sync::Mutex::new(HashMap::new()),
+            commit_traces: std::sync::Mutex::new(HashMap::new()),
+            trace_workspaces: std::sync::Mutex::new(HashMap::new()),
             change_set_probing: std::sync::atomic::AtomicBool::new(false),
             logs: std::sync::Mutex::new(HashMap::new()),
             log_watcher: crate::log_watch::LogWatcher::start(crate::log_watch::roots()),
@@ -2351,6 +2471,230 @@ impl Watcher {
     }
 
     /// What the watcher last decided, with both clocks.
+    /// Add to one terminal's trace, in the bucket `now` belongs to.
+    ///
+    /// `now` is seconds, not the milliseconds everything else in this loop
+    /// carries: bucket edges are wall-clock seconds and the conversion belongs
+    /// at the one boundary rather than inside `farcooler_core::trace`.
+    pub fn record_trace(
+        &self,
+        terminal: Uuid,
+        now_secs: i64,
+        sample: farcooler_core::trace::Sample,
+    ) {
+        self.traces
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(terminal)
+            .or_default()
+            .record(now_secs, sample);
+    }
+
+    /// Move every live terminal's ring forward and drop the ones that are gone.
+    ///
+    /// Advancing matters even for a terminal that did nothing: a ring that is
+    /// not advanced has not cleared the slots a gap skipped, and the next read
+    /// would find yesterday's counts sitting in today's buckets. See
+    /// `Trace::advance_to`.
+    pub fn tick_traces(&self, live: &HashMap<Uuid, Uuid>, now_secs: i64) {
+        let mut traces = self.traces.lock().unwrap_or_else(|e| e.into_inner());
+        traces.retain(|id, _| live.contains_key(id));
+        for id in live.keys() {
+            traces.entry(*id).or_default().tick(now_secs);
+        }
+        drop(traces);
+
+        let workspaces: HashSet<Uuid> = live.values().copied().collect();
+        let mut commits = self.commit_traces.lock().unwrap_or_else(|e| e.into_inner());
+        commits.retain(|id, _| workspaces.contains(id));
+        for id in &workspaces {
+            commits.entry(*id).or_default().tick(now_secs);
+        }
+        drop(commits);
+
+        self.trace_shapes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id, _| live.contains_key(id));
+        *self.trace_workspaces.lock().unwrap_or_else(|e| e.into_inner()) = live.clone();
+    }
+
+    /// One terminal's trace, encoded as the wire carries it.
+    ///
+    /// Its own ring for the two bars, plus its worktree's ring for the commit
+    /// marks on the axis. Read by BOTH finishers — `rpc::with_activity` on the
+    /// poll path and `announce` on the push path — so a client that polls and a
+    /// client that is pushed to never hold different histories for the same
+    /// terminal. That is the rule every other field in `wire::terminal`
+    /// follows, and the reason this is a method here rather than a computation
+    /// at either call site.
+    pub fn trace(&self, terminal: Uuid) -> Vec<u8> {
+        let now = now_millis() / 1000;
+        let Some(mut trace) = self
+            .traces
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&terminal)
+            .cloned()
+        else {
+            return Vec::new();
+        };
+        let workspace =
+            self.trace_workspaces.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
+        if let Some(workspace) = workspace {
+            if let Some(marks) =
+                self.commit_traces.lock().unwrap_or_else(|e| e.into_inner()).get(&workspace)
+            {
+                trace.absorb(marks, now);
+            }
+        }
+        trace.encode(now)
+    }
+
+    /// Every terminal's trace added together, at one width for the whole fleet.
+    ///
+    /// Summed here rather than on the phone because the rows do not share a
+    /// width — each snaps to the shortest window holding its own activity — so
+    /// adding bucket 4 of a five-minute row to bucket 4 of a two-hour row would
+    /// add two different spans of time. The daemon holds every ring and can
+    /// pick one width across all of them; a client holding only the rendered
+    /// rows cannot.
+    ///
+    /// Commits come off the workspace rings and so are added once each, not
+    /// once per pane sharing the worktree. See `commit_traces`.
+    pub fn fleet_trace(&self) -> Vec<u8> {
+        let now = now_millis() / 1000;
+        let mut fleet = farcooler_core::trace::Trace::new();
+        let mut any = false;
+        for one in self.traces.lock().unwrap_or_else(|e| e.into_inner()).values() {
+            fleet.absorb(one, now);
+            any = true;
+        }
+        for marks in self.commit_traces.lock().unwrap_or_else(|e| e.into_inner()).values() {
+            fleet.absorb(marks, now);
+            any = true;
+        }
+        if !any {
+            return Vec::new();
+        }
+        fleet.encode(now)
+    }
+
+    /// The upper half and the axis, for one workspace that was just probed.
+    ///
+    /// Called from `probe_change_sets`, which is already behind the gate that
+    /// decides a worktree is worth looking at, and which has just refreshed the
+    /// counts this reads. **Nothing here runs git.** `ReviewCache::counts` is a
+    /// map lookup by contract, and the commit marks are a read of a file git
+    /// appends to — so the trace costs one `stat`, and one short read on the
+    /// passes where HEAD actually moved.
+    ///
+    /// # What the upper half really is, said plainly
+    ///
+    /// It is the GROWTH of `insertions + deletions` for the whole worktree
+    /// against its base, split evenly among the panes this loop saw working
+    /// while it grew. Three things follow, and none of them is a bug:
+    ///
+    /// - **Attribution is an even split, not a measurement.** Several terminals
+    ///   routinely share a worktree — the same objection `FleetSnapshot.swift`
+    ///   already records for `reviewsWaiting` — and neither git nor the daemon
+    ///   can say which pane wrote a line. Where one pane was working it is
+    ///   exact; where three were, each row gets a third of the truth.
+    /// - **Churn is lost.** A line written and then written back shows as
+    ///   growth of zero, because the diff against the base ends where it
+    ///   started. The trace under-reports a busy agent that rewrites its own
+    ///   work, and never over-reports.
+    /// - **Nothing is attributed when nobody was seen working.** A person
+    ///   editing in their own editor moves the diff with no pane to put it on,
+    ///   and it is dropped rather than shared out among whoever happens to be
+    ///   in that worktree.
+    fn record_workspace_trace(&self, workspace: Uuid, worktree: &std::path::Path, now_secs: i64) {
+        let workers: Vec<Uuid> = self
+            .trace_workers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&workspace)
+            .map(|set| set.into_iter().collect())
+            .unwrap_or_default();
+
+        let mut levels = self.trace_levels.lock().unwrap_or_else(|e| e.into_inner());
+        let level = levels.entry(workspace).or_default();
+
+        if let crate::review::Counts::Known(_, insertions, deletions) =
+            self.service.review_cache.counts(workspace)
+        {
+            let total = insertions.saturating_add(deletions);
+            let each = code_share(level.lines, total, workers.len());
+            level.lines = Some(total);
+            if each > 0 {
+                for terminal in &workers {
+                    self.traces
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .entry(*terminal)
+                        .or_default()
+                        .record(now_secs, farcooler_core::trace::Sample::code(each));
+                }
+            }
+        }
+
+        // The commit marks. One `stat`, and a read only of what is new.
+        let log = crate::review::git_dir(worktree).join("logs/HEAD");
+        let Ok(meta) = std::fs::metadata(&log) else {
+            // No reflog: either the file has never been written or this
+            // repository has `core.logAllRefUpdates` off. Either way git kept
+            // no record, and no mark is the honest reading of that.
+            return;
+        };
+        let from = level.reflog.unwrap_or(0);
+        if level.reflog.is_some() && meta.len() <= from {
+            // Nothing appended. A file that SHRANK has been expired or
+            // rewritten by `git reflog expire` or a gc; re-reading it whole
+            // would count every surviving commit a second time, so the offset
+            // is simply moved and this pass records nothing.
+            level.reflog = Some(meta.len());
+            return;
+        }
+
+        // The lock is held across this read, and the read is why. The offset
+        // stored below has to be the length of the text that was actually
+        // parsed, not the length `stat` reported a moment earlier — git may
+        // have appended between the two, and an offset short of what was
+        // counted makes the next pass count those commits a second time. A
+        // reflog is a few tens of kilobytes and nothing else touches this map,
+        // so holding it is cheaper than the correction would be.
+        let Ok(text) = std::fs::read_to_string(&log) else { return };
+        level.reflog = Some(text.len() as u64);
+        // On the first pass `from` is 0 and the whole file is read, which is
+        // the backfill described on `TraceLevel::reflog`. After that only the
+        // tail is parsed, because everything before the offset has been
+        // counted once already.
+        // `get` rather than an index, and that is not defensiveness. The offset
+        // is a byte count, a commit message is UTF-8, and slicing a string
+        // anywhere but a character boundary PANICS. The file is append-only so
+        // a stored offset stays a boundary — until the day something rewrites
+        // it, and a panic in the sampling loop takes the whole daemon's fleet
+        // with it. Falling back to the whole file counts a few marks twice,
+        // once, which is a bar one pixel taller than it should be.
+        let fresh = text.get(from as usize..).unwrap_or(text.as_str());
+        let commits = crate::change_set::reflog_commits(fresh);
+        drop(levels);
+        if commits.is_empty() {
+            return;
+        }
+        let mut traces = self.commit_traces.lock().unwrap_or_else(|e| e.into_inner());
+        let ring = traces.entry(workspace).or_default();
+        for at in commits {
+            // Recorded at the second the commit was authored, not at the second
+            // this pass noticed it. That is what makes the backfill land in the
+            // buckets the work actually happened in.
+            ring.record(at, farcooler_core::trace::Sample::commits(1));
+        }
+        // And forward to now, so a backfill of yesterday's reflog does not
+        // leave the ring believing yesterday is the present.
+        ring.tick(now_secs);
+    }
+
     pub async fn activity(&self, terminal: Uuid) -> (AgentActivity, Option<i64>, Option<i64>) {
         match self.state.lock().await.get(&terminal) {
             Some(o) => (o.activity, Some(o.state_since), o.turn_started_at),
@@ -2749,6 +3093,13 @@ impl Watcher {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .insert(ws.id, now_millis());
+
+            // The activity trace's upper half and its commit marks, off the
+            // counts this pass just refreshed. Free by construction: a map
+            // lookup for the diff, one `stat` for the reflog. See
+            // `record_workspace_trace`, which states exactly what the upper
+            // half is and what it cannot say.
+            self.record_workspace_trace(ws.id, &worktree, now_millis() / 1000);
 
             if let Some(version) = version {
                 self.announce_change_set(ws.id, version);
@@ -3173,6 +3524,19 @@ impl Watcher {
             self.logs.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| ids.contains(id));
         }
 
+        // Every live terminal's ring moves forward, whether or not this tick
+        // had anything to put in it, and rings belonging to terminals that are
+        // gone are dropped.
+        //
+        // Advancing a quiet ring is not bookkeeping: a slot that is not cleared
+        // as it is passed still holds what was written into it 26 hours ago,
+        // and the next read would draw yesterday afternoon as this one. See
+        // `Trace::advance_to`.
+        self.tick_traces(
+            &live.iter().map(|s| (s.id, s.workspace_id)).collect(),
+            now_millis() / 1000,
+        );
+
         for Sampled {
             id,
             command,
@@ -3278,6 +3642,46 @@ impl Watcher {
                 // process matching alone would never find.
                 match runtime.screen(id).await {
                     Ok((screen, _, _)) => {
+                        // How far the pane scrolled since the last tick, which
+                        // is the trace's lower half.
+                        //
+                        // Here, and not in the pty byte stream, because the
+                        // byte stream is not always there. Raw pane bytes reach
+                        // a process exactly once — `fanout::serve_on` — which
+                        // tmux starts when a client asks to watch a pane and
+                        // which exits five seconds after the last one leaves.
+                        // Nothing pipes a pane nobody is looking at, on purpose.
+                        // A newline counter there would describe only the
+                        // minutes somebody was watching, and the trace exists to
+                        // describe the hours they were not.
+                        //
+                        // This capture, by contrast, already happens once a
+                        // second for every live terminal whatever is connected,
+                        // because the activity classifier needs it. The counter
+                        // is a hash per row and a shift search over them; see
+                        // `trace::lines_produced` for what it counts, what it
+                        // saturates on, and why tmux's own `history_size`
+                        // cannot be used instead.
+                        let shape = farcooler_core::trace::ScreenShape::of(&screen);
+                        let was = self
+                            .trace_shapes
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(id, shape.clone());
+                        // Nothing on the first sighting. A daemon that just
+                        // started has no previous screen, and treating the
+                        // whole of one as freshly produced would draw a bar
+                        // on every terminal at every restart.
+                        if let Some(was) = was {
+                            let produced = farcooler_core::trace::lines_produced(&was, &shape);
+                            if produced > 0 {
+                                self.record_trace(
+                                    id,
+                                    now / 1000,
+                                    farcooler_core::trace::Sample::output(produced),
+                                );
+                            }
+                        }
                         // Which agent this is, by process where the process
                         // says and by what it drew where it does not — Claude
                         // Code renames itself to its version, so the screen is
@@ -3411,6 +3815,17 @@ impl Watcher {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(workspace_id, now);
+                // WHICH pane, as well as whether any. The gate above only has
+                // to know that this worktree is worth a `git diff`; the trace's
+                // upper half has to put the result on a row, and a workspace's
+                // diff belongs to whichever of its panes was working while it
+                // grew. Cleared by `probe_change_sets` when it spends them.
+                self.trace_workers
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry(workspace_id)
+                    .or_default()
+                    .insert(id);
             }
 
             // Whether the relay is holding a card for a run that has gone.
@@ -3625,6 +4040,11 @@ impl Watcher {
             // description is text the agent wrote and takes the same cleaning
             // every other line here does.
             message.subagents = observed.signals.subagents();
+            // The thirteen buckets. Off the ring rather than off `observed`,
+            // because a trace is history and an `Observed` is one moment — but
+            // through the SAME method the poll path calls, so the two cannot
+            // hand a client different histories of one pane.
+            message.activity_trace = self.trace(terminal).into();
             // How the last turn went, which `apply_rungs` below narrows into
             // the glyph and the headline. Without it a turn that died reaches
             // every client as an ordinary `done`.
@@ -3709,6 +4129,32 @@ fn now_millis() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    /// The upper half of the trace, and every case where it must say nothing.
+    ///
+    /// The three zeroes matter more than the number: each of them is a
+    /// worktree's diff moving for a reason that is not an agent writing code in
+    /// the last few seconds, and drawing a bar for any of them puts activity on
+    /// a row that had none.
+    #[test]
+    fn the_code_share_refuses_to_invent_work() {
+        use super::code_share;
+        assert_eq!(code_share(None, 4_000, 1), 0, "a first reading is not growth");
+        assert_eq!(code_share(Some(4_000), 3_000, 1), 0, "a shrinking diff is not negative work");
+        assert_eq!(code_share(Some(10), 200, 0), 0, "nobody was working, so nobody wrote it");
+        assert_eq!(code_share(Some(10), 10, 1), 0, "a diff that did not move is not work");
+    }
+
+    /// And the case where it does say something, split among the panes that
+    /// were working. The sum is exact; each row is an approximation.
+    #[test]
+    fn the_code_share_splits_growth_among_the_panes_that_were_working() {
+        use super::code_share;
+        assert_eq!(code_share(Some(100), 142, 1), 42, "one pane gets all of it");
+        assert_eq!(code_share(Some(100), 142, 2), 21, "two panes split it");
+        assert_eq!(code_share(Some(100), 142, 3), 14, "three panes split it");
+        assert_eq!(code_share(Some(0), 1, 2), 0, "a split too small to divide is not rounded up");
+    }
+
     /// A pane holding a question is blocked, however long its log has been
     /// quiet.
     ///

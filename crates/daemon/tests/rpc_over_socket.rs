@@ -2454,3 +2454,62 @@ async fn an_unchanged_screen_still_carries_the_history_that_was_asked_for() {
         "the history was withheld because the screen happened to be current"
     );
 }
+
+/// The activity trace reaches a client, on both the row and the fleet.
+///
+/// The failure this exists for is the one this repository keeps finding: a
+/// field declared in the proto, generated into the Rust struct, and then never
+/// assigned — which compiles, ships, and shows up as a widget that draws
+/// nothing. So this asserts on bytes that came back over a real unix socket
+/// from the daemon's own `RpcFactory`, not on anything the test put there.
+#[tokio::test]
+async fn a_terminal_list_carries_the_activity_trace_and_the_fleet_sum() {
+    use farcooler_core::trace::{BUCKETS, ENCODED_LEN, Sample};
+
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository) = registered_repository(&mut client).await;
+    create_workspace(&mut client, repository, "add auth", "feat/add-auth", "shell").await;
+
+    // The terminal the daemon actually opened, by the id the daemon gave it.
+    let opened = terminals(&mut client).await;
+    assert_eq!(opened.len(), 1, "the worktree came with a terminal");
+    let id = uuid::Uuid::from_slice(&opened[0].id).expect("a terminal id");
+    assert!(
+        opened[0].activity_trace.is_empty(),
+        "a terminal that has done nothing must send no trace at all, not 66 zero bytes"
+    );
+
+    // Put a known count into the watcher's ring, the way the sampling loop
+    // does. The loop itself is not running here — see `start` — so this is the
+    // only thing standing in for it, and everything past this point is the real
+    // daemon.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
+    let workspace = uuid::Uuid::from_slice(&opened[0].workspace_id).expect("a workspace id");
+    h.watcher.tick_traces(&std::collections::HashMap::from([(id, workspace)]), now);
+    h.watcher.record_trace(id, now, Sample { output: 9, code: 4, commits: 0 });
+
+    let listed = terminals(&mut client).await;
+    let trace = &listed[0].activity_trace;
+    assert_eq!(trace.len(), ENCODED_LEN, "the row's trace never reached the wire");
+    // The newest bucket is the last of the thirteen, in each half.
+    let newest_code = u16::from_le_bytes([trace[1 + (BUCKETS - 1) * 2], trace[2 + (BUCKETS - 1) * 2]]);
+    let output_at = 1 + BUCKETS * 2;
+    let newest_output =
+        u16::from_le_bytes([trace[output_at + (BUCKETS - 1) * 2], trace[output_at + 1 + (BUCKETS - 1) * 2]]);
+    assert_eq!(newest_code, 4, "the upper half did not survive the wire");
+    assert_eq!(newest_output, 9, "the lower half did not survive the wire");
+
+    // And the fleet sum on the same reply.
+    let result = client.call(request("terminal.list")).await.expect("terminal.list");
+    let Some(result::Value::TerminalList(list)) = result.value else { panic!("wrong result") };
+    assert_eq!(list.fleet_trace.len(), ENCODED_LEN, "the fleet trace never reached the wire");
+    let fleet_output = u16::from_le_bytes([
+        list.fleet_trace[output_at + (BUCKETS - 1) * 2],
+        list.fleet_trace[output_at + 1 + (BUCKETS - 1) * 2],
+    ]);
+    assert_eq!(fleet_output, 9, "the fleet sum lost the only agent in it");
+}

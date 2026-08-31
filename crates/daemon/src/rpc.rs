@@ -956,7 +956,23 @@ impl Rpc {
                         items.push(self.with_activity(terminal).await);
                     }
                 }
-                Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList { items }))
+                // The fleet trace: every ring added together at one width.
+                //
+                // Added here rather than left for the client because rows do
+                // not share a width — each snaps to the shortest window holding
+                // its own activity — so adding one row's bucket 4 to another's
+                // would add two different spans of time. Only the daemon holds
+                // every ring.
+                //
+                // Sent on the whole-fleet listing only. A filtered list is one
+                // workspace, and a fleet figure beside it would be a number
+                // about terminals the reply does not contain.
+                let fleet_trace =
+                    if filter.is_none() { self.watcher.fleet_trace() } else { Vec::new() };
+                Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList {
+                    items,
+                    fleet_trace: fleet_trace.into(),
+                }))
             }
 
             // ---- mutations ----
@@ -1491,6 +1507,7 @@ impl Rpc {
                 // exists.
                 Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList {
                     items: Vec::new(),
+                    fleet_trace: Default::default(),
                 }))
             }
 
@@ -1501,6 +1518,7 @@ impl Rpc {
                 // `terminal.remove` answers with, for the same reason.
                 Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList {
                     items: Vec::new(),
+                    fleet_trace: Default::default(),
                 }))
             }
 
@@ -1969,6 +1987,11 @@ impl Rpc {
         // and then watches events must not see two subagents in the list and
         // none in the push.
         message.subagents = self.watcher.subagents(view.terminal.id).await;
+        // The thirteen buckets, off the watcher's ring for the same reason as
+        // everything above it: the ring is the only copy, and a client that
+        // lists terminals and then watches events must not be handed two
+        // different histories of one pane. See `Watcher::trace`.
+        message.activity_trace = self.watcher.trace(view.terminal.id).into();
         // The compact ladder, computed from everything just set above — see
         // `wire::apply_rungs` for why it has to run last, and why the signal
         // line is handed to it rather than read off the message.

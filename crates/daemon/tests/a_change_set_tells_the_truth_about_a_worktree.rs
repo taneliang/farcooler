@@ -9,7 +9,8 @@ use std::path::Path;
 use std::process::Command;
 
 use farcooler_daemon::change_set::{
-    BaseSource, change_set, commits_since, merge_base, working_tree, worktree_digest,
+    BaseSource, change_set, commits_since, merge_base, reflog_commits, working_tree,
+    worktree_digest,
 };
 use tempfile::TempDir;
 
@@ -740,4 +741,68 @@ async fn a_repository_with_no_remote_keeps_the_bare_default_branch_name() {
     let cs = change_set(p, "feature", &base, BaseSource::DefaultBranch).await.expect("change set");
     assert_eq!(cs.commits.len(), 1);
     assert_eq!(cs.insertions, 2);
+}
+
+/// The activity trace's commit marks, read out of a REAL reflog.
+///
+/// Real git, for the reason at the top of this file and one more: the reflog's
+/// line format is not documented as an interface, so a fixture here would only
+/// prove that the parser agrees with whatever the author believed git writes.
+/// This makes commits with git and reads back what git left behind.
+#[test]
+fn the_reflog_dates_every_commit_and_counts_nothing_else() {
+    let dir = repo();
+    let p = dir.path();
+
+    // Three commits, and four HEAD moves that are NOT commits. Every one of the
+    // four appears in the same file, and counting any of them would put a mark
+    // on the axis for work nobody did.
+    run(p, &["checkout", "-q", "-b", "feature"]);
+    write(p, "one.txt", "1\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "one"]);
+    write(p, "two.txt", "2\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "two"]);
+    run(p, &["checkout", "-q", "main"]);
+    run(p, &["checkout", "-q", "feature"]);
+    write(p, "three.txt", "3\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-q", "-m", "three"]);
+    run(p, &["reset", "-q", "--hard", "HEAD~1"]);
+    run(p, &["checkout", "-q", "main"]);
+
+    let log = std::fs::read_to_string(p.join(".git/logs/HEAD")).expect("a reflog");
+    let commits = reflog_commits(&log);
+
+    // Four commits: the repository's own initial one, plus the three above.
+    assert_eq!(
+        commits.len(),
+        4,
+        "expected 4 commit marks and nothing for the checkouts or the reset; \
+         the reflog was:\n{log}"
+    );
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
+    for at in &commits {
+        assert!(
+            (now - at).abs() < 600,
+            "a commit made a moment ago is dated {at}, which is not now ({now})"
+        );
+    }
+
+    // And the marks land in the buckets those seconds belong to.
+    let mut trace = farcooler_core::trace::Trace::new();
+    for at in &commits {
+        trace.record(*at, farcooler_core::trace::Sample::commits(1));
+    }
+    let buckets = trace.buckets(now, farcooler_core::trace::BASE_WIDTH);
+    assert_eq!(
+        buckets.iter().map(|b| b.commits).sum::<u32>(),
+        4,
+        "the marks did not survive into the trace's buckets"
+    );
 }

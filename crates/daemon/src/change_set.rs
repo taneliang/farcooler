@@ -203,6 +203,53 @@ pub async fn merge_base(repo: &Path, base_ref: &str) -> Result<String> {
 /// `git log` already diffs a parentless commit against the empty tree, so the
 /// first commit of an orphan branch reports everything it added rather than
 /// nothing.
+/// When each commit on this worktree's HEAD landed, out of the reflog.
+///
+/// The activity trace wants commit marks on its axis, per bucket, going back a
+/// day — and there is no periodic source for that. `commits_since` is the only
+/// thing that produces timestamped commits and it runs one `git log` per call,
+/// on the demand-driven `ReviewCache::get` path only; nothing recomputes it on
+/// a clock, so a trace built from it would be blank for every workspace nobody
+/// had opened a diff for.
+///
+/// `<git dir>/logs/HEAD` is the same fact for free. git appends one line to it
+/// every time HEAD moves, each line carrying the author time in Unix seconds
+/// and what moved it, so a commit landing is a few bytes appended to a file the
+/// daemon can read without spawning anything. A linked worktree keeps its own,
+/// which is why the caller passes a git dir resolved through
+/// `review::git_dir` rather than `<worktree>/.git`.
+///
+/// **Only lines whose action is a commit count.** A reflog records checkouts,
+/// merges, resets, rebases and pulls in the same file, and every one of them
+/// moves HEAD without anybody having written code. `commit`, `commit (initial)`
+/// and `commit (amend)` are the three git writes for "a commit was made here";
+/// an amend counts, because the work it carries is work that landed.
+///
+/// **A repository with reflogs turned off has no commit marks**, and that is a
+/// silent zero rather than an error: `core.logAllRefUpdates` defaults on for
+/// any non-bare repository, so this is a deliberate local setting, and the
+/// honest reading of "git kept no record" is no mark rather than a guess.
+pub fn reflog_commits(text: &str) -> Vec<i64> {
+    text.lines()
+        .filter_map(|line| {
+            // `<old> <new> <name> <email> <seconds> <tz>\t<action>: <message>`.
+            // The tab is the only delimiter git guarantees, because a
+            // committer's name may contain anything at all.
+            let (left, right) = line.split_once('\t')?;
+            let action = right.split(':').next()?.trim();
+            if action != "commit" && !action.starts_with("commit (") {
+                return None;
+            }
+            // From the RIGHT: the timezone is last and the epoch seconds are
+            // the field before it. Counting from the left would depend on how
+            // many words are in the committer's name.
+            let mut fields = left.split_whitespace().rev();
+            fields.next()?;
+            fields.next()?.parse::<i64>().ok()
+        })
+        .collect()
+}
+
 pub async fn commits_since(repo: &Path, base_commit: &str) -> Result<Vec<Commit>> {
     // A record separator that cannot occur in a commit message, and a field
     // separator likewise. %x1e / %x1f are the ASCII record and unit separators,

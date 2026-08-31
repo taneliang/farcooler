@@ -317,3 +317,114 @@ async fn respawning_a_pane_keeps_its_id_its_tag_and_its_place() {
     let _ = server.kill_terminal_window(terminal).await;
     let _ = window;
 }
+
+/// The activity trace's lower half, counted off a REAL pane's real output.
+///
+/// This is the test that stops `trace::lines_produced` from being a function
+/// that agrees with a fixture. Everything here is genuine: a tmux server, a pty,
+/// a shell writing to it, and tmux's own VT emulator deciding what the screen
+/// looks like afterwards. The expected number is read out of the pane's own
+/// text — the last line number visible in each of the two captures — so the
+/// assertion is "the counter agrees with what the terminal actually did", not
+/// "the counter returns what the test handed it".
+#[tokio::test]
+async fn output_lines_are_counted_off_a_real_pane() {
+    use farcooler_core::trace::{ScreenShape, lines_produced};
+
+    let Some(srv) = live_server().await else { return };
+
+    // Ten rows, so the pane fills within the first second and everything after
+    // that is a genuine scroll rather than the screen merely filling up.
+    let win = srv
+        .create_terminal_window(
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+            "chatty",
+            "/tmp",
+            "sh -c 'i=1; while [ $i -le 2000 ]; do echo \"line $i\"; i=$((i+1)); \
+             sleep 0.02; done; sleep 60'",
+        )
+        .await
+        .unwrap();
+    srv.resize_window(&win.window_id, 80, 10).await.unwrap();
+
+    /// The highest `line N` the pane is showing, which is how far the program
+    /// has got. Read off the capture rather than counted by the test, so the
+    /// two captures and the expectation all come from the same reality.
+    fn furthest(screen: &str) -> Option<u32> {
+        screen
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("line ")?.trim().parse::<u32>().ok())
+            .max()
+    }
+
+    // Wait until the screen is full, so the comparison below is across a
+    // scrolling pane and not a filling one.
+    until("the pane to fill", || async {
+        srv.capture_screen(&win.pane_id).await.ok().and_then(|s| furthest(&s)).is_some_and(|n| n > 12)
+    })
+    .await;
+
+    let before = srv.capture_screen(&win.pane_id).await.unwrap();
+    let at_before = furthest(&before).expect("the pane should be printing numbered lines");
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    let after = srv.capture_screen(&win.pane_id).await.unwrap();
+    let at_after = furthest(&after).expect("the pane should still be printing numbered lines");
+
+    let actually_printed = at_after - at_before;
+    // Both ends asserted, because a test whose expected value could be zero is
+    // a test that passes on a counter that always returns zero — and a value
+    // at or above the pane height would be the documented saturation rather
+    // than a measurement.
+    assert!(
+        actually_printed > 0 && actually_printed < 10,
+        "this test needs a partial screenful between the two captures, got {actually_printed}"
+    );
+
+    let counted = lines_produced(&ScreenShape::of(&before), &ScreenShape::of(&after));
+    assert_eq!(
+        counted, actually_printed,
+        "the pane printed lines {at_before}..{at_after} and the counter said {counted}"
+    );
+
+    srv.kill_server().await.unwrap();
+}
+
+/// A pane that printed nothing produced nothing.
+///
+/// The other half of the test above, and the one that fails if `lines_produced`
+/// ever starts reporting a screenful for a screen that merely still exists.
+#[tokio::test]
+async fn a_quiet_real_pane_produces_no_output_lines() {
+    use farcooler_core::trace::{ScreenShape, lines_produced};
+
+    let Some(srv) = live_server().await else { return };
+    let win = srv
+        .create_terminal_window(
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+            "quiet",
+            "/tmp",
+            "sh -c 'echo settled; sleep 60'",
+        )
+        .await
+        .unwrap();
+    srv.resize_window(&win.window_id, 80, 10).await.unwrap();
+
+    until("the pane to print its one line", || async {
+        srv.capture_screen(&win.pane_id).await.is_ok_and(|s| s.contains("settled"))
+    })
+    .await;
+
+    let before = srv.capture_screen(&win.pane_id).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let after = srv.capture_screen(&win.pane_id).await.unwrap();
+
+    assert_eq!(
+        lines_produced(&ScreenShape::of(&before), &ScreenShape::of(&after)),
+        0,
+        "a sleeping pane was counted as producing output"
+    );
+
+    srv.kill_server().await.unwrap();
+}

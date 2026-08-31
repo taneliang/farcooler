@@ -954,6 +954,55 @@ message Terminal {
   // rung 3 for a pane without.
   optional uint32 plan_done = 33;
   optional uint32 plan_total = 34;
+
+  // Thirteen buckets of what this terminal has been doing: lines of code
+  // touched, lines of output, and commits. The activity trace of the glance
+  // spec's §04, which every widget, Live Activity and watch accessory draws.
+  //
+  // **Bytes rather than three `repeated uint32` fields, and that is a memory
+  // decision, not a wire one.** The consumer that decides it is the iOS widget:
+  // `FleetWidget` holds a whole fleet snapshot per timeline entry, up to 13
+  // entries, in an extension with a hard memory ceiling — so the arithmetic is
+  // buckets x series x agents x entries, on the DECODED size. Three repeated
+  // fields decode into three Swift arrays per agent: for 12 agents over 13
+  // timeline entries that is 44,928 bytes across 468 separate heap objects.
+  // One `Data` of 66 bytes is 17,472 across 156. See `farcooler_core::trace`
+  // for the layout and the full table.
+  //
+  // **The buckets are absolute wall-clock, never relative to now.** Two polls
+  // landing inside one bucket produce identical bytes here, which is what
+  // makes `agentsSayTheSame(as:)` able to skip a Bluetooth write to the watch.
+  // A window measured backwards from the moment of the poll would change these
+  // bytes every three seconds forever. Do not "improve" this into a sliding
+  // window.
+  //
+  // Empty when the terminal has done nothing the trace can see, rather than 66
+  // zero bytes: a fleet at rest costs nothing.
+  //
+  // Byte 0 is `version << 4 | width`, where width is 0 for five-minute buckets,
+  // 1 for thirty-minute and 2 for two-hour. A client that does not recognize
+  // the version must draw an empty trace rather than read the rest.
+  //
+  // **What each channel actually is**, so nobody reads more into a bar than is
+  // there. None of the three is an accounting figure; the spec draws this 12pt
+  // wide, scales it per row per half, and never prints it as a number.
+  //
+  // - Lower half, output: how far this pane's screen scrolled, sampled once a
+  //  second by the daemon. Screen-aware, so a TUI repainting in place counts
+  //  nothing — but it saturates at the pane's height between two samples, so a
+  //  build firehose is a solid bar rather than a taller one.
+  // - Upper half, code: the GROWTH of the worktree's `insertions + deletions`
+  //  against its base, split evenly among the panes the daemon saw working
+  //  while it grew. A worktree is shared, and neither git nor the daemon can
+  //  say which pane wrote a line — so with one agent in a worktree this is
+  //  exact, and with three each row carries a third of the truth. Growth only:
+  //  a line written and then written back nets to nothing, so a busy agent
+  //  rewriting its own work is under-reported, never over-reported.
+  // - Axis, commits: HEAD moves that were commits, dated from the worktree's
+  //  reflog. Per WORKSPACE, so every row of one worktree shows the same marks
+  //  — which is the true statement, since a commit belongs to the worktree and
+  //  not to a pane. A repository with reflogs disabled shows none.
+  bytes activity_trace = 35;
 }
 
 // What a pane is hosting.
@@ -1001,7 +1050,23 @@ enum AgentActivity {
   AGENT_ACTIVITY_UNKNOWN = 6;
 }
 
-message TerminalList { repeated Terminal items = 1; }
+message TerminalList {
+  repeated Terminal items = 1;
+
+  // Every terminal's trace added together, at one width for the whole fleet.
+  //
+  // Summed here rather than by the client because the rows do not share a
+  // width: each snaps to the shortest window holding its own activity, per the
+  // spec, so adding bucket 4 of a five-minute row to bucket 4 of a two-hour row
+  // would add two different spans of time. The daemon holds every ring and can
+  // pick one width for all of them; a client holding only the rendered rows
+  // cannot.
+  //
+  // Same encoding as `Terminal.activity_trace`, and empty on the same terms.
+  // Legitimate as a sum because it stays within a channel: code with code,
+  // output with output. Never sum the two halves together.
+  bytes fleet_trace = 2;
+}
 
 enum TerminalIntent {
   TERMINAL_INTENT_UNSPECIFIED = 0;

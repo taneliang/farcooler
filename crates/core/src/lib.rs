@@ -21,6 +21,7 @@ pub mod session_log;
 pub mod shell;
 pub mod theme;
 pub mod title;
+pub mod trace;
 pub mod validate;
 
 pub use error::{DomainError, Result};

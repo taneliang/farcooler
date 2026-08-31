@@ -207,6 +207,12 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // it is the only thing that knows the previous observation — which is
         // what `Done` is made of. A converter that guessed would erase it.
         activity: wire::AgentActivity::Unspecified as i32,
+        // Left unset here for the same reason, and it matters more: the trace
+        // is HISTORY, and this converter sees one moment. Only the watcher
+        // holds the ring, and both finishers ask it for the same bytes so a
+        // client that polls and a client that is pushed to cannot end up
+        // holding different histories for one terminal.
+        activity_trace: Default::default(),
         activity_changed_at: None,
         turn_started_at: None,
         blocked_question: None,
