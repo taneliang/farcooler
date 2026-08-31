@@ -365,6 +365,148 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(visibleCount(), 1, "a drag made a second pane visible")
     }
 
+    // MARK: - The three bugs from the device
+
+    /// **A tap on a column row switches to that tab.**
+    ///
+    /// The column is the shell's tab switcher and a tap on one of its rows was
+    /// dead: `ShellColumn` draws rows and declares no target of its own, so the
+    /// only thing under a finger anywhere on that surface is the bar's own
+    /// `DragGesture`, and a tap resolves through `barRelease(axis: nil, ...)`
+    /// to `.toggleColumn` — which SHUT the menu instead of choosing from it.
+    /// Opening worked, selecting did not.
+    ///
+    /// The last tab and not the first, because the row nearest the bar is the
+    /// LAST one — see `ShellGesture.columnSelection` — so this fails if the
+    /// mapping is inverted as well as if the tap is ignored.
+    func testTappingAColumnRowSwitchesToThatTab() throws {
+        let app = launch()
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
+        XCTAssertEqual(try state(app)["tab"], 0)
+
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let opened = try state(app)
+        XCTAssertEqual(opened["pinned"], 1, "a tap did not hold the column open")
+        XCTAssertEqual(opened["column"], 3 * rowHeight, "the three rows were not showing")
+
+        tapColumnRow(app, bar, fromBottom: 0)
+        let landed = try state(app)
+        XCTAssertEqual(
+            landed["tab"], 2, "a tap on the row nearest the bar did not switch to the last tab")
+        XCTAssertEqual(landed["pinned"], 0, "choosing a row left the column open over it")
+    }
+
+    /// The row two up from the bar is tab 0, which is the one you came from —
+    /// so this pins the MAPPING rather than merely the fact that a tap does
+    /// something.
+    func testTappingTheTopColumnRowSwitchesToTheFirstTab() throws {
+        let app = launch()
+        swipeContent(app, toward: -1)
+        swipeContent(app, toward: -1)
+        XCTAssertEqual(try state(app)["tab"], 2, "could not get to the third tab")
+
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30))
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertEqual(try state(app)["pinned"], 1)
+
+        tapColumnRow(app, bar, fromBottom: 2)
+        XCTAssertEqual(
+            try state(app)["tab"], 0, "the topmost row is tab 0 and the tap landed elsewhere")
+    }
+
+    /// Tap the column row `fromBottom` rows above the bar row.
+    ///
+    /// Measured off the bar element's own frame rather than off a normalized
+    /// offset: the surface grows by the column's height when it opens, so a
+    /// fraction of it means a different row for every tab count.
+    private func tapColumnRow(_ app: XCUIApplication, _ bar: XCUIElement, fromBottom row: Int) {
+        let frame = bar.frame
+        let centre = CGVector(
+            dx: frame.midX,
+            dy: frame.maxY - CGFloat(rowHeight) * (1.5 + CGFloat(row)))
+        app.coordinate(withNormalizedOffset: .zero).withOffset(centre).tap()
+    }
+
+    /// **A drag down the content does not turn the page, however far it
+    /// wanders sideways.**
+    ///
+    /// `ShellGesture.axis` compared `abs(dx) > dy` with `dy` measured
+    /// UP-positive, so every DOWNWARD drag had a negative `dy` and lost to any
+    /// horizontal component at all — a scroll down the screen was called
+    /// horizontal, and the ten degrees of drift a thumb makes over six hundred
+    /// points is well past the seventy that commits. Reading a terminal
+    /// changed tab under you.
+    ///
+    /// The numbers: 79 points across against 511 down, which is about nine
+    /// degrees off vertical and is a scroll by any reading.
+    func testADragDownTheContentDoesNotTurnThePage() throws {
+        let app = launch(["-shell-scroll"])
+        XCTAssertEqual(try state(app)["tab"], 0)
+
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.18))
+        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.78))
+        from.press(
+            forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.4)
+
+        let after = try state(app)
+        XCTAssertEqual(after["tab"], 0, "a drag down the content turned the page")
+        XCTAssertEqual(after["ws"], 0, "a drag down the content changed workspace")
+    }
+
+    /// The same drag UPWARD, which was never broken, so the fix cannot be "the
+    /// axis lock now refuses everything".
+    func testADragUpTheContentDoesNotTurnThePageEither() throws {
+        let app = launch(["-shell-scroll"])
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.78))
+        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.18))
+        from.press(
+            forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.4)
+        XCTAssertEqual(try state(app)["tab"], 0, "a drag up the content turned the page")
+    }
+
+    /// **Scrolling the grid back to its top does not close it.**
+    ///
+    /// The pull-down that dismisses the overview read `atTop` at the moment
+    /// the finger LEFT, so any scroll that finished at the top of the grid —
+    /// which is every scroll back up through forty cards — was indistinguish-
+    /// able from a deliberate pull-down and threw you back onto the workspace
+    /// you came from.
+    func testScrollingTheGridBackToItsTopDoesNotCloseIt() throws {
+        let app = launch(["-shell-40"])
+        liftBar(app, by: 320)
+        XCTAssertEqual(try state(app)["overview"], 1, "the lift never reached the overview")
+
+        // Down through the grid…
+        let low = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+        let high = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.22))
+        low.press(
+            forDuration: 0.05, thenDragTo: high, withVelocity: .slow, thenHoldForDuration: 0.3)
+        XCTAssertEqual(try state(app)["overview"], 1, "scrolling down the grid closed it")
+
+        // …and back up, in one drag that ends at the top.
+        high.press(
+            forDuration: 0.05, thenDragTo: low, withVelocity: .slow, thenHoldForDuration: 0.3)
+        XCTAssertEqual(
+            try state(app)["overview"], 1, "scrolling the grid back to its top closed it")
+    }
+
+    /// The other half of the same rule: a pull-down that BEGINS at the top is
+    /// still the way out by touch, and the fix must not have removed it.
+    func testAPullDownFromTheTopOfTheGridStillClosesIt() throws {
+        let app = launch(["-shell-40"])
+        liftBar(app, by: 320)
+        XCTAssertEqual(try state(app)["overview"], 1)
+
+        let high = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let low = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
+        high.press(
+            forDuration: 0.05, thenDragTo: low, withVelocity: .slow, thenHoldForDuration: 0.3)
+        XCTAssertEqual(
+            try state(app)["overview"], 0, "the pull-down out of the grid stopped working")
+    }
+
     /// Forty workspaces is the number the design was chosen for, so the
     /// harness has to reach it and the overview has to hold it.
     func testTheOverviewHoldsFortyWorkspaces() throws {
@@ -375,3 +517,4 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["40 Workspaces"].waitForExistence(timeout: 5))
     }
 }
+

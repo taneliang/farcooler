@@ -37,9 +37,14 @@ import SwiftUI
 // touch. `Done` is a real toolbar button, but the drag back down that also
 // closes this used to live on the hand-built header, and there is no header
 // left to attach it to. It is now a pull-down on the grid itself, gated on the
-// scroll being at its top and attached as a SIMULTANEOUS gesture so the scroll
-// never loses an argument to it — which is the sheet idiom, and closer to what
-// a person will try than the old strip-only version was.
+// scroll having BEGUN at its top and attached as a SIMULTANEOUS gesture so the
+// scroll never loses an argument to it — which is the sheet idiom, and closer
+// to what a person will try than the old strip-only version was.
+//
+// "Begun at its top" is the whole of the gate and it was "ended at its top",
+// which is not the same claim and is the one the owner's phone caught: every
+// scroll back up through forty cards ends at the top with a large downward
+// translation behind it, so browsing the grid dismissed it. See `pullBegan`.
 
 /// Where each laid-out card is, by workspace index, in screen coordinates.
 ///
@@ -340,6 +345,23 @@ struct ShellOverview<Actions: View>: View {
     /// pull-down means "close this" rather than "scroll up".
     @State private var atTop = true
 
+    /// Whether the grid was at its top when the drag now under way BEGAN, or
+    /// nil between drags.
+    ///
+    /// **A pull-down is a gesture that starts at the top, not one that ends
+    /// there**, and reading `atTop` at the release alone is what made the
+    /// overview close itself on the owner's phone. Every scroll back up
+    /// through forty cards finishes at the top with a large downward
+    /// translation behind it — which is character for character the same
+    /// release a deliberate pull-down produces — so browsing the grid threw
+    /// you back onto the workspace you came from, with nothing about the
+    /// gesture to say why.
+    ///
+    /// Both halves are still required: it must have begun at the top AND still
+    /// be there. Begun alone would dismiss a scroll that started at the top
+    /// and travelled; still-there alone is the bug.
+    @State private var pullBegan: Bool?
+
     private var order: [Int] { fleet.overviewOrder(matching: search) }
 
     var body: some View {
@@ -579,8 +601,22 @@ struct ShellOverview<Actions: View>: View {
         // scroll should always win that — so it runs alongside instead, and
         // only acts where a downward drag has nothing else to mean.
         .simultaneousGesture(
-            DragGesture(minimumDistance: 20).onEnded { value in
-                if atTop, value.translation.height > 40 { onDismiss() }
-            })
+            DragGesture(minimumDistance: 20)
+                // The first movement of each drag, and only the first: this is
+                // where "was the grid at its top" is still a fact about the
+                // gesture rather than about what the gesture has since done.
+                .onChanged { _ in if pullBegan == nil { pullBegan = atTop } }
+                .onEnded { value in
+                    let began = pullBegan ?? atTop
+                    pullBegan = nil
+                    guard began, atTop else { return }
+                    // Predominantly downward as well as far enough. A diagonal
+                    // flick across the cards is not a pull-down, and the
+                    // distance alone cannot tell the two apart.
+                    guard value.translation.height > 40,
+                        value.translation.height > abs(value.translation.width)
+                    else { return }
+                    onDismiss()
+                })
     }
 }

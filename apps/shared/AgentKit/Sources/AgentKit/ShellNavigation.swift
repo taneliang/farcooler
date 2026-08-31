@@ -524,17 +524,29 @@ enum ShellGesture {
     /// sideways and ends up opening the column, which is every accidental
     /// gesture in the design review.
     ///
-    /// `dy` is measured UP-positive — `startY - y` — which is why the
-    /// comparison is `abs(dx) > dy` and not `abs(dx) > abs(dy)`. That is
-    /// verbatim from the prototype and it is right: a DOWNWARD drag has no
-    /// meaning on this bar (only up unfurls the column), so a downward flick
-    /// gives a negative `dy`, loses to any `abs(dx)` at all, and is called
-    /// horizontal — where its near-zero `dx` springs it straight back. The
-    /// alternative, calling it vertical, would be a gesture that is locked to
-    /// an axis on which it can do nothing.
+    /// `dy` is measured UP-positive — `startY - y` — and the comparison is
+    /// against its MAGNITUDE. It was `abs(dx) > dy`, verbatim from the
+    /// prototype, and that is a sign error rather than a transcription:
+    /// a DOWNWARD drag has a negative `dy`, so it lost to any horizontal
+    /// component at all and every drag down the screen was called horizontal.
+    ///
+    /// The prototype's reasoning was sound for the surface it was written
+    /// against — down has no meaning on the bar, so calling a downward flick
+    /// horizontal let its near-zero `dx` spring straight back — and it rests
+    /// entirely on `dx` being near zero. On the CONTENT it is not: down the
+    /// screen is a scroll, a thumb travelling six hundred points arcs eighty
+    /// across on the way, and eighty is past the seventy that commits. So
+    /// reading a terminal turned the page under you, which is what the owner
+    /// reported from a real phone.
+    ///
+    /// A true lock costs the bar nothing, and that is why one rule can serve
+    /// both. A downward flick on the bar now locks VERTICAL, where `lift` is
+    /// floored at zero, `columnSelection` answers nil below `openMin` and the
+    /// release is `.abandon` — a gesture that does nothing, which is what the
+    /// prototype's comment wanted and reached the other way round.
     static func axis(dx: CGFloat, up dy: CGFloat) -> ShellAxis? {
         guard max(abs(dx), abs(dy)) > ShellMetrics.axisLock else { return nil }
-        return abs(dx) > dy ? .horizontal : .vertical
+        return abs(dx) > abs(dy) ? .horizontal : .vertical
     }
 
     /// How far the track actually moves for a drag of `dx`.
@@ -589,6 +601,37 @@ enum ShellGesture {
         guard up >= ShellMetrics.openMin else { return nil }
         let steps = columnSteps(up: up, tabCount: tabCount)
         return steps > 0 ? tabCount - steps : nil
+    }
+
+    /// Which row of an OPEN column a TAP lands on, or nil for a touch that is
+    /// not on the column at all.
+    ///
+    /// **The column had no tap target of its own and this is it.**
+    /// `ShellColumn` draws rows and declares nothing, so the only recognizer
+    /// anywhere on that surface is the bar's own drag — and a tap resolved
+    /// through `barRelease` to `.toggleColumn`, which SHUT the menu instead of
+    /// choosing from it. Opening worked and selecting did not, which is the
+    /// shell's primary tab switcher being dead to the one gesture everybody
+    /// tries first.
+    ///
+    /// It is arithmetic here rather than a `Button` in the column for the
+    /// reason the rest of this file exists: the row a touch lands on is a
+    /// mapping, `columnSelection` is the same mapping read off a lift, and two
+    /// answers to "which row is that" is exactly how the drag and the tap come
+    /// to disagree about a menu.
+    ///
+    /// `above` is how far the touch is ABOVE the bar row's top edge, so a tap
+    /// on the bar itself is zero or negative and answers nil — which leaves it
+    /// the toggle it always was. Counted from the BOTTOM of the list for the
+    /// same reason `columnSelection` counts down: the column reads top to
+    /// bottom with tab 0 first, so the row nearest the bar is the LAST tab.
+    static func columnRow(above: CGFloat, tabCount: Int) -> Int? {
+        guard tabCount > 0, above > 0, above <= columnFull(tabCount: tabCount) else { return nil }
+        // Clamped rather than trusted: `above == columnFull` is the column's
+        // very top edge and divides to exactly `tabCount`, which is one past
+        // the end of the list.
+        let fromBottom = min(tabCount - 1, Int(above / ShellMetrics.rowHeight))
+        return tabCount - 1 - fromBottom
     }
 
     /// The lift at which the column has nothing left to reveal.
@@ -753,10 +796,20 @@ extension ShellFleet {
     /// caller; `axis` is the one decided on the first 6 points, or nil if the
     /// gesture never grew that big — which is a tap and is why this function
     /// can return `.toggleColumn` at all.
-    func barRelease(axis: ShellAxis?, dx: CGFloat, up: CGFloat, at position: ShellPosition)
-        -> ShellRelease
-    {
-        guard let axis else { return .toggleColumn }
+    /// `tapRow` is which column row a tap landed on, from
+    /// `ShellGesture.columnRow`, and is nil for every gesture that is not a
+    /// tap on an open column. It is an argument rather than something derived
+    /// here because it takes a POINT, and a point is the one thing about a
+    /// gesture this file has no business knowing how to place.
+    func barRelease(
+        axis: ShellAxis?, dx: CGFloat, up: CGFloat, at position: ShellPosition,
+        tapRow: Int? = nil
+    ) -> ShellRelease {
+        // A tap, and the column is open under it: choosing a row. Ahead of
+        // the toggle, because a tap that lands on a row is not a tap on the
+        // bar — see `ShellGesture.columnRow`, which answers nil for the bar
+        // itself and leaves the toggle exactly as it was.
+        guard let axis else { return tapRow.map { .land(tab: $0) } ?? .toggleColumn }
         switch axis {
         case .horizontal:
             guard ShellGesture.commits(dx: dx), let direction = ShellGesture.direction(dx: dx),

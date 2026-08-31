@@ -274,17 +274,85 @@ struct ShellNavigationTests {
         #expect(ShellGesture.axis(dx: 0, up: 6.1) == .vertical)
     }
 
-    /// `abs(dx) > dy`, up-positive — so a DOWNWARD drag is horizontal, and
-    /// then does nothing because its `dx` is nowhere near the commit
-    /// threshold. Locking it vertical instead would lock it to the one axis on
-    /// which the bar has nothing to offer.
-    @Test func aDownwardDragIsHorizontalAndThereforeHarmless() {
-        #expect(ShellGesture.axis(dx: 0, up: -40) == .horizontal)
+    /// **A drag down the screen is VERTICAL, however far it wanders
+    /// sideways.**
+    ///
+    /// This asserted the opposite, from the prototype: `abs(dx) > dy` with
+    /// `dy` up-positive, so a downward drag lost to any horizontal component
+    /// at all and was called horizontal. It was harmless on the bar for
+    /// exactly the reason the old comment gave — a downward flick's `dx` is
+    /// nowhere near the commit threshold — and it was the owner's bug on the
+    /// CONTENT, where a thumb travelling six hundred points down a terminal
+    /// arcs eighty across on the way and eighty is past the seventy that
+    /// commits.
+    ///
+    /// Both halves are pinned here: the plain downward flick that used to be
+    /// the point of this test, and the drifting one that was the bug.
+    @Test func aDragDownTheScreenIsVerticalHoweverFarItDrifts() {
+        #expect(ShellGesture.axis(dx: 0, up: -40) == .vertical)
+        #expect(ShellGesture.axis(dx: 79, up: -511) == .vertical)
+        #expect(ShellGesture.axis(dx: -79, up: -511) == .vertical)
+        // And a drag that really is sideways still is, whichever way it leans.
+        #expect(ShellGesture.axis(dx: 120, up: -40) == .horizontal)
+        #expect(ShellGesture.axis(dx: 120, up: 40) == .horizontal)
+    }
+
+    /// The other half of the old test, which was the part worth keeping: a
+    /// downward flick on the bar costs nothing. It reaches that as an
+    /// `.abandon` now rather than as a `.springBack`, and the two are the same
+    /// nothing — `apply` runs `flatten()` for both.
+    @Test func aDownwardFlickOnTheBarCostsNothing() {
         let fleet = Self.crossing()
         #expect(
             fleet.barRelease(
-                axis: .horizontal, dx: 0, up: 0, at: ShellPosition(workspace: 1, tab: 0))
-                == .springBack)
+                axis: .vertical, dx: 0, up: 0, at: ShellPosition(workspace: 1, tab: 0))
+                == .abandon)
+    }
+
+    // MARK: - Tapping a column row
+
+    /// **A tap on an open column row chooses that row.**
+    ///
+    /// The column had no target of its own, so a tap anywhere on that surface
+    /// reached `barRelease` with no axis and resolved to `.toggleColumn` —
+    /// which shut the menu instead of choosing from it. The shell's primary
+    /// tab switcher was dead to the one gesture everybody tries first.
+    ///
+    /// `above` is measured from the bar row's TOP edge, so the first row up is
+    /// the LAST tab — the same direction `columnSelection` counts, because the
+    /// column reads top to bottom with tab 0 first.
+    @Test func aTapOnAColumnRowPicksTheRowUnderIt() {
+        let row = ShellMetrics.rowHeight
+        // The row nearest the bar is the last tab.
+        #expect(ShellGesture.columnRow(above: 1, tabCount: 3) == 2)
+        #expect(ShellGesture.columnRow(above: row - 1, tabCount: 3) == 2)
+        // One row up.
+        #expect(ShellGesture.columnRow(above: row + 1, tabCount: 3) == 1)
+        // The topmost row is tab 0, right up to the column's own top edge.
+        #expect(ShellGesture.columnRow(above: 2 * row + 1, tabCount: 3) == 0)
+        #expect(ShellGesture.columnRow(above: 3 * row, tabCount: 3) == 0)
+    }
+
+    /// A touch that is not on the column answers nil, which is what leaves the
+    /// tap on the BAR the toggle it has always been.
+    @Test func aTapOffTheColumnPicksNoRow() {
+        let row = ShellMetrics.rowHeight
+        // On the bar row itself, or below it.
+        #expect(ShellGesture.columnRow(above: 0, tabCount: 3) == nil)
+        #expect(ShellGesture.columnRow(above: -20, tabCount: 3) == nil)
+        // Above the column's top edge.
+        #expect(ShellGesture.columnRow(above: 3 * row + 1, tabCount: 3) == nil)
+        // A workspace with no tabs has no rows to hit.
+        #expect(ShellGesture.columnRow(above: 10, tabCount: 0) == nil)
+    }
+
+    /// The release reads it: a tap with a row under it LANDS, and a tap with
+    /// none still toggles.
+    @Test func aTapWithARowUnderItLandsRatherThanTogglingTheColumn() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)
+        #expect(fleet.barRelease(axis: nil, dx: 0, up: 0, at: at, tapRow: 2) == .land(tab: 2))
+        #expect(fleet.barRelease(axis: nil, dx: 0, up: 0, at: at, tapRow: nil) == .toggleColumn)
     }
 
     // MARK: - The column

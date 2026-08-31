@@ -274,6 +274,21 @@ struct ShellRootView<Pane: View, Actions: View>: View {
 
     /// The column, held open by a tap. Separate from `lift`, see above.
     @State var columnPinned = false
+
+    /// The bar surface's bottom edge, in global coordinates.
+    ///
+    /// What a TAP on an open column is measured against — see
+    /// `ShellDrag.tappedRow`. Measured rather than recomputed from
+    /// `safeArea.bottom + barGap`, which is the arithmetic that puts the bar
+    /// there: a second copy of it here would be right until somebody changed a
+    /// padding, and would then land every tap one row off its target with
+    /// nothing on screen to say why.
+    ///
+    /// The BOTTOM edge and not the top, because the column grows upward out of
+    /// the bar row. The top edge moves for the whole of the menu's spring and
+    /// would write this on every frame of it; the bottom edge changes only
+    /// when the safe area does.
+    @State var barBottom: CGFloat = 0
     /// Whether the menu is showing, as a state of its own rather than as
     /// something read off the lift.
     ///
@@ -711,6 +726,9 @@ struct ShellRootView<Pane: View, Actions: View>: View {
                 columnHeight: menuHeight,
                 columnSelection: columnSelection)
                 .accessibilityIdentifier("shell-bar")
+                // Where the bar actually is, for the tap that chooses a column
+                // row. See `barBottom`.
+                .background { barFrameReader }
                 .gesture(barGesture(page: page))
                 .frame(width: page)
 
@@ -740,6 +758,20 @@ struct ShellRootView<Pane: View, Actions: View>: View {
         // and `reveal` is exactly when it has.
         .opacity(1 - reveal)
         .allowsHitTesting(!overview)
+    }
+
+    /// The bar's bottom edge, reported out of the layout that draws it.
+    ///
+    /// Only `maxY`, and only when it changes. The frame's HEIGHT springs for
+    /// the whole of the menu opening; its bottom edge does not move at all, so
+    /// watching the one number costs a write when the safe area changes and
+    /// nothing on any other frame.
+    private var barFrameReader: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { barBottom = geo.frame(in: .global).maxY }
+                .onChange(of: geo.frame(in: .global).maxY) { barBottom = $1 }
+        }
     }
 
     /// The workspace waiting off one edge, drawn on the tab you would land on.

@@ -77,12 +77,41 @@ extension ShellRootView {
                 let dx = value.translation.width
                 let up = lift
                 let openedBefore = wasOpen
+                // Read BEFORE `rest()`, which zeroes the lift the column's
+                // height is computed from. Everything this needs — the lift,
+                // whether the column was pinned — is state the release is
+                // about to spend.
+                let row = decided == nil ? tappedRow(at: value.startLocation) : nil
                 rest()
                 apply(
-                    fleet.barRelease(axis: decided, dx: dx, up: up, at: position), dx: dx,
-                    page: page, wasOpen: openedBefore)
+                    fleet.barRelease(
+                        axis: decided, dx: dx, up: up, at: position, tapRow: row),
+                    dx: dx, page: page, wasOpen: openedBefore)
                 syncMenu()
             }
+    }
+
+    /// Which column row a tap at `point` chose, or nil when there was no open
+    /// column under it.
+    ///
+    /// **Measured against the bar's own bottom edge rather than against the
+    /// layout that puts it there.** `barBottom` is read off the surface
+    /// SwiftUI actually drew — see `ShellRootView.barTrack` — because the
+    /// alternative is a second copy of `safeArea.bottom + barGap` here, which
+    /// would be right until somebody changed a padding and would then send
+    /// every tap one row off with nothing on screen to say why. The one number
+    /// still written down is `ShellMetrics.barRow`, and it is the shared
+    /// constant the bar is drawn at rather than a literal.
+    ///
+    /// The bar's bottom and not its top: the bar row's position is fixed and
+    /// the column grows UP out of it, so the top edge is a number that
+    /// animates and the bottom edge is one that does not.
+    private func tappedRow(at point: CGPoint) -> Int? {
+        guard barBottom > 0,
+            ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned) > 0
+        else { return nil }
+        return ShellGesture.columnRow(
+            above: (barBottom - ShellMetrics.barRow) - point.y, tabCount: tabCount)
     }
 
     /// The content's own swipe, along the flat sequence.
