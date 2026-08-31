@@ -212,8 +212,11 @@ struct PermissionView<Client: FleetClient>: View {
             // The phone's words, and the phone's color. Orange means an agent
             // is waiting on a person, on every surface this app has — so this
             // is the one place on the watch that spends it.
+            // `darkColor` rather than the scheme-resolved value: watchOS has
+            // no light appearance at all, so §01's pale-backdrop palette
+            // answers a question this platform never asks.
             Text("Needs your approval")
-                .foregroundStyle(.orange)
+                .foregroundStyle(GlancePalette.amber.darkColor)
         }
     }
 
@@ -419,9 +422,9 @@ private struct Signal: View {
             let confidence = snapshot.confidence(in: agent, at: context.date)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(agent.glyph)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(agent.status == "blocked" ? Color.orange : Color.secondary)
+                    GlanceMarkView(
+                        GlanceMark(agent: agent, confidence: confidence), size: .watchRow)
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                     Text(stated(agent, confidence))
                         .font(.caption.weight(.medium))
                 }

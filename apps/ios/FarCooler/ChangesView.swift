@@ -9,7 +9,7 @@ import SwiftUI
 /// them, and `ChangesView.pullRequestRow`, which is where it decides what is
 /// drawn.
 ///
-/// A plain value, assembled by `WorkspaceView` from one `stack.get`. Everything
+/// A plain value, assembled by `ShellScreen` from one `stack.get`. Everything
 /// this row needs and nothing that would pull a `Connection` into a lazy stack.
 struct BranchPullRequest: Equatable {
     /// GitHub's answer for this branch, or nil when there is none to have.
@@ -98,7 +98,7 @@ struct ChangesView: View {
 
     /// What GitHub says about this branch, and the way in to act on it.
     ///
-    /// Resolved by `WorkspaceView` — which holds `currentWorkspace` and
+    /// Resolved by `ShellScreen` — which holds the workspace at rest and
     /// therefore the repository id `stack.get` takes — and handed down as a
     /// plain value for exactly the reason `agents` is one, above.
     ///
@@ -192,9 +192,9 @@ struct ChangesView: View {
             // first request to the one screenful that exists. It half-worked —
             // the offset was recorded before the restore had had its turn, so a
             // second or third visit jumped — and all of it existed only because
-            // the view was destroyed on every pane switch. `WorkspaceView` keeps the
-            // pane mounted, so the scroll never moves and there is nothing to
-            // put back.
+            // the view was destroyed on every pane switch. `ShellPaneTrack`
+            // keeps the pane mounted, so the scroll never moves and there is
+            // nothing to put back.
             //
             // What DOES get put back is a position across a process death,
             // which is a different problem with a different answer: a file
@@ -248,10 +248,11 @@ struct ChangesView: View {
             // was, a picker.
             //
             // Presented from here rather than from either control that opens it:
-            // one of those controls lives in `WorkspaceView`'s toolbar, and a sheet
-            // hung off a `Menu`'s content is hung off something that is not a live
-            // view hierarchy to present from. The flag lives on the store so both
-            // can reach it.
+            // one of those controls was `ChangesToolbarMenu`, and a sheet hung off
+            // a `Menu`'s content is hung off something that is not a live view
+            // hierarchy to present from. The flag lives on the store so both can
+            // reach it — which is also what keeps this reachable while that menu
+            // has no host. See `ChangesToolbarMenu`.
             .sheet(isPresented: $store.showingHistory) {
                 CommitHistorySheet(store: store)
             }
@@ -1281,10 +1282,25 @@ private struct FileIndexSheet: View {
 
 /// The changes pane's contextual toolbar control.
 ///
-/// Owned by `WorkspaceView`, not `ChangesView`: the host owns every navigation-bar
-/// item and can therefore keep their order stable as panes change. A mounted
-/// child contributing its own toolbar item made SwiftUI merge two independent
-/// toolbar trees, which moved the worktree switcher whenever this menu appeared.
+/// **Nothing mounts this right now, and that is a gap rather than a decision.**
+/// It was owned by `WorkspaceView`, the pane host, and never by `ChangesView`:
+/// the host owned every navigation-bar item and could therefore keep their
+/// order stable as panes changed, where a mounted child contributing its own
+/// toolbar item made SwiftUI merge two independent toolbar trees and moved the
+/// worktree switcher whenever this menu appeared.
+///
+/// The shell has no navigation bar over a pane, so that host is gone and this
+/// has no door. The reason it was moved OUT of `ChangesView` is also gone with
+/// it — there is no second toolbar tree left to merge with — so putting it back
+/// is a real option; where it would go is a design question about `ReviewBar`,
+/// which is the only chrome a diff carries now, and that has not been asked.
+///
+/// Kept rather than deleted because what it holds has no other door either: the
+/// `DiffScope` picker is the only way to change what a diff is compared
+/// against, and the commit history entry is one of two ways into
+/// `CommitHistorySheet`. Both are reachable from `ChangesStore` — the flags
+/// live there, not here — so a host can be given to this without changing
+/// anything else.
 struct ChangesToolbarMenu: View {
     @ObservedObject var store: ChangesStore
 
@@ -1849,6 +1865,28 @@ private struct HunkView: View {
     /// The widest row in this hunk, so every row can be drawn that wide. See
     /// the note on `onPreferenceChange` below.
     @State private var rowWidth: CGFloat = 0
+    /// How far this hunk could still scroll, either way, as of its last
+    /// layout.
+    ///
+    /// Kept whether or not anybody is touching it, because the answer is
+    /// needed at the INSTANT a finger lands: a scroll geometry only reports
+    /// when it changes, and a hunk sitting still at the start of a long line
+    /// has not changed since it was laid out.
+    @State private var room = ShellSidewaysRoom.none
+    /// Whether a finger is on this hunk's own sideways scroll right now.
+    ///
+    /// The gate on saying anything at all. Every hunk on screen has room, and
+    /// only the one under the thumb is entitled to answer for the drag.
+    @State private var interacting = false
+
+    /// What this hunk tells the shell about the drag under way.
+    ///
+    /// A diff line is a line, so a hunk scrolls sideways — and sideways over a
+    /// pane is also how the shell turns the page. This is a nested horizontal
+    /// scroll inside a horizontal pager, and the answer is the platform's
+    /// usual one: the inner scroller goes first and hands over at its edge.
+    /// See `ShellDragClaim`.
+    @Environment(\.shellDragClaim) private var shellDrag
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1886,6 +1924,43 @@ private struct HunkView: View {
                 .onPreferenceChange(DiffRowWidth.self) { rowWidth = $0 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
+            }
+            // **What this hunk has left, so the shell knows what is left over
+            // for it.**
+            //
+            // A line short enough to fit reports nothing and the page turns
+            // over it like anywhere else; a line being read reports the room
+            // it still has and the shell stands down for exactly that much;
+            // and a line scrolled to its end reports zero, so the next point
+            // of the same drag turns the page without the finger lifting.
+            // That last one is the behaviour the owner asked for by name, and
+            // it is why this is a distance rather than a flag.
+            //
+            // Two callbacks and not one. The geometry says what the room IS
+            // and is the only thing that knows; the phase says whether this
+            // hunk is the one being touched, and re-sends the standing answer
+            // the moment it becomes so — because a hunk that has not moved
+            // since it was laid out will not have a geometry change to report
+            // when a finger lands on it.
+            .onScrollGeometryChange(for: ShellSidewaysRoom.self) { geometry in
+                // In `UIScrollView`'s terms: how far the offset is above its
+                // minimum, and how far below its maximum. Both include the
+                // content insets, which are zero here today and would not stay
+                // zero silently.
+                let leading = geometry.contentInsets.leading
+                let span =
+                    geometry.contentSize.width + leading + geometry.contentInsets.trailing
+                return ShellSidewaysRoom(
+                    before: geometry.contentOffset.x + leading,
+                    after: span - geometry.containerSize.width - geometry.contentOffset.x
+                        - leading)
+            } action: { _, now in
+                room = now
+                if interacting { shellDrag.room = now }
+            }
+            .onScrollPhaseChange { _, phase in
+                interacting = phase == .interacting
+                if interacting { shellDrag.room = room }
             }
         }
     }
@@ -2605,14 +2680,25 @@ struct ChangesLayoutHarness: View {
 
     @StateObject private var connection = Connection()
 
-    var body: some View {
-        let store = connection.changesStores.store(for: "harness")
+    /// Put the canned change set on a store.
+    ///
+    /// Static, and called from `ShellHarness` as well as from here: the shell's
+    /// own harness draws this same pane inside the navigation shell so the page
+    /// turn can be argued with a real diff's gesture recognizers under it, and
+    /// two spellings of "a canned diff" would be two things to keep in step.
+    static func standIn(_ store: ChangesStore) {
         let commit = Self.changeSet.commits[1]
         store.standIn(
             on: Self.changeSet,
             scope: CommandLine.arguments.contains("-commit") ? .commit(commit.sha) : .branch,
             diffs: Self.diffs,
-            expanded: CommandLine.arguments.contains("-commit") ? nil : "crates/daemon/src/file_diff.rs")
+            expanded: CommandLine.arguments.contains("-commit")
+                ? nil : "crates/daemon/src/file_diff.rs")
+    }
+
+    var body: some View {
+        let store = connection.changesStores.store(for: "harness")
+        Self.standIn(store)
         return NavigationStack {
             ChangesView(
                 store: store, workspaceName: "add-retries", pullRequest: Self.pullRequest)
@@ -2712,11 +2798,35 @@ struct ChangesLayoutHarness: View {
         ],
         workingTree: nil)
 
+    /// Long enough to be a diff rather than a snippet.
+    ///
+    /// Six lines was what this was, and six lines fit on a phone with most of
+    /// the screen to spare — so nothing that only goes wrong once a diff is
+    /// TALLER than its pane had a fixture at all: the pinned file heading
+    /// never pinned, the file list's "1 of 2" never moved, and inside the
+    /// navigation shell the pane's own vertical scroll was a gesture with
+    /// nowhere to go. `ShellPaneScrollTests` is what needed it; the change set
+    /// above has always claimed +96 −12 for this file, and now the diff under
+    /// it is at least the same order of thing.
     private static let diffs: [String: [DiffComputation.Line]] = [
         "crates/daemon/src/file_diff.rs": DiffComputation.compute(
             old: """
                 fn backoff(attempt: u32) -> Duration {
                     Duration::from_millis(200)
+                }
+
+                async fn send(request: Request) -> Result<Response> {
+                    let mut attempt = 0;
+                    loop {
+                        match transport.send(&request).await {
+                            Ok(response) => return Ok(response),
+                            Err(error) if attempt < MAX_ATTEMPTS => {
+                                sleep(backoff(attempt)).await;
+                                attempt += 1;
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
                 }
                 """,
             new: """
@@ -2725,6 +2835,38 @@ struct ChangesLayoutHarness: View {
                         return after.min(Duration::from_secs(30));
                     }
                     Duration::from_millis(200 << attempt.min(6))
+                }
+
+                /// The server's own answer wins, clamped, and only for 429.
+                fn retry_after(response: &Response) -> Option<Duration> {
+                    if response.status != StatusCode::TOO_MANY_REQUESTS {
+                        return None;
+                    }
+                    response
+                        .headers
+                        .get("retry-after")
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .map(Duration::from_secs)
+                }
+
+                async fn send(request: Request) -> Result<Response> {
+                    let mut attempt = 0;
+                    loop {
+                        match transport.send(&request).await {
+                            Ok(response) if response.status.is_success() => return Ok(response),
+                            Ok(response) if attempt < MAX_ATTEMPTS => {
+                                sleep(backoff(attempt, retry_after(&response))).await;
+                                attempt += 1;
+                            }
+                            Ok(response) => return Err(Error::Http(response.status)),
+                            Err(error) if attempt < MAX_ATTEMPTS => {
+                                sleep(backoff(attempt, None)).await;
+                                attempt += 1;
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
                 }
                 """)
     ]

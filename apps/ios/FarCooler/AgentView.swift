@@ -172,9 +172,9 @@ struct AgentView: View {
     ///
     /// A type and a STATIC, where this was five instance properties the harness
     /// set on an `AgentView` it constructed itself. Constructing the pane is
-    /// what it may no longer do: the harness mounts `WorkspaceView` now, so the
-    /// pane is built by `TerminalView` several levels down and there is nothing
-    /// for an outside caller to reach into. A fixture that has to survive that
+    /// what it may no longer do: the harness mounts the shell now, so the pane
+    /// is built by `ShellPaneRealView` and `TerminalView` several levels down
+    /// and there is nothing for an outside caller to reach into. A fixture that has to survive that
     /// trip is a static, and one value rather than five keeps "there is a
     /// fixture" a single question.
     ///
@@ -281,6 +281,11 @@ struct AgentView: View {
     /// honest question a count is trying to answer is whether anything has
     /// happened since you looked away, and a dot answers exactly that and
     /// claims nothing more.
+    /// The way-back button's diameter, named because two places need it: the
+    /// button itself, and the offset that lifts it clear of the composer's
+    /// strip. A literal in both is a literal that drifts in one.
+    private static let jumpDiameter: CGFloat = 38
+
     private var jumpToLatest: some View {
         Button {
             setPinned(true)
@@ -295,7 +300,7 @@ struct AgentView: View {
                 // blue-link reading half the controls on this screen have
                 // already been corrected for.
                 .foregroundStyle(.primary)
-                .frame(width: 38, height: 38)
+                .frame(width: Self.jumpDiameter, height: Self.jumpDiameter)
                 .background(.regularMaterial, in: Circle())
                 .overlay {
                     Circle().strokeBorder(Color.primary.opacity(0.12))
@@ -353,7 +358,35 @@ struct AgentView: View {
                 // the keyboard's own overlap with the accessory included — is
                 // used for both.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    Color.clear.frame(height: obstruction)
+                    // The reserved strip, and the way back RIDING ON IT.
+                    //
+                    // The button used to be an `.overlay(alignment: .bottom)`
+                    // on the whole pane, padded up by `obstruction` — the same
+                    // number said a second time, and correct only for as long
+                    // as the pane's frame ended at the bottom of the screen.
+                    // It stopped: the pane is inside a `NavigationStack` now
+                    // (`ShellScreen.ShellPaneRealView.body`), whose content is
+                    // laid out inside the framework's own keyboard inset, so
+                    // "the bottom of the frame" is no longer where the composer
+                    // is. Measured with a keyboard up: the button landed at
+                    // y = −97, off the top of the display, and the test that
+                    // taps it could not reach it.
+                    //
+                    // Hung off the strip instead, which IS the composer's room
+                    // — one number, in one place, and the button cannot drift
+                    // from the thing it is meant to sit above however the pane
+                    // is hosted. The alignment guide puts the button's own
+                    // BOTTOM one card above the strip's top edge; the strip
+                    // stays exactly `obstruction` tall, so what the transcript
+                    // reserves is unchanged.
+                    Color.clear
+                        .frame(height: obstruction)
+                        .overlay(alignment: .top) {
+                            if !pinnedToTail {
+                                jumpToLatest
+                                    .offset(y: -(Self.jumpDiameter + PaneMetrics.card))
+                            }
+                        }
                 }
                 // THE HOME INDICATOR, COUNTED ONCE.
                 //
@@ -386,18 +419,6 @@ struct AgentView: View {
                 // card over content, not a bar with a floor — but it is a real
                 // change and nobody has looked at it on a device.
                 .ignoresSafeArea(.all, edges: .bottom)
-                // The way back, drawn over the conversation rather than in the
-                // bar — the bar is an accessory in another window, and putting
-                // it there would make the transcript reserve room for its own
-                // scroll control. Sits one card's gap above whatever is
-                // covering the transcript, which is the same number the
-                // transcript insets itself by.
-                .overlay(alignment: .bottom) {
-                    if !pinnedToTail {
-                        jumpToLatest
-                            .padding(.bottom, obstruction + PaneMetrics.card)
-                    }
-                }
                 .animation(.spring(response: 0.28, dampingFraction: 0.86), value: pinnedToTail)
                 // How the conversation MEETS the glass over it.
                 //
@@ -2886,11 +2907,10 @@ enum KeyboardDismissal {
 /// nothing is a step above anything, it is just the number that looked right
 /// the day the view was written. Four values, and the reason each exists.
 ///
-/// The two surface constants are the phone's, not this screen's:
-/// `TerminalTabStrip` and `TerminalKeyRow` already draw at 22 and 10, and a
-/// composer floating two points inside a tab strip with corners curving at
-/// half the rate is what made three surfaces on one screen read as three
-/// different objects.
+/// The two surface constants are the phone's, not this screen's: `ShellBar`
+/// and `TerminalKeyRow` already draw at 22 and 10, and a composer floating two
+/// points inside a glass bar with corners curving at half the rate is what made
+/// three surfaces on one screen read as three different objects.
 enum PaneMetrics {
     /// Inside one control — a glyph and the word next to it.
     static let tight: CGFloat = 4
@@ -2966,11 +2986,31 @@ enum TranscriptFill {
     static let alarm = AnyShapeStyle(Color.red.opacity(0.12))
 }
 
+/// One floating surface's glass, in one place.
+///
+/// Every floating thing in this app goes through here rather than reaching for
+/// `glassEffect` itself, so there is exactly one opinion about what glass is
+/// and a shape can never end up backed by a slightly different material than
+/// the one beside it.
 struct GlassSurface: ViewModifier {
     var radius: CGFloat = PaneMetrics.surfaceRadius
+    /// Whether this surface is a thing you TOUCH, and should react like one.
+    ///
+    /// iOS 26's glass has a reaction built into it — it scales, bounces and
+    /// lights up at the point of contact — and it is off unless a surface asks
+    /// for it, because it is a statement about affordance rather than a
+    /// finish: glass that flexes under a finger is glass the finger can do
+    /// something to. A strip you drag says yes; a panel that merely floats
+    /// over a transcript says no, and turning it on there would promise a
+    /// control that is not there.
+    ///
+    /// Not for `Button`s. The standard button styles already carry the same
+    /// reaction, and a button drawn on an interactive surface reacts twice.
+    var interactive: Bool = false
 
     func body(content: Content) -> some View {
-        content.glassEffect(.regular, in: .rect(cornerRadius: radius))
+        content.glassEffect(
+            interactive ? .regular.interactive() : .regular, in: .rect(cornerRadius: radius))
     }
 }
 
@@ -3100,37 +3140,38 @@ private struct WorkingRow: View {
 ///
 /// ## It mounts the pane where the app mounts it
 ///
-/// This used to construct an `AgentView` and put it on screen BARE — no
-/// navigation stack, no bar, no tab strip — and the app has never once shown
-/// the pane that way. `FleetView` owns a `NavigationStack`, pushes
-/// `WorkspaceView` into it, and `WorkspaceView` gives the pane a title, a
-/// subtitle, a toolbar, a floating tab strip and a top safe-area inset that
-/// holds the conversation clear of all of it. What the harness drew instead was
-/// a transcript running up under the status bar, with a tool-call row crossing
-/// the clock — and screenshots from here are now how this app's iOS layout gets
-/// judged, so a harness that is wrong about the TOP of the screen is a trap for
-/// the next person measuring something at the bottom.
+/// This used to construct an `AgentView` and put it on screen BARE — no shell,
+/// no bar, no ribbon — and the app has never once shown the pane that way.
+/// What the harness drew instead was a transcript running up under the status
+/// bar, with a tool-call row crossing the clock, and screenshots from here are
+/// how this app's iOS layout gets judged: a harness that is wrong about the TOP
+/// of the screen is a trap for the next person measuring something at the
+/// bottom.
 ///
-/// So the route is the app's route, top to bottom: a stack, a push, the real
-/// `WorkspaceView`, the real `TerminalView`, the real `AgentView`. Everything
-/// above the pane is the shipping code reading a canned fleet, which is the
-/// only part that is fixture — `Connection.standIn(on:)` and
+/// So the route is the app's route, top to bottom — and the app's route is the
+/// shell now. `ShellScreen` over a canned `Connection`, `ShellRootView`,
+/// `ShellPaneTrack`, the real `TerminalView`, the real `AgentView`. That is a
+/// stronger claim than the pushed `WorkspaceView` this used to mount, because
+/// the shell is what tells a pane where the furniture is: `ShellPaneSlot.chrome`
+/// is the top and bottom inset the conversation has to clear, and it is
+/// measured from the bar rather than from a navigation bar that no longer
+/// exists. A harness that skipped it would be measuring the wrong two numbers.
+///
+/// Everything above the pane is the shipping code reading a canned fleet, which
+/// is the only part that is fixture — `Connection.standIn(on:)` and
 /// `AgentView.fixture` are the two seams, and neither of them draws anything.
 ///
 /// ## What is not the app, and says so
 ///
-/// The words in the navigation bar. The title and subtitle are a workspace's
-/// task and branch, so the fixture names itself there — "Layout harness" over
-/// "fixture · no runner" — rather than borrowing a plausible worktree name and
-/// leaving somebody to find out later that no runner was involved. The chrome
-/// around them is real; only the words are canned.
+/// The words in the bar. It carries the workspace's name, so the fixture names
+/// itself there — "Layout harness" — rather than borrowing a plausible worktree
+/// name and leaving somebody to find out later that no runner was involved. The
+/// glass around it is real; only the words are canned.
 ///
-/// The back chevron reads "Fleet" because that is what the stand-in root under
-/// this stack is called. In the app it reads the runner's name, which is
-/// per-runner and would be a longer or shorter word — the one metric here that
-/// a screenshot cannot be measured against.
+/// The runner menu in the overview's toolbar stands on an empty `RunnerStore`
+/// and says "No Runner", which is the truth about this launch.
 ///
-/// The Changes chip shows no counts: they come from `Connection.inbox`, which
+/// The Diff tab shows no unread ring: that comes from `Connection.inbox`, which
 /// is a separate round trip this stands nothing in for.
 struct AgentLayoutHarness: View {
     static var isRequested: Bool {
@@ -3138,25 +3179,25 @@ struct AgentLayoutHarness: View {
     }
 
     @StateObject private var connection = Connection()
+    /// No runners, and that is the fixture. The menu is real and its sheets
+    /// open; there is simply nothing on this device to switch to.
+    @StateObject private var hosts = RunnerStore()
 
-    /// Empty until `stand()` runs, so the pane is not built before the fixture
-    /// it is to be built from exists.
-    @State private var path: [Pane] = []
+    /// The pane to open on, as the shell's own deep-link request.
+    ///
+    /// Set once `stand()` has filled the fixture in. The shell would land on
+    /// this pane anyway — `PaneFocus.rule` picks the top-ranked agent and the
+    /// fixture has one — but going through the request is the app's own path
+    /// for "open exactly this pane", so the harness cannot start passing
+    /// because the rule happened to agree.
+    @State private var open: String?
 
     var body: some View {
-        NavigationStack(path: $path) {
-            fleetStandIn
-                // The one route, declared where `FleetView` declares its own:
-                // on the stack's root content. See `FleetView.body`.
-                .navigationDestination(for: Pane.self) { pane in
-                    WorkspaceView(
-                        workspace: Self.workspace.id, initial: pane, connection: connection)
-                }
-        }
-        .task { stand() }
+        ShellScreen(connection: connection, hosts: hosts, pendingTerminal: $open)
+            .task { stand() }
     }
 
-    /// Fill the fixture in, then push the pane at it.
+    /// Fill the fixture in, then point the shell at the pane.
     ///
     /// In this order, and in a `task` rather than in `body`: the fixture has to
     /// exist before `AgentView` mounts and reads it, and writing to an
@@ -3166,32 +3207,16 @@ struct AgentLayoutHarness: View {
         AgentView.fixture = Self.fixture
         connection.standIn(
             on: Fleet(runtimeHealthy: true, livePanes: 2, workspaces: [Self.workspace]))
-        path = [Pane(Self.agentPane)]
-    }
-
-    /// What the back chevron is pointing at.
-    ///
-    /// Deliberately not a stand-in `FleetView`: that screen needs a runner to
-    /// draw anything at all, and a second fixture for a screen nobody is
-    /// looking at would be a second thing to keep true. It is titled, because
-    /// the title is the only part of it that shows — in the chevron.
-    private var fleetStandIn: some View {
-        ContentUnavailableView(
-            "Agent layout harness",
-            systemImage: "bubble.left.and.text.bubble.right",
-            description: Text(
-                "The pane is pushed onto this stack the way the app pushes it. "
-                + "Nothing behind it is a runner."))
-            .navigationTitle("Fleet")
-            .navigationBarTitleDisplayMode(.inline)
+        open = Self.agentPane.id
     }
 
     /// The canned pane, and the fleet it lives in.
     ///
-    /// A chat-capable agent pane and a shell beside it, because the toolbar's
-    /// pane-mode button is drawn from `canSwitchPaneMode` and the tab strip is
-    /// drawn from the workspace's terminals — a one-terminal fixture would have
-    /// quietly dropped both from every screenshot.
+    /// A chat-capable agent pane and a shell beside it, because the ribbon and
+    /// the column are drawn from the workspace's terminals and the content
+    /// swipe walks between them — a one-terminal fixture would have made every
+    /// screenshot a workspace with two tabs where the app usually has three or
+    /// four, and left the swipe with nowhere to go.
     ///
     /// The activity is the fleet's, not a flag on the pane: `AgentView.isWorking`
     /// reads it from here the way it does in the app, so a fixture that says a
@@ -3265,10 +3290,10 @@ struct AgentLayoutHarness: View {
     ///
     /// The pane no longer takes the container treatment this used to apply —
     /// `.ignoresSafeArea(.keyboard, edges: .bottom)`, added here to reproduce
-    /// what `WorkspaceView` does so the keyboard was not counted twice.
-    /// `WorkspaceView` is on screen now and does it itself, which is the point
-    /// of mounting it: nothing about the container is reproduced, so nothing
-    /// about it can drift.
+    /// what the pane host does so the keyboard was not counted twice.
+    /// `ShellPaneRealView` is on screen now and does it itself, which is the
+    /// point of mounting the shell: nothing about the container is reproduced,
+    /// so nothing about it can drift.
     private static var fixture: AgentView.Fixture {
         if let (phase, waited, trouble) = emptyState {
             return AgentView.Fixture(events: [], phase: phase, waited: waited, trouble: trouble)

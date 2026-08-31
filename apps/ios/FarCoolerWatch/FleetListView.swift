@@ -151,13 +151,20 @@ private struct AgentRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(agent.glyph)
-                .font(.caption.monospaced())
-                // Amber for the one that is waiting on a person and nothing
-                // else — the reservation the widget and the Live Activity both
-                // make, so a glance at any of the three answers "does this need
-                // me" without reading a word.
-                .foregroundStyle(agent.status == "blocked" ? Color.orange : Color.secondary)
+            // The one state mark, at the 14pt row size §03 gives the wrist —
+            // "read at arm's length, two sizes only". Amber for the agent that
+            // is waiting on a person and nothing else, which is the reservation
+            // the widget and the Live Activity both make, so a glance at any of
+            // the three answers "does this need me" without reading a word.
+            //
+            // Unlike the complication, this states the CORE. §08's rule that
+            // "working versus idle never appears on a widget" is about a surface
+            // that reloads twice an hour; this screen is open in front of a
+            // person and polls, so the claim is true when it is made.
+            GlanceMarkView(GlanceMark(agent: agent, confidence: confidence), size: .watchRow)
+                // A shape has no baseline, so a `firstTextBaseline` stack would
+                // hang it off its bottom edge a descender low.
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             VStack(alignment: .leading, spacing: 1) {
                 Text(stated(agent, confidence))
                     .font(.body.weight(.medium))
@@ -202,11 +209,15 @@ private struct ReviewRow: View {
     let count: Int
 
     var body: some View {
-        Label(
-            FleetSnapshot.Glance.review(count).phrase,
-            systemImage: FleetSnapshot.Glance.review(count).symbol)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(Color.accentColor)
+        Label {
+            Text(FleetSnapshot.Glance.review(count).phrase)
+        } icon: {
+            GlanceMarkView(GlanceMark(glance: .review(count)), size: .watchRow)
+        }
+        .font(.caption.weight(.medium))
+        // `darkColor` because watchOS has no light appearance — see the same
+        // note in `PermissionView`.
+        .foregroundStyle(GlancePalette.review.darkColor)
     }
 }
 

@@ -34,7 +34,7 @@ struct DockedBar<Content: View>: UIViewControllerRepresentable {
     /// Whether this bar should be docked at all.
     ///
     /// An input accessory lives in the KEYBOARD's window, not in the view that
-    /// vends it, so hiding that view does nothing to it. `WorkspaceView` keeps every
+    /// vends it, so hiding that view does nothing to it. `ShellPaneTrack` keeps every
     /// visited pane mounted, so without this every chat pane ever opened went on
     /// holding first responder and went on drawing its composer — over the
     /// terminal, and over a changes pane that has no composer at all.

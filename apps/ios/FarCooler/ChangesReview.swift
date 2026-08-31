@@ -143,7 +143,7 @@ extension Workspace {
     ///
     /// Here rather than beside either caller, because there are two now: a
     /// review reached through a `changes` pane (`TerminalView`) and one reached
-    /// from the inbox (`NeedsYouView`). Two copies of this filter is two
+    /// from the inbox that used to be the front door. Two copies of this filter is two
     /// chances for the same worktree to offer different agents depending on
     /// which door you came through.
     ///

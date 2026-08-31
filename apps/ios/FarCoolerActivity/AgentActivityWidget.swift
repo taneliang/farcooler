@@ -137,8 +137,16 @@ struct AgentActivityWidget: Widget {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } compactLeading: {
-                Image(systemName: status.symbol)
-                    .foregroundStyle(status.tint)
+                // §07's compact presentation leads with the mark. 11pt, the
+                // header diameter, which is what fits beside the pill's own
+                // curve without the ring reading as part of it.
+                //
+                // Forced dark, because the Island is a black pill whatever the
+                // phone's appearance is — §01's light palette answers a
+                // different question, "what does this look like on a pale
+                // backdrop", and there is no pale backdrop here.
+                GlanceMarkView(status.mark, size: .header)
+                    .environment(\.colorScheme, .dark)
             } compactTrailing: {
                 // The leader's name, and how many agents are behind it.
                 //
@@ -153,8 +161,11 @@ struct AgentActivityWidget: Widget {
                     .lineLimit(1)
                     .frame(maxWidth: 74)
             } minimal: {
-                Image(systemName: status.symbol)
-                    .foregroundStyle(status.tint)
+                // §07, verbatim: "MINIMAL: The ring alone at 15pt. No count, no
+                // trace — history is unreadable at this size." The lone
+                // indicator, which is the whole presentation.
+                GlanceMarkView(status.mark, size: .lone)
+                    .environment(\.colorScheme, .dark)
             }
             .widgetURL(terminalURL(context.state.terminal))
         }
@@ -617,39 +628,65 @@ private struct LeaderRow: View {
     }
 }
 
-/// The icon and word for a state, drawn the same way in both presentations.
+/// The state mark and its word, drawn the same way in both presentations.
+///
+/// The mark replaces the SF Symbol this drew before — `circle.dotted`,
+/// `exclamationmark.bubble.fill`, `checkmark.circle.fill` — which were three
+/// glyphs saying what one mark now says on every surface in the product. §03's
+/// whole argument is that a person learns the mark once; three symbols here
+/// meant the lock screen card was the one place that learning did not transfer.
+///
+/// **This surface DOES state the core**, unlike every widget family. §08's rule
+/// is about refresh rate — "Working versus idle never appears on a widget. It
+/// flips every few seconds; at this refresh rate the claim would be false more
+/// often than true" — and a Live Activity is pushed on every change rather than
+/// reloaded twice an hour. The claim is true here when it is made.
 private struct StatusBadge: View {
     let status: AgentStatus
+    /// 11pt — §07 gives the card's rows a leading column of exactly 11, which
+    /// is §03's header diameter.
+    var size: GlanceMarkSize = .header
 
     var body: some View {
         VStack(spacing: 4) {
-            Image(systemName: status.symbol)
-                .font(.title2)
+            GlanceMarkView(status.mark, size: size)
             Text(status.title)
-                .font(.caption2.weight(.medium))
+                .glanceType(.monoFigures)
         }
-        .foregroundStyle(status.tint)
     }
 }
 
 extension AgentStatus {
-    var symbol: String {
+    /// This state as the one mark.
+    ///
+    /// Blocked is the only one that earns the heavy amber ring, and that is the
+    /// point: amber is reserved for the state that is waiting on a person, so a
+    /// glance at a locked phone answers "does this need me" without reading a
+    /// word. Working and finished both sit on the quiet hairline and are told
+    /// apart by the core, which is exactly the split §03 draws — "the core is
+    /// the agent's: filled while producing, absent at a prompt."
+    ///
+    /// Green has come off. It was the third hue in a system §01 allows two, and
+    /// what it was saying — "this finished" — is what an absent core says.
+    var mark: GlanceMark {
         switch self {
-        case .working: "circle.dotted"
-        case .blocked: "exclamationmark.bubble.fill"
-        case .done: "checkmark.circle.fill"
+        case .working: GlanceMark(attention: .quiet, core: .producing)
+        case .blocked: GlanceMark(attention: .needsYou, core: .atAPrompt)
+        case .done: GlanceMark(attention: .quiet, core: .atAPrompt)
         }
     }
 
-    /// Blocked is the only one that gets a warm color, and that is the point.
-    /// Working and finished are both states nobody has to act on; amber is
-    /// reserved for the one that is waiting on a person, so a glance at a locked
-    /// phone answers "does this need me" without reading a word.
+    /// The color for the WORDS beside the mark. The mark colors itself.
+    ///
+    /// `darkColor` and not the scheme-resolved value: the Dynamic Island is a
+    /// black pill whatever the phone's appearance is set to, and the lock
+    /// screen card sits over a wallpaper on the same dark ground. §01's light
+    /// values are for a pale backdrop, which is not what either of these is.
     var tint: Color {
         switch self {
-        case .working: .secondary
-        case .blocked: .orange
-        case .done: .green
+        case .working: GlancePalette.text2.darkColor
+        case .blocked: GlancePalette.amber.darkColor
+        case .done: GlancePalette.text2.darkColor
         }
     }
 }

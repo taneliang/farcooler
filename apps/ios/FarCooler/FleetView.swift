@@ -1,169 +1,18 @@
 import SwiftUI
 
-/// Where the phone is, as a value.
+/// One runner, and what stands in front of it until it answers.
 ///
-/// Every screen this stack can push is a case here, and `FleetView` renders
-/// `[Route]` as its navigation path. That is what turns "what does Back mean"
-/// into a question about the path rather than about which view happened to
-/// declare a destination: appending never truncates, so a screen reached two
-/// ways sits at two different depths and Back is the screen you came from in
-/// both. The shape this replaced, and the bug it had, are on `FleetView.path`.
+/// What is left of what this was. It used to be the app's navigation — a
+/// `NavigationStack`, a `[Route]` path, a persisted copy of that path, and the
+/// rules for restoring, truncating and deferring to it. All of that is gone:
+/// the navigation shell is the app's navigation now, and a shell position is a
+/// pair of indices into the fleet this connection is already publishing, so
+/// there is nothing to push, nothing to persist and nothing to resolve.
 ///
-/// Ids and not values, because the path is `Codable` and persisted — see
-/// `FleetView.savedPath`. A `Terminal` is a snapshot of what the daemon said a
-/// moment ago; persisting one would restore a screen built from a description
-/// of the world that has since moved on. An id either still names something on
-/// this runner or it does not, and the second answer is one this screen can act
-/// on.
-///
-/// `.review` and `.terminal` were two routes here and are one now. They only
-/// ever differed in what the screen opened ONTO — a diff or a transcript — and
-/// the owner's account of reviewing an agent's work is that those are two views
-/// of one thing you move between constantly: read what it said it did, judge
-/// it, look at the change, reply. Two destinations made that a Back and a
-/// second navigation. One destination with a FOCUS makes it a chip.
-enum Route: Hashable, Codable {
-    /// Every workspace on this runner, and the toolbar that starts new work.
-    case workspaces
-    /// One worktree — its agents and its diff — with one of them showing.
-    case workspace(id: String, focus: Focus)
-
-    /// Which tab a workspace opens on.
-    ///
-    /// Part of the route rather than state inside the screen because it is a
-    /// property of the tap: every door into a workspace names the pane it meant,
-    /// and they differ only in what they are able to name. The workspace list
-    /// names the agent whose row was tapped. The inbox names one too — its rows
-    /// are one per blocked agent and one for the diff, so it says `.agent` or
-    /// `.changes` and never shrugs. See `NeedsYouView.section(for:)`.
-    ///
-    /// `.none` is "nobody at this door had an opinion", and no door emits it any
-    /// more. It survives because three things that are not doors still produce
-    /// it: `WorkspaceRoute.alive(_:in:)` returns it when a focus names a pane
-    /// that has left the worktree, which is how a stale answer falls through to
-    /// the next one; `FleetView.deferringToMemory(_:)` writes it into a route
-    /// coming back out of `@SceneStorage` that has a remembered tab behind it,
-    /// which is how a door that is now history stops outranking the place you
-    /// actually ended up; and a path persisted by a build that predates the
-    /// inbox's rows decodes straight back into it. All three are resolved at the
-    /// moment the screen is built by `WorkspaceRoute.resolve()`.
-    ///
-    /// Which resolves it in an order, and the order is an order of authority:
-    ///
-    /// 1. **The route says.** Somebody pointed at a pane on the way in — an
-    ///    inbox row, a workspace list row, a tapped card, the switcher sheet.
-    ///    That is the most recent thing anyone asked for and it wins outright.
-    /// 2. **The tab you were last on.** `Connection.lastFocus`, written only
-    ///    when a person taps a chip. Read here rather than stored in the route
-    ///    itself, because a path element whose value changes is a destination
-    ///    SwiftUI may rebuild — see that property, and `WorkspaceView`.
-    /// 3. **The rule**, `rule(for:inbox:)`: whatever needs you now.
-    ///
-    /// Two and three used to be one, and the difference between them is the
-    /// difference between a place you chose and a place the app picked for you.
-    /// A workspace you last read the diff of should open on that diff when you
-    /// come back to it, at the gym ninety seconds later or in the morning —
-    /// `docs/jobs-to-be-done.md` F4 is the owner saying review has to be
-    /// resumable, and landing somewhere other than where you were is exactly
-    /// what it is not to be. A workspace you have never chosen a tab in has
-    /// nothing to be resumed to, and opens on whatever needs you at seven
-    /// rather than on the agent that needed you at midnight.
-    ///
-    /// One beats two only while the door is still the most recent thing that
-    /// happened, and a path coming back out of `@SceneStorage` is not that: the
-    /// door it names was walked through before the app was killed, and any chip
-    /// tapped on the far side of it is newer. So a restored route hands its
-    /// focus to the memory instead — `FleetView.deferringToMemory(_:)` is where
-    /// the two swap places. It matters because every door names a pane now, the
-    /// inbox included: without the swap, a workspace entered on an agent and
-    /// then read as a diff would come back on the agent, which is the F4 case
-    /// this whole order exists to answer. Only where there is a memory to swap
-    /// with, though. A workspace nobody ever chose a tab in has none, and there
-    /// the door is the only surviving record of where that person was sitting,
-    /// so a restored route keeps it and one still beats three.
-    ///
-    /// Both of the last two degrade the same way: a remembered or ruled agent
-    /// that has left the fleet falls through to the next answer rather than to
-    /// a placeholder.
-    enum Focus: Hashable, Codable {
-        /// One agent, by terminal id.
-        case agent(String)
-        /// The worktree's own diff.
-        case changes
-        /// No opinion — see the order above.
-        case none
-    }
-
-    /// The workspace this route is about, or nil for the ones that are not
-    /// about one. Asked by the two places that care: a deep link arriving while
-    /// a workspace is open, and a workspace that left the fleet underneath one.
-    var workspaceID: String? {
-        if case .workspace(let id, _) = self { return id }
-        return nil
-    }
-}
-
-extension Route.Focus {
-    /// Which tab a workspace opens on when nobody said and nobody ever chose.
-    ///
-    /// The last of the three answers in `Route.Focus`, and the only one that
-    /// reads the world as it is right now rather than as somebody left it.
-    ///
-    /// Blocked agent, then unread diff, then whatever the fleet list would put
-    /// at the top. In that order because it is the order of "what did you open
-    /// this for": an agent that stopped to ask is waiting on you, a diff that
-    /// moved is waiting to be read, and a workspace where neither is true is
-    /// one you went looking for rather than one that called.
-    ///
-    /// The blocked agent is chosen by `sortRank` — `farcooler_core::feed::rank`,
-    /// computed on the runner — with the terminal id as a tiebreak, because
-    /// ranks genuinely collide and `min(by:)` over a collision has to land on
-    /// the same agent every time or the screen opens somewhere different on
-    /// each poll.
-    ///
-    /// Two callers reach it now, and there used to be three. The inbox row was
-    /// the third: it pointed at a workspace and left the pane to this. It points
-    /// at a pane itself now, so what is left is a focus — the route's or the
-    /// remembered one's — naming a pane that has since gone, and a restored path
-    /// with neither answer to give: no remembered tab, and a focus that a build
-    /// older than the inbox's rows wrote down as `.none`. Still one function,
-    /// because two copies of it would be two answers to "where does this
-    /// workspace open".
-    static func rule(for workspace: Workspace, inbox: InboxRow?) -> Route.Focus {
-        // A `changes` pane the host happens to have open is not an agent and is
-        // not a candidate: the diff it shows is the Changes tab, which is
-        // already the second branch below.
-        let panes = workspace.terminals.filter { !$0.isChangesPane }
-
-        if let blocked = panes.filter({ $0.agent == .blocked })
-            .min(by: { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) })
-        {
-            return .agent(blocked.id)
-        }
-        // Both halves, and they are not the same fact. `hasDiff` is true of
-        // every worktree with work on it and stays true after you have read it;
-        // `changedSinceReviewed` is the daemon's watermark, and it is what makes
-        // this "there is something new here" rather than "there is a branch
-        // here". `NeedsYouView.items` gates its second tier on the same pair.
-        if let inbox, inbox.changedSinceReviewed, inbox.hasDiff { return .changes }
-        if let top = panes.min(by: { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) }) {
-            return .agent(top.id)
-        }
-        // A workspace with no panes at all still has a diff to read, and that
-        // is the whole reason Changes needs no pane to exist behind it.
-        return .changes
-    }
-}
-
-/// One runner, and everything the phone shows of it.
-///
-/// This used to be the screen between a host and a terminal, and then mostly a
-/// hand-off: it picked a terminal on connect — `fleet.landingTerminal` — and
-/// the worktree list existed only for a runner that had none. It no longer
-/// lands anywhere. A connected phone opens onto `NeedsYouView`, which is the
-/// answer to the question the app is actually opened with, and the fleet list
-/// is one tap below it. See that view's own comment, and
-/// `docs/jobs-to-be-done.md` for why the front door changed.
+/// What remains is the part that was never navigation: OWNING the connection,
+/// and standing in front of it until it answers. The four phases, the ways out
+/// of the three that have no fleet behind them, and the deep link that arrives
+/// before any of it exists.
 ///
 /// What did not change: every state shown here is DERIVED by the daemon at the
 /// moment of asking. The phone never computes a terminal's state, because a
@@ -175,83 +24,6 @@ struct FleetView: View {
     let store: RunnerStore
 
     @StateObject private var connection = Connection()
-
-    /// Where this screen is, as an explicit list of pushes.
-    ///
-    /// This was `@State private var landing: Terminal?`, drawn by a
-    /// `.navigationDestination(item:)` declared on the ROOT of the stack, and
-    /// that shape is what put Back on the wrong screen. SwiftUI resolves a
-    /// destination at the depth where it is declared, so assigning `landing`
-    /// from the workspace list did not COVER that list — it truncated the
-    /// implicit path to depth 0 and pushed the pane as the single element, and
-    /// backing out of it landed on Needs You.
-    ///
-    /// The comment that stood here defended that single root destination as the
-    /// thing giving Back one meaning, and the bug it guarded against was real:
-    /// an earlier build had the pane reachable both as the stack root and as a
-    /// push, so whether a terminal had a back button at all depended on whether
-    /// the fleet happened to be empty when this screen connected, and backing
-    /// out of a pushed terminal landed on a list that usually had a terminal to
-    /// go straight back into. One screen at two depths is one screen with two
-    /// answers to "what does Back mean here".
-    ///
-    /// An explicit path buys a stronger invariant than that fix did, and buys
-    /// it without making either answer wrong. Every navigation is an APPEND or
-    /// a system pop; appending never truncates; so a pane is at depth 1 when it
-    /// was opened from the inbox and at depth 2 when it was opened from the
-    /// workspace list, and Back is the screen you came from by construction
-    /// rather than by special case. One destination TYPE at any depth, in place
-    /// of one destination at one depth.
-    @State private var path: [Route] = []
-
-    /// The path this scene was last on, as JSON, so being interrupted does not
-    /// cost you your place.
-    ///
-    /// `docs/jobs-to-be-done.md` F4 is the owner saying the phone has to
-    /// survive being put down every ninety seconds. `landing` restored nothing
-    /// at all, and could not: a decoded `Terminal` is a value with no identity
-    /// anything could write down. A path of ids has one.
-    ///
-    /// The runner is stored beside the routes because `@SceneStorage` is keyed
-    /// by the scene rather than by this view, so one value outlives the
-    /// `.id(host)` rebuild that switching runners performs — and terminal ids
-    /// are per-runner, so a path saved on one names nothing on another. A
-    /// string rather than `Data` only so it is legible when this misbehaves.
-    @SceneStorage("fleet.path") private var savedPath = ""
-
-    /// The tab each workspace was last left on, as JSON, so being interrupted
-    /// does not cost you your place INSIDE the screen either.
-    ///
-    /// A second key rather than a field on `SavedPath`, and beside the path for
-    /// the same reason `Connection.lastFocus` is beside it in memory: this
-    /// changes when somebody taps a chip and the path changes when somebody
-    /// navigates, which are different moments, and a path saved by a build
-    /// without this still decodes.
-    ///
-    /// **Persisted deliberately, and it was a real question.** A memory of
-    /// where you were is stalest exactly when the app was killed longest ago,
-    /// and the argument for letting it die with the process is that a workspace
-    /// you last touched at midnight should open on whatever needs you at seven.
-    /// That argument is already made and already answered one level up: `path`
-    /// itself is persisted, so seven o'clock puts you back in the midnight
-    /// WORKSPACE regardless. Restoring the screen and then re-deriving the tab
-    /// inside it is not caution, it is the app half-remembering — and F4's case
-    /// is a phone killed in a pocket between sets at the gym, where the whole
-    /// point is to come back to the diff you were reading. If the staleness
-    /// worry is right it is right about the path, and that is a different
-    /// change from this one.
-    ///
-    /// What that costs is bounded by `restoreFocus`, which admits an entry only
-    /// if the fleet that just answered still has the workspace AND the pane it
-    /// names — so nothing here can resurrect a tab for something that is gone.
-    ///
-    /// Runner-scoped like the path, and for the same reason: ids are
-    /// per-runner, so a memory written on one names nothing on another.
-    @SceneStorage("fleet.focus") private var savedFocus = ""
-
-    /// Whether the saved place has had its one chance to come back. See
-    /// `restorePlace` for why it gets exactly one.
-    @State private var restoredPlace = false
 
     /// Whether the runner has told us what it has, at least once.
     ///
@@ -275,22 +47,9 @@ struct FleetView: View {
     /// finds nothing and the tap opens the app onto whatever it would have
     /// opened onto anyway. That is indistinguishable from a card that ignored
     /// the tap, which is the failure this whole task exists to remove — so the
-    /// id is remembered instead and `openRequested` runs again once there is a
-    /// fleet to look in.
+    /// id is remembered instead, and the shell picks it up the moment there is
+    /// a fleet to look in. See `dropUnknownTerminal`.
     @State private var pendingTerminal: String?
-
-    /// The terminal to show, handed to `WorkspaceView` and cleared the moment
-    /// it takes it.
-    ///
-    /// Only ever a pane in the workspace already on screen — `show(_:)` sends
-    /// anything else through the path instead — because this is the retarget
-    /// channel, and retargeting is the thing that keeps mounted panes alive.
-    ///
-    /// One-shot rather than a record of which terminal the card chose: the tab
-    /// strip moves on afterwards without telling this screen, so a second card
-    /// for the SAME terminal has to read as a new request rather than as the
-    /// value this already holds — which would change nothing and open nothing.
-    @State private var requested: Terminal?
 
     /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
     @State private var stalled = false
@@ -302,52 +61,24 @@ struct FleetView: View {
     @State private var editing = false
 
     var body: some View {
-        // The stack lives here rather than in `RootView`, and that is not
-        // tidying. `path` and `Connection` have to be the same view's state:
-        // every route is an id that means something only against THIS runner's
-        // fleet, and resolving one, validating a restored one, and popping a
-        // pane when the fleet empties are all reads of `connection`. A stack a
-        // level up would have put the path above the only data that can say
-        // what it names.
+        // No `NavigationStack` around the connected app, and that is the whole
+        // shape of this change.
         //
-        // `RootView`'s stated reason for owning it is not lost, because it was
-        // never a reason for owning it — it was a reason for the stack to
-        // EXIST. `FleetView` was previously pushed from the host list and
-        // inherited that screen's stack; opening straight onto it left no
-        // navigation bar, so no title, no terminal/chat switch, and nothing for
-        // a destination to push into. Declaring the stack here satisfies that
-        // in full. The `.id(host)` that rebuilds everything below on a runner
-        // change stays one level up, and now rebuilds this stack and its path
-        // along with the connection — which is right, since a path naming
-        // terminals on one runner names nothing on another.
-        NavigationStack(path: $path) {
-            phases
-            // Every screen this stack can push, declared once.
-            //
-            // On the stack's ROOT content, which is where a
-            // `navigationDestination(for:)` belongs: it is inherited by every
-            // depth below, so a route appended from Needs You and the same
-            // route appended from the workspace list resolve to the same view
-            // at different depths. That is precisely what the
-            // `navigationDestination(item:)` this replaced could not do — see
-            // `path`.
-            //
-            // Attached outside the phase switch rather than inside
-            // `connected`, so the destinations exist in every phase. A Live
-            // Activity card tapped while this screen is still connecting sets
-            // `pendingTerminal`, and `openRequested` runs again the moment a
-            // fleet arrives; a destination declared inside the connected branch
-            // would not be there to receive it.
-            //
-            // Changing pane while one is open does NOT come through here — the
-            // tab strip retargets `WorkspaceView` in place, and a deep link or
-            // the switcher sheet naming a pane in the SAME workspace goes to
-            // `requested` for the same reason. Appending a second `.workspace`
-            // would mount a second `WorkspaceView` on top of the first and leave
-            // every pane underneath it holding a stream nobody can see. A pane
-            // in a DIFFERENT workspace replaces the last route rather than
-            // appending — see `show(_:)`.
-            .navigationDestination(for: Route.self) { destination($0) }
+        // This view used to declare one with an explicit `[Route]` path, and
+        // the argument for it was sound while there were screens to push: the
+        // path had to sit beside the `Connection`, because every route was an
+        // id that means something only against THIS runner's fleet. There are
+        // no routes now. The shell is one screen — a workspace is a position in
+        // it, a tab is a position in it, and moving between them is a gesture
+        // rather than a push — so a stack around it would be a stack of one
+        // with a navigation bar this design puts at the BOTTOM of the display
+        // as a piece of glass.
+        //
+        // What still needs a stack is everything before a fleet exists: the
+        // failure screen pushes `AuthorizeView`, and all four pre-connection
+        // screens are titled. Each of those branches declares its own, which is
+        // also what keeps the shell out of one — see `phases`.
+        phases
             .sheet(isPresented: $editing) {
                 HostEditorView(
                     existing: host,
@@ -366,65 +97,27 @@ struct FleetView: View {
             .onChange(of: scenePhase) { _, phase in
                 connection.setActive(phase == .active)
             }
-            // A workspace that leaves the fleet has nothing left to show, so it
-            // comes off the path.
+            // A workspace leaving the fleet no longer needs anything from this
+            // view.
             //
-            // This used to watch the fleet's TERMINAL count and pop when it hit
-            // zero, because the screen underneath was a pane host and a pane
-            // host with no panes is a dead end with the switcher sheet as its
-            // only exit. `WorkspaceView` is not that: its Changes tab needs no
-            // pane to exist, so a worktree whose last agent was stopped is still
-            // a screen worth standing on — you are usually there to read what
-            // the agent left behind.
+            // The rule that stood here truncated the navigation path at the
+            // first route naming a worktree the runner had stopped reporting,
+            // because the screen underneath was a pane host pointed at a
+            // workspace that no longer existed. The shell has no path to
+            // truncate and cannot be pointed at a workspace that is not in the
+            // fleet: `ShellPosition` is an INDEX, resolved against whatever
+            // `ShellFleetMap.of` just built, and `ShellPaneTrack` prunes the
+            // retained panes of terminals that have gone. A workspace removed
+            // while you are in it is the fleet renumbering under a position,
+            // which is the case that shape was chosen for.
             //
-            // What IS a dead end is the worktree itself being removed, and that
-            // is what this watches now. Deliberately not the focused pane
-            // disappearing: `WorkspaceView` moves off the pane it opened with
-            // whenever the tab strip is used, so "the terminal we arrived at is
-            // gone" is routine and correct and must not yank anyone anywhere.
-            //
-            // Guarded on the fleet being non-empty, because a reconnect can
-            // briefly answer with nothing and every workspace would look
-            // removed — the same guard, for the same reason, as
-            // `WorkspaceView.prune`.
-            //
-            // Truncated at the FIRST workspace rather than emptied outright, so
-            // someone who reached it through the workspace list lands back on
-            // that list — which still has its toolbar, and is the one screen
-            // that can start the work that would refill the fleet.
-            .onChange(of: workspaceIDs) { _, ids in
-                guard !ids.isEmpty else { return }
-                let live = Set(ids)
-                guard
-                    let gone = path.firstIndex(where: { route in
-                        guard let id = route.workspaceID else { return false }
-                        return !live.contains(id)
-                    })
-                else { return }
-                path.removeSubrange(gone...)
-            }
-            // The saved place's one chance, taken the moment there is a fleet
-            // to check it against. See `restorePlace`.
-            .onChange(of: hasFleet) { _, arrived in
-                if arrived { restorePlace() }
-            }
-            // And the other direction: every push and every pop is written
-            // down. Cheap — a couple of hundred bytes of JSON on a navigation,
-            // not on a poll — because `path` only changes when someone
-            // navigates.
-            .onChange(of: path) { _, routes in savePath(routes) }
-            // The same, for the half of "where you were" the path deliberately
-            // does not carry. Also only on a human action: `Connection`
-            // publishes this when a chip is tapped and at no other time — a
-            // poll that changes the whole fleet leaves it alone.
-            .onChange(of: connection.lastFocus) { _, focus in saveFocus(focus) }
-            // A tapped Live Activity card, arriving as `…://terminal/<id>`.
+            // A card tapped at cold launch, arriving as `…://terminal/<id>`.
             //
             // Here rather than on the root view, because this is the screen
-            // that owns `path` and the connection whose fleet the id has to be
-            // looked up in. Routing it from the root would mean a second way to
-            // choose a terminal, threaded down through views that know nothing
-            // about one.
+            // that owns the connection whose fleet the id has to be looked up
+            // in. Routing it from the root would mean a second way to choose a
+            // terminal, threaded down through views that know nothing about
+            // one.
             //
             // The scheme is deliberately not checked: iOS only delivers URLs
             // whose scheme this app registered, and each channel registers only
@@ -435,340 +128,121 @@ struct FleetView: View {
                 let terminal = url.lastPathComponent
                 guard !terminal.isEmpty else { return }
                 pendingTerminal = terminal
-                openRequested()
+                // Not resolved here. `ShellScreen` derives the tab this id is
+                // from the fleet it already holds and honors it on the next
+                // body pass, which is the same code path a cold launch takes
+                // once its first fleet lands. See `dropUnknownTerminal`.
+                dropUnknownTerminal()
             }
-        }
+            // The runner has answered and does not have it, so it is never
+            // coming. Watched on the fleet's own generation rather than on
+            // `hasFleet` alone, because the pane a card names can also be
+            // stopped between the tap and the answer.
+            .onChange(of: connection.pollGeneration) { _, _ in dropUnknownTerminal() }
     }
 
-    /// The stack's root, one branch per connection phase.
+    /// One branch per connection phase, and the one place a `NavigationStack`
+    /// is still declared.
     ///
     /// Split out of `body` rather than written inline, for the compiler's sake:
     /// a `switch` over an associated-value enum inside a long modifier chain is
     /// the shape Swift's type checker gives up on, and it did.
+    ///
+    /// **The three pre-connected screens are unchanged**, `escapable(_:)` and
+    /// all. That wrapper puts `HostSwitcherBar` under each of them, and the bar
+    /// is the app's only escape hatch before a runner answers: without it,
+    /// "Could not connect" is a room with no doors, because the switcher used
+    /// to live inside the connected screen and the connected screen is the one
+    /// you cannot reach. The stack around them is what gives them a title and
+    /// what `failure`'s "Authorize This Device" pushes into.
+    ///
+    /// The shell gets no stack, deliberately, and gets one nowhere else either
+    /// — see `body`. Its own navigation is a gesture, and the only navigation
+    /// bar in it belongs to the overview, which declares a stack of its own.
     @ViewBuilder
     private var phases: some View {
         switch connection.phase {
         case .connecting:
-            escapable { connecting }
+            NavigationStack { escapable { connecting } }
 
         case .needsApproval(let fingerprint):
-            escapable { approval(fingerprint) }
+            NavigationStack { escapable { approval(fingerprint) } }
 
         case .failed(let message):
-            escapable { failure(message) }
+            NavigationStack { escapable { failure(message) } }
 
         // Reconnecting renders exactly what connected renders. The fleet on
         // screen is the last one this runner sent, and it is a better answer
         // than a spinner while the link comes back — see
-        // `Connection.Phase.reconnecting`. The status chip in the bar is where
-        // the difference shows.
+        // `Connection.Phase.reconnecting`. The status chip in the overview's
+        // toolbar is where the difference shows.
         case .connected, .reconnecting:
-            connected
+            if hasFleet {
+                connected
+            } else {
+                NavigationStack { waitingForFleet }
+            }
         }
     }
 
-    /// What each route draws.
+    /// Hand the shell the terminal a card asked for, if this runner has it.
     ///
-    /// The workspace goes through a small wrapper rather than being built
-    /// straight out of the fleet here, and that indirection is load-bearing —
-    /// see `WorkspaceRoute`.
-    @ViewBuilder
-    private func destination(_ route: Route) -> some View {
-        switch route {
-        case .workspaces:
-            // Titled for what it lists, and for the word the owner uses. It was
-            // "Worktrees" under a row labeled "Working", which was two names
-            // for one screen and neither of them what the screen is. See
-            // `NeedsYouView.workspacesRow`.
-            //
-            // `onSelect` appends, so a workspace opened from here sits ON this
-            // list at depth 2 and Back returns to it. That is the whole of the
-            // Back bug: the same callback used to assign `landing`, and
-            // assigning `landing` replaced this screen with the pane.
-            //
-            // Focused on the terminal that was tapped. The inbox's door points
-            // at a pane too now, so the two no longer disagree about whether to
-            // name one — only about what they can name. Here, any terminal in
-            // the workspace, including an idle or exited one. There, a blocked
-            // agent or the worktree's diff, which is all that door lists. See
-            // `Route.Focus`.
-            WorkspaceListView(
-                connection: connection,
-                onSelect: { show($0) },
-                hosts: store
-            )
-            .navigationTitle("Workspaces")
-            .navigationBarTitleDisplayMode(.inline)
-
-        case .workspace(let id, let focus):
-            WorkspaceRoute(
-                workspace: id, focus: focus, connection: connection, hosts: store,
-                requested: $requested, onOpen: show)
-        }
-    }
-
-    /// Show a terminal, wherever it is.
+    /// The two-phase dance survives the shell unchanged, because what made it
+    /// necessary has not changed: a card tapped at COLD LAUNCH delivers its URL
+    /// before the first connection has produced a fleet, so an id looked up as
+    /// it arrives finds nothing and the tap opens the app onto whatever it
+    /// would have opened onto anyway — indistinguishable from a card that
+    /// ignored the tap.
     ///
-    /// The one place that decides between the three things a request to open a
-    /// pane can mean, so a deep link, the workspace list and the switcher sheet
-    /// inside a workspace cannot answer it differently.
+    /// What changed is where the second phase lives. It used to be
+    /// `openRequested()`, run again on `hasFleet`, resolving the id against the
+    /// fleet and then choosing between a push, a route replacement and a
+    /// retarget — three answers, because there were three shapes a screen could
+    /// be in. There is nothing to push any more, and every pane on this runner
+    /// is one position in one shell: `ShellScreen` reads `pendingTerminal` as a
+    /// DERIVED value, the tab id that terminal is once the fleet has one, so
+    /// "run it again when a fleet arrives" is simply that derivation
+    /// re-evaluating. The shell honors it on appearance as well as on change,
+    /// which covers the cold-launch case where the fleet and the shell arrive
+    /// in the same turn and there is no change to observe. See
+    /// `ShellScreen.requestedTab` and `ShellRootView.honorRequest`.
     ///
-    /// - Already in the workspace on screen: hand it to `requested`, which
-    ///   `WorkspaceView` honors by switching tabs. Nothing is pushed and nothing
-    ///   is rebuilt, so every mounted pane keeps its scroll position, its
-    ///   half-typed message and its open ssh stream.
-    /// - A DIFFERENT workspace while one is open: replace the route rather than
-    ///   append. Appending would stack a second `WorkspaceView` on the first and
-    ///   leave every pane underneath it holding a stream nobody can see;
-    ///   replacing swaps the host at the same depth, so Back still means what it
-    ///   meant a moment ago.
-    /// - Nothing open: append, which is the ordinary push.
-    private func show(_ terminal: Terminal) {
-        guard
-            let workspace = connection.fleet.workspaces.first(where: { candidate in
-                candidate.terminals.contains { $0.id == terminal.id }
-            })
-        else { return }
-
-        if path.last?.workspaceID == workspace.id {
-            requested = terminal
-        } else if path.last?.workspaceID != nil {
-            path[path.count - 1] = .workspace(id: workspace.id, focus: .agent(terminal.id))
-        } else {
-            path.append(.workspace(id: workspace.id, focus: .agent(terminal.id)))
-        }
-    }
-
-    /// Open the terminal a card asked for, if this runner's fleet has it yet.
+    /// The id is held HERE rather than inside the shell because this is the
+    /// view that receives the URL: `.onOpenURL` has to be attached above a
+    /// screen that only exists once a fleet does, or a card tapped at a cold
+    /// launch would be delivered to nothing.
     ///
-    /// Runs when the URL arrives and again when a connection has produced a
-    /// fleet, because at a cold launch those are two different moments and the
-    /// first one has nothing to search.
-    private func openRequested() {
-        guard let id = pendingTerminal else { return }
+    /// Dropped, and not kept waiting, once the runner has answered without it:
+    /// the pane is gone, or the card was about another runner entirely — the
+    /// URL carries an id and no host, so there is nothing here to switch to.
+    /// Held open, a pane created much later would be jumped to long after
+    /// anybody tapped anything.
+    private func dropUnknownTerminal() {
+        guard let id = pendingTerminal, connection.phase == .connected, hasFleet else { return }
         let all = connection.fleet.workspaces.flatMap(\.terminals)
-        if let terminal = all.first(where: { $0.id == id }) {
-            pendingTerminal = nil
-            // Push, replace or retarget — `show(_:)` owns that decision, and
-            // owning it in one place is why a card behaves the same whether it
-            // was tapped at the inbox, inside the workspace it names, or inside
-            // a different one.
-            //
-            // The path goes on naming the pane the workspace was OPENED with
-            // and is not rewritten as the tab strip moves. A path element that
-            // changes value is a destination SwiftUI is free to rebuild, and
-            // rebuilding this one discards every mounted pane — which is the
-            // exact loss `WorkspaceView` exists to prevent.
-            //
-            // That used to cost you the tab you were actually on: a restored
-            // path re-ran the focus rule, so reading a diff, being interrupted
-            // and coming back landed you on a blocked agent instead. It does
-            // not any more, and not because the path changed — the memory lives
-            // beside it, in `Connection.lastFocus`, where changing it moves no
-            // navigation state at all. See `Route.Focus` for the order the two
-            // are read in.
-            show(terminal)
-        } else if connection.phase == .connected {
-            // The runner answered and does not have it: the pane is gone, or
-            // the card was about another runner entirely — the URL carries an
-            // id and no host, so there is nothing here to switch to. Dropped
-            // rather than kept waiting, or a pane created much later would be
-            // jumped to long after anyone tapped anything.
-            pendingTerminal = nil
-        }
-    }
-
-    /// Put the phone back where it was, once there is a fleet to check that
-    /// against.
-    ///
-    /// Deliberately not applied at launch, when `@SceneStorage` hands the value
-    /// back. At that moment there is no fleet, so a `.terminal` route names
-    /// something this app cannot resolve, and installing it would push a screen
-    /// with nothing in it over the connecting, approval and failure screens —
-    /// the three that most need to be visible. Held instead until the runner
-    /// has answered, which is the first moment the question "does this still
-    /// exist" has an answer.
-    ///
-    /// Once, and only once. After this the path is whatever the person holding
-    /// the phone has done with it, and a second pass on a later reconnect would
-    /// be the app steering them somewhere they had already left.
-    ///
-    /// Two halves, because where you were is two facts: which screens were
-    /// stacked up, and which tab was showing inside the last of them. They are
-    /// stored apart for the reason `savedFocus` gives, and restored in an order
-    /// that matters — the remembered tabs go in FIRST, because installing the
-    /// path is what mounts a `WorkspaceRoute`, and that view reads the memory in
-    /// the same turn it appears. Seeded afterwards, the workspace would already
-    /// have opened on the rule's answer and latched it. `restorePath` then puts
-    /// a question of its own to the same memory — see `deferringToMemory(_:)` —
-    /// so the order is load-bearing twice over, and swapping these two lines
-    /// costs you the tab you were on in two different ways.
-    private func restorePlace() {
-        guard !restoredPlace else { return }
-        restoredPlace = true
-        restoreFocus()
-        restorePath()
-    }
-
-    /// The tabs, checked against the fleet that just arrived.
-    ///
-    /// Restored whether or not the path is — the memory is about workspaces
-    /// rather than about a location, so it is worth having for a workspace
-    /// opened by hand ten minutes from now as much as for the one coming back
-    /// on the path.
-    ///
-    /// Entries are dropped, not repaired, and both halves are checked: the
-    /// workspace has to still be in the fleet, and an `.agent` has to still name
-    /// a pane in it. `WorkspaceRoute` would degrade a dead one to the rule
-    /// anyway, so this is not what makes the app correct — it is what stops the
-    /// stored value accumulating worktrees that were merged away months ago.
-    private func restoreFocus() {
-        guard let data = savedFocus.data(using: .utf8),
-            let saved = try? JSONDecoder().decode(SavedFocus.self, from: data),
-            saved.runner == host.id.uuidString
-        else { return }
-
-        let live = connection.fleet.workspaces
-        let usable = saved.focus.filter { workspace, focus in
-            guard let workspace = live.first(where: { $0.id == workspace }) else { return false }
-            guard case .agent(let terminal) = focus else { return true }
-            return workspace.terminals.contains { $0.id == terminal }
-        }
-        guard !usable.isEmpty else { return }
-        connection.seedFocus(usable)
-    }
-
-    /// The screens, in the order they were pushed.
-    ///
-    /// Truncated at the first route that no longer resolves rather than
-    /// filtered, because a path is a sequence of pushes: keeping depth 2 after
-    /// dropping depth 1 would put a screen on top of a screen nobody navigated
-    /// through. A path that resolves to nothing simply leaves you at the root,
-    /// which is where a cold launch has always landed.
-    ///
-    /// Restored as it was written down except for the focus, which a route
-    /// gives up where there is a fresher record of where you were — see
-    /// `deferringToMemory(_:)`.
-    private func restorePath() {
-        guard path.isEmpty, let data = savedPath.data(using: .utf8),
-            let saved = try? JSONDecoder().decode(SavedPath.self, from: data),
-            saved.runner == host.id.uuidString
-        else { return }
-
-        let usable = Array(saved.routes.prefix(while: resolves)).map(deferringToMemory)
-        guard !usable.isEmpty else { return }
-        // No push animation for a screen you never left. Restoring where you
-        // were should look like the app remembering, not like it navigating.
-        var silent = Transaction()
-        silent.disablesAnimations = true
-        withTransaction(silent) { path = usable }
-    }
-
-    /// A route on its way back out of `@SceneStorage`, with its focus handed
-    /// over to the tab that workspace was last left on.
-    ///
-    /// A route's focus is the door somebody came in by, and it wins outright
-    /// because on the way IN it is the most recent thing anybody asked for: the
-    /// inbox row that named the blocked agent, the workspace list row that named
-    /// the terminal. None of that is true of a route being restored. The door
-    /// was walked through before the app was killed, and a chip tapped on the
-    /// far side of it is strictly newer — so what the door said is history and
-    /// where the person actually ended up is what they want back. `.none` is how
-    /// a route says it has no opinion, so writing it here is exactly how the
-    /// door steps aside and `WorkspaceRoute.resolve()` reaches the memory.
-    ///
-    /// Only where there IS one, which is why this asks rather than blanking
-    /// every restored route. `Connection.lastFocus` records chip taps and
-    /// nothing else — deliberately, see `Connection.rememberFocus` — so a
-    /// workspace opened straight onto an agent and never tabbed away from has no
-    /// entry at all. There the door is not stale evidence of where somebody was
-    /// sitting, it is the only evidence, and blanking it would drop them on the
-    /// rule's answer instead: the same lost place this exists to prevent,
-    /// arrived at through the other door.
-    ///
-    /// The entry is trusted rather than re-checked, because `restoreFocus` ran
-    /// first in the same turn and against the same fleet, and admits an entry
-    /// only if that fleet still has the workspace AND the pane it names. If it
-    /// dies later anyway, `resolve` degrades it to the rule, which is a better
-    /// answer than a door two interruptions ago.
-    ///
-    /// What this returns is also what gets written back down, since saving the
-    /// path is on a change to it. That is the intent and not a leak: the route
-    /// has no opinion any more, and saying so is what the next restore should
-    /// read.
-    private func deferringToMemory(_ route: Route) -> Route {
-        guard case .workspace(let id, _) = route, connection.lastFocus[id] != nil else {
-            return route
-        }
-        return .workspace(id: id, focus: .none)
-    }
-
-    /// Whether this runner still has the thing a route names.
-    ///
-    /// The workspace, and deliberately not its focus. A worktree that is still
-    /// here is a screen worth restoring even if the agent you were reading has
-    /// since been stopped — the diff is still there, the other agents are still
-    /// there, and `WorkspaceRoute` falls back to the focus rule for exactly this
-    /// case. Refusing the whole route over a missing pane would drop you at the
-    /// inbox instead, which is further from where you were.
-    private func resolves(_ route: Route) -> Bool {
-        switch route {
-        case .workspaces:
-            // Always. The screen lists whatever there is, including nothing.
-            return true
-        case .workspace(let id, _):
-            return connection.fleet.workspaces.contains { $0.id == id }
-        }
-    }
-
-    private func savePath(_ routes: [Route]) {
-        let saved = SavedPath(runner: host.id.uuidString, routes: routes)
-        guard let data = try? JSONEncoder().encode(saved),
-            let json = String(data: data, encoding: .utf8)
-        else { return }
-        savedPath = json
-    }
-
-    private func saveFocus(_ focus: [String: Route.Focus]) {
-        let saved = SavedFocus(runner: host.id.uuidString, focus: focus)
-        guard let data = try? JSONEncoder().encode(saved),
-            let json = String(data: data, encoding: .utf8)
-        else { return }
-        savedFocus = json
-    }
-
-    /// The path and the runner it was walked on, which is the whole of what
-    /// `savedPath` holds. See it for why the runner has to travel with it.
-    private struct SavedPath: Codable {
-        var runner: String
-        var routes: [Route]
-    }
-
-    /// The remembered tabs and the runner they were chosen on. The runner
-    /// travels with them for the reason it travels with the path: workspace and
-    /// terminal ids mean nothing on a different one.
-    private struct SavedFocus: Codable {
-        var runner: String
-        var focus: [String: Route.Focus]
+        guard !all.contains(where: { $0.id == id }) else { return }
+        pendingTerminal = nil
     }
 
     /// Every screen shown BEFORE a connection exists, wrapped in the ways out of
     /// it.
     ///
-    /// This is the bug those screens all had. `FleetView` is the root of the
-    /// app's only navigation stack — the app opens onto a runner rather than a
-    /// list of them — so it has no back button, and the host switcher lives
-    /// inside `WorkspaceListView`, which only exists once a connection has
-    /// succeeded. Any phase short of `.connected` was therefore a room with no
-    /// doors: "Could not connect" offered "Try again" and nothing else, and if
-    /// trying again could not work — the wrong address, a runner that never
+    /// This is the bug those screens all had. `FleetView` is the app's only
+    /// screen — the app opens onto a runner rather than a list of them — so it
+    /// has no back button, and the host switcher used to live inside the
+    /// workspace list, which only existed once a connection had succeeded. Any
+    /// phase short of `.connected` was therefore a room with no doors: "Could
+    /// not connect" offered "Try again" and nothing else, and if trying again
+    /// could not work — the wrong address, a runner that never
     /// authorized this phone — there was no way to reach another runner, add
     /// one, fix this one, or even see this device's key. Force-quitting was the
     /// only exit.
     ///
-    /// So the switcher comes out of the connected screen and goes under all four
-    /// phases instead, in the same place with the same behavior. The bar is
-    /// what makes each of these a screen you can leave.
+    /// So the switcher came out of the connected screen and went under these
+    /// three instead, in the same place with the same behavior. The bar is what
+    /// makes each of them a screen you can leave. It is under these three and
+    /// nothing else now: the connected screen is the shell, which is full bleed
+    /// and puts the same menu in its overview's toolbar. See `RunnerMenu`.
     private func escapable<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -811,36 +285,35 @@ struct FleetView: View {
         withAnimation { stalled = true }
     }
 
-    /// The root of the stack, in every phase that has a fleet behind it.
+    /// The app, once this runner has answered: the navigation shell.
     ///
-    /// Always the inbox, never a terminal. Everything else this stack shows is
-    /// appended to `path` on top of it — see the `navigationDestination` in
-    /// `body` — which is what makes Back the screen you came from.
+    /// One branch, and it is the last thing between a connection and the shell.
+    /// `hasFleet` is what it turns on because the shell opens ON a pane — see
+    /// `ShellScreen.seed` — and there is no pane to open on until the runner
+    /// has said what it has. It is set by the fleet read itself rather than by
+    /// the phase, which flips to `.connected` a whole SSH round trip earlier.
     ///
-    /// Nothing is handed down to open a terminal any more. The rows push a
-    /// `Route` value themselves, which is an append; the callback that used to
-    /// come back up here existed only so that one assignment to `landing` could
-    /// be the app's single terminal destination.
-    @ViewBuilder
+    /// This used to be the inbox — a list of what on this runner was waiting on
+    /// a person — with the shell behind a debug flag beside it. Both are gone:
+    /// the shell's overview IS the fleet screen — searchable,
+    /// precedence-sorted, needs-you first — and a second screen answering the
+    /// same question with rows instead of cards was a second thing to keep
+    /// true.
     private var connected: some View {
-        if hasFleet {
-            NeedsYouView(connection: connection, runner: host, store: store)
-        } else {
-            // Not the inbox with nothing in it. Until the runner has answered,
-            // "Nothing needs you" would be a claim made from `Fleet.empty` —
-            // see `hasFleet`. The runner's own name is the title here because
-            // there is nothing else yet to say what is being waited on.
-            ProgressView()
-                .navigationTitle(host.label)
-                .navigationBarTitleDisplayMode(.inline)
-        }
+        ShellScreen(connection: connection, hosts: store, pendingTerminal: $pendingTerminal)
     }
 
-    /// Every workspace this runner still has. Watched rather than the fleet
-    /// itself, because this screen only cares about one of it going away.
-    /// Sorted because `onChange` wants `Equatable` and a stable order.
-    private var workspaceIDs: [String] {
-        connection.fleet.workspaces.map(\.id).sorted()
+    /// The wait for the runner's first answer.
+    ///
+    /// Not an empty shell. Before the first fleet there is no position to open
+    /// on, and a shell with no workspace is a bar naming something that does
+    /// not exist. The runner's own name is the title because there is nothing
+    /// else yet to say what is being waited on.
+    private var waitingForFleet: some View {
+        ProgressView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(host.label)
+            .navigationBarTitleDisplayMode(.inline)
     }
 
     /// Connect, then let the inbox draw whatever fleet that connection
@@ -858,10 +331,13 @@ struct FleetView: View {
     /// reading.
     private func connect(_ target: Runner) async {
         await connection.start(host: target)
-        // A card tapped at cold launch delivers its URL before there is a fleet
-        // to look the id up in, so `openRequested` found nothing and gave up.
-        // This is its second chance, now that there is somewhere to look.
-        openRequested()
+        // A card tapped at cold launch delivers its URL before there is a
+        // fleet to look the id up in. Nothing has to be re-run for it now:
+        // `ShellScreen.requestedTab` is derived from this connection's own
+        // fleet, so a fleet arriving IS the second look. What is left is
+        // deciding that an id this runner does not have is never coming — see
+        // `dropUnknownTerminal`.
+        dropUnknownTerminal()
     }
 
     // MARK: - Phases
@@ -1051,15 +527,12 @@ struct FleetView: View {
             // unreachable from the only screen that ever sends you looking for
             // it.
             //
-            // The one link in this stack that is a view rather than a `Route`,
-            // and the exception is deliberate. It is a leaf with nothing under
-            // it, reachable only from the failure screen — a phase with no
-            // fleet, so nothing can be appended to the path underneath it:
-            // `openRequested` appends only for a terminal the runner has
-            // answered with, and the only calls to `connect` that could produce
-            // one are the buttons on the screen this covers. Nothing here is
-            // worth persisting either, which is the other half of what a route
-            // is for.
+            // The only push left in the app, and it is a leaf with nothing
+            // under it: reachable from the failure screen alone, which is a
+            // phase with no fleet, so the shell that has replaced every other
+            // destination is not on screen to be pushed over. That is why
+            // `phases` gives these three branches a `NavigationStack` of their
+            // own and gives the shell none.
             NavigationLink {
                 AuthorizeView(runners: store)
             } label: {
@@ -1180,253 +653,6 @@ struct FleetView: View {
     }
 }
 
-/// One workspace, opened on one tab, resolved exactly once.
-///
-/// The wrapper exists for a single reason, and removing it puts back the worst
-/// bug this screen can have. `WorkspaceView` needs a starting `Pane`, the path
-/// holds an id and a focus, and the obvious thing — resolving that focus every
-/// time this destination is evaluated — makes the host's very existence
-/// conditional on the lookup going on succeeding. It routinely stops
-/// succeeding: the pane you arrived at can be killed, dismissed or removed
-/// while you are reading a different tab in the same workspace, which is an
-/// ordinary state `WorkspaceView` already handles by pruning it out of
-/// `visited`. If the lookup drove the view structure, that same moment would
-/// swap the whole host for a placeholder and throw away every mounted pane —
-/// the exact loss `WorkspaceView` exists to prevent, and the same argument
-/// `FleetView`'s removed-workspace rule makes from the other side.
-///
-/// So the starting pane is latched the first time it resolves and never
-/// unlatched. After that this view's structure is fixed and the host is left
-/// alone; which tab is on screen inside it is `WorkspaceView`'s business, not
-/// the path's. `FleetView` still pops the route when the WORKSPACE leaves the
-/// fleet, which is the one case where there is genuinely nothing left to show.
-///
-/// STARTING pane, and only that. `WorkspaceView` reports the chips a person
-/// taps to `Connection.lastFocus`, which this view reads on the way in and
-/// never again — a memory read once at mount cannot rebuild anything, which is
-/// the whole reason it is a dictionary on the connection and not a value in the
-/// path.
-///
-/// A focus naming an agent that has gone falls back — to the remembered tab,
-/// then to the rule — rather than to a placeholder, which is what makes a path
-/// restored hours later land somewhere useful. See `Route.Focus`.
-@MainActor
-private struct WorkspaceRoute: View {
-    let workspace: String
-    let focus: Route.Focus
-    @ObservedObject var connection: Connection
-    let hosts: RunnerStore
-    @Binding var requested: Terminal?
-    /// How to open a pane this workspace does not contain — the switcher sheet
-    /// can name one anywhere on the runner. See `FleetView.show(_:)`.
-    let onOpen: (Terminal) -> Void
-
-    @State private var opened: Pane?
-
-    private var live: Workspace? {
-        connection.fleet.workspaces.first { $0.id == workspace }
-    }
-
-    var body: some View {
-        Group {
-            if let opened {
-                WorkspaceView(
-                    workspace: workspace, initial: opened, connection: connection,
-                    hosts: hosts, requested: $requested, onOpen: onOpen)
-            } else {
-                ProgressView()
-            }
-        }
-        .onAppear { resolve() }
-        .onChange(of: liveIDs) { _, _ in resolve() }
-    }
-
-    /// This workspace and its panes, as something `onChange` can compare.
-    ///
-    /// Scoped to the workspace rather than the fleet, and the workspace's own id
-    /// is in it deliberately: a worktree with no terminals at all still has a
-    /// diff to open, and a key made only of terminal ids would never change when
-    /// such a workspace arrived — leaving this on the spinner for good. Sorted
-    /// because `onChange` wants a stable order.
-    private var liveIDs: [String] {
-        guard let live else { return [] }
-        return [live.id] + live.terminals.map(\.id).sorted()
-    }
-
-    private func resolve() {
-        guard opened == nil, let workspace = live else { return }
-        // Three answers in order of authority — what the door asked for, then
-        // the tab this workspace was last left on, then the rule. Each one is
-        // filtered through `alive` first, so a `.none` here always means "this
-        // answer named a pane that is gone" or "this answer had no opinion",
-        // and both fall through to the next for the same reason. See
-        // `Route.Focus`, which sets the order out in full.
-        var wanted = alive(focus, in: workspace)
-        if case .none = wanted, let remembered = connection.lastFocus[workspace.id] {
-            wanted = alive(remembered, in: workspace)
-        }
-        if case .none = wanted {
-            wanted = Route.Focus.rule(for: workspace, inbox: connection.inbox[workspace.id])
-        }
-
-        switch wanted {
-        case .changes, .none:
-            opened = .changes
-        case .agent(let id):
-            guard let terminal = workspace.terminals.first(where: { $0.id == id }) else {
-                opened = .changes
-                return
-            }
-            opened = Pane(terminal)
-        }
-    }
-
-    /// A focus, or `.none` when what it names has left this worktree.
-    ///
-    /// The one degradation rule, and it is applied to both of the answers that
-    /// can be stale rather than only to the route's. An agent stopped overnight
-    /// is exactly as gone whether the path named it or you last read it, and
-    /// answering "the pane you want is not here" differently in the two cases is
-    /// how a screen ends up opening onto nothing. The rule needs no such filter,
-    /// because it picks out of the fleet as it is right now.
-    ///
-    /// `.changes` always survives: nothing on the runner has to exist for the
-    /// worktree's own diff. See `Pane`.
-    private func alive(_ focus: Route.Focus, in workspace: Workspace) -> Route.Focus {
-        guard case .agent(let id) = focus else { return focus }
-        return workspace.terminals.contains { $0.id == id } ? focus : .none
-    }
-}
-
-/// The workspace list plus what it takes to act on it: quick task, new
-/// workspace, pull-to-refresh. Shown two places — pushed from the inbox's
-/// Workspaces row, and inside the sheet `WorkspaceView` opens to switch
-/// terminals —
-/// so a task started from either one works the same way and neither loses a
-/// capability the other has.
-///
-/// It was `FleetView`'s fallback for a runner with no terminal to land on,
-/// which is why the two toolbar buttons live here: they were on the only screen
-/// a runner with nothing running could show. That makes this the one place to
-/// start work, and it is now a tap below the front door rather than at it —
-/// which is why the row that leads here counts WORKSPACES and not working
-/// agents. See `NeedsYouView.workspacesRow`.
-struct WorkspaceListView: View {
-    @ObservedObject var connection: Connection
-    let onSelect: (Terminal) -> Void
-    /// Non-nil only in the sheet: what "Done" calls. `FleetView`'s own use
-    /// leaves this nil because a pushed screen already has a back button.
-    var onDismiss: (() -> Void)?
-    /// The runners to switch between, when this is the sheet.
-    ///
-    /// Switching hosts lives here because this is already where you go to
-    /// switch what you are looking at. The app opens onto terminals now (see
-    /// `RootView`), so there is no host list to go back to — and inventing a
-    /// second switcher screen for the rarer of the two switches would be one
-    /// more place to look.
-    var hosts: RunnerStore?
-
-    @State private var showNewWorkspace = false
-    @State private var showQuickTask = false
-    @State private var removeCandidate: Workspace?
-    @State private var confirmingRemove = false
-    @State private var needsTypedConfirmation: Workspace?
-
-    var body: some View {
-        FleetList(fleet: connection.fleet, connection: connection, onSelect: onSelect, onRemove: { ws in
-            removeCandidate = ws
-            confirmingRemove = true
-        }) { action, terminal in
-            Task { await connection.act(action, on: terminal) }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let hosts {
-                HostSwitcherBar(hosts: hosts, connection: connection, onSwitch: onDismiss)
-            }
-        }
-        .refreshable { await connection.refresh() }
-        // No `.scrollContentBackground(.hidden)` any more. It let the terminal
-        // palette show behind these rows, and an inset-grouped row draws
-        // `secondarySystemGroupedBackground` — `#1C1C1E` dark, `#FFFFFF` light,
-        // fixed colors rather than theme ones. On five of the seven dark themes
-        // that made the card DARKER than its own ground, which is dark mode's
-        // elevation rule upside down, and on the three light themes with a
-        // `#FFFFFF` background it made card and ground identical, so the rows
-        // had no card at all. `NeedsYouView` carries the numbers and the full
-        // argument; the short version is that the theme is the terminal's
-        // palette and a list of workspaces is chrome.
-        .toolbar {
-            // A sparkle for "describe it" (`TaskComposerView`), plain plus for
-            // "fill in the form" (`NewWorkspaceView`) — same two flows the
-            // Mac keeps side by side, kept apart here by icon rather than
-            // by picking a winner, since a phone's one-sentence flow is
-            // new and unproven next to a form that already works.
-            //
-            // `sparkle` rather than `sparkles`: the Mac's `QuickCreate` and its
-            // command palette both mark this flow with the singular, and one
-            // concept gets one glyph. There is no argument either way beyond
-            // that, which is itself the argument for taking the Mac's.
-            //
-            // Named out loud, because an `Image` alone in a `Button` is read
-            // as its SF Symbol: "sparkle" and "plus" were the whole of what
-            // VoiceOver had to tell the app's two ways of starting work apart,
-            // and neither is a word this product uses. Each is named for the
-            // sheet it opens — Quick Task's own title, and the workspace form's
-            // title-cased as a button label is — so the button and the screen
-            // behind it are one name, and `FleetList`'s empty state points at
-            // these two by exactly these names.
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showQuickTask = true } label: { Image(systemName: "sparkle") }
-                    .accessibilityLabel("Quick Task")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showNewWorkspace = true } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("New Workspace")
-            }
-            if let onDismiss {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", action: onDismiss)
-                }
-            }
-        }
-        .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceView(repositories: connection.repositories, connection: connection) { repository, name, branch, adopt in
-                await connection.createWorkspace(
-                    repository: repository, name: name, branch: branch, adopt: adopt)
-            }
-        }
-        .sheet(isPresented: $showQuickTask) {
-            TaskComposerView(connection: connection)
-        }
-        .confirmationDialog(
-            "Remove worktree for \(removeCandidate?.task ?? "")?",
-            isPresented: $confirmingRemove,
-            titleVisibility: .visible
-        ) {
-            Button("Remove", role: .destructive) {
-                guard let ws = removeCandidate else { return }
-                Task {
-                    switch await connection.removeWorktree(ws, confirm: "") {
-                    case .ok:
-                        break
-                    case .confirmationRequired, .failed:
-                        // The typed-name sheet also handles and displays a
-                        // `.failed` result — route every non-.ok outcome
-                        // there so there is one place this is shown, not two.
-                        needsTypedConfirmation = ws
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .sheet(item: $needsTypedConfirmation) { ws in
-            RemoveWorktreeConfirmSheet(workspace: ws) { typed in
-                await connection.removeWorktree(ws, confirm: typed)
-            }
-        }
-    }
-}
-
 /// Which runner you are looking at, and every way of changing that.
 ///
 /// A strip along the bottom rather than a section in a list: the list above it
@@ -1434,27 +660,19 @@ struct WorkspaceListView: View {
 /// one more thing in the same collection. This says what the collection belongs
 /// to.
 ///
-/// Split out of `WorkspaceListView` because it turned out to be the app's only
-/// escape hatch, and it was attached to the one screen you cannot reach when you
-/// need an escape hatch — the connected one. `FleetView` now puts it under the
-/// connecting, approval and failure screens too, which is what makes those
-/// screens leaveable at all.
+/// Split out of the workspace list because it turned out to be the app's only
+/// escape hatch, and it was attached to the one screen you cannot reach when
+/// you need an escape hatch — the connected one. It is under the connecting,
+/// approval and failure screens now and under nothing else: the connected app
+/// is the shell, which is full bleed and has no room for a strip, and the same
+/// menu is a toolbar item on the shell's overview instead. See
+/// `RunnerMenu`, which is the half both of them share.
 struct HostSwitcherBar: View {
     @ObservedObject var hosts: RunnerStore
     /// The connection whose state the chip shows, and which its tap retries.
     /// Also how the settings screen names the daemon it is talking to. Absent
     /// before a connection exists, which is most of the time this bar matters.
     @ObservedObject var connection: Connection
-    /// Called after picking a different runner, for the caller that is a sheet
-    /// and needs to close itself. Nil where the bar is part of the screen.
-    var onSwitch: (() -> Void)?
-
-    @State private var showAdd = false
-    /// The host being edited, rather than a bare flag: a flag plus a separate
-    /// `hosts.selected` lookup can present a sheet with nothing in it if the
-    /// selection changes between the tap and the presentation.
-    @State private var editingRunner: Runner?
-    @State private var showSettings = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1462,57 +680,7 @@ struct HostSwitcherBar: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Menu {
-                ForEach(hosts.hosts) { host in
-                    Button {
-                        hosts.selected = host
-                        onSwitch?()
-                    } label: {
-                        if host.id == hosts.selected?.id {
-                            Label(host.label, systemImage: "checkmark")
-                        } else {
-                            Text(host.label)
-                        }
-                    }
-                }
-                Divider()
-                // One entry, not one per kind of adding. This said "Add a
-                // Runner…" and went straight to the address form, which is the
-                // long road — the ceremony that would have picked up a runner's
-                // address, user, port and host key without anybody typing was
-                // reachable only from a screen this device stopped showing the
-                // moment it had its first runner.
-                Button("Add…") { showAdd = true }
-                if let selected = hosts.selected {
-                    // Editing and removing were unreachable from anywhere in the
-                    // app: `RunnerStore.remove` existed and had no caller, so a
-                    // runner typed in wrong was permanent, and permanent plus
-                    // unreachable meant the app opened onto a screen it could
-                    // never get past.
-                    Button("Edit This Runner…") { editingRunner = selected }
-                }
-                // Reachable from here because there is nowhere else left.
-                //
-                // Settings and the device's public key used to live on the root
-                // screen, which was the host list. The app opens onto terminals
-                // now, so that screen only appears when there are no hosts —
-                // and everything that was on it would have become unreachable
-                // the moment you added one.
-                Button("This Device…") { showSettings = true }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(hosts.selected?.label ?? "No Runner")
-                        .font(.callout.weight(.medium))
-                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
-                }
-                // The only way to change runners in the app, and it was about
-                // 21 points tall. The words keep their size; the band around
-                // them is the guideline's 44, and `contentShape` makes that band
-                // live rather than merely occupied — padding on a menu label is
-                // layout only otherwise. Same move the tab strip's chips made.
-                .frame(minHeight: PaneMetrics.target)
-                .contentShape(.rect)
-            }
+            RunnerMenu(hosts: hosts, connection: connection)
 
             Spacer(minLength: 0)
 
@@ -1525,6 +693,95 @@ struct HostSwitcherBar: View {
         // that clear the floor, on the one strip that is under every phase of
         // this screen including the ones you cannot otherwise leave.
         .background(.bar)
+    }
+}
+
+/// Which runner, and every way of changing that — the menu, without a bar
+/// around it.
+///
+/// Split out of `HostSwitcherBar` when the connected app stopped having a strip
+/// to put one on. The shell is full bleed: the only chrome it has is a piece of
+/// glass at the bottom that IS the workspace, and a second bar under it would
+/// be a second thing competing for the same edge. So the connected app carries
+/// this menu as a toolbar item on the overview — the screen that is the fleet,
+/// and therefore the screen that should say whose fleet it is — while the three
+/// pre-connected phases go on carrying the bar, because a screen with no fleet
+/// has no overview to put anything on.
+///
+/// One type rather than two copies, and that is the whole reason it exists.
+/// This is the app's only way to reach another runner, to correct the one it is
+/// on, and to reach this device's own key; two menus that had drifted apart
+/// would mean the door out of a dead connection and the door out of a live one
+/// offering different things.
+struct RunnerMenu: View {
+    @ObservedObject var hosts: RunnerStore
+    @ObservedObject var connection: Connection
+    /// Called after picking a different runner, for a caller that has something
+    /// to close. Nil everywhere it is part of the screen.
+    var onSwitch: (() -> Void)?
+
+    @State private var showAdd = false
+    /// The host being edited, rather than a bare flag: a flag plus a separate
+    /// `hosts.selected` lookup can present a sheet with nothing in it if the
+    /// selection changes between the tap and the presentation.
+    @State private var editingRunner: Runner?
+    @State private var showSettings = false
+
+    var body: some View {
+        Menu {
+            ForEach(hosts.hosts) { host in
+                Button {
+                    hosts.selected = host
+                    onSwitch?()
+                } label: {
+                    if host.id == hosts.selected?.id {
+                        Label(host.label, systemImage: "checkmark")
+                    } else {
+                        Text(host.label)
+                    }
+                }
+            }
+            Divider()
+            // One entry, not one per kind of adding. This said "Add a
+            // Runner…" and went straight to the address form, which is the
+            // long road — the ceremony that would have picked up a runner's
+            // address, user, port and host key without anybody typing was
+            // reachable only from a screen this device stopped showing the
+            // moment it had its first runner.
+            Button("Add…") { showAdd = true }
+            if let selected = hosts.selected {
+                // Editing and removing were unreachable from anywhere in the
+                // app: `RunnerStore.remove` existed and had no caller, so a
+                // runner typed in wrong was permanent, and permanent plus
+                // unreachable meant the app opened onto a screen it could
+                // never get past.
+                Button("Edit This Runner…") { editingRunner = selected }
+            }
+            // Reachable from here because there is nowhere else left.
+            //
+            // Settings and the device's public key used to live on the root
+            // screen, which was the host list. The app opens onto terminals
+            // now, so that screen only appears when there are no hosts —
+            // and everything that was on it would have become unreachable
+            // the moment you added one.
+            Button("This Device…") { showSettings = true }
+        } label: {
+            HStack(spacing: 4) {
+                Text(hosts.selected?.label ?? "No Runner")
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+            }
+            // The only way to change runners in the app, and it was about
+            // 21 points tall. The words keep their size; the band around
+            // them is the guideline's 44, and `contentShape` makes that band
+            // live rather than merely occupied — padding on a menu label is
+            // layout only otherwise.
+            .frame(minHeight: PaneMetrics.target)
+            .contentShape(.rect)
+        }
+        .accessibilityIdentifier("runner-menu")
         .sheet(isPresented: $showAdd) {
             AddView(runners: hosts)
         }
@@ -1653,867 +910,6 @@ struct LinkStatusChip: View {
     }
 }
 
-/// The rows themselves: every workspace on a host, its terminals, and the
-/// swipe actions on each. Split out of `WorkspaceListView` because the two
-/// places that view is shown agree on everything except the frame around the
-/// list — a `NavigationStack` with a title and a "Done" button in the sheet,
-/// nothing of the kind when it's `FleetView`'s own fallback content — and
-/// `List` content itself carries no opinion about what encloses it.
-///
-/// **Accent is spent per screen, not per card.** Every row here is a tap
-/// target, so blue cannot mean "this is tappable" — everything is, and the
-/// terminal rows carrying the actual work are not blue. What is left for it to
-/// mean is "this is the one worth finding", and a full-accent label repeated
-/// once per workspace down a scrolling list says that about the least urgent
-/// thing on the screen. The rule: a control that appears ONCE keeps the accent,
-/// because color is the only thing that makes it findable; a control that
-/// repeats per card is found by its position and its glyph, and drops to
-/// secondary.
-///
-/// So the accent stays on `WorkspaceListView`'s two toolbar buttons — the one
-/// place in the app work is started, in the platform's own corner, named by
-/// this list's own empty state — and on `HostSwitcherBar`'s runner menu, which
-/// is the escape hatch from a screen that believes it is fine while the person
-/// holding it can see that it is not. It leaves the two things this list draws
-/// once per workspace: the overflow `…`, which iOS draws secondary in its own
-/// lists, and "New terminal", whose `+` keeps the accent so the row still reads
-/// as an action.
-struct FleetList: View {
-    let fleet: Fleet
-    @ObservedObject var connection: Connection
-    let onSelect: (Terminal) -> Void
-    var onRemove: (Workspace) -> Void = { _ in }
-    let onAction: (Connection.Action, Terminal) -> Void
-
-    @State private var hiddenExpanded = false
-    /// Which workspace's stack is being looked at. One value rather than a flag
-    /// plus two strings: a sheet that can be presented with nothing to show is
-    /// a sheet that will eventually be presented with nothing to show.
-    @State private var stackTarget: StackTarget?
-
-    /// A repository and a branch — everything `stack.get` needs.
-    struct StackTarget: Identifiable {
-        let repository: String
-        let branch: String
-        var id: String { "\(repository)#\(branch)" }
-    }
-
-    private var shown: [Workspace] { fleet.workspaces.filter { !$0.isHidden } }
-    private var hidden: [Workspace] { fleet.workspaces.filter(\.isHidden) }
-
-    var body: some View {
-        List {
-            if fleet.workspaces.isEmpty {
-                // What this screen is FOR, rather than only what it lacks.
-                //
-                // The door that leads here promises it — "This is where you
-                // start one", in `NeedsYouView.workspacesFooter` — and arriving
-                // at "No workspaces on this runner." was that promise going
-                // unanswered by the screen that has to keep it. This is the one
-                // place on the phone where work is started, and a person who
-                // took the sentence at its word landed on a flat denial.
-                //
-                // `ContentUnavailableView` rather than a hand-rolled headline:
-                // it is the platform's own empty state, at the size and rhythm
-                // iOS gives every other one, and the Mac's workspace
-                // placeholder and the watch's already use it.
-                //
-                // **No `actions:` block, deliberately.** The two buttons that
-                // start work are in this screen's own toolbar, a thumb's reach
-                // above this text, and the comment on them records a decision
-                // NOT to pick a winner between the two flows. One button here
-                // would pick it; both would be four controls for two actions on
-                // one screen, which is the competing pair to avoid. The
-                // sentence names them instead, in the words their accessibility
-                // labels use — so the button a reader is sent to is the button
-                // they can find, by ear or by eye.
-                //
-                // Still a row inside the `List`, so pull-to-refresh survives: a
-                // runner that has nothing yet is exactly the fleet worth
-                // pulling on.
-                ContentUnavailableView(
-                    "No Workspaces",
-                    systemImage: "arrow.triangle.branch",
-                    description: Text(
-                        "This is where you start one, with Quick Task or New Workspace.")
-                )
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            }
-
-            ForEach(shown) { workspace in
-                let numbering = workspace.ordinals()
-                Section {
-                    // The host's order: blocked first, then done, then working,
-                    // oldest first inside each — `farcooler_core::feed::rank`,
-                    // computed once so this list and a widget showing one agent
-                    // cannot disagree about which one matters.
-                    //
-                    // It replaced creation order, and the argument creation
-                    // order won on is still true: a row that moves under a
-                    // finger already travelling toward it is a tap that lands on
-                    // something else. What changed is that the same order now
-                    // has to hold on surfaces with room for ONE agent, where
-                    // "find the marked row" is not an option — and two orders,
-                    // one per surface, is the disagreement the ladder exists to
-                    // prevent. The rank only moves when the agent's own state
-                    // does, so the list still holds still while you read it.
-                    ForEach(workspace.terminals.sorted { $0.sortRank < $1.sortRank }) { terminal in
-                        row(terminal, ordinal: numbering[terminal.id])
-                    }
-                    if workspace.terminals.isEmpty {
-                        Text("No terminals").font(.callout).foregroundStyle(.secondary)
-                    }
-                    // The loudest accent on the screen, and the least urgent
-                    // action on it: a full-blue sentence at the foot of every
-                    // card, repeated for as many workspaces as the runner has.
-                    // See the rule on `FleetList`. The `+` keeps the accent, so
-                    // a row with no chevron and no disclosure still reads as
-                    // something you press; the words drop to secondary, where
-                    // they are also plainly easier to read than accent-on-dark.
-                    //
-                    // Tinted rather than only restyled, because `.foregroundStyle`
-                    // inside a button's label is not reliably what wins — see the
-                    // note on the `…` menu below, and `AgentView`'s composer row.
-                    // `Color.accentColor` on the glyph rather than `.tint`: the
-                    // tint IS secondary here, so asking for it would grey the
-                    // thing this comment is keeping blue. If the explicit style
-                    // is overridden too, the row goes entirely grey, which is the
-                    // safe direction to fail in.
-                    Button {
-                        Task { await connection.createTerminal(workspace: workspace) }
-                    } label: {
-                        Label {
-                            Text("New terminal")
-                        } icon: {
-                            Image(systemName: "plus").foregroundStyle(Color.accentColor)
-                        }
-                    }
-                    .font(.callout)
-                    .tint(.secondary)
-                } header: {
-                    HStack(spacing: 6) {
-                        Text(workspace.task)
-                            // First in and last squeezed. Seven things share
-                            // this line and the task is the only one that says
-                            // WHICH worktree this is; without a priority it was
-                            // simply the first `Text` the layout reached for
-                            // when the branch and the counts wanted room.
-                            //
-                            // That priority was right and incomplete, and what
-                            // it left out shipped a broken header: a priority
-                            // says who gives up width, not HOW, and it named no
-                            // order among the three things that now had to give
-                            // instead. See the counts below. One line and a
-                            // middle truncation is the how — the same pair
-                            // `NeedsYouView.header` puts on the same string, so
-                            // a long task reads the same way on both screens
-                            // rather than wrapping a section header to two lines
-                            // on one of them.
-                            .layoutPriority(1)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        // Something under here wants you, said once at the top
-                        // rather than left to be inferred from a row further
-                        // down that may be scrolled off.
-                        //
-                        // In the color of the row you get by expanding it, not
-                        // in orange whatever is inside — see `mostUrgent(in:)`.
-                        // A header that says orange over a row that says red is
-                        // a header pointing somewhere else.
-                        if let leader = mostUrgent(in: workspace.terminals) {
-                            Circle()
-                                .fill(attentionColor(leader))
-                                .frame(width: 6, height: 6)
-                                .accessibilityLabel(leader.activityLabel)
-                        }
-                        // The worktree this workspace names is not on disk any
-                        // more. Said on the header because every row under it
-                        // is about a pane in a directory that is gone, and
-                        // "Removed" beats twenty terminals failing separately.
-                        if workspace.worktreeMissing {
-                            Text("worktree gone")
-                                .font(.caption2)
-                                // A fixed two-word notice, not user text, and
-                                // the same reasoning as the counts: it either
-                                // fits on its line or the row is the wrong shape
-                                // for it. Wrapped to "worktree" over "gone" it
-                                // doubles the height of a header that is trying
-                                // to say a worktree is missing.
-                                .lineLimit(1)
-                                .fixedSize()
-                                // Red, not amber. A worktree that is no longer
-                                // on disk is a failure, and amber in this app
-                                // means an agent is waiting on you — which the
-                                // dot two views to the left is already saying,
-                                // in the same color, about something else.
-                                .foregroundStyle(.red)
-                        }
-                        // `minLength: 0`, as in `NeedsYouView.header`. A bare
-                        // `Spacer` reserves 8 points it will not give back, and
-                        // this row's whole problem is the last few points.
-                        Spacer(minLength: 0)
-                        // What this worktree has changed, which is the fact the
-                        // Mac's sidebar puts here and the one that says whether
-                        // a workspace is worth opening. Monospaced so the
-                        // columns line up down the list, and absent entirely
-                        // when there is nothing — a row of `+0 -0` on every
-                        // clean worktree is noise in the shape of information.
-                        if let counts = connection.inbox[workspace.id], counts.hasDiff {
-                            HStack(spacing: 4) {
-                                Text("+\(counts.insertions)").foregroundStyle(.green)
-                                Text("-\(counts.deletions)").foregroundStyle(.red)
-                            }
-                            .font(.caption2.monospaced())
-                            // **Rigid.** This is what broke: with the task on
-                            // `.layoutPriority(1)` and nothing said about these,
-                            // the counts became the thing the row squeezed
-                            // instead — and a `Text` with no line limit reports
-                            // its minimum width as one character, so `+1,366`
-                            // and `-1,449` did not truncate, they WRAPPED, into
-                            // a column of single digits about seven points wide.
-                            // The branch beside them was being crushed to `e…s`
-                            // in the same move, because the two of them sat at
-                            // the same priority and gave way together.
-                            //
-                            // `.fixedSize` rather than another priority number.
-                            // A priority only orders who gives first; these must
-                            // never give at all, and they can afford not to — a
-                            // diff count is a handful of digits with a known
-                            // ceiling, and it is the fact this row exists to
-                            // carry. The line limit is belt and braces: it is
-                            // what keeps the failure a truncation rather than a
-                            // column if a future edit takes the fixed size away.
-                            .lineLimit(1)
-                            .fixedSize()
-                            // Read aloud, the parts are "plus 82" and "minus
-                            // 13" — two numbers with nothing attaching them to
-                            // a diff, which is what this said until now. The
-                            // clause is the phone's whole share of what the
-                            // Mac's sidebar tooltip explains: this number is
-                            // more than the branch has committed, and nothing
-                            // on the row said so. No hover here, so the label
-                            // is the only place it can be said.
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(
-                                "\(counts.insertions) added, \(counts.deletions) removed, "
-                                    + "including work that isn’t committed yet")
-                        }
-                        // The main checkout has a branch like everything else,
-                        // but WHICH branch is not the useful fact about it —
-                        // that it is the repository itself, and so cannot be
-                        // removed, is. The Mac says the same thing here.
-                        Text(workspace.isPrimaryCheckout ? "Primary checkout" : workspace.branch)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            // Last in the chain, which is the rule
-                            // `NeedsYouView.header` already states in words for
-                            // this same string: which worktree this is survives
-                            // a narrow screen; which branch it is on is the fact
-                            // that can afford to be truncated. That header had
-                            // the `-1` and this one never did, so on the front
-                            // door the branch was a peer of the counts rather
-                            // than the thing that yields to them.
-                            //
-                            // The consequence is deliberate and worth naming: a
-                            // long task now takes the width, and on the worst
-                            // rows the branch is an ellipsis. That is the right
-                            // trade — these branches share a prefix and differ
-                            // in the tail, so a few characters of one identifies
-                            // nothing, while a truncated task still says which
-                            // worktree you are looking at, and the branch is
-                            // spelled in full one tap inside.
-                            .layoutPriority(-1)
-                        // Hide, Unhide, Remove Worktree and the stack all live
-                        // behind this glyph and nowhere else on the phone, and
-                        // it inherited a grouped header's `.footnote` — a
-                        // roughly 22-point target for the only destructive
-                        // action on the screen. The glyph is `.title3` and its
-                        // band is 44, which costs this header about 24 points of
-                        // height per workspace. Worth it: a header is read once
-                        // on the way past and this is the one control in it.
-                        //
-                        // Rigid, like the counts: an `Image` in a fixed frame
-                        // has nothing to give, so it is not part of the
-                        // negotiation above at all.
-                        Menu {
-                            Button {
-                                Task { await connection.createTerminal(workspace: workspace) }
-                            } label: {
-                                Label("New terminal", systemImage: "plus")
-                            }
-                            // Where this branch sits, and what GitHub says.
-                            // Only offered when the daemon told us which
-                            // repository the worktree belongs to — an older one
-                            // did not, and a menu item that cannot work is
-                            // worse than one that is not there.
-                            if let repository = workspace.repository, !workspace.branch.isEmpty {
-                                Button {
-                                    stackTarget = StackTarget(
-                                        repository: repository, branch: workspace.branch)
-                                } label: {
-                                    Label("Stack & Pull Request", systemImage: "square.stack.3d.up")
-                                }
-                            }
-                            if workspace.isHidden {
-                                Button {
-                                    Task { await connection.unhideWorkspace(workspace) }
-                                } label: {
-                                    Label("Unhide", systemImage: "eye")
-                                }
-                            } else {
-                                Button {
-                                    Task { await connection.hideWorkspace(workspace) }
-                                } label: {
-                                    Label("Hide", systemImage: "eye.slash")
-                                }
-                            }
-                            if !workspace.isPrimaryCheckout {
-                                Button(role: .destructive) {
-                                    onRemove(workspace)
-                                } label: {
-                                    Label("Remove Worktree…", systemImage: "trash")
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title3)
-                                .foregroundStyle(.secondary)
-                                .frame(
-                                    minWidth: PaneMetrics.target,
-                                    minHeight: PaneMetrics.target,
-                                    alignment: .trailing)
-                                .contentShape(.rect)
-                        }
-                        // The `.foregroundStyle` above was right and never
-                        // reached the glyph. A `Menu` tints its own label with
-                        // the accent color and a foreground style set inside
-                        // does not survive it — the bug `4458dcb` found in the
-                        // transcript composer, where five controls "read as a
-                        // line of links", and `AgentView` fixes the same way.
-                        // So this circled `…` has been drawing in full accent on
-                        // every workspace header while the code asked for grey.
-                        //
-                        // Grey is also what it should be on the merits: iOS
-                        // draws the overflow affordance in its own lists
-                        // secondary, and this one repeats per card. The style
-                        // stays where it is rather than being deleted, because
-                        // it is what the glyph resolves to once the tint lets it
-                        // through.
-                        .tint(.secondary)
-                    }
-                    // Against the grouped list's uppercasing, which is right for
-                    // the word "SETTINGS" and wrong for both halves of this: the
-                    // task is a sentence somebody wrote, and a branch is an
-                    // identifier whose case is not ours to change —
-                    // `FEAT/ADD-AUTH` is not a branch that exists. `NeedsYouView`
-                    // states this rule for the same two strings one tap away,
-                    // and this header was the copy that never got it.
-                    .textCase(nil)
-                }
-            }
-
-            if !hidden.isEmpty {
-                Section {
-                    if hiddenExpanded {
-                        ForEach(hidden) { workspace in
-                            let numbering = workspace.ordinals()
-                            // The same host order as the shown workspaces
-                            // above. A hidden workspace sorted differently would
-                            // be a second answer to "which agent matters most"
-                            // living one disclosure triangle away.
-                            ForEach(workspace.terminals.sorted { $0.sortRank < $1.sortRank }) { terminal in
-                                row(terminal, ordinal: numbering[terminal.id])
-                            }
-                            HStack {
-                                Text(workspace.task).font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Button("Unhide") {
-                                    Task { await connection.unhideWorkspace(workspace) }
-                                }
-                                .font(.caption)
-                                .frame(minHeight: PaneMetrics.target)
-                                .contentShape(.rect)
-                            }
-                        }
-                    }
-                } header: {
-                    Button {
-                        hiddenExpanded.toggle()
-                    } label: {
-                        HStack {
-                            Image(systemName: hiddenExpanded ? "chevron.down" : "chevron.right")
-                                .font(.caption2)
-                            Text("Hidden")
-                            Text("\(hidden.count)")
-                                .foregroundStyle(.tertiary)
-                            // Same rule as a workspace header: the color of
-                            // what you would find, not orange regardless.
-                            if let leader = mostUrgent(in: hidden.flatMap(\.terminals)) {
-                                Circle()
-                                    .fill(attentionColor(leader))
-                                    .frame(width: 6, height: 6)
-                                    .accessibilityLabel(leader.activityLabel)
-                            }
-                            Spacer()
-                        }
-                        // The only route to a hidden workspace, in a header that
-                        // gave it about 20 points of height.
-                        .frame(minHeight: PaneMetrics.target)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            Section {
-                HStack {
-                    Circle()
-                        // Red rather than amber for "tmux unavailable". No
-                        // agent is waiting on anyone; the runtime that every
-                        // pane on this runner lives inside is not answering,
-                        // which is a failure. The audit did not list this one
-                        // and it is the same bug as the six it did.
-                        //
-                        // And neutral rather than green for the healthy case,
-                        // which was the OTHER half of the same bug: green is
-                        // what an agent that has finished its work wears, and
-                        // this spent it on "nothing is wrong" at the foot of the
-                        // list where those agents are. The count beside it says
-                        // the fleet is alive; the colour is now reserved for the
-                        // sentence that is news.
-                        .fill(fleet.runtimeHealthy ? Color.secondary : Color.red)
-                        .frame(width: 8, height: 8)
-                    Text(
-                        fleet.runtimeHealthy
-                            ? "\(fleet.livePanes) live"
-                            // The same three words the Mac and Android show. This one
-                            // said "on this host" — the wrong noun for a runner, and
-                            // redundant on a screen that speaks for one already.
-                            : "tmux unavailable"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .sheet(item: $stackTarget) { target in
-            StackView(
-                repository: target.repository,
-                branch: target.branch,
-                connection: connection)
-        }
-    }
-
-    /// One terminal, as a row you tap to open it.
-    ///
-    /// Shared by the visible workspaces and the hidden ones, which drew the same
-    /// row twice with the same identifier and the same swipe actions.
-    private func row(_ terminal: Terminal, ordinal: Int?) -> some View {
-        Button { onSelect(terminal) } label: {
-            HStack(spacing: PaneMetrics.step) {
-                TerminalRow(terminal: terminal, ordinal: ordinal)
-                    // A list row's label otherwise sizes to its text. Give
-                    // selection the whole visible row, including the blank
-                    // trailing space a thumb naturally lands in.
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                // The same row is a `NavigationLink` on Needs You, where the
-                // system draws this, and was a bare `Button` here — so one row
-                // said "this opens something" and the identical row one tap away
-                // said nothing at all. Drawn by hand because the tap is not a
-                // push: it goes up to `FleetView.show(_:)`, which may replace
-                // the route or dismiss the sheet this list is sitting in.
-                //
-                // Hidden from VoiceOver, which is what the system does with its
-                // own: the row already says where it goes.
-                Image(systemName: "chevron.forward")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("fleet-terminal-\(terminal.id)")
-        .swipeActions(edge: .trailing) { terminalActions(for: terminal) }
-    }
-
-    @ViewBuilder
-    private func terminalActions(for terminal: Terminal) -> some View {
-        let kind = StateKind.parse(terminal.state)
-        if kind == .lost {
-            Button("Dismiss") { onAction(.dismissLost, terminal) }.tint(.gray)
-        }
-        // Nothing destructive for a terminal whose runner did not answer.
-        // Restart kills the pane and starts a new epoch: the right answer for a
-        // process that is gone, and the wrong one for a process that is fine
-        // behind a tmux server that was busy for a moment — which is exactly
-        // what `unknown` means. The daemon already refuses `dismiss` in this
-        // state; this keeps the phone from offering the more damaging of the
-        // two at all.
-        if kind != .unknown {
-            Button("Restart") { onAction(.restart, terminal) }.tint(.blue)
-        }
-        if kind == .running || kind == .starting {
-            Button("Stop", role: .destructive) { onAction(.stop, terminal) }
-        }
-    }
-}
-
-/// The column every row in a workspace section is built on.
-///
-/// A `TerminalRow` draws an 8-point state dot and then its words 10 points
-/// after it, so its text starts 18 points in. Nothing else on either screen knew
-/// that number: `NeedsYouView`'s overflow line started at 0 and its changes row
-/// at roughly 24, which is three text edges inside one section — three margins
-/// for the eye to find on a screen whose whole job is to be read at a glance.
-/// Named here, beside the row that sets it, so the other two can ask instead of
-/// guessing.
-///
-/// Not on `PaneMetrics`' scale, and deliberately so: that scale is about how far
-/// apart two things sit, and this is the width of one specific column. The 10 is
-/// what shipped and what the rows are drawn to; moving it to the scale's 8 would
-/// re-cut every row in the app to buy one fewer number.
-enum RowGutter {
-    /// The state dot's diameter, and the width of the column it sits in.
-    static let dot: CGFloat = 8
-    /// The gap between that column and what it labels.
-    static let gap: CGFloat = 10
-    /// Where a row's text starts.
-    static let text: CGFloat = dot + gap
-}
-
-struct TerminalRow: View {
-    let terminal: Terminal
-    /// Which of several identically-labeled siblings this is, from
-    /// `Workspace.ordinals()`, or nil when its label is unique in the
-    /// workspace and numbering it would answer a question nobody asked.
-    var ordinal: Int?
-
-    private var kind: StateKind { StateKind.parse(terminal.state) }
-
-    var body: some View {
-        // Once a second, and only for the rows that have a clock to run. A
-        // `TimelineView` is how the elapsed string ticks at all — see
-        // `Terminal.displayDuration(at:)` for why the time has to arrive as an
-        // argument rather than be read inside the row.
-        //
-        // Wrapped around the whole row rather than around the one `Text`,
-        // because the schedule is what decides how often SwiftUI re-evaluates
-        // this subtree — and a row with no clock must not be re-evaluated
-        // every second to display nothing new. Both branches are `.periodic`
-        // because a ternary has to produce one type, and an hour is "never" at
-        // the scale of a list somebody is looking at; a row whose agent starts
-        // working gets its new schedule from the state change itself rather
-        // than by waiting out the hour.
-        TimelineView(.periodic(from: .now, by: hasClock ? 1 : 3600)) { tick in
-            content(at: tick.date)
-        }
-    }
-
-    /// Whether anything in this row changes with the passing of time.
-    private var hasClock: Bool {
-        terminal.agent == .working || terminal.agent == .blocked
-    }
-
-    private func content(at now: Date) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: RowGutter.gap) {
-            ProcessDot(kind: kind)
-                // The dot sits on the first line's baseline rather than in the
-                // middle of a row that is now up to four lines tall.
-                //
-                // The comment was right and the code only approximated it. It
-                // was a hardcoded `.padding(.top, 6)`, measured against `.body`
-                // at the default Dynamic Type size — and the first line's
-                // baseline moves with the type size while 6 points does not, so
-                // the dot drifted up the line as the text grew and down it as
-                // the text shrank, at every setting but one. Aligned to the
-                // baseline itself now: the dot rests ON it, the way a period
-                // does, and the number is the one SwiftUI computes rather than
-                // one this file remembers.
-                .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
-
-            // A full step between the two groups, a tight one inside each.
-            //
-            // Every band was `spacing: 3` — one distance for everything, which
-            // is a stack with no grouping in it. What the pane IS and where its
-            // agent got to are one thought in two lines; what the agent SAID is
-            // a different thought, and the gap is now the thing that says so.
-            VStack(alignment: .leading, spacing: PaneMetrics.step) {
-                VStack(alignment: .leading, spacing: PaneMetrics.tight) {
-                    // Band 1: what it is, and how long it has been that.
-                    HStack(spacing: 4) {
-                        Text(terminal.label).font(.body)
-                        if let ordinal {
-                            Text("\(ordinal)")
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.tertiary)
-                        }
-                        if let status = statusText(at: now) {
-                            Text(status)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 0)
-                        // The reason to have opened the app. Only the two states
-                        // worth acting on get color, so a list of twenty still
-                        // reads at a glance.
-                        //
-                        // Six silhouettes, where the Mac's `StatusGlyph` forbids
-                        // them outright — "not a moon for idle and a gearwheel
-                        // for working" — and that is deliberate. The Mac's dot
-                        // is one pointer-rest from explaining itself: every
-                        // `StatusGlyph` carries a `.help` with the state's name
-                        // in it. A phone has no hover, so a mark that encodes
-                        // its meaning in hue alone is unrecoverable — and the
-                        // pair a reader most needs separated, blocked and done,
-                        // is orange-filled against green-filled, which is
-                        // exactly the pair that collapses for the commonest kind
-                        // of color blindness. The shape is what survives that.
-                        //
-                        // The two halves of the Mac's complaint that ARE about
-                        // this list were taken: the mark is one size (Android
-                        // stepped 16→20 on attention and moved its own column),
-                        // and it is filled for the states that want a person and
-                        // outlined for the ones that do not, which is
-                        // hollow-vs-filled in SF Symbols' own vocabulary.
-                        //
-                        // The weight below still steps, and that is safe HERE
-                        // and nowhere else: this glyph is anchored against the
-                        // `Spacer` above it, so a semibold mark grows leftward
-                        // into slack and nothing after it moves. `TabChip` keeps
-                        // one weight for the opposite reason — a chip that grows
-                        // slides every chip after it sideways.
-                        //
-                        // `.footnote`, which is 13 points at the default size —
-                        // the same 13 this was hardcoded to as
-                        // `.system(size: 13)`, and now the same 13 that GROWS
-                        // when the words beside it do. A fixed-size glyph next
-                        // to scaling text is a mark that shrinks relative to its
-                        // own row at every accessibility size, and this one is on
-                        // every row in the app.
-                        if terminal.agent.isAgent && terminal.agent != .unknown {
-                            Label(terminal.activityLabel, systemImage: terminal.activitySymbol)
-                                .labelStyle(.iconOnly)
-                                .font(
-                                    .footnote.weight(
-                                        terminal.agent.wantsAttention ? .semibold : .regular))
-                                .foregroundStyle(attentionColor(terminal))
-                                .accessibilityLabel(terminal.activityLabel)
-                        }
-                    }
-
-                    // Band 2: where the agent IS — the question it is blocked
-                    // on, its position in its own task list, or what it is
-                    // doing. One line, composed on the host so a Mac, a phone
-                    // and a watch cannot disagree about which of those three to
-                    // show.
-                    //
-                    // This is what replaced `terminal.state.lowercased()`, which
-                    // spent the most valuable line of the row restating the dot
-                    // immediately to its left.
-                    if !terminal.signalLine.isEmpty {
-                        Text(terminal.signalLine)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                }
-
-                // Bands 3 and 4: what the agent said it did, and what it
-                // spawned and has not finished with.
-                //
-                // `.secondary`, not `.tertiary`. `NeedsYouView` calls these
-                // lines "the part of the row that answers 'what did it do',
-                // which the owner is explicit is most of what reviewing an
-                // agent's work is" — and they were drawn in the faintest tier
-                // the platform offers, at 11 points, in the same tier as the
-                // ordinal beside the title, which nobody reads. The ordinal
-                // stays tertiary; it is a disambiguator and it earns that tier.
-                //
-                // Wrapped rather than left loose, and guarded on being non-empty
-                // — an empty group would otherwise still take the step of
-                // spacing above it and leave a gap under every one-agent row.
-                if !terminal.recentSteps.isEmpty || !terminal.runningSubagents.isEmpty {
-                    VStack(alignment: .leading, spacing: PaneMetrics.tight) {
-                        // Already redacted and cut to a row's width by the
-                        // daemon, so this renders them and decides nothing about
-                        // them.
-                        ForEach(Array(terminal.recentSteps.enumerated()), id: \.offset) { _, step in
-                            Text(step)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-
-                        ForEach(terminal.runningSubagents, id: \.self) { name in
-                            Text("\u{2442} \(name)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                    }
-                }
-            }
-        }
-        .contentShape(Rectangle())
-    }
-
-    /// "Working 12m", "Needs you 2m", or just the state for a pane that is not
-    /// an agent.
-    ///
-    /// A duration only where one exists: `displayDuration` returns nil under
-    /// five seconds, so a row does not flicker "1s" on its way to saying
-    /// something useful.
-    private func statusText(at now: Date) -> String? {
-        guard terminal.agent.isAgent, terminal.agent != .unknown else {
-            // A plain shell still says whether it is alive, which is the whole
-            // of what is known about it. Exited is worth saying; running is the
-            // ordinary case and `ProcessDot` now draws nothing for it, so a
-            // live shell is a row with a name on it and nothing else — which is
-            // the point of the silence, not a fact withheld.
-            return kind == .running ? nil : terminal.state.lowercased()
-        }
-        guard let elapsed = terminal.displayDuration(at: now) else { return terminal.activityLabel }
-        return "\(terminal.activityLabel) \(elapsed)"
-    }
-}
-
-/// The dot for "is the process alive" — shared by the fleet list and the
-/// terminal tab strip (`TerminalTabStrip`), so the same terminal cannot read
-/// one way in one screen and another way in the other.
-///
-/// **Silence is the default, and green is spent once.** This was `.green` for
-/// `running`, which put a green dot on every row of a list where green already
-/// meant something else: `attentionColor` gives it to `done`, so an idle
-/// `zsh` and an agent that had just finished its work wore the same mark, and
-/// on a busy worktree they wore it three rows apart. A running process is the
-/// ordinary case and now says nothing; green survives on exactly one state,
-/// the same one the Mac spends it on. See `StatusGlyph` over there, whose
-/// `.idle, .running, .exited` branch has drawn `Color.clear` since `8bce995`.
-/// `ProcessDot` reserves the column either way, so names line up down the list
-/// rather than stepping in and out as panes start and stop.
-///
-/// **Not yellow for `starting`.** A pane is starting for well under a second,
-/// and a color nobody has time to read is a color spent for nothing. The Mac
-/// calls `starting` in-progress and paints it `.secondary`; so does this now.
-///
-/// **`exited` keeps its dot**, where the Mac draws nothing for it. The Mac can
-/// afford silence because its fused `Status` puts "Exited" on the row in
-/// words; `TerminalRow.statusText` spells the state out only for panes that
-/// are NOT agents, so an agent pane whose process is gone would otherwise lose
-/// its only mark.
-func processColor(_ kind: StateKind) -> Color {
-    switch kind {
-    case .running: return .clear
-    case .starting, .exited, .unknown: return .secondary
-    // The one state that means Far Cooler does not know what happened.
-    case .lost, .error: return .red
-    }
-}
-
-/// That dot, drawn — one shape, one size, and a hollow one where something is
-/// missing.
-///
-/// **Shape before color.** Hollow says "something is not there" before the hue
-/// does, which is the half of this vocabulary that survives a colorblind
-/// reader, a grayscale screenshot and a phone in bright sun. The phones had
-/// dropped it entirely and drew every state as a filled disc, leaving hue as
-/// the only channel; `StatusGlyph.mark` on the Mac has carried it all along,
-/// with the same three states hollow — a pane that died where the app was not
-/// looking, one that failed to start, and one the runner would not report on.
-///
-/// **One size**, `RowGutter.dot`. The tab strip drew 6 and this list drew 8 for
-/// the same mark; that is the drift the Mac had to be pulled back from, where
-/// eleven call sites passed five diameters of a glyph whose whole argument is
-/// that it is always the same mark. Eight is the one that is load-bearing:
-/// `RowGutter.text` is measured off it, and `NeedsYou`'s changes row puts its
-/// symbol in a frame of exactly this width so the two sets of words share an
-/// axis.
-struct ProcessDot: View {
-    let kind: StateKind
-
-    var body: some View {
-        Group {
-            if hollow {
-                // 1.5, which is `StatusGlyph`'s line width for the same ring at
-                // the same diameter — a third of the dot, so the hole reads as
-                // a hole rather than as a slightly soft disc.
-                Circle().strokeBorder(processColor(kind), lineWidth: 1.5)
-            } else {
-                Circle().fill(processColor(kind))
-            }
-        }
-        .frame(width: RowGutter.dot, height: RowGutter.dot)
-    }
-
-    private var hollow: Bool {
-        switch kind {
-        case .lost, .error, .unknown: return true
-        case .running, .starting, .exited: return false
-        }
-    }
-}
-
-/// The color behind an agent's activity glyph, shared with the tab strip for
-/// the same reason as `processColor` above.
-func attentionColor(_ agent: AgentActivity) -> Color {
-    switch agent {
-    case .blocked: return .orange
-    case .done: return .green
-    default: return .secondary
-    }
-}
-
-/// The same color, for a terminal whose finished turn may have DIED.
-///
-/// Green and red are the whole difference between "it's done" and "it stopped
-/// working", and `AgentActivity` alone cannot tell them apart — the daemon
-/// sends both as `done` and says which in `turnFailed`. Every surface that has
-/// a terminal in hand asks this one instead, so the fleet list and the tab
-/// strip cannot disagree about the same pane.
-func attentionColor(_ terminal: Terminal) -> Color {
-    terminal.turnDidFail ? .red : attentionColor(terminal.agent)
-}
-
-/// The one terminal a roll-up should wear the color of, out of everything
-/// waiting inside it.
-///
-/// A collapsed workspace header cannot show six dots, so it shows the one that
-/// decides the color. It was showing solid orange for all of them, which is the
-/// bug the Mac fixed in `90c8dd6` and the phone inherited: a worktree whose only
-/// pending item is a FAILED agent said orange in the header and red one tap
-/// down, so the same pane had two colors decided by whether the section was
-/// expanded. Orange also means one specific thing across this app, the widget,
-/// the Live Activity and the complication — an agent waiting on an answer — and
-/// spending it on a worktree where nothing is waiting weakens it everywhere.
-///
-/// The ranking is `Status.mostUrgent(in:)`'s, for the reason stated there:
-/// blocked first, because an agent stalled mid-turn is the state this
-/// application exists for and the only one where the work resumes the moment you
-/// look; a dead turn next, because something stopped; `done` last, because
-/// nothing is waiting on anything — it is finished and merely unread.
-///
-/// Nil when nothing inside wants attention, which is also when nothing should be
-/// drawn.
-func mostUrgent(in terminals: some Sequence<Terminal>) -> Terminal? {
-    terminals
-        .filter(\.agent.wantsAttention)
-        .min { attentionRank($0) < attentionRank($1) }
-}
-
-private func attentionRank(_ terminal: Terminal) -> Int {
-    if terminal.agent == .blocked { return 0 }
-    if terminal.turnDidFail { return 1 }
-    return 2
-}
-
 /// What a sheet says when the thing it asked for did not happen: the app's own
 /// sentence, and — when the app has no account of its own — the daemon's words
 /// underneath it.
@@ -2555,6 +951,14 @@ struct SheetFailureSection: View {
 /// The second phase: the worktree has uncommitted work, so removal needs its
 /// name typed exactly. Also where any other refusal surfaces, since there is
 /// no room for an error message inside a confirmationDialog.
+///
+/// **Recovered verbatim from `f319376`.** It went out of the tree with
+/// `FleetList`, whose per-row swipe actions were the only caller, and the
+/// ceremony is the reason it came back rather than being rewritten: a typed
+/// name is the one thing standing between a thumb and a directory with
+/// uncommitted work in it, and a rewrite is a chance to make it one tap
+/// lighter by accident. Its caller now is `ShellPaneChromeModifier` — see that type
+/// for why the door is on the pane's bar rather than on an overview card.
 struct RemoveWorktreeConfirmSheet: View {
     let workspace: Workspace
     let onRemove: (String) async -> Connection.RemoveWorktreeResult

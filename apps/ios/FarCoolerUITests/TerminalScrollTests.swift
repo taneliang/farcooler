@@ -23,8 +23,9 @@ import XCTest
 /// nothing answers: a test suite that goes red on a laptop with no demo host
 /// running teaches people to ignore it.
 final class TerminalScrollTests: XCTestCase {
-    private func launch() -> XCUIApplication {
+    private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
+        app.launchArguments += extra
         // The Mac's user and host, forwarded by xcodebuild as TEST_RUNNER_*.
         //
         // NOT `NSUserName()`: this code runs in the SIMULATOR, whose user is
@@ -63,32 +64,15 @@ final class TerminalScrollTests: XCTestCase {
 
     /// Walk from wherever the app opens to a terminal pane.
     ///
-    /// Defensive about the route rather than pinned to it: the phone opens on
-    /// "Needs You" when nothing is running and straight into a workspace when
-    /// something is, and neither is this test's subject.
-    /// Walk from wherever the app opens to a terminal pane.
-    ///
-    /// Straight at `fleet-terminal-<id>` (`FleetView.swift:2140`) rather than
-    /// walking cells: the fleet list interleaves repository headers, workspaces
-    /// and terminals, so "the first cell" is a repository and tapping it goes
-    /// nowhere useful. The identifier is the only stable handle.
-    private func openATerminal(_ app: XCUIApplication) throws {
-        let workspaces = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Workspaces")).firstMatch
-        if workspaces.waitForExistence(timeout: 30) {
-            workspaces.tap()
-        }
-        let pane = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "fleet-terminal-")).firstMatch
-        guard pane.waitForExistence(timeout: 20) else {
-            print(app.debugDescription)
-            throw XCTSkip("No terminal in this fleet; run ./scripts/demo-host.sh first.")
-        }
-        pane.tap()
-        guard app.otherElements["terminal-surface"].waitForExistence(timeout: 40) else {
-            print(app.debugDescription)
-            throw XCTSkip("The terminal pane never rendered.")
-        }
+    /// This used to tap "Workspaces" on the inbox and then a `fleet-terminal-`
+    /// row in the list behind it. Neither exists: the app opens INTO the shell,
+    /// on a workspace, and the way to another of its tabs is a swipe. So the
+    /// walk is `openATerminalInTheShell`, which is now the only walk there is —
+    /// kept as a name of its own so the three tests below go on reading as
+    /// "reach a terminal, then assert about the terminal".
+    @discardableResult
+    private func openATerminal(_ app: XCUIApplication) throws -> XCUIElement {
+        try openATerminalInTheShell(app)
     }
 
     func testASwipeScrollsIntoTheScrollback() throws {
@@ -151,6 +135,206 @@ final class TerminalScrollTests: XCTestCase {
             surface.swipeUp(velocity: .fast)
         }
         XCTAssertEqual(position(app)?.offset, 0, "the view never came back to the live screen")
+    }
+
+    // MARK: - The same pane, inside the navigation shell
+
+    /// **The shell must not steal the gesture the pane already owns.**
+    ///
+    /// The shell's content swipe is a horizontal `DragGesture` over the whole
+    /// pane, and the terminal's scroll is a `UIPanGestureRecognizer` on the
+    /// keystroke sink — the view that already owns every touch landing on the
+    /// terminal (`TerminalView.swift:945-970`). Two recognizers over one
+    /// surface is a race, and the way it is lost is silent: the swipe is
+    /// recognized as a page turn, or as nothing, and a terminal that will not
+    /// scroll looks exactly like a terminal with no scrollback.
+    ///
+    /// So this is `testASwipeScrollsIntoTheScrollback`'s assertion made about
+    /// the arbitration rather than about the emulator, and it is the reason the
+    /// shell can be trusted to carry a real pane at all. The two were one
+    /// launch argument apart while the shell was behind `-shell-live`; the
+    /// shell is the app now, so they are the same launch and the difference is
+    /// only what each one is watching. Kept separate deliberately: they fail
+    /// for different reasons, and a suite that merged them would report a
+    /// stolen gesture as a broken scrollback.
+    func testTheShellDoesNotStealTheTerminalsScroll() throws {
+        let app = launch()
+        let surface = try openATerminalInTheShell(app)
+
+        let hasHistory = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "NOT (value ENDSWITH %@)", "history=0"),
+            object: surface
+        )
+        try XCTSkipUnless(
+            XCTWaiter.wait(for: [hasHistory], timeout: 30) == .completed,
+            "This pane has no scrollback, so a swipe has nowhere to go."
+        )
+
+        let before = try XCTUnwrap(position(app))
+        XCTAssertEqual(before.offset, 0, "a pane opens at the live screen")
+
+        surface.swipeDown(velocity: .slow)
+
+        let after = try XCTUnwrap(position(app))
+        XCTAssertGreaterThan(
+            after.offset, before.offset,
+            "the shell swallowed the pane's own scroll: \(before.history) lines above and the "
+                + "view never left the bottom"
+        )
+    }
+
+    /// And the other half of the same race: the shell's own swipe still works
+    /// with a live terminal under it.
+    ///
+    /// The two failures are opposite and both are silent. If the terminal's
+    /// pan always wins, the shell's page turn is unreachable from a terminal
+    /// pane — you can get into one and never swipe out. If the shell always
+    /// wins, the pane will not scroll. Only a runner can tell them apart,
+    /// because only a runner produces a pane with a `UIPanGestureRecognizer`
+    /// on it.
+    func testTheShellStillTurnsThePageOverALiveTerminal() throws {
+        let app = launch()
+        _ = try openATerminalInTheShell(app)
+
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        func place() -> String {
+            (probe.value as? String ?? "").split(separator: " ")
+                .filter { $0.hasPrefix("ws=") || $0.hasPrefix("tab=") }.joined(separator: " ")
+        }
+        let before = place()
+        XCTAssertFalse(before.isEmpty, "the shell never reported where it was")
+
+        // BACKWARD along the sequence, which is the direction that is
+        // guaranteed to have somewhere to go: the pane was reached by swiping
+        // forward, so the tab behind it exists. Forward from here may be the
+        // end of the fleet, where the correct answer is a rubber band and
+        // nothing else — a test that swiped that way would pass or fail on
+        // how many terminals the demo runner happens to have.
+        let y = 0.42
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y))
+        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y))
+        from.press(
+            forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.4)
+
+        // Polled rather than read once. The commit animates for a third of a
+        // second and re-seats in its completion — deliberately, so the page
+        // does not bounce — so the shell is still settling when the finger
+        // comes up.
+        let moved = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in place() != before }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [moved], timeout: 5), .completed,
+            "a horizontal swipe over a live terminal did not move the shell: \(probe.value ?? "")")
+    }
+
+    /// **Coming back to a workspace reopens the tab you left it on.**
+    ///
+    /// The owner's case, and it needs a runner because it runs through the one
+    /// memory the app already keeps: `Connection.lastFocus`, written when
+    /// somebody moves between the tabs of a workspace and read back by
+    /// `ShellFleetMap.resume` as the tab a deliberate arrival lands on. The
+    /// pure half is `ShellNavigationTests.theBarStepLandsOnTheRememberedTab`;
+    /// what only a runner can show is that the two halves are wired together.
+    ///
+    /// **It comes back to the DIFF, and that is the whole design of the test.**
+    /// Landing on the terminal would prove nothing: `PaneFocus.rule` — the
+    /// fallback for a workspace nobody has chosen a tab in — picks the
+    /// top-ranked agent, which on this runner is that same terminal, so a
+    /// memory that was never written and a memory that was read back give the
+    /// same answer. Parking on the diff first is the one choice the rule would
+    /// not have made. A negative control confirms it: with the write to
+    /// `lastFocus` removed, this fails and the earlier shape passed.
+    ///
+    /// The bar swipe rather than the content swipe, deliberately: the content
+    /// walks a continuum and must stay literal, which
+    /// `theContentStepIgnoresTheRememberedTab` pins from the other side.
+    func testCrossingBackToAWorkspaceReopensTheTabYouLeft() throws {
+        let app = launch()
+        _ = try openATerminalInTheShell(app)
+
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        func field(_ name: String) -> Int? {
+            (probe.value as? String ?? "").split(separator: " ")
+                .first { $0.hasPrefix("\(name)=") }
+                .flatMap { Int($0.split(separator: "=")[1]) }
+        }
+        let home = try XCTUnwrap(field("ws"))
+        try XCTSkipUnless(
+            (field("tab") ?? 0) > 0,
+            "This runner's terminal is already the first tab, so there is no tab behind it "
+                + "to choose.")
+        try XCTSkipUnless(
+            (field("workspaces") ?? 0) > 1, "One workspace: there is nowhere to cross to.")
+
+        // Back one tab, inside this workspace. That is the move that is a
+        // CHOICE, and the only kind of move the memory records.
+        let y = 0.42
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y)).press(
+            forDuration: 0.05,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y)),
+            withVelocity: .slow, thenHoldForDuration: 0.4)
+        let chose = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in field("tab") == 0 && field("ws") == home },
+            object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [chose], timeout: 5), .completed,
+            "could not get onto the diff: \(probe.value ?? "")")
+
+        // Away along the BAR, and back the same way. Two arrivals, each
+        // landing on whatever that workspace's `resume` resolved to.
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 20))
+        func swipeBar(_ from: CGFloat, _ to: CGFloat) {
+            bar.coordinate(withNormalizedOffset: CGVector(dx: from, dy: 0.5)).press(
+                forDuration: 0.05,
+                thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: to, dy: 0.5)),
+                withVelocity: .slow, thenHoldForDuration: 0.4)
+        }
+        let away = home > 0 ? (0.1, 0.85) : (0.85, 0.1)
+        swipeBar(away.0, away.1)
+        let left = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in field("ws") != home }, object: nil)
+        try XCTSkipUnless(
+            XCTWaiter.wait(for: [left], timeout: 5) == .completed,
+            "The bar swipe did not cross; there is nothing to come back from.")
+
+        swipeBar(away.1, away.0)
+        let returned = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in field("ws") == home }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returned], timeout: 5), .completed,
+            "never came back: \(probe.value ?? "")")
+        XCTAssertEqual(
+            field("tab"), 0,
+            "coming back landed on tab \(field("tab") ?? -1) — the rule's answer — rather than "
+                + "on the diff it was left on: \(probe.value ?? "")")
+    }
+
+    /// Reach a terminal from the shell, which opens on the Diff tab.
+    ///
+    /// One swipe along the flat sequence, because `ShellFleetMap` puts Changes
+    /// first in every workspace and the terminals after it in fleet order.
+    /// Repeated a few times rather than once: the demo fleet's first workspace
+    /// may have no terminal at all, in which case the sequence spills into the
+    /// next workspace, which is the behaviour rather than a failure.
+    private func openATerminalInTheShell(_ app: XCUIApplication) throws -> XCUIElement {
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        guard probe.waitForExistence(timeout: 60) else {
+            print(app.debugDescription)
+            throw XCTSkip("The shell never rendered; run ./scripts/demo-host.sh first.")
+        }
+        let surface = app.otherElements["terminal-surface"]
+        for _ in 0..<6 {
+            if surface.waitForExistence(timeout: 3) { return surface }
+            let y = 0.42
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y))
+            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y))
+            from.press(
+                forDuration: 0.05, thenDragTo: to, withVelocity: .slow,
+                thenHoldForDuration: 0.4)
+        }
+        print(app.debugDescription)
+        throw XCTSkip("No terminal in this fleet; run ./scripts/demo-host.sh first.")
     }
 
     /// On a runner that advertises `terminal_stream`, a pane must actually

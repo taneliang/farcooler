@@ -175,33 +175,57 @@ final class Connection: ObservableObject {
     lazy var changesStores = ChangesStores(core: core)
 
     /// The tab each worktree was last left on, by workspace id — and only ever
-    /// a tab somebody CHOSE. See `WorkspaceView.choose(_:)`, which is the one
-    /// writer, and `Route.Focus` for where it sits in the order of authority.
+    /// a tab somebody CHOSE. `ShellScreen.remember(_:leaving:)` is the one
+    /// writer; `PaneFocus` is where it sits in the order of authority.
     ///
-    /// It lives beside the navigation path rather than inside it, and that is
-    /// the whole design. Writing the focused tab back into `path` on every chip
-    /// tap changes a path element's VALUE, and SwiftUI is free to rebuild a
-    /// destination whose value changed — which would discard every mounted pane
-    /// and cost exactly the scroll positions, half-typed messages and open
-    /// streams `WorkspaceView` exists to keep. A dictionary the path never sees
-    /// cannot do that, because nothing about the navigation state moves when it
-    /// changes.
+    /// It lived beside the navigation path rather than inside it, and that was
+    /// the whole design: writing the focused tab back into a path element
+    /// changed that element's VALUE, and SwiftUI is free to rebuild a
+    /// destination whose value changed — which discarded every mounted pane and
+    /// cost exactly the scroll positions, half-typed messages and open streams
+    /// the pane host existed to keep. There is no path any more, and the
+    /// argument survives it unchanged in the shell: `ShellFleetMap` is rebuilt
+    /// from this connection on every poll and thrown away, so a value it reads
+    /// must not be one whose change re-identifies anything. This is read once
+    /// per map, resolved into an index, and never seen by `ShellPaneTrack`.
     ///
-    /// Here rather than in a view because of what has to outlive what.
-    /// `WorkspaceView` is torn down whenever its route is popped, so a memory
-    /// inside it would be gone by the time anyone came back to read it — the
-    /// same argument `ChangesStores` makes above. `Connection` is a
-    /// `@StateObject` on `FleetView`, which `RootView` keys `.id(host)`, so
-    /// this is created once per runner and dies with it: workspace and terminal
-    /// ids are per-runner, and a memory that outlived the runner would name
-    /// nothing on the next one.
+    /// Here rather than in a view because of what has to outlive what. A pane
+    /// host is torn down whenever it leaves the screen, so a memory inside it
+    /// would be gone by the time anyone came back to read it — the same
+    /// argument `ChangesStores` makes above. `Connection` is a `@StateObject`
+    /// on `FleetView`, which `RootView` keys `.id(host)`, so this is created
+    /// once per runner and dies with it: workspace and terminal ids are
+    /// per-runner, and a memory that outlived the runner would name nothing on
+    /// the next one.
     ///
-    /// `@Published` because `FleetView` writes it through to `@SceneStorage` on
-    /// change, the same way it saves the path. Chip taps are rare and
-    /// user-initiated, so the extra body pass costs less than a single poll
-    /// already does.
-    @Published private(set) var lastFocus: [String: Route.Focus] = [:]
+    /// It dies with the process too, and that is a change. The path and this
+    /// memory were both written through to `@SceneStorage`, and both blobs went
+    /// with the navigation they belonged to — see `FleetView`. What that costs
+    /// is a workspace opening on the rule's answer rather than on the tab you
+    /// left it on, but only across a launch; within one, the shell resumes
+    /// exactly as it did.
+    @Published private(set) var lastFocus: [String: PaneFocus] = [:]
+
+    /// The fallback poll. See `startPolling` for what it is now a fallback TO.
     private var poller: Task<Void, Never>?
+
+    /// A refresh the runner's news asked for, waiting out `minimumNewsSpacing`.
+    ///
+    /// One slot: news arriving while a refresh is armed is already covered by
+    /// it, because a refresh reads the whole fleet rather than a delta.
+    private var newsRefresh: Task<Void, Never>?
+
+    /// When the last fleet read went out, which is what `minimumNewsSpacing` is
+    /// measured from.
+    private var lastRefreshAt = Date.distantPast
+
+    /// Whether `core` has been handed this connection's news handler.
+    ///
+    /// Once per object, not once per link: reconnecting reuses the same core
+    /// and the same handle, so the handler registered at `start` still applies
+    /// after it. Registering again would replace it with an identical closure
+    /// and cost a lock for nothing.
+    private var listeningForNews = false
 
     /// The runner this connection is for, remembered so a reconnection has
     /// something to reconnect TO. Before this, the host appeared only as an
@@ -272,11 +296,13 @@ final class Connection: ObservableObject {
 
     deinit {
         poller?.cancel()
+        newsRefresh?.cancel()
         reconnectTask?.cancel()
     }
 
     func start(host: Runner) async {
         poller?.cancel()
+        newsRefresh?.cancel()
         reconnectTask?.cancel()
         self.host = host
         // The watch performs everything through whichever connection the app is
@@ -316,11 +342,75 @@ final class Connection: ObservableObject {
 
         guard mine == attempt else { return }
         phase = .connected
+        await listenForFleetNews()
         await refresh()
         await loadRepositories()
         await loadThemes()
         startPolling()
     }
+
+    /// Take the runner's word for it when something changes.
+    ///
+    /// The daemon has pushed since it was written — `crates/daemon/src/rpc.rs`
+    /// subscribes every connection to its broadcast with no opt-in, and the
+    /// CLI's `farcooler events` has consumed that stream for as long — but no
+    /// app could receive one, so this app asked again every three seconds
+    /// instead. That was a round trip and a radio wake-up per three seconds for
+    /// as long as it was open, and up to three seconds of staleness on
+    /// everything it shows.
+    ///
+    /// Registered once. See `listeningForNews`.
+    private func listenForFleetNews() async {
+        guard !listeningForNews else { return }
+        listeningForNews = true
+        await core.startEvents { [weak self] _ in
+            // The notice itself is not read, and that is the design rather than
+            // laziness. Every one of them means "re-read it" and none carries a
+            // delta — see `FleetEvent` in `crates/client/src/session.rs` — so
+            // there is exactly one thing to do about any of them, and doing it
+            // from one place keeps ONE code path for reading state. An app that
+            // applied deltas would have to be right about reconciliation
+            // creating and deleting rows in the same pass, and about the CLI
+            // and an agent editing the same state from outside it.
+            Task { @MainActor in self?.fleetNewsArrived() }
+        }
+    }
+
+    /// The runner says something moved. Re-read it — but not faster than
+    /// `minimumNewsSpacing`.
+    ///
+    /// The floor is not a poll in disguise. A quiet fleet produces no news at
+    /// all and so costs nothing, and the first notice after a quiet stretch is
+    /// acted on immediately: `lastRefreshAt` is already old, so the wait is
+    /// zero. What it bounds is the other end — the runner samples every second
+    /// (`SAMPLE_INTERVAL` in `crates/daemon/src/watch.rs`) and an agent under
+    /// load can move a row on most of them, so without a floor a busy
+    /// workspace would cost MORE round trips than the three-second poll this
+    /// replaces. Half a second is two reads a second at the very worst, and
+    /// only while something is genuinely happening and somebody is watching it.
+    private func fleetNewsArrived() {
+        // Not while nobody is looking, and not while there is no link to read
+        // over. The same two gates the poll has always had; news is not a
+        // reason to relax either.
+        guard isActive, phase == .connected else { return }
+        // A refresh is already armed, and it reads everything. This notice is
+        // in it.
+        guard newsRefresh == nil else { return }
+
+        let wait = Self.minimumNewsSpacing - Date().timeIntervalSince(lastRefreshAt)
+        newsRefresh = Task { [weak self] in
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard let self, !Task.isCancelled else { return }
+            // Cleared BEFORE the read, not after: news arriving while this
+            // refresh is crossing the network is news this refresh may be too
+            // early to see, and it has to be able to arm the next one.
+            self.newsRefresh = nil
+            await self.refreshIfWatched()
+        }
+    }
+
+    /// The shortest gap between two reads the runner's news asked for.
+    private static let minimumNewsSpacing: Double = 0.5
 
     // MARK: - Staying connected
 
@@ -354,6 +444,11 @@ final class Connection: ObservableObject {
         guard phase == .connected else { return }
         poller?.cancel()
         poller = nil
+        // The armed read too. There is nothing to read it over, and leaving it
+        // ticking would put a "not connected" failure on top of a reconnect
+        // that is already in hand.
+        newsRefresh?.cancel()
+        newsRefresh = nil
         scheduleReconnect(attempt: 1, after: Self.backoff(attempt: 1))
     }
 
@@ -382,6 +477,8 @@ final class Connection: ObservableObject {
         guard host != nil else { return }
         poller?.cancel()
         poller = nil
+        newsRefresh?.cancel()
+        newsRefresh = nil
         reconnectTask?.cancel()
         // A `start` may still be waiting on the network — this is reachable
         // from `.connecting`, and a routable address with nothing listening
@@ -477,6 +574,12 @@ final class Connection: ObservableObject {
             // cost of one redundant release is a few bytes, and the cost of a
             // missed one is a notification nobody gets.
             Task { await reportWatching([]) }
+            // Whatever the runner's news asked for, nobody is there to see it.
+            // The gate in `fleetNewsArrived` stops the next one; this stops the
+            // one already armed, which would otherwise wake the radio for a
+            // screen behind a locked phone.
+            newsRefresh?.cancel()
+            newsRefresh = nil
         }
         guard active, !wasActive else { return }
 
@@ -520,6 +623,8 @@ final class Connection: ObservableObject {
     private func abandon(_ message: String) {
         attempt += 1
         poller?.cancel()
+        newsRefresh?.cancel()
+        newsRefresh = nil
         // The armed retry too. "Stop waiting" that leaves a backoff ticking
         // underneath would put the spinner back thirty seconds later, which is
         // the opposite of what was asked for.
@@ -594,6 +699,11 @@ final class Connection: ObservableObject {
 
     func refresh() async {
         guard phase == .connected else { return }
+        // Stamped before the read, not after, and before it can fail: what
+        // `minimumNewsSpacing` bounds is how often this app puts a request on
+        // the wire, and a request that came back empty still cost the round
+        // trip and the radio.
+        lastRefreshAt = Date()
         do {
             let data = try await core.call("fleet")
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
@@ -616,7 +726,7 @@ final class Connection: ObservableObject {
             // Not a second clock and not a timer: a counter on the ONE loop
             // this app runs, so a screen that has to re-read something the
             // fleet does not carry can hang it off this cadence instead of
-            // starting a cadence of its own. `WorkspaceView` re-reads
+            // starting a cadence of its own. `ShellScreen` re-reads
             // `stack.get` on it, because the daemon fills an empty pull
             // request cache in the BACKGROUND and has no way to tell a phone
             // it landed — `stack_changed` is emitted and the FFI has no event
@@ -892,20 +1002,46 @@ final class Connection: ObservableObject {
         Themes.shared.merge(hostThemes: reply.themes)
     }
 
-    /// Poll while the view is up.
+    /// The backstop, not the mechanism.
     ///
-    /// Three seconds, not sub-second: every poll is an SSH round trip, and this
-    /// is a phone with a battery. The states that matter here change on the
-    /// scale of an agent finishing a task, not a keystroke.
+    /// This used to be how the app learned anything: three seconds, every three
+    /// seconds, a round trip and a radio wake each time, and up to three
+    /// seconds of staleness on everything. `listenForFleetNews` is the
+    /// mechanism now, and what is left here is the answer to "what if the push
+    /// path is not there".
+    ///
+    /// Two cadences, chosen from the core each time round rather than once:
+    ///
+    /// - **No live subscription** — a runner reached without ssh, one whose
+    ///   second channel could not be opened, or a subscription that died. Three
+    ///   seconds, exactly as before. The degraded case is the old behavior, not
+    ///   a frozen screen, and it is reached within one interval of the
+    ///   subscription dying because `eventsLive` is read at the top of each
+    ///   pass.
+    /// - **A live subscription** — fifteen seconds. Not zero, on purpose: a
+    ///   subscription can be up and silent for a reason nothing here can see —
+    ///   a daemon that restarted its watcher, a broadcast that lapsed — and a
+    ///   screen that is wrong until somebody pulls to refresh is worse than one
+    ///   round trip a quarter of a minute. It is a fifth of the wake-ups.
     private func startPolling() {
         poller?.cancel()
         poller = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
+                guard let core = self?.core else { return }
+                let live = await core.eventsLive
+                try? await Task.sleep(
+                    for: .seconds(live ? Self.subscribedPollSeconds : Self.pollSeconds))
                 await self?.refreshIfWatched()
             }
         }
     }
+
+    /// The fallback interval while the runner is pushing.
+    private static let subscribedPollSeconds: Double = 15
+
+    /// And while it is not: what this app did on every runner before there was
+    /// a push path at all.
+    private static let pollSeconds: Double = 3
 
     /// A poll that a backgrounded app does not make. See `isActive`.
     private func refreshIfWatched() async {
@@ -1361,28 +1497,18 @@ final class Connection: ObservableObject {
 
     /// Remember the tab somebody chose in a worktree.
     ///
-    /// Called from one place — a tap on the tab strip. Not from a deep link
-    /// retargeting the screen, not from the focus rule choosing where to open,
-    /// and not from a pane vanishing under the person reading it; see
-    /// `WorkspaceView.choose(_:)` for why each of those is a change the person
-    /// did not make, and `lastFocus` for what this is for.
-    func rememberFocus(_ focus: Route.Focus, in workspace: String) {
+    /// Called from one place — `ShellScreen.remember(_:leaving:)`, when a pane
+    /// comes to rest on a different tab of the workspace it was already in. Not
+    /// from a deep link retargeting the shell, not from arriving in a workspace
+    /// at all, and not from a pane vanishing under the person reading it; see
+    /// that function for why each of those is a change the person did not make,
+    /// and `lastFocus` for what this is for.
+    func rememberFocus(_ focus: PaneFocus, in workspace: String) {
         // `.none` is the absence of a choice, which is the one thing a record
         // of choices must never hold: storing it would mean "the person picked
         // no opinion", and reading it back would beat the rule with nothing.
         if case .none = focus { return }
         lastFocus[workspace] = focus
-    }
-
-    /// Install a memory restored from a previous run of the app.
-    ///
-    /// Only ever at launch, and only with entries `FleetView` has already
-    /// checked against the fleet that just arrived. Merged over rather than
-    /// assigned, so a tab chosen in the gap between connecting and the fleet
-    /// answering outranks the one written down yesterday — that person is
-    /// holding the phone now.
-    func seedFocus(_ remembered: [String: Route.Focus]) {
-        lastFocus = remembered.merging(lastFocus) { _, live in live }
     }
 
     #if DEBUG
@@ -1392,12 +1518,12 @@ final class Connection: ObservableObject {
     /// `fleet` and `phase` are `private(set)` because nothing outside this file
     /// may claim to know what a runner said. A harness is the one caller that
     /// has to, and it has to because of what mounting the REAL screens costs:
-    /// `WorkspaceView` names the worktree in the navigation bar, draws a chip
-    /// per terminal, and asks the pane whether it can switch modes — every one
-    /// of those is a read of this fleet, and a harness that skipped them was a
-    /// harness that drew none of that chrome. See `AgentLayoutHarness`.
+    /// the shell reads this fleet for the bar's name, the ribbon's marks, the
+    /// column's rows and every card in the overview, and a harness that skipped
+    /// them was a harness that drew none of that chrome. See
+    /// `AgentLayoutHarness`.
     ///
-    /// `.connected` deliberately: the link chip in `WorkspaceView`'s toolbar is
+    /// `.connected` deliberately: the link chip in the overview's toolbar is
     /// drawn only when the link is NOT healthy, and a harness left `.connecting`
     /// would put a "reconnecting" chip on every screenshot of a screen whose
     /// runner is fine.

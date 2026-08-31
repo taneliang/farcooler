@@ -40,7 +40,7 @@ struct TerminalView: View {
     ///
     /// This used to be `@State` that the tab strip reassigned, because one
     /// `TerminalView` was reused for every pane in the workspace. It is a `let`
-    /// now: `WorkspaceView` keeps one of these per visited pane and shows the
+    /// now: `ShellPaneTrack` keeps one of these per retained pane and shows the
     /// current one, so a pane never becomes a different pane.
     let terminal: Terminal
     /// Whether this pane is the one on screen.
@@ -52,9 +52,6 @@ struct TerminalView: View {
     /// rather than removed. Everything that used to hang off them hangs off
     /// this instead.
     let isVisible: Bool
-    /// How far the keyboard reaches up, its key row included. See the grid's
-    /// bottom inset below.
-    @StateObject private var keyboard = KeyboardInset()
     @State private var ctrlArmed = false
     @State private var altArmed = false
     @State private var focusRequest = 0
@@ -85,7 +82,7 @@ struct TerminalView: View {
         TerminalMetrics.cell(.terminal(fontChoice, size: fontSize))
     }
 
-    /// Images on their way into this pane, owned by `WorkspaceView` so a transfer
+    /// Images on their way into this pane, owned by `ShellScreen` so a transfer
     /// started on one pane survives switching to another.
     @ObservedObject var pastes: ImagePasteQueue
 
@@ -122,7 +119,7 @@ struct TerminalView: View {
     }
 
     /// Which of several identically-labeled siblings `current` is — the
-    /// same numbering `FleetView` and `TerminalTabStrip` use, so a terminal
+    /// same numbering the shell's ribbon and column use, so a terminal
     /// reads as "claude 2" everywhere or nowhere.
     private var currentOrdinal: Int? {
         currentWorkspace?.ordinals()[terminal.id]
@@ -154,10 +151,10 @@ struct TerminalView: View {
                 // pane that has none — the mode has been in the fleet all
                 // along, with nothing on this platform able to show it.
                 //
-                // No longer the ordinary way a diff is reached: `WorkspaceView`
+                // No longer the ordinary way a diff is reached: the shell
                 // gives every workspace a Changes tab that needs no pane behind
-                // it, and folds a host-side `changes` pane into that tab rather
-                // than mounting it here. What is left for this branch is a pane
+                // it — see `ShellFleetMap.of` — and folds a host-side `changes`
+                // pane into that tab rather than mounting it here. What is left for this branch is a pane
                 // that BECOMES a `changes` pane while it is mounted — the Mac
                 // can do that to a worktree this phone is looking at — and the
                 // alternative for that case is the VT grid and the original bug.
@@ -204,26 +201,36 @@ struct TerminalView: View {
                                 columns: columns(for: geo.size), rows: rows(for: geo.size))
                         }
                 }
-                // OUTSIDE the `GeometryReader`, and that is the entire fix.
+                // NO KEYBOARD INSET OF THIS VIEW'S OWN, AND THAT IS A CHANGE.
                 //
-                // This inset was inside it, wrapped around the content — which
-                // insets what is DRAWN and leaves the reader measuring the full
-                // height it was proposed. So `geo.size` never shrank, the grid
-                // kept every row, `columns/rows` asked tmux for a pane the
-                // screen could no longer show, and the bottom lines sat behind
-                // the keyboard. Out here the reader itself is proposed the
-                // smaller height, so the geometry it reports is the geometry the
-                // user can actually see.
+                // There used to be one here — `Color.clear.frame(height:
+                // keyboard.height)` outside the reader, so that the reader
+                // itself was proposed the smaller height and `columns/rows`
+                // asked tmux for the pane the screen could actually show. It
+                // was correct while its premise was: the shell took no
+                // automatic avoidance, so the grid had to ask for its own room.
                 //
-                // `WorkspaceView` no longer takes the framework's automatic
-                // avoidance — it lifted the whole container and carried the tab
-                // strip up behind the navigation bar — so the grid asks for its
-                // own room. `KeyboardInset` reports the keyboard's whole reach,
-                // the key row accessory included, which is what the automatic
-                // behavior used to remove.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    Color.clear.frame(height: isVisible ? keyboard.height : 0)
-                }
+                // The premise died when the pane grew a `NavigationStack` for
+                // its own bar (`ShellScreen.ShellPaneRealView.body`). A
+                // navigation stack is a `UINavigationController`, and the
+                // framework re-derives keyboard avoidance from the window
+                // inside it — an `ignoresSafeArea(.keyboard)` outside the stack
+                // does not reach in. So this inset became the SECOND
+                // subtraction of the same 360 points, and 874 − 116 (bar and
+                // status bar) − 450 (the shell's furniture plus the keyboard)
+                // − 360 is negative: the grid came out **0 points tall**, the
+                // pane rendered nothing at all with the keyboard up, and three
+                // UI tests could not swipe an element with no visible frame.
+                //
+                // What replaces it is the framework's own number, and it is
+                // the same number: SwiftUI's avoidance counts the input
+                // accessory, so the key row is included exactly as
+                // `KeyboardInset` counted it. This view no longer observes
+                // `KeyboardInset` at all — `AgentView` still does, because a
+                // DOCKED composer is on screen with the keyboard down and posts
+                // no keyboard frame at all, which is a state the terminal's key
+                // row never reaches: its accessory exists only while the field
+                // it belongs to is first responder.
             }
         }
         // The link a long press landed on. Titled with the URL itself, because
@@ -258,6 +265,30 @@ struct TerminalView: View {
                 await connection.markVisibleSeen()
             } else {
                 session.stop()
+                // AND IT GIVES UP THE KEYBOARD.
+                //
+                // A pane that is merely hidden is still MOUNTED — that is what
+                // `ShellPaneTrack` is for — and `KeystrokeSink` went on holding
+                // first responder after the pane left the screen. So the
+                // keyboard, and the key row docked in its window, stayed up
+                // over a workspace whose pane has no tty at all, covering the
+                // bottom of the display and everything on it: measured, the
+                // shell's bar sat at y=784 under a keyboard whose top edge was
+                // at 514, and a swipe aimed at the bar went into the keyboard
+                // instead. `DockedBar.swift:34-41` is the same hazard said
+                // about a composer; this is its terminal half.
+                //
+                // It was invisible until the shell stopped letting the keyboard
+                // into its own safe area (`ShellRootView.body`), because the
+                // bar used to be shoved up clear of the keyboard — which is the
+                // bug, not the reason it worked.
+                //
+                // Through `dismissRequest` rather than by calling
+                // `resignFirstResponder` from here: the request is the one
+                // channel `KeystrokeField.updateUIView` reads, and a second
+                // route into UIKit's responder state is how the two get out of
+                // step.
+                dismissRequest += 1
             }
         }
         // Returning to the foreground carries no geometry of its own — this
@@ -320,7 +351,7 @@ struct TerminalView: View {
     /// `ChangesPane` already use for exactly this.
     ///
     /// Semantic colors throughout, and they resolve correctly here:
-    /// `WorkspaceView` puts this whole pane in the terminal theme's own color
+    /// `ShellPaneRealView` puts this whole pane in the terminal theme's own color
     /// scheme. That was already written down beside the transcript box, and the
     /// rest of this view had drifted past it — a hardcoded `.white` headline
     /// over the two `#FFFFFF` themes this app ships was a screen that said
@@ -604,7 +635,7 @@ struct TerminalView: View {
         let usable = size.height - padding.top - padding.bottom
         return max(1, Int((usable / cellSize.height).rounded(.down)))
     }
-    // `select` is gone. Switching panes is `WorkspaceView`'s job now, and it does
+    // `select` is gone. Switching panes is `ShellPaneTrack`'s job now, and it does
     // it by showing a different, already-mounted pane rather than by pointing
     // this one somewhere else — which is what makes a pane's grid, scroll
     // offset and fold state survive the switch.
@@ -977,6 +1008,56 @@ private final class KeystrokeSink: UIView, UIKeyInput {
         // does nothing rather than being given a new meaning nobody asked for.
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
         addGestureRecognizer(hold)
+    }
+
+    /// **The scroll is VERTICAL, so it only claims vertical drags.**
+    ///
+    /// `handlePan` converts a drag to whole lines out of `translation.y` and
+    /// ignores `x` entirely — a sideways drag on a terminal has always
+    /// scrolled it by zero lines. What is new is that something else now wants
+    /// that drag: the navigation shell's page turn is a horizontal
+    /// `DragGesture` over the whole pane, and a `UIPanGestureRecognizer` that
+    /// BEGINS on a sideways touch wins the race against it and then does
+    /// nothing with it. The symptom is a terminal you can swipe into and never
+    /// swipe out of, and it is silent — the drag is recognized, so nothing
+    /// anywhere reports a conflict.
+    ///
+    /// **Measured, not reasoned about.**
+    /// `TerminalScrollTests.testTheShellStillTurnsThePageOverALiveTerminal`
+    /// fails without this and passes with it, on the same runner, over the
+    /// same pane; `testTheShellDoesNotStealTheTerminalsScroll` is the opposite
+    /// assertion and passes either way. Refusing to begin is the whole fix,
+    /// and it is the same rule a `UIScrollView` with no horizontal content
+    /// applies.
+    ///
+    /// It costs nothing on the screens that have no page turn behind them: a
+    /// sideways drag there used to scroll by zero lines and now falls through
+    /// to whatever is behind it, which on a navigation stack is the
+    /// interactive back swipe this pane had quietly been eating.
+    ///
+    /// **The same rule, said by the other kind of pane, is `ShellDragClaim`.**
+    /// A pane must not take a drag it cannot use — that is this — and a pane
+    /// that IS using one sideways has to say so, because the shell now runs
+    /// alongside its panes rather than behind them. A diff's hunks say it;
+    /// this recognizer never has to, because there is no sideways use for a
+    /// drag on a terminal at all.
+    ///
+    /// Translation rather than velocity, because a drag that begins slowly has
+    /// a velocity near zero in both axes and would be decided by noise.
+    /// `abs(y) > abs(x)` is deliberately the same comparison
+    /// `ShellGesture.axis` makes, so the two cannot disagree about which way a
+    /// finger went.
+    ///
+    /// The tap is unaffected. It already `require(toFail:)`s this recognizer,
+    /// so a pan that never begins lets the tap through — and a tap has an
+    /// allowable movement of a few points, so a sideways drag long enough to
+    /// turn a page is nowhere near one.
+    override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = recognizer as? UIPanGestureRecognizer else {
+            return super.gestureRecognizerShouldBegin(recognizer)
+        }
+        let travel = pan.translation(in: self)
+        return abs(travel.y) > abs(travel.x)
     }
 
     override var canBecomeFirstResponder: Bool { true }

@@ -496,7 +496,7 @@ final class ChangesStore: ObservableObject {
     // `ReviewPosition`, which explains at length why a position on this screen
     // is a PATH. The Mac's `ChangesStore` holds an offset because its pane is
     // destroyed when a tmux layout is switched; this one's is not, since
-    // `WorkspaceView` keeps every visited pane mounted, so within one run of the app
+    // `ShellPaneTrack` keeps every visited pane mounted, so within one run of the app
     // the scroll never moves and there is nothing to put back.
 
     /// A file the view should scroll to, once.
@@ -583,7 +583,7 @@ final class ChangesStore: ObservableObject {
     ///
     /// On the store rather than in a view, because the two controls that open
     /// it live in two different view trees: the History row is `ChangesView`'s,
-    /// and `ChangesToolbarMenu` belongs to `WorkspaceView`'s toolbar for the reason
+    /// and `ChangesToolbarMenu` belonged to the pane host's toolbar for the reason
     /// its own comment gives. A `@State` in either is invisible to the other,
     /// and the store is the one thing both already hold.
     @Published var showingHistory = false

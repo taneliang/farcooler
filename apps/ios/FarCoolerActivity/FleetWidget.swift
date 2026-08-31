@@ -197,32 +197,6 @@ private var appName: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Far Cooler"
 }
 
-/// The one color rule this feature turns on.
-///
-/// **Amber means "needs you", and nothing else may wear it.** A blocked agent
-/// is stopped until a person answers it; a worktree with an unreviewed diff is
-/// merely waiting, and nothing is worse for having waited another hour. The
-/// moment reviews are amber too, amber stops meaning anything and the glance
-/// this widget exists to support becomes a thing to be read rather than seen.
-///
-/// A second copy of this switch is in `WatchFleetWidget`, and it has to be a
-/// copy: that is a separate binary, a color is a SwiftUI type, and
-/// `FleetSnapshot` — the file both targets compile and where the glyph, the
-/// words and the precedence do live — is the wire's shape and has no business
-/// importing SwiftUI. Three cases is the whole rule, and it is stated in both.
-///
-/// `AnyShapeStyle` because the three tints are not all colors: tertiary is a
-/// hierarchical style, which is what makes the all-clear rung recede against
-/// whatever wallpaper or watch face is behind it rather than sitting at a fixed
-/// gray that is invisible on one and shouting on another.
-private func glanceTint(_ glance: FleetSnapshot.Glance) -> AnyShapeStyle {
-    switch glance {
-    case .blocked: AnyShapeStyle(Color.orange)
-    case .review: AnyShapeStyle(Color.accentColor)
-    case .working: AnyShapeStyle(HierarchicalShapeStyle.tertiary)
-    }
-}
-
 /// One count, said in full: the mark, the number and the words.
 ///
 /// `Label` rather than an `HStack`, so the mark and the text keep the system's
@@ -230,23 +204,42 @@ private func glanceTint(_ glance: FleetSnapshot.Glance) -> AnyShapeStyle {
 /// drawn at accessibility sizes on a lock screen, where a hand-spaced icon and
 /// its text drift apart.
 ///
+/// **The icon is the state mark now, not an SF Symbol.** It used to be
+/// `glance.symbol` — a `▲` or a `±` — which made this one of the four
+/// different drawings four surfaces used for one fact. The spec's §03 is a
+/// single mark whose ring says whether your attention is wanted, and the whole
+/// value of one mark is that a person who has learned it on the home screen has
+/// learned it on the lock screen and the wrist at the same time.
+///
+/// **`.withoutCore`**, like every mark on a widget: §08 says
+/// "Working versus idle never appears on a widget. It flips every few seconds;
+/// at this refresh rate the claim would be false more often than true."
+///
 /// Never dimmed by `confidence`. Both counts this draws are latched: an agent
 /// that was blocked an hour ago is still blocked, and a diff nobody has
 /// reviewed is still unreviewed. Dimming them would make the two facts a person
 /// opens this widget for look like the doubtful part of it.
 private struct GlanceLabel: View {
+    @Environment(\.colorScheme) private var scheme
     let glance: FleetSnapshot.Glance
 
     var body: some View {
-        Label(glance.phrase, systemImage: glance.symbol)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(glanceTint(glance))
-            .lineLimit(1)
+        Label {
+            Text(glance.phrase)
+        } icon: {
+            GlanceMarkView(GlanceMark(glance: glance).withoutCore, size: .row)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(GlancePalette.tint(glance, scheme))
+        .lineLimit(1)
     }
 }
 
 struct FleetWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    /// Light mode is a different palette rather than a filter over the dark one
+    /// — §01: "Not a filter flip." See `GlanceInk`.
+    @Environment(\.colorScheme) private var scheme
     let entry: FleetEntry
 
     private var top: FleetSnapshot.Agent? { entry.snapshot.ranked.first }
@@ -331,11 +324,15 @@ struct FleetWidgetView: View {
             // once no working agent can still be asserted, `glance(at:)`
             // returns nil and this falls back to "last seen claude 4m" — the
             // prefix that is this surface's entire degradation, kept intact.
-            if let glance = entry.snapshot.glance(at: entry.date) {
-                Label(glance.phrase, systemImage: glance.symbol)
-            } else {
-                Text(headline)
-            }
+            //
+            // **Words only, and BOTH tiers.** §06: "accessoryInline has no
+            // styling channel at all, so it is words only: `2 need you · 3 to
+            // review`. Highest tier first, and it appends `· 2m` when the
+            // snapshot is not fresh." The SF Symbol this used to lead with was
+            // the one part of the line the system is free to draw in its own
+            // tint at its own size, so it spent the narrowest slot in the
+            // product on the only glyph that could not be relied on.
+            Text(inlineLine)
         case .circular:
             // The mark and the number are ONE fact, so they come from one
             // answer. A glyph belonging to the top agent above a number
@@ -349,19 +346,32 @@ struct FleetWidgetView: View {
             // volatile rung is already gone by then: `glance(at:)` drops
             // working agents this snapshot can no longer vouch for, and returns
             // nil once none is left.
-            VStack(spacing: 0) {
+            VStack(spacing: 2) {
                 if let glance = entry.snapshot.glance(at: entry.date) {
-                    Image(systemName: glance.symbol)
-                        .font(.title3)
-                        .foregroundStyle(glanceTint(glance))
+                    // §06: "Heavy ring plus the count, at the lone-indicator
+                    // size and stroke given in §03 — the heaviest mark in the
+                    // system, which is both what a blocked agent earns and what
+                    // survives vibrancy on a photograph." So 15pt with the
+                    // 3.5pt ring, not a `.title3` SF Symbol.
+                    GlanceMarkView(GlanceMark(glance: glance).withoutCore, size: .lone)
+                        .foregroundStyle(GlancePalette.tint(glance, scheme))
                     Text("\(glance.count)")
                         .font(.caption2.monospacedDigit())
                 } else {
-                    Text(top?.glyph ?? "·")
-                        .font(.title3)
-                        // The top agent's own mark, which CAN be a `working`
-                        // one that has expired — so this one does dim.
-                        .opacity(confidence == .lastSeen ? 0.6 : 1)
+                    // No count to make, so the mark is the top agent's own
+                    // state rather than the fleet's — the same drawing, asked a
+                    // narrower question.
+                    GlanceMarkView(
+                        top.map { GlanceMark(agent: $0, confidence: confidence).withoutCore }
+                            ?? GlanceMark(attention: .quiet, core: nil),
+                        size: .lone)
+                    // No opacity dim any more, and that is the mark earning its
+                    // keep rather than a rule being dropped. The top agent's
+                    // mark CAN be a `working` one that has expired; a dashed
+                    // ring is what §03 says that looks like — "a broken ring is
+                    // a broken link" — and it survives the vibrancy flattening
+                    // that a 60% opacity does not.
+                    //
                     // A dash, not a zero, before anything has been written. "0"
                     // under a lock screen clock is a statement that nothing
                     // needs you, and this surface has no footer to qualify it
@@ -417,7 +427,42 @@ struct FleetWidgetView: View {
         }
     }
 
-    /// The one line the two text accessories spend their whole budget on.
+    /// The whole of `accessoryInline`, as §06 specifies it.
+    ///
+    /// Both counts, highest tier first, joined by the separator the spec draws
+    /// — and the snapshot's age appended in the same way when it is no longer
+    /// fresh. `glance(at:)` is deliberately NOT what picks here: it answers
+    /// "the one thing this fleet is about", which is the right question for a
+    /// slot holding one number and the wrong one for a line that has room for
+    /// two facts.
+    ///
+    /// With neither count to make, it falls back to naming the top agent — the
+    /// same fallback this family always had, including the case a stale
+    /// snapshot creates, where `stated` prefixes "last seen".
+    private var inlineLine: String {
+        var parts: [String] = []
+        if entry.snapshot.needingYou > 0 {
+            parts.append(FleetSnapshot.Glance.blocked(entry.snapshot.needingYou).phrase)
+        }
+        // `?? 0` here and not in the snapshot: nil means this build was never
+        // told about reviews, and saying nothing is what "not told" should
+        // draw. What must never happen is the reverse — "0 to review" asserting
+        // something nobody said.
+        if let reviews = entry.snapshot.needsReview, reviews > 0 {
+            parts.append(FleetSnapshot.Glance.review(reviews).phrase)
+        }
+        if parts.isEmpty { parts.append(headline) }
+        let age = entry.snapshot.age(at: entry.date)
+        // Only when it is not fresh. A line that appended "· now" to every
+        // render would spend the narrowest slot in the product restating that
+        // nothing is wrong.
+        if entry.hasSnapshot, age >= GlanceAge.fresh {
+            parts.append(GlanceAge.brief(age))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The one line the rectangular accessory spends its whole budget on.
     private var headline: String {
         guard let top, !agentTitle(top).isEmpty else { return nothingKnown }
         return stated(top, confidence)
@@ -436,6 +481,7 @@ struct FleetWidgetView: View {
 
 /// One number and the agent behind it.
 private struct SmallFleet: View {
+    @Environment(\.colorScheme) private var scheme
     let entry: FleetEntry
 
     var body: some View {
@@ -459,11 +505,15 @@ private struct SmallFleet: View {
             // exactly that state, and the agent line and the footer below say
             // it properly.
             if entry.hasSnapshot, let glance {
+                // §02's own row: "38–46 / 600, −0.035em. The single count on a
+                // widget. Tabular numerals." Not `.rounded`, which this drew
+                // before — §02's rule is SF for chrome and SF Mono for anything
+                // a machine produced, and rounded is neither.
                 Text("\(glance.count)")
-                    .font(.system(size: 44, weight: .semibold, design: .rounded))
-                    .foregroundStyle(glanceTint(glance))
+                    .glanceType(.count())
+                    .foregroundStyle(GlancePalette.tint(glance, scheme))
                 Text(glance.caption)
-                    .font(.caption)
+                    .glanceType(.secondary)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
@@ -539,6 +589,7 @@ private struct RowsFleet: View {
 
 /// One agent: its mark, its name, and where it is.
 private struct AgentLine: View {
+    @Environment(\.colorScheme) private var scheme
     let agent: FleetSnapshot.Agent
     let snapshot: FleetSnapshot
     let at: Date
@@ -547,20 +598,41 @@ private struct AgentLine: View {
         let confidence = snapshot.confidence(in: agent, at: at)
         let title = agentTitle(agent)
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(agent.glyph)
-                .font(.caption.monospaced())
-                // Amber for the one that is waiting on a person, and nothing
-                // else — the same reservation the Live Activity badge makes, so
-                // a glance at either surface answers "does this need me"
-                // without reading a word.
-                .foregroundStyle(agent.status == "blocked" ? Color.orange : Color.secondary)
+            // The state mark at the row size — 10pt with no core, which §03
+            // spells out: "There is no 10pt core — a row shows the ring alone."
+            //
+            // This used to be `Text(agent.glyph)`, a literal character off the
+            // wire, which made a widget row the third of four different
+            // drawings of one fact. The glyph is still on the wire and still
+            // right for the surfaces that are text and nothing else; a row has
+            // room to draw the mark, and drawing it is what makes a person who
+            // has learned it here able to read the lock screen.
+            //
+            // `.withoutCore` for §08's reason: at one reload per twenty
+            // minutes, working-versus-idle "would be false more often than
+            // true".
+            GlanceMarkView(GlanceMark(agent: agent, confidence: confidence).withoutCore, size: .row)
+                // A shape has no baseline of its own, so a `firstTextBaseline`
+                // stack would hang it off its bottom edge and leave it sitting
+                // a descender low. One point below the baseline centres it
+                // against the x-height of the caption beside it.
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             VStack(alignment: .leading, spacing: 0) {
                 // "last seen working" rather than "working": an agent that was
                 // working an hour ago has very likely finished, and a widget
                 // that keeps asserting it is a widget telling you something
                 // untrue in the calmest possible voice.
                 Text(stated(agent, confidence))
-                    .font(.caption.weight(.medium))
+                    .glanceType(.rowName)
+                    // **Stated, because a `Link` tints its label.** The rows on
+                    // the medium and large families are wrapped in one so a tap
+                    // opens that agent, and a `Link` label with no colour of
+                    // its own is drawn in the accent colour — so every agent's
+                    // name on the two biggest tiles was blue, which in a
+                    // palette whose whole rule is that one hue is reserved is a
+                    // second hue nobody chose. §01's `text 1`: "Names, counts,
+                    // anything you read first."
+                    .foregroundStyle(GlancePalette.ink1(scheme))
                     .lineLimit(1)
                 // Skipped when it is already the line above. An agent pushed
                 // before the app has ever seen it has no `headline`, so
@@ -568,9 +640,13 @@ private struct AgentLine: View {
                 // printed it twice would spend both of its lines saying one
                 // thing.
                 if !agent.line.isEmpty, agent.line != title {
+                    // Same reason as the line above it: inside a `Link`,
+                    // `.secondary` is a secondary ACCENT rather than a secondary
+                    // ink. §01's `text 2` is the floor for on-device text and is
+                    // what this row is for.
                     Text(agent.line)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .glanceType(.secondary)
+                        .foregroundStyle(GlancePalette.ink2(scheme))
                         .lineLimit(1)
                 }
             }
@@ -590,12 +666,20 @@ private struct StaleFooter: View {
         // your agents" and "these are the ones I have heard from".
         let source = entry.snapshot.complete ? "" : " · from notifications"
         if entry.hasSnapshot {
-            Text("\(entry.snapshot.capturedAt, style: .relative) ago\(source)")
-                .font(.caption2)
+            // **A figure, not a running clock.** This was
+            // `Text(_, style: .relative)`, which ticks: a widget counting
+            // seconds up from a measurement it took a quarter of an hour ago,
+            // to a precision it does not have. §02: "Relative and coarse: 2m
+            // ago, 52m ago, 3h ago. Never a running clock on an idle agent —
+            // precision nobody needs implies precision we do not have."
+            //
+            // Mono because it came off a machine, at §02's 11pt floor.
+            Text("\(GlanceAge.stated(entry.snapshot.age(at: entry.date)))\(source)")
+                .glanceType(.monoFigures)
                 .foregroundStyle(.tertiary)
         } else {
             Text("Open \(appName) to see your agents")
-                .font(.caption2)
+                .glanceType(.secondary)
                 .foregroundStyle(.tertiary)
         }
     }

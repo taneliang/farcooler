@@ -149,9 +149,11 @@ private struct Headline: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(agent.glyph)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(agent.status == "blocked" ? Color.orange : Color.secondary)
+                // 22pt, which §03 names for exactly this: "as a lone indicator
+                // — strokes 5 / 4 / 1.5, core 8 — used by the detail header and
+                // accessoryCircular."
+                GlanceMarkView(GlanceMark(agent: agent, confidence: confidence), size: .watchLone)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
                 // "last seen working" rather than "working", and the qualifier
                 // in front — see `stated`. On this screen there is room for the
                 // whole string, which is exactly why the rule cannot be argued

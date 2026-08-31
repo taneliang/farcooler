@@ -1,7 +1,37 @@
 import XCTest
 
+/// The shell's bar has to survive the keyboard, and still answer a finger
+/// afterwards.
+///
+/// This was `testTabStripRemainsInteractiveAfterKeyboardDismissal`, written
+/// against `TerminalTabStrip` — a floating strip of chips under a navigation
+/// bar, in a `WorkspaceView`. Neither exists. What the regression was ABOUT
+/// does: an input accessory lives in the keyboard's window, and a pane host
+/// that lets the keyboard into its own safe area gets its furniture shoved up
+/// the screen and then left there. The shell's answer is
+/// `ShellRootView.body`'s full-height stack and every pane's
+/// `.ignoresSafeArea(.keyboard, edges: .bottom)`, and this is the assertion
+/// that they hold.
+///
+/// So the same five moments, against the surfaces that carry them now:
+///
+/// | Then | Now |
+/// | --- | --- |
+/// | the tab strip's frame | `shell-bar`'s frame |
+/// | `workspace-tab-changes`'s `value == "current"` | `shell-state`'s `tab=` |
+/// | a lift is a tap on a chip | a lift on the bar, which is how a tab is chosen |
+/// | the switcher sheet's `fleet-terminal-<id>` row | an overview card, `shell-card-<id>` |
+///
+/// **Two of the old assertions have no equivalent and are not replaced.** The
+/// changes pane's "Review options" menu and the "Switch workspace" button were
+/// items in `WorkspaceView`'s navigation-bar toolbar, and the test checked
+/// their ORDER within it — that the switcher stayed rightmost as the contextual
+/// menu came and went. There is no navigation bar over a pane any more and
+/// neither control has a host, so there is no order left to be wrong. That is a
+/// gap in the shell rather than in this test; see `ChangesToolbarMenu`, which
+/// is still in the tree and is currently mounted by nothing.
 final class KeyboardTabStripTests: XCTestCase {
-    func testTabStripRemainsInteractiveAfterKeyboardDismissal() throws {
+    func testTheBarRemainsInteractiveAfterKeyboardDismissal() throws {
         #if targetEnvironment(simulator)
         throw XCTSkip("This regression needs a real iPhone with a configured workspace.")
         #endif
@@ -14,25 +44,22 @@ final class KeyboardTabStripTests: XCTestCase {
             throw XCTSkip("The current device state has no agent composer to exercise.")
         }
 
-        // The Changes tab, by identifier rather than by label. Its label now
-        // carries the diff's counts when there are any, and what they count —
-        // "Changes, 82 added, 13 removed, including work that isn’t committed
-        // yet" — so matching on the word alone found it only on a clean
-        // workspace. It is also no longer a pane the host has to have opened:
-        // every workspace has this chip. See `TerminalTabStrip`.
-        let otherTab = app.buttons["workspace-tab-changes"]
-        guard otherTab.waitForExistence(timeout: 5) else {
-            throw XCTSkip("The current screen is not a workspace with a tab strip.")
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        guard bar.waitForExistence(timeout: 5) else {
+            throw XCTSkip("The current screen is not the shell.")
         }
-        guard otherTab.value as? String != "current" else {
-            throw XCTSkip("The workspace opened on its Changes tab; nothing to switch to.")
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        guard probe.waitForExistence(timeout: 5) else {
+            throw XCTSkip("The shell never reported where it was.")
         }
-        let initialTabFrame = otherTab.frame
-        let initialSwitcherFrame = app.buttons["Switch workspace"].frame
-        let originalTab = app.buttons.matching(
-            NSPredicate(format: "value == %@", "current")
-        ).firstMatch
-        let originalTabIdentifier = originalTab.identifier
+        func field(_ name: String) -> Int? {
+            (probe.value as? String ?? "").split(separator: " ")
+                .first { $0.hasPrefix("\(name)=") }
+                .flatMap { Int($0.split(separator: "=")[1]) }
+        }
+        let home = try XCTUnwrap(field("tab"))
+        let initialBarFrame = bar.frame
+
         let transcript = app.scrollViews["agent-transcript"]
         guard transcript.waitForExistence(timeout: 5) else {
             throw XCTSkip("The current agent pane has no transcript scroll view.")
@@ -59,10 +86,9 @@ final class KeyboardTabStripTests: XCTestCase {
             XCTWaiter.wait(for: [remainsAtTail], timeout: 2), .completed,
             "Opening the keyboard pulled a tail-following transcript off the bottom"
         )
-        let keyboardTabFrame = otherTab.frame
         XCTAssertEqual(
-            keyboardTabFrame.minY, initialTabFrame.minY, accuracy: 2,
-            "The tab strip moved when the keyboard appeared"
+            bar.frame.minY, initialBarFrame.minY, accuracy: 2,
+            "The bar moved when the keyboard appeared"
         )
 
         app.swipeDown()
@@ -72,10 +98,9 @@ final class KeyboardTabStripTests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [keyboardDismissed], timeout: 5), .completed)
 
-        let dismissedTabFrame = otherTab.frame
         XCTAssertEqual(
-            dismissedTabFrame.minY, initialTabFrame.minY, accuracy: 2,
-            "The tab strip moved after the keyboard disappeared"
+            bar.frame.minY, initialBarFrame.minY, accuracy: 2,
+            "The bar moved after the keyboard disappeared"
         )
         let transcriptInsetReset = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value BEGINSWITH %@", "keyboard=0;"),
@@ -85,65 +110,64 @@ final class KeyboardTabStripTests: XCTestCase {
             XCTWaiter.wait(for: [transcriptInsetReset], timeout: 2), .completed,
             "The transcript retained the keyboard-height bottom inset after dismissal: \(String(describing: transcript.value))"
         )
-        XCTAssertTrue(otherTab.isHittable, "The tab strip moved behind the navigation bar")
-        otherTab.tap()
+        XCTAssertTrue(bar.isHittable, "The bar ended up somewhere nothing can touch")
 
-        let selected = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "current"), object: otherTab)
+        // And it still ANSWERS, which is the half the frame check cannot make.
+        // A lift onto the first row is how a tab is chosen in the shell — the
+        // column unfurls one row per 34 points, and the first row is the diff,
+        // which every workspace has. That is the same move the Changes chip
+        // used to be.
+        try XCTSkipUnless(home != 0, "This pane is already the first tab; nothing to move to.")
+        lift(bar, by: 20)
+        let landed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in field("tab") == 0 }, object: nil)
         XCTAssertEqual(
-            XCTWaiter.wait(for: [selected], timeout: 5), .completed,
-            "The Changes tab did not become the current pane after the tap"
+            XCTWaiter.wait(for: [landed], timeout: 5), .completed,
+            "A lift on the bar after the keyboard had come and gone chose nothing: "
+                + "\(probe.value ?? "")"
         )
-        let changesSwitcher = app.buttons["Switch workspace"]
-        let reviewOptions = app.buttons["Review options"]
-        XCTAssertTrue(reviewOptions.waitForExistence(timeout: 2))
-        XCTAssertGreaterThan(
-            changesSwitcher.frame.minX, reviewOptions.frame.minX,
-            "The workspace switcher was not the rightmost changes-pane control"
-        )
-        XCTAssertEqual(
-            changesSwitcher.frame.maxX, initialSwitcherFrame.maxX, accuracy: 2,
-            "The workspace switcher moved when the changes toolbar appeared"
-        )
+
         let toolbarPost = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        toolbarPost.name = "workspace-button-order-and-transcript-type-post"
+        toolbarPost.name = "shell-bar-after-keyboard"
         toolbarPost.lifetime = .keepAlways
         add(toolbarPost)
 
-        let originalTabAfterSwitch = app.buttons[originalTabIdentifier]
-        XCTAssertTrue(originalTabAfterSwitch.waitForExistence(timeout: 2))
-        originalTabAfterSwitch.tap()
-        XCTAssertFalse(
-            app.buttons["Review options"].exists,
-            "The hidden changes pane left its review menu in the agent toolbar"
-        )
-
-        // The switcher sheet, which now hands its selection all the way back up
-        // to `FleetView.show(_:)` rather than selecting inside the screen — a
-        // pane in another workspace is a different screen. A pane in THIS one
-        // comes straight back down and switches tabs without rebuilding
-        // anything, which is what this checks.
-        let tabPrefix = "terminal-tab-"
-        let agentTab = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@ AND value != %@", tabPrefix, "current")
-        ).firstMatch
-        guard agentTab.waitForExistence(timeout: 3) else {
-            throw XCTSkip("This workspace has no second agent pane to switch to.")
-        }
-        let terminalID = String(agentTab.identifier.dropFirst(tabPrefix.count))
-        app.buttons["Switch workspace"].tap()
-        let modalRow = app.buttons["fleet-terminal-\(terminalID)"]
-        XCTAssertTrue(modalRow.waitForExistence(timeout: 3))
-        XCTAssertTrue(modalRow.isHittable, "The terminal row was visible but not tappable")
-        modalRow.tap()
-
-        let selectedFromModal = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "current"), object: agentTab)
+        // The cross-worktree jump, which used to be the switcher sheet in the
+        // toolbar and is the overview now. Same shape of assertion: reach every
+        // workspace on the runner from inside a pane, and land in one.
+        try XCTSkipUnless(
+            (field("workspaces") ?? 0) > 1, "One workspace: there is nowhere to cross to.")
+        let ws = try XCTUnwrap(field("ws"))
+        lift(bar, by: 320)
+        let opened = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in field("overview") == 1 }, object: nil)
         XCTAssertEqual(
-            XCTWaiter.wait(for: [selectedFromModal], timeout: 3), .completed,
-            "Tapping a terminal in the modal did not switch to its tab"
-        )
-        XCTAssertFalse(app.buttons["Done"].exists, "The terminal modal did not dismiss")
+            XCTWaiter.wait(for: [opened], timeout: 5), .completed,
+            "The long lift never reached the overview: \(probe.value ?? "")")
+
+        let other = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "shell-card-")
+        ).allElementsBoundByIndex.first { $0.isHittable }
+        let card = try XCTUnwrap(other, "The overview drew no cards")
+        card.tap()
+        let arrived = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in field("overview") == 0 }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [arrived], timeout: 5), .completed,
+            "Tapping a card did not leave the overview: \(probe.value ?? "")")
+        XCTAssertNotNil(field("ws"), "The shell stopped reporting where it was")
+        _ = ws
+    }
+
+    /// Lift the bar by `points`, and hold there so the column is at that height
+    /// when the finger leaves. The same helper `ShellGestureTests` uses, and it
+    /// has to stay the same: a lift that releases in the frame of its last
+    /// movement can leave the final translation unreported.
+    private func lift(_ bar: XCUIElement, by points: CGFloat) {
+        let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let to = from.withOffset(CGVector(dx: 0, dy: -points))
+        from.press(
+            forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.5)
     }
 }
 

@@ -34,6 +34,11 @@ struct ShellHarness: View {
         CommandLine.arguments.contains("-shell-harness")
     }
 
+    /// The one thing a canned `ChangesView` needs, and the same one
+    /// `ChangesLayoutHarness` stands it on: a connection nobody connects, for
+    /// the sake of the store hanging off it.
+    @StateObject private var connection = Connection()
+
     var body: some View {
         let fleet = Self.fleet
         ZStack {
@@ -54,12 +59,31 @@ struct ShellHarness: View {
                 // is exactly the state a screenshot most wants and a script
                 // least reliably produces.
                 openingOnOverview: CommandLine.arguments.contains("-shell-overview")
-            ) {
-                _, workspace, tab, isCrossing in
-                ShellPanePlaceholder(workspace: workspace, tab: tab, isCrossing: isCrossing)
+            ) { slot in
+                ShellPanePlaceholder(slot: slot, changes: changesStore)
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    /// The review pane over `ChangesLayoutHarness`'s own canned change set, or
+    /// nil when this launch did not ask for one.
+    ///
+    /// `-shell-changes`, and it is the fixture the shell's page turn most
+    /// needed and did not have. A diff is not one scroll view: every hunk is a
+    /// horizontal `ScrollView` of its own, because a diff line is a line and
+    /// wrapping one breaks the only property a diff has. Nothing else in this
+    /// app puts a horizontal scroller inside a pane, and a shell tested only
+    /// against panes that scroll vertically is a shell that has never met the
+    /// gesture it actually loses. See `ShellPaneScrollTests`.
+    ///
+    /// The SAME canned set `-changes-layout-harness` stands on, so the two
+    /// harnesses cannot come to disagree about what a diff looks like.
+    private var changesStore: ChangesStore? {
+        guard CommandLine.arguments.contains("-shell-changes") else { return nil }
+        let store = connection.changesStores.store(for: "harness")
+        ChangesLayoutHarness.standIn(store)
+        return store
     }
 
     /// Which fixture this launch asked for.
@@ -183,22 +207,81 @@ struct ShellHarness: View {
 /// workspace's name in muted text, so the crossing is visible while it is
 /// still abandonable rather than a surprise you find after committing to it.
 struct ShellPanePlaceholder: View {
-    let workspace: ShellWorkspace
-    let tab: ShellTab
-    let isCrossing: Bool
+    let slot: ShellPaneSlot
+    /// The canned review pane this slot draws instead of text, under
+    /// `-shell-changes`. Nil for every other launch.
+    var changes: ChangesStore?
+
+    /// A value that changes if and only if this pane is REBUILT.
+    ///
+    /// The whole of how the pane-retention invariant is proved, and it works
+    /// because of what `@State` is: the initializer runs every time the struct
+    /// is created, and SwiftUI keeps the FIRST value for as long as the view's
+    /// identity survives. So a `body` pass, a fleet poll, a re-seat of
+    /// `position` and a whole swipe all leave this alone; a destroyed and
+    /// recreated subtree gets a new one.
+    ///
+    /// A placeholder can afford to be honest about this in a way a terminal
+    /// cannot — a real pane's evidence of being rebuilt is a lost scroll
+    /// position, which is not a thing a test can read — so the assertion is
+    /// made here, against the same `ShellPaneTrack` the app uses.
+    @State private var born = UUID().uuidString.prefix(8)
+
+    private var workspace: ShellWorkspace { slot.workspace }
+    private var tab: ShellTab { slot.tab }
+    private var isCrossing: Bool { slot.isCrossing }
+
+    /// Whether this launch asked for panes that SCROLL.
+    ///
+    /// `-shell-scroll`, and it is the only flag in this harness that changes
+    /// what a pane IS rather than how many of them there are. A text
+    /// placeholder cannot show the one thing a real pane brings with it: its
+    /// own vertical gesture, competing with the shell's page turn over the
+    /// same touch. A terminal has one and so does a diff, and they are
+    /// different recognizers with the same problem — see
+    /// `ShellPaneScrollTests`.
+    private static var scrolls: Bool {
+        CommandLine.arguments.contains("-shell-scroll")
+    }
+
+    /// Where the pane's own scroll view is, so a test can tell "the shell
+    /// swallowed the scroll" from "there was nothing to scroll".
+    @State private var offset: CGFloat = 0
 
     var body: some View {
-        VStack(spacing: PaneMetrics.step) {
-            HStack(spacing: PaneMetrics.step) {
-                ShellMarkView(mark: tab.mark, size: 7)
-                Text(tab.title)
-                    .font(.system(size: 17, weight: .medium))
-                if isCrossing {
-                    Text(workspace.name)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
+        Group {
+            if let changes {
+                // The real pane, over canned data — not a stand-in for it.
+                // What the shell has to arbitrate with is `ChangesView`'s own
+                // scroll views, and a fixture that merely looked like a diff
+                // would have none of them.
+                ChangesView(
+                    store: changes, workspaceName: workspace.name, agents: [],
+                    pullRequest: nil)
+                    // Where the shell's furniture is, told to the pane the same
+                    // way `ShellPaneRealView` tells a real one. Without it the
+                    // diff's header sits under the clock and a test's drag
+                    // lands somewhere the app would never put it.
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        Color.clear.frame(height: slot.chrome.top)
+                    }
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        Color.clear.frame(height: slot.chrome.bottom)
+                    }
+            } else if Self.scrolls {
+                scrollingBody
+            } else {
+                restingBody
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(.rect)
+        .overlay(alignment: .topLeading) { probe }
+    }
+
+    private var restingBody: some View {
+        VStack(spacing: PaneMetrics.step) {
+            title
 
             // SF Mono, because everything under here came off a machine — or
             // would have, in the commit that puts a terminal in this slot.
@@ -206,12 +289,79 @@ struct ShellPanePlaceholder: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.tertiary)
 
-            Text("Pane placeholder")
+            Text(slot.isVisible ? "visible" : "hidden")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(.rect)
+    }
+
+    /// The same pane with a `ScrollView` around it, and enough rows that there
+    /// is somewhere to go.
+    ///
+    /// A plain `ScrollView` on purpose, rather than a copy of `ChangesView`.
+    /// What the shell has to get right is not a fact about the diff — it is
+    /// that a `UIScrollView` inside a pane claims a drag before the shell's
+    /// horizontal `DragGesture` can, in any direction, including the one it has
+    /// nothing to do with. A pane made of forty lines of text has exactly that
+    /// recognizer and nothing else, which is what makes it the right fixture:
+    /// a rule proved against it is a rule the third scrollable pane gets for
+    /// free.
+    private var scrollingBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: PaneMetrics.step) {
+                title
+                ForEach(0..<60, id: \.self) { line in
+                    Text("\(tab.id) · line \(line)")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text(slot.isVisible ? "visible" : "hidden")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(PaneMetrics.edge)
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, y in
+            offset = y
+        }
+    }
+
+    private var title: some View {
+        HStack(spacing: PaneMetrics.step) {
+            ShellMarkView(mark: tab.mark, size: 7)
+            Text(tab.title)
+                .font(.system(size: 17, weight: .medium))
+            if isCrossing {
+                Text(workspace.name)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// The two things about a pane that no screenshot can show: whether it
+    /// survived the last gesture, and whether it thinks it is the pane.
+    ///
+    /// A one-point element rather than a value on the pane itself, for the
+    /// reason `ShellRootView.probe` gives: `accessibilityValue` on a container
+    /// makes the container the element and hides everything inside it.
+    ///
+    /// `isVisible` is here because it is the flag a real terminal opens its
+    /// ssh stream on and the flag a composer takes first responder on, and
+    /// `DockedBar.swift:34-41` is what happens when two panes have it at once.
+    /// Mid-gesture two panes are on screen, so "exactly one" is a claim that
+    /// has to be checked with a finger down.
+    private var probe: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: 1, height: 1)
+            .accessibilityElement()
+            .accessibilityIdentifier("shell-pane-\(tab.id)")
+            .accessibilityValue(
+                "born=\(born) visible=\(slot.isVisible ? 1 : 0) "
+                    + "offset=\(Int(offset.rounded()))")
     }
 }
 

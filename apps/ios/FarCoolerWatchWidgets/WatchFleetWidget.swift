@@ -256,33 +256,6 @@ private func headline(
     return stated(top, confidence)
 }
 
-/// The one color rule this feature turns on.
-///
-/// **Amber means "needs you", and nothing else may wear it.** A blocked agent
-/// is stopped until a person answers it; a worktree with an unreviewed diff is
-/// merely waiting, and nothing is worse for having waited another hour. On a
-/// wrist that reservation is worth more than anywhere else — this is the
-/// surface people see without deciding to look, so the mark has to answer
-/// "does this need me" before any word is read.
-///
-/// A second copy of the switch in `FleetWidget`, and it has to be a copy: that
-/// is a separate binary, a color is a SwiftUI type, and `FleetSnapshot` — the
-/// file both targets compile, and where the glyph, the words and the precedence
-/// DO live, so they cannot drift — is the wire's shape and has no business
-/// importing SwiftUI. Three cases is the whole rule and it is stated in both.
-///
-/// `AnyShapeStyle` because the three tints are not all colors: tertiary is a
-/// hierarchical style, which is what lets the all-clear rung recede against
-/// whatever watch face is behind it instead of sitting at a fixed gray that
-/// disappears on one face and shouts on another.
-private func glanceTint(_ glance: FleetSnapshot.Glance) -> AnyShapeStyle {
-    switch glance {
-    case .blocked: AnyShapeStyle(Color.orange)
-    case .review: AnyShapeStyle(Color.accentColor)
-    case .working: AnyShapeStyle(HierarchicalShapeStyle.tertiary)
-    }
-}
-
 /// One count, said in full: the mark, the number and the words.
 ///
 /// `Label` rather than an `HStack`, so the mark and the text keep the system's
@@ -290,18 +263,38 @@ private func glanceTint(_ glance: FleetSnapshot.Glance) -> AnyShapeStyle {
 /// dynamic type sizes are what a Smart Stack card is read at, and a hand-spaced
 /// icon drifts away from its text there.
 ///
+/// **The icon is the state mark, at the wrist's row size.** §03 gives the watch
+/// two diameters and no more, "read at arm's length": 14pt in a row and 22pt as
+/// a lone indicator. `accessoryRectangular` takes the row size "because it IS a
+/// row: mark, label, trace."
+///
+/// **The colour comes from `GlancePalette` and is no longer a copy.** There
+/// used to be a `glanceTint` here whose own comment explained that it HAD to be
+/// a copy of the phone's, because a colour is a SwiftUI type and
+/// `FleetSnapshot` — the file both targets compile — has no business importing
+/// SwiftUI. That was true of `FleetSnapshot` and still is
+/// (`FleetSnapshot.swift:466-470`); it was never true of the seam. The tint
+/// lives in a SwiftUI file this target also compiles now, so the rule "amber
+/// means needs you, and nothing else may wear it" exists once instead of twice,
+/// on the two surfaces a person looks at within a minute of each other.
+///
 /// Never dimmed by `confidence`. Both counts it draws are latched: an agent
 /// blocked an hour ago is still blocked, and a diff nobody has reviewed is
 /// still unreviewed. Dimming them would make the two facts somebody raises a
 /// wrist for look like the doubtful part of the card.
 private struct GlanceLabel: View {
+    @Environment(\.colorScheme) private var scheme
     let glance: FleetSnapshot.Glance
 
     var body: some View {
-        Label(glance.phrase, systemImage: glance.symbol)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(glanceTint(glance))
-            .lineLimit(1)
+        Label {
+            Text(glance.phrase)
+        } icon: {
+            GlanceMarkView(GlanceMark(glance: glance).withoutCore, size: .watchRow)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(GlancePalette.tint(glance, scheme))
+        .lineLimit(1)
     }
 }
 
@@ -351,12 +344,44 @@ struct WatchFleetView: View {
             // once no working agent can still be asserted, `glance(at:)`
             // returns nil and this falls back to "last seen claude 4m" — the
             // prefix that is this surface's entire degradation, kept intact.
-            if let glance = entry.snapshot.glance(at: entry.date) {
-                Label(glance.phrase, systemImage: glance.symbol)
-            } else {
-                Text(headline(entry: entry, top: top, confidence: confidence, appName: appName))
-            }
+            //
+            // **Words only, and BOTH tiers**, the same line the phone's inline
+            // accessory draws. §06: "accessoryInline has no styling channel at
+            // all, so it is words only: `2 need you · 3 to review`. Highest
+            // tier first, and it appends `· 2m` when the snapshot is not
+            // fresh." The SF Symbol this used to lead with was the one part of
+            // the line the system was free to redraw in its own tint at its own
+            // size, so the narrowest slot in the product was spending its first
+            // characters on the only glyph that could not be relied on.
+            Text(inlineLine)
         }
+    }
+
+    /// The whole of `accessoryInline`, as §06 specifies it.
+    ///
+    /// A copy of `FleetWidgetView.inlineLine` on the phone, and it has to be
+    /// one: this is a separate binary and the parts it is assembled from —
+    /// `Glance.phrase`, `needingYou`, `needsReview`, `GlanceAge.brief` — are
+    /// all in AgentKit, where both targets read them. What is duplicated is the
+    /// four-line assembly; what is shared is every value in it.
+    private var inlineLine: String {
+        var parts: [String] = []
+        if entry.snapshot.needingYou > 0 {
+            parts.append(FleetSnapshot.Glance.blocked(entry.snapshot.needingYou).phrase)
+        }
+        // `?? 0` deliberately absent: nil is "this build was never told about
+        // reviews", and saying nothing is what that should draw. "0 to review"
+        // would assert something no host said.
+        if let reviews = entry.snapshot.needsReview, reviews > 0 {
+            parts.append(FleetSnapshot.Glance.review(reviews).phrase)
+        }
+        if parts.isEmpty {
+            parts.append(
+                headline(entry: entry, top: top, confidence: confidence, appName: appName))
+        }
+        let age = entry.snapshot.age(at: entry.date)
+        if entry.hasSnapshot, age >= GlanceAge.fresh { parts.append(GlanceAge.brief(age)) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -366,11 +391,21 @@ struct WatchFleetView: View {
 /// glyph and one number, so "2 agents are stopped waiting for you" and "3
 /// worktrees are waiting to be looked at" arrive in the same shape — and if
 /// they arrive in the same COLOR with the same MARK, a glance cannot tell
-/// urgent from merely pending, which is worse than showing neither. The pair is
-/// what separates them: a filled amber triangle over 2, or an accented `±` over
-/// 3, decided by `FleetSnapshot.glance(at:)` so this and the phone's circular
-/// accessory cannot disagree about which of the two a fleet is currently about.
+/// urgent from merely pending, which is worse than showing neither.
+///
+/// What separates them is the mark's own ring: a 5pt amber ring over 2, or a
+/// 4pt review ring over 3, at the 22pt lone-indicator diameter §03 gives the
+/// wrist. Which of the two a fleet is currently about is decided in
+/// `FleetSnapshot.glance(at:)` so that this and the phone's circular accessory
+/// cannot disagree.
+///
+/// **Stroke and not hue is what does the work here**, which matters on this
+/// family more than anywhere: a watch face flattens every accessory to a single
+/// tint, so a drawing that told the two apart by colour told them apart
+/// nowhere. §03: "the mark distinguishes states by stroke weight, fill and
+/// dash, so hue was always redundant reinforcement."
 private struct Circular: View {
+    @Environment(\.colorScheme) private var scheme
     let entry: WatchFleetEntry
     let top: FleetSnapshot.Agent?
     let confidence: FleetSnapshot.Confidence
@@ -385,19 +420,26 @@ private struct Circular: View {
         // latched, and the volatile rung is already gone by then: `glance(at:)`
         // counts only working agents this snapshot can still vouch for, and
         // returns nil once there are none.
-        VStack(spacing: 0) {
+        VStack(spacing: 2) {
             if let glance = entry.snapshot.glance(at: entry.date) {
-                Image(systemName: glance.symbol)
-                    .font(.title3)
-                    .foregroundStyle(glanceTint(glance))
+                // 22pt, the wrist's lone-indicator size, with the 5pt ring a
+                // needs-you mark earns there. §06: "the heaviest mark in the
+                // system, which is both what a blocked agent earns and what
+                // survives vibrancy on a photograph."
+                GlanceMarkView(GlanceMark(glance: glance).withoutCore, size: .watchLone)
+                    .foregroundStyle(GlancePalette.tint(glance, scheme))
                 Text("\(glance.count)")
-                    .font(.caption2.monospacedDigit())
+                    .glanceType(.monoFigures)
             } else {
-                Text(top?.glyph ?? "·")
-                    .font(.title3)
-                    // The top agent's own mark, which CAN be a `working` one
-                    // that has expired — so this one does dim.
-                    .opacity(confidence == .lastSeen ? 0.6 : 1)
+                // No count to make, so the mark answers the narrower question:
+                // what the top agent is doing. A dashed ring is what a snapshot
+                // that has stopped vouching for it looks like — §03's "a broken
+                // ring is a broken link" — which survives the face's vibrancy
+                // flattening in a way that a 60% opacity does not.
+                GlanceMarkView(
+                    top.map { GlanceMark(agent: $0, confidence: confidence).withoutCore }
+                        ?? GlanceMark(attention: .quiet, core: nil),
+                    size: .watchLone)
                 // A dash, not a zero, before anything has been written. "0" on
                 // a watch face is a statement that nothing needs you, and this
                 // slot has no second line to qualify it with. It is also the

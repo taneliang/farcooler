@@ -34,7 +34,16 @@ enum ShellMetrics {
     /// One tab row in the column, and therefore the travel that reveals one.
     /// The two are the same number on purpose: the row you are selecting is
     /// under your finger, not a row ahead of it or behind it.
-    static let rowHeight: CGFloat = 34
+    /// 44, not the prototype's 34, and the constant is doing two jobs so both
+    /// move together: it is the row's HEIGHT and it is how much lift reveals
+    /// one row's worth of selection. A visual row taller than the mapping
+    /// would put the highlight somewhere other than under the thumb.
+    ///
+    /// 44 is the platform's own row height — a menu row, a table row, the
+    /// minimum comfortable target. The owner's note that these numbers are "a
+    /// tuned starting point, not gospel" is what makes this movable, and
+    /// looking native was worth more than the four points.
+    static let rowHeight: CGFloat = 44
 
     /// The bar itself, and one item of its rail. The same 44 the rest of this
     /// app calls `PaneMetrics.target`, arrived at from the other side — the
@@ -189,16 +198,62 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// nothing — a workspace whose terminal has said nothing has nothing to
     /// show, and a placeholder there would be forty lies.
     var tail: [String]
+    /// Which tab this workspace should be REOPENED on, as an index into
+    /// `tabs`.
+    ///
+    /// "Reopened" is the whole of the distinction, and it is why this is on the
+    /// workspace rather than being a rule inside `step`. There are two ways to
+    /// arrive at another workspace and they are not the same journey:
+    ///
+    /// - **The content swipe walks a continuum.** One flat sequence of tabs
+    ///   through the whole fleet, spilling into the next workspace's nearest
+    ///   tab — its first going forward, its last coming back. That has to stay
+    ///   literal: a sequence that skipped to a remembered tab would not be a
+    ///   sequence, it would drift as you swiped back and forth, and swiping
+    ///   right then left would land you somewhere you had not been. See
+    ///   `contentStep`, which does not read this.
+    /// - **The bar swipe, the carried lift and an overview card are all
+    ///   GOING somewhere**, by name, deliberately. Going back to a workspace
+    ///   should put you where you were in it, which is the same F4 argument
+    ///   `docs/jobs-to-be-done.md` makes about the app being put down every
+    ///   ninety seconds — landing on tab 0 is the app half-remembering.
+    ///
+    /// Resolved by whoever builds the fleet, from the ONE memory the app
+    /// already keeps: `Connection.lastFocus`, written only when a person
+    /// chooses a tab. A second memory living in here would be a second thing
+    /// to disagree with it. Nil means nobody has ever chosen a tab in this
+    /// workspace, and nil resolves to the first tab, which is where a
+    /// workspace nobody has an opinion about opens.
+    ///
+    /// An index rather than a tab id because that is what a `ShellPosition`
+    /// is, and because the caller has just built `tabs` and is the only thing
+    /// that can turn a remembered id into one honestly. A remembered pane that
+    /// has since gone must not resolve to "index 0 by accident"; see
+    /// `Route.Focus.rule(for:inbox:)`, which is what the caller falls back to.
+    var resume: Int?
 
     init(
         id: String, name: String, server: String? = nil,
-        tail: [String] = [], tabs: [ShellTab]
+        tail: [String] = [], resume: Int? = nil, tabs: [ShellTab]
     ) {
         self.id = id
         self.name = name
         self.tabs = tabs
         self.server = server
         self.tail = tail
+        self.resume = resume
+    }
+
+    /// The tab a deliberate arrival lands on: the remembered one where it
+    /// still exists, and the first otherwise.
+    ///
+    /// Clamped rather than trusted. `resume` is resolved against the fleet the
+    /// caller was holding, and a poll between building it and reading it can
+    /// have taken a terminal away — a stale index is an ordinary event here
+    /// and must land on a tab rather than trap.
+    var resumeTab: Int {
+        guard let resume, tabs.indices.contains(resume) else { return 0 }
+        return resume
     }
 
     /// Where this workspace sorts in the overview.
@@ -296,6 +351,45 @@ struct ShellFleet: Hashable {
             && workspaces[position.workspace].tabs.indices.contains(position.tab)
     }
 
+    /// The tab at a position, or nil for a position the fleet no longer has.
+    ///
+    /// Nil rather than a trap for the reason `tabCount(ofWorkspace:)` gives:
+    /// a poll can shrink the fleet under a finger, and every caller here is
+    /// already holding a position taken a moment ago.
+    func tab(at position: ShellPosition) -> ShellTab? {
+        guard contains(position) else { return nil }
+        return workspaces[position.workspace].tabs[position.tab]
+    }
+
+    /// Where a tab is right now, by its id, or nil once the fleet has stopped
+    /// having it.
+    ///
+    /// **This is what lets a mounted pane survive the fleet moving underneath
+    /// it.** A pane is retained by tab ID and drawn at whatever SLOT that id
+    /// currently occupies, so a workspace that gains a terminal — which
+    /// renumbers every index after it — moves the panes rather than rebuilding
+    /// them. An index cached at mount time would silently start naming a
+    /// different tab, which is `Connection.swift:190-199`'s bug reached from
+    /// the other direction: there a value changed under a stable identity,
+    /// here an identity would change under a stable value.
+    ///
+    /// Nil is also the whole of the prune rule. A retained pane whose id no
+    /// longer resolves is a pane for something the runner has forgotten, and
+    /// `ShellPaneTrack` unmounts exactly those.
+    ///
+    /// Linear, and deliberately not an index built once: the fleet is a value
+    /// that arrives whole from the daemon every poll, so an index would have
+    /// to be rebuilt every poll to answer questions about a handful of
+    /// retained panes.
+    func position(ofTab id: String) -> ShellPosition? {
+        for (w, workspace) in workspaces.enumerated() {
+            if let t = workspace.tabs.firstIndex(where: { $0.id == id }) {
+                return ShellPosition(workspace: w, tab: t)
+            }
+        }
+        return nil
+    }
+
     /// The first position in the fleet, or nil for a fleet with nothing in it.
     var first: ShellPosition? {
         for (i, workspace) in workspaces.enumerated() where !workspace.tabs.isEmpty {
@@ -330,12 +424,21 @@ struct ShellFleet: Hashable {
         }
     }
 
-    /// The adjacent workspace at its first tab. Always a crossing — that is
-    /// what the bar's gesture is for.
+    /// The adjacent workspace, on the tab you last had open there. Always a
+    /// crossing — that is what the bar's gesture is for.
+    ///
+    /// `resumeTab` and not 0, and that is the difference between this and
+    /// `contentStep`. The bar is the workspace, so swiping it is going to
+    /// another workspace by name; arriving somewhere you have been before and
+    /// finding the tab you left is what makes the fleet a place rather than a
+    /// list you re-navigate every time. The content swipe is a continuum and
+    /// stays literal — see `ShellWorkspace.resume`, which sets out both halves.
     private func barStep(from workspace: Int, _ direction: ShellDirection) -> ShellStep? {
         let next = direction == .next ? workspace + 1 : workspace - 1
         guard workspaces.indices.contains(next) else { return nil }
-        return ShellStep(position: ShellPosition(workspace: next, tab: 0), crossesWorkspace: true)
+        return ShellStep(
+            position: ShellPosition(workspace: next, tab: workspaces[next].resumeTab),
+            crossesWorkspace: true)
     }
 
     /// The next tab along, over the whole fleet, crossing workspaces.
@@ -466,10 +569,37 @@ enum ShellGesture {
     /// Nil below `openMin` and not "row 0": the difference between them is
     /// whether letting go costs you the tab you were on, and a bar that
     /// switched tabs on a 10-point twitch would make the bar untouchable.
+    ///
+    /// **Counted DOWN from the last tab, because the menu reads top to
+    /// bottom.** The column lists tab 0 at the TOP — the same order the
+    /// ribbon draws its marks in, leftmost mark to topmost row — so the row
+    /// nearest the bar, which is the one the first `rowHeight` of lift puts
+    /// under the thumb, is the LAST tab. Every further row of lift walks one
+    /// step UPWARD through the list toward tab 0, and a lift long enough to
+    /// fill the column selects tab 0.
+    ///
+    /// It used to be `steps - 1`, against a column drawn bottom-up. Both were
+    /// self-consistent and the pair of them was wrong in the way that matters:
+    /// a menu whose first item is at the bottom is a menu you read backwards,
+    /// and it disagreed with the ribbon two points below it about which end of
+    /// a workspace tab 0 lives at. Fixing the order therefore had to invert
+    /// this — the mapping and the drawing are one decision, and this is the
+    /// half of it a test can hold.
     static func columnSelection(up: CGFloat, tabCount: Int) -> Int? {
         guard up >= ShellMetrics.openMin else { return nil }
         let steps = columnSteps(up: up, tabCount: tabCount)
-        return steps > 0 ? steps - 1 : nil
+        return steps > 0 ? tabCount - steps : nil
+    }
+
+    /// The lift at which the column has nothing left to reveal.
+    ///
+    /// The join. Everything about this gesture is measured from it rather than
+    /// from an absolute distance — the column below it, the overview above it,
+    /// and the page's own travel — so a workspace with one tab and a workspace
+    /// with nine both reach the same places by "keep going until there is
+    /// nothing left, then keep going".
+    static func columnFull(tabCount: Int) -> CGFloat {
+        CGFloat(tabCount) * ShellMetrics.rowHeight
     }
 
     /// The column's height right now.
@@ -481,8 +611,24 @@ enum ShellGesture {
     /// `pinned`, a drag owns `up`, and this function is the only place they
     /// meet.
     static func columnHeight(up: CGFloat, tabCount: Int, pinned: Bool) -> CGFloat {
-        let full = CGFloat(tabCount) * ShellMetrics.rowHeight
-        return pinned ? full : max(0, min(up, full))
+        let full = columnFull(tabCount: tabCount)
+        // Whole, or nothing. The prototype tied the height to the lift —
+        // `min(up, full)` — so the column unrolled a row at a time and you
+        // could not see what you were choosing between until you had already
+        // dragged past most of it. A menu you can only read one item of is not
+        // a menu; the owner asked for it to spring open, and it is right.
+        //
+        // The lift still drives the SELECTION — `columnSelection` is unchanged
+        // — so the finger keeps choosing among rows that are all already on
+        // screen. That is the part worth keeping from the original: the
+        // continuous drag from "next workspace" through the tabs and on into
+        // the overview still works, it just stops hiding its options.
+        //
+        // The threshold is the same `openMin` a release uses to decide between
+        // landing and abandoning, so the column is open exactly when a release
+        // would do something.
+        if pinned { return full }
+        return up >= ShellMetrics.openMin ? full : 0
     }
 
     /// How far into the overview a lift of `up` has got, 0…1.
@@ -490,8 +636,82 @@ enum ShellGesture {
     /// Measured from the point where the column has nothing left to reveal, so
     /// the overview is always "keep going" and never "go a specific distance".
     static func overviewProgress(up: CGFloat, tabCount: Int) -> CGFloat {
-        let full = CGFloat(tabCount) * ShellMetrics.rowHeight
-        return min(1, max(0, (up - full) / ShellMetrics.overRun))
+        min(1, max(0, pageRise(up: up, tabCount: tabCount) / ShellMetrics.overRun))
+    }
+
+    /// How far the PAGE itself has travelled for a lift of `up`.
+    ///
+    /// Zero for the whole column phase, and that is the rule rather than an
+    /// implementation detail: picking a tab is a light action taken INSIDE the
+    /// workspace, so the menu opens over a page that has not moved. The page
+    /// only becomes something you are holding once the finger goes past the
+    /// last row and there is nothing left to pick — which is exactly where
+    /// `overviewProgress` starts, so the two say the same thing about the same
+    /// point and cannot come apart.
+    ///
+    /// Unclamped above, unlike `overviewProgress`. Past the overview's own run
+    /// the page has finished shrinking but the finger has not finished moving,
+    /// and a card that stopped following the thumb at some invisible line
+    /// would be a card you had let go of without letting go.
+    static func pageRise(up: CGFloat, tabCount: Int) -> CGFloat {
+        max(0, up - columnFull(tabCount: tabCount))
+    }
+
+    /// Whether the page has left the display and is in your hand.
+    ///
+    /// The whole of what makes a lift able to answer the OTHER axis, and the
+    /// place the decision the owner asked for is written down.
+    ///
+    /// **The axis lock is never released; the lift takes both axes.** The
+    /// alternative — letting `axis` be re-decided once a lift is established
+    /// — was considered and is wrong here, because the two axes are not
+    /// competing for one meaning: the lift decides WHERE you end up (holding
+    /// the page, or in the overview) and sideways decides WHICH workspace you
+    /// end up holding. Handing the gesture over to `.horizontal` mid-drag
+    /// would drop the page back onto the display while your thumb was still
+    /// up in the air holding it, which is the same "a swipe that started as
+    /// one thing finished as another" the lock exists to stop. Owning both is
+    /// what a card in the app switcher does: you can move it sideways among
+    /// its neighbours without ever stopping holding it.
+    ///
+    /// Not held for the whole column phase, and that is the same line
+    /// `pageRise` draws. Below it the finger is choosing a column ROW and
+    /// `dx` is nothing but the sideways wander of a thumb travelling up a
+    /// phone; a page turn read out of that would make every tab choice a coin
+    /// toss. Past the last row there is no row left to choose and the page has
+    /// left the glass, so sideways has nothing else it could mean.
+    static func pageIsHeld(up: CGFloat, tabCount: Int) -> Bool {
+        pageRise(up: up, tabCount: tabCount) > 0
+    }
+
+    /// How far through the COLUMN's own stretch of the lift `up` has got, 0…1.
+    ///
+    /// The other half of the same drag. `overviewProgress` starts where this
+    /// one finishes, so between them they cover the whole upward gesture with
+    /// no gap and no overlap — this one for the stretch where the COLUMN
+    /// answers the finger, the other for the stretch where the PAGE does.
+    ///
+    /// Nothing is drawn straight off this number: the column springs open at
+    /// `openMin` rather than unrolling, and the page reads `pageRise`. What it
+    /// is for is the join. It reaching 1 at precisely the lift where
+    /// `overviewProgress` leaves 0 is what the tests pin down, and that single
+    /// point is where the whole gesture changes hands.
+    ///
+    /// Normalized by the column's length rather than by an absolute distance,
+    /// for the reason `overRun` gives: this gesture is "keep going until there
+    /// is nothing left to reveal, then keep going", and a workspace with one
+    /// tab has less to reveal than one with nine. A join fixed at some number
+    /// of points would fall in the middle of a nine-tab column and past the
+    /// end of a one-tab one.
+    ///
+    /// A workspace with no tabs has no column, so there is nothing for the
+    /// lift to be a fraction OF; it reports fully travelled, which hands the
+    /// whole gesture to `overviewProgress` and is the only answer that does
+    /// not divide by zero.
+    static func columnProgress(up: CGFloat, tabCount: Int) -> CGFloat {
+        let full = columnFull(tabCount: tabCount)
+        guard full > 0 else { return 1 }
+        return min(1, max(0, up / full))
     }
 }
 
@@ -511,6 +731,15 @@ enum ShellRelease: Hashable {
     case land(tab: Int)
     /// Dragged past the last row, all the way into the overview.
     case openOverview
+    /// Dragged past the last row AND far enough sideways: the page is carried
+    /// into the neighbouring workspace's cell and the overview opens on that
+    /// workspace instead of this one.
+    ///
+    /// Both axes answered at once, which is the point of it. It is not
+    /// `commit` followed by `openOverview` — those are two springs and two
+    /// arrivals — and it is not a third threshold: it is the same 70 points
+    /// sideways and the same run past the last row, read off one release.
+    case carry(ShellStep)
     /// A vertical drag that did not open the column far enough. Costs nothing.
     case abandon
     /// No axis at all: this was a tap.
@@ -536,8 +765,30 @@ extension ShellFleet {
             return .commit(step)
         case .vertical:
             let tabs = tabCount(ofWorkspace: position.workspace)
-            if up >= CGFloat(tabs) * ShellMetrics.rowHeight + ShellMetrics.overRun {
-                return .openOverview
+            // The sideways half of a lift, and it only exists once the page
+            // is off the display — see `ShellGesture.pageIsHeld`, which is
+            // also where the decision not to release the axis lock is
+            // argued. Along `.bar`, because what a lifted page is holding is
+            // a WORKSPACE: the cards it can be moved between are the
+            // overview's cards, and those are workspaces.
+            let sideways: ShellStep? =
+                ShellGesture.pageIsHeld(up: up, tabCount: tabs)
+                    && ShellGesture.commits(dx: dx)
+                ? ShellGesture.direction(dx: dx).flatMap { step(from: position, $0, along: .bar) }
+                : nil
+            if up >= ShellGesture.columnFull(tabCount: tabs) + ShellMetrics.overRun {
+                // The lift says you are staying in the overview; the sideways
+                // says which cell the page lands in. At the ends of the fleet
+                // there is no neighbour to carry to, and the lift's answer
+                // stands on its own.
+                return sideways.map(ShellRelease.carry) ?? .openOverview
+            }
+            if let sideways {
+                // Lifted, but not far enough to stay up. The page comes back
+                // down — onto the neighbour, because the finger asked for it
+                // on the way. The same crossing a swipe along the bar makes,
+                // reached from a few points higher up.
+                return .commit(sideways)
             }
             if let row = ShellGesture.columnSelection(up: up, tabCount: tabs) {
                 return .land(tab: row)

@@ -25,10 +25,11 @@ SOURCES = [
     "ClientCore.swift",
     "Connection.swift",
     "FleetSnapshotWriter.swift",
+    # What is left of the app's navigation: the connection, the four phases,
+    # and the deep link. `NeedsYou.swift` was here beside it — the inbox that
+    # used to be the front door — and is gone: the shell's overview is the
+    # fleet screen, sorted by what needs you.
     "FleetView.swift",
-    # The front door: what on this runner is waiting on a person. See its own
-    # doc comment for why the phone stopped opening into a terminal.
-    "NeedsYou.swift",
     # `Model.swift` was here. It is `CoreModel.swift` in `AGENTKIT_SOURCES`
     # below now — moved so the AgentKit test target can decode a fixture into
     # `Fleet`, `Workspace` and `Terminal`, which nothing could while they sat in
@@ -44,11 +45,42 @@ SOURCES = [
     "TaskComposer.swift",
     "VTCore.swift",
     "TerminalSession.swift",
-    "TerminalTabStrip.swift",
     "TerminalView.swift",
-    # One worktree: its agents and its diff, as tabs. Was `PaneHost.swift`,
-    # which was scoped to a terminal.
-    "WorkspaceView.swift",
+    # One tab of a workspace, and which tab somebody chose. Both were nested in
+    # screens that no longer exist — `Pane` in `WorkspaceView.swift`, the pane
+    # host the shell replaced, and `PaneFocus` as `Route.Focus` inside
+    # `FleetView`'s navigation enum. `TerminalTabStrip.swift` went with them:
+    # the ribbon and the column on the shell's bar are what a workspace's tabs
+    # look like now.
+    "Pane.swift",
+    "PaneFocus.swift",
+    # The navigation shell: one bar that IS the workspace, the column of its
+    # tabs, and the all-workspaces view. It IS the app's navigation now —
+    # `-shell-harness` stands it on a canned fleet and is the only flag left.
+    # Its pure model lives in AgentKit so `swift test` can reach it — only the
+    # views are here.
+    "ShellBar.swift",
+    "ShellOverview.swift",
+    "ShellRootView.swift",
+    # The other two thirds of what `ShellRootView.swift` used to be. One type,
+    # three files: the container, the page's own layer, and the finger. The
+    # seam is what each of them can be reviewed against — a change to the
+    # motion is not a change to the gesture, and neither is a change to the
+    # layering.
+    "ShellPageLayer.swift",
+    "ShellDrag.swift",
+    # The retained pane set, which is the invariant rather than a detail: a
+    # pane is mounted once, keyed by tab id, and MOVED. See its header.
+    "ShellPaneTrack.swift",
+    # A bar that belongs to the PANE rather than to the shell, at the top where
+    # the keyboard cannot cover it. It carries what a pane can do — the diff's
+    # review options, an image into a tty, the worktree's own removal — which
+    # is what the pane host's toolbar carried before the shell replaced it.
+    "ShellPaneBar.swift",
+    # The shell over a real runner: the fleet mapped onto its vocabulary, and
+    # terminals in the slots.
+    "ShellScreen.swift",
+    "ShellHarness.swift",
     "DockedBar.swift",
     "ImagePaste.swift",
     "AgentStream.swift",
@@ -94,6 +126,37 @@ CEREMONY_SOURCES = [
 # gives them a group of their own instead, the same way `fontsGroup` does for
 # `Fonts/`.
 AGENTKIT_SOURCES = [
+    # The navigation shell's pure model: the flat sequence across the fleet,
+    # the axis lock, the release decisions, precedence, search. In AgentKit
+    # rather than beside its views because the iOS target has no unit tests —
+    # only UI tests — and these are the rules with no screen in them. See
+    # `ShellNavigationTests`.
+    "ShellNavigation.swift",
+    # The other half of the same argument: what the shell MOVES by, and the
+    # flying page's geometry. Here rather than beside the views because the
+    # iOS target has no unit tests — a transform inside a `View` can be checked
+    # by nothing but a person swiping at it. See `ShellFlightTests`.
+    "ShellFlight.swift",
+    # The glance surfaces' colour, their one state mark and their type scale, in
+    # FOUR lists: this
+    # one, `activity_build_ids`, `WATCH_AGENTKIT_SOURCES` and
+    # `WATCH_WIDGET_AGENTKIT_SOURCES`. Same argument as `FleetSnapshot.swift`
+    # below — several targets, several binaries, one file — and here the file
+    # is the reason three copies of one colour rule stopped existing: the two
+    # `glanceTint` functions in the widget extensions and `ShellMarkView`'s four
+    # literals were three places one amber could drift.
+    #
+    # NOT in `FleetSnapshot.swift`, deliberately. That file's own doc
+    # (`FleetSnapshot.swift:466-470`) says it "has no business importing
+    # SwiftUI: it is the wire's shape, compiled into a notification service
+    # extension and a watch complication that have no views at all" — and the
+    # notification service extension really does compile it and really does
+    # draw nothing, so a `Color` in there would break `FarCoolerNotify`. This is
+    # where the SwiftUI half lives instead, and `NOTIFY_SOURCES` does not carry
+    # it.
+    "GlancePalette.swift",
+    "GlanceMark.swift",
+    "GlanceType.swift",
     # The account, and the two screens it makes meaningful. Shared because
     # signing in is identical on both platforms and because the words under the
     # button — that an account buys notifications and nothing else — must not
@@ -253,6 +316,17 @@ WATCH_AGENTKIT_SOURCES = [
     "WatchState.swift",
     "FleetSnapshot.swift",
     "SnapshotStore.swift",
+    # The colour, the mark and the type scale, which the watch app's own detail
+    # header draws at
+    # the 22pt lone-indicator size. Measured to typecheck for
+    # `arm64_32-apple-watchos` before being listed here, which is the bar this
+    # list sets a few lines above — the conversion in `GlancePalette` is plain
+    # `Double` arithmetic and the mark is plain SwiftUI shapes, precisely so it
+    # clears it. Nothing in either file reaches for `UIColor`, an asset catalog
+    # or a dynamic colour provider, none of which the watch has.
+    "GlancePalette.swift",
+    "GlanceMark.swift",
+    "GlanceType.swift",
 ]
 
 # The subset of the above that no OTHER target compiles.
@@ -288,17 +362,33 @@ WATCH_WIDGET_SOURCES = ["WatchFleetWidget.swift"]
 
 # AgentKit files the complication compiles.
 #
-# Two, and no more: the extension has no connection, no `WatchLinkClient` and no
-# screens. Its only window onto the fleet is the file the watch app writes into
-# the shared container, so `FleetSnapshot` is the model it renders and
+# Five, and no more: the extension has no connection, no `WatchLinkClient` and
+# no screens. Its only window onto the fleet is the file the watch app writes
+# into the shared container, so `FleetSnapshot` is the model it renders and
 # `SnapshotStore` is how it opens the file. `WatchLink.swift` is deliberately
 # absent — this target never speaks to the phone, and listing the vocabulary for
 # symmetry would claim a capability it does not have.
-WATCH_WIDGET_AGENTKIT_SOURCES = ["FleetSnapshot.swift", "SnapshotStore.swift"]
+#
+# The other two are what it renders WITH. A complication is the surface a person
+# sees without deciding to look, so it is the one that most needs to draw the
+# same mark in the same amber as the phone widget beside it — which is what
+# these two files are for, and why the alternative was a second copy of
+# `glanceTint` on the wrist. There already was one.
+WATCH_WIDGET_AGENTKIT_SOURCES = [
+    "FleetSnapshot.swift",
+    "SnapshotStore.swift",
+    "GlancePalette.swift",
+    "GlanceMark.swift",
+    "GlanceType.swift",
+]
 
 UI_TEST_SOURCES = [
     "ChangesPullRequestTests.swift",
     "KeyboardTabStripTests.swift",
+    "ShellGestureTests.swift",
+    # The other half of the terminal's pair, for panes the app did not write
+    # the scroller of. See its header.
+    "ShellPaneScrollTests.swift",
     "TerminalScrollTests.swift",
 ]
 
@@ -414,6 +504,14 @@ activity_build_ids = {
         # through the App Group or not at all.
         "AnswerPermissionIntent.swift",
         "GlancePermissions.swift",
+        # What every family in this extension is drawn in and drawn WITH. Six
+        # home-screen and lock-screen families plus four Dynamic Island
+        # presentations all read one amber and one mark out of these, which is
+        # the point: the widget and the Live Activity are on the same phone and
+        # a person meets both within a minute.
+        "GlancePalette.swift",
+        "GlanceMark.swift",
+        "GlanceType.swift",
     ]
 }
 

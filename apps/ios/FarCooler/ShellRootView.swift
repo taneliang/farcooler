@@ -1,26 +1,27 @@
 import SwiftUI
 
-// The navigation shell: three panes on a track, the bar that is the workspace,
-// and the overview at the end of the same drag.
+// The navigation shell: a screen that fills the screen, the bar that is the
+// workspace, and the overview at the end of the same drag.
 //
 // This view owns the state and reads the finger. Every threshold it applies
 // comes out of `AgentKit/ShellNavigation.swift`, which is where they can be
 // tested without a simulator; nothing here decides anything a `swift test`
 // could have checked. What is here and could not be there is the part that is
-// about SwiftUI itself: the retained track, the axis lock's lifetime, and the
-// no-bounce commit.
+// about SwiftUI itself: the retained track, the axis lock's lifetime, the
+// no-bounce commit, and the transforms below.
 //
 // ## The invariant, and the new way there now is to break it
 //
 // **A pane must never be rebuilt, and its host's identity must never change.**
 // Three comments in this codebase exist because that was got wrong three
-// separate ways — `WorkspaceView.swift:83-97` (a pane mounted and never
-// destroyed, because tearing one down costs a scroll position, a half-typed
-// message and a tmux renegotiation), `FleetView.swift:1183-1202` (a route
-// whose lookup drove the view structure threw every pane away the moment the
-// lookup stopped succeeding), `Connection.swift:190-199` (writing focus back
-// into the path changed a path element's value, and SwiftUI is free to rebuild
-// a destination whose value changed).
+// separate ways — the pane host mounted a pane and never destroyed it, because
+// tearing one down costs a scroll position, a half-typed message and a tmux
+// renegotiation; a route whose lookup drove the view structure threw every
+// pane away the moment the lookup stopped succeeding; and
+// `Connection.swift:178-206`, where writing focus back into the navigation
+// path changed a path element's value and SwiftUI is free to rebuild a
+// destination whose value changed. The first two screens are gone and the
+// rules they were written on are in `ShellPaneTrack.swift:5-30`.
 //
 // A swipeable track adds a fourth way that does not exist anywhere in the app
 // today: a lazy paging container is free to RECYCLE. `TabView(.page)` and
@@ -30,6 +31,12 @@ import SwiftUI
 // slots, each keyed `.id(tab.id)`, and it stays that way when the placeholders
 // below become real terminals.
 //
+// It is also why the two horizontal weights below are ONE pane track and a
+// separate bar track rather than three whole screens side by side. A screen
+// that carried its own pane would put the same tab in the tree twice — once in
+// the heavy track and once in the light one — and two views claiming one id is
+// the recycling problem wearing its last remaining hat.
+//
 // ## What is a placeholder here and what is not
 //
 // The PANES are placeholders — this commit is the shell behind a DEBUG flag,
@@ -38,28 +45,102 @@ import SwiftUI
 // that puts terminals in it, because a track that recycles is not a thing that
 // can be discovered by looking at text placeholders: it looks perfect right up
 // until the day it costs somebody a message they were typing.
+//
+// ## Where the rest of it went
+//
+// This file is the CONTAINER: the state, the layering, and the two tracks. The
+// other two thirds of what it used to be are one seam apart each and are
+// separate files now.
+//
+// - `ShellPageLayer.swift` — the page as one moving object: the shape it is
+//   clipped to, the card it carries, and the transforms. Its arithmetic is
+//   `AgentKit/ShellFlight.swift`, which `swift test` can reach.
+// - `ShellDrag.swift` — the finger: the axis lock, the drag channel, and the
+//   six things a release can be. Its decisions are `ShellGesture` and
+//   `ShellFleet.barRelease`, which `swift test` can also reach.
+//
+// Three files, one type, and that is why the state below is not `private`: an
+// extension in another file cannot see a private member. It is still not
+// reachable from a CALLER — `init` takes an initial position and a pane
+// builder, and hands back nothing — which is the property `onRest` exists to
+// keep and the one the comment there is about.
 
 /// The shell, over a fleet, with panes the caller supplies.
 ///
 /// Generic over the pane so this file never has to know what a pane is. The
-/// harness hands it text; the commit that wires this to a runner hands it the
-/// real thing, and the retained-set rules that go with a real pane —
-/// `isVisible` staying exactly one pane, the single writer for
-/// `Notifier.shared.visibleTerminal` — belong to whatever it hands in, not
-/// here. `DockedBar.swift:34-41` is why that matters: an input accessory lives
-/// in the KEYBOARD's window, so two panes that both think they are visible are
-/// two composers fighting over first responder, and mid-gesture there are
-/// always two panes partly on screen.
-struct ShellRootView<Pane: View>: View {
+/// harness hands it text; `ShellScreen` hands it a terminal, an agent or a
+/// diff.
+///
+/// The retained set is NOT here, and that is the one structural thing to know
+/// about this file. `ShellPaneTrack` owns which panes are mounted, how long
+/// they stay, and which single one is `isVisible` — read its header before
+/// changing anything below that moves `position`. `DockedBar.swift:34-41` is
+/// why it matters: an input accessory lives in the KEYBOARD's window, so two
+/// panes that both think they are visible are two composers fighting over
+/// first responder, and mid-gesture there are always two panes partly on
+/// screen.
+struct ShellRootView<Pane: View, Actions: View>: View {
     let fleet: ShellFleet
-    private let pane: (ShellPosition, ShellWorkspace, ShellTab, Bool) -> Pane
+    private let pane: (ShellPaneSlot) -> Pane
+    /// What the overview puts in its navigation bar. See
+    /// `ShellOverview.actions`.
+    private let overviewActions: () -> Actions
+    /// A tab to go to, by id, honored once and cleared.
+    ///
+    /// **The one way in from outside, and deliberately not a binding to
+    /// `position`.** That value is re-seated inside a silent transaction at the
+    /// end of every commit, and a caller holding a binding to it could write
+    /// into the frame a spring is settling — the exact shape
+    /// `Connection.swift:190-199` records as having thrown every pane away
+    /// once. A REQUEST is a different thing: it is honored on this view's own
+    /// terms, in one place, and it is cleared as it is taken so a second card
+    /// naming the same terminal reads as a new request rather than as a value
+    /// that has not changed.
+    ///
+    /// One-shot for the reason the pane host's `requested` was one-shot, which is
+    /// the same mechanism this replaces: the shell moves on afterwards without
+    /// telling anybody, so a request that stayed set would name a pane nobody
+    /// is on and block the next tap on the same card.
+    ///
+    /// A tab id and not a terminal id, because a tab is what the shell has
+    /// positions for — `ShellFleet.position(ofTab:)` is the whole of the
+    /// lookup, and the Changes tab has no terminal to name. Resolving the one
+    /// into the other is `ShellScreen.requestedTab`, which is where the fleet
+    /// and the shell's vocabulary are both in hand.
+    ///
+    /// Not `private` for the same reason `position` is not: `honorRequest` is
+    /// written in `ShellDrag.swift`, which is a fact about the three files this
+    /// one type is spelled across rather than about what a caller can hold. The
+    /// only way in from outside is still `init`.
+    @Binding var request: String?
+    /// Called when the pane AT REST changes, and at no other time.
+    ///
+    /// The shell's `position` is not reachable from outside and has to stay
+    /// that way — it is re-seated inside a deliberately silent transaction, and
+    /// a binding out of it would let a caller write back into the one value a
+    /// commit is in the middle of settling. (The property lost the `private`
+    /// keyword when the gesture moved to `ShellDrag.swift`, which is a fact
+    /// about the three files this one type is written in and not about what a
+    /// caller can hold: `init` takes a fleet, a position and a pane builder,
+    /// and nothing hands the state back out.) What a caller genuinely needs is the EVENT, and only
+    /// the one: `ShellScreen` is the single writer of
+    /// `Notifier.shared.visibleTerminal`, which `Notifications.swift:162` reads
+    /// to suppress a banner about the pane you are looking at and
+    /// `Connection.markVisibleSeen()` reads to claim the runner's ten-second
+    /// watch.
+    ///
+    /// Never fired mid-gesture. Two panes are on screen for the whole of a
+    /// swipe and neither of them has arrived; `position` moves once, when the
+    /// release lands.
+    private let onRest: ((ShellPosition) -> Void)?
 
     /// Where the shell is. The one thing a commit re-seats.
-    @State private var position: ShellPosition
+    @State var position: ShellPosition
 
     // MARK: The drag channel
     //
-    // Four properties, and the important thing about them is what is NOT here:
+    // The properties a gesture writes, and the important thing about them is
+    // what is NOT here:
     // `columnPinned` lives below, outside this group, and is never derived
     // from `lift`. The prototype keeps `colOpen` distinct from `dragY`
     // deliberately, and the bug that taught it — a tap that toggled the wrong
@@ -67,54 +148,287 @@ struct ShellRootView<Pane: View>: View {
     // source of truth per thing.
 
     /// How far the bar has been lifted, up-positive, floored at zero.
-    @State private var lift: CGFloat = 0
+    @State var lift: CGFloat = 0
     /// How far the track has been dragged sideways, in points.
-    @State private var trackX: CGFloat = 0
+    @State var trackX: CGFloat = 0
+    /// How far the finger has carried a LIFTED page sideways, in points.
+    ///
+    /// A second horizontal channel, and not the same one as `trackX`, because
+    /// the two move different things by different amounts. `trackX` is the
+    /// three-pane track's own translation, in PAGE coordinates behind a clip
+    /// that is a page wide; `carryX` moves the whole shrunken card, on screen,
+    /// one point per point of finger. Feeding a held card from `trackX` would
+    /// scale the finger by the card's own shrink — a 70-point thumb move
+    /// sliding the card 29 points — which is the opposite of following it.
+    ///
+    /// Zero for the whole column phase. Until the page has left the display
+    /// there is nothing in your hand to move sideways, and `dx` is the arc a
+    /// thumb draws travelling up a phone; see `ShellGesture.pageIsHeld`.
+    @State var carryX: CGFloat = 0
+    /// How far into the overview the shell is, 0…1.
+    ///
+    /// **Stored, not derived from `lift`**, and that is a bug fix rather than
+    /// a preference. It used to be `overview ? 1 : progress(lift)`, and `lift`
+    /// is the one thing `rest()` zeroes unconditionally the instant a finger
+    /// leaves. On the release that opens the overview there is a render
+    /// between `rest()` zeroing the lift and `flyToCell` setting `overview` —
+    /// and in that render this read 0, which took the grid's mount condition
+    /// with it. The overview was torn out of the tree and re-inserted a frame
+    /// later, so what the owner saw at the end of every lift was the WHOLE
+    /// GRID fading back in from black while the page flew, with the bar
+    /// flashing back to full strength on the way. It looks exactly like the
+    /// card fading in at the end of the flight, and it is not: it is the
+    /// screen behind it.
+    ///
+    /// The same argument `crossing` makes below. This is the shell's SHAPE,
+    /// which each release resolves exactly once, rather than a fact about the
+    /// gesture, which `rest()` clears.
+    @State var reveal: CGFloat = 0
+    /// The page's own alpha over the grid.
+    ///
+    /// Only ever 1, 0, or on its way between them over `handover`. What it is
+    /// NOT is a crossfade partner: at every moment of a handover the OTHER
+    /// half — the card in the cell — is fully drawn underneath, so this fades
+    /// over something opaque and there is no frame where neither is all
+    /// there. See `land()`.
+    @State var pageAlpha: CGFloat
+    /// Whether the grid holds the current workspace's cell open rather than
+    /// drawing a card in it.
+    ///
+    /// Separate from `flights` on purpose, and the separation is the whole of
+    /// the fix for the landing. The cell has to be a hole for as long as the
+    /// page is in the AIR — a workspace cannot be in two places — but it has
+    /// to stop being one the moment the page arrives, while the page is still
+    /// opaque on top of it and a frame before the page begins to dissolve.
+    /// One flag for both meant the card could only appear by fading in as the
+    /// page faded out, and two half-present layers over one rectangle is a
+    /// dip: for an instant you see through both of them to the ground, which
+    /// is the "vanishes into the hole" the owner called out.
+    @State var cellIsHole: Bool
+    /// How much of a card the pages have become for a sideways crossing, 0…1.
+    ///
+    /// Stored rather than derived from `trackX`, and this is the one property
+    /// here that could look redundant. `trackX` is re-seated SILENTLY at the
+    /// end of a commit — the new pane is already in the middle slot, so
+    /// zeroing the translation is invisible — but the card is not: it is at
+    /// 96% with the display's corners, and snapping it back to a full-bleed
+    /// page in the same silent frame is a pop exactly where the gesture is
+    /// supposed to finish. So the crossing unwinds on its own spring, after
+    /// the re-seat, and the page grows back into the screen.
+    @State var crossing: CGFloat = 0
+    /// How much of a CARD the page has become, 0…1 — its shape, its size and
+    /// its face, all on one number.
+    ///
+    /// **The animatable value the flight runs on, and it exists because a
+    /// boolean cannot be interpolated.** The crop used to read `isFlying ?
+    /// card : pageFrame.height`, which is a step, and `flights` is incremented
+    /// OUTSIDE the animation that carries the page — it has to be, because the
+    /// grid's mount and the landing's overtaken-guard both read it. So the
+    /// page's height changed in an update with no animation in it and then the
+    /// spring translated what was already a card: at release the page abruptly
+    /// halved in height and only then flew, and tapping a card ran the same
+    /// bug backwards — the page grew into the bottom 36% of the screen and the
+    /// top of it appeared in one frame when the spring finished.
+    ///
+    /// Every part of "is it a card yet" now hangs off this one number, so
+    /// there is nothing left that can be a step: the scale between
+    /// `ShellMotion.heldScale` and the cell's own, the crop between a whole
+    /// page and a card's rectangle, the corner between the display's and the
+    /// card's, and the alpha of the card FACE the page carries. Set only
+    /// inside the animation that moves the page, in both directions.
+    ///
+    /// Zero for the whole of a lift, and that is the property the owner asked
+    /// for rather than a consequence: a page being minimized is still a page
+    /// the whole way up. Becoming a card happens after you let go, because
+    /// becoming a card is the same event as landing in the grid.
+    @State var cropped: CGFloat
+    /// Where the finger that is lifting the page went down, in the page's own
+    /// coordinates, or nil before anything has been lifted.
+    ///
+    /// The point the shrink is anchored at. The page used to shrink about the
+    /// middle of the display, which is fine only if that is where your thumb
+    /// is: anywhere else, the pixels under the finger slide toward the centre
+    /// as the page gets smaller, so a card that is not being moved sideways at
+    /// all appears to slide sideways out from under the thumb holding it.
+    /// Anchoring at the touch-down point makes the one point of the page you
+    /// are actually holding the one point that does not move.
+    ///
+    /// The START of the gesture and not the finger's current position. A live
+    /// anchor would re-aim the shrink every frame, which is a second sideways
+    /// motion on top of `carryX` and the same class of mistake as letting the
+    /// destination cell pull the page mid-drag.
+    @State var liftOrigin: CGFloat?
     /// The axis, decided once on the first 6 points and never revisited.
-    @State private var axis: ShellAxis?
+    @State var axis: ShellAxis?
     /// Which sequence this gesture walks. Set when the finger goes down, not
     /// when the axis is decided: the three panes on the track depend on it,
     /// and they are drawn from the first frame of the gesture.
-    @State private var track: ShellTrack = .content
+    @State var track: ShellTrack = .content
     /// Whether a gesture is in flight, so the first `onChanged` can be told
     /// from every later one. A `DragGesture` has no `onBegan`.
-    @State private var gestureActive = false
+    @State var gestureActive = false
     /// Whether the column was already pinned open when this gesture started.
     /// Only the tap branch reads it, and it is the reason `.toggleColumn` can
     /// be a decision rather than a guess.
-    @State private var wasOpen = false
+    @State var wasOpen = false
 
     /// The column, held open by a tap. Separate from `lift`, see above.
-    @State private var columnPinned = false
+    @State var columnPinned = false
+    /// Whether the menu is showing, as a state of its own rather than as
+    /// something read off the lift.
+    ///
+    /// **It is derived — `menuShouldShow` is the derivation — and then
+    /// STORED, and the reason is the animation rather than the value.** The
+    /// lift is written inside an `interactiveSpring` because a page has to
+    /// follow a finger one point per point; the menu does not follow anything,
+    /// it is shut and then whole, and run on the tracking spring it appeared
+    /// as if it had been switched on. It needs its own transaction.
+    ///
+    /// A scoped `.animation(_:value:)` inside `ShellBar` was tried first and
+    /// is the wrong tool twice over: it animates the modifier it is attached
+    /// to while the surface around it resolves on the caller's transaction, so
+    /// the glass and the rows inside it opened at two different speeds and
+    /// disagreed about where they were. See the note in `ShellBar`. The state
+    /// being here means one `withAnimation` owns the whole surface — the
+    /// glass, the window, the rows, and the height the stack lays out against.
+    @State var menuOpen = false
     /// Whether the overview is the thing on screen.
     ///
     /// Seeded rather than always false, so the harness can open ON it. A state
     /// only reachable by performing a gesture is a state nobody screenshots,
     /// and the overview is the surface most worth looking at repeatedly — it
     /// is where forty workspaces have to stay scannable.
-    @State private var overview: Bool
-    @State private var overviewSearch = ""
+    @State var overview: Bool
+    @State var overviewSearch = ""
+
+    /// Where every laid-out card sits, by workspace index, in screen
+    /// coordinates.
+    ///
+    /// All of them and not just the current one, because the flight runs both
+    /// ways: the page lands in the cell of the workspace you are in, and it
+    /// grows back out of the cell of the workspace you TAP, which is a
+    /// different cell and is not known until the tap. A grid that only
+    /// published the current card would leave the second half of that
+    /// journey starting from wherever the first half ended.
+    @State var tiles: [Int: CGRect] = [:]
+    /// The screen's own frame, so the flight has a start as well as an end.
+    /// Measured through the safe area, because that is what the page fills.
+    @State var pageFrame: CGRect = .zero
+
+    /// What the pane under the finger says about the drag now under way.
+    ///
+    /// Owned here and handed down the environment, because the two halves live
+    /// at opposite ends of the tree: a hunk's scroll view is the only thing
+    /// that knows it moved, and the shell's `onChanged` is the only place the
+    /// answer can be acted on. See `ShellDragClaim`.
+    @State var dragClaim = ShellDragClaim()
+
+    /// Where in this drag the pane under the finger ran out of room.
+    ///
+    /// Zero for a drag no pane wanted, which is every drag over a terminal and
+    /// every drag over the ground between a diff's cards. See
+    /// `ShellRootView.carriedX`.
+    @State var handoff: CGFloat = 0
+
+    /// How many flights between the page and its cell are in the air.
+    ///
+    /// A count rather than a flag so an overlap cannot strand it: releasing
+    /// into the overview and tapping a card before that flight has landed
+    /// starts a second one, and the first one's completion must not then
+    /// announce that the page has arrived somewhere it is no longer going.
+    ///
+    /// What it gates is the handover. While anything is in the air the PAGE is
+    /// the current workspace's card and the grid leaves that cell empty; when
+    /// the air is clear the grid's own card is the card and the page is not
+    /// drawn at all. Two copies of one workspace, one flying over the other,
+    /// is the thing this exists to prevent.
+    @State var flights = 0
 
     init(
         fleet: ShellFleet,
         initial: ShellPosition,
         openingOnOverview: Bool = false,
-        @ViewBuilder pane: @escaping (ShellPosition, ShellWorkspace, ShellTab, Bool) -> Pane
+        request: Binding<String?> = .constant(nil),
+        onRest: ((ShellPosition) -> Void)? = nil,
+        @ViewBuilder overviewActions: @escaping () -> Actions,
+        @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
         self.fleet = fleet
         self.pane = pane
+        self.overviewActions = overviewActions
+        _request = request
+        self.onRest = onRest
         _position = State(initialValue: initial)
         _overview = State(initialValue: openingOnOverview)
+        // Opening ON the overview is the same state a landing leaves behind:
+        // the grid holds a real card and the page is not drawn.
+        _reveal = State(initialValue: openingOnOverview ? 1 : 0)
+        _pageAlpha = State(initialValue: openingOnOverview ? 0 : 1)
+        _cellIsHole = State(initialValue: !openingOnOverview)
+        // A shell that opens ON the overview has already landed: the page is
+        // card-shaped and card-faced, waiting under a cell it is not drawn in,
+        // so the first tap flies OUT correctly rather than growing a
+        // full-bleed page out of a 168-point hole.
+        _cropped = State(initialValue: openingOnOverview ? 1 : 0)
     }
 
-    /// While tracking: the pane follows the finger, with just enough spring
+    /// While tracking: the page follows the finger, with just enough spring
     /// that a fast flick does not look linear.
-    private static var tracking: Animation { .interactiveSpring }
+    static var tracking: Animation { .interactiveSpring }
 
-    /// On release. Every use of it is interruptible — nothing below gates
-    /// input on an animation being finished, so a second swipe onto a
-    /// settling one inherits its velocity rather than waiting for it.
-    private static var settle: Animation { .spring(response: 0.3, dampingFraction: 0.82) }
+    /// On release, when what moved was one pane inside a workspace.
+    ///
+    /// Every use of it is interruptible — nothing below gates input on an
+    /// animation being finished, so a second swipe onto a settling one
+    /// inherits its velocity rather than waiting for it.
+    static var settle: Animation { .spring(response: 0.3, dampingFraction: 0.82) }
+
+    /// On release, when what moved was the WHOLE screen.
+    ///
+    /// Slower and more damped, and that is the point rather than a taste: the
+    /// two horizontal gestures differ in how much of the screen answers them,
+    /// and a heavier thing that settles at exactly the speed of a lighter one
+    /// stops feeling heavier the moment your finger leaves it. Half of the
+    /// weight is what moves; this is the other half.
+    static var settleAcross: Animation { .spring(response: 0.42, dampingFraction: 0.86) }
+
+    /// A workspace growing out of its cell to fill the screen.
+    ///
+    /// Its own spring rather than `settleAcross`, which is a CROSSING — two
+    /// cards passing each other, where damping close to 1 is right because
+    /// nothing should wobble as it arrives at a place it is only passing
+    /// through. Opening is the opposite: something small becomes the whole
+    /// screen, and that wants to arrive with a bit of spring in it.
+    static var settleOpen: Animation { .spring(response: 0.34, dampingFraction: 0.74) }
+
+    /// The moment the page and its card change places.
+    ///
+    /// Short, and a fade rather than a spring, because nothing MOVES here: the
+    /// page has already arrived at the cell and the two are the same rectangle
+    /// in the same place. What crosses is only what is drawn inside it — a
+    /// workspace's terminal for a workspace's name and tail — and a spring on
+    /// a thing that is not travelling reads as a stutter at the end of a
+    /// flight that had none.
+    ///
+    /// **One-sided.** Only the page's own alpha is on this animation; the card
+    /// underneath is already opaque before it starts and is still opaque when
+    /// it ends. A page and a card are not the same aspect ratio and never can
+    /// be — that is what the crop is for — so this crossfade is real and
+    /// cannot be argued away. What can be taken away is the DIP: two layers
+    /// crossing at 50% each show the ground between them, and a rectangle that
+    /// goes momentarily see-through in the middle of a landing is what reads
+    /// as vanishing. Fading one opaque thing over another opaque thing has no
+    /// such moment.
+    static var handover: Animation { .easeInOut(duration: 0.16) }
+
+    /// Whether the page is between the screen and its cell in either
+    /// direction, which is the whole of when it is drawn over the grid.
+    var flying: Bool { flights > 0 }
+
+    /// The cell this workspace's page belongs in, or nil when the grid has not
+    /// laid one out — a search that filters the current workspace out, most
+    /// obviously — in which case the page simply does not fly.
+    var tile: CGRect? { tiles[position.workspace] }
 
     /// The page's real width, read rather than stored.
     ///
@@ -127,99 +441,235 @@ struct ShellRootView<Pane: View>: View {
     /// only clue a trap deep inside a glass geometry effect. A width that is
     /// read on the way down cannot feed back into the pass that produced it.
     var body: some View {
-        GeometryReader { geo in shell(page: geo.size.width) }
-    }
-
-    private func shell(page: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            paneTrack(page: page)
-                // The page recedes as the overview arrives. Scale AND opacity,
-                // from the mechanics doc: either alone reads as a transition
-                // to somewhere, and both together read as this screen going
-                // back to make room.
-                .scaleEffect(1 - overviewProgress * 0.06)
-                .opacity(1 - overviewProgress * 0.8)
-                .allowsHitTesting(!overview)
-
-            barLayer(page: page)
-                .opacity(1 - overviewProgress * 0.9)
-                .allowsHitTesting(!overview)
-
-            if overviewProgress > 0 {
-                ShellOverview(
-                    fleet: fleet, current: position.workspace, search: $overviewSearch,
-                    onOpen: open(workspace:), onDismiss: closeOverview)
-                    .opacity(overviewProgress)
-                    .scaleEffect(0.92 + overviewProgress * 0.08)
-                    .allowsHitTesting(overview)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .topLeading) { probe }
-    }
-
-    // MARK: - The track
-
-    /// Three panes side by side, translated. Never lazy, never a `TabView`.
-    ///
-    /// Which three depends on the track the gesture started on: from the bar
-    /// they are the adjacent WORKSPACES at their first tabs, and from the
-    /// content they are the adjacent TABS along the flat sequence. Both
-    /// neighbours are genuinely mounted and drawn at 0.72, which is what makes
-    /// the incoming pane real rather than something that appears on commit.
-    private func paneTrack(page: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            slot(previousStep?.position, page: page).opacity(0.72)
-            slot(position, page: page)
-            slot(nextStep?.position, page: page).opacity(0.72)
-        }
-        // Three page-wide slots centred in one page puts the middle one on
-        // screen and the neighbours exactly one page off each edge, which is
-        // the prototype's `-PAGE_W + dx` written as a layout rather than as an
-        // offset that has to be kept in step with the width.
-        .frame(width: page * 3)
-        .offset(x: trackX)
-        // A FIXED width, and this is not interchangeable with the
-        // `.frame(maxWidth: .infinity)` that was here first.
+        // Two readers, and the nesting is the point.
         //
-        // A flexible frame's lower bound is its CHILD's width when no
-        // `minWidth` is given: `maxWidth: .infinity` over a three-page track
-        // reports three pages, not one. Nothing warns. The shell simply
-        // becomes 1206 points wide inside a 402-point screen, the bar centres
-        // itself 600 points off the right edge, and the screen renders empty —
-        // and if anything then MEASURES that width and feeds it back in, the
-        // track grows again every pass until the hosting view stops resolving
-        // and the whole app goes white. Both of those happened here in that
-        // order. A fixed frame is what a page is.
-        .frame(width: page)
-        .frame(maxHeight: .infinity)
-        .clipped()
-        .contentShape(.rect)
-        .gesture(contentGesture(page: page))
+        // The shell is laid out FULL BLEED — a workspace fills the screen, so
+        // the stack it lives in has to be the screen — but the bar and the
+        // overview still have to clear the status bar and the home indicator.
+        // `ignoresSafeArea` on a view zeroes the insets its own reader would
+        // report, so one reader cannot answer both questions: the outer one is
+        // asked where the safe area is, the inner one is asked how big the
+        // screen is, and each is measured somewhere it can still tell the
+        // truth. What comes back is then handed to the two layers that want it
+        // as ordinary padding, which is the same inset spelled out where you
+        // can see it rather than applied invisibly to everything.
+        GeometryReader { safe in
+            let insets = safe.safeAreaInsets
+            GeometryReader { full in
+                shell(page: full.size.width, safeArea: insets)
+            }
+            .ignoresSafeArea()
+        }
+        // The KEYBOARD is not furniture, and the outer reader must not report
+        // it as any.
+        //
+        // SwiftUI implements keyboard avoidance as a safe-area inset, so a
+        // `GeometryReader` that has not opted out reports `safeAreaInsets`
+        // grown by the whole keyboard the moment one is up. That inset is the
+        // number `chrome.bottom` and `barTrack`'s padding are both built from,
+        // so with a keyboard on screen the shell's bar climbed 300 points up
+        // the display and every pane was told the shell's furniture was that
+        // tall — which is the exact opposite of what this shell promises
+        // (`ShellPaneTrack.swift:55-61`: the bar and the track never move under
+        // a keyboard, because the composer that rises with it lives in the
+        // keyboard's own window).
+        //
+        // For the terminal it was worse than a moved bar, because
+        // `TerminalView` subtracts the keyboard itself — deliberately, since
+        // the host takes no automatic avoidance — so the room was taken TWICE
+        // and the grid came out 0 points tall: a pane that rendered nothing,
+        // and three UI tests that could not swipe an element with no visible
+        // frame. Opting the reader out here leaves exactly one subtraction, in
+        // the one view that knows how many rows it is losing.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
-    @ViewBuilder
-    private func slot(_ at: ShellPosition?, page: CGFloat) -> some View {
-        Group {
-            if let at, fleet.contains(at) {
-                let workspace = fleet.workspaces[at.workspace]
-                let tab = workspace.tabs[at.tab]
-                // Keyed on the TAB's id and nothing else. Not on the index,
-                // not on the position: an id that moves when the fleet
-                // reorders is an id that rebuilds a pane the reorder did not
-                // touch, which is `Connection.swift:190-199`'s bug wearing a
-                // different hat.
-                pane(at, workspace, tab, at.workspace != position.workspace)
-                    .id(tab.id)
-            } else {
-                // The end of the fleet. Empty rather than absent, so the
-                // track keeps its three slots and the middle one keeps its
-                // position — a two-slot `HStack` would shift the pane you are
-                // looking at sideways the moment you reached an end.
-                Color.clear
+    private func shell(page: CGFloat, safeArea: EdgeInsets) -> some View {
+        // Back to front, and the order is the whole reveal.
+        //
+        // The overview is UNDER the page, not over it. Drawn on top it
+        // composites its cards into the page as legible text — a workspace
+        // name ghosted across a terminal, which is the double exposure
+        // `ShellOverview`'s own ground is there to prevent and which no amount
+        // of opacity fixes, because the page is what you are still reading.
+        // Underneath, the same opacity is a REVEAL: what shows is what the
+        // shrinking page has stopped covering, which is what an app switcher
+        // shows you and the reason it never looks like a crossfade.
+        ZStack(alignment: .bottom) {
+            // Mounted from the first point of lift rather than from the point
+            // where it starts to show. The page flies into a tile, so it needs
+            // to know where that tile IS before it starts moving; a grid that
+            // only appeared once the page was already travelling would leave
+            // the first stretch of every lift with nowhere to fly to and the
+            // page frozen until the geometry landed. The column phase is now
+            // the whole of that head start, which is the one good thing about
+            // a page that holds still for it.
+            //
+            // And kept mounted while a flight is in the air the OTHER way. The
+            // page grows out of a cell on the way back, and a grid that
+            // vanished on the first frame of that would leave it growing out
+            // of nothing.
+            // `reveal` and not `lift` is what carries this through a
+            // release. `rest()` zeroes the lift unconditionally the instant
+            // the finger leaves, and for one render that used to leave every
+            // term of this condition false — so the grid was removed from the
+            // tree and re-inserted on the next frame, fading in from nothing
+            // underneath the flight. `lift` is still here for the head start:
+            // the column phase mounts the grid so the tiles are measured
+            // before the page has anywhere to fly.
+            if lift > 0 || reveal > 0 || overview || flying {
+                ShellOverview(
+                    fleet: fleet, current: position.workspace,
+                    // The cell the page is going to is a HOLE while it is on
+                    // its way, and the page is what fills it when it lands.
+                    //
+                    // The grid reserves the space and draws nothing in it.
+                    // Drawing a finished card there and flying a second copy
+                    // of the same workspace on top of it is two of one thing,
+                    // and it is what stops the lift reading as picking the
+                    // screen up: a grid of workspaces where the one you were
+                    // in is the one in your hand only works if it is in
+                    // exactly one place at a time.
+                    currentIsEmpty: cellIsHole,
+                    // The chrome arrives with the DESTINATION, not with the
+                    // gesture, and `overview` is exactly the moment the
+                    // destination becomes one: it is false for every point of
+                    // a lift, however far, and a release sets it. See
+                    // `ShellOverview.chrome` for what the three pieces of
+                    // chrome each cost, and why none of them costs the grid a
+                    // point of layout.
+                    //
+                    // The same flag that gates hit testing below, and that is
+                    // not a coincidence worth removing: a surface you cannot
+                    // touch yet is a surface that has not arrived, and the
+                    // header, the `Done` and the search field are the three
+                    // things that claim it has.
+                    chrome: overview,
+                    search: $overviewSearch,
+                    onOpen: open(workspace:), onDismiss: closeOverview,
+                    actions: overviewActions)
+                    // Revealed over exactly the stretch where the page is
+                    // moving to reveal it, which is the run past the last row.
+                    // For the whole column phase the page is still and opaque
+                    // and this is behind it, so anything else here would be a
+                    // fade nobody can see.
+                    .opacity(reveal)
+                    .onPreferenceChange(ShellTileFrame.self) { tiles = $0 }
+                    .allowsHitTesting(overview)
+                    // The overview is a surface you read and type into, so it
+                    // takes the safe area back. Its own ground bleeds past
+                    // this — see `ShellOverview` — which is what keeps the
+                    // darkening behind the lifted page edge to edge while the
+                    // words inside it stay clear of the clock.
+                    //
+                    // `safeAreaPadding` rather than `padding`, and the
+                    // difference is the whole reason the grid reads as a
+                    // native screen. Plain padding makes the overview a
+                    // smaller rectangle inside the display, so its navigation
+                    // bar starts BELOW the clock and its content stops there
+                    // too — a strip of bare ground above the chrome, and cards
+                    // that vanish at a hard edge instead of sliding under the
+                    // bar. Adding the inset to the SAFE AREA instead leaves
+                    // the surface full bleed and tells the things inside it
+                    // where the display's furniture is, which is what a
+                    // navigation stack and a scroll view each want to know:
+                    // the bar draws its material all the way up behind the
+                    // clock, and the grid scrolls underneath it.
+                    .safeAreaPadding(.top, safeArea.top)
+                    .safeAreaPadding(.bottom, safeArea.bottom)
             }
+
+            pageLayer(page: page, safeArea: safeArea)
+
+            barTrack(page: page, safeArea: safeArea)
         }
-        .frame(width: page)
+        // Bottom-aligned, and spelled out on the frame as well as on the
+        // stack. The page fills this stack and the bar does not, so the
+        // alignment is the only thing saying where the bar goes; left at the
+        // frame's default it would centre, and the bar would sit halfway up
+        // the workspace.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .background { screenFrameReader }
+        .overlay(alignment: .topLeading) { probe }
+        // One announcement per arrival. `onAppear` as well as `onChange`,
+        // because the first pane the shell opens on is one nobody moved to and
+        // is still the pane being read.
+        .onAppear {
+            onRest?(position)
+            // On appear as well as on change, and the difference is a cold
+            // launch. A card tapped before this app was running delivers its
+            // URL, the connection answers, and the shell is mounted with the
+            // request ALREADY set — so there is no change for `onChange` to
+            // see, and the tap would open the app onto whatever it would have
+            // opened onto anyway. Which is the failure the deep link exists to
+            // remove. See `FleetView.dropUnknownTerminal`.
+            honorRequest()
+        }
+        .onChange(of: position) { _, at in onRest?(at) }
+        .onChange(of: request) { _, _ in honorRequest() }
+    }
+
+    /// The screen's frame, which is also the page's: everything in here is
+    /// laid out full bleed, so this reader needs nothing to reach the edges.
+    ///
+    /// Measured OUTSIDE the page rather than inside it. A `GeometryReader`
+    /// within the transformed subtree would be reporting a frame that the
+    /// transform it is feeding had already moved, which is a measurement
+    /// chasing its own answer.
+    private var screenFrameReader: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { pageFrame = geo.frame(in: .global) }
+                .onChange(of: geo.frame(in: .global)) { pageFrame = $1 }
+        }
+    }
+
+    /// Which three are ON the track depends on the track the gesture started
+    /// on: from the bar they are the adjacent WORKSPACES on the tab you last
+    /// had open in each, and from the content they are the adjacent TABS along
+    /// the flat sequence. Both neighbours are genuinely mounted and drawn at
+    /// 0.72, which is what makes the incoming pane real rather than something
+    /// that appears on commit.
+    ///
+    /// Everything about how they are mounted, retained and placed lives in
+    /// `ShellPaneTrack`, and its header is where the argument is. The short
+    /// version: this used to be a three-slot `HStack`, which keys its children
+    /// by POSITION, so re-seating `position` destroyed the pane at slot 1 and
+    /// the already-mounted pane at slot 2 along with it. Every commit rebuilt
+    /// every pane.
+    func paneTrack(page: CGFloat, safeArea: EdgeInsets) -> some View {
+        ShellPaneTrack(
+            fleet: fleet, position: position, previous: previousStep, next: nextStep,
+            page: page, trackX: trackX, crossing: crossing,
+            // What the shell puts over a pane: the display's furniture at the
+            // top, and at the bottom the home indicator plus the bar and its
+            // breathing room — the same two numbers `barTrack` pads by, said
+            // once here so the two cannot drift.
+            chrome: EdgeInsets(
+                top: safeArea.top, leading: 0,
+                bottom: safeArea.bottom + ShellMetrics.barRow + barGap, trailing: 0),
+            pane: pane
+        )
+        .environment(\.shellDragClaim, dragClaim)
+        // **Alongside the pane, not behind it.**
+        //
+        // `.gesture` attaches at the LOWEST priority in SwiftUI: anything a
+        // descendant declares wins the touch, and the shell never hears about
+        // it. That was invisible for as long as the panes were a terminal —
+        // whose scroll is a `UIPanGestureRecognizer` in UIKit's graph, not
+        // SwiftUI's, and therefore not a competitor here at all — and a text
+        // placeholder, which declares nothing. A diff declares something on
+        // nearly every pixel, and the page turn simply stopped existing over
+        // it. See `ShellDragClaim`, which has the measurement.
+        //
+        // `.simultaneousGesture` rather than `.highPriorityGesture`, and the
+        // difference is the vertical half. High priority would win the drag
+        // outright — including the plainly vertical ones this gesture reads
+        // and then deliberately does nothing with — so a diff would stop
+        // scrolling, which is the one thing that must stay perfect. Running
+        // alongside leaves every pane's own gesture exactly as it was and only
+        // stops the shell being cut out of the conversation.
+        .simultaneousGesture(contentGesture(page: page))
     }
 
     private var previousStep: ShellStep? {
@@ -230,44 +680,178 @@ struct ShellRootView<Pane: View>: View {
         fleet.step(from: position, .next, along: track)
     }
 
-    // MARK: - The bar
+    // MARK: - The bar, and the second weight
 
-    private func barLayer(page: CGFloat) -> some View {
-        ShellBar(
-            fleet: fleet,
-            position: position,
-            previous: previousStep?.position.workspace,
-            next: nextStep?.position.workspace,
-            railWidth: ShellMetrics.railWidth(page: page),
-            railX: railX(page: page),
-            columnHeight: ShellGesture.columnHeight(
-                up: lift, tabCount: tabCount, pinned: columnPinned),
-            columnSelection: columnSelection,
-            // The column dissolves as the overview arrives — all the way,
-            // where the bar only fades to a tenth. The two are one surface, so
-            // the column has to be gone before the overview is, or a piece of
-            // glass with rows in it sits behind the grid.
-            columnOpacity: 1 - overviewProgress)
-            .padding(.bottom, 12)
-            .gesture(barGesture(page: page))
-    }
-
-    /// How far the bar's rail has moved.
+    /// Three bars, one page apart, on a track of their own.
     ///
-    /// **Zero unless the swipe will actually change workspace.** Within a
-    /// workspace the bar holds still, because the workspace is not changing —
-    /// a bar that slid for every tab swipe would be saying something false
-    /// twice a swipe. When it does move it moves PROPORTIONALLY: one rail
-    /// width to the content's one page, so the two arrive together.
-    private func railX(page: CGFloat) -> CGFloat {
-        guard let direction = ShellGesture.direction(dx: trackX),
-            let step = fleet.step(from: position, direction, along: track),
-            step.crossesWorkspace
-        else { return 0 }
-        return trackX * (ShellMetrics.railWidth(page: page) / page)
+    /// **This is the heavier of the two horizontal weights.** Within a
+    /// workspace the bar holds perfectly still and only the pane slides: the
+    /// workspace is not changing, and a bar that moved for every tab swipe
+    /// would be saying something false twice a swipe. Across workspaces the
+    /// bar travels a FULL PAGE, in step with the pane, so the whole screen
+    /// leaves together and the neighbour's whole screen arrives — the way a
+    /// browser changes tab.
+    ///
+    /// The rail used to do this from inside a single bar, sliding its contents
+    /// by one rail width while the page moved by one page. It is the same
+    /// information and it is a completely different sentence: something moving
+    /// inside a surface that is itself still says "this bar is changing what
+    /// it shows", and the whole surface leaving says "you are leaving". Only
+    /// one of those is what a workspace change is, and only one of them can be
+    /// told apart from a tab swipe with your eyes shut.
+    private func barTrack(page: CGFloat, safeArea: EdgeInsets) -> some View {
+        let width = ShellMetrics.railWidth(page: page)
+        return HStack(alignment: .bottom, spacing: 0) {
+            neighbourBar(previousStep, page: page, width: width)
+
+            ShellBar(
+                workspace: currentWorkspace,
+                currentTab: position.tab,
+                width: width,
+                columnHeight: menuHeight,
+                columnSelection: columnSelection)
+                .accessibilityIdentifier("shell-bar")
+                .gesture(barGesture(page: page))
+                .frame(width: page)
+
+            neighbourBar(nextStep, page: page, width: width)
+        }
+        .frame(width: page * 3)
+        .offset(x: barX)
+        .frame(width: page)
+        // The bar's own inset, plus the home indicator the stack around it no
+        // longer reserves.
+        .padding(.bottom, safeArea.bottom + barGap)
+        // All the way to nothing, and NOT the prototype's `1 - overP * 0.9`.
+        //
+        // That residual tenth is right in the web version and wrong here, and
+        // the difference is the z-order. The prototype composites the overview
+        // ON TOP of everything, so a bar left at 10% sits UNDER a 94% ground
+        // and nets about half a percent — invisible. Here the overview is
+        // deliberately UNDERNEATH the page, because that is what makes the
+        // lift a reveal rather than a crossfade (see `shell`), and a layer
+        // that is on top does not get covered by anything: the last tenth of
+        // the bar was being drawn straight over the bottom row of cards, where
+        // a workspace's name and its ribbon were legible across a card that
+        // names a different workspace. No amount of ground fixes that, because
+        // the ground is behind the bar, not in front of it — the number that
+        // was wrong is this one. Content beneath glass is matte; a card is
+        // content; so the bar has to be GONE by the time the grid has arrived,
+        // and `reveal` is exactly when it has.
+        .opacity(1 - reveal)
+        .allowsHitTesting(!overview)
     }
 
-    private var tabCount: Int { fleet.tabCount(ofWorkspace: position.workspace) }
+    /// The workspace waiting off one edge, drawn on the tab you would land on.
+    ///
+    /// Not hit-testable and not in the accessibility tree: there are three
+    /// bars on this track and exactly one of them is the bar. A neighbour that
+    /// answered to `shell-bar` would be the one a test found first, and it is
+    /// a page off the side of the screen.
+    @ViewBuilder
+    private func neighbourBar(_ step: ShellStep?, page: CGFloat, width: CGFloat) -> some View {
+        ShellBar(
+            workspace: step.flatMap { workspace(at: $0.position.workspace) },
+            currentTab: step?.position.tab ?? -1,
+            width: width)
+            .frame(width: page)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    /// How far the bar track has moved: the whole page, or nothing at all.
+    ///
+    /// Nothing at all unless the swipe will actually change workspace, which
+    /// is what makes the two weights two weights. Reading the direction off
+    /// `trackX` rather than latching it at the axis lock keeps this continuous
+    /// through a drag that reverses: the answer only changes as `trackX`
+    /// passes zero, and at zero both answers are zero.
+    ///
+    /// A carried LIFT moves it too, and by the same rule rather than as a
+    /// special case: a page held off the display and moved sideways is asking
+    /// for the next workspace, so the whole screen leaves together — the bar
+    /// included — and the neighbour's bar comes in behind it saying which
+    /// workspace the card is being handed to. What would be strange is the
+    /// other way round: the thing under your thumb sliding a third of the way
+    /// across the display while the surface it came off sits perfectly still
+    /// at seven tenths opacity.
+    /// The breathing room under the bar, above the home indicator.
+    ///
+    /// Named because it is used twice and the two uses must agree: the bar is
+    /// padded by it, and every pane is told the bar is this far up. A literal
+    /// in both places is a pane whose last line sits under the glass the day
+    /// somebody nudges one of them.
+    private var barGap: CGFloat { 12 }
+
+    private var barX: CGFloat {
+        if carryX != 0 { return carryX }
+        return crossesWorkspace(trackX) ? trackX : 0
+    }
+
+    /// Whether a sideways drag of `dx` would leave this workspace.
+    ///
+    /// The gate on both of the things that make a crossing heavier than a tab
+    /// swipe: the bar travelling with the page, and the page becoming a card.
+    /// Read off the translation rather than latched at the axis lock so it
+    /// stays continuous through a drag that reverses — the answer only changes
+    /// as the translation passes zero, and at zero both answers are zero.
+    func crossesWorkspace(_ dx: CGFloat) -> Bool {
+        guard let direction = ShellGesture.direction(dx: dx),
+            let step = fleet.step(from: position, direction, along: track)
+        else { return false }
+        return step.crossesWorkspace
+    }
+
+    /// How much of a card a sideways drag of `dx` has made the pages, 0…1.
+    func crossProgress(_ dx: CGFloat) -> CGFloat {
+        crossesWorkspace(dx) ? ShellFlight.cardness(travel: abs(dx)) : 0
+    }
+
+    /// How much of the menu is showing: all of it, or none.
+    ///
+    /// **It POPS shut at the line where the page starts moving, rather than
+    /// furling with the finger.** Past the last row there is no row left to
+    /// choose, so the menu has stopped being relevant at exactly that point —
+    /// and a menu that closes at the speed of the drag from there on is a
+    /// second thing answering the same movement as the page, competing with
+    /// it for the same travel. Nothing about a lift past the last row is a
+    /// question about tabs any more.
+    ///
+    /// It used to be the full height scaled by `1 - reveal`, which furled it
+    /// over exactly the 76 points that carry the page. The morph is the same
+    /// morph either way — the menu closes back into the bar it grew out of —
+    /// it is only the clock that changes, and `ShellMotion.menu` is the clock.
+    private var menuHeight: CGFloat {
+        menuOpen ? ShellGesture.columnFull(tabCount: tabCount) : 0
+    }
+
+    /// Whether the menu ought to be showing, given everything else.
+    private var menuShouldShow: Bool {
+        guard !overview, !ShellGesture.pageIsHeld(up: lift, tabCount: tabCount) else { return false }
+        return ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned) > 0
+    }
+
+    /// Bring the menu into line with everything else, on the menu's own
+    /// spring.
+    ///
+    /// Called from outside whatever animation just ran, never inside one, so
+    /// the surface is opened and shut by a transaction that belongs to it. The
+    /// guard is what makes it safe to call after every gesture event: a value
+    /// that has not changed opens no transaction at all, so this runs at most
+    /// twice per gesture however many times the finger moves.
+    func syncMenu() {
+        let wanted = menuShouldShow
+        guard wanted != menuOpen else { return }
+        withAnimation(ShellMotion.menu) { menuOpen = wanted }
+    }
+
+    var tabCount: Int { fleet.tabCount(ofWorkspace: position.workspace) }
+
+    var currentWorkspace: ShellWorkspace? { workspace(at: position.workspace) }
+
+    private func workspace(at index: Int) -> ShellWorkspace? {
+        fleet.workspaces.indices.contains(index) ? fleet.workspaces[index] : nil
+    }
 
     /// Which column row is under the finger, or which one you are on when the
     /// column is held open.
@@ -279,214 +863,6 @@ struct ShellRootView<Pane: View>: View {
     private var columnSelection: Int? {
         if columnPinned && lift == 0 { return position.tab }
         return ShellGesture.columnSelection(up: lift, tabCount: tabCount)
-    }
-
-    private var overviewProgress: CGFloat {
-        overview ? 1 : ShellGesture.overviewProgress(up: lift, tabCount: tabCount)
-    }
-
-    // MARK: - The gestures
-
-    /// `minimumDistance: 0` so a TAP arrives here too.
-    ///
-    /// The tap is not a separate `TapGesture`: it is this gesture ending
-    /// without ever having decided an axis, which is what the mechanics doc
-    /// means by "no axis at all — that is a tap". Two recognizers would be two
-    /// things racing over the same touch, and the loser would be whichever one
-    /// SwiftUI felt like.
-    ///
-    /// `.global`, and on this gesture it is load-bearing rather than tidy. A
-    /// drag's translation is the difference between two points measured in the
-    /// chosen space, and the LOCAL space of this view moves while the gesture
-    /// runs: the column unfurls upward, so the bar's own origin rises by
-    /// exactly the lift being measured. Measured locally, `up` came out as
-    /// `drag - lift`, which settles at half the distance the finger actually
-    /// travelled — a column that stops at 30 points for a 60-point drag and an
-    /// overview that needs twice its documented reach. Nothing about it looks
-    /// like a bug; it just feels heavy.
-    private func barGesture(page: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .global)
-            .onChanged { value in
-                begin(on: .bar)
-                let dx = value.translation.width
-                let up = -value.translation.height
-                decideAxis(dx: dx, up: up)
-                withAnimation(Self.tracking) {
-                    switch axis {
-                    case .horizontal:
-                        trackX = ShellGesture.translation(dx: dx, rubberBanding: rubberBands(dx))
-                    case .vertical:
-                        lift = max(0, up)
-                    case nil:
-                        break
-                    }
-                }
-            }
-            .onEnded { value in
-                let decided = axis
-                let dx = value.translation.width
-                let up = lift
-                let openedBefore = wasOpen
-                rest()
-                apply(
-                    fleet.barRelease(axis: decided, dx: dx, up: up, at: position), dx: dx,
-                    page: page, wasOpen: openedBefore)
-            }
-    }
-
-    /// The content's own swipe, along the flat sequence.
-    ///
-    /// Also `minimumDistance: 0`, and that is safe here only because the panes
-    /// in this commit are placeholders that want no touches. The commit that
-    /// puts a terminal in the slot has to give this a minimum distance or hand
-    /// the pane the touch first — a terminal's own pan is its scrollback, and
-    /// `TerminalScrollTests` is the regression that says so.
-    private func contentGesture(page: CGFloat) -> some Gesture {
-        // `.global` for the same reason the bar's is, kept the same here so
-        // the two gestures cannot come to measure different things.
-        DragGesture(minimumDistance: 0, coordinateSpace: .global)
-            .onChanged { value in
-                begin(on: .content)
-                let dx = value.translation.width
-                decideAxis(dx: dx, up: -value.translation.height)
-                guard axis == .horizontal else { return }
-                withAnimation(Self.tracking) {
-                    trackX = ShellGesture.translation(dx: dx, rubberBanding: rubberBands(dx))
-                }
-            }
-            .onEnded { value in
-                let decided = axis
-                let dx = value.translation.width
-                rest()
-                apply(
-                    fleet.contentRelease(axis: decided, dx: dx, at: position), dx: dx,
-                    page: page, wasOpen: false)
-            }
-    }
-
-    /// The first `onChanged` of a gesture, and only the first.
-    private func begin(on which: ShellTrack) {
-        guard !gestureActive else { return }
-        gestureActive = true
-        track = which
-        wasOpen = columnPinned
-    }
-
-    /// Decide the axis, once.
-    ///
-    /// The guard is the whole rule: once `axis` is non-nil nothing asks again
-    /// for the rest of the gesture. An axis that could be revisited is a swipe
-    /// that starts sideways and ends up opening the column, which is every
-    /// accidental gesture in the design review.
-    private func decideAxis(dx: CGFloat, up: CGFloat) {
-        guard axis == nil else { return }
-        axis = ShellGesture.axis(dx: dx, up: up)
-    }
-
-    private func rubberBands(_ dx: CGFloat) -> Bool {
-        guard let direction = ShellGesture.direction(dx: dx) else { return false }
-        return fleet.rubberBands(at: position, direction, along: track)
-    }
-
-    /// The drag channel goes back to rest, unconditionally, before any branch
-    /// below can return.
-    ///
-    /// This runs FIRST in both `onEnded`s and it takes no arguments, so there
-    /// is no branch it can be skipped by. That ordering is load-bearing: the
-    /// column's height is read straight off `lift`, so a release that decides
-    /// to do nothing and returns early would leave `lift` standing and the
-    /// column open with no gesture holding it — a column that is open because
-    /// of a drag that ended.
-    ///
-    /// `trackX` is deliberately NOT reset here. It is the track's translation
-    /// rather than a fact about the gesture, every arm of `apply` resolves it
-    /// exactly once, and zeroing it here would make a commit animate from the
-    /// centre — which is the page jumping back before it goes.
-    private func rest() {
-        gestureActive = false
-        axis = nil
-        wasOpen = false
-        withAnimation(Self.settle) { lift = 0 }
-    }
-
-    private func apply(_ release: ShellRelease, dx: CGFloat, page: CGFloat, wasOpen: Bool) {
-        switch release {
-        case .commit(let step):
-            commit(step, dx: dx, page: page)
-        case .springBack, .abandon:
-            withAnimation(Self.settle) { trackX = 0 }
-        case .land(let tab):
-            withAnimation(Self.settle) {
-                position.tab = tab
-                // Landing on a row is choosing from the column, so the column
-                // has done its job. It furls whether it was pinned or dragged
-                // — a tap-opened column that stayed open after a choice would
-                // leave the chosen pane behind a list of its siblings.
-                columnPinned = false
-                trackX = 0
-            }
-        case .openOverview:
-            withAnimation(Self.settle) {
-                overview = true
-                columnPinned = false
-                trackX = 0
-            }
-        case .toggleColumn:
-            withAnimation(Self.settle) {
-                columnPinned = !wasOpen
-                trackX = 0
-            }
-        }
-    }
-
-    /// Animate to the neighbour, then re-seat on it without animating.
-    ///
-    /// The one that is easy to get wrong. Animating the track to ±one page and
-    /// then setting the new position leaves `trackX` still at ±one page with
-    /// the new pane already in the middle slot — so it has to go back to zero
-    /// in the same breath, and if that zeroing animates you watch the page
-    /// slide back to where it came from. The web prototype disables its
-    /// transitions for one frame and restores them two `requestAnimationFrame`s
-    /// later; SwiftUI has a first-class version and this is it.
-    ///
-    /// `.logicallyComplete` and not `.removed`: the spring is allowed to still
-    /// be settling visually when the swap happens, which is what makes the
-    /// commit feel instant rather than back-loaded. A `DispatchQueue.main.async`
-    /// imitation of this would fire on a frame boundary that has nothing to do
-    /// with the animation and would sometimes land early.
-    private func commit(_ step: ShellStep, dx: CGFloat, page: CGFloat) {
-        let sign: CGFloat = dx < 0 ? -1 : 1
-        withAnimation(Self.settle, completionCriteria: .logicallyComplete) {
-            trackX = sign * page
-            // The column belongs to the workspace it lists, so a crossing
-            // furls it. A swipe within one workspace leaves it alone: the same
-            // list is still the right list.
-            if step.crossesWorkspace { columnPinned = false }
-        } completion: {
-            var silent = Transaction()
-            silent.disablesAnimations = true
-            withTransaction(silent) {
-                position = step.position
-                trackX = 0
-            }
-        }
-    }
-
-    private func open(workspace index: Int) {
-        withAnimation(Self.settle) {
-            if fleet.workspaces.indices.contains(index) {
-                position = ShellPosition(workspace: index, tab: 0)
-            }
-            overview = false
-            overviewSearch = ""
-        }
-    }
-
-    private func closeOverview() {
-        withAnimation(Self.settle) {
-            overview = false
-            overviewSearch = ""
-        }
     }
 
     // MARK: - The probe
@@ -513,5 +889,26 @@ struct ShellRootView<Pane: View>: View {
                     + "workspaces=\(fleet.workspaces.count) tabs=\(tabCount) "
                     + "column=\(Int(ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned).rounded())) "
                     + "pinned=\(columnPinned ? 1 : 0) overview=\(overview ? 1 : 0)")
+    }
+}
+
+/// A shell with nothing of its own to put in the overview's navigation bar.
+///
+/// `ShellHarness` stands the whole shell on a canned fleet, and a fixture has
+/// no runner to switch to and no work to start — every one of the controls
+/// `ShellScreen` contributes would be a button that could not do anything. The
+/// grid, the search and `Done` are the platform's and are there either way.
+extension ShellRootView where Actions == EmptyView {
+    init(
+        fleet: ShellFleet,
+        initial: ShellPosition,
+        openingOnOverview: Bool = false,
+        request: Binding<String?> = .constant(nil),
+        onRest: ((ShellPosition) -> Void)? = nil,
+        @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
+    ) {
+        self.init(
+            fleet: fleet, initial: initial, openingOnOverview: openingOnOverview,
+            request: request, onRest: onRest, overviewActions: { EmptyView() }, pane: pane)
     }
 }
