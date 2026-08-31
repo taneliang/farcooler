@@ -305,6 +305,10 @@ struct CommandPalette: View {
 /// say about itself is on the screen underneath, which is the part worth the
 /// space.
 private struct SwitcherTile: View {
+    /// The wash below is amber for a blocked agent, and §01's amber is a
+    /// different colour in each appearance rather than the same one dimmed.
+    @Environment(\.colorScheme) private var scheme
+
     let entry: PaletteEntry
     let lines: [String]
     let width: CGFloat
@@ -397,12 +401,12 @@ private struct SwitcherTile: View {
     /// tile, a finished one a green dot inside an orange tile.
     private var border: Color {
         if isHighlighted { return .accentColor }
-        if wantsAttention { return status.tint.opacity(0.55) }
+        if wantsAttention { return status.tint(scheme).opacity(0.55) }
         return Color.primary.opacity(0.08)
     }
 
     private var fill: Color {
-        wantsAttention ? status.tint.opacity(0.07) : Color.primary.opacity(0.04)
+        wantsAttention ? status.tint(scheme).opacity(0.07) : Color.primary.opacity(0.04)
     }
 }
 

@@ -218,6 +218,10 @@ enum DaemonRestartCost {
 /// retry dot there today, and retrying a protocol mismatch is the one thing
 /// that provably cannot work.
 struct DaemonSkewDot: View {
+    /// §01's amber is a different colour in each appearance, not the same one
+    /// dimmed, so this resolves it rather than holding a constant.
+    @Environment(\.colorScheme) private var scheme
+
     let target: DaemonUpdateTarget
 
     @State private var showingCard = false
@@ -231,7 +235,14 @@ struct DaemonSkewDot: View {
                 if target.skew == .tooOldToTalk {
                     Circle().fill(Color.red)
                 } else {
-                    Circle().strokeBorder(Color.orange, lineWidth: 1.5)
+                    // `GlancePalette.amber`, not `Color.orange`. §01 allows the
+                    // product exactly one amber and this file's own argument is
+                    // that this dot has earned it — "the only thing here ASKING
+                    // a person for something". Earning the hue and writing the
+                    // hue down twice are different things: two literals drift,
+                    // and a sidebar column carrying two ambers a shade apart is
+                    // the drift being visible at a glance.
+                    Circle().strokeBorder(GlancePalette.amber(scheme), lineWidth: 1.5)
                 }
             }
             .frame(width: 6, height: 6)
@@ -277,6 +288,9 @@ struct DaemonSkewDot: View {
 /// something, which is the one piece of Apple's button grammar that says "this
 /// will ask first" before you click it.
 struct DaemonUpdateBar: View {
+    /// See `DaemonSkewDot`.
+    @Environment(\.colorScheme) private var scheme
+
     let targets: [DaemonUpdateTarget]
 
     @State private var showingCard = false
@@ -291,7 +305,7 @@ struct DaemonUpdateBar: View {
                 // the worst runner's color would make one unreachable runner
                 // repaint a row that is mostly about runners doing fine.
                 Circle()
-                    .strokeBorder(Color.orange, lineWidth: 1.5)
+                    .strokeBorder(GlancePalette.amber(scheme), lineWidth: 1.5)
                     .frame(width: 6, height: 6)
                 Text(label)
                     .font(.caption)

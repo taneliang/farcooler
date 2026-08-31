@@ -222,9 +222,12 @@ struct WorkspaceSection: View {
                 // pending item was a failed agent showed orange collapsed and
                 // red expanded — the same terminal, two colors, decided by
                 // whether a disclosure triangle happened to be open.
-                Circle()
-                    .fill(waiting.tint)
-                    .frame(width: 6, height: 6)
+                // Drawn by `StatusGlyph` rather than by a `Circle` of its
+                // own, so the collapsed row and the expanded row are the same
+                // mark and not two drawings that agree by hand. 6pt is below
+                // anything §03 names, which is what the in-app initialiser is
+                // for — see `StatusGlyph.Geometry`.
+                StatusGlyph(status: waiting, inAppDiameter: 6)
                     .accessibilityLabel(
                         "\(workspace.attention.count) waiting on you in \(workspace.task)")
             }
@@ -601,8 +604,10 @@ struct ProjectHeader: View {
 /// palette had a rule: amber for the middle state, neither well nor dead. It
 /// cannot stay one, because amber now means exactly one thing across all three
 /// apps — an agent is waiting on you — and a socket coming back up is nobody
-/// waiting. `Status.tint` already paints `working` and `starting` `.secondary`
-/// for that reason; a connection in progress is the fleet-level version of the
+/// waiting. `Status.tint(_:)` already paints `working` and `starting` in
+/// `GlancePalette.ink2` — §01's quiet ink, and the same one the mark's own
+/// hairline ring uses — for that reason; a connection in progress is the
+/// fleet-level version of the
 /// same sentence, and iOS says it in the same word. The cost is that this and
 /// `.notInstalled` now draw the same mark, separated only by their help text:
 /// the shape channel that would have split them is not available at 5pt, where
@@ -1198,9 +1203,7 @@ struct HiddenWorktrees: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
                         if let waiting = attentionStatus {
-                            Circle()
-                                .fill(waiting.tint)
-                                .frame(width: 5, height: 5)
+                            StatusGlyph(status: waiting, inAppDiameter: 5)
                                 .help("\(attention) waiting on you, inside a hidden workspace")
                         }
                         Spacer(minLength: 0)

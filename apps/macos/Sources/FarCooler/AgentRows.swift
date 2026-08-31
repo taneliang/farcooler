@@ -256,6 +256,10 @@ private struct ThoughtRow: View {
 /// call that reports progress four times still occupies the one line it
 /// earned.
 private struct ToolRowView: View {
+    /// §01's amber darkens in light mode rather than dimming, so the outline
+    /// below has to be resolved against the appearance.
+    @Environment(\.colorScheme) private var scheme
+
     let tool: ToolRow
     /// Whether this is the newest row — nothing has followed it yet.
     var isLive: Bool = false
@@ -313,7 +317,13 @@ private struct ToolRowView: View {
             // nothing should not shout, and one that does should be findable
             // without reading the transcript.
             if pending != nil {
-                RoundedRectangle(cornerRadius: 7).strokeBorder(Color.orange.opacity(0.45))
+                // §01's one saturated hue, from the one place it is written
+                // down. A tool call that has stopped and is waiting for a
+                // person to answer is the definition of `needsYou`, so this
+                // outline and the sidebar's amber ring are the same colour by
+                // construction rather than by two hands typing `.orange`.
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(GlancePalette.amber(scheme).opacity(0.45))
             }
         }
         .animation(Motion.snap, value: expanded)

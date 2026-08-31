@@ -1,29 +1,51 @@
+import AgentKit
 import SwiftUI
 
 /// The status indicator.
 ///
-/// Three rules, and everything here follows from them.
+/// **This is `GlanceMarkView` now.** The rules below are the ones this file
+/// kept for itself before the product had one mark; §03 of the glance spec is
+/// the vocabulary the phone, the widgets and the wrist already draw, and the
+/// argument for adopting it here is the argument this file already made about
+/// its own six diameters, one level up: a mark is worth having only if it is
+/// the same mark everywhere, or it is something to be read rather than
+/// recognised. See `Status.glanceMark` for what carried across and what did
+/// not.
+///
+/// Three rules, and everything here still follows from them.
 ///
 /// **Color means one thing.** Selection is structural — where am I — and
 /// status is semantic — what is happening. Encoding both in color put an
 /// orange label on an accent-blue row and made a list of four terminals look
 /// like a warning panel. Selection is now neutral, and color belongs entirely
-/// to status.
+/// to status. §01 states the strong form of the same rule and this file now
+/// obeys it: the one saturated hue is `GlancePalette.amber`, it means "an
+/// agent is waiting on you", and nothing else in the app may be amber.
 ///
-/// **Silence is the default.** An idle terminal shows no indicator at all.
-/// Most terminals are idle most of the time, and an icon on every row is an
-/// icon on none: the eye has nowhere to land. Marking only what has something
-/// to say is what makes the one that does unmissable.
+/// **Silence is no longer the default, and that is the one behaviour this
+/// change reverses.** An idle terminal used to draw nothing at all, on the
+/// argument that "an icon on every row is an icon on none". §03 draws quiet as
+/// a 1pt hairline ring at every size — "Drawn, not omitted" — and the phone's
+/// ribbon has drawn it that way since `8b08c1f`. A hairline is not the filled
+/// dot that argument was made against: it is a ring one point wide in
+/// `GlancePalette.ink2`, which reserves the column, keeps the twelve states a
+/// person learns on the phone all present on the Mac, and still leaves amber
+/// as the only thing in the list with any weight. Run `GlanceTests` and open
+/// `.build/glance/status-column-*.png` before taking a view on it; the whole
+/// point of that target is that this is a question about pixels.
 ///
-/// **One shape, one size.** A filled dot. Not a moon for idle and a gearwheel
-/// for working — literal imagery reads as a sticker sheet, and a column of
-/// different silhouettes will not align no matter how carefully it is spaced.
+/// **One shape, one size.** A ring, with a core inside it while the agent is
+/// producing. Not a moon for idle and a gearwheel for working — literal
+/// imagery reads as a sticker sheet, and a column of different silhouettes
+/// will not align no matter how carefully it is spaced.
 ///
 /// "One size" was the rule and it had stopped being the practice: eleven call
 /// sites passed 6, 7, 8, 10 and 14 between them, and the declared default of 9
 /// was used by nobody, so the app drew six diameters of a glyph whose whole
 /// argument is that it is always the same mark. There are two situations, not
-/// six, and they are named below.
+/// six, and they are named below — and they are now `GlanceMarkSize` cases
+/// rather than numbers this file chose, so the Mac cannot drift from the
+/// ladder the phone is drawn on.
 struct StatusGlyph: View {
     /// A dot in a row of text — a sidebar row, a palette result, a tool call,
     /// a pane's header strip. Every one of these sits beside 11–13pt text.
@@ -31,19 +53,60 @@ struct StatusGlyph: View {
     /// Eight, because the sidebar reserves a marker column of exactly this
     /// width and the feed lines under a terminal row indent past it; the one
     /// place in the app where the glyph's size is load-bearing for alignment
-    /// gets to pick the number.
-    static let inline: CGFloat = 8
+    /// gets to pick the number — and §03's smallest diameter is the same 8,
+    /// so the number this app picked and the number the spec picked agree and
+    /// only one of them is written down.
+    static let inline: CGFloat = GlanceMarkSize.ribbon.diameter
 
-    /// A dot standing in for a whole pane, centered with nothing else in it.
+    /// Where this mark is drawn on §03's ladder, or beneath it.
     ///
-    /// Two places, and they are the same situation: a pane whose terminal is
-    /// gone, and a tile waiting for one to start. Each shows this mark, a
-    /// label and at most two buttons — at row size that reads as a speck of
-    /// dust rather than as the subject of the screen.
-    static let hero: CGFloat = 14
+    /// Two cases and not one, mirroring `GlanceMarkView`'s own two
+    /// initialisers. The spec's six diameters cover a mark that stands for a
+    /// terminal; the roll-up dots on a collapsed workspace, a hidden section
+    /// and the window's attention badge are 5 and 6 points, which is below
+    /// anything §03 names, and those numbers are the ones this app already
+    /// laid out around. `GlanceMarkView(_:inAppDiameter:)` is the sanctioned
+    /// way to say that — it takes the 8pt stroke collapse and drops the core,
+    /// which is exactly right for a dot that stands for a group rather than
+    /// for one agent.
+    private enum Geometry {
+        case spec(GlanceMarkSize)
+        case inApp(CGFloat)
+
+        var diameter: CGFloat {
+            switch self {
+            case .spec(let size): size.diameter
+            case .inApp(let d): d
+            }
+        }
+    }
+
+    /// Resolved here rather than by a dynamic colour provider, for the reason
+    /// `GlanceInk` gives: the provider APIs are `NSColor`/`UIColor` and the
+    /// watch has neither, so `@Environment(\.colorScheme)` is the one
+    /// mechanism the whole palette shares. Only `outcome` reads it — the mark
+    /// itself resolves its own.
+    @Environment(\.colorScheme) private var scheme
 
     let status: Status
-    var size: CGFloat = StatusGlyph.inline
+    private let geometry: Geometry
+
+    /// One of §03's six diameters. `.ribbon` (8pt) in a row of text; `.lone`
+    /// (15pt) for a dot standing in for a whole pane, centered with nothing
+    /// else in it — a pane whose terminal is gone, and a tile waiting for one
+    /// to start. Each of those shows this mark, a label and at most two
+    /// buttons, and at row size that reads as a speck of dust rather than as
+    /// the subject of the screen.
+    init(status: Status, size: GlanceMarkSize = .ribbon) {
+        self.status = status
+        self.geometry = .spec(size)
+    }
+
+    /// A roll-up dot, smaller than §03 goes. See `Geometry`.
+    init(status: Status, inAppDiameter: CGFloat) {
+        self.status = status
+        self.geometry = .inApp(inAppDiameter)
+    }
 
     var body: some View {
         Group {
@@ -54,6 +117,14 @@ struct StatusGlyph: View {
             }
         }
         .help(status.label)
+        // The Mac's own word, not `GlanceMark.phrase`, and the mark below is
+        // therefore drawn `decorative` so it does not say a second one. Every
+        // state §03 has a slot for maps onto a phrase that is broader than the
+        // one this app already knew — "Nothing wanted" for a shell that
+        // exited — and the states it has NO slot for are precisely the ones
+        // whose whole content is the word: a screen reader that heard
+        // "Nothing wanted" for a build that died overnight would be told the
+        // opposite of the truth.
         .accessibilityLabel(status.label)
     }
 
@@ -61,23 +132,36 @@ struct StatusGlyph: View {
         // The column is reserved whether or not anything occupies it, so names
         // align down the list rather than stepping in and out.
         ZStack {
-            switch status {
-            case .idle, .running, .exited:
-                // Nothing to say.
-                Color.clear
-            case .lost, .failed, .unreadable:
-                // Hollow: something is missing, and the shape says so before
-                // the color does. `unreadable` shares the shape because what is
-                // missing is the same thing — an answer — and differs in color,
-                // because one of them is a problem to act on and the other is a
-                // runner that has not replied yet.
-                Circle()
-                    .strokeBorder(status.tint, lineWidth: 1.5)
-            default:
-                Circle().fill(status.tint)
+            if let glance = status.glanceMark {
+                switch geometry {
+                case .spec(let size): GlanceMarkView(glance, size: size, decorative: true)
+                case .inApp(let d): GlanceMarkView(glance, inAppDiameter: d)
+                }
+            } else {
+                outcome
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: geometry.diameter, height: geometry.diameter)
+    }
+
+    /// What this app draws for a state §03 has no slot for.
+    ///
+    /// See `Status.glanceMark` for the argument. These five keep exactly the
+    /// drawing they had before the mark arrived — green for a turn that ended
+    /// and red for one that died or a terminal that is gone — because the
+    /// alternative on offer was the quiet hairline, and a hairline is the
+    /// mark's way of saying "nothing is wanted from you", which about an
+    /// overnight build that failed is not a missing answer but a wrong one.
+    @ViewBuilder
+    private var outcome: some View {
+        switch status {
+        case .lost, .failed:
+            // Hollow: something is missing, and the shape says so before the
+            // color does.
+            Circle().strokeBorder(status.tint(scheme), lineWidth: 1.5)
+        default:
+            Circle().fill(status.tint(scheme))
+        }
     }
 }
 
@@ -116,6 +200,72 @@ private struct Breathing: ViewModifier {
 }
 
 extension Status {
+    /// This status as the one mark the whole product draws, or nil where §03
+    /// has no slot for it.
+    ///
+    /// **Nil is a refusal, not an omission.** The glance vocabulary is three
+    /// axes: a ring that says whether YOUR attention is wanted and what for, a
+    /// core that says whether the AGENT is producing, and a dash that says the
+    /// channel is broken. Seven of this app's twelve statuses are one of those
+    /// combinations exactly, and they are mapped below. Five are not, and the
+    /// nearest mark for every one of them is the quiet hairline — which is the
+    /// mark for "nothing is wanted from you", spoken by VoiceOver as exactly
+    /// that. Drawing it on a build that died overnight, or on a turn that
+    /// finished and nobody has read, would make this app state the opposite of
+    /// what it knows in a vocabulary that is now trusted on three platforms.
+    /// So those five keep the drawing they already had, `StatusGlyph.outcome`
+    /// draws them, and the gap is a question for the design document rather
+    /// than one for this file to answer quietly.
+    ///
+    /// The five, and what the mark would have to grow to take them:
+    ///
+    ///   - `done` — "the turn ended and nobody has looked yet". Structurally
+    ///     this is §03's `toReview` tier applied to a TURN instead of to a
+    ///     diff, and it is the one that most wants an answer, because it is
+    ///     also the most common. `GlanceMark.Attention.toReview` forbids it in
+    ///     so many words — "Never an agent's state" — and the stated REASON is
+    ///     that `reviewsWaiting` is a fleet scalar and `unreadDiff` is per
+    ///     workspace, so a per-agent version would have to be invented. That
+    ///     reason does not hold here: nothing is invented, the daemon sends
+    ///     `done` per terminal (`Terminal.status`, `AgentActivity.done`).
+    ///     Whether the prohibition should be narrowed to the diff counts it
+    ///     was written about is the owner's call, not this file's.
+    ///   - `failedRun`, `failedTurn` — a definite bad outcome. Red exists
+    ///     precisely because "a turn that died and a turn that worked were the
+    ///     same dot until this existed"; folding them into the hairline would
+    ///     put that bug back with the vocabulary's name on it.
+    ///   - `lost`, `failed` — the terminal is gone, or never started. Tempting
+    ///     to draw as a broken LINK, and wrong: a dashed ring is "the channel
+    ///     is not carrying anything right now", which is a claim about
+    ///     reachability that resolves on its own. These do not.
+    ///
+    /// **The blocked/needs-you mapping is the load-bearing one** and it is
+    /// identical to the phone's, `GlanceMark(agent:)` and
+    /// `GlanceMark(_ shell:)` both: a heavy amber ring with NO core, because
+    /// §03 gives the ring to the person's side and the core to the agent's,
+    /// and a blocked agent is stopped at a prompt.
+    var glanceMark: GlanceMark? {
+        switch self {
+        case .blocked: GlanceMark(attention: .needsYou, core: .atAPrompt)
+        // Producing. `starting` joins `working` because it already drew
+        // identically to it — a filled secondary dot, breathing — and because
+        // a pane coming up is a pane with something happening in it.
+        case .working, .starting: GlanceMark(attention: .quiet, core: .producing)
+        // At a prompt, and nothing wanted. The three states this app used to
+        // draw as nothing at all.
+        case .idle, .running, .exited: GlanceMark(attention: .quiet, core: .atAPrompt)
+        // "The runner did not answer, so this row is not saying anything" —
+        // `Status.unreadable`'s own words, and `GlanceMark.Link.broken`'s
+        // ("Unreachable, or a claim about the present that has gone stale")
+        // are the same sentence. The core is `nil` rather than `.atAPrompt`
+        // for the same reason: nil is a surface DECLINING to state that axis,
+        // which is exactly what "could not look" means, and it is the
+        // difference §03 makes audible even though it draws the same.
+        case .unreadable: GlanceMark(attention: .quiet, core: nil, link: .broken)
+        case .done, .failed, .failedRun, .failedTurn, .lost: nil
+        }
+    }
+
     /// Warm for "you", green for "finished", red for "missing", and nothing
     /// else. Four colors in an application is already generous.
     ///
@@ -126,9 +276,19 @@ extension Status {
     /// green — so a failed agent was orange collapsed and red expanded, and the
     /// switcher showed both at once, a red dot inside an orange tile. One rule,
     /// one place, and there is nowhere left to disagree from.
-    var tint: Color {
+    ///
+    /// **A function of the appearance, because amber is.** §01 is explicit
+    /// that light mode is "Not a filter flip" — amber darkens to hold its
+    /// contrast on a pale backdrop — so the one colour in here that belongs to
+    /// the glance system has to be resolved against a `ColorScheme` rather
+    /// than being a constant. Green and red do not vary, and they do not come
+    /// from `GlancePalette` because §01 has no figure for either: they are
+    /// this app's own inks for the five states §03 does not cover, and
+    /// `glanceMark` is where that is argued.
+    func tint(_ scheme: ColorScheme) -> Color {
         switch self {
-        case .blocked: return .orange
+        // The one saturated hue, from the one place it is written down.
+        case .blocked: return GlancePalette.amber(scheme)
         case .done: return .green
         // `failedRun` and `failedTurn` are filled rather than hollow, like
         // `done`: both are a definite outcome, not a missing answer. Left out
@@ -141,8 +301,8 @@ extension Status {
         // a decision; a runner that has not answered yet is neither, and
         // painting the whole fleet red every time tmux is busy is how a colour
         // stops meaning anything.
-        case .unreadable: return .secondary
-        case .working, .starting: return .secondary
+        case .unreadable: return GlancePalette.ink2(scheme)
+        case .working, .starting: return GlancePalette.ink2(scheme)
         default: return .clear
         }
     }
@@ -190,7 +350,12 @@ struct AttentionBadge: View {
     var body: some View {
         if let status = Status.mostUrgent(in: waiting) {
             HStack(spacing: 4) {
-                Circle().fill(status.tint).frame(width: 6, height: 6)
+                // The same mark the row it points at will draw, at the size
+                // this badge already reserved. `StatusGlyph`'s in-app
+                // initialiser rather than a bare `Circle`, so a header that
+                // says amber and a row that says amber are one drawing and not
+                // two that happen to agree today.
+                StatusGlyph(status: status, inAppDiameter: 6)
                 Text("\(waiting.count)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)

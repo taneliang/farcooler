@@ -290,6 +290,10 @@ struct TileView: View {
 /// It is a border rather than a dimming of the others, because the others are
 /// working and you are reading them.
 private struct TilePane: View {
+    /// §01's inks are two literals apiece rather than one dimmed, so anything
+    /// drawing one has to know which appearance it is in.
+    @Environment(\.colorScheme) private var scheme
+
     /// The header's exact height, fixed rather than intrinsic.
     ///
     /// Fixed because the viewport arithmetic subtracts it: a header that sized
@@ -441,7 +445,7 @@ private struct TilePane: View {
             } else {
                 ZStack {
                     Color(nsColor: Palette.background)
-                    StatusGlyph(status: terminal.status, size: StatusGlyph.hero)
+                    StatusGlyph(status: terminal.status, size: .lone)
                 }
             }
         }
@@ -623,8 +627,15 @@ private struct TilePane: View {
             changeCount.help(ifAny: changeCountHelp)
 
             if changes.changeSet.isDirty {
+                // **Not amber, and that is the whole of §01's first rule.**
+                // "Nothing else in the product may be amber, at any opacity" —
+                // amber answers one question, "is an agent waiting on me", and
+                // a worktree with uncommitted work is nobody waiting. It is a
+                // diff nobody has dealt with, which is exactly what
+                // `GlancePalette.review` is the colour for, and reviews are
+                // counted per WORKSPACE, which is the level this dot sits at.
                 Circle()
-                    .fill(.orange)
+                    .fill(GlancePalette.review(scheme))
                     .frame(width: 5, height: 5)
                     .help("This workspace has uncommitted changes")
             }

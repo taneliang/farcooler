@@ -125,7 +125,7 @@ struct TerminalPane: View {
     private var inactive: some View {
         VStack(spacing: 12) {
             Spacer()
-            StatusGlyph(status: terminal.status, size: StatusGlyph.hero)
+            StatusGlyph(status: terminal.status, size: .lone)
             Text(terminal.status.label).font(.title3.weight(.medium))
             Text("The session ended or the runner can’t be reached.")
                 .font(.callout)

@@ -1171,8 +1171,8 @@ struct ContentView: View {
         case .connected: return .red
         case .notInstalled: return .secondary
         // Neutral rather than amber. Amber would say an agent is waiting on
-        // you; what is waiting is a socket. `Status.tint` paints `working`
-        // and `starting` `.secondary` for exactly that reason, and a
+        // you; what is waiting is a socket. `Status.tint(_:)` paints `working`
+        // and `starting` in `GlancePalette.ink2` for exactly that reason, and a
         // connection coming back up is the fleet-level version of the same
         // sentence. `.connecting` cannot actually reach this — the list this
         // colors leaves out a runner nothing is yet known about, see

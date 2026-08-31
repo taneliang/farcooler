@@ -560,6 +560,10 @@ private struct PlanPanel: View {
 /// paused waiting on it, so it belongs in the flow of the conversation it
 /// interrupted, not in a window layered on top of it.
 private struct ApprovalCard: View {
+    /// §01's amber is a different colour in each appearance — "Not a filter
+    /// flip" — so this card resolves it rather than holding a constant.
+    @Environment(\.colorScheme) private var scheme
+
     let pending: PendingPermission
     let onChoose: (String) -> Void
 
@@ -570,13 +574,19 @@ private struct ApprovalCard: View {
                 Text("Needs your approval")
                     .font(.system(size: 12, weight: .semibold))
             }
-            .foregroundStyle(.orange)
+            // The one saturated hue, and this card is what it is for: an
+            // agent has stopped and is waiting for a person to answer.
+            .foregroundStyle(GlancePalette.amber(scheme))
 
             ApprovalControls(options: pending.options, onChoose: onChoose)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.3)))
+        .background(
+            GlancePalette.amber(scheme).opacity(0.08), in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(GlancePalette.amber(scheme).opacity(0.3)))
     }
 }

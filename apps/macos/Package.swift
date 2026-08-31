@@ -95,6 +95,22 @@ let package = Package(
             dependencies: ["Far Cooler"],
             path: "Tests/CeremonyTests"
         ),
+        // What the status column actually paints.
+        //
+        // The third target, and it earns one because its charter is the
+        // opposite of `CeremonyTests`'. That suite is for rules whose failure
+        // modes are invisible by looking; this one is for the claim that a
+        // drawing is a particular colour, which no other kind of test can
+        // reach. The glance vocabulary is a difference in ring weight, hue,
+        // dash and core — a view asked what it is will happily answer
+        // correctly while rendering something else — so this target rasterises
+        // the mark and reads the ink back out of the bitmap. It also writes
+        // the specimen sheets a person opens.
+        .testTarget(
+            name: "GlanceTests",
+            dependencies: ["Far Cooler"],
+            path: "Tests/GlanceTests"
+        ),
         // Who decides how big a pane is.
         //
         // The other thing in this package that is invisible by looking. A pane
