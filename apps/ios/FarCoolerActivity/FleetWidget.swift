@@ -235,6 +235,57 @@ private struct GlanceLabel: View {
     }
 }
 
+/// The fleet, as one monochrome-safe row of state marks.
+///
+/// §06's accessoryRectangular: "Count, the names behind it, and the fleet as
+/// one monochrome ribbon." Row size — `GlanceMarkSize.row` — because
+/// accessoryRectangular takes the row size: §03, "it IS a row: mark, label,
+/// trace."
+///
+/// **`WidgetRenderingMode` is read because color cannot be leaned on here.**
+/// Lock screen accessories render `.vibrant` or `.accented` — the system
+/// strips every hue a mark would otherwise carry — so what has to tell twelve
+/// states apart is `GlanceMarkView`'s own vocabulary of stroke weight, fill
+/// and dash, which §03 built for exactly this reason: "the mark distinguishes
+/// states by stroke weight, fill and dash, so hue was always redundant
+/// reinforcement." `.fullColor` is the widget-gallery/picker case, the one
+/// place this ribbon is ever seen with its hue intact.
+///
+/// **Quiet marks drop out once color is gone.** §03's own concession: "If
+/// 1pt hairlines wash out under vibrancy, quiet marks leave the accessory
+/// ribbon and only the attention marks are drawn; the count text carries the
+/// rest." A ribbon that is all 1pt hairlines when nobody is blocked would
+/// also be pure decoration under §05's rule for an all-clear tile — there is
+/// nothing left for the eye to sort, so the row is worth spending only on the
+/// states that need a person.
+///
+/// Fixed order — `ranked`, never re-derived from activity here or anywhere
+/// else in this file — so a ribbon glanced at twice in a row does not
+/// reshuffle under a finger that touched nothing.
+///
+/// Every mark is `decorative`, the same choice `ShellRibbon` makes for its
+/// own ribbon in the app: the headline line above already names the agent
+/// that matters, and VoiceOver reading "Needs you, at a prompt" once per dot
+/// in a row of eight would repeat one word eight times without saying which
+/// agent any dot was.
+private struct FleetRibbon: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    let snapshot: FleetSnapshot
+    let at: Date
+
+    var body: some View {
+        let marks = snapshot.ranked.map {
+            GlanceMark(agent: $0, confidence: snapshot.confidence(in: $0, at: at)).withoutCore
+        }
+        let shown = renderingMode == .fullColor ? marks : marks.filter { !$0.isQuiet }
+        HStack(spacing: 3) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, mark in
+                GlanceMarkView(mark, size: .row, decorative: true)
+            }
+        }
+    }
+}
+
 struct FleetWidgetView: View {
     @Environment(\.widgetFamily) private var family
     /// Light mode is a different palette rather than a filter over the dark one
@@ -372,11 +423,21 @@ struct FleetWidgetView: View {
                     // a broken link" — and it survives the vibrancy flattening
                     // that a 60% opacity does not.
                     //
-                    // A dash, not a zero, before anything has been written. "0"
-                    // under a lock screen clock is a statement that nothing
-                    // needs you, and this surface has no footer to qualify it
-                    // with.
-                    Text(entry.hasSnapshot ? "\(entry.snapshot.needingYou)" : "–")
+                    // A dash, not a zero, before anything has been written —
+                    // AND once the top agent's own mark above has gone dashed
+                    // too. `entry.snapshot.needingYou` is provably 0 on every
+                    // path that reaches this `else`: `glance(at:)` returns
+                    // `.blocked` the moment it is not, so printing it plainly
+                    // was printing a guaranteed zero regardless of how old the
+                    // snapshot answering it is. "0" under a lock screen clock
+                    // is a confident claim that nobody needs you; once
+                    // `confidence` has lapsed to `.lastSeen` this snapshot can
+                    // no longer back that claim — a blocked agent since would
+                    // arrive by the same unreliable push that let this snapshot
+                    // go stale in the first place — and the digit has to say
+                    // "I don't know" the same way the ring above it already
+                    // does with its dash.
+                    Text(entry.hasSnapshot && confidence == .known ? "\(entry.snapshot.needingYou)" : "–")
                         .font(.caption2.monospacedDigit())
                 }
             }
@@ -415,6 +476,13 @@ struct FleetWidgetView: View {
                         .font(.caption)
                         .lineLimit(1)
                         .opacity(confidence == .lastSeen ? 0.6 : 1)
+                }
+                // §06: "Count, the names behind it, and the fleet as one
+                // monochrome ribbon." One agent alone would just be the
+                // headline drawn twice, so the ribbon earns its row only once
+                // there is a fleet to be a picture of.
+                if entry.snapshot.agents.count > 1 {
+                    FleetRibbon(snapshot: entry.snapshot, at: entry.date)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -753,6 +821,28 @@ private struct StaleFooter: View {
             date: now.addingTimeInterval(120), snapshot: snapshot(quiet, reviews: 0))
         static let reviewsUnknownState = FleetEntry(
             date: now.addingTimeInterval(180), snapshot: snapshot(quiet, reviews: nil))
+
+        /// One working agent, alone, whose news is older than
+        /// `FleetSnapshot.staleAfter`. `confidence(in:at:)` has lapsed to
+        /// `.lastSeen` for it, so `glance(at:)` will not count it and the
+        /// circular accessory falls into the "no count to make" branch this
+        /// fixture exists to exercise.
+        ///
+        /// **The fixture that proves the circular fix.** Before it, this
+        /// state rendered a dashed ring over a confident "0" — the ring said
+        /// "I don't know" and the digit beneath it said "definitely zero" in
+        /// the same breath. The digit now dashes with the ring.
+        static let staleAgent = FleetSnapshot.Agent(
+            id: "t9", label: "claude", machine: "orchard", status: "working",
+            glyph: "●", headline: "claude 3h", line: "Writing review_ops.rs",
+            feed: [], rank: 300, turnFailed: false,
+            activityChangedAt: now.addingTimeInterval(-FleetSnapshot.staleAfter - 60))
+        static let staleState = FleetEntry(
+            date: now,
+            snapshot: FleetSnapshot(
+                agents: [staleAgent],
+                capturedAt: now.addingTimeInterval(-FleetSnapshot.staleAfter - 60),
+                complete: true, reviewsWaiting: 0))
     }
 
     #Preview("Small · blocked, reviews, clear, unknown", as: .systemSmall) {
@@ -807,5 +897,55 @@ private struct StaleFooter: View {
         PreviewFleet.reviewsOnlyState
         PreviewFleet.allClearState
         PreviewFleet.reviewsUnknownState
+    }
+
+    /// A fifth state, on its own rather than folded into the four above: it
+    /// is the one this task exists to fix, and stepping past it quickly in a
+    /// four-frame timeline is exactly how a regression here would go
+    /// unnoticed. Watch the ring go dashed AND the digit go dashed with it —
+    /// before the fix, only the ring did.
+    #Preview("Circular · stale — dash, not zero", as: .accessoryCircular) {
+        FleetWidget()
+    } timeline: {
+        PreviewFleet.staleState
+    }
+
+    /// **Rendered, not reasoned about.** Lock screen accessories render
+    /// `.vibrant`, and the tinted Home Screen renders `.accented` — both
+    /// strip hue — so this steps `FleetRibbon` through `.fullColor`,
+    /// `.vibrant` and `.accented` directly via `.environment`, the same
+    /// mechanism `FleetRibbon` itself reads at `\.widgetRenderingMode`.
+    ///
+    /// The bottom two rows are additionally desaturated with `.grayscale(1)`.
+    /// That is not what the system does internally — real accessory vibrancy
+    /// is a compositing pass in the accessory host, outside SwiftUI, and
+    /// cannot be reproduced inside a canvas preview — but it removes hue the
+    /// same way `GlanceMark.swift`'s own matrix preview does, "the same grid
+    /// desaturated", which is enough to answer the one question that
+    /// matters here: with color gone, can the ribbon still be read? What
+    /// should survive per row: row 1 in full colour; rows 2–3 down to
+    /// stroke weight and presence only, with the two hairline "quiet" marks
+    /// dropped and only the two heavier "needs you" rings left.
+    #Preview("Ribbon · monochrome legibility") {
+        let fixture = PreviewFleet.snapshot(PreviewFleet.blocked, reviews: 3)
+        let rows: [(String, WidgetRenderingMode)] = [
+            ("full colour — widget gallery", .fullColor),
+            ("vibrant — Lock Screen", .vibrant),
+            ("accented — tinted Home Screen", .accented),
+        ]
+        return VStack(alignment: .leading, spacing: 20) {
+            ForEach(rows, id: \.0) { label, mode in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(label).font(.caption2).foregroundStyle(.white)
+                    FleetRibbon(snapshot: fixture, at: PreviewFleet.now)
+                        .environment(\.widgetRenderingMode, mode)
+                        .grayscale(mode == .fullColor ? 0 : 1)
+                        .padding(10)
+                        .background(Color.black, in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+        .padding()
+        .background(Color(white: 0.08))
     }
 #endif

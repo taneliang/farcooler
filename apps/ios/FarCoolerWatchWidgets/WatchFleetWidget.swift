@@ -440,13 +440,20 @@ private struct Circular: View {
                     top.map { GlanceMark(agent: $0, confidence: confidence).withoutCore }
                         ?? GlanceMark(attention: .quiet, core: nil),
                     size: .watchLone)
-                // A dash, not a zero, before anything has been written. "0" on
-                // a watch face is a statement that nothing needs you, and this
-                // slot has no second line to qualify it with. It is also the
-                // state every watch is in the moment this complication is first
-                // added — which is the moment somebody decides whether the
-                // feature works.
-                Text(entry.hasSnapshot ? "\(entry.snapshot.needingYou)" : "–")
+                // A dash, not a zero, before anything has been written — AND
+                // once the top agent's own mark above has gone dashed too.
+                // `entry.snapshot.needingYou` is provably 0 on every path that
+                // reaches this `else`: `glance(at:)` returns `.blocked` the
+                // moment it is not, so printing it plainly was printing a
+                // guaranteed zero regardless of how old the snapshot answering
+                // it is. "0" on a watch face is a confident claim that nobody
+                // needs you; once `confidence` has lapsed to `.lastSeen` this
+                // snapshot can no longer back that claim, and the digit has to
+                // say "I don't know" the same way the ring above it already
+                // does with its dash. It is also the state every watch is in
+                // the moment this complication is first added — which is the
+                // moment somebody decides whether the feature works.
+                Text(entry.hasSnapshot && confidence == .known ? "\(entry.snapshot.needingYou)" : "–")
                     .font(.caption2.monospacedDigit())
             }
         }
@@ -571,6 +578,27 @@ private struct Rectangular: View {
             date: now.addingTimeInterval(120), snapshot: snapshot(quiet, reviews: 0))
         static let reviewsUnknownState = WatchFleetEntry(
             date: now.addingTimeInterval(180), snapshot: snapshot(quiet, reviews: nil))
+
+        /// One working agent, alone, whose news is older than
+        /// `FleetSnapshot.staleAfter`. `confidence(in:at:)` has lapsed to
+        /// `.lastSeen`, so `glance(at:)` will not count it and `Circular`
+        /// falls into the "no count to make" branch this fixture exercises.
+        ///
+        /// **The fixture that proves the `Circular` fix.** Before it, this
+        /// state rendered a dashed ring over a confident "0" — the ring said
+        /// "I don't know" and the digit beneath it said "definitely zero" in
+        /// the same breath. The digit now dashes with the ring.
+        static let staleAgent = FleetSnapshot.Agent(
+            id: "t9", label: "claude", machine: "orchard", status: "working",
+            glyph: "●", headline: "claude 3h", line: "Writing review_ops.rs",
+            feed: [], rank: 300, turnFailed: false,
+            activityChangedAt: now.addingTimeInterval(-FleetSnapshot.staleAfter - 60))
+        static let staleState = WatchFleetEntry(
+            date: now,
+            snapshot: FleetSnapshot(
+                agents: [staleAgent],
+                capturedAt: now.addingTimeInterval(-FleetSnapshot.staleAfter - 60),
+                complete: true, reviewsWaiting: 0))
     }
 
     #Preview("Circular · blocked, reviews, clear, unknown", as: .accessoryCircular) {
@@ -598,5 +626,16 @@ private struct Rectangular: View {
         PreviewFleet.reviewsOnlyState
         PreviewFleet.allClearState
         PreviewFleet.reviewsUnknownState
+    }
+
+    /// A fifth state, on its own rather than folded into the four above: it
+    /// is the one this task exists to fix, and stepping past it quickly in a
+    /// four-frame timeline is exactly how a regression here would go
+    /// unnoticed. Watch the ring go dashed AND the digit go dashed with it —
+    /// before the fix, only the ring did.
+    #Preview("Circular · stale — dash, not zero", as: .accessoryCircular) {
+        WatchFleetWidget()
+    } timeline: {
+        PreviewFleet.staleState
     }
 #endif
