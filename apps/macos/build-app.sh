@@ -275,10 +275,29 @@ fi
 
 # Ad-hoc sign so macOS treats it as a stable identity across launches. This is
 # not notarization; public distribution needs a Developer ID.
+#
+# **A signing failure fails the build, and its reason is printed.** This line
+# read `... 2>/dev/null || echo "    (ad-hoc signing skipped)"`, which is the
+# same shape the Rust build above refuses to have: the script announced "Built
+# ..." and exited 0 with a bundle carrying no stable identity, and the one
+# sentence saying why had been sent to /dev/null. The entitlements here are not
+# decoration — they are what the app is granted — and an unsigned bundle gets a
+# new identity every launch, which is a different application as far as
+# launchd, Sparkle and the keychain are concerned.
+#
+# This is NOT the trade the icon render and the Linux binaries make a few lines
+# up. Those two say in their own comments that going without is fine, because a
+# missing icon is cosmetic and a missing Linux binary only costs a remote-host
+# install on a machine that never built one. There is no such sentence here,
+# and there should not be: if this machine cannot ad-hoc sign, the bundle it
+# just produced is not the one anybody meant to ship.
 echo "==> Signing (ad-hoc)"
 codesign --force --deep --sign - \
   --entitlements Resources/FarCooler.entitlements \
-  "$APP" 2>/dev/null || echo "    (ad-hoc signing skipped)"
+  "$APP" || {
+  echo "    ad-hoc signing failed; refusing to leave an unsigned bundle behind"
+  exit 1
+}
 
 # Refresh Launch Services so the Dock picks up the icon and identifier.
 LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
