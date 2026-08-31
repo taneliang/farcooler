@@ -127,7 +127,112 @@ pub struct Session {
     client: Client<Reader, Writer>,
     /// Held so the SSH connection lives as long as the session does.
     _ssh: Option<ssh::Session>,
+    /// Where fleet news goes, once somebody has asked for it.
+    ///
+    /// `None` until `subscribe` is called, which is the honest default: this
+    /// type is also the CLI's and the tests', and neither wants a callback
+    /// firing on a runtime thread. Set by `subscribe` BEFORE it opens its
+    /// channel, so a runner where the dedicated channel could not be opened
+    /// still forwards whatever fleet news arrives on a terminal attachment —
+    /// see `attach_stream`, which is subscribed to the same broadcast for free.
+    events: Option<EventSink>,
+    /// The socket this session was opened on, when it was opened on one.
+    ///
+    /// Only `subscribe` reads it, and only so the push path can be proven
+    /// against a real daemon without an ssh server in the test — the same
+    /// argument `tests/against_a_real_daemon.rs` already makes for everything
+    /// else it covers: ssh is a byte pipe, and what can go wrong here is above
+    /// it. A desktop client on a local runner gets the same channel for free.
+    socket: Option<std::path::PathBuf>,
 }
+
+/// What a client is told when the runner says something changed.
+///
+/// **These carry no delta on purpose.** Every variant means "re-read it", and
+/// that is the whole contract: the daemon's own `fleet_changed` says so in the
+/// proto ("a client re-reads the fleet rather than trying to apply it as a
+/// delta"), reconciliation both creates and deletes rows in one pass, and three
+/// editors — the app, the CLI and an agent driving the CLI — move the same
+/// state. A client that applied deltas would need to be right about every one
+/// of those; a client that re-reads needs only to be told that it should.
+///
+/// The consequence is the one that makes the whole push path cheap: losing one
+/// of these is harmless as long as the client learns it missed SOMETHING, so
+/// the boundary is free to drop and coalesce rather than buffer. See
+/// `EventQueue` in `ffi.rs`, which is where that policy is written down.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FleetEvent {
+    /// Something in the fleet moved: a terminal's state, a workspace, a
+    /// layout, an operation, or the set of workspaces itself.
+    ///
+    /// One variant for all five because they have one answer — re-read
+    /// `fleet` — and a client that told them apart would make the same call
+    /// five times. It is also what makes coalescing work at all: a busy runner
+    /// samples every second (`SAMPLE_INTERVAL` in `crates/daemon/src/watch.rs`)
+    /// and a working agent can move a row on every sample, so the events that
+    /// arrive in a burst have to collapse to one notice or the "push" is just
+    /// a faster poll.
+    Fleet,
+    /// One worktree's diff moved. The set itself is not carried — see
+    /// `announce_change_set` in `crates/daemon/src/watch.rs:2511` for why the
+    /// daemon does not fan thousands of file records out to every device.
+    ChangeSet { workspace: Uuid },
+    /// A repository's pull request state was re-read, because somebody's
+    /// `stack.get` found a cache nobody had filled.
+    ///
+    /// The event the phone's pull request row was invented around: the daemon
+    /// fills that cache in the BACKGROUND and answers the read from cache at
+    /// local speed, so without this the only delivery mechanism was asking
+    /// again on the next poll. See `crates/daemon/src/watch.rs:2538`.
+    Stack { repository: Uuid },
+}
+
+impl FleetEvent {
+    /// Read one wire event as news, or as nothing.
+    ///
+    /// `None` for the arms that are not fleet news: `TerminalFrame` is one
+    /// connection's terminal bytes and has a reader of its own, and
+    /// `AgentEvents` is a transcript batch which `agent.events` pages by
+    /// cursor — turning either into "re-read the fleet" would spend a round
+    /// trip re-reading state that did not change.
+    fn of(payload: farcooler_protocol::v1::event::Payload) -> Option<Self> {
+        use farcooler_protocol::v1::event::Payload;
+        match payload {
+            Payload::TerminalChanged(_)
+            | Payload::WorkspaceChanged(_)
+            | Payload::OperationChanged(_)
+            | Payload::LayoutChanged(_)
+            | Payload::FleetChanged(_) => Some(FleetEvent::Fleet),
+            Payload::ChangeSetChanged(c) => {
+                Some(FleetEvent::ChangeSet { workspace: uuid_of(&c.workspace_id) })
+            }
+            Payload::StackChanged(s) => {
+                Some(FleetEvent::Stack { repository: uuid_of(&s.repository_id) })
+            }
+            Payload::TerminalFrame(_) | Payload::AgentEvents(_) => None,
+            // Reserved arms no daemon emits. Named one by one rather than
+            // swept up by `_`, so that the day one of them starts being sent
+            // this match stops compiling and somebody decides what a client
+            // should re-read — which for these is the repository list, not the
+            // fleet, and so is not a decision to make by default.
+            Payload::HostChanged(_)
+            | Payload::RepositoryRootChanged(_)
+            | Payload::RepositoryChanged(_) => None,
+        }
+    }
+}
+
+/// Where fleet news is delivered.
+///
+/// A plain callback rather than a channel, and that is the design rather than
+/// a shortcut. A bounded channel would make the daemon's reader wait on a slow
+/// consumer — the one thing a push path must never do — and an unbounded one
+/// would grow without limit behind a consumer that stopped. A callback pushes
+/// the decision to the layer that can actually make it: the FFI takes a lock,
+/// coalesces into a fixed-size queue, and returns. Nothing here ever blocks.
+///
+/// It is called from a runtime thread, so it must not block and must not panic.
+pub type EventSink = std::sync::Arc<dyn Fn(FleetEvent) + Send + Sync>;
 
 /// The daemon this client is built to talk to.
 ///
@@ -159,7 +264,7 @@ impl Session {
         )
         .await?;
 
-        Ok(Self { client, _ssh: Some(transport) })
+        Ok(Self { client, _ssh: Some(transport), events: None, socket: None })
     }
 
     /// Open a second ssh channel carrying nothing but one terminal's bytes.
@@ -293,18 +398,37 @@ impl Session {
         // dropped, which fails the write. The last of those is what returns the
         // ssh session slot — `ChannelGuard` in `ssh.rs` — so a client that stops
         // reading stops holding one of sshd's ten.
+        // Fleet news arriving on THIS channel, forwarded rather than dropped.
+        //
+        // Free, and worth having for that alone: a terminal attachment is
+        // subscribed to the daemon's broadcast like every other connection
+        // (`Rpc::events` in `crates/daemon/src/rpc.rs:230` subscribes each one
+        // with no opt-in), so these frames were already crossing the wire and
+        // being thrown away. It is also the backstop for the case
+        // `subscribe` cannot serve: a runner where the dedicated channel could
+        // not be opened still pushes while a pane is open.
+        //
+        // Duplicates with the dedicated channel are expected and are exactly
+        // what the boundary's coalescing is for — two "re-read the fleet"
+        // notices a millisecond apart are one notice.
+        let news = self.events.clone();
         let (mine, theirs) = tokio::io::duplex(64 * 1024);
         tokio::spawn(async move {
             use tokio::io::AsyncWriteExt;
             let mut sink = theirs;
             loop {
                 let Ok(event) = client.next_event().await else { break };
-                let Some(farcooler_protocol::v1::event::Payload::TerminalFrame(frame)) =
-                    event.payload
-                else {
-                    // Fleet news on this connection. It is subscribed to the
-                    // broadcast like any other, and nothing here wants it.
-                    continue;
+                let Some(payload) = event.payload else { continue };
+                // A `match` rather than the `let ... else` this replaces,
+                // because the else arm now needs the payload it did not take.
+                let frame = match payload {
+                    farcooler_protocol::v1::event::Payload::TerminalFrame(frame) => frame,
+                    other => {
+                        if let (Some(news), Some(what)) = (&news, FleetEvent::of(other)) {
+                            news(what);
+                        }
+                        continue;
+                    }
                 };
                 // A frame for a pane this session did not attach to could only
                 // come from an attachment that was replaced, and feeding its
@@ -325,6 +449,95 @@ impl Session {
         Ok(Box::new(mine))
     }
 
+    /// Receive fleet news on a channel of its own, for as long as this session
+    /// lives.
+    ///
+    /// **Why a third channel and not the control connection.** `Client::call`
+    /// owns the reader for the length of a request — it reads frames until it
+    /// sees its own response — so nothing reads the control socket between
+    /// calls, and events sit in the kernel buffer until the next request
+    /// happens to drain them. That is the shape that produced polling: the only
+    /// way to learn something changed was to ask. Teaching the control client
+    /// to demultiplex responses from a background reader is a transport rewrite
+    /// with a correlation table and a lock in it; ssh already multiplexes
+    /// channels, and letting it do that is the same trade `open_stream` made
+    /// one layer down and for the same reason.
+    ///
+    /// The cost is one sshd channel and one handshake, paid once per
+    /// connection, against a round trip and a radio wake every three seconds
+    /// for as long as the app is open.
+    ///
+    /// No request is sent on it. `Rpc::events` in
+    /// `crates/daemon/src/rpc.rs:230` subscribes every connection to the
+    /// broadcast with no opt-in — "a client that connected wants to know when
+    /// something changes, and making it ask would just be a round trip before
+    /// the first event" — so the handshake IS the subscription.
+    ///
+    /// `--stdio`, like `attach_stream` and for the same reason: it is the one
+    /// command both key types run, because sshd substitutes it on an enrolled
+    /// device's forced-command line and `main.rs` matches it on a plain key.
+    ///
+    /// The returned handle finishes when the subscription does — the ssh
+    /// channel closed, the daemon stopped, or this session was dropped. A
+    /// caller that shows "live" anywhere should await it and stop saying so.
+    pub async fn subscribe(
+        &mut self,
+        sink: EventSink,
+    ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+        // Kept even if the channel below cannot be opened. See the field: a
+        // terminal attachment carries the same broadcast, so a session that
+        // failed to get its own channel is not a session with no push at all.
+        self.events = Some(std::sync::Arc::clone(&sink));
+
+        let mut client = match self._ssh.as_mut() {
+            Some(ssh) => {
+                // Named by tilde, not bare: see `connect_ssh` above.
+                let streams =
+                    ssh.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
+                Client::over(
+                    Box::new(streams.reader) as Reader,
+                    Box::new(streams.writer) as Writer,
+                    "farcooler-mobile",
+                    env!("CARGO_PKG_VERSION"),
+                )
+                .await?
+            }
+            // A second connection to the same socket. Not an ssh channel, but
+            // the same thing one layer down, and the daemon cannot tell the
+            // difference: it subscribes whatever connected.
+            None => {
+                let socket = self.socket.as_ref().ok_or_else(|| {
+                    SessionError::Protocol("this session has nothing to open a channel on".into())
+                })?;
+                let stream = tokio::net::UnixStream::connect(socket).await.map_err(|e| {
+                    SessionError::Disconnected(format!("cannot reach the daemon: {e}"))
+                })?;
+                let (read, write) = stream.into_split();
+                Client::over(
+                    Box::new(read) as Reader,
+                    Box::new(write) as Writer,
+                    "farcooler-mobile",
+                    env!("CARGO_PKG_VERSION"),
+                )
+                .await?
+            }
+        };
+
+        Ok(tokio::spawn(async move {
+            loop {
+                // Any error ends the subscription rather than retrying here.
+                // Reconnecting is the session's business and it already has a
+                // schedule for it; a retry loop at this depth would be a second
+                // one, disagreeing with the first about when to give up.
+                let Ok(event) = client.next_event().await else { break };
+                let Some(payload) = event.payload else { continue };
+                if let Some(what) = FleetEvent::of(payload) {
+                    sink(what);
+                }
+            }
+        }))
+    }
+
     /// Connect to a daemon on this runner. Used by tests and by any desktop
     /// client that wants the same API as the mobile one.
     pub async fn connect_local(socket: &std::path::Path) -> Result<Self, SessionError> {
@@ -339,7 +552,7 @@ impl Session {
             env!("CARGO_PKG_VERSION"),
         )
         .await?;
-        Ok(Self { client, _ssh: None })
+        Ok(Self { client, _ssh: None, events: None, socket: Some(socket.to_path_buf()) })
     }
 
     pub fn daemon_version(&self) -> &str {

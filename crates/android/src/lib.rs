@@ -187,6 +187,42 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativePoll(
     jstring_of(&mut env, text)
 }
 
+/// The oldest fleet notice, or null when none is waiting.
+///
+/// A second drain beside `nativePoll` rather than a line on it, because the two
+/// queues have opposite policies — a finished call is somebody's awaited answer
+/// and is never dropped; a notice may be. See `farcooler_client_next_event`.
+///
+/// Copied into a Java string immediately, for the reason `nativePoll` states,
+/// and with the same hazard: the pointer belongs to the handle until the next
+/// call to this function on it.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeNextEvent(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let raw = unsafe { client::farcooler_client_next_event(handle_of(handle)) };
+    if raw.is_null() {
+        return std::ptr::null_mut();
+    }
+    let Ok(text) = (unsafe { CStr::from_ptr(raw) }).to_str() else {
+        return std::ptr::null_mut();
+    };
+    jstring_of(&mut env, text)
+}
+
+/// Whether a dedicated event channel is up right now, so the caller can choose
+/// its fallback cadence.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeEventsLive(
+    _env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jboolean {
+    u8::from(unsafe { client::farcooler_client_events_live(handle_of(handle)) })
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeConnected(
     _env: JNIEnv,

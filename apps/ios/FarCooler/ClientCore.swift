@@ -24,6 +24,14 @@ actor ClientCore {
     /// would leave the transfer running with nobody listening.
     private var reporting: [UInt64: @Sendable (Int64, Int64) -> Void] = [:]
 
+    /// Who to tell when the runner says something changed.
+    ///
+    /// One handler, not a stream of values: every notice means "re-read it"
+    /// and carries no delta, so there is nothing to buffer here that the core
+    /// has not already buffered — and buffered better, because it coalesces.
+    /// See `farcooler_client_next_event` in `crates/client/src/ffi.rs`.
+    private var onFleetNews: (@Sendable ([String: Any]) -> Void)?
+
     /// What a live terminal stream reports back. Not a continuation, because a
     /// stream is not an answer to anything: it produces bytes until the pane
     /// ends or someone stops watching.
@@ -124,6 +132,34 @@ actor ClientCore {
     var isConnected: Bool {
         guard let handle else { return false }
         return farcooler_client_connected(handle)
+    }
+
+    /// Hear about changes on the runner as they happen.
+    ///
+    /// The runner has always pushed — every connection is subscribed to its
+    /// broadcast with no opt-in — and until this existed nothing on either
+    /// phone could receive one, so every app asked again on a timer instead.
+    /// The handler runs on the pump, off the main actor, and is handed the
+    /// decoded notice; see the header for its shapes. They all mean the same
+    /// thing to a caller that re-reads everything.
+    func startEvents(_ handler: @escaping @Sendable ([String: Any]) -> Void) {
+        onFleetNews = handler
+        // The pump is what drains the notices, and it is otherwise started by
+        // the first call. Starting it here means a caller that registers before
+        // connecting does not sit deaf until it makes one.
+        startPumping()
+    }
+
+    /// Whether the core has a live event channel to this runner.
+    ///
+    /// What the caller's fallback cadence is chosen from: poll slowly while
+    /// this is true, at the old interval while it is false. False is a real
+    /// answer, not an error — a runner that cannot carry the channel still
+    /// works — and it goes false on its own when a subscription dies, which is
+    /// what stops a dead push path becoming a frozen screen.
+    var eventsLive: Bool {
+        guard let handle else { return false }
+        return farcooler_client_events_live(handle)
     }
 
     /// Watch a terminal's output as it happens.
@@ -247,6 +283,30 @@ actor ClientCore {
                     continuation.resume(throwing: CoreError.rejected(message))
                 }
             }
+        }
+
+        // And the runner's news, from a queue of its own.
+        //
+        // Second, behind the answers above, for the same reason the daemon's
+        // own `select!` is biased that way: somebody's tap is waiting on one of
+        // those, and a burst of news from a busy fleet must not delay it.
+        //
+        // Drained even with no handler registered, and that is deliberate — the
+        // queue is bounded and coalescing, so leaving it undrained costs
+        // nothing, but leaving it undrained forever would mean a handler
+        // registered later inherits a backlog of notices about a fleet it has
+        // never read.
+        guard let onFleetNews else {
+            while farcooler_client_next_event(handle) != nil {}
+            return
+        }
+        while let raw = farcooler_client_next_event(handle) {
+            let json = String(cString: raw)
+            guard
+                let data = json.data(using: .utf8),
+                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            onFleetNews(object)
         }
     }
 

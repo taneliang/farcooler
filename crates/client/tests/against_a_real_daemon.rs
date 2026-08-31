@@ -257,6 +257,80 @@ async fn hiding_and_unhiding_round_trips_through_the_client() {
     assert_eq!(reversible["state"], "ready");
 }
 
+/// The push path, end to end, with a number on it.
+///
+/// This is the claim the whole event surface rests on: a change made on the
+/// runner reaches a client in one round trip rather than at the next poll. It
+/// is asserted as a LATENCY, not merely as an arrival, because "an event
+/// arrives eventually" was already true of the three-second poll it replaces.
+///
+/// `workspace.hide` is the trigger because it announces synchronously in the
+/// handler — see `crates/daemon/src/rpc.rs:1088` — so what is measured is the
+/// path and not a reconcile pass's timer.
+#[tokio::test]
+async fn fleet_news_reaches_a_subscriber_in_a_round_trip_not_a_poll_interval() {
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
+    let workspace = session
+        .create_workspace(repository, "pushed", "feat/push", "HEAD", "", false)
+        .await
+        .expect("create");
+    let id = farcooler_client::session::uuid_of(&workspace.id);
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let subscription = session
+        .subscribe(std::sync::Arc::new(move |what| {
+            let _ = tx.send(what);
+        }))
+        .await
+        .expect("subscribe");
+
+    // Drain whatever the reconcile pass has already said, so the measurement
+    // below times the hide and nothing that happened before it.
+    while tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await.is_ok() {}
+
+    let started = std::time::Instant::now();
+    session.hide_workspace(id).await.expect("hide");
+    let news = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("fleet news must arrive without waiting out a poll interval")
+        .expect("the subscription is still open");
+    let elapsed = started.elapsed();
+
+    assert_eq!(news, farcooler_client::session::FleetEvent::Fleet);
+    // Two orders of magnitude under the three-second poll this replaces. Not a
+    // tight bound — a loaded CI machine is allowed to be slow — but tight
+    // enough that a regression back to "it arrives on the next timer" fails
+    // here rather than in somebody's hand.
+    assert!(elapsed.as_millis() < 500, "fleet news took {elapsed:?}");
+    eprintln!("fleet news arrived {elapsed:?} after the change");
+
+    // And the subscription is still open afterwards: one event does not end it.
+    session.unhide_workspace(id).await.expect("unhide");
+    tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("a second change is pushed too")
+        .expect("the subscription is still open");
+    assert!(!subscription.is_finished());
+}
+
 #[tokio::test]
 async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error() {
     // A client attaches to a PANE, not to a session. A terminal that has never

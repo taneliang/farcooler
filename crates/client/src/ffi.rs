@@ -103,6 +103,134 @@ pub struct ClientHandle {
     /// Running terminal streams, by terminal id, so a second attach replaces the
     /// first rather than pumping the same bytes twice.
     streams: Arc<Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
+    /// Fleet news waiting to be taken. Its own queue, with its own policy; see
+    /// `EventQueue`.
+    events: Arc<Mutex<EventQueue>>,
+    /// The last event handed out, held so its pointer stays valid until the
+    /// next `farcooler_client_next_event`.
+    ///
+    /// Separate from `scratch` on purpose: they are handed out by two different
+    /// functions a caller interleaves freely, and one slot would mean a poll
+    /// invalidating an event's pointer under a caller that had not read it yet.
+    event_scratch: Option<std::ffi::CString>,
+}
+
+/// The largest number of distinct notices held for a client that is not
+/// reading.
+///
+/// Not tuned: a client draining at any sane rate never sees more than one or
+/// two, because notices coalesce. It is the ceiling on memory a stalled reader
+/// can cost, and it is small because what sits above it is bounded too — one
+/// `Fleet`, plus one per workspace whose diff moved and one per repository
+/// whose stack was re-read.
+const EVENT_QUEUE_LIMIT: usize = 64;
+
+/// Fleet news on its way to the caller, and the rules for losing it.
+///
+/// **The policy, in one sentence: a notice may be coalesced or dropped, but
+/// the client is never left believing it is up to date when it is not.**
+///
+/// That is affordable only because of what a notice says. Every `FleetEvent`
+/// means "re-read it" and carries no delta (see `FleetEvent` in `session.rs`),
+/// so two identical notices are worth exactly one re-read, and any set of
+/// notices is covered by re-reading everything. Which gives three rules:
+///
+/// 1. **Never block.** `push` takes this lock, does O(n) over at most
+///    `EVENT_QUEUE_LIMIT` short strings, and returns. It is called from the
+///    task reading the daemon's socket, and a boundary that could make that
+///    task wait on a UI thread would be back-pressuring the daemon's writer
+///    through an ssh channel — a slow phone would stall the runner.
+/// 2. **Coalesce.** A notice equal to one already waiting is dropped. A busy
+///    runner samples every second and an agent under load moves a row on every
+///    sample; without this the push path would be a poll with extra steps.
+/// 3. **Overflow collapses, it does not truncate.** At the limit the whole
+///    queue is replaced by a single `{"event":"resync"}` — "you missed some,
+///    re-read everything". Dropping the oldest would silently lose a workspace
+///    nobody re-reads; dropping the newest would lose the most recent news.
+///    Collapsing loses only the detail of WHICH thing moved, which no client
+///    depends on, and it is the one outcome that cannot leave a client stale.
+///
+/// The queue is deliberately not cleared when a session is replaced. A notice
+/// from the connection that just died still means "re-read", and the client
+/// re-reads over the new one.
+#[derive(Default)]
+struct EventQueue {
+    /// Notices as the JSON lines the caller receives, oldest first.
+    ///
+    /// JSON rather than a typed value for the same reason every other answer
+    /// here is JSON: this is the C boundary, and the alternative is a second
+    /// decoder in Swift and a third in Kotlin.
+    pending: VecDeque<String>,
+    /// Which subscription is current, so a dying one cannot report the living
+    /// one dead.
+    ///
+    /// Reconnecting opens a new channel and drops the old session, and the old
+    /// subscription's task learns it is over some milliseconds LATER — after
+    /// the new one is already up. Without the counter its cleanup would clear
+    /// `live` for a subscription that is fine, and the client would fall back
+    /// to fast polling with a working push path underneath it.
+    generation: u64,
+    /// Whether a dedicated event channel is currently up.
+    ///
+    /// What decides the fallback cadence on the client. False is not an error:
+    /// a runner reached without ssh, or one where the second channel could not
+    /// be opened, is a runner the client polls the way it always did.
+    live: bool,
+}
+
+impl EventQueue {
+    /// Rule 2 and rule 3 above, in the order they are checked.
+    fn push(&mut self, notice: String) {
+        if self.pending.iter().any(|held| *held == notice) {
+            return;
+        }
+        if self.pending.len() >= EVENT_QUEUE_LIMIT {
+            self.pending.clear();
+            self.pending.push_back(json!({ "event": "resync" }).to_string());
+            return;
+        }
+        self.pending.push_back(notice);
+    }
+
+    /// Claim the next subscription generation. The caller quotes it back when
+    /// that subscription ends.
+    fn opening(&mut self) -> u64 {
+        self.generation += 1;
+        self.live = false;
+        self.generation
+    }
+
+    fn opened(&mut self, generation: u64) {
+        if self.generation == generation {
+            self.live = true;
+        }
+    }
+
+    fn closed(&mut self, generation: u64) {
+        if self.generation == generation {
+            self.live = false;
+        }
+    }
+}
+
+/// One notice as the line the caller reads.
+///
+/// Here rather than in `session.rs` because the shape is the boundary's, not
+/// the session's: `{"event": ...}` is what tells `drain` on the other side that
+/// this line is not the answer to any ticket, the same way `{"stream": ...}`
+/// does for terminal bytes.
+fn event_line(what: &crate::session::FleetEvent) -> String {
+    use crate::session::FleetEvent;
+    match what {
+        FleetEvent::Fleet => json!({ "event": "fleet" }),
+        FleetEvent::ChangeSet { workspace } => {
+            json!({ "event": "change_set", "workspace": workspace.to_string() })
+        }
+        FleetEvent::Stack { repository } => {
+            json!({ "event": "stack", "repository": repository.to_string() })
+        }
+    }
+    .to_string()
 }
 
 /// Create a client. Free with `farcooler_client_free`.
@@ -127,6 +255,8 @@ pub extern "C" fn farcooler_client_new() -> *mut c_void {
             next_ticket: Arc::new(Mutex::new(1)),
             scratch: None,
             streams: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            events: Arc::new(Mutex::new(EventQueue::default())),
+            event_scratch: None,
         });
         Box::into_raw(handle) as *mut c_void
     })
@@ -170,11 +300,12 @@ pub unsafe extern "C" fn farcooler_client_connect(
         let ticket = h.take_ticket();
         let session = Arc::clone(&h.session);
         let finished = Arc::clone(&h.finished);
+        let events = Arc::clone(&h.events);
 
         h.runtime.spawn(async move {
             let outcome = match parse_destination(&config) {
                 Ok(destination) => match Session::connect_ssh(&destination).await {
-                    Ok(open) => {
+                    Ok(mut open) => {
                         let version = open.daemon_version().to_string();
                         // What that runner can do, so the app can dim what it
                         // cannot serve rather than offering a control that fails.
@@ -185,6 +316,7 @@ pub unsafe extern "C" fn farcooler_client_connect(
                             .filter(|c| open.can(c))
                             .map(|c| (*c).to_string())
                             .collect();
+                        subscribe(&mut open, &events).await;
                         *session.lock().await = Some(open);
                         Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
                     }
@@ -1059,6 +1191,101 @@ pub unsafe extern "C" fn farcooler_client_builtin_themes(out: *mut u8, capacity:
         }
         unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
         bytes.len()
+    })
+}
+
+/// Start this session pushing fleet news into `events`.
+///
+/// Best effort, and deliberately not a reason to fail the connection. A runner
+/// too old, an sshd out of channels, or a transport that is not ssh at all —
+/// each of those is a runner the client polls the way it always did, and
+/// refusing to connect over it would turn a slower app into no app.
+async fn subscribe(open: &mut Session, events: &Arc<Mutex<EventQueue>>) {
+    let generation = locked(events).opening();
+
+    // The sink. It runs on the runtime thread reading the daemon's socket, so
+    // everything it does is under one uncontended lock and bounded: see
+    // `EventQueue`.
+    let queue = Arc::clone(events);
+    let sink: crate::session::EventSink = Arc::new(move |what| {
+        locked(&queue).push(event_line(&what));
+    });
+
+    match open.subscribe(sink).await {
+        Ok(subscription) => {
+            locked(events).opened(generation);
+            let queue = Arc::clone(events);
+            // Awaited rather than dropped, so `live` is an answer about now.
+            // The task ends when the ssh channel does, which is also when the
+            // session it belongs to was dropped — hence the generation check
+            // inside `closed`.
+            tokio::spawn(async move {
+                let _ = subscription.await;
+                locked(&queue).closed(generation);
+            });
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "no dedicated event channel; this client will poll");
+        }
+    }
+}
+
+/// Take the oldest fleet notice, or NULL if none is waiting.
+///
+/// A second queue rather than a line on `farcooler_client_poll`, because the
+/// two have opposite policies and one queue can only have one. A finished call
+/// is somebody's awaited answer and must never be dropped; a notice may be
+/// dropped freely, and must be, or a client that stopped reading would grow
+/// this without limit. Keeping them apart also stops a burst of news from a
+/// busy runner delaying the answer to a tap.
+///
+/// The line is JSON, one of:
+///
+/// ```text
+/// {"event": "fleet"}
+/// {"event": "change_set", "workspace": "<uuid>"}
+/// {"event": "stack", "repository": "<uuid>"}
+/// {"event": "resync"}
+/// ```
+///
+/// **All four mean the same thing to a client that re-reads everything: ask
+/// again now.** The names are there for a client that wants to be narrower and
+/// for anyone reading a log; nothing is lost by treating them alike, which is
+/// what `resync` depends on.
+///
+/// The returned pointer is owned by the handle and stays valid until the next
+/// call to this function on it. Each notice is returned exactly once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_next_event(handle: *mut c_void) -> *const c_char {
+    guarded(std::ptr::null(), || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return std::ptr::null() };
+        let next = locked(&h.events).pending.pop_front();
+        match next {
+            Some(json) => {
+                h.event_scratch = std::ffi::CString::new(json).ok();
+                h.event_scratch.as_ref().map_or(std::ptr::null(), |s| s.as_ptr())
+            }
+            None => std::ptr::null(),
+        }
+    })
+}
+
+/// Whether a dedicated event channel is up right now.
+///
+/// What a client uses to choose its fallback cadence: slowly while this is
+/// true, at the old interval while it is false. False rather than an error is
+/// the point — a runner reached over something that is not ssh, or one whose
+/// second channel could not be opened, still works, just at the latency it
+/// always had.
+///
+/// It goes false on its own when the channel dies, so a subscription that
+/// stopped without the session noticing degrades to polling instead of to a
+/// frozen screen.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_events_live(handle: *mut c_void) -> bool {
+    guarded(false, || {
+        let Some(h) = (unsafe { as_handle(handle) }) else { return false };
+        locked(&h.events).live
     })
 }
 
@@ -2299,6 +2526,86 @@ mod identity_tests {
             0,
             "a fingerprint of something that will not parse is nothing, not a guess"
         );
+    }
+
+    /// Two notices saying the same thing are one notice.
+    ///
+    /// The rule the whole push path is affordable because of: a runner samples
+    /// every second and a working agent moves a row on most of them, so without
+    /// this a client would make one round trip per sample and the push would be
+    /// a faster poll.
+    #[test]
+    fn the_same_news_twice_is_queued_once() {
+        use crate::session::FleetEvent;
+        let mut queue = super::EventQueue::default();
+        for _ in 0..50 {
+            queue.push(super::event_line(&FleetEvent::Fleet));
+        }
+        assert_eq!(queue.pending.len(), 1);
+        assert_eq!(queue.pending[0], r#"{"event":"fleet"}"#);
+    }
+
+    /// News about different things is not collapsed together.
+    ///
+    /// The other half of the rule: coalescing is by what a notice SAYS, and
+    /// two workspaces moving are two things to re-read.
+    #[test]
+    fn news_about_different_things_is_kept_apart() {
+        use crate::session::FleetEvent;
+        let mut queue = super::EventQueue::default();
+        let one = uuid::Uuid::now_v7();
+        let two = uuid::Uuid::now_v7();
+        queue.push(super::event_line(&FleetEvent::ChangeSet { workspace: one }));
+        queue.push(super::event_line(&FleetEvent::ChangeSet { workspace: two }));
+        queue.push(super::event_line(&FleetEvent::ChangeSet { workspace: one }));
+        assert_eq!(queue.pending.len(), 2);
+    }
+
+    /// A reader that stopped costs a bounded amount of memory and loses no
+    /// news it could act on.
+    ///
+    /// Overflow COLLAPSES rather than truncates, and that is the whole safety
+    /// argument: dropping the oldest would silently lose a workspace nobody
+    /// then re-reads, and a client left believing it is current is the one
+    /// outcome this queue must not produce. `resync` covers every notice that
+    /// was thrown away because every notice only ever meant "re-read".
+    #[test]
+    fn a_reader_that_stopped_overflows_into_one_resync() {
+        use crate::session::FleetEvent;
+        let mut queue = super::EventQueue::default();
+        for _ in 0..super::EVENT_QUEUE_LIMIT + 10 {
+            queue.push(super::event_line(&FleetEvent::Stack { repository: uuid::Uuid::now_v7() }));
+        }
+        assert!(queue.pending.len() <= super::EVENT_QUEUE_LIMIT);
+        assert!(
+            queue.pending.iter().any(|line| line == r#"{"event":"resync"}"#),
+            "an overflowed queue has to say so: {:?}",
+            queue.pending
+        );
+    }
+
+    /// A subscription that dies after a newer one is up cannot report the
+    /// newer one dead.
+    ///
+    /// Reconnecting opens the new channel and drops the old session, and the
+    /// old subscription's task learns it is over milliseconds LATER. Without
+    /// the generation check the client would fall back to fast polling with a
+    /// working push path underneath it — which is invisible, because
+    /// everything still works, just at the cost this whole change removes.
+    #[test]
+    fn a_dying_subscription_does_not_report_the_live_one_dead() {
+        let mut queue = super::EventQueue::default();
+        let first = queue.opening();
+        queue.opened(first);
+        assert!(queue.live);
+
+        let second = queue.opening();
+        queue.opened(second);
+        queue.closed(first);
+        assert!(queue.live, "the first subscription's cleanup must not clear the second's");
+
+        queue.closed(second);
+        assert!(!queue.live);
     }
 
     /// The fingerprint a device shows belongs to the key it generated.

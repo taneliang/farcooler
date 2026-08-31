@@ -205,6 +205,45 @@ uint64_t farcooler_client_call(void *handle, const char *method, const char *arg
  */
 const char *farcooler_client_poll(void *handle);
 
+/*
+ * Take the oldest fleet notice, or NULL if none is waiting.
+ *
+ * The runner pushes: every connection is subscribed to its broadcast, so this
+ * says "something changed, re-read it" a round trip after it happened rather
+ * than up to a poll interval later.
+ *
+ * The line is JSON, one of:
+ *
+ *   {"event": "fleet"}
+ *   {"event": "change_set", "workspace": "<uuid>"}
+ *   {"event": "stack", "repository": "<uuid>"}
+ *   {"event": "resync"}
+ *
+ * All four mean the same thing to a client that re-reads everything: ask again
+ * now. No notice carries a delta, which is what makes losing one survivable —
+ * so this queue is allowed to coalesce and, at its ceiling, to collapse to a
+ * single `resync`. It never blocks the runner, and it never leaves a client
+ * believing it is up to date when it is not.
+ *
+ * A separate queue from `farcooler_client_poll` because the two have opposite
+ * policies: a finished call is somebody's awaited answer and is never dropped.
+ *
+ * Owned by the handle, valid until the next call to THIS function on it. Each
+ * notice is returned exactly once.
+ */
+const char *farcooler_client_next_event(void *handle);
+
+/*
+ * Whether a dedicated event channel is up right now.
+ *
+ * Choose the fallback cadence with it: poll slowly while this is true, at the
+ * old interval while it is false. False is not an error — a runner that cannot
+ * carry the channel still works, at the latency it always had — and it goes
+ * false on its own when a subscription dies, so a client degrades to polling
+ * rather than to a frozen screen.
+ */
+bool farcooler_client_events_live(void *handle);
+
 /* True once a session is established. */
 bool farcooler_client_connected(void *handle);
 
