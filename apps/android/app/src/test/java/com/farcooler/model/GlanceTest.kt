@@ -1,5 +1,8 @@
 package com.farcooler.model
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import com.farcooler.ui.FINISHED
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -309,9 +312,10 @@ class GlanceTest {
     }
 
     /**
-     * **A finished turn has no mark, and that is a refusal rather than a gap.**
+     * **A finished turn is the review ring, and it is the only agent state that
+     * reaches that tier.**
      *
-     * An earlier version of this file mapped `done` onto the amber ring, on the
+     * An earlier version of this file mapped `done` onto the AMBER ring, on the
      * grounds that `AgentActivity.wantsAttention` is blocked OR done — this
      * app's single definition of "interrupt someone" — and that the row prints
      * the word beside the mark anyway. Both halves are true and the conclusion
@@ -319,14 +323,104 @@ class GlanceTest {
      * chip, which has no state text at all, and folding a failed turn into amber
      * put back the exact defect red was introduced to fix.
      *
-     * The Mac reached the opposite conclusion first, in `Status.glanceMark`, and
-     * three platforms giving three answers to one question is what this port
-     * exists to end. So: no mark, and [agentOutcome] answers instead.
+     * A later version made it an [AgentOutcome] — a filled disc, first green and
+     * then in the review ink — because `GlanceMark.Attention.TO_REVIEW` refused
+     * an agent's state outright. That refusal was narrowed to the workspace
+     * counts it was written about, so this now maps like `Status.glanceMark` on
+     * the Mac and `GlanceMark(agent:)` on the phone: same tier, same weight,
+     * same ink, three platforms.
+     *
+     * The other eleven-ish statuses are still held out of the tier, which is the
+     * half of the old prohibition that survived.
      */
     @Test
-    fun `a finished turn has no mark and an outcome instead`() {
-        assertNull(GlanceMark.of(terminal("done"), now = 0L))
-        assertEquals(AgentOutcome.DONE, agentOutcome(terminal("done")))
+    fun `a finished turn is the review ring and nothing else is`() {
+        val mark = GlanceMark.of(terminal("done"), now = 0L)!!
+        assertEquals(GlanceMark.Attention.TO_REVIEW, mark.attention)
+        // The turn is over, so the agent is not producing.
+        assertEquals(GlanceMark.Core.AT_A_PROMPT, mark.core)
+        assertEquals("To review, at a prompt", mark.phrase)
+        assertNull("a finished turn is not an outcome any more", agentOutcome(terminal("done")))
+
+        for (activity in listOf("idle", "working", "blocked", "none", "unknown", "wat")) {
+            assertNotEquals(
+                "$activity claimed the review tier",
+                GlanceMark.Attention.TO_REVIEW,
+                GlanceMark.of(terminal(activity), now = 0L)?.attention,
+            )
+        }
+    }
+
+    /**
+     * §03 gives the tiers three stroke weights and calls hue "redundant
+     * reinforcement", and the accessory sizes flatten to one tint, so a finished
+     * turn has to be separable from a quiet one and from a blocked one by the
+     * drawing alone.
+     */
+    @Test
+    fun `a finished turn reads with its hue removed`() {
+        val done = GlanceMark.of(terminal("done"), now = 0L)!!.attention
+        val quiet = GlanceMark.of(terminal("idle"), now = 0L)!!.attention
+        val blocked = GlanceMark.of(terminal("blocked"), now = 0L)!!.attention
+        for (size in GlanceMarkSize.entries) {
+            assertTrue(
+                "$size draws a finished turn at a quiet turn's weight",
+                size.stroke(done) > size.stroke(quiet),
+            )
+        }
+        // Above the 8dp ribbon, where §03 deliberately collapses the two
+        // attention strokes into one, it must also not be as loud as blocked.
+        for (size in GlanceMarkSize.entries - GlanceMarkSize.RIBBON) {
+            assertTrue(
+                "$size draws a finished turn as loudly as a blocked one",
+                size.stroke(done) < size.stroke(blocked),
+            )
+        }
+    }
+
+    /**
+     * **The ink decision, where a JVM test can reach it.**
+     *
+     * `agentTint` is a `@Composable` and this source set is plain JUnit, so
+     * while the rule lived inside the composable nothing could catch it being
+     * reverted — and putting a finished turn back to [FINISHED] green was tried
+     * and left the whole suite passing. [agentInk] is that rule pulled into the
+     * model, and this is the test that could not exist before.
+     */
+    @Test
+    fun `the ink an agent wears is decided in the model`() {
+        assertEquals(AgentInk.REVIEW, agentInk(terminal("done")))
+        assertEquals(GlancePalette.review.darkArgb, agentInk(terminal("done"))!!.glance!!.darkArgb)
+        assertNotEquals(FINISHED.toArgb(), agentInk(terminal("done"))!!.glance!!.darkArgb)
+
+        assertEquals(AgentInk.AMBER, agentInk(terminal("blocked")))
+        assertEquals(AgentInk.ERROR, agentInk(terminal("done", failed = true)))
+        // Material's own role, because §01 has no figure for red at all.
+        assertNull("red must not be pulled out of the palette", AgentInk.ERROR.glance)
+
+        for (activity in listOf("idle", "working", "none", "wat")) {
+            assertNull("$activity wears an ink it should not", agentInk(terminal(activity)))
+        }
+    }
+
+    /**
+     * **A finished turn wears the review ink now, and [FINISHED] green did not
+     * move with it.**
+     *
+     * Repointing [FINISHED] — rather than moving the one branch that was about
+     * an agent — would restyle a done plan step and a completed tool call as
+     * well, two facts that are not about an agent at all, and this fails if
+     * somebody does. The rule itself is pinned one test up, in [agentInk].
+     *
+     * The second half is that the two are genuinely different colours, so the
+     * change is one a person can see: Material green 500 against §01's
+     * low-chroma review ink.
+     */
+    @Test
+    fun `the finished green is untouched and is not the review ink`() {
+        assertEquals(Color(0xFF4CAF50), FINISHED)
+        assertNotEquals(GlancePalette.review.darkArgb, FINISHED.toArgb())
+        assertNotEquals(GlancePalette.review.argb(dark = false), FINISHED.toArgb())
     }
 
     /**
@@ -334,15 +428,25 @@ class GlanceTest {
      * the same dot until it did. The daemon sends both as `done` and says which
      * in `turnFailed`, so this is the one distinction a `when` on the activity
      * alone cannot make — and the one a chip's hue carries by itself.
+     *
+     * **`done` joining the review tier did not take the failure with it.** The
+     * ruling was about a turn that ENDED; a turn that died still refuses the
+     * mark, because the mark has no failure axis and the review ring says "have
+     * a look", which about a build that died overnight is not the fact. So the
+     * two are now drawn by different halves of the file, which is a stronger
+     * separation than the two enum cases they used to be.
      */
     @Test
-    fun `a turn that died is a different outcome from one that worked`() {
+    fun `a turn that died refuses the mark that a turn that worked now takes`() {
         assertEquals(AgentOutcome.FAILED, agentOutcome(terminal("done", failed = true)))
-        assertNotEquals(
-            agentOutcome(terminal("done")),
-            agentOutcome(terminal("done", failed = true)),
-        )
         assertNull(GlanceMark.of(terminal("done", failed = true), now = 0L))
+
+        assertNull(agentOutcome(terminal("done")))
+        assertEquals(
+            GlanceMark.Attention.TO_REVIEW,
+            GlanceMark.of(terminal("done"), now = 0L)!!.attention,
+        )
+        assertNotEquals(agentInk(terminal("done")), agentInk(terminal("done", failed = true)))
     }
 
     /**
@@ -394,6 +498,18 @@ class GlanceTest {
             GlanceMark.Link.LIVE,
             GlanceMark.of(terminal("blocked", since = longAgo), now)!!.link,
         )
+        // "to-review" in §08's sentence is now reachable from an agent, and it
+        // holds the same way blocked does: a turn that ended an hour ago has
+        // still ended. `FleetSnapshot.Confidence` gives the same answer on the
+        // Apple side by vouching for `done` at any age.
+        assertEquals(
+            GlanceMark.Link.LIVE,
+            GlanceMark.of(terminal("done", since = longAgo), now)!!.link,
+        )
+        assertEquals(
+            GlanceMark.Link.BROKEN,
+            GlanceMark.of(terminal("idle", since = longAgo), now)!!.link,
+        )
     }
 
     /**
@@ -426,13 +542,23 @@ class GlanceTest {
     }
 
     /**
-     * An agent tab can never be cyan. `InboxRow` is a WORKSPACE's counts, not an
-     * agent's state, and inventing a per-agent version of it would sort a diff
-     * by how blocked some agent in the same worktree happens to be.
+     * **Only `done` reaches the review tier from a terminal, and this test used
+     * to say nothing did.**
+     *
+     * The prohibition was narrowed rather than lifted, so the guard is narrowed
+     * with it rather than deleted. What it was written about still holds:
+     * `InboxRow` is a WORKSPACE's counts, not an agent's state, and inventing a
+     * per-agent version of it would sort a diff by how blocked some agent in the
+     * same worktree happens to be. `done` was never that invented count — the
+     * daemon sends it per terminal — which is why it is the one thing let in.
      */
     @Test
-    fun `no terminal can produce the review tier`() {
-        for (activity in listOf("none", "idle", "working", "blocked", "done", "unknown", "wat")) {
+    fun `only a finished turn reaches the review tier from a terminal`() {
+        assertEquals(
+            GlanceMark.Attention.TO_REVIEW,
+            GlanceMark.of(terminal("done"), now = 0L)?.attention,
+        )
+        for (activity in listOf("none", "idle", "working", "blocked", "unknown", "wat")) {
             assertNotEquals(
                 "$activity must not be able to draw the review ring",
                 GlanceMark.Attention.TO_REVIEW,

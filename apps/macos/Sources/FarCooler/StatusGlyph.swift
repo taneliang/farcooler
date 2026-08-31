@@ -146,12 +146,15 @@ struct StatusGlyph: View {
 
     /// What this app draws for a state §03 has no slot for.
     ///
-    /// See `Status.glanceMark` for the argument. These five keep exactly the
-    /// drawing they had before the mark arrived — green for a turn that ended
-    /// and red for one that died or a terminal that is gone — because the
-    /// alternative on offer was the quiet hairline, and a hairline is the
-    /// mark's way of saying "nothing is wanted from you", which about an
-    /// overnight build that failed is not a missing answer but a wrong one.
+    /// See `Status.glanceMark` for the argument. These four keep exactly the
+    /// drawing they had before the mark arrived — red for a turn that died or
+    /// a terminal that is gone — because the alternative on offer was the
+    /// quiet hairline, and a hairline is the mark's way of saying "nothing is
+    /// wanted from you", which about an overnight build that failed is not a
+    /// missing answer but a wrong one.
+    ///
+    /// **A finished turn is no longer one of them.** `done` draws the review
+    /// ring now, so it never reaches here; `glanceMark` says why.
     @ViewBuilder
     private var outcome: some View {
         switch status {
@@ -206,30 +209,36 @@ extension Status {
     /// **Nil is a refusal, not an omission.** The glance vocabulary is three
     /// axes: a ring that says whether YOUR attention is wanted and what for, a
     /// core that says whether the AGENT is producing, and a dash that says the
-    /// channel is broken. Seven of this app's twelve statuses are one of those
-    /// combinations exactly, and they are mapped below. Five are not, and the
+    /// channel is broken. Eight of this app's twelve statuses are one of those
+    /// combinations exactly, and they are mapped below. Four are not, and the
     /// nearest mark for every one of them is the quiet hairline — which is the
     /// mark for "nothing is wanted from you", spoken by VoiceOver as exactly
-    /// that. Drawing it on a build that died overnight, or on a turn that
-    /// finished and nobody has read, would make this app state the opposite of
-    /// what it knows in a vocabulary that is now trusted on three platforms.
-    /// So those five keep the drawing they already had, `StatusGlyph.outcome`
-    /// draws them, and the gap is a question for the design document rather
-    /// than one for this file to answer quietly.
+    /// that. Drawing it on a build that died overnight would make this app
+    /// state the opposite of what it knows in a vocabulary that is now trusted
+    /// on three platforms. So those four keep the drawing they already had,
+    /// `StatusGlyph.outcome` draws them, and the gap is a question for the
+    /// design document rather than one for this file to answer quietly.
     ///
-    /// The five, and what the mark would have to grow to take them:
+    /// **`done` used to be a fifth, and it is not any more.** It asked whether
+    /// `GlanceMark.Attention.toReview` — then "Never an agent's state" — could
+    /// be narrowed to the diff counts it was actually written about, and the
+    /// answer came back yes. The ban's stated reason was that a per-agent
+    /// review tier would have to be INVENTED, because `reviewsWaiting` is a
+    /// fleet scalar and `unreadDiff` is per workspace; that reason never
+    /// reached `done`, which the daemon sends per terminal
+    /// (`Terminal.status`, `AgentActivity.done`), and which this codebase
+    /// already treats as latched rather than passing — `confidence(in:at:)`
+    /// vouches for `blocked` and `done` at any age and stops vouching only for
+    /// `working`. So `done` maps onto the review ring below, the green dot it
+    /// wore here is gone, and this app, the phone and Android all put a
+    /// finished turn in the review tier — Android in the hue only, where it is
+    /// still drawn by `agentTint` rather than by a mark. The ban still stands
+    /// for `reviewsWaiting` and `unreadDiff`, which still have no per-agent
+    /// version and must not be given an invented one.
     ///
-    ///   - `done` — "the turn ended and nobody has looked yet". Structurally
-    ///     this is §03's `toReview` tier applied to a TURN instead of to a
-    ///     diff, and it is the one that most wants an answer, because it is
-    ///     also the most common. `GlanceMark.Attention.toReview` forbids it in
-    ///     so many words — "Never an agent's state" — and the stated REASON is
-    ///     that `reviewsWaiting` is a fleet scalar and `unreadDiff` is per
-    ///     workspace, so a per-agent version would have to be invented. That
-    ///     reason does not hold here: nothing is invented, the daemon sends
-    ///     `done` per terminal (`Terminal.status`, `AgentActivity.done`).
-    ///     Whether the prohibition should be narrowed to the diff counts it
-    ///     was written about is the owner's call, not this file's.
+    /// The four that remain, and what the mark would have to grow to take
+    /// them:
+    ///
     ///   - `failedRun`, `failedTurn` — a definite bad outcome. Red exists
     ///     precisely because "a turn that died and a turn that worked were the
     ///     same dot until this existed"; folding them into the hairline would
@@ -262,12 +271,17 @@ extension Status {
         // which is exactly what "could not look" means, and it is the
         // difference §03 makes audible even though it draws the same.
         case .unreadable: GlanceMark(attention: .quiet, core: nil, link: .broken)
-        case .done, .failed, .failedRun, .failedTurn, .lost: nil
+        // The turn ended and nobody has looked at it. The same mapping the
+        // phone makes from the wire's own word, `GlanceMark(agent:)`'s
+        // `case "done"`, and the reason it is allowed is in the comment above.
+        case .done: GlanceMark(attention: .toReview, core: .atAPrompt)
+        case .failed, .failedRun, .failedTurn, .lost: nil
         }
     }
 
-    /// Warm for "you", green for "finished", red for "missing", and nothing
-    /// else. Four colors in an application is already generous.
+    /// Warm for "you", the low-chroma review ink for "finished and unread",
+    /// red for "missing", and nothing else. Four colors in an application is
+    /// already generous, and this is now three.
     ///
     /// On `Status` rather than private to `StatusGlyph`, because the glyph was
     /// not the only thing painting a status. A collapsed worktree, a hidden
@@ -277,25 +291,37 @@ extension Status {
     /// switcher showed both at once, a red dot inside an orange tile. One rule,
     /// one place, and there is nowhere left to disagree from.
     ///
-    /// **A function of the appearance, because amber is.** §01 is explicit
-    /// that light mode is "Not a filter flip" — amber darkens to hold its
-    /// contrast on a pale backdrop — so the one colour in here that belongs to
-    /// the glance system has to be resolved against a `ColorScheme` rather
-    /// than being a constant. Green and red do not vary, and they do not come
-    /// from `GlancePalette` because §01 has no figure for either: they are
-    /// this app's own inks for the five states §03 does not cover, and
-    /// `glanceMark` is where that is argued.
+    /// **A function of the appearance, because the glance inks are.** §01 is
+    /// explicit that light mode is "Not a filter flip" — amber darkens to hold
+    /// its contrast on a pale backdrop, and review darkens with it — so the
+    /// two colours in here that belong to the glance system have to be
+    /// resolved against a `ColorScheme` rather than being constants. Red does
+    /// not vary, and it does not come from `GlancePalette` because §01 has no
+    /// figure for it: it is this app's own ink for the four states §03 does
+    /// not cover, and `glanceMark` is where that is argued.
+    ///
+    /// **Green is gone.** `done` used to be painted `.green` here and drawn as
+    /// a filled green dot by `StatusGlyph.outcome`. It is a review-tier state
+    /// now, so the glyph draws it through `glanceMark` and never reaches this
+    /// function at all — but a collapsed worktree's roll-up and the palette
+    /// tile's wash still ask, and they must not go on saying green about a
+    /// terminal whose dot no longer is. Hence `GlancePalette.review`, which is
+    /// the exact ink `GlanceMarkView` strokes that ring in.
     func tint(_ scheme: ColorScheme) -> Color {
         switch self {
         // The one saturated hue, from the one place it is written down.
         case .blocked: return GlancePalette.amber(scheme)
-        case .done: return .green
-        // `failedRun` and `failedTurn` are filled rather than hollow, like
-        // `done`: both are a definite outcome, not a missing answer. Left out
-        // of the shape switch in `StatusGlyph` so they fall to the
-        // filled-circle default there. Red rather than green is the whole point
-        // — a turn that died and a turn that worked were the same dot until
-        // this existed.
+        // The other glance ink, and the same value `GlanceMarkView` strokes
+        // the review ring in — so a `done` terminal's glyph and the tile
+        // washed behind it cannot come out two different colours.
+        case .done: return GlancePalette.review(scheme)
+        // `failedRun` and `failedTurn` are filled rather than hollow: both are
+        // a definite outcome, not a missing answer. Left out of the shape
+        // switch in `StatusGlyph` so they fall to the filled-circle default
+        // there. Red rather than the review ink is the whole point — a turn
+        // that died and a turn that worked were the same dot until this
+        // existed, and they must not become the same dot again now that the
+        // one that worked has a mark.
         case .lost, .failed, .failedRun, .failedTurn: return .red
         // Not red. Red is reserved for something that has gone wrong and wants
         // a decision; a runner that has not answered yet is neither, and

@@ -44,15 +44,28 @@ public struct GlanceMark: Hashable, Sendable {
         /// An agent is stopped, waiting on a person. The heaviest ring, and
         /// the only amber thing in the product.
         case needsYou
-        /// A finished diff nobody has read. A middle-weight ring in the low
-        /// chroma `GlancePalette.review`.
+        /// A finished thing nobody has looked at. A middle-weight ring in the
+        /// low chroma `GlancePalette.review`.
         ///
-        /// **Never an agent's state.** `reviewsWaiting` is a fleet-wide scalar
-        /// and `unreadDiff` is per WORKSPACE; `ShellScreen.swift:141-147` and
-        /// `ShellNavigation.swift:116-124` both refuse to invent a per-agent
-        /// version, so this tier belongs to a fleet-level count or to a Diff
-        /// tab and to nothing else. The convenience initialiser from
-        /// `FleetSnapshot.Agent` below cannot produce it, on purpose.
+        /// **A finished diff nobody has read, and a finished turn nobody has
+        /// opened.** It was the first of those alone until the `done` status
+        /// was let in, and the widening is deliberate: what the tier says is
+        /// "this is over, and you have not looked", which is true of a turn in
+        /// exactly the sense it is true of a diff.
+        ///
+        /// **`reviewsWaiting` and `unreadDiff` are still fleet- and
+        /// workspace-level and have no per-agent version.** `reviewsWaiting`
+        /// is a fleet-wide scalar and `unreadDiff` is per WORKSPACE;
+        /// `ShellScreen.swift:141-147` and `ShellNavigation.swift:116-124`
+        /// both refuse to invent a per-agent version, and that refusal stands
+        /// — a ring meaning "this AGENT has unread changes" would be a fact
+        /// nothing on the wire has an opinion about. The narrowing that let
+        /// `done` in does not reach those two counts, because the reason for
+        /// the ban was invented data and `done` is not invented: the daemon
+        /// sends it per terminal, and `FleetSnapshot.Confidence` already
+        /// treats it as latched rather than passing. See the initializer from
+        /// `FleetSnapshot.Agent` below, which produces this tier for `done`
+        /// and for nothing else.
         case toReview
         /// Nothing is wanted from you. A 1pt hairline at every size.
         case quiet
@@ -130,7 +143,9 @@ public struct GlanceMark: Hashable, Sendable {
     /// take the whole snapshot down. So an unrecognised status lands on the
     /// quiet hairline, which is the tier that claims the least.
     ///
-    /// This can never return `.toReview`. See `Attention.toReview`.
+    /// `.toReview` comes out of exactly one status, `done`, and out of no
+    /// other — see `Attention.toReview` for why that one is allowed and why a
+    /// per-agent `reviewsWaiting` or `unreadDiff` still is not.
     public init(agent: FleetSnapshot.Agent, confidence: FleetSnapshot.Confidence = .known) {
         switch agent.status {
         // Blocked is latched — an agent stopped an hour ago is still stopped —
@@ -138,7 +153,19 @@ public struct GlanceMark: Hashable, Sendable {
         // is genuinely absent rather than merely unstated: being at a prompt is
         // what "blocked" means.
         case "blocked": self.init(attention: .needsYou, core: .atAPrompt)
+        // The turn is over and nobody has looked at it. `.atAPrompt` for the
+        // same reason `blocked` is, one line up: the core is the agent's side
+        // of the mark and a finished agent is not producing anything.
+        //
+        // Latched, like `blocked` and unlike `working` — `confidence(in:at:)`
+        // vouches for both at any age, as the comment below this switch says,
+        // so the ring stays solid however old the snapshot is. Drawing a state
+        // the system latches as "nothing wanted" would contradict a decision
+        // this codebase has already made.
+        case "done": self.init(attention: .toReview, core: .atAPrompt)
         case "working": self.init(attention: .quiet, core: .producing)
+        // An unrecognised status lands on the tier that claims the least, and
+        // that rule is untouched by `done` joining the review tier above.
         default: self.init(attention: .quiet, core: .atAPrompt)
         }
         // Only the claim about the present decays. `confidence(in:at:)` has

@@ -170,21 +170,29 @@ fun TerminalTabStrip(
                         if (isCurrent) MaterialTheme.colorScheme.secondaryContainer
                         else Color.Transparent
                     )
-                    // Amber for blocked, green for a finished turn, red for one
-                    // that died — from [agentTint], which is the one place that
-                    // rule lives and which the fleet row and the Mac's glyph
-                    // read too. Blocked's amber is now the palette's rather than
-                    // Material orange 500, and it is the only hue here that
-                    // comes from §01: green and red are this app's own inks for
-                    // the two outcomes the glance vocabulary has no mark for.
+                    // Amber for blocked, the review ink for a finished turn,
+                    // red for one that died — from [agentTint], which is the one
+                    // place that rule lives and which the fleet row and the
+                    // Mac's glyph read too. Blocked's amber is now the palette's
+                    // rather than Material orange 500, and amber and review are
+                    // both §01's: red is the only hue left here that is this
+                    // app's own ink, for the one outcome the glance vocabulary
+                    // still has no mark for.
                     //
-                    // **This chip is exactly why those two survived.** The
-                    // argument for folding a failed turn into amber was that the
-                    // word is printed beside the mark — true of a fleet row,
-                    // false here. A chip carries a conversation's NAME and no
-                    // state text at all, so on this surface the hue is the whole
-                    // distinction between a turn that worked and a turn that
-                    // died.
+                    // **A finished turn is visibly a different colour on this
+                    // chip than it was.** It was green until `done` joined the
+                    // review tier; the tier is what a person is being told, and
+                    // green was saying "it worked" where the useful fact is "you
+                    // have not looked at it". The ring here and the mark the
+                    // fleet row draws for the same terminal are the same ink,
+                    // because [agentInk] decides it once for both.
+                    //
+                    // **This chip is exactly why red survived.** The argument for
+                    // folding a failed turn into amber was that the word is
+                    // printed beside the mark — true of a fleet row, false here.
+                    // A chip carries a conversation's NAME and no state text at
+                    // all, so on this surface the hue is the whole distinction
+                    // between a turn that worked and a turn that died.
                     //
                     // **A ring and not a mark, and only for now.** §03's
                     // vocabulary would put an `AgentMarkView` at

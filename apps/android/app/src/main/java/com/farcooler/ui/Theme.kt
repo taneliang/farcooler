@@ -240,10 +240,12 @@ fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
  * role for — there is no "positive" slot in a `ColorScheme` the way there is an
  * `error` one. It used to match `attentionColor`'s green to the byte and was
  * written out separately so that a change to what a FINISHED AGENT looks like
- * could not silently change what an added line looks like; that separation is
- * now structural rather than conventional, since a finished agent wears
- * `GlancePalette.amber` and no green at all. Red IS the scheme's error role,
- * because "removed" and "went wrong" want the same red under every theme.
+ * could not silently change what an added line looks like — and that separation
+ * has now been cashed in twice. A finished agent wears `GlancePalette.review`,
+ * the low-chroma review ink, and no green at all; `FINISHED` green survives only
+ * on the things INSIDE a turn, a plan step and a tool call. Neither move touched
+ * this constant. Red IS the scheme's error role, because "removed" and "went
+ * wrong" want the same red under every theme.
  *
  * **This is NOT a glance colour and must not become one.** §01's palette is
  * about what an agent is doing; a diff's signs are about what a patch says, and

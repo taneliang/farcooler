@@ -24,15 +24,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.MaterialTheme
-import com.farcooler.model.AgentActivity
-import com.farcooler.model.AgentOutcome
+import com.farcooler.model.AgentInk
 import com.farcooler.model.GlanceInk
 import com.farcooler.model.GlanceMark
 import com.farcooler.model.GlanceMarkSize
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.GlanceType
 import com.farcooler.model.Terminal
-import com.farcooler.model.agentOutcome
+import com.farcooler.model.agentInk
 
 /*
  * The glance vocabulary, drawn.
@@ -179,8 +178,8 @@ fun GlanceMarkView(
 }
 
 /**
- * The tint for a state the glance vocabulary has a mark for, or an outcome it
- * does not — and null where there is nothing to say.
+ * The tint an agent wears, resolved against the current appearance — and null
+ * where it wears none.
  *
  * **This is `Status.tint` from the Mac**, and it is one function for the same
  * reason it is one there: the glyph was not the only thing painting a status.
@@ -188,41 +187,62 @@ fun GlanceMarkView(
  * out different colours, and before the Mac fused this, a failed agent was
  * orange collapsed and red expanded.
  *
- * **Amber comes from [GlancePalette] and is a function of the appearance,
- * because §01 says light mode is "Not a filter flip" — amber darkens to hold
- * contrast on a pale backdrop. Green and red do not come from the palette,
- * because §01 has no figure for either**: they are this app's own inks for the
- * two states §03 does not cover, and [agentOutcome] is where that is argued.
+ * **The decision is not here; only the resolution is.** Which ink an agent wears
+ * is [agentInk], in the model, where a plain JVM test can read it — this
+ * function has no per-state branch left at all, and that is deliberate. It used
+ * to hold the whole rule, and because it is a `@Composable` in a module whose
+ * unit tests are plain JUnit, nothing could catch the rule being reverted:
+ * putting a finished turn back to [FINISHED] green left the entire suite green
+ * too. `GlanceMarkSize.ringRadius` and `GlanceMark.dash` were pulled into the
+ * model ahead of this for the same reason.
  *
- * Red is `colorScheme.error`, which is the same choice `DiffCounts` makes and
- * for the same reason — "removed" and "went wrong" want the same red under
- * every theme, and Material has a role for it. Green is a literal because
- * Material has no "positive" role at all.
+ * **[AgentInk.glance] comes from [GlancePalette] and is a function of the
+ * appearance, because §01 says light mode is "Not a filter flip" — amber darkens
+ * to hold contrast on a pale backdrop, and review darkens with it. A null
+ * `glance` means §01 has no figure at all**, which is true of red and of nothing
+ * else: it is `colorScheme.error`, the same choice `DiffCounts` makes and for
+ * the same reason — "removed" and "went wrong" want the same red under every
+ * theme, and Material has a role for it.
+ *
+ * **A finished turn used to be [FINISHED] green here.** It is the review ink
+ * now: `GlanceMark.Attention.TO_REVIEW` stopped meaning "a finished diff nobody
+ * has read" and started meaning "a finished thing nobody has looked at", `done`
+ * maps onto it on all three platforms, and this is the Android half of that.
+ * The chip and the fleet row a person actually looks at visibly change colour;
+ * that is the intended outcome and not a regression. [FINISHED] itself stays
+ * exactly where it is — it has two other users that are not about agents.
  */
 @Composable
-fun agentTint(terminal: Terminal): Color? = when {
-    agentOutcome(terminal) == AgentOutcome.FAILED -> MaterialTheme.colorScheme.error
-    agentOutcome(terminal) == AgentOutcome.DONE -> FINISHED
-    terminal.agent == AgentActivity.BLOCKED -> glanceColor(GlancePalette.amber)
-    else -> null
+fun agentTint(terminal: Terminal): Color? {
+    val ink = agentInk(terminal) ?: return null
+    // The one branch, and it is about where a figure comes from rather than
+    // about what an agent is doing: §01's inks resolve against the appearance,
+    // and Material's roles resolve themselves.
+    return ink.glance?.let { glanceColor(it) } ?: MaterialTheme.colorScheme.error
 }
 
 /**
- * The green for **something that ran and succeeded** — a turn that finished, a
- * plan step ticked off, a tool call that completed.
+ * The green for **a step inside a turn that ran and succeeded** — a plan step
+ * ticked off, a tool call that completed.
  *
  * Material green 500, which is what `attentionColor` spent on DONE before any of
- * this and what the Mac's `.green` is the nearest system equivalent of. §01 has
- * no figure for it, and that is not an oversight to be filled in from the
- * palette: the glance vocabulary is about whether an agent wants you and whether
- * it is producing, and "it worked" is neither. [agentOutcome] is where that gap
- * is argued.
+ * this. §01 has no figure for it, and that is not an oversight to be filled in
+ * from the palette: the glance vocabulary is about whether an agent wants you
+ * and whether it is producing, and "it worked" is neither.
  *
- * **One meaning, one value, three call sites.** The same literal was written out
+ * **The finished TURN is no longer one of these.** It wore this green until
+ * `done` joined the review tier; it is a `GlanceMark.Attention.TO_REVIEW` ring
+ * in `GlancePalette.review` now, drawn by `GlanceMark.of` like any other mark.
+ * This constant is deliberately NOT repointed with it, because the two remaining
+ * users are not about agents at all — a plan step and a tool call are items
+ * inside a turn, and a decision about how a fleet reads at a glance must not
+ * silently restyle the inside of a transcript.
+ *
+ * **One meaning, one value, two call sites.** The same literal was written out
  * four times in `ui/AgentRows.kt` and here, for a finished turn, a done plan
- * step and a completed tool call — which are one fact at three scales — plus a
- * fifth time for a diff's insertions, which is NOT. So the first four collapse
- * here and the fifth stays where it is.
+ * step and a completed tool call — which were one fact at three scales — plus a
+ * fifth time for a diff's insertions, which is NOT. The first four collapsed
+ * here, the fifth stayed where it was, and the finished turn has since left.
  *
  * **`DIFF_ADDED` is deliberately still a separate literal of the same bytes.**
  * `DiffCounts` makes the argument and it survives the vocabulary intact: a `+`
@@ -281,9 +301,12 @@ fun AgentMarkView(
             // TalkBack read two descriptions of one dot.
             GlanceMarkView(mark, size, decorative = true)
         } else if (tint != null) {
+            // A dead turn, and nothing else reaches here any more: a finished
+            // one draws the review RING above, like the Mac's and the phone's.
+            //
             // Filled, at the mark's own diameter. Filled rather than hollow
-            // because both outcomes are definite — hollow is this app's shape
-            // for a missing answer, and `ProcessDot` owns it.
+            // because the outcome is definite — hollow is this app's shape for
+            // a missing answer, and `ProcessDot` owns it.
             Canvas(Modifier.size(size.diameter.dp)) {
                 drawCircle(color = tint, radius = this.size.minDimension / 2)
             }

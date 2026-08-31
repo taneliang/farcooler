@@ -172,9 +172,19 @@ object GlancePalette {
      * A finished diff, unread. Deliberately low chroma so amber stays the only
      * loud thing.
      *
-     * **Never an agent's state.** An `InboxRow` is a WORKSPACE's counts;
-     * `model/NeedsYou.kt` already refuses to invent a per-agent version of it,
-     * and [GlanceMark.of] cannot produce this tier for the same reason.
+     * **A finished diff nobody has read, and a finished turn nobody has
+     * opened.** The tier was the first of those alone until `done` was let into
+     * it on all three platforms; what it says now is "this is over, and you have
+     * not looked".
+     *
+     * **The workspace counts still have no per-agent version.** An `InboxRow` is
+     * a WORKSPACE's counts and `model/NeedsYou.kt` refuses to invent a per-agent
+     * one; that refusal stands, because the ban's reason was invented data.
+     * `done` was never invented — the daemon sends it per terminal — which is
+     * why it is the one thing the narrowing let in.
+     *
+     * [GlanceMark.of] produces this tier for `done` and for nothing else, and
+     * [ofDiff] for an unread diff. Those two, and no third.
      */
     val review = GlanceInk(dark = Oklch(0.76, 0.055, 235.0), light = Oklch(0.5, 0.06, 235.0))
 
@@ -295,10 +305,14 @@ data class GlanceMark(
         NEEDS_YOU,
 
         /**
-         * A finished diff nobody has read. A middle-weight ring in the low
+         * A finished thing nobody has looked at — a diff nobody has read, or a
+         * turn that ended and nobody has opened. A middle-weight ring in the low
          * chroma [GlancePalette.review].
          *
-         * **Never an agent's state.** See [GlancePalette.review].
+         * **Still never a per-agent `reviewsWaiting` or unread-diff count** —
+         * those are a WORKSPACE's, and `model/NeedsYou.kt` refuses to invent a
+         * per-agent version of either. `done` is the one agent state that
+         * reaches this tier. See [GlancePalette.review].
          */
         TO_REVIEW,
 
@@ -439,32 +453,37 @@ data class GlanceMark(
          * copied here deliberately. The glance vocabulary is three axes: a ring
          * that says whether YOUR attention is wanted and what for, a core that
          * says whether the AGENT is producing, and a dash that says the channel
-         * is broken. `blocked`, `working`, `idle` and a pane with no agent are
-         * one of those combinations exactly, and they are mapped below. A
-         * finished turn and a turn that DIED are not, and the nearest mark for
-         * either is the quiet hairline — which is the mark for "nothing is
-         * wanted from you", spoken by TalkBack as exactly that. Drawing it on a
-         * build that failed overnight would make this app state the opposite of
-         * what it knows, in a vocabulary that is now trusted on three platforms.
+         * is broken. `blocked`, `working`, `idle`, a FINISHED turn and a pane
+         * with no agent are one of those combinations exactly, and they are
+         * mapped below. A turn that DIED is not, and the nearest mark for it is
+         * the quiet hairline — which is the mark for "nothing is wanted from
+         * you", spoken by TalkBack as exactly that. Drawing that on a build that
+         * failed overnight would make this app state the opposite of what it
+         * knows, in a vocabulary that is now trusted on three platforms. So a
+         * dead turn, and only a dead turn, is left to [agentOutcome].
          *
-         * So those two keep the drawing they already had — see [agentOutcome] —
-         * and the gap is a question for the design document rather than one for
-         * this file to answer quietly. It is written up in
-         * `needs-planning/done-has-no-place-in-the-vocabulary.md`.
+         * **[Attention.TO_REVIEW] is reachable from here, and `done` is the one
+         * status that reaches it.** The tier used to forbid an agent's state in
+         * so many words, on the stated ground that the review counts are per
+         * WORKSPACE and a per-agent version would have to be invented. That
+         * ground never reached `done` — nothing is invented, the daemon sends it
+         * per terminal — so the prohibition was narrowed to the two counts it
+         * was written about. `Status.glanceMark` on the Mac and
+         * `GlanceMark(agent:)` on the phone make the identical mapping, which is
+         * the point: one agent, one tier, three platforms. The ban still stands
+         * for the workspace counts, and [ofDiff] is still the only other way to
+         * this tier. See [GlancePalette.review].
          *
          * **This is not the reduction an earlier version of this file made.**
-         * It folded `done` and a failed turn into the amber ring on the grounds
+         * It folded `done` and a failed turn into the AMBER ring on the grounds
          * that `wantsAttention` covers both and that `rowStatus` prints the word
          * beside the mark. The first half is true and the second half is true of
          * a FLEET ROW and false of a tab-strip chip, which has no adjacent state
          * text at all: on a chip the hue was carrying the whole distinction, and
          * folding it in put back the exact defect red was introduced to fix —
-         * "a turn that died and a turn that worked were the same dot". Three
-         * platforms giving three answers to one question was the thing this port
-         * exists to end, so this one now matches the Mac.
-         *
-         * **This can never return [Attention.TO_REVIEW].** See
-         * [GlancePalette.review].
+         * "a turn that died and a turn that worked were the same dot". A
+         * finished turn is a review ring here and a dead one is still red; the
+         * two have never been the same dot and are not now.
          *
          * A terminal the host has said nothing about at all — no
          * [Terminal.activitySince] — is NOT stale. Null means "not told", which
@@ -481,14 +500,24 @@ data class GlanceMark(
             // and `Status.glanceMark`: a heavy amber ring with NO core, because
             // §03 gives the ring to the person's side and the core to the
             // agent's, and a blocked agent is stopped at a prompt.
-            val attention =
-                if (terminal.agent == AgentActivity.BLOCKED) Attention.NEEDS_YOU
-                else Attention.QUIET
+            //
+            // DONE is the second of those three-way agreements and the newer
+            // one: the turn is over and nobody has looked at it, which is what
+            // the review tier says.
+            val attention = when (terminal.agent) {
+                AgentActivity.BLOCKED -> Attention.NEEDS_YOU
+                AgentActivity.DONE -> Attention.TO_REVIEW
+                else -> Attention.QUIET
+            }
             val core =
                 if (terminal.agent == AgentActivity.WORKING) Core.PRODUCING else Core.AT_A_PROMPT
             // Only the claim about the present decays. Blocked is latched — an
-            // agent stopped an hour ago is still stopped — so an attention mark
-            // keeps its solid ring however old the answer is.
+            // agent stopped an hour ago is still stopped — and so is done: a
+            // turn that ended an hour ago has still ended. So an attention mark
+            // keeps its solid ring however old the answer is, which is §08 word
+            // for word ("Blocked and to-review hold at any age; working and idle
+            // go dashed") and is the same answer `FleetSnapshot.Confidence`
+            // gives on the Apple side by vouching for both at any age.
             //
             // MILLISECONDS, both sides. [Terminal.activitySince] is Unix
             // milliseconds off the host — `crates/cli`'s `activity_since` — and
@@ -528,54 +557,58 @@ data class GlanceMark(
 }
 
 /**
- * A definite OUTCOME: the two things an agent can be that §03 has no mark for.
+ * A definite OUTCOME: the one thing this app draws without a mark.
  *
  * The Android half of the argument `Status.glanceMark` makes on the Mac and
- * [GlanceMark.of] repeats: these keep exactly the drawing they had before the
- * vocabulary arrived — green for a turn that ended, red for one that died —
+ * [GlanceMark.of] repeats: this is drawn by `agentTint` rather than by a mark,
  * because the alternative on offer was the quiet hairline, and a hairline is the
  * mark's way of saying "nothing is wanted from you", which about a turn that
  * failed is not a missing answer but a wrong one.
  *
- * **Two, where the Mac has five.** Its `Status` is a fused type that also
+ * **This used to hold two, and [DONE] has left it.** A finished turn was an
+ * outcome here — a filled green disc, then a filled review-ink one — for exactly
+ * as long as `GlanceMark.Attention.TO_REVIEW` refused an agent's state. That
+ * prohibition was narrowed to the workspace counts it was written about, `done`
+ * became the review tier on all three platforms, and a finished turn is now a
+ * middle-weight hollow ring drawn by [GlanceMark.of] like any other mark. Hue
+ * agreement was never the whole of it: the Mac and the phone draw a RING, and a
+ * recoloured disc would have been this app agreeing about the colour and not
+ * about the vocabulary.
+ *
+ * **So this type is now a single axis: the turn died.** It is deliberately still
+ * called [AgentOutcome] rather than being renamed to say so — the name is load
+ * bearing across `Shell.kt`, the fleet row and the tab strip, and renaming it is
+ * a separate decision from the one this file just took.
+ *
+ * **One, where the Mac has four.** Its `Status` is a fused type that also
  * carries the process — `lost` and `failed` mean the terminal is gone or never
  * started. This app keeps those apart: they are `StateKind`, and `ProcessDot`
  * has drawn them hollow, in its own column, since before any of this. So the
- * agent side has exactly the two outcomes below, and both are FILLED, which is
- * the same split the Mac draws: filled is a definite outcome, hollow is a
- * missing answer.
+ * agent side has exactly the one outcome below, and it is FILLED, which is the
+ * same split the Mac draws: filled is a definite outcome, hollow is a missing
+ * answer.
  *
- * Both are drawn at the mark's own diameter so the column is reserved either
- * way — a row must not change width because an agent finished.
+ * It is drawn at the mark's own diameter so the column is reserved either way —
+ * a row must not change width because an agent finished.
  */
 enum class AgentOutcome {
-    /**
-     * The turn ended and nobody has looked yet.
-     *
-     * Structurally this is §03's `toReview` tier applied to a TURN instead of a
-     * diff, and it is the one that most wants an answer, because it is also the
-     * most common. [GlanceMark.Attention.TO_REVIEW] forbids it in so many words
-     * — "Never an agent's state" — and the stated REASON is that the review
-     * counts are per WORKSPACE, so a per-agent version would have to be
-     * invented. That reason does not hold here: nothing is invented, the daemon
-     * sends `done` per terminal. Whether the prohibition should be narrowed to
-     * the diff counts it was written about is the owner's call, not this file's.
-     */
-    DONE,
-
     /**
      * The turn died.
      *
      * The daemon sends a failed turn as `done` and says which in `turnFailed`,
      * so this is not a second activity but a flag on one — see
      * [Terminal.turnDidFail]. Red exists precisely because a turn that died and
-     * a turn that worked were the same dot until it did.
+     * a turn that worked were the same dot until it did, and that is why this
+     * one did NOT follow `done` into the review tier: the mark has no failure
+     * axis, and the review ring says "have a look", which about a build that
+     * died overnight is not the fact.
      */
     FAILED,
 }
 
 /**
- * What this terminal's agent has finished as, or null when it has not finished.
+ * What this terminal's agent has finished as, or null when it has not finished
+ * BADLY.
  *
  * The companion to [GlanceMark.of], and the two are exhaustive and exclusive
  * over an agent pane: exactly one of them answers, always. `GlanceTest` asserts
@@ -583,13 +616,70 @@ enum class AgentOutcome {
  * leaving it to two `when`s in different files to keep agreeing.
  *
  * Null for a pane that is not an agent at all, where there is nothing to say
- * and `ProcessDot` is already saying whether the process is alive.
+ * and `ProcessDot` is already saying whether the process is alive — and null for
+ * a turn that merely ENDED, which [GlanceMark.of] answers for now.
  */
 fun agentOutcome(terminal: Terminal): AgentOutcome? = when {
     !terminal.agent.isAgent -> null
-    // Checked before DONE, because a failed turn arrives AS `done`.
+    // The flag and not the activity. A failed turn arrives AS `done`, so this
+    // is the one distinction a `when` on the activity alone cannot make — and
+    // it is the whole of what is left here now that a plain `done` has a mark.
     terminal.turnDidFail -> AgentOutcome.FAILED
-    terminal.agent == AgentActivity.DONE -> AgentOutcome.DONE
+    else -> null
+}
+
+/**
+ * Which ink an agent wears, as a decision separate from resolving it to a
+ * [Color].
+ *
+ * **This exists so the decision can be tested.** `agentTint` is a `@Composable`
+ * and this module's unit tests are plain JVM JUnit with no Compose or
+ * Robolectric harness, so as long as "a finished turn is the review ink" lived
+ * inside the composable it was a rule nothing could catch being reverted — and
+ * it was reverted once, deliberately, to prove exactly that. It is the same move
+ * `GlanceMarkSize.ringRadius` and [GlanceMark.dash] made for the same reason:
+ * the figure and the rule live in the model where a test can read them, and the
+ * view is left with nothing but the resolution.
+ *
+ * **The glance ink travels with the case.** A future edit that wanted to paint a
+ * finished turn green again would have to change [REVIEW]'s ink or [agentInk]'s
+ * mapping, and `GlanceTest` reads both; there is no per-state branch left in the
+ * view for it to hide in.
+ *
+ * @property glance the §01 ink this resolves to, or null where §01 has no figure
+ *   and Material's own role is used instead.
+ */
+enum class AgentInk(val glance: GlanceInk?) {
+    /** An agent is waiting on a person. The one saturated hue in the app. */
+    AMBER(GlancePalette.amber),
+
+    /**
+     * The turn ended and nobody has looked yet — the same low-chroma ink
+     * `GlanceMarkView` strokes a [GlanceMark.Attention.TO_REVIEW] ring in, so a
+     * tab chip's border and the ring inside it cannot come out two colours.
+     */
+    REVIEW(GlancePalette.review),
+
+    /**
+     * The turn died. `colorScheme.error`, which is the same choice `DiffCounts`
+     * makes and for the same reason — "removed" and "went wrong" want the same
+     * red under every theme, and Material has a role for it where §01 has no
+     * figure at all.
+     */
+    ERROR(null),
+}
+
+/**
+ * Which ink this terminal's agent wears, or null where it wears none.
+ *
+ * The order is the order it has always been in: a dead turn is checked before
+ * anything else because it arrives as `done`, and a blocked agent is checked
+ * last because it is the only one of the three that is a plain activity.
+ */
+fun agentInk(terminal: Terminal): AgentInk? = when {
+    agentOutcome(terminal) == AgentOutcome.FAILED -> AgentInk.ERROR
+    terminal.agent == AgentActivity.DONE -> AgentInk.REVIEW
+    terminal.agent == AgentActivity.BLOCKED -> AgentInk.AMBER
     else -> null
 }
 

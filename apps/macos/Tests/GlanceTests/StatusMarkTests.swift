@@ -230,23 +230,38 @@ struct StatusMarkMappingTests {
     /// it should, because the hairline's own phrase is "Nothing wanted", which
     /// about a build that died overnight is a false statement in a vocabulary
     /// three platforms now trust.
-    @Test("The five outcomes §03 has no slot for refuse the mark rather than borrowing one")
+    ///
+    /// **`done` was a fifth and is not any more**, and that is the one change
+    /// this test has taken: it draws the review ring now. The comment above is
+    /// still exactly why the four below refuse one.
+    @Test("The four outcomes §03 has no slot for refuse the mark rather than borrowing one")
     func outcomesHaveNoMark() {
-        for status in [Status.done, .failed, .failedRun, .failedTurn, .lost] {
+        for status in [Status.failed, .failedRun, .failedTurn, .lost] {
             #expect(status.glanceMark == nil, "\(status.label) borrowed a mark it has no right to")
         }
+        #expect(Status.done.glanceMark != nil, "a finished turn lost the mark it was given")
     }
 
-    /// `toReview` is fleet-level or Diff-level and nothing else — the rule
-    /// `ShellScreen` and `ShellNavigation` both refuse to break. Nothing on
-    /// this platform may reach it from a per-terminal status either.
-    @Test("No per-agent status can ever produce the review ring")
-    func noPerAgentReview() {
-        let every: [Status] = [
-            .starting, .running, .idle, .working, .blocked, .done, .exited,
+    /// The review ring is `done` and nothing else on this platform.
+    ///
+    /// **This test used to say NO per-terminal status could reach it.** The
+    /// prohibition was narrowed rather than lifted — `reviewsWaiting` is still
+    /// a fleet scalar and `unreadDiff` is still per workspace, and `ShellScreen`
+    /// and `ShellNavigation` still refuse to invent a per-agent version of
+    /// either — so the guard is narrowed with it and the other eleven statuses
+    /// are still held out.
+    @Test("Only a finished turn produces the review ring")
+    func onlyDoneReachesTheReviewRing() {
+        #expect(Status.done.glanceMark == GlanceMark(attention: .toReview, core: .atAPrompt))
+        // The same tier the phone reaches from the wire's own word, so the two
+        // cannot drift apart: this is `GlanceMark(agent:)`'s `case "done"`.
+        #expect(Status.done.glanceMark?.phrase == "To review, at a prompt")
+
+        let everyOther: [Status] = [
+            .starting, .running, .idle, .working, .blocked, .exited,
             .failed, .lost, .failedRun, .failedTurn, .unreadable,
         ]
-        for status in every {
+        for status in everyOther {
             #expect(status.glanceMark?.attention != .toReview, "\(status.label) claimed to-review")
         }
     }
@@ -330,12 +345,25 @@ struct StatusMarkPixelTests {
         #expect(dashed < solid * 0.9, "dashed (\(dashed)) is not broken against solid (\(solid))")
     }
 
-    /// The two states the mark cannot say still say it, in the colours they
-    /// always did. If this starts failing, somebody folded an outcome into the
-    /// hairline.
-    @Test("A finished turn is still green and a dead one still red")
+    /// A dead turn still says so in the colour it always did, and a finished
+    /// one now says so in the review ink rather than green. If this starts
+    /// failing, somebody folded one of them into the hairline — or folded them
+    /// into each other, which is the defect red was introduced to fix.
+    ///
+    /// **The `done` row is read out of the pixels and not out of the switch.**
+    /// `Status.tint` returning the review ink is not the claim; the claim is
+    /// that the glyph a person looks at is that colour, which after this change
+    /// it reaches by a different route — `Status.glanceMark` and
+    /// `GlanceMarkView`'s ring, not `StatusGlyph.outcome`'s fill.
+    @Test("A finished turn is the review ink and a dead one still red")
     func outcomesKeepTheirInk() {
-        for (status, expected) in [(Status.done, Color.green), (Status.failedTurn, Color.red)] {
+        let expectedPairs: [(Status, Color)] = [
+            (.done, GlancePalette.review(.dark)), (.failedTurn, .red),
+        ]
+        #expect(
+            distance(components(GlancePalette.review(.dark)), components(Color.green)) > 0.2,
+            "the review ink is close enough to green that this test could not tell them apart")
+        for (status, expected) in expectedPairs {
             let sheet = raster(
                 StatusGlyph(status: status), size: CGSize(width: 8, height: 8), scheme: .dark)
             let ink = sheet.dominantInk(against: Self.dark)

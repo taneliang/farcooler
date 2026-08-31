@@ -470,25 +470,35 @@ class ShellTest {
     }
 
     /**
-     * **A finished turn sorts with needs-you even though it draws no amber
-     * ring.** `wantsAttention` is blocked OR done, and it is this app's single
-     * definition of "should this interrupt someone", shared with the Mac since
-     * long before the glance vocabulary. What a mark SAYS and what a list SORTS
-     * BY are different questions; a workspace whose agent just finished is
+     * **A finished turn sorts with needs-you even though it draws the quieter
+     * review ring.** `wantsAttention` is blocked OR done, and it is this app's
+     * single definition of "should this interrupt someone", shared with the Mac
+     * since long before the glance vocabulary. What a mark SAYS and what a list
+     * SORTS BY are different questions; a workspace whose agent just finished is
      * exactly what you opened the app to see.
+     *
+     * **The tab used to carry no mark at all here**, an `AgentOutcome.DONE` and
+     * a null mark, because the review tier refused an agent's state. It carries
+     * the review ring now, and the sort must not have quietly moved down a rung
+     * with the drawing — which is the whole reason `wantsAttention` is a
+     * separate field rather than something derived from the mark.
      */
     @Test
-    fun `a finished agent pulls its workspace to the top without wearing amber`() {
+    fun `a finished agent pulls its workspace to the top while wearing the review ring`() {
         val done = ShellTab(
             id = "d",
             title = "claude",
-            mark = null,
-            outcome = AgentOutcome.DONE,
+            mark = GlanceMark(GlanceMark.Attention.TO_REVIEW, GlanceMark.Core.AT_A_PROMPT),
             wantsAttention = true,
         )
         val w = workspace("w", listOf(done))
         assertEquals(ShellPrecedence.NEEDS_YOU, w.precedence)
-        assertNull("and it draws no mark at all", w.tabs.first().mark)
+        assertEquals(
+            "and it draws the review ring, a rung below where it sorts",
+            GlanceMark.Attention.TO_REVIEW,
+            w.tabs.first().mark?.attention,
+        )
+        assertNull("a turn that merely ended is not an outcome", w.tabs.first().outcome)
     }
 
     @Test

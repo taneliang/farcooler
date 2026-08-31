@@ -110,21 +110,61 @@ struct GlanceMarkTests {
         #expect(seen.count == 12)
     }
 
-    /// An agent's mark can never be the review tier.
+    /// `done` is the only status that reaches the review tier, and every other
+    /// one is still shut out of it.
     ///
-    /// `reviewsWaiting` is a fleet-wide scalar and `unreadDiff` is per
-    /// WORKSPACE; `ShellScreen` and `ShellNavigation` both refuse to invent a
-    /// per-agent version. A cyan ring on an agent would mean "this agent has
-    /// unread changes", which is not a fact anything on the wire has an opinion
-    /// about.
-    @Test func noAgentIsEverInTheReviewTier() {
-        for status in ["blocked", "working", "done", "something new"] {
-            let agent = FleetSnapshot.Agent(
+    /// **This test used to say no agent could ever be `.toReview`.** The
+    /// prohibition was narrowed rather than lifted, so the guard is narrowed
+    /// with it rather than deleted: `reviewsWaiting` is still a fleet-wide
+    /// scalar and `unreadDiff` is still per WORKSPACE, `ShellScreen` and
+    /// `ShellNavigation` still refuse to invent a per-agent version of either,
+    /// and a ring meaning "this agent has unread changes" would still be a fact
+    /// nothing on the wire has an opinion about. What changed is that `done` was
+    /// never that fact — the daemon sends it per terminal, so nothing is
+    /// invented — and the tier now says "a finished thing nobody has looked at".
+    ///
+    /// The case this exists for: a turn that ended, unlooked-at, must not be
+    /// spoken as "Nothing wanted".
+    @Test func theReviewTierIsAFinishedTurnAndNothingElse() {
+        #expect(Self.mark("done").attention == .toReview)
+        // The turn is over, so the agent is not producing.
+        #expect(Self.mark("done").core == .atAPrompt)
+        #expect(Self.mark("done").phrase == "To review, at a prompt")
+        #expect(Self.mark("done").isQuiet == false)
+
+        for status in ["blocked", "working", "something new", "idle", ""] {
+            #expect(
+                Self.mark(status).attention != .toReview,
+                "\(status) claimed the review tier")
+        }
+    }
+
+    /// Hue is redundant reinforcement — §03 — and the accessory families
+    /// flatten to a single tint, so a finished turn has to be separable from a
+    /// quiet one by the drawing alone.
+    @Test func aFinishedTurnReadsWithItsHueRemoved() {
+        let done = Self.mark("done")
+        let quiet = Self.mark("idle")
+        for size in GlanceMarkSize.allCases {
+            #expect(
+                size.stroke(done.attention) > size.stroke(quiet.attention),
+                "\(size) draws a finished turn at a quiet turn's weight")
+        }
+        // And not at the heaviest weight either, above the 8pt ribbon where
+        // §03 deliberately collapses the two attention strokes into one.
+        for size in GlanceMarkSize.allCases where size != .ribbon {
+            #expect(
+                size.stroke(done.attention) < size.stroke(.needsYou),
+                "\(size) draws a finished turn as loudly as a blocked one")
+        }
+    }
+
+    private static func mark(_ status: String) -> GlanceMark {
+        GlanceMark(
+            agent: FleetSnapshot.Agent(
                 id: "t", label: "claude", machine: "orchard", status: status, glyph: "●",
                 headline: "", line: "", feed: [], rank: 0, turnFailed: false,
-                activityChangedAt: nil)
-            #expect(GlanceMark(agent: agent).attention != .toReview)
-        }
+                activityChangedAt: nil))
     }
 
     /// A status the daemon invents later must not become an attention tier

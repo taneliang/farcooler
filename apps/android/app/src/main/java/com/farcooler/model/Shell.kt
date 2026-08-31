@@ -98,7 +98,9 @@ object ShellMetrics {
  * seam left over from the shell landing before the glance spec did. There is no
  * reason to reproduce the seam here: a tab holds a [GlanceMark] and an
  * [AgentOutcome] exactly as a fleet row does, decided by the same two functions,
- * so a ribbon dot and the row it names cannot disagree.
+ * so a ribbon dot and the row it names cannot disagree. Since `done` joined the
+ * review tier the mark answers for all but one state, and [outcome] is a dead
+ * turn and nothing else.
  *
  * Order is fixed and is **never re-sorted by activity** — §03, and the reason is
  * that a strip whose items move when an agent finishes is a strip you cannot
@@ -109,7 +111,10 @@ data class ShellTab(
     val title: String,
     /** Null where [outcome] answers instead. Exactly one of the two is set. */
     val mark: GlanceMark?,
-    /** Null where [mark] answers instead. */
+    /**
+     * Null where [mark] answers instead, which is every tab but a turn that
+     * DIED — see [AgentOutcome], which is down to one case.
+     */
     val outcome: AgentOutcome? = null,
     /**
      * Whether this tab is asking for a person, by the app's own single
@@ -117,9 +122,10 @@ data class ShellTab(
      * the Mac since long before any of this.
      *
      * Carried rather than re-derived from [mark] because it is deliberately
-     * BROADER than the amber ring: a finished turn wants you and draws no mark
-     * at all. See [ShellWorkspace.precedence], which is the only thing that
-     * reads it and the only place the distinction matters.
+     * BROADER than the amber ring: a finished turn wants you and draws the
+     * middle-weight REVIEW ring, not the heavy amber one. See
+     * [ShellWorkspace.precedence], which is the only thing that reads it and the
+     * only place the distinction matters.
      */
     val wantsAttention: Boolean = false,
 )
@@ -168,12 +174,15 @@ data class ShellWorkspace(
      *
      * **The top rung is `wantsAttention` and not the amber ring**, which is the
      * one place the shell's sort and the shell's DRAWING deliberately part
-     * company. A finished turn draws green rather than amber — the mark has no
-     * slot for it, see `GlanceMark.of` — but it is still a workspace you should
+     * company. A finished turn draws the REVIEW ring rather than the amber one
+     * — `GlanceMark.of` maps it there — but it is still a workspace you should
      * be shown first, and `AgentActivity.wantsAttention` has been this app's
      * single answer to "should this interrupt someone" since before the glance
-     * vocabulary existed. iOS reaches the same ordering by a shorter road,
-     * because over there `wantsAttention` maps onto the amber ring directly.
+     * vocabulary existed. So a done tab sorts on the needs-you rung while
+     * drawing a rung below it, and the `TO_REVIEW` clause under this one is
+     * therefore about a DIFF: a finished turn has already been claimed by the
+     * line above. iOS reaches the same ordering by a shorter road, because over
+     * there `wantsAttention` maps onto the amber ring directly.
      *
      * This is stated at length because it looks like an inconsistency and is
      * not: what a mark SAYS and what a list SORTS BY are different questions,
