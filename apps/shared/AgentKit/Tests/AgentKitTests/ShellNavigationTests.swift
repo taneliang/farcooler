@@ -31,8 +31,53 @@ struct ShellNavigationTests {
         ])
     }
 
-    private static func tab(_ id: String, _ mark: ShellMark) -> ShellTab {
-        ShellTab(id: id, title: id, mark: mark)
+    /// The shorthand these tests are written in.
+    ///
+    /// **A TEST vocabulary, and deliberately no longer the app's.** `ShellMark`
+    /// was an enum of exactly these names in the app itself, and it is retired
+    /// — `ShellTab.mark` says why. What the navigation and precedence tests
+    /// need is still a one-word way to say "a workspace with a blocked tab in
+    /// it", and spelling three axes at forty call sites would bury the thing
+    /// each test is actually about. So the shorthand stays here, where it is
+    /// scenery, and the app holds a `GlanceMark`.
+    ///
+    /// `done` and `idle` are new and are not decoration: they are the two
+    /// states the old enum could not say, and the tests below that matter most
+    /// are the ones that tell them from `needsYou` and `working`.
+    enum TabState {
+        case needsYou
+        case unreadDiff
+        case working
+        case idle
+        case done
+        case stale
+    }
+
+    private static func tab(_ id: String, _ state: TabState) -> ShellTab {
+        switch state {
+        case .needsYou:
+            return ShellTab(
+                id: id, title: id, mark: GlanceMark(attention: .needsYou, core: .atAPrompt),
+                wantsAttention: true)
+        case .done:
+            return ShellTab(
+                id: id, title: id, mark: GlanceMark(attention: .toReview, core: .atAPrompt),
+                wantsAttention: true)
+        // A diff, which states no core because it has no agent behind it.
+        case .unreadDiff:
+            return ShellTab(
+                id: id, title: id, mark: GlanceMark(attention: .toReview, core: nil))
+        case .working:
+            return ShellTab(
+                id: id, title: id, mark: GlanceMark(attention: .quiet, core: .producing))
+        case .idle:
+            return ShellTab(
+                id: id, title: id, mark: GlanceMark(attention: .quiet, core: .atAPrompt))
+        case .stale:
+            return ShellTab(
+                id: id, title: id,
+                mark: GlanceMark(attention: .quiet, core: nil, link: .broken))
+        }
     }
 
     // MARK: - The flat sequence
@@ -529,6 +574,56 @@ struct ShellNavigationTests {
         #expect(ShellWorkspace(id: "e", name: "e", tabs: []).precedence == .working)
     }
 
+    /// **A finished turn sorts on the top rung while drawing the rung below
+    /// it**, and those are two different questions about the same tab.
+    ///
+    /// This is the invariant the move from `ShellMark` to `GlanceMark` was
+    /// most able to lose quietly. `done` draws `.toReview` — the owner ruled
+    /// that it is the review tier — so a `precedence` that asked the MARK
+    /// which rung to use would put every finished agent on the diff rung, one
+    /// below where it has always sorted, and the overview would reorder itself
+    /// under a person for no reason they could see. It asks
+    /// `wantsAttention` instead, which is `AgentActivity`'s own answer and has
+    /// been this app's single definition of "interrupt someone" since before
+    /// the glance vocabulary existed.
+    @Test func aFinishedTurnSortsWithTheBlockedOnesRatherThanWithTheDiffs() {
+        let done = ShellWorkspace(id: "d", name: "d", tabs: [Self.tab("d0", .done)])
+        #expect(done.tabs[0].mark.attention == .toReview, "done is the review tier, and draws it")
+        #expect(done.precedence == .needsYou, "and it still sorts where a person is wanted")
+
+        // The other half, and the reason the rung below did not widen: a diff
+        // draws the SAME ring and must not be lifted by it.
+        let diff = ShellWorkspace(id: "f", name: "f", tabs: [Self.tab("f0", .unreadDiff)])
+        #expect(diff.tabs[0].mark.attention == .toReview)
+        #expect(diff.precedence == .unreadDiff, "a diff is not an agent asking for you")
+
+        // And the order they land in, which is what a person actually sees.
+        let fleet = ShellFleet(workspaces: [
+            ShellWorkspace(id: "0", name: "quiet", tabs: [Self.tab("x", .idle)]),
+            diff,
+            done,
+            ShellWorkspace(id: "3", name: "blocked", tabs: [Self.tab("x", .needsYou)]),
+        ])
+        #expect(
+            fleet.overviewOrder().map { fleet.workspaces[$0].id } == ["d", "3", "f", "0"],
+            "done and blocked share the top rung, in fleet order; then the diff; then the quiet one")
+    }
+
+    /// An idle agent is not a stale one, and a workspace full of idle agents
+    /// is not a workspace we have stopped hearing from.
+    ///
+    /// `allStale` reads the link axis now rather than a case called `stale`,
+    /// and the two are easy to conflate: `idle` and `stale` were ONE case
+    /// under `ShellMark` for every purpose except the one this rung is about.
+    @Test func aWorkspaceOfIdleAgentsIsNotAWorkspaceGoneQuiet() {
+        let idle = ShellWorkspace(
+            id: "i", name: "i", tabs: [Self.tab("i0", .idle), Self.tab("i1", .idle)])
+        #expect(idle.precedence == .working, "idle is a live answer; it just is not a busy one")
+        let gone = ShellWorkspace(
+            id: "g", name: "g", tabs: [Self.tab("g0", .idle), Self.tab("g1", .stale)])
+        #expect(gone.precedence == .working, "one tab we have not heard from is not the workspace")
+    }
+
     /// The overview is the fleet with the loud ones lifted, not a new
     /// arrangement: equal precedence keeps fleet order.
     @Test func theOverviewSortsByPrecedenceAndIsStable() {
@@ -728,20 +823,57 @@ struct ShellNavigationTests {
     /// still waiting on you, and that is the one thing worth crossing a runner
     /// for.
     @Test func aCachedRunnersMarksDecayOnlyWhereTheyAreClaimsAboutNow() {
-        #expect(RunnerDirectory.decayed("needsYou") == .needsYou)
-        #expect(RunnerDirectory.decayed("unreadDiff") == .unreadDiff)
-        #expect(RunnerDirectory.decayed("working") == .stale, "working is a claim about now")
-        #expect(RunnerDirectory.decayed("stale") == .stale)
+        let blocked = RunnerDirectory.decayed("needsYou")
+        #expect(blocked.mark.attention == .needsYou)
+        #expect(blocked.mark.link == .live, "blocked is latched; it does not go dashed with age")
+        #expect(blocked.wantsAttention)
+
+        let diff = RunnerDirectory.decayed("unreadDiff")
+        #expect(diff.mark.attention == .toReview)
+        #expect(diff.mark.link == .live, "nobody has read it, and time passing does not read it")
         #expect(
-            RunnerDirectory.decayed("a-word-from-a-later-build") == .stale,
-            "an unknown mark must not take the cache down; it claims the least instead")
+            !diff.wantsAttention,
+            "a diff is not an agent asking for you; only the rung below is its own")
+
+        // The word that did not exist before the `GlanceMark` migration, and
+        // the reason it had to: a finished turn and an unread diff both draw
+        // the review ring, and only one of them sorts on the top rung.
+        let done = RunnerDirectory.decayed("done")
+        #expect(done.mark.attention == .toReview)
+        #expect(done.mark.link == .live, "done is latched, exactly as blocked is")
+        #expect(done.wantsAttention, "a remembered finished turn still wants you")
+
+        for word in ["working", "idle", "stale", "a-word-from-a-later-build"] {
+            let aged = RunnerDirectory.decayed(word)
+            #expect(aged.mark.link == .broken, "\(word) is a claim about now, and this is not now")
+            #expect(aged.mark.attention == .quiet)
+            #expect(!aged.wantsAttention)
+            #expect(
+                aged.mark.core == nil,
+                "\(word): not being told what it is doing is not the same as being told it is idle")
+        }
+
         // The round trip, so the two halves cannot drift into writing a word
-        // the reader does not know. `!= nil` here would be vacuous: `decayed`
-        // returns a mark, never an optional.
-        #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: .needsYou)) == .needsYou)
-        #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: .unreadDiff)) == .unreadDiff)
-        #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: .working)) == .stale)
-        #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: .stale)) == .stale)
+        // the reader does not know. Spelled as marks in and marks out rather
+        // than as `!= nil`, which would be vacuous.
+        let trips: [(GlanceMark, Bool)] = [
+            (GlanceMark(attention: .needsYou, core: .atAPrompt), true),
+            (GlanceMark(attention: .toReview, core: .atAPrompt), true),  // done
+            (GlanceMark(attention: .toReview, core: nil), false),  // a diff
+        ]
+        for (mark, wants) in trips {
+            let back = RunnerDirectory.decayed(RunnerDirectory.word(for: mark))
+            #expect(back.mark == mark, "\(RunnerDirectory.word(for: mark)) did not survive a trip")
+            #expect(back.wantsAttention == wants)
+        }
+        // And the ones that are MEANT to decay, which is the other half of the
+        // rule and would be silently lost if only the survivors were checked.
+        for mark in [
+            GlanceMark(attention: .quiet, core: .producing),
+            GlanceMark(attention: .quiet, core: .atAPrompt),
+        ] {
+            #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: mark)).mark.link == .broken)
+        }
     }
 
     /// The cache becomes a group the grid can draw: the runner's label on
@@ -757,7 +889,10 @@ struct ShellNavigationTests {
         #expect(group.lastSeen == seen)
         #expect(group.order().count == 1, "the hidden one is not drawn")
         #expect(group.workspaces[0].server == "gpu-box-2", "a cached card names its runner")
-        #expect(group.workspaces[0].tabs[0].mark == .needsYou)
+        #expect(group.workspaces[0].tabs[0].mark.attention == .needsYou)
+        #expect(
+            group.workspaces[0].tabs[0].wantsAttention,
+            "the sort flag has to survive the cache, or a remembered blocked workspace sinks")
     }
 
     // MARK: - Release

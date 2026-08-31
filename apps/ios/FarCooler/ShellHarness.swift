@@ -189,24 +189,52 @@ struct ShellHarness: View {
                             // ring at the wrong end of every ribbon, and a
                             // ribbon is only learnable because the marks do
                             // not move.
-                            mark: mark(workspace: index, tab: tab))
+                            mark: mark(workspace: index, tab: tab).mark,
+                            wantsAttention: mark(workspace: index, tab: tab).wantsAttention)
                     })
             })
     }
 
-    /// The four states, spread so that every one of them is on screen at the
-    /// scales a person looks at.
-    private static func mark(workspace: Int, tab: Int) -> ShellMark {
-        // Tab 0 is the diff now, so "the first AGENT" is tab 1. This read
-        // `tab == 0` while the fixture put the diff last, and moving the diff
-        // to the front left that arm unreachable — every workspace would have
-        // quietly rendered as working, and the amber mark the whole ribbon
-        // exists for would have been absent from every screenshot.
-        switch (workspace % 4, tab == 0) {
-        case (0, true): return .unreadDiff
-        case (1, false) where tab == 1: return .needsYou
-        case (2, _): return .stale
-        default: return .working
+    /// Every state the bar can draw, spread so that each one is on screen at
+    /// the scales a person looks at.
+    ///
+    /// **Six now rather than four**, because the mark gained the axis it was
+    /// missing: a producing agent and an idle one are different drawings, and
+    /// a fixture that cannot produce both is a fixture in which the defect
+    /// this replaced would still not be visible.
+    ///
+    /// **Nothing asserts that every arm below is reachable**, and the paragraph
+    /// after this one is what that costs — the app has no unit-test target, so
+    /// this file is checked by being looked at. `-shell` with enough workspaces
+    /// is the check: the cycles are `% 4` on the diff and `% 5` on the agents
+    /// against tab counts of `[3, 2, 5, 1, 4]`, so ten workspaces show every
+    /// arm. If an arm is ever made unreachable again it will go unnoticed the
+    /// same way, which is an argument for the target and not for a comment.
+    ///
+    /// Tab 0 is the diff, so "the first AGENT" is tab 1. This read `tab == 0`
+    /// while the fixture put the diff last, and moving the diff to the front
+    /// left that arm unreachable — every workspace would have quietly
+    /// rendered as working, and the amber mark the whole ribbon exists for
+    /// would have been absent from every screenshot.
+    static func mark(workspace: Int, tab: Int) -> (mark: GlanceMark, wantsAttention: Bool) {
+        // The diff, which is never an agent and so never states a core.
+        if tab == 0 {
+            return (
+                GlanceMark(attention: workspace % 4 == 0 ? .toReview : .quiet, core: nil), false
+            )
+        }
+        // Five agent states over a cycle coprime with neither the tab counts
+        // (period 5 — hence the `+ tab`, which walks the residues) nor the
+        // four-workspace diff cycle above.
+        switch (workspace + tab) % 5 {
+        case 0: return (GlanceMark(attention: .needsYou, core: .atAPrompt), true)
+        // Done: the review tier, and it wants you even though it does not draw
+        // the amber ring. See `ShellTab.wantsAttention`.
+        case 1: return (GlanceMark(attention: .toReview, core: .atAPrompt), true)
+        case 2: return (GlanceMark(attention: .quiet, core: .producing), false)
+        case 3: return (GlanceMark(attention: .quiet, core: .atAPrompt), false)
+        default:
+            return (GlanceMark(attention: .quiet, core: .producing, link: .broken), false)
         }
     }
 

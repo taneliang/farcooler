@@ -485,7 +485,13 @@ struct ShellPaneTrack<Pane: View>: View {
             position: at ?? position,
             workspace: workspace
                 ?? ShellWorkspace(id: entry.workspace, name: "", tabs: []),
-            tab: at.flatMap(fleet.tab(at:)) ?? ShellTab(id: entry.tab, title: "", mark: .working),
+            // Nothing is known about a tab that is not in the fleet any more,
+            // and this one is drawn nowhere regardless. `core: nil` is the
+            // mark for declining to state the agent axis rather than claiming
+            // it is at a prompt — see `GlanceMark.core`.
+            tab: at.flatMap(fleet.tab(at:))
+                ?? ShellTab(
+                    id: entry.tab, title: "", mark: GlanceMark(attention: .quiet, core: nil)),
             isCrossing: false,
             chrome: chrome,
             isVisible: false)

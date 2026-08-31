@@ -357,6 +357,11 @@ public struct GlanceMarkView: View {
     private let diameter: CGFloat
     private let ring: CGFloat
     private let coreDiameter: CGFloat?
+    /// Whether `core == .producing` is said with FILL rather than with a disc.
+    ///
+    /// Only ever true for the in-app ladder. See that initializer, which is
+    /// where the deviation from §03 is argued.
+    private let fillsCore: Bool
     private let elongated: Bool
     private let decorative: Bool
 
@@ -366,6 +371,7 @@ public struct GlanceMarkView: View {
         self.diameter = size.diameter
         self.ring = size.stroke(mark.attention)
         self.coreDiameter = mark.core == .producing ? size.core : nil
+        self.fillsCore = false
         self.elongated = false
         self.decorative = decorative
     }
@@ -386,14 +392,51 @@ public struct GlanceMarkView: View {
     /// already looking.
     ///
     /// What it inherits from the spec is everything except the diameter: the
-    /// 8pt stroke collapse (2 / 2 / 1), and no core, because "below 7pt
-    /// diameter the core comes off entirely" and because at 7pt a 3pt core
-    /// inside a 2pt ring would touch it on both sides.
+    /// 8pt stroke collapse (2 / 2 / 1), and the core's INK and meaning — but
+    /// not the core's geometry. See below.
+    ///
+    /// **The deviation from §03, stated plainly.** The spec says "below 7pt
+    /// diameter the core comes off entirely", and it says nothing about
+    /// putting anything in its place. This initializer used to obey that
+    /// literally — `coreDiameter = nil`, full stop — and the result was a
+    /// defect the owner reported: in the shell bar a WORKING agent and an idle
+    /// one drew the same 1pt hairline ring, which reads as nothing at all. The
+    /// Mac's sidebar showed the same agent's core correctly, because it draws
+    /// at 8 and 15 where the core survives; the phone's bar said nothing until
+    /// the turn finished. A person watching both had one surface telling them
+    /// their agent was running and another implying it was not.
+    ///
+    /// So at these diameters `core: .producing` is drawn as FILL: the ring's
+    /// whole interior in `ink1`, where an at-a-prompt mark leaves it empty.
+    ///
+    /// **Why this is §03's own argument rather than a hole in it.** The spec's
+    /// reason for taking the core off is geometric and it still holds — at 7pt
+    /// a 3pt disc inside a 2pt ring touches it on both sides, and there is no
+    /// smaller disc that reads. What does not follow is that the AXIS goes
+    /// silent: §03's stated method is that "the mark distinguishes states by
+    /// stroke weight, fill and dash", and fill is the one of those three the
+    /// in-app ladder had not spent. The core keeps its ink (`ink1`, the
+    /// brightest neutral, never amber — the reason is in `body`) and its
+    /// meaning (the agent is producing); only its shape changes, from a
+    /// concentric disc to the interior it could not fit inside.
+    ///
+    /// **The fill is inset by the ring rather than drawn behind it**, which is
+    /// what keeps `link: .broken` legible. A filled capsule with the ring
+    /// stroked on top would show `ink1` through the dash GAPS, so a stale
+    /// working agent would read as a solid disc with a slightly dimmer edge —
+    /// the dash, which is the whole of what "we have not heard from this
+    /// recently" looks like, would be gone. Inset, the gaps show the surface
+    /// behind the mark, and the two inks differ, so a dashed ring around a
+    /// filled interior stays a dashed ring.
+    ///
+    /// This is a deviation and it is confined to this one initializer. The six
+    /// spec sizes above are untouched and still draw §03's disc.
     public init(_ mark: GlanceMark, inAppDiameter: CGFloat, elongated: Bool = false) {
         self.mark = mark
         self.diameter = inAppDiameter
         self.ring = GlanceMarkSize.ribbon.stroke(mark.attention)
         self.coreDiameter = nil
+        self.fillsCore = mark.core == .producing
         self.elongated = elongated
         self.decorative = true
     }
@@ -411,6 +454,14 @@ public struct GlanceMarkView: View {
             // height a capsule IS a circle, so one shape draws both the mark
             // and the elongated in-app variant of it. `ShellMarkView` has the
             // argument for why that variant exists.
+            // The in-app ladder's core, which is the interior rather than a
+            // disc — see `init(_:inAppDiameter:elongated:)`. Inset by the ring
+            // so the dash's gaps show the surface and not this.
+            if fillsCore {
+                Capsule()
+                    .inset(by: ring)
+                    .fill(GlancePalette.ink1(scheme))
+            }
             Capsule()
                 .strokeBorder(ringColor, style: strokeStyle)
             if let coreDiameter {

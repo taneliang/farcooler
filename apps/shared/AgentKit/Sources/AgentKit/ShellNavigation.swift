@@ -101,38 +101,6 @@ enum ShellMetrics {
     static func railWidth(page: CGFloat = pageWidth) -> CGFloat { page - 2 * barInset }
 }
 
-/// What one tab's mark says it is doing.
-///
-/// Four states and no fifth. Three of them are the daemon's own answer about a
-/// terminal — the phone never computes one, see `FleetView.swift:168-171` —
-/// and `stale` is the AGE of that answer rather than a competing claim about
-/// the terminal, which is the argument the mechanics doc makes at length.
-enum ShellMark: Hashable {
-    /// An agent is waiting on a person. The one thing amber means in this app.
-    case needsYou
-
-    /// A diff nobody has read yet.
-    ///
-    /// **Only a Diff tab may ever be in this state.** It comes from
-    /// `InboxRow`, which counts a WORKSPACE's changed lines and knows nothing
-    /// about any agent — `NeedsYou.swift:94-97` refuses to invent a per-agent
-    /// version of it for exactly that reason. Whatever maps a real fleet into
-    /// a `ShellFleet` owes this: putting it on an agent tab would draw a cyan
-    /// ring that means "this agent has unread changes", which is not a fact
-    /// anything on the wire has an opinion about.
-    case unreadDiff
-
-    /// The agent is working. Nothing is being asked of anybody.
-    case working
-
-    /// The daemon's answer about this tab is old.
-    ///
-    /// Not "less important" — less KNOWN. Drawn under whatever the daemon
-    /// already said rather than instead of it, which is why this is a state
-    /// here but a dashed ring rather than a different colour on screen.
-    case stale
-}
-
 /// Where a workspace sorts in the overview, and nowhere else.
 ///
 /// The mechanics doc's `needsYou > unreadDiff > (all stale) > working`, as a
@@ -163,12 +131,59 @@ struct ShellTab: Identifiable, Hashable {
     var id: String
     /// What the column row says. Short: the column is one bar wide.
     var title: String
-    var mark: ShellMark
 
-    init(id: String, title: String, mark: ShellMark) {
+    /// **The product's mark, not a fourth vocabulary.**
+    ///
+    /// This was a `ShellMark` — a private enum of four cases, `needsYou`,
+    /// `unreadDiff`, `working` and `stale` — left over from the shell landing
+    /// before the glance spec existed. It is gone, and the reason it had to go
+    /// is not tidiness: those four cases collapsed three independent axes into
+    /// one dimension, and the collapse was LOSSY in a way that reached the
+    /// screen. `working` was the catch-all — it meant an agent producing, an
+    /// agent idle at a prompt, an agent whose status the daemon had never
+    /// stated, AND a Diff tab with nothing new in it. Four different facts
+    /// drawn as one dot. So the bar could not say that an agent was working
+    /// even in principle, and the owner reported exactly that: the Mac showed a
+    /// filled indicator while the phone's bar showed nothing until the turn was
+    /// over. Android's `ShellTab` reached this shape first and named the seam.
+    ///
+    /// A `GlanceMark` says all three axes separately, so nothing has to be
+    /// discarded on the way in. `ShellScreen.mark(of:now:)` is where one is
+    /// built, and it is the same table `GlanceMark.init(agent:)` uses.
+    ///
+    /// **`Attention.toReview` on an AGENT tab means a finished turn, and on
+    /// the DIFF tab means unread changes — and those are the only two things
+    /// it may ever mean here.** The prohibition the old `unreadDiff` case
+    /// carried is unchanged and still binding: an unread-diff count comes from
+    /// `InboxRow`, which counts a WORKSPACE's changed lines and knows nothing
+    /// about any agent, and `NeedsYou.swift:94-97` refuses to invent a
+    /// per-agent version of it. Putting THAT on an agent tab would draw a ring
+    /// meaning "this agent has unread changes", which is not a fact anything on
+    /// the wire has an opinion about. `ShellScreen.diffMark` is the only place
+    /// allowed to produce it from a diff, and it is only ever called for the
+    /// Diff tab.
+    var mark: GlanceMark
+
+    /// Whether this tab is asking for a person, by the app's own single
+    /// definition — `AgentActivity.wantsAttention`, blocked or done, shared
+    /// with the Mac since long before the glance vocabulary existed.
+    ///
+    /// **Carried rather than re-derived from `mark`, because it is deliberately
+    /// BROADER than the amber ring.** Since `done` joined the review tier a
+    /// finished turn draws the middle-weight review ring rather than the heavy
+    /// amber one — but it is still a workspace you should be shown first.
+    /// `ShellWorkspace.precedence` is the only thing that reads this and the
+    /// only place the distinction matters; what a mark SAYS and what a list
+    /// SORTS BY are different questions, and folding them together is what
+    /// would silently demote every finished agent in the overview. Android's
+    /// `ShellTab` makes the same split for the same reason.
+    var wantsAttention: Bool
+
+    init(id: String, title: String, mark: GlanceMark, wantsAttention: Bool = false) {
         self.id = id
         self.title = title
         self.mark = mark
+        self.wantsAttention = wantsAttention
     }
 }
 
@@ -278,10 +293,33 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// An empty workspace ranks as `working`, which is the "nothing to say"
     /// rank: it is not waiting on anybody, has no diff to read, and has no
     /// tabs that could have gone quiet.
+    ///
+    /// **The order is unchanged by the move to `GlanceMark`, and each rung is
+    /// the same set of workspaces it was before.** It is worth writing down why
+    /// the second rung did not silently widen when it started reading an
+    /// attention tier rather than a case name:
+    ///
+    ///   - The top rung sorts on `wantsAttention` and NOT on the amber ring.
+    ///     Under `ShellMark` those were the same set, because blocked and done
+    ///     both flattened into `needsYou`; now that `done` draws the review ring
+    ///     they are not, and sorting on the ring would drop every finished agent
+    ///     a rung. `AgentActivity.wantsAttention` is the app's single answer to
+    ///     "should this interrupt someone" and it is what belongs here.
+    ///   - The `unreadDiff` rung therefore still means a DIFF, even though
+    ///     `done` now also produces `.toReview`: a done tab has already been
+    ///     claimed by the rung above, so the only `.toReview` that can reach
+    ///     this line is `ShellScreen.diffMark`'s.
+    ///   - `allStale` is a property of the WHOLE workspace and stays one. The
+    ///     Diff tab is never broken in live data, so this rung is reached only
+    ///     by the remembered workspaces `RunnerDirectory.decayed` builds, which
+    ///     is exactly what it is for.
+    ///
+    /// Android's `ShellWorkspace.precedence` states the same split at length
+    /// and for the same reason.
     var precedence: ShellPrecedence {
-        if tabs.contains(where: { $0.mark == .needsYou }) { return .needsYou }
-        if tabs.contains(where: { $0.mark == .unreadDiff }) { return .unreadDiff }
-        if !tabs.isEmpty && tabs.allSatisfy({ $0.mark == .stale }) { return .allStale }
+        if tabs.contains(where: \.wantsAttention) { return .needsYou }
+        if tabs.contains(where: { $0.mark.attention == .toReview }) { return .unreadDiff }
+        if !tabs.isEmpty && tabs.allSatisfy({ $0.mark.link == .broken }) { return .allStale }
         return .working
     }
 }
@@ -1099,31 +1137,68 @@ extension RunnerDirectory {
                     tail: workspace.tail,
                     isHidden: workspace.isHidden,
                     tabs: workspace.tabs.enumerated().map { index, tab in
-                        ShellTab(
+                        let aged = RunnerDirectory.decayed(tab.mark)
+                        return ShellTab(
                             id: "\(runner)/\(workspace.id)/\(index)",
                             title: tab.title,
-                            mark: RunnerDirectory.decayed(tab.mark))
+                            mark: aged.mark,
+                            wantsAttention: aged.wantsAttention)
                     })
             })
     }
 
     /// One remembered mark, aged.
-    static func decayed(_ mark: String) -> ShellMark {
+    ///
+    /// Returns the sort flag alongside the drawing, because the cache is the
+    /// one place they cannot be derived from each other: `wantsAttention` is
+    /// the live model's `AgentActivity`, and by the time a tab is a word on
+    /// disk that activity is gone. Writing the word for a DONE agent
+    /// separately from the word for an unread diff is what keeps a remembered
+    /// finished turn on the same rung it has always sorted on — see
+    /// `ShellWorkspace.precedence`, and `word(for:)` below, which is the half
+    /// of the round trip that makes the two tellable apart.
+    static func decayed(_ mark: String) -> (mark: GlanceMark, wantsAttention: Bool) {
         switch mark {
-        case "needsYou": return .needsYou
-        case "unreadDiff": return .unreadDiff
-        default: return .stale
+        case "needsYou":
+            return (GlanceMark(attention: .needsYou, core: .atAPrompt), true)
+        case "done":
+            return (GlanceMark(attention: .toReview, core: .atAPrompt), true)
+        // A DIFF, and never an agent — `ShellTab.mark` carries the prohibition
+        // and the reason. `core: nil` because a diff has no agent side to
+        // state, which is also what tells this apart from `done` on the way
+        // back out.
+        case "unreadDiff":
+            return (GlanceMark(attention: .toReview, core: nil), false)
+        // Everything else is a claim about the present, and this is not the
+        // present. `core: nil` rather than a remembered one: we are not being
+        // told what it is doing, which is a different thing from being told it
+        // is at a prompt.
+        default:
+            return (GlanceMark(attention: .quiet, core: nil, link: .broken), false)
         }
     }
 
-    /// The word to write down for a mark. The inverse of `decayed` for the two
-    /// that survive it, and one string for the two that do not.
-    static func word(for mark: ShellMark) -> String {
-        switch mark {
+    /// The word to write down for a mark. The inverse of `decayed` for the
+    /// three that survive it, and one string for everything that does not.
+    ///
+    /// **The words are the old four and are deliberately unchanged**, because
+    /// they are on disk. `RunnerDirectory.Tab.mark` is a String precisely so a
+    /// value from another build cannot take the cache down, and renaming what
+    /// this writes would have every already-cached runner read back as
+    /// `default` — a whole remembered fleet going dashed at once, on upgrade,
+    /// for no reason a person could see.
+    ///
+    /// `done` is the one addition, and it is a word the review tier needs
+    /// rather than a rename: a finished turn and an unread diff both draw
+    /// `.toReview`, and the cache has to tell them apart or a remembered
+    /// finished agent sorts a rung below where it always has. They are
+    /// distinguishable because a diff has no agent behind it and so states no
+    /// core — see `ShellScreen.diffMark`.
+    static func word(for mark: GlanceMark) -> String {
+        switch mark.attention {
         case .needsYou: return "needsYou"
-        case .unreadDiff: return "unreadDiff"
-        case .stale: return "stale"
-        case .working: return "working"
+        case .toReview: return mark.core == nil ? "unreadDiff" : "done"
+        case .quiet: return "working"
         }
     }
 }

@@ -934,11 +934,17 @@ struct RunnerDirectory: Codable, Sendable, Equatable {
 
     /// A tab as the cache holds it.
     ///
-    /// The mark is a String and not a `ShellMark`, for the reason
+    /// The mark is a String and not a `GlanceMark`, for the reason
     /// `FleetSnapshot.Agent.status` is one: a value written by a later build
     /// must not fail to decode and take the whole cache down with it. An
-    /// unrecognized word reads as `working`, which is the rank that claims the
-    /// least — and which `decayed` then turns into `stale` anyway.
+    /// unrecognized word reads as the quiet hairline, which is the tier that
+    /// claims the least — and which `decayed` then dashes anyway, because by
+    /// then it is a claim about a present that has passed.
+    ///
+    /// `RunnerDirectory.word(for:)` and `decayed` are the two halves, and the
+    /// words they exchange are deliberately older than the type: they were
+    /// written by builds that had a `ShellMark`, they are on disk, and a
+    /// rename would age every cached runner out at once on upgrade.
     struct Tab: Codable, Sendable, Equatable {
         var title: String
         var mark: String

@@ -590,3 +590,155 @@ struct ActivityTraceTests {
             })
     }
 }
+
+// The in-app ladder, RENDERED — because the defect this suite gained was
+// invisible to every assertion that stopped at the model.
+//
+// `ShellScreen` computed `working` correctly, `GlanceMark` carried
+// `core: .producing` correctly, and the shell bar still showed a person
+// nothing at all while their agent ran: the drawing threw the core away at
+// these diameters, and a working agent and an idle one came out as the same
+// 1pt hairline. Every enum-level test passed the whole time, which is exactly
+// why nobody noticed. So these compare PIXELS, at the three diameters the bar
+// actually uses, and they are the only tests here that could have gone red.
+#if os(macOS)
+import AppKit
+import SwiftUI
+
+/// The six drawings the shell bar can put on screen.
+///
+/// `unreadDiff` is absent on purpose and its absence is not an oversight: a
+/// diff's mark is `(.toReview, core: nil)`, and `GlanceMark.core` says nil
+/// "draws the same as `.atAPrompt` — there is no fourth thing a core can look
+/// like", so it is the same drawing as a finished turn and differs only in what
+/// VoiceOver says. Asserting those two apart would be asserting a difference
+/// the system deliberately does not draw.
+private let barDrawings: [(String, GlanceMark)] = [
+    ("needs you", GlanceMark(attention: .needsYou, core: .atAPrompt)),
+    ("to review", GlanceMark(attention: .toReview, core: .atAPrompt)),
+    ("working", GlanceMark(attention: .quiet, core: .producing)),
+    ("idle", GlanceMark(attention: .quiet, core: .atAPrompt)),
+    ("stale working", GlanceMark(attention: .quiet, core: .producing, link: .broken)),
+    ("stale idle", GlanceMark(attention: .quiet, core: .atAPrompt, link: .broken)),
+]
+
+/// 5 on an overview card, 6 in the bar's ribbon, 7 in the column.
+private let barDiameters: [CGFloat] = [5, 6, 7]
+
+/// One mark's pixels, at the scale a phone draws them, as a short fingerprint.
+///
+/// Rendered into a fixed box with an opaque ground and an explicit colour
+/// scheme, so the only thing that can move the bytes is the mark.
+///
+/// **A digest and not the buffer, because of what a failure PRINTS.** Swift
+/// Testing renders the operands of a failed `#expect` into the message, and
+/// two 40x20 boxes at scale 3 are most of two megabytes of decimal integers —
+/// a real failure arrived as an unreadable wall and the actual complaint was
+/// off the end of it. A test whose output nobody can read is one nobody keeps.
+/// FNV-1a rather than `hashValue`, which is seeded per process and would make
+/// the numbers in that message meaningless between runs.
+@MainActor
+private func fingerprint(_ mark: GlanceMark, diameter: CGFloat, elongated: Bool) -> String {
+    let box = CGSize(width: 40, height: 20)
+    let view = GlanceMarkView(mark, inAppDiameter: diameter, elongated: elongated)
+        .frame(width: box.width, height: box.height)
+        .background(Color.black)
+        .environment(\.colorScheme, .dark)
+    let renderer = ImageRenderer(content: view)
+    renderer.scale = 3
+    guard let image = renderer.cgImage else { return "nothing rendered" }
+
+    let width = image.width, height = image.height
+    var buffer = [UInt8](repeating: 0, count: width * height * 4)
+    buffer.withUnsafeMutableBytes { raw in
+        let context = CGContext(
+            data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        context?.draw(image, in: CGRect(origin: .zero, size: CGSize(width: width, height: height)))
+    }
+    var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+    for byte in buffer {
+        hash ^= UInt64(byte)
+        hash = hash &* 0x0000_0100_0000_01b3
+    }
+    return String(hash, radix: 16)
+}
+
+/// **The control, and it comes first.** Every assertion below is of the form
+/// "these two renders differ", and such an assertion passes for free if the
+/// renderer is simply not deterministic. This is the one that fails in that
+/// case: the same mark, rendered twice, has to come out byte for byte the
+/// same, or "differs" means nothing anywhere else in this file.
+@MainActor
+@Test func theSameMarkTwiceRendersTheSameBytes() {
+    for (name, mark) in barDrawings {
+        for diameter in barDiameters {
+            let once = fingerprint(mark, diameter: diameter, elongated: false)
+            let twice = fingerprint(mark, diameter: diameter, elongated: false)
+            #expect(once != "nothing rendered", "\(name) at \(diameter)pt rendered nothing at all")
+            #expect(once == twice, "\(name) at \(diameter)pt does not render deterministically")
+        }
+    }
+}
+
+/// **A working agent must not look like an idle one, at the sizes the bar
+/// draws.** This is the defect, as an assertion.
+///
+/// It is stated over the whole matrix rather than for the one pair, because
+/// the pair that broke was not special — it broke because the in-app ladder
+/// dropped an entire axis, and any state that differed only on that axis would
+/// have gone with it. A stale working agent and a stale idle one are here for
+/// the same reason, and they are the harder half: they have to stay apart
+/// while a dashed ring is running over both of them.
+@MainActor
+@Test func everyMarkTheBarCanDrawLooksDifferentAtEveryDiameterItDrawsAt() {
+    for diameter in barDiameters {
+        // The current tab is the same mark 2.5 times as wide, and it is a
+        // separate drawing that can regress on its own.
+        for elongated in [false, true] {
+            let rendered = barDrawings.map {
+                ($0.0, fingerprint($0.1, diameter: diameter, elongated: elongated))
+            }
+            for a in rendered.indices {
+                for b in (a + 1)..<rendered.count {
+                    #expect(
+                        rendered[a].1 != rendered[b].1,
+                        """
+                        \(rendered[a].0) and \(rendered[b].0) draw identically at \
+                        \(diameter)pt\(elongated ? ", elongated" : "") — the bar cannot say \
+                        which of the two is happening
+                        """)
+                }
+            }
+        }
+    }
+}
+
+/// The dash still reads at the smallest diameter in the app.
+///
+/// Separated from the matrix above because it is a different claim: the matrix
+/// says a stale mark differs from the OTHER states, and this says the staleness
+/// itself is what differs — the same agent, live and stale, drawn apart at 5pt,
+/// which is the size §03's dash rule is under the most pressure at.
+@MainActor
+@Test func stalenessIsVisibleAtTheSmallestDiameterTheAppDraws() {
+    let live = GlanceMark(attention: .quiet, core: .producing)
+    let working = GlanceMark(attention: .quiet, core: .atAPrompt)
+    #expect(
+        fingerprint(live, diameter: 5, elongated: false)
+            != fingerprint(live.dashed, diameter: 5, elongated: false),
+        "a working agent looks the same whether or not we have heard from it")
+    #expect(
+        fingerprint(working, diameter: 5, elongated: false)
+            != fingerprint(working.dashed, diameter: 5, elongated: false),
+        "an idle agent looks the same whether or not we have heard from it")
+}
+
+extension GlanceMark {
+    /// The same mark with its channel broken. Test scenery.
+    fileprivate var dashed: GlanceMark {
+        GlanceMark(attention: attention, core: core, link: .broken)
+    }
+}
+#endif

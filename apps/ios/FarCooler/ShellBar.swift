@@ -43,8 +43,17 @@ import SwiftUI
 /// having only if it is the same mark everywhere, or it is something to be read
 /// rather than recognised. `GlanceMark` carries the states; this view carries
 /// the ribbon's own size and its elongation.
+///
+/// **And the tab now HOLDS a `GlanceMark` rather than being translated into
+/// one here.** There was a `ShellMark` enum in front of this — four cases, a
+/// second vocabulary for the same thing — and a bridging initializer in this
+/// file that turned one into the other. It is gone; `ShellTab.mark` says why at
+/// length. The short version is that the bridge could not carry what it was
+/// given: `ShellMark` had one case for a producing agent and an idle one, so a
+/// working agent drew the same hairline as an agent sitting at a prompt, and
+/// the bar said nothing at all while a turn ran.
 struct ShellMarkView: View {
-    let mark: ShellMark
+    let mark: GlanceMark
     /// 6 in the bar's ribbon, 7 in the column, 5 on an overview card.
     ///
     /// **Smaller than any of §03's six diameters, and deliberately kept.** The
@@ -56,6 +65,10 @@ struct ShellMarkView: View {
     /// surfaces — widgets, the lock screen, the wrist — would move three frames
     /// in the app, where the person is already looking. What this ribbon takes
     /// from §03 is the drawing, which is what was drifting.
+    ///
+    /// These sizes have no room for §03's concentric core, and
+    /// `GlanceMarkView.init(_:inAppDiameter:elongated:)` is where what they do
+    /// instead — say `producing` with fill — is argued.
     let size: CGFloat
     var isCurrent: Bool = false
 
@@ -65,49 +78,7 @@ struct ShellMarkView: View {
         // is what says the tier in words on the surfaces where the mark stands
         // alone — §06 of the visual brief, since stroke weight reaches VoiceOver
         // through nothing else.
-        GlanceMarkView(GlanceMark(mark), inAppDiameter: size, elongated: isCurrent)
-    }
-}
-
-extension GlanceMark {
-    /// One shell tab's state as the one mark.
-    ///
-    /// Here rather than in `GlanceMark.swift` because that file is compiled by
-    /// the watch's complication and `ShellNavigation.swift` is not — a mapping
-    /// living beside the type would be a phone-only dependency inside a file
-    /// four other binaries build.
-    ///
-    /// **Nothing here can produce a core**, because nothing at these diameters
-    /// draws one: §03 takes the core off below 7pt, and at 7pt exactly a 3pt
-    /// core inside a 2pt ring would touch it on both sides. The axis is still
-    /// set honestly so that the day this ribbon is drawn at a spec size it
-    /// starts saying the right thing rather than starting to lie.
-    init(_ shell: ShellMark) {
-        switch shell {
-        // Amber, here and on the widget, the Live Activity and the inbox — see
-        // the tab strip's `ChangesChip`, which refuses the colour for exactly
-        // this reason. It is a heavy amber RING now rather than a filled
-        // capsule: §03 gives the ring to the person's side of the question and
-        // the core to the agent's, and a blocked agent is stopped at a prompt,
-        // which is what an absent core means.
-        case .needsYou: self.init(attention: .needsYou, core: .atAPrompt)
-        // Only ever a Diff tab. `ShellMark.unreadDiff` says why, and
-        // `GlanceMark.Attention.toReview` says it again from the other side.
-        case .unreadDiff: self.init(attention: .toReview, core: .atAPrompt)
-        case .working: self.init(attention: .quiet, core: .producing)
-        // Dashed at the SAME weight as `working` rather than at a different
-        // one, which is what §03 means by putting dashes on the ring: staleness
-        // is the age of the daemon's answer, not a fifth state competing with
-        // it, so it breaks the channel and leaves the rest of the mark alone.
-        //
-        // The core it keeps is `working`'s, which is the one thing this mapping
-        // cannot do honestly: `ShellMark` collapses three axes into four cases,
-        // so by the time a tab is `.stale` the fact of what it was doing has
-        // been discarded. §03's "a broken ring ... never disturbs the core"
-        // cannot be obeyed exactly from this input. It costs nothing today
-        // because no core is drawn at these diameters.
-        case .stale: self.init(attention: .quiet, core: .producing, link: .broken)
-        }
+        GlanceMarkView(mark, inAppDiameter: size, elongated: isCurrent)
     }
 }
 

@@ -111,7 +111,10 @@ struct ShellFleetMap {
                     ShellTab(
                         id: tabID(workspace: workspace.id, pane: pane),
                         title: terminal.label,
-                        mark: mark(of: terminal, now: now)))
+                        mark: mark(of: terminal, now: now),
+                        // The sort's own question, kept separate from the
+                        // drawing's. See `ShellTab.wantsAttention`.
+                        wantsAttention: terminal.agent.wantsAttention))
                 order.append(ShellPaneRef(workspace: workspace.id, pane: pane))
             }
 
@@ -163,9 +166,26 @@ struct ShellFleetMap {
     ///
     /// Never stale: the diff has no activity and no timestamp, so there is no
     /// answer whose age could be shown.
-    private static func diffMark(_ inbox: InboxRow?) -> ShellMark {
-        guard let inbox, inbox.changedSinceReviewed, inbox.hasDiff else { return .working }
-        return .unreadDiff
+    ///
+    /// **The core is `nil` on both arms, and that is the whole of what a Diff
+    /// tab is.** `GlanceMark.core` documents nil as a surface DECLINING to
+    /// state the agent axis, which is a different thing from stating that an
+    /// agent is at a prompt — and a diff is the one tab in this app with no
+    /// terminal behind it and no agent that could be producing anything. It
+    /// therefore has nothing to say on that axis and says nothing.
+    ///
+    /// This matters twice over. It is what keeps a Diff tab from drawing the
+    /// filled mark that now means "an agent is producing" — under the old
+    /// `ShellMark` the quiet arm here was `.working`, the same case a running
+    /// agent used, so every workspace's Diff tab would have started drawing a
+    /// filled dot the moment fill began to mean something. And it is what lets
+    /// `RunnerDirectory.word(for:)` tell an unread diff from a finished turn,
+    /// since both are `.toReview` and only one of them is an agent.
+    private static func diffMark(_ inbox: InboxRow?) -> GlanceMark {
+        guard let inbox, inbox.changedSinceReviewed, inbox.hasDiff else {
+            return GlanceMark(attention: .quiet, core: nil)
+        }
+        return GlanceMark(attention: .toReview, core: nil)
     }
 
     /// One agent's mark.
@@ -180,14 +200,41 @@ struct ShellFleetMap {
     /// "told a long time ago" and must never be rendered as it: an older
     /// daemon sends no timestamp for anything, and reading that as silence
     /// would draw a whole healthy fleet as unknown.
-    private static func mark(of terminal: Terminal, now: Date) -> ShellMark {
-        if terminal.agent.wantsAttention { return .needsYou }
-        if let changed = terminal.activityChangedAt,
-            now.timeIntervalSince(changed) > staleAfter
-        {
-            return .stale
+    ///
+    /// **This is the same table `GlanceMark.init(agent:)` reads**, and it is
+    /// here rather than beside that one because it takes an `AgentActivity`:
+    /// `GlanceMark.swift` is compiled a file at a time by the watch's
+    /// complication and `CoreModel.swift` is not in that list, so a mapping
+    /// living there would break a build this app does not run.
+    ///
+    /// **`working` is no longer the catch-all it was.** The old `ShellMark`
+    /// had one case for a producing agent, an idle one, an agent the daemon
+    /// had said nothing about, and a Diff tab — and drawing them alike is the
+    /// defect this replaced: the bar could not say an agent was running even
+    /// in principle. The core axis carries that distinction now, and `idle`,
+    /// `none` and `unknown` land at a prompt rather than borrowing a claim
+    /// that some agent somewhere is producing.
+    private static func mark(of terminal: Terminal, now: Date) -> GlanceMark {
+        // Latched, both of them, and never dashed. `GlanceMark.Link` states
+        // the rule — "blocked and to-review hold at any age; working and idle
+        // go dashed" — and `FleetSnapshot.Confidence.isLatched` is the same
+        // sentence about the same two statuses. An agent that stopped for you
+        // an hour ago is still stopped for you.
+        switch terminal.agent {
+        case .blocked: return GlanceMark(attention: .needsYou, core: .atAPrompt)
+        case .done: return GlanceMark(attention: .toReview, core: .atAPrompt)
+        default: break
         }
-        return .working
+        let stale =
+            if let changed = terminal.activityChangedAt {
+                now.timeIntervalSince(changed) > staleAfter
+            } else {
+                false
+            }
+        return GlanceMark(
+            attention: .quiet,
+            core: terminal.agent == .working ? .producing : .atAPrompt,
+            link: stale ? .broken : .live)
     }
 
     /// What this workspace's card shows: the last few things its most recently
