@@ -27,7 +27,6 @@ import com.farcooler.R
 import com.farcooler.data.Themes
 import com.farcooler.data.TerminalFontChoice
 import androidx.compose.material3.Text
-import com.farcooler.model.AgentActivity
 import com.farcooler.model.InboxRow
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
@@ -61,6 +60,12 @@ fun FarCoolerTheme(content: @Composable () -> Unit) {
     // Recomposed when the theme changes, which is what carries a pick in
     // settings out to every surface in the app rather than just the terminal.
     val revision by Themes.revision.collectAsStateWithLifecycle()
+    // Which way the chosen theme goes, hoisted out of [scheme] because the
+    // glance vocabulary needs the same answer and must not ask a second time.
+    // §01's light palette is a different set of values rather than a filter over
+    // the dark one, so "which palette" is a decision, and a decision made twice
+    // is a decision two surfaces can make differently.
+    val dark = remember(revision) { Themes.current.dark }
     val scheme = remember(context, revision) {
         val theme = Themes.current
         // Material You survives, for the DARK case only.
@@ -85,8 +90,12 @@ fun FarCoolerTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = scheme,
         typography = MaterialTheme.typography,
-        content = content,
-    )
+    ) {
+        // Inside, not outside: [glanceInk1] and [glanceInk2] fall back to the
+        // scheme's own on-surface roles in light mode, so the glance vocabulary
+        // has to be able to see the colours Material just resolved.
+        ProvideGlanceAppearance(dark, content)
+    }
 }
 
 /**
@@ -117,7 +126,7 @@ object TerminalFonts {
  *
  * **Silence is the default, and green is spent once.** This was green for
  * RUNNING, which put a green dot on every row of a list where green already
- * meant something else: [attentionColor] gives it to DONE, so an idle `zsh`
+ * meant something else: the agent mark gave it to DONE, so an idle `zsh`
  * and an agent that had just finished its work wore the same mark, and on a
  * busy worktree they wore it three rows apart. A running process is the
  * ordinary case and now says nothing at all; green survives on exactly one
@@ -198,42 +207,25 @@ fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
 }
 
 
-/**
- * The colour behind an agent's activity glyph, shared with the tab strip for
- * the same reason as [processColor]. Only the two states worth acting on get
- * colour, so a list of twenty still reads at a glance.
- */
-@Composable
-fun attentionColor(agent: AgentActivity): Color = when (agent) {
-    AgentActivity.BLOCKED -> Color(0xFFFF9800)
-    AgentActivity.DONE -> Color(0xFF4CAF50)
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
-}
-
-/**
- * The same colour, for a terminal whose finished turn may have DIED.
+/*
+ * `attentionColor` was here, in three overloads, and the whole of it is gone.
  *
- * Green and red are the whole difference between "it's done" and "it stopped
- * working", and [AgentActivity] alone cannot tell them apart — the daemon
- * sends both as `done` and says which in `turnFailed`. This app decoded no such
- * field, so an agent whose turn had died wore the green checkmark of one that
- * had succeeded: the second place green meant two things on this screen, and
- * the one that mattered more. iOS has had this overload since the field
- * landed; see `attentionColor(_ terminal:)` in its `FleetView`.
+ * It gave Material orange 500 to a blocked agent, Material green 500 to a
+ * finished one and the scheme's error red to a turn that died, and every one of
+ * those was a colour this file mixed by hand. §01 of the glance spec reserves
+ * ONE saturated hue for "does this need me" and forbids any other loud thing;
+ * three hues answering that one question is the failure the rule names. The
+ * replacement is `model/Glance.kt` — `GlancePalette.amber` for the tier and
+ * `GlanceMark` for the drawing — and it is shared with iOS and the Mac rather
+ * than with the two surfaces in this app that happened to call the same
+ * function.
+ *
+ * Which KIND of attention it is did not go with it: `Terminal.activityLabel`
+ * says "Needs you", "Done" or "Failed" in words, and `rowStatus` puts one of
+ * them on every agent row. Recorded here rather than left implicit, because
+ * "the failure red is gone" reads like a regression until you know where the
+ * word went.
  */
-@Composable
-fun attentionColor(terminal: Terminal): Color =
-    attentionColor(terminal.agent, terminal.turnDidFail)
-
-/**
- * The same rule again, for a surface that has already taken the two facts apart
- * — `TerminalTabStrip` flattens its terminals into chips before it draws them.
- * One rule in one place either way: a chip's ring and the row it names must not
- * be able to come out different colours.
- */
-@Composable
-fun attentionColor(agent: AgentActivity, turnDidFail: Boolean): Color =
-    if (turnDidFail) MaterialTheme.colorScheme.error else attentionColor(agent)
 
 /**
  * `+82 -13`: how much a worktree has changed, in the two colours those signs
@@ -244,13 +236,19 @@ fun attentionColor(agent: AgentActivity, turnDidFail: Boolean): Color =
  * shape `df87410` already had to pull the landing ordering back from: three
  * copies of one rule is three chances for a phone to disagree with itself.
  *
- * The green is a literal and matches [attentionColor]'s green to the byte,
- * because it is the one colour Material's scheme has no role for — there is no
- * "positive" slot in a `ColorScheme` the way there is an `error` one. It is
- * written here rather than borrowed from `attentionColor` so that a change to
- * what a FINISHED AGENT looks like cannot silently change what an added line
- * looks like. Red IS the scheme's error role, because "removed" and "went
- * wrong" want the same red under every theme.
+ * The green is a literal because it is the one colour Material's scheme has no
+ * role for — there is no "positive" slot in a `ColorScheme` the way there is an
+ * `error` one. It used to match `attentionColor`'s green to the byte and was
+ * written out separately so that a change to what a FINISHED AGENT looks like
+ * could not silently change what an added line looks like; that separation is
+ * now structural rather than conventional, since a finished agent wears
+ * `GlancePalette.amber` and no green at all. Red IS the scheme's error role,
+ * because "removed" and "went wrong" want the same red under every theme.
+ *
+ * **This is NOT a glance colour and must not become one.** §01's palette is
+ * about what an agent is doing; a diff's signs are about what a patch says, and
+ * they sit inside a review surface a person is already reading rather than on a
+ * mark they are meant to catch at a glance.
  */
 @Composable
 fun DiffCounts(counts: InboxRow, modifier: Modifier = Modifier) {
@@ -279,3 +277,15 @@ fun DiffCounts(counts: InboxRow, modifier: Modifier = Modifier) {
  * what [DiffCounts]'s own comment says one copy exists to prevent.
  */
 internal val DIFF_ADDED = Color(0xFF4CAF50)
+
+/**
+ * How much of an ink a full-width wash gets, where a row is TINTED rather than
+ * drawn in a colour.
+ *
+ * The added and removed backgrounds behind a patch's lines. It was `0x26` baked
+ * into two ARGB literals — 38/255, which is this — and written as part of the
+ * colour rather than as a property of the wash, so the two could not be changed
+ * together and neither could follow a theme's own error red.
+ */
+internal const val WASH = 0.15f
+

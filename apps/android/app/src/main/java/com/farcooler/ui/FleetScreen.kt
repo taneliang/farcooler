@@ -18,19 +18,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Menu
-import androidx.compose.material.icons.outlined.PauseCircle
-import androidx.compose.material.icons.outlined.Pending
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,7 +49,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,6 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.model.AgentActivity
+import com.farcooler.model.GlanceMarkSize
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
@@ -794,6 +787,13 @@ internal fun TerminalRow(
 ) {
     val kind = StateKind.parse(terminal.state)
     var menu by remember { mutableStateOf(false) }
+    // Not ticking, deliberately, where [ElapsedStatus] below does tick. The one
+    // question asked of this clock is whether the runner's last answer is over
+    // an hour old, and a value taken when this row was last composed is exact
+    // enough for an hour: a fleet poll recomposes it long before the threshold
+    // could be crossed unobserved. A second one-second timer per row, to move a
+    // dash that changes once an hour, is a timer for nothing.
+    val now by rememberNow(ticking = false)
 
     Row(
         Modifier
@@ -860,31 +860,50 @@ internal fun TerminalRow(
                         ElapsedStatus(terminal)
                     }
 
-                    // The reason to have opened the app. Only the two states
-                    // worth acting on get colour, so a list of twenty still
-                    // reads at a glance.
+                    // The reason to have opened the app: one mark, in the one
+                    // vocabulary every surface in the product now draws.
                     //
-                    // One size. This stepped 16dp to 20dp on `wantsAttention`,
-                    // so the trailing column changed width every time an agent
-                    // finished a turn or asked a question — and it changed for
-                    // ONE row, which pulls that row's glyph out of line with the
-                    // twenty above and below it. A column that moves as its rows
-                    // change state is a defect on any platform, and the Mac's
-                    // `StatusGlyph` spends its whole doc comment on the same
-                    // point. Emphasis is carried by fill and by colour instead,
-                    // in channels that cost no layout: PanTool and CheckCircle
-                    // are filled where PauseCircle and Pending are outlined.
+                    // **The ring is your side, the core is the agent's** — for
+                    // the states §03 has a mark for. A finished turn and one
+                    // that died are not among them: they keep the green and the
+                    // red they already had, because the nearest mark for either
+                    // is the quiet hairline and "nothing is wanted from you" is
+                    // the opposite of what a failed build means. [AgentMarkView]
+                    // holds that fork, and holds it once for every surface. See
+                    // `model/Glance.kt` and the Mac's `Status.glanceMark`.
                     //
-                    // [attentionColor] takes the TERMINAL, not its activity, so
-                    // a turn that died is red rather than wearing the green of
-                    // one that succeeded.
+                    // **What this replaced, and why the loss is the point.**
+                    // Six Material icons tinted orange-or-green-or-red said
+                    // six things where the row says three: `rowStatus` already
+                    // prints "Needs you 2m", "Working 12m" and "Failed", so the
+                    // glyph was restating a string beside it in a channel — hue
+                    // — that a colourblind reader, a greyscale screenshot and a
+                    // phone in sunlight all lose. §03's mark keeps the
+                    // distinction that survives all three: stroke weight for
+                    // whether you are wanted, a filled centre for whether it is
+                    // producing, a dash for whether we have heard from it. The
+                    // two hues that survive are the two that are NOT restating a
+                    // tier — green and red are an outcome, and a chip elsewhere
+                    // in the app carries them with no words beside it at all.
+                    //
+                    // One size still, and now a smaller one — 10dp, §03's row
+                    // diameter. The column cannot change width as a row changes
+                    // state, which is the defect the icon's own comment was
+                    // written to prevent and which the mark prevents by
+                    // construction: every state is the same circle.
                     if (terminal.agent.isAgent && terminal.agent != AgentActivity.UNKNOWN) {
                         Spacer(Modifier.width(8.dp))
-                        Icon(
-                            activityIcon(terminal),
-                            contentDescription = terminal.activityLabel,
-                            tint = attentionColor(terminal),
-                            modifier = Modifier.size(18.dp),
+                        AgentMarkView(
+                            terminal,
+                            now,
+                            GlanceMarkSize.ROW,
+                            // Decorative, because the words are right there.
+                            // `rowStatus` is never null for an agent pane — it
+                            // falls back to `activityLabel` alone — so whatever
+                            // this draws is already in the row's text, and a
+                            // mark that announced it too would make TalkBack say
+                            // "Needs you" twice per row.
+                            decorative = true,
                         )
                     }
                 }
@@ -1068,36 +1087,3 @@ private fun rememberNow(ticking: Boolean): State<Long> =
         }
     }
 
-/**
- * The same vocabulary the Apple apps use, in this platform's icon set.
- *
- * NONE and UNKNOWN are unreachable from every call site — both guard on
- * `isAgent && != UNKNOWN` before drawing anything — and are kept because the
- * `when` is exhaustive over the enum, not because either has ever been on
- * screen. Recorded rather than deleted so the next reader does not go looking
- * for the terminal glyph.
- *
- * Filled where the state wants a person, outlined where it does not, which is
- * the non-colour half of the vocabulary the Mac calls hollow-vs-filled. It
- * happens to be right here already; the process dot beside it is where the
- * phones had lost it.
- */
-fun activityIcon(activity: AgentActivity): ImageVector = when (activity) {
-    AgentActivity.NONE -> Icons.Outlined.Terminal
-    AgentActivity.IDLE -> Icons.Outlined.PauseCircle
-    AgentActivity.WORKING -> Icons.Outlined.Pending
-    AgentActivity.BLOCKED -> Icons.Filled.PanTool
-    AgentActivity.DONE -> Icons.Filled.CheckCircle
-    AgentActivity.UNKNOWN -> Icons.AutoMirrored.Outlined.HelpOutline
-}
-
-/**
- * The same mark, for a terminal whose finished turn may have DIED.
- *
- * `Cancel` is Material's filled circle with a cross in it — the same mark iOS
- * draws as `xmark.circle.fill`, and the same filled shape as the CheckCircle it
- * replaces, so a failed turn and a finished one differ in what is inside the
- * circle as well as in its colour.
- */
-fun activityIcon(terminal: Terminal): ImageVector =
-    if (terminal.turnDidFail) Icons.Filled.Cancel else activityIcon(terminal.agent)

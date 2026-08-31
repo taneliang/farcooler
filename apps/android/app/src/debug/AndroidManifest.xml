@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug-only additions, merged over `src/main/AndroidManifest.xml`.
+
+    Nothing declared here exists in a release APK, which is the whole reason
+    this file exists rather than a flag inside the main manifest: a development
+    surface guarded by a runtime check is a surface that ships and is one
+    mistaken boolean away from being reachable.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+            §03's matrix. See `ui/GlanceMatrixActivity.kt` for what it is for and
+            how to launch it.
+
+            `exported` so `adb shell am start` can reach it without the app
+            being in the foreground first — this is a thing looked at from a
+            terminal, in CI or in a review, and a non-exported activity would
+            need a launcher entry instead, which is a second icon on a
+            developer's home screen for the life of the build.
+        -->
+        <activity
+            android:name=".ui.GlanceMatrixActivity"
+            android:exported="true"
+            android:label="Glance matrix"
+            android:theme="@style/Theme.FarCooler" />
+    </application>
+</manifest>

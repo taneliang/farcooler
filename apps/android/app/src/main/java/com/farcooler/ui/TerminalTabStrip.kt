@@ -100,14 +100,18 @@ fun TerminalTabStrip(
         val label: String,
         val kind: StateKind,
         val wantsAttention: Boolean,
-        val attention: com.farcooler.model.AgentActivity,
         /**
-         * Whether that attention is a turn that DIED. Carried beside
-         * [attention] because [com.farcooler.model.AgentActivity] has no word
-         * for it — the daemon sends a failed turn as `done` — and without it
-         * this ring was green around an agent that had stopped working.
+         * The whole terminal, for [agentTint].
+         *
+         * The activity and the `turnFailed` flag travelled here as two fields
+         * for a while, so that the ring could be orange, green or red without
+         * the chip holding a model object. That was the wrong economy: the rule
+         * for which of the three it is lives in ONE function now — the same one
+         * the fleet row and the Mac's glyph use — and a chip that flattened its
+         * terminal into two booleans before asking would be a third place that
+         * could get the flattening wrong.
          */
-        val turnDidFail: Boolean,
+        val terminal: com.farcooler.model.Terminal,
     )
 
     val numbering = workspace?.ordinals() ?: emptyMap()
@@ -119,8 +123,7 @@ fun TerminalTabStrip(
                 label = terminal.displayName(numbering[terminal.id]),
                 kind = StateKind.parse(terminal.state),
                 wantsAttention = terminal.agent.wantsAttention,
-                attention = terminal.agent,
-                turnDidFail = terminal.turnDidFail,
+                terminal = terminal,
             )
         }
 
@@ -167,15 +170,36 @@ fun TerminalTabStrip(
                         if (isCurrent) MaterialTheme.colorScheme.secondaryContainer
                         else Color.Transparent
                     )
+                    // Amber for blocked, green for a finished turn, red for one
+                    // that died — from [agentTint], which is the one place that
+                    // rule lives and which the fleet row and the Mac's glyph
+                    // read too. Blocked's amber is now the palette's rather than
+                    // Material orange 500, and it is the only hue here that
+                    // comes from §01: green and red are this app's own inks for
+                    // the two outcomes the glance vocabulary has no mark for.
+                    //
+                    // **This chip is exactly why those two survived.** The
+                    // argument for folding a failed turn into amber was that the
+                    // word is printed beside the mark — true of a fleet row,
+                    // false here. A chip carries a conversation's NAME and no
+                    // state text at all, so on this surface the hue is the whole
+                    // distinction between a turn that worked and a turn that
+                    // died.
+                    //
+                    // **A ring and not a mark, and only for now.** §03's
+                    // vocabulary would put an `AgentMarkView` at
+                    // `GlanceMarkSize.RIBBON` in this chip's leading slot — the
+                    // slot [ProcessDot] currently holds — and that is a change
+                    // to what the strip IS rather than to what it is coloured.
+                    // The strip is the surface iOS replaced wholesale with the
+                    // shell's bar; restructuring it here would be work thrown
+                    // away twice. So this pass takes the hue only, which is the
+                    // half that is wrong today independently of what the strip
+                    // becomes.
                     .then(
-                        if (chip.wantsAttention) {
-                            Modifier.border(
-                                1.5.dp,
-                                attentionColor(chip.attention, chip.turnDidFail),
-                                CircleShape,
-                            )
-                        } else {
-                            Modifier
+                        when (val tint = agentTint(chip.terminal)) {
+                            null -> Modifier
+                            else -> Modifier.border(1.5.dp, tint, CircleShape)
                         }
                     )
                     .clickable { onSelect(chip.pane) }

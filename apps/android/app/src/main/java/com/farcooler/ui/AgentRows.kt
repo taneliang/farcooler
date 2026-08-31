@@ -575,7 +575,10 @@ fun PlanPanel(entries: List<PlanEntry>) {
                         },
                         contentDescription = null,
                         tint = when (status) {
-                            PlanStatus.DONE -> Color(0xFF4CAF50)
+                            // One green for "it ran and it worked", shared with
+                            // a finished turn and a completed tool call. See
+                            // [FINISHED].
+                            PlanStatus.DONE -> FINISHED
                             PlanStatus.ACTIVE -> MaterialTheme.colorScheme.primary
                             PlanStatus.PENDING -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
@@ -629,7 +632,9 @@ fun DiffView(diff: Diff) {
                     "+$added",
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF4CAF50),
+                    // A diff's insertions, which is [DIFF_ADDED]'s job and not
+                    // [FINISHED]'s — the same bytes today, and two decisions.
+                    color = DIFF_ADDED,
                 )
                 Spacer(Modifier.width(6.dp))
             }
@@ -667,9 +672,17 @@ fun DiffView(diff: Diff) {
                     Row(
                         Modifier
                             .background(
+                                // The same two inks as the `+N −N` counts
+                                // above, at a wash. They were two more literals
+                                // here — and the red was `F44336` rather than
+                                // the scheme's error role, so under any theme
+                                // that moved its error colour a removed line's
+                                // background and the `−N` beside it were already
+                                // two different reds.
                                 when (line.kind) {
-                                    DiffComputation.Kind.ADDED -> Color(0x264CAF50)
-                                    DiffComputation.Kind.REMOVED -> Color(0x26F44336)
+                                    DiffComputation.Kind.ADDED -> DIFF_ADDED.copy(alpha = WASH)
+                                    DiffComputation.Kind.REMOVED ->
+                                        MaterialTheme.colorScheme.error.copy(alpha = WASH)
                                     DiffComputation.Kind.CONTEXT -> Color.Transparent
                                 }
                             )
@@ -726,7 +739,7 @@ private fun Gutter(number: Int?) {
 fun toolStatusColor(status: ToolStatus): Color = when (status) {
     ToolStatus.PENDING -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
     ToolStatus.IN_PROGRESS -> MaterialTheme.colorScheme.onSurfaceVariant
-    ToolStatus.COMPLETED -> Color(0xFF4CAF50)
+    ToolStatus.COMPLETED -> FINISHED
     ToolStatus.FAILED -> MaterialTheme.colorScheme.error
     // A status from a newer daemon. Neutral on purpose: it finished, and
     // claiming either success or failure would be inventing a detail.
