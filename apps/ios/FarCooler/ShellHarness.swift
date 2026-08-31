@@ -39,6 +39,13 @@ struct ShellHarness: View {
     /// the sake of the store hanging off it.
     @StateObject private var connection = Connection()
 
+    /// A card on another runner, tapped. The harness cannot actually cross —
+    /// there is no `RunnerStore` behind a fixture and nothing to connect to —
+    /// but the ALERT is the half worth driving, because the wording is what
+    /// somebody reads before they lose a scrollback and a fixture cannot
+    /// contradict it.
+    @State private var crossing: ShellCrossing?
+
     var body: some View {
         let fleet = Self.fleet
         ZStack {
@@ -58,11 +65,17 @@ struct ShellHarness: View {
                 // Reaching it otherwise takes a drag past the last row, which
                 // is exactly the state a screenshot most wants and a script
                 // least reliably produces.
-                openingOnOverview: CommandLine.arguments.contains("-shell-overview")
+                openingOnOverview: CommandLine.arguments.contains("-shell-overview"),
+                liveServer: "this-mac",
+                elsewhere: Self.elsewhere,
+                onCross: { group, workspace in
+                    crossing = ShellCrossing(group: group, workspace: workspace)
+                }
             ) { slot in
                 ShellPanePlaceholder(slot: slot, changes: changesStore)
             }
         }
+        .shellCrossingAlert($crossing, leaving: "this-mac") { _ in }
         .preferredColorScheme(.dark)
     }
 
@@ -100,6 +113,11 @@ struct ShellHarness: View {
         return canned(count: 10)
     }
 
+    /// Whether this launch asked for some of the fleet to be put away.
+    private static var hides: Bool {
+        CommandLine.arguments.contains("-shell-hidden")
+    }
+
     /// `count` workspaces, with tab counts and states that vary the way a real
     /// fleet's do.
     ///
@@ -130,7 +148,17 @@ struct ShellHarness: View {
                     // A server on some of them and not others, so the bar's
                     // both-ways case is reachable by flag: the local runner
                     // says nothing, the rest name themselves.
-                    server: index % 3 == 0 ? nil : Self.servers[index % Self.servers.count],
+                    //
+                    // **Except when the grid has real sections.** These
+                    // workspaces are the LIVE fleet, and a live card that
+                    // names `eu-runner-1` while sitting under a `this-mac`
+                    // heading is a fixture contradicting itself — which in the
+                    // app cannot happen, because `ShellFleetMap.of` leaves
+                    // `server` nil for every workspace on the runner it is
+                    // connected to. So the bar's fixture and the grid's
+                    // fixture take turns.
+                    server: CommandLine.arguments.contains("-shell-servers") || index % 3 == 0
+                        ? nil : Self.servers[index % Self.servers.count],
                     // FIVE tails against a four-workspace mark cycle, and the
                     // count is the point rather than the stride.
                     //
@@ -143,6 +171,12 @@ struct ShellHarness: View {
                     // tail is a restatement of the mark. Five and four are
                     // coprime, so the pair walks all twenty combinations.
                     tail: Self.tails[index % Self.tails.count],
+                    // `-shell-hidden`, and every fifth one rather than every
+                    // second: the section has to be a MINORITY of the grid or
+                    // the fixture stops looking like a fleet somebody put a
+                    // few things away in. Coprime with neither cycle above, so
+                    // it does not line up with the marks or the tails.
+                    isHidden: Self.hides && index % 5 == 3,
                     tabs: (0..<tabs).map { tab in
                         ShellTab(
                             id: "ws-\(index)-tab-\(tab)",
@@ -177,6 +211,56 @@ struct ShellHarness: View {
     }
 
     private static let servers = ["gpu-box-2", "eu-runner-1"]
+
+    /// Two OTHER runners, as the app would have last seen them.
+    ///
+    /// `-shell-servers`, behind a flag rather than always on, for the reason
+    /// every flag in this harness is: it changes what the grid CONTAINS, and
+    /// the tests that were written against a one-runner grid are still the
+    /// tests for a one-runner grid. A fixture that quietly grew two extra
+    /// sections would have rewritten all of them.
+    ///
+    /// The marks are the interesting part and they are not uniform. A cached
+    /// runner is not uniformly grey: `RunnerDirectory.decayed` holds
+    /// `needsYou` and `unreadDiff` at any age and lets `working` go dashed, so
+    /// this fixture carries one of each — a fixture where every cached ring
+    /// was dashed could not show that rule working or failing.
+    ///
+    /// One of them is HIDDEN, which must not be drawn at all: the way back
+    /// from hiding is on the runner the worktree is on, and this is not that
+    /// runner.
+    static var elsewhere: [ShellServerGroup] {
+        guard CommandLine.arguments.contains("-shell-servers") else { return [] }
+        let now = Date()
+        return [
+            RunnerDirectory(
+                runner: "runner-gpu", label: "gpu-box-2",
+                seenAt: now.addingTimeInterval(-2 * 60 * 60),
+                workspaces: [
+                    directory("fix/token-refresh", mark: "needsYou"),
+                    directory("feat/queue-drain", mark: "working"),
+                    directory("chore/put-away", mark: "working", isHidden: true),
+                ]
+            ).group(),
+            RunnerDirectory(
+                runner: "runner-eu", label: "eu-runner-1",
+                seenAt: now.addingTimeInterval(-9 * 60),
+                workspaces: [directory("spike/watch-sync", mark: "unreadDiff")]
+            ).group(),
+        ]
+    }
+
+    private static func directory(
+        _ name: String, mark: String, isHidden: Bool = false
+    ) -> RunnerDirectory.Workspace {
+        RunnerDirectory.Workspace(
+            id: name, name: name, isHidden: isHidden,
+            tabs: [
+                RunnerDirectory.Tab(title: "Diff", mark: mark),
+                RunnerDirectory.Tab(title: "claude", mark: "working"),
+            ],
+            tail: ["$ npm test", "142 passing, 0 failing"])
+    }
 
     /// What a card's terminal last said. Four shapes rather than one, because
     /// a grid where every card says the same thing cannot show whether the

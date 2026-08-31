@@ -285,6 +285,44 @@ private struct ShellOverviewCard: View {
     }
 }
 
+/// One workspace on a runner this app is not connected to.
+///
+/// The same FACE as an ordinary card — deliberately, because it is the same
+/// thing: a worktree with a name, a ribbon and a tail. What is different is
+/// everything about it being live.
+///
+/// - **It publishes no tile frame.** `ShellTileFrame` is keyed by an index
+///   into `fleet.workspaces`, and it is what a lifted page flies INTO. A card
+///   that is not in that fleet has no index to publish under, and publishing
+///   one anyway would collide with a live workspace's cell — a page flying to
+///   a card that names a different worktree on a different machine.
+/// - **It is never `isCurrent`.** The amber outline means "you are here", and
+///   you are not.
+/// - **Its rings are dashed**, because `RunnerDirectory.group` decayed them
+///   on the way in: `working` became `stale`, while blocked and unread-diff
+///   held. That is this app's existing staleness rule (`GlanceMark.Link`) and
+///   not a second one invented for this grid.
+/// - **A tap does not open it.** There is no pane to open — the terminal it
+///   names is on a machine this app has no connection to — so the tap goes to
+///   `onOpen`, which crosses runners and says so first.
+private struct ShellElsewhereCard: View {
+    let workspace: ShellWorkspace
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            ShellCardFace(workspace: workspace, isCurrent: false)
+        }
+        .buttonStyle(.plain)
+        .dynamicTypeSize(...DynamicTypeSize.large)
+        .accessibilityIdentifier("shell-elsewhere-\(workspace.id)")
+        // Named with its runner, because that is the whole of what makes this
+        // card different from the one above it and a label reading only the
+        // branch would be two cards with one name.
+        .accessibilityLabel("\(workspace.name), on \(workspace.server ?? "another runner")")
+    }
+}
+
 /// The grid, its search, and the way out.
 ///
 /// A `LazyVGrid`, and the pane invariant does not reach here. The rule that
@@ -319,8 +357,25 @@ struct ShellOverview<Actions: View>: View {
     /// release has resolved. What makes that affordable is that none of the
     /// three costs the grid a single point of layout — see each of them below.
     let chrome: Bool
+    /// What to call the runner these cards are on, or nil where there is
+    /// nothing to tell it apart from.
+    ///
+    /// Drawn on a section header over the live cards and ONLY when there is a
+    /// second section under them. A heading that is always there is a heading
+    /// that stops being read — the same rule `ShellCardFace.subtitle` follows
+    /// when it leaves the local runner's name off a card.
+    var liveServer: String? = nil
+    /// The worktrees on the OTHER runners this app knows, as it last saw them.
+    ///
+    /// Cached, and they say so: see `ShellServerGroup`, and `RunnerDirectory`
+    /// for why they are cached rather than live. Empty is the ordinary case —
+    /// one runner, one section, no headings at all.
+    var elsewhere: [ShellServerGroup] = []
     @Binding var search: String
     let onOpen: (Int) -> Void
+    /// A card on another runner, tapped. The grid does not know what crossing
+    /// costs; `ShellScreen` does, and it is the one that asks.
+    var onCross: (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in }
     let onDismiss: () -> Void
     /// What this app puts in the navigation bar opposite `Done`.
     ///
@@ -363,6 +418,24 @@ struct ShellOverview<Actions: View>: View {
     @State private var pullBegan: Bool?
 
     private var order: [Int] { fleet.overviewOrder(matching: search) }
+
+    /// The worktrees this runner has been told to stop showing.
+    private var hidden: [Int] { fleet.hiddenOrder(matching: search) }
+
+    /// The other runners worth drawing a section for. See
+    /// `ShellServerGroup.arrange`: a group a search emptied is not a heading.
+    private var groups: [ShellServerGroup] {
+        ShellServerGroup.arrange(elsewhere, matching: search)
+    }
+
+    /// Whether the hidden section is open.
+    ///
+    /// Collapsed by default, which is the Mac's rule and the point of hiding:
+    /// these are not meant to be in the way. Not remembered across a lift
+    /// either — the overview is opened and left many times a minute, and a
+    /// section that stayed open would be the put-away worktrees quietly
+    /// becoming permanent again.
+    @State private var hiddenShown = false
 
     var body: some View {
         overviewBody
@@ -531,7 +604,7 @@ struct ShellOverview<Actions: View>: View {
 
     @ViewBuilder
     private var content: some View {
-        if order.isEmpty {
+        if order.isEmpty && hidden.isEmpty && groups.isEmpty {
             // The platform's empty state, which is a layout and not a
             // sentence: glyph, title and explanation, centred and sized the
             // way every other iOS app's is. The wording is still this app's —
@@ -556,6 +629,103 @@ struct ShellOverview<Actions: View>: View {
         }
     }
 
+    /// One card of the fleet this app is connected to. The same view for the
+    /// shown cards and the hidden ones: hiding changes where a card is drawn,
+    /// not what it is, and two card views would be two things to keep in step.
+    private func liveCard(_ index: Int) -> some View {
+        ShellOverviewCard(
+            workspace: fleet.workspaces[index],
+            index: index,
+            isCurrent: index == current,
+            isEmpty: index == current && currentIsEmpty,
+            onOpen: { onOpen(index) })
+            .id(index)
+    }
+
+    /// How wide the two columns of cards actually are.
+    ///
+    /// A section header is offered the whole container, and the columns are
+    /// `.fixed` and therefore CENTERED in it — so a header at `maxWidth:
+    /// .infinity` starts 27 points to the left of the cards it stands over on
+    /// a 402-point display, which on this one clipped the first letter of the
+    /// runner's name off the edge of the screen. Measured, not reasoned: the
+    /// cards' left edge is at x=28 and the header's text was at x=0.
+    ///
+    /// Said as the same expression the columns are built from, so the two
+    /// cannot drift.
+    static var gridWidth: CGFloat { ShellCardFace.size.width * 2 + PaneMetrics.card }
+
+    /// A section heading: the runner, and one line about how current it is.
+    ///
+    /// Left-aligned across the whole grid rather than sitting over one column,
+    /// and not pinned. A pinned header would sit over the cards as they scroll
+    /// under it — which is right in a `List` of rows and wrong here, because
+    /// the thing it would cover is the amber outline that says which workspace
+    /// you are in.
+    private func header(_ name: String, detail: String?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
+            Text(name)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let detail {
+                Text(detail)
+                    // Mono for the same reason the card's subtitle is: this
+                    // half of the line is data about a machine.
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(width: Self.gridWidth, alignment: .leading)
+        .padding(.top, PaneMetrics.card)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("shell-section-\(name)")
+    }
+
+    /// The way back from hiding, which is the whole reason this is a section
+    /// and not a filter. Collapsed by default; the count is on the header so
+    /// it is answerable without opening it.
+    private var hiddenHeader: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.2)) { hiddenShown.toggle() }
+        } label: {
+            HStack(spacing: PaneMetrics.step) {
+                Image(systemName: hiddenShown ? "chevron.down" : "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                Text("Hidden")
+                    .font(.subheadline.weight(.semibold))
+                Text("\(hidden.count)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .frame(width: Self.gridWidth, alignment: .leading)
+        .padding(.top, PaneMetrics.card)
+        .accessibilityIdentifier("shell-hidden-section")
+        // "Hidden Workspaces" and not "Show Hidden Workspaces": the control is
+        // a disclosure, so what it does depends on which way it is, and a
+        // label that named one direction would be wrong half the time. The
+        // count is the value, which is what VoiceOver reads after the name.
+        .accessibilityLabel("Hidden Workspaces")
+        .accessibilityValue("\(hidden.count)")
+    }
+
+    /// How old this runner's answer is, in words.
+    ///
+    /// **Never "just now" for a runner nobody has heard from.** Nil is "not
+    /// told", which is a different thing from recent and must not be drawn as
+    /// it — the rule `FleetSnapshot.observedAt` states, kept here.
+    static func lastSeen(_ date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "Not seen yet" }
+        return "Last seen \(date.formatted(.relative(presentation: .numeric)))"
+    }
+
     private var grid: some View {
         ScrollView {
             LazyVGrid(
@@ -565,14 +735,43 @@ struct ShellOverview<Actions: View>: View {
                 ],
                 spacing: PaneMetrics.card
             ) {
-                ForEach(order, id: \.self) { index in
-                    ShellOverviewCard(
-                        workspace: fleet.workspaces[index],
-                        index: index,
-                        isCurrent: index == current,
-                        isEmpty: index == current && currentIsEmpty,
-                        onOpen: { onOpen(index) })
-                        .id(index)
+                // The runner you are ON, first and unlabeled unless there is
+                // something under it to tell it apart from.
+                Section {
+                    ForEach(order, id: \.self) { index in liveCard(index) }
+                } header: {
+                    if let liveServer, !groups.isEmpty {
+                        header(liveServer, detail: "Connected")
+                    }
+                }
+
+                // Then what this runner has been told to stop showing.
+                if !hidden.isEmpty {
+                    Section {
+                        if hiddenShown {
+                            ForEach(hidden, id: \.self) { index in liveCard(index) }
+                        }
+                    } header: {
+                        hiddenHeader
+                    }
+                }
+
+                // Then every other runner, as it was when this app last saw
+                // it. These are the only cards in this grid that are not a
+                // place you can go by swiping: a tap crosses runners, and
+                // `ShellScreen` is what says what that costs.
+                ForEach(groups) { group in
+                    Section {
+                        ForEach(group.order(matching: search), id: \.self) { index in
+                            let workspace = group.workspaces[index]
+                            ShellElsewhereCard(
+                                workspace: workspace,
+                                onOpen: { onCross(group, workspace) })
+                                .id("\(group.id)/\(workspace.id)")
+                        }
+                    } header: {
+                        header(group.name, detail: Self.lastSeen(group.lastSeen))
+                    }
                 }
             }
             .padding(.vertical, PaneMetrics.edge)

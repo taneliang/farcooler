@@ -754,6 +754,14 @@ final class Connection: ObservableObject {
             FleetSnapshotWriter.write(
                 fleet: fleet, inbox: inboxRead ? inbox : nil, machine: hostLabel)
 
+            // And the same fleet again, in the one shape a runner you are NOT
+            // looking at can still be drawn from. See `RunnerDirectory`, and
+            // note that this is not a second copy of `fleet.json`: that file
+            // is agents-only, single, and rewritten whole by whichever
+            // connection polled last, so it cannot answer "what worktrees does
+            // the runner I am not on have".
+            recordDirectory(at: Date())
+
             // Announce anything worth announcing, from the fleet we just read.
             //
             // Here rather than in a view: a notification about an agent must
@@ -1494,6 +1502,54 @@ final class Connection: ObservableObject {
     func terminal(_ id: String, in workspace: String) -> Terminal? {
         fleet.workspaces.first { $0.id == workspace }?.terminals.first { $0.id == id }
     }
+
+    /// Write down what this runner has, for the grid to draw when you are
+    /// looking at a different one.
+    ///
+    /// **Derived from `ShellFleetMap`, not from `fleet` directly**, and that
+    /// is the whole reason this is three lines rather than thirty. The order
+    /// of a workspace's tabs, which terminal is a Changes pane, what a mark
+    /// means and how a tail is chosen are all decided once, in the file that
+    /// draws them — a cache that mapped a fleet a second way would be a grid
+    /// where a cached card and a live one disagree about the same worktree.
+    ///
+    /// **At most once a minute, and that is a THROTTLE rather than a change
+    /// test.** A poll lands every three seconds; a preferences key rewritten
+    /// at that rate for a screen nobody is looking at is churn. A change test
+    /// alone would not have stopped it — the tails are the last few lines an
+    /// agent said, so on a runner that is actually working they change on
+    /// nearly every poll, and "write when it changes" would have been a write
+    /// every three seconds with a comment claiming otherwise.
+    ///
+    /// A minute is the resolution the only reader needs: a header that says
+    /// "Last seen 2 hours ago". What it costs is that a worktree created in
+    /// the last minute can be missing from the cache when somebody switches
+    /// away — from a grid that is explicitly a memory, with the age on the
+    /// heading.
+    private func recordDirectory(at now: Date) {
+        guard let host else { return }
+        // Before the mapping, not after it: the point of the throttle is to
+        // not do this work either.
+        if let last = lastDirectory, now.timeIntervalSince(last.seenAt) < 60 { return }
+        let workspaces = ShellFleetMap.of(self, now: now).fleet.workspaces.map { workspace in
+            RunnerDirectory.Workspace(
+                id: workspace.id, name: workspace.name, isHidden: workspace.isHidden,
+                tabs: workspace.tabs.map {
+                    RunnerDirectory.Tab(
+                        title: $0.title, mark: RunnerDirectory.word(for: $0.mark))
+                },
+                tail: workspace.tail)
+        }
+        let directory = RunnerDirectory(
+            runner: host.id.uuidString, label: host.label, seenAt: now,
+            workspaces: workspaces)
+        lastDirectory = directory
+        RunnerDirectoryStore.record(directory)
+    }
+
+    /// The last directory this connection wrote, so the next poll can tell
+    /// "nothing has changed" from "nothing has been written yet".
+    private var lastDirectory: RunnerDirectory?
 
     /// Remember the tab somebody chose in a worktree.
     ///

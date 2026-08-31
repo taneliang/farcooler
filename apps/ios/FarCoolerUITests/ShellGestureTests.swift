@@ -507,6 +507,136 @@ final class ShellGestureTests: XCTestCase {
             try state(app)["overview"], 0, "the pull-down out of the grid stopped working")
     }
 
+    // MARK: - A grid that spans runners
+
+    /// **The grid lists worktrees across all servers, grouped by runner.**
+    ///
+    /// The owner's ask. What makes it possible without a second live
+    /// connection is that the other runners are CACHED — see
+    /// `RunnerDirectory`, and `ShellServerGroup` for why N live connections is
+    /// worse than N times the cost — so the assertions here are about a grid
+    /// that draws three sections, one of which you are connected to and two of
+    /// which are memories.
+    ///
+    /// `-shell-4` so the whole grid fits on one screen: the cached sections
+    /// come after the live one, and a ten-workspace fixture puts them below
+    /// the fold where `exists` is still true but nothing has been shown.
+    func testTheGridGroupsEveryRunnersWorktreesUnderItsOwnHeading() throws {
+        let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
+        XCTAssertEqual(try state(app)["overview"], 1, "the harness did not open on the grid")
+
+        for runner in ["this-mac", "eu-runner-1", "gpu-box-2"] {
+            let header = app.descendants(matching: .any)
+                .matching(identifier: "shell-section-\(runner)").firstMatch
+            XCTAssertTrue(
+                header.waitForExistence(timeout: 10),
+                "no heading for \(runner): \(app.debugDescription)")
+        }
+
+        // A card from another runner, which is a card that cannot be swiped
+        // to — it is not in the fleet at all.
+        XCTAssertTrue(
+            app.buttons["shell-elsewhere-spike/watch-sync"].waitForExistence(timeout: 5),
+            "the cached runner's worktree is not in the grid")
+
+        // And one that must not be: hiding is honored on the runner the
+        // worktree is on, and this grid is not that runner.
+        XCTAssertFalse(
+            app.buttons["shell-elsewhere-chore/put-away"].exists,
+            "a hidden worktree on another runner was drawn anyway")
+    }
+
+    /// The other runners' sections are ordered by how recently this app saw
+    /// them, so the runner you were on ten minutes ago is not below the one
+    /// you last opened in March.
+    ///
+    /// Asserted on the frames rather than on the order of the accessibility
+    /// tree, which is not the order things are drawn in.
+    func testTheMostRecentlySeenRunnerComesFirst() throws {
+        let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
+        let recent = app.descendants(matching: .any)
+            .matching(identifier: "shell-section-eu-runner-1").firstMatch
+        let older = app.descendants(matching: .any)
+            .matching(identifier: "shell-section-gpu-box-2").firstMatch
+        XCTAssertTrue(recent.waitForExistence(timeout: 10))
+        XCTAssertTrue(older.waitForExistence(timeout: 10))
+        XCTAssertLessThan(
+            recent.frame.minY, older.frame.minY,
+            "eu-runner-1 was seen 9 minutes ago and gpu-box-2 two hours ago, so eu-runner-1 "
+                + "belongs above it — they are at \(recent.frame.minY) and \(older.frame.minY)")
+    }
+
+    /// **A hidden worktree is out of the grid until you ask for it.**
+    ///
+    /// `Workspace.isHidden` has existed in the model the whole time and iOS
+    /// had no consumer for it, so a worktree somebody put away on the Mac came
+    /// back as an ordinary card on the phone. A filter alone would be the
+    /// other bug — hiding is reversible and the way back must not be a
+    /// settings screen — so both halves are asserted here.
+    func testHiddenWorktreesLeaveTheGridUntilTheSectionIsOpened() throws {
+        let app = launch(["-shell-hidden", "-shell-overview", "-shell-4"])
+        XCTAssertEqual(try state(app)["overview"], 1)
+
+        // The fixture hides every fifth workspace from index 3, so `ws-3` is
+        // the one out of four that goes.
+        let hiddenCard = app.buttons["shell-card-ws-3"]
+        let shownCard = app.buttons["shell-card-ws-0"]
+        XCTAssertTrue(shownCard.waitForExistence(timeout: 10), "the grid never drew")
+        XCTAssertFalse(hiddenCard.exists, "a hidden worktree was drawn as an ordinary card")
+
+        let section = app.descendants(matching: .any)
+            .matching(identifier: "shell-hidden-section").firstMatch
+        XCTAssertTrue(section.waitForExistence(timeout: 5), "no way back from hiding")
+        section.tap()
+        XCTAssertTrue(
+            hiddenCard.waitForExistence(timeout: 5),
+            "opening the hidden section did not reveal the worktree in it")
+    }
+
+    /// **Tapping another runner's card says what it costs before it costs it.**
+    ///
+    /// A cross-runner tap is not navigation inside this shell: `RootView` keys
+    /// the whole tree `.id(host)`, so it destroys `FleetView`, the track and
+    /// every mounted pane. `ShellPaneTrack`'s whole design is that a pane must
+    /// never be rebuilt, and the one moment that cannot be kept is the one
+    /// moment it has to be said out loud.
+    ///
+    /// Cancel and not Switch, because the harness has no runner to switch to —
+    /// what is being asserted is that the shell is still exactly where it was
+    /// after somebody says no.
+    func testCrossingToAnotherRunnerAsksFirstAndCancelChangesNothing() throws {
+        let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
+        let before = try state(app)
+
+        let card = app.buttons["shell-elsewhere-spike/watch-sync"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.tap()
+
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(
+            alert.waitForExistence(timeout: 5),
+            "a cross-runner tap threw the panes away without asking")
+        XCTAssertTrue(
+            alert.staticTexts["Switch to eu-runner-1?"].exists,
+            "the alert does not name the runner it is about: \(alert.debugDescription)")
+        // The cost, in the words the thing is called by. Asserted because the
+        // wording IS the feature here: an alert that does not say what goes is
+        // an alert people learn to dismiss.
+        let body = alert.staticTexts.allElementsBoundByIndex.map { $0.label }.joined(separator: " ")
+        XCTAssertTrue(
+            body.contains("will close"),
+            "the alert never says the open panes close: \(body)")
+        XCTAssertTrue(
+            body.contains("spike/watch-sync"),
+            "the alert never says where it would land: \(body)")
+
+        alert.buttons["Cancel"].tap()
+        XCTAssertFalse(alert.exists, "Cancel did not dismiss")
+        let after = try state(app)
+        XCTAssertEqual(after["ws"], before["ws"], "cancelling moved the shell")
+        XCTAssertEqual(after["overview"], 1, "cancelling closed the grid")
+    }
+
     /// Forty workspaces is the number the design was chosen for, so the
     /// harness has to reach it and the overview has to hold it.
     func testTheOverviewHoldsFortyWorkspaces() throws {

@@ -559,6 +559,207 @@ struct ShellNavigationTests {
             "a stray space must not empty the grid")
     }
 
+    // MARK: - Hidden worktrees, and other runners
+
+    /// A hidden worktree leaves the grid's main list and turns up in the
+    /// section that reveals it — it does not vanish, and it does not stay
+    /// where it was.
+    ///
+    /// Both halves asserted, because each fails on its own: a filter with no
+    /// section loses the way back from hiding, and a section that also left
+    /// the card in place would draw it twice.
+    @Test func hidingTakesAWorkspaceOutOfTheGridAndIntoItsOwnSection() {
+        let fleet = ShellFleet(workspaces: [
+            ShellWorkspace(id: "0", name: "shown-a", tabs: [Self.tab("x", .working)]),
+            ShellWorkspace(
+                id: "1", name: "put-away", isHidden: true, tabs: [Self.tab("x", .needsYou)]),
+            ShellWorkspace(id: "2", name: "shown-b", tabs: [Self.tab("x", .working)]),
+        ])
+        #expect(fleet.overviewOrder() == [0, 2])
+        #expect(fleet.hiddenOrder() == [1])
+        #expect(
+            fleet.workspaces.count == 3,
+            "hiding is a view preference; the workspace keeps its place in the fleet")
+    }
+
+    /// Hiding must not reorder what is still showing. A hidden workspace that
+    /// outranks everything is exactly the case where a shared sort and a
+    /// separate one diverge.
+    @Test func theHiddenSectionUsesTheSameSortAndDoesNotDisturbTheRest() {
+        let fleet = ShellFleet(workspaces: [
+            ShellWorkspace(id: "0", name: "working", tabs: [Self.tab("x", .working)]),
+            ShellWorkspace(
+                id: "1", name: "loud-but-hidden", isHidden: true,
+                tabs: [Self.tab("x", .needsYou)]),
+            ShellWorkspace(id: "2", name: "diff", tabs: [Self.tab("x", .unreadDiff)]),
+            ShellWorkspace(
+                id: "3", name: "quiet-hidden", isHidden: true, tabs: [Self.tab("x", .working)]),
+        ])
+        #expect(fleet.overviewOrder() == [2, 0])
+        #expect(fleet.hiddenOrder() == [1, 3], "the section sorts by precedence too")
+    }
+
+    /// A worktree you hid is still a worktree you can ask for by name.
+    @Test func searchReachesIntoTheHiddenSection() {
+        let fleet = ShellFleet(workspaces: [
+            ShellWorkspace(id: "0", name: "feat/retries", tabs: [Self.tab("x", .working)]),
+            ShellWorkspace(
+                id: "1", name: "fix/RETRY-storm", isHidden: true, tabs: [Self.tab("x", .working)]),
+        ])
+        #expect(fleet.overviewOrder(matching: "retr") == [0])
+        #expect(fleet.hiddenOrder(matching: "retr") == [1])
+        #expect(fleet.hiddenOrder(matching: "deps") == [])
+    }
+
+    /// Another runner's group sorts its cards the way the live fleet sorts
+    /// its own, and leaves that runner's hidden worktrees out entirely.
+    @Test func aServerGroupSortsLikeTheFleetAndDropsHiddenWorktrees() {
+        let group = ShellServerGroup(
+            id: "r1", name: "gpu-box-2",
+            workspaces: [
+                ShellWorkspace(id: "a", name: "working", tabs: [Self.tab("x", .working)]),
+                ShellWorkspace(id: "b", name: "needs", tabs: [Self.tab("x", .needsYou)]),
+                ShellWorkspace(
+                    id: "c", name: "put-away", isHidden: true, tabs: [Self.tab("x", .needsYou)]),
+            ])
+        #expect(group.order() == [1, 0])
+        #expect(group.order(matching: "work") == [0])
+    }
+
+    /// The runner you were on ten minutes ago comes above the one you last
+    /// opened in March, and a runner this app has never reached comes last.
+    @Test func serverGroupsSortByWhenTheyWereLastSeen() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        func group(_ name: String, _ seen: Date?) -> ShellServerGroup {
+            ShellServerGroup(
+                id: name, name: name, lastSeen: seen,
+                workspaces: [ShellWorkspace(id: "w", name: "w", tabs: [Self.tab("x", .working)])])
+        }
+        let arranged = ShellServerGroup.arrange([
+            group("march", now.addingTimeInterval(-90 * 86_400)),
+            group("never", nil),
+            group("recent", now.addingTimeInterval(-600)),
+        ])
+        #expect(arranged.map(\.name) == ["recent", "march", "never"])
+    }
+
+    /// A header standing over no cards reads as a runner that has gone empty.
+    /// A search nothing on that runner matches must remove the header too.
+    @Test func aServerGroupWithNothingToShowIsNotDrawn() {
+        let full = ShellServerGroup(
+            id: "r1", name: "gpu-box-2",
+            workspaces: [
+                ShellWorkspace(id: "a", name: "feat/queue", tabs: [Self.tab("x", .working)])
+            ])
+        let allHidden = ShellServerGroup(
+            id: "r2", name: "eu-runner-1",
+            workspaces: [
+                ShellWorkspace(
+                    id: "b", name: "feat/queue", isHidden: true, tabs: [Self.tab("x", .working)])
+            ])
+        #expect(ShellServerGroup.arrange([full, allHidden]).map(\.name) == ["gpu-box-2"])
+        #expect(ShellServerGroup.arrange([full], matching: "queue").count == 1)
+        #expect(ShellServerGroup.arrange([full], matching: "nothing").isEmpty)
+    }
+
+    // MARK: - The other runners' worktrees, cached
+
+    /// A scratch defaults suite, so a test never writes into the app's own.
+    private func scratchDefaults(_ name: String = UUID().uuidString) -> UserDefaults {
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    private func directory(
+        _ runner: String, label: String, at seen: Date, workspaces: [String],
+        hidden: [String] = [], mark: String = "working"
+    ) -> RunnerDirectory {
+        RunnerDirectory(
+            runner: runner, label: label, seenAt: seen,
+            workspaces: (workspaces + hidden).map { name in
+                RunnerDirectory.Workspace(
+                    id: "\(runner)-\(name)", name: name, isHidden: hidden.contains(name),
+                    tabs: [RunnerDirectory.Tab(title: "Diff", mark: mark)], tail: ["$ ▌"])
+            })
+    }
+
+    /// The newest answer about a runner REPLACES the previous one, and leaves
+    /// every other runner's alone.
+    ///
+    /// Both halves fail differently and both have to hold: appending would
+    /// grow the file by an entry every three seconds, and unioning would
+    /// resurrect a worktree somebody removed.
+    @Test func recordingOneRunnerReplacesItsEntryAndKeepsTheOthers() {
+        let defaults = scratchDefaults()
+        let then = Date(timeIntervalSince1970: 1_000)
+        RunnerDirectoryStore.record(
+            directory("a", label: "gpu-box-2", at: then, workspaces: ["one", "two"]),
+            in: defaults)
+        RunnerDirectoryStore.record(
+            directory("b", label: "eu-runner-1", at: then, workspaces: ["far"]), in: defaults)
+        RunnerDirectoryStore.record(
+            directory("a", label: "gpu-box-2", at: then + 60, workspaces: ["one"]), in: defaults)
+
+        let all = RunnerDirectoryStore.read(from: defaults)
+        #expect(all.count == 2, "a third record about a known runner is not a third entry")
+        let a = all.first { $0.runner == "a" }
+        #expect(a?.workspaces.map(\.name) == ["one"], "the removed worktree stayed removed")
+        #expect(a?.seenAt == then + 60)
+        #expect(all.first { $0.runner == "b" }?.workspaces.map(\.name) == ["far"])
+    }
+
+    /// A runner somebody deleted stops turning up in the grid.
+    @Test func forgettingDropsRunnersThatAreNoLongerKnown() {
+        let defaults = scratchDefaults()
+        let then = Date(timeIntervalSince1970: 1_000)
+        RunnerDirectoryStore.record(directory("a", label: "a", at: then, workspaces: ["w"]), in: defaults)
+        RunnerDirectoryStore.record(directory("b", label: "b", at: then, workspaces: ["w"]), in: defaults)
+        RunnerDirectoryStore.forget(runners: ["a"], in: defaults)
+        #expect(RunnerDirectoryStore.read(from: defaults).map(\.runner) == ["a"])
+    }
+
+    /// **Blocked holds at any age; working does not.**
+    ///
+    /// `GlanceMark.Link` states the rule this follows — "decay applies only to
+    /// claims about the present. Blocked and to-review hold at any age;
+    /// working and idle go dashed" — so a cached card is not uniformly greyed
+    /// out. An agent that was waiting on you when this runner was last seen is
+    /// still waiting on you, and that is the one thing worth crossing a runner
+    /// for.
+    @Test func aCachedRunnersMarksDecayOnlyWhereTheyAreClaimsAboutNow() {
+        #expect(RunnerDirectory.decayed("needsYou") == .needsYou)
+        #expect(RunnerDirectory.decayed("unreadDiff") == .unreadDiff)
+        #expect(RunnerDirectory.decayed("working") == .stale, "working is a claim about now")
+        #expect(RunnerDirectory.decayed("stale") == .stale)
+        #expect(
+            RunnerDirectory.decayed("a-word-from-a-later-build") == .stale,
+            "an unknown mark must not take the cache down; it claims the least instead")
+        // The round trip, so the two halves cannot drift into writing a word
+        // the reader does not know. `!= nil` here would be vacuous: `decayed`
+        // returns a mark, never an optional.
+        #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: .needsYou)) == .needsYou)
+        #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: .unreadDiff)) == .unreadDiff)
+        #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: .working)) == .stale)
+        #expect(RunnerDirectory.decayed(RunnerDirectory.word(for: .stale)) == .stale)
+    }
+
+    /// The cache becomes a group the grid can draw: the runner's label on
+    /// every card, its worktrees in order, and its hidden ones left out.
+    @Test func aCachedRunnerBecomesAGroupTheGridCanDraw() {
+        let seen = Date(timeIntervalSince1970: 1_000)
+        let group = directory(
+            "a", label: "gpu-box-2", at: seen, workspaces: ["feat/queue"], hidden: ["old"],
+            mark: "needsYou"
+        ).group()
+        #expect(group.id == "a", "a tap has to name the runner, not its label")
+        #expect(group.name == "gpu-box-2")
+        #expect(group.lastSeen == seen)
+        #expect(group.order().count == 1, "the hidden one is not drawn")
+        #expect(group.workspaces[0].server == "gpu-box-2", "a cached card names its runner")
+        #expect(group.workspaces[0].tabs[0].mark == .needsYou)
+    }
+
     // MARK: - Release
 
     /// The bar's four answers, at the thresholds themselves.

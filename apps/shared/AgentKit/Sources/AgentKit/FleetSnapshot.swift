@@ -630,3 +630,157 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         return zip(agents, other.agents).allSatisfy { $0.saysTheSame(as: $1) }
     }
 }
+
+// MARK: - What the OTHER runners had
+
+/// One runner's worktrees, as this app last saw them.
+///
+/// `FleetSnapshot` above cannot answer this and should not be made to. It is
+/// AGENTS-ONLY by design — "a widget listing every terminal on every runner
+/// would be a list nobody can find anything in" — it is a SINGLE file, and it
+/// is rewritten whole on every poll by whichever connection is live. Ask it
+/// "what worktrees does `gpu-box-2` have" and it answers about whatever runner
+/// polled last.
+///
+/// So this is a second, smaller thing with a different shape: keyed by runner,
+/// merged rather than clobbered, and about worktrees rather than agents. It
+/// exists for one screen — the overview's grid, which the owner asked to list
+/// all worktrees across all servers — and for the reason a second live
+/// connection cannot do that job: `Connection.start` claims four process-wide
+/// slots (`Connection.current`, `WatchLinkHost.shared.adopt`,
+/// `Reachability.shared.onShouldRetry`, and the one `fleet.json`), so two live
+/// connections would not cost twice as much, they would fight.
+///
+/// **Everything in here is a claim about the past, and `seenAt` is part of the
+/// value.** Nothing that reads it may draw it as current: see `decayed`, which
+/// applies this app's existing staleness rule rather than inventing a second
+/// one.
+struct RunnerDirectory: Codable, Sendable, Equatable {
+    /// One worktree, with just enough to draw a card and nothing more.
+    ///
+    /// No terminal ids, no pane state, no scrollback. A card shows a name, a
+    /// ribbon and a tail, and a cache that held more would be a cache somebody
+    /// eventually tried to open a pane from — which is the one thing a
+    /// workspace on a runner you are not connected to cannot do.
+    struct Workspace: Codable, Sendable, Equatable {
+        var id: String
+        var name: String
+        var isHidden: Bool
+        /// The tabs, in the order the runner gave them, as a title and a mark
+        /// each. `Diff` leads, exactly as `ShellFleetMap.of` builds them, so a
+        /// cached ribbon and a live one read the same way round.
+        var tabs: [Tab]
+        /// What this worktree's most recent agent last said.
+        var tail: [String]
+
+        init(
+            id: String, name: String, isHidden: Bool, tabs: [Tab], tail: [String]
+        ) {
+            self.id = id
+            self.name = name
+            self.isHidden = isHidden
+            self.tabs = tabs
+            self.tail = tail
+        }
+    }
+
+    /// A tab as the cache holds it.
+    ///
+    /// The mark is a String and not a `ShellMark`, for the reason
+    /// `FleetSnapshot.Agent.status` is one: a value written by a later build
+    /// must not fail to decode and take the whole cache down with it. An
+    /// unrecognized word reads as `working`, which is the rank that claims the
+    /// least — and which `decayed` then turns into `stale` anyway.
+    struct Tab: Codable, Sendable, Equatable {
+        var title: String
+        var mark: String
+
+        init(title: String, mark: String) {
+            self.title = title
+            self.mark = mark
+        }
+    }
+
+    /// The runner's id — `Runner.id.uuidString` — because that is what a tap
+    /// has to name to select it. Not the address: two runners can share a box.
+    var runner: String
+    /// The runner's label, for the header.
+    var label: String
+    /// When this app last actually heard from it.
+    var seenAt: Date
+    var workspaces: [Workspace]
+
+    init(runner: String, label: String, seenAt: Date, workspaces: [Workspace]) {
+        self.runner = runner
+        self.label = label
+        self.seenAt = seenAt
+        self.workspaces = workspaces
+    }
+}
+
+/// Every runner's directory, on disk, merged rather than clobbered.
+///
+/// `UserDefaults` and not the App Group container, deliberately: this is for
+/// the app's own overview and no other surface renders it, so it does not need
+/// to cross a process boundary — and `SnapshotStore`'s container is where the
+/// things that DO cross one live. `RunnerStore` keeps the runners themselves
+/// in plain `UserDefaults` for the same reason: none of this is secret.
+///
+/// One key holding one dictionary, written whole. A key per runner would be
+/// cheaper to write and impossible to enumerate without knowing every runner's
+/// id first, which is exactly the question this answers.
+enum RunnerDirectoryStore {
+    /// Kept spelled out, because it names a slot on disk that installs already
+    /// have — the rule `RunnerStore`'s own keys follow.
+    private static let key = "runnerDirectories"
+
+    static func read(from defaults: UserDefaults = .standard) -> [RunnerDirectory] {
+        guard let data = defaults.data(forKey: key),
+            let decoded = try? decoder.decode([RunnerDirectory].self, from: data)
+        else { return [] }
+        return decoded
+    }
+
+    /// Record what one runner has, leaving every other runner's entry alone.
+    ///
+    /// Merged and not appended: a runner polls every three seconds, and a list
+    /// that grew by one entry per poll would be a preferences file that grew
+    /// without bound. The newest answer about a runner replaces the previous
+    /// one entirely — a worktree that has gone is gone, and a directory that
+    /// unioned old entries in would keep resurrecting removed worktrees.
+    static func record(
+        _ directory: RunnerDirectory, in defaults: UserDefaults = .standard
+    ) {
+        var all = read(from: defaults).filter { $0.runner != directory.runner }
+        all.append(directory)
+        guard let data = try? encoder.encode(all) else { return }
+        defaults.set(data, forKey: key)
+    }
+
+    /// Forget a runner — for the moment somebody removes one, so its worktrees
+    /// stop turning up in a grid for a machine the app can no longer reach.
+    static func forget(
+        runners kept: Set<String>, in defaults: UserDefaults = .standard
+    ) {
+        let all = read(from: defaults)
+        let survivors = all.filter { kept.contains($0.runner) }
+        guard survivors.count != all.count, let data = try? encoder.encode(survivors)
+        else { return }
+        defaults.set(data, forKey: key)
+    }
+
+    /// Seconds since 1970 on both sides, pinned for `SnapshotStore`'s reason:
+    /// a reader and a writer built with different strategies write files
+    /// neither can read, and the symptom is a permanently empty surface.
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        return encoder
+    }()
+
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return decoder
+    }()
+}

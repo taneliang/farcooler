@@ -123,6 +123,13 @@ struct RootView: View {
         // an identity to offer. Doing it here costs one keygen on first run and
         // nothing on every run after — `privateKey()` returns the stored one.
         .task {
+            // Worktrees remembered for a runner nobody has any more are
+            // worktrees the grid would offer to cross to and then could not.
+            // Here rather than in `RunnerStore.remove`, because a runner can
+            // also simply stop being passed at launch — the demo host is one —
+            // and this is the one place that sees the whole list. See
+            // `RunnerDirectory`.
+            RunnerDirectoryStore.forget(runners: Set(hosts.hosts.map(\.id.uuidString)))
             _ = Identity.publicKey
             // Asked for at launch, alongside the device key.
             //

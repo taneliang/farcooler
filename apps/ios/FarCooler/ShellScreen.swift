@@ -121,15 +121,23 @@ struct ShellFleetMap {
                 ShellWorkspace(
                     id: workspace.id,
                     name: workspace.task,
-                    // Nil, always, and that is honest rather than unfinished.
-                    // A `Connection` is one runner — `RootView` keys the whole
-                    // tree `.id(host)` — so every workspace on this screen is
-                    // on the same machine, and a name that is on every bar is
-                    // a name that stops being read. The field earns its keep
-                    // the day a fleet spans runners.
+                    // Nil, still, and now for a sharper reason than "one
+                    // runner". A `Connection` IS one runner — `RootView` keys
+                    // the whole tree `.id(host)` — so every workspace here is
+                    // on the same machine, and the overview names that machine
+                    // once, on the section header over these cards, rather
+                    // than forty times underneath them. The cards that DO
+                    // carry a server are the cached ones from other runners
+                    // (`RunnerDirectory.group`), where the name is the whole
+                    // point: they are somewhere else.
                     server: nil,
                     tail: tail(of: workspace),
                     resume: resume(workspace, connection: connection, tabs: order),
+                    // The daemon's own view preference, carried rather than
+                    // re-derived. iOS had no consumer for it at all, so a
+                    // worktree somebody put away on the Mac came back as an
+                    // ordinary card on the phone. See `ShellFleet.hiddenOrder`.
+                    isHidden: workspace.isHidden,
                     tabs: tabs))
         }
 
@@ -265,6 +273,20 @@ struct ShellPaneRealView: View {
 
     @State private var terminal: Terminal?
 
+    /// How far the keyboard reaches up this pane, the key row included.
+    ///
+    /// Observed rather than derived, because the number this pane has to
+    /// cancel is applied by the framework on the far side of a
+    /// `NavigationStack` where nothing in SwiftUI's own vocabulary can see it.
+    /// The same object `AgentView` uses, and the same reading: one
+    /// notification whose reported frame already includes the accessory. See
+    /// `KeyboardInset` and `paneBottom`.
+    @StateObject private var keyboard = KeyboardInset()
+
+    /// The display's own bottom inset, as the shell measured it. See
+    /// `EnvironmentValues.shellDisplayBottom`.
+    @Environment(\.shellDisplayBottom) private var displayBottom
+
     init(
         slot: ShellPaneSlot, ref: ShellPaneRef, connection: Connection,
         pastes: ImagePasteQueue, pullRequest: BranchPullRequest?
@@ -317,21 +339,10 @@ struct ShellPaneRealView: View {
         // `page` × full height and offsets it) and the overview's own stack.
         NavigationStack {
             paneContent
-                // The shell's furniture at the bottom, and NOT the keyboard.
-                //
-                // A `NavigationStack` is a `UINavigationController`, and the
-                // framework re-derives keyboard avoidance from the window on
-                // the far side of it — so the pane's content is inset by the
-                // keyboard in here whatever the pane as a whole says about
-                // ignoring it. That is fine, and it is now the ONLY subtraction
-                // of the keyboard on this path: see `TerminalView`, which used
-                // to make the same room by hand and no longer does. Measured on
-                // an iPhone 17 with a keyboard up: the content's bottom safe
-                // area is 450 — the shell's 90 points of furniture plus the
-                // keyboard's whole 360-point reach — and the grid gets the 308
-                // points that are left.
+                // The shell's furniture at the bottom, and only the part of it
+                // this stack has not already reserved. See `paneBottom`.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    Color.clear.frame(height: slot.chrome.bottom)
+                    Color.clear.frame(height: paneBottom)
                 }
                 // The pane's own controls and title, wrapped AROUND the pane
                 // rather than handed to `.toolbar` as a view: `.toolbar` is a
@@ -361,6 +372,67 @@ struct ShellPaneRealView: View {
         // Keyboard room is owned by the pane below. The shell around it stays
         // full-height so the bar and the track never move under a keyboard.
         .ignoresSafeArea(.keyboard, edges: .bottom)
+    }
+
+    /// The room to reserve under this pane's content, which is NOT
+    /// `chrome.bottom` and was.
+    ///
+    /// A `NavigationStack` is a `UINavigationController`, and the framework
+    /// re-derives the bottom safe area from the window on the far side of it —
+    /// the home indicator always, and the keyboard whenever one is up —
+    /// whatever the pane as a whole says about ignoring either. So this inset
+    /// is not the furniture, it is the furniture MINUS what the stack has
+    /// already reserved, and reserving the flat number instead reserved two
+    /// different invisible things:
+    ///
+    /// - **The home indicator, twice.** `chrome.bottom` is 90 on an iPhone 17
+    ///   — 34 of home indicator plus the bar's 44 and its 12 of breathing room
+    ///   — and the stack had already inset by the same 34. Measured on the
+    ///   simulator with the key row down: the grid ran to y=750 where the
+    ///   bar's top edge is at 784. With this, 784.
+    /// - **The bar, while the keyboard is over it.** The shell's bar does not
+    ///   move for a keyboard, on purpose (`ShellRootView.body`,
+    ///   `ShellPaneTrack.swift:53-61`), so everything the keyboard reaches
+    ///   over is room nobody can see. Two states, both measured:
+    ///   - Only the terminal's key row up, over a hardware keyboard. The
+    ///     stack reserved 52 of its own, the flat number added 90 on top, and
+    ///     the grid ran to y=732 — 52 points of nothing under the last line.
+    ///     With this, 784, the bar's edge.
+    ///   - A software keyboard up. The stack reserves its whole 360-point
+    ///     reach, the flat number added 90 to that, and the grid stopped
+    ///     short of the MIDDLE OF THE DISPLAY: the test could not find a pane
+    ///     under y=437 at all, because 874 − 116 of bar and status bar − 450
+    ///     leaves 308 and the grid ended at 424, with the key row at 514. A
+    ///     90-point band of nothing between the last line and the keys, on a
+    ///     phone, while you are typing. With this, 514 — the keyboard's own
+    ///     top edge, and no band.
+    ///
+    /// All three are from a booted iPhone 17 and `TerminalScrollTests` asserts
+    /// them. Between them they pin the identity this expression rests on —
+    /// the stack's own inset is `max(displayBottom, keyboard)` — at 0, at 52
+    /// and at 360, which is either side of `chrome.bottom` and therefore both
+    /// branches of the outer `max`. That clamp is the point: a NEGATIVE
+    /// `safeAreaInset` height is the second subtraction that once produced a
+    /// 0-point-tall grid and a pane that drew nothing.
+    ///
+    /// **Which of the two keyboard states a run gets is not this code's
+    /// choice.** XCUITest attaches a hardware keyboard to the simulator and
+    /// does not always detach it, so the key row is sometimes docked on the
+    /// home indicator and sometimes riding a full keyboard. That is why the
+    /// test asserts on "the nearest thing over the pane" rather than on a
+    /// number: it is the same sentence in both, and the flat expression fails
+    /// it in both.
+    ///
+    /// `max` and not a subtraction of both, because the stack's own inset is
+    /// itself a `max` of the two things it re-derives: with a keyboard up the
+    /// home indicator is already inside the keyboard's reach and is not
+    /// subtracted a second time. So the total the content ends up with is
+    /// `max(chrome.bottom, keyboard)` — the furniture when nothing is over it,
+    /// the keyboard when the keyboard is taller — which is what "the bar never
+    /// moves and never hides behind the keyboard" means as a number. Clamped
+    /// at zero: a keyboard taller than the furniture wants no help from here.
+    private var paneBottom: CGFloat {
+        max(0, slot.chrome.bottom - max(displayBottom, keyboard.height))
     }
 
     /// The pane's chrome, as a modifier so `paneContent` can be the thing it
@@ -468,6 +540,10 @@ struct ShellScreen: View {
     @State private var restingRef: ShellPaneRef?
     /// What GitHub says about the branch of the workspace at rest.
     @State private var pullRequest: BranchPullRequest?
+    /// The card on another runner somebody tapped, until they say yes or no.
+    @State private var crossing: ShellCrossing?
+    /// The other runners' worktrees. See `readElsewhere`.
+    @State private var elsewhere: [ShellServerGroup] = []
     /// The tab a deep link was last honored onto, until a rest accounts for it.
     ///
     /// A deep link is not a choice, and `remember(_:leaving:)` must not write
@@ -508,7 +584,13 @@ struct ShellScreen: View {
                     .background(Themes.shared.current.backgroundColor.ignoresSafeArea())
             }
         }
-        .onAppear { seed() }
+        .onAppear {
+            seed()
+            // Read here rather than in a computed property: see
+            // `readElsewhere`. A `ShellScreen` is destroyed and rebuilt on
+            // every change of runner, so "once per mount" is once per runner.
+            elsewhere = readElsewhere()
+        }
         .onChange(of: connection.hasFleet) { _, _ in seed() }
         .task(id: pullRequestKey) { await readPullRequest() }
         .onChange(of: scenePhase) { _, phase in
@@ -579,6 +661,30 @@ struct ShellScreen: View {
             .accessibilityLabel("New Workspace")
     }
 
+    /// The other runners' worktrees, read once.
+    ///
+    /// **Once is correct, not thrifty.** This app talks to one runner at a
+    /// time, so nothing in this process can change another runner's entry
+    /// while this screen is mounted — the only writer is
+    /// `Connection.recordDirectory`, and the connection it belongs to is the
+    /// one runner this list excludes. Re-reading it from a `body` that runs
+    /// three times a second would be a JSON decode per poll for an answer that
+    /// cannot have moved.
+    private func readElsewhere() -> [ShellServerGroup] {
+        let live = connection.hostId?.uuidString
+        let known = Set(hosts.hosts.map(\.id.uuidString))
+        return RunnerDirectoryStore.read()
+            // The live runner is excluded by ID, not by label: two entries can
+            // name one box under different users, and a grid that showed the
+            // runner you are ON as a cached section would draw every workspace
+            // twice — once live, and once as it was thirty seconds ago.
+            //
+            // A runner somebody has since removed is excluded too. A card for
+            // one would be a card whose tap can do nothing.
+            .filter { $0.runner != live && known.contains($0.runner) }
+            .map { $0.group() }
+    }
+
     private func shell(_ map: ShellFleetMap, from initial: ShellPosition) -> some View {
         ShellRootView(
             fleet: map.fleet,
@@ -605,6 +711,11 @@ struct ShellScreen: View {
                 restingRef = arrived
                 markVisible(arrived)
             },
+            liveServer: connection.hostLabel,
+            elsewhere: elsewhere,
+            onCross: { group, workspace in
+                crossing = ShellCrossing(group: group, workspace: workspace)
+            },
             overviewActions: { overviewActions }
         ) { slot in
             if let ref = map.refs[slot.tab.id] {
@@ -619,7 +730,29 @@ struct ShellScreen: View {
         // Over the panes, above the key row, and gone the moment the path is
         // typed. Nothing about a transfer is ever written into the pane itself.
         .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
+        // The teardown, asked for out loud. See `shellCrossingAlert`.
+        .shellCrossingAlert($crossing, leaving: connection.hostLabel) { cross(to: $0) }
     }
+
+    /// Change runners, carrying the tapped worktree across the rebuild.
+    ///
+    /// `UserDefaults` and not `@State`, and it has to be: this view is one of
+    /// the things the selection destroys, so a note left in its own state
+    /// would go with it. The note is read back by `seed` on the OTHER side —
+    /// a different `ShellScreen`, in a different `FleetView`, on a different
+    /// `Connection` — which is the only place the new runner's fleet is in
+    /// hand to resolve it against.
+    private func cross(to crossing: ShellCrossing) {
+        guard let runner = hosts.hosts.first(where: { $0.id.uuidString == crossing.group.id })
+        else { return }
+        UserDefaults.standard.set(
+            "\(crossing.group.id)/\(crossing.workspace.id)", forKey: Self.crossingKey)
+        hosts.selected = runner
+    }
+
+    /// Which worktree a crossing was aimed at, spelled `runner/workspace`.
+    static let crossingKey = "shell.crossingTo"
+
 
     // MARK: - Where the shell opens
 
@@ -637,8 +770,31 @@ struct ShellScreen: View {
         guard initial == nil else { return }
         let map = self.map
         guard !map.fleet.isEmpty, let at = map.fleet.first else { return }
+        // A crossing names a worktree, so a crossing lands on it. Spent
+        // whether or not it resolved: a note left standing would steer the
+        // next launch of a runner somebody reached the ordinary way, which is
+        // the self-fulfilling memory `remember(_:leaving:tab:)` refuses for
+        // the same reason one paragraph down.
+        let workspace = takeCrossing().flatMap { wanted in
+            map.fleet.workspaces.firstIndex { $0.id == wanted }
+        } ?? at.workspace
         initial = ShellPosition(
-            workspace: at.workspace, tab: map.fleet.workspaces[at.workspace].resumeTab)
+            workspace: workspace, tab: map.fleet.workspaces[workspace].resumeTab)
+    }
+
+    /// The worktree a crossing was aimed at, if it was aimed at THIS runner.
+    ///
+    /// Checked against the runner as well as read, because the note outlives
+    /// the tap: an app killed between the alert and the connection would come
+    /// back with a note about a runner somebody may no longer be on.
+    private func takeCrossing() -> String? {
+        guard let note = UserDefaults.standard.string(forKey: Self.crossingKey) else { return nil }
+        UserDefaults.standard.removeObject(forKey: Self.crossingKey)
+        let parts = note.split(separator: "/", maxSplits: 1)
+        guard parts.count == 2, let runner = connection.hostId?.uuidString,
+            parts[0] == runner
+        else { return nil }
+        return String(parts[1])
     }
 
 
@@ -771,5 +927,70 @@ struct ShellScreen: View {
         let mine = reply.links.first { $0.branch == workspace.branch }
         pullRequest = BranchPullRequest(
             pr: mine?.pr, known: reply.prAnswered, repoURL: reply.repoUrl)
+    }
+}
+
+// MARK: - Crossing to another runner
+
+/// A card on another runner, tapped and waiting to be confirmed.
+///
+/// Holds the WORKSPACE as well as the runner, because the tap named one and
+/// landing on whatever the new runner happens to open on would be the app
+/// half-honoring it. See `ShellScreen.crossingKey`.
+struct ShellCrossing: Identifiable {
+    var group: ShellServerGroup
+    var workspace: ShellWorkspace
+    var id: String { "\(group.id)/\(workspace.id)" }
+}
+
+extension View {
+    /// **The teardown is asked for out loud, because it cannot be avoided.**
+    ///
+    /// Crossing to another runner is not navigation inside this shell, it is a
+    /// different connection: `RootView` keys the whole tree `.id(host)`
+    /// (`FarCoolerApp.swift`), so selecting another runner destroys
+    /// `FleetView`, `ShellScreen`, the track and every mounted pane with it.
+    /// That follows from what a `Connection` is — `start` claims four
+    /// process-wide slots (`Connection.current`, `WatchLinkHost.shared.adopt`,
+    /// `Reachability.shared.onShouldRetry`, and the single `fleet.json` every
+    /// glance surface renders from), so two live connections would not cost
+    /// twice as much, they would fight over all four and the last poller to
+    /// land would define the widget's whole fleet.
+    ///
+    /// `ShellPaneTrack`'s entire design is "a pane must never be rebuilt". The
+    /// one moment that promise cannot be kept is the one moment it has to be
+    /// said aloud — so this is an alert naming what goes, and a button
+    /// somebody pressed on purpose, rather than a card tap that quietly costs
+    /// a scrollback.
+    ///
+    /// A modifier rather than an alert written inline, so `ShellHarness` can
+    /// present the same one over a canned fleet. The wording is the thing most
+    /// likely to be wrong here and it is not testable against a fixture that
+    /// has its own.
+    func shellCrossingAlert(
+        _ crossing: Binding<ShellCrossing?>,
+        leaving runner: String,
+        onConfirm: @escaping (ShellCrossing) -> Void
+    ) -> some View {
+        alert(
+            crossing.wrappedValue.map { "Switch to \($0.group.name)?" } ?? "",
+            isPresented: Binding(
+                get: { crossing.wrappedValue != nil },
+                set: { if !$0 { crossing.wrappedValue = nil } }),
+            presenting: crossing.wrappedValue
+        ) { pending in
+            Button("Switch Runner") { onConfirm(pending) }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            // What actually goes, said in the words the thing is called by.
+            // Not "your session will end" — nothing ends on the runner, and a
+            // warning that overstates gets dismissed unread.
+            Text(
+                "This app talks to one runner at a time, so the panes open on \(runner) "
+                    + "will close. Nothing stops on \(pending.group.name), but anything "
+                    + "you were partway through typing goes with them.\n\n"
+                    + "It'll open on \(pending.workspace.name)."
+            )
+        }
     }
 }

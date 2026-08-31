@@ -81,6 +81,18 @@ import SwiftUI
 /// screen.
 struct ShellRootView<Pane: View, Actions: View>: View {
     let fleet: ShellFleet
+    /// What to call the runner `fleet` is on, and the worktrees on the others.
+    ///
+    /// Both reach exactly one view — `ShellOverview` — and neither is part of
+    /// the fleet. That is not an accident of plumbing, it is the rule:
+    /// `ShellPosition` indexes into `fleet.workspaces`, the bar walks it and
+    /// `ShellPaneTrack` mounts a pane for every tab it steps onto, so a
+    /// workspace with no connection behind it must never be in that array.
+    /// See `ShellServerGroup`, which says so at length.
+    private let liveServer: String?
+    private let elsewhere: [ShellServerGroup]
+    /// A card on another runner, tapped.
+    private let onCross: (ShellServerGroup, ShellWorkspace) -> Void
     private let pane: (ShellPaneSlot) -> Pane
     /// What the overview puts in its navigation bar. See
     /// `ShellOverview.actions`.
@@ -365,10 +377,16 @@ struct ShellRootView<Pane: View, Actions: View>: View {
         openingOnOverview: Bool = false,
         request: Binding<String?> = .constant(nil),
         onRest: ((ShellPosition) -> Void)? = nil,
+        liveServer: String? = nil,
+        elsewhere: [ShellServerGroup] = [],
+        onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
         @ViewBuilder overviewActions: @escaping () -> Actions,
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
         self.fleet = fleet
+        self.liveServer = liveServer
+        self.elsewhere = elsewhere
+        self.onCross = onCross
         self.pane = pane
         self.overviewActions = overviewActions
         _request = request
@@ -560,8 +578,12 @@ struct ShellRootView<Pane: View, Actions: View>: View {
                     // header, the `Done` and the search field are the three
                     // things that claim it has.
                     chrome: overview,
+                    liveServer: liveServer,
+                    elsewhere: elsewhere,
                     search: $overviewSearch,
-                    onOpen: open(workspace:), onDismiss: closeOverview,
+                    onOpen: open(workspace:),
+                    onCross: onCross,
+                    onDismiss: closeOverview,
                     actions: overviewActions)
                     // Revealed over exactly the stretch where the page is
                     // moving to reveal it, which is the run past the last row.
@@ -666,6 +688,19 @@ struct ShellRootView<Pane: View, Actions: View>: View {
             pane: pane
         )
         .environment(\.shellDragClaim, dragClaim)
+        // The half of `chrome.bottom` that is the DISPLAY's and not the
+        // shell's, handed down so a pane can tell the two apart.
+        //
+        // `chrome.bottom` above is the home indicator plus the bar, as one
+        // number, and that is right for a pane laid out in this shell's own
+        // coordinates — `ShellHarness` insets by exactly it. A pane with a
+        // `NavigationStack` in it is not laid out in those coordinates: the
+        // framework re-derives the WINDOW's bottom inset on the far side of
+        // the stack and applies it again, so a pane that then reserves
+        // `chrome.bottom` on top has reserved the home indicator twice. Only
+        // the shell knows which part of its own number the window is going to
+        // give back, so it says so here. See `ShellPaneRealView.paneBottom`.
+        .environment(\.shellDisplayBottom, safeArea.bottom)
         // **Alongside the pane, not behind it.**
         //
         // `.gesture` attaches at the LOWEST priority in SwiftUI: anything a
@@ -937,10 +972,29 @@ extension ShellRootView where Actions == EmptyView {
         openingOnOverview: Bool = false,
         request: Binding<String?> = .constant(nil),
         onRest: ((ShellPosition) -> Void)? = nil,
+        liveServer: String? = nil,
+        elsewhere: [ShellServerGroup] = [],
+        onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
         self.init(
             fleet: fleet, initial: initial, openingOnOverview: openingOnOverview,
-            request: request, onRest: onRest, overviewActions: { EmptyView() }, pane: pane)
+            request: request, onRest: onRest, liveServer: liveServer, elsewhere: elsewhere,
+            onCross: onCross, overviewActions: { EmptyView() }, pane: pane)
     }
+}
+
+extension EnvironmentValues {
+    /// The display's own bottom inset — the home indicator — as the shell
+    /// measured it, before the shell added its bar to it.
+    ///
+    /// Written by `ShellRootView` beside the pane track and read by the one
+    /// kind of pane that needs it: one whose content is inside a
+    /// `NavigationStack`, which is a `UINavigationController` and re-derives
+    /// this same inset from the window on its own. Everything else in the
+    /// shell wants `ShellPaneSlot.chrome`, which already includes it.
+    ///
+    /// Zero outside the shell, which is the honest answer for a pane mounted
+    /// somewhere with no shell furniture over it.
+    @Entry var shellDisplayBottom: CGFloat = 0
 }

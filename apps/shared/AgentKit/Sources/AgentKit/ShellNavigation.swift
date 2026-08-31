@@ -231,10 +231,26 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// has since gone must not resolve to "index 0 by accident"; see
     /// `Route.Focus.rule(for:inbox:)`, which is what the caller falls back to.
     var resume: Int?
+    /// Whether this worktree has been told to stop showing.
+    ///
+    /// The daemon's own per-worktree view preference — `Workspace.isHidden`,
+    /// `state == "hidden"` — carried into the shell's vocabulary rather than
+    /// re-derived, because it is a preference somebody set on the runner and
+    /// every surface has to agree about it. The Mac has honored it in its
+    /// sidebar since the feature existed; this is the phone's half.
+    ///
+    /// It changes where a workspace is DRAWN and nothing else. A hidden
+    /// workspace keeps its place in `workspaces`, so its position, its tabs
+    /// and the bar's walk through the fleet are all exactly what they were —
+    /// hiding is a view preference, and a preference that silently made a
+    /// worktree unreachable would be a different feature. See
+    /// `overviewOrder` and `hiddenOrder`.
+    var isHidden: Bool
 
     init(
         id: String, name: String, server: String? = nil,
-        tail: [String] = [], resume: Int? = nil, tabs: [ShellTab]
+        tail: [String] = [], resume: Int? = nil, isHidden: Bool = false,
+        tabs: [ShellTab]
     ) {
         self.id = id
         self.name = name
@@ -242,6 +258,7 @@ struct ShellWorkspace: Identifiable, Hashable {
         self.server = server
         self.tail = tail
         self.resume = resume
+        self.isHidden = isHidden
     }
 
     /// The tab a deliberate arrival lands on: the remembered one where it
@@ -883,14 +900,48 @@ extension ShellFleet {
     ///
     /// **Stable.** Equal precedence keeps fleet order, so the overview is the
     /// fleet with the loud ones lifted to the front rather than a new
-    /// arrangement to learn. `sorted(by:)` in Swift is not guaranteed stable,
-    /// hence the explicit tiebreak on the original index.
+    /// arrangement to learn. See `rank`, which is where that is done.
+    /// **Hidden workspaces are not in it.** Hiding is a view preference the
+    /// daemon keeps per worktree, and the Mac has honored it in its sidebar
+    /// since the feature existed (`ContentView.swift:588-590`) — a phone that
+    /// drew them as ordinary cards was the one surface where hiding did
+    /// nothing at all. They are not gone, they are in `hiddenOrder`, which is
+    /// the section the grid puts them in.
     func overviewOrder() -> [Int] {
-        workspaces.indices.sorted { a, b in
+        rank(workspaces.indices.filter { !workspaces[$0].isHidden })
+    }
+
+    /// The hidden ones, in the same order, for the section that reveals them.
+    ///
+    /// A section rather than a filter, which is the Mac's rule stated again:
+    /// hiding is reversible, and something reversible needs a way back that is
+    /// not a settings screen. See `HiddenWorktrees` on the Mac, which this is
+    /// the phone's half of.
+    func hiddenOrder() -> [Int] {
+        rank(workspaces.indices.filter { workspaces[$0].isHidden })
+    }
+
+    /// Precedence, then fleet order. The one sort every list in the grid is
+    /// made with — the shown cards, the hidden section, and each other
+    /// runner's group — so revealing a section cannot reorder what was already
+    /// showing and no two sections can sort differently.
+    ///
+    /// **Stable.** Equal precedence keeps fleet order; `sorted(by:)` in Swift
+    /// is not guaranteed stable, hence the explicit tiebreak on the index.
+    ///
+    /// `static` and taking the workspaces, for the reason `matching` is:
+    /// `ShellServerGroup` holds workspaces that are not in any fleet and has
+    /// to sort them the same way.
+    static func rank(_ indices: [Int], of workspaces: [ShellWorkspace]) -> [Int] {
+        indices.sorted { a, b in
             let pa = workspaces[a].precedence
             let pb = workspaces[b].precedence
             return pa == pb ? a < b : pa < pb
         }
+    }
+
+    private func rank(_ indices: [Int]) -> [Int] {
+        ShellFleet.rank(indices, of: workspaces)
     }
 
     /// The same order, filtered by a search over workspace NAMES.
@@ -900,11 +951,179 @@ extension ShellFleet {
     /// somebody remembers is very often in the middle. An all-whitespace query
     /// is an empty one — a stray space must not empty a grid of forty cards.
     func overviewOrder(matching query: String) -> [Int] {
+        ShellFleet.matching(query, in: overviewOrder(), of: workspaces)
+    }
+
+    /// The hidden ones a search matches.
+    ///
+    /// Searched as well as listed, and that is the point of a section rather
+    /// than a filter: somebody typing the name of a worktree they hid last
+    /// week is asking for it by name, and a grid that answered "No workspace
+    /// matches" would be lying about a workspace it is holding.
+    func hiddenOrder(matching query: String) -> [Int] {
+        ShellFleet.matching(query, in: hiddenOrder(), of: workspaces)
+    }
+
+    /// One needle, applied to a list of indices already in order.
+    ///
+    /// `static` and taking the workspaces so `ShellServerGroup` can search its
+    /// own the same way. Two substring rules over one grid is two grids that
+    /// answer differently to the same typing.
+    static func matching(
+        _ query: String, in order: [Int], of workspaces: [ShellWorkspace]
+    ) -> [Int] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return overviewOrder() }
-        return overviewOrder().filter {
+        guard !needle.isEmpty else { return order }
+        return order.filter {
             workspaces[$0].name.range(
                 of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
+}
+
+
+/// The worktrees on a runner this app is NOT talking to.
+///
+/// The owner's ask was "the worktrees grid should list all worktrees across
+/// all servers", and the shape of that answer is decided by what a
+/// `Connection` is. A connection claims four process-wide slots on `start` —
+/// `Connection.current`, `WatchLinkHost.shared.adopt`,
+/// `Reachability.shared.onShouldRetry` and the single `fleet.json` that every
+/// glance surface renders from — so two live connections would not cost twice
+/// as much, they would fight, and the last poller to land would define the
+/// widget's whole fleet. N live connections is worse than N times the cost.
+///
+/// So the other runners are CACHED and say so. This type is that cache as the
+/// grid needs it: a runner's name, when this app last actually saw it, and the
+/// worktrees it had then. Everything in here is a claim about the past, which
+/// is why the marks on its cards are `.stale` — the shell's existing word for
+/// "the answer is old", drawn as the dashed ring `GlanceMark.Link.broken`
+/// already means throughout this app.
+///
+/// **Not a `ShellFleet`, and deliberately not part of one.** A `ShellFleet` is
+/// the NAVIGABLE fleet: `ShellPosition` indexes into it, the bar walks it, and
+/// `ShellPaneTrack` mounts a pane for every tab it steps onto. A workspace
+/// this app has no connection to has no pane to mount and no terminal behind
+/// it, so putting one in that array would make positions that resolve to
+/// nothing — the fifth way to break "a pane must never be rebuilt", arrived at
+/// from a direction none of the four comments about it is watching. These
+/// reach exactly one surface, the overview, and a tap on one is a change of
+/// runner rather than a move within a fleet.
+struct ShellServerGroup: Identifiable, Hashable {
+    /// The runner's id. What a tap has to name, so the app can select it —
+    /// not the label, which two runners on one box may share.
+    var id: String
+    /// What to call it on the header. The runner's own label.
+    var name: String
+    /// When this app last actually heard from this runner, or nil for a
+    /// runner it has never managed to reach.
+    ///
+    /// Nil is "not told" and must not be drawn as "just now" — the same rule
+    /// `FleetSnapshot.observedAt` states, for the same reason.
+    var lastSeen: Date?
+    var workspaces: [ShellWorkspace]
+
+    init(id: String, name: String, lastSeen: Date? = nil, workspaces: [ShellWorkspace]) {
+        self.id = id
+        self.name = name
+        self.lastSeen = lastSeen
+        self.workspaces = workspaces
+    }
+
+    /// This group's cards, in the same order the live fleet's are in.
+    ///
+    /// Precedence first, then the order the runner gave them, and hidden ones
+    /// left out — the same three rules `ShellFleet.overviewOrder` follows,
+    /// because a grid where the sections sort differently is a grid you have
+    /// to read twice. Hidden ones are simply absent here rather than getting a
+    /// section of their own: the way back from hiding is on the runner the
+    /// worktree is on, and this section is not that runner.
+    func order(matching query: String = "") -> [Int] {
+        let shown = ShellFleet.rank(
+            workspaces.indices.filter { !workspaces[$0].isHidden }, of: workspaces)
+        return ShellFleet.matching(query, in: shown, of: workspaces)
+    }
+
+    /// The groups worth drawing, most recently seen first.
+    ///
+    /// **A group with nothing to show is not a header.** An empty group is
+    /// either a runner whose worktrees are all hidden or, far more often, a
+    /// search that nothing in it matched — and a header standing over no cards
+    /// reads as a runner that has gone empty, which is a different and
+    /// alarming sentence. The same rule the live fleet follows: `content`
+    /// draws `ContentUnavailableView` rather than an empty grid.
+    ///
+    /// Most recently seen first, then by name, so the order is stable across
+    /// polls and puts the runner you were on ten minutes ago above the one you
+    /// last opened in March. A runner never reached sorts last, which is where
+    /// "nothing known" belongs.
+    static func arrange(_ groups: [ShellServerGroup], matching query: String = "")
+        -> [ShellServerGroup]
+    {
+        groups
+            .filter { !$0.order(matching: query).isEmpty }
+            .sorted { a, b in
+                switch (a.lastSeen, b.lastSeen) {
+                case let (x?, y?) where x != y: return x > y
+                case (nil, _?): return false
+                case (_?, nil): return true
+                default: return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                }
+            }
+    }
+}
+
+extension RunnerDirectory {
+    /// This directory as the overview's grid needs it, with every claim about
+    /// the present already decayed.
+    ///
+    /// **The decay is this app's existing rule, not a second one.**
+    /// `GlanceMark.Link` states it: *"decay applies only to claims about the
+    /// present. Blocked and to-review hold at any age; working and idle go
+    /// dashed."* So an agent that was waiting on you when this runner was last
+    /// seen is STILL waiting on you — that is a latched fact, and drawing it
+    /// as merely old would hide the one thing worth crossing a runner for —
+    /// while an agent that was working is drawn `stale`, because "working" is
+    /// a statement about right now and this is not right now.
+    ///
+    /// An unread diff holds for the same reason: nobody has read it, and time
+    /// passing does not read it.
+    func group() -> ShellServerGroup {
+        ShellServerGroup(
+            id: runner, name: label, lastSeen: seenAt,
+            workspaces: workspaces.map { workspace in
+                ShellWorkspace(
+                    id: workspace.id,
+                    name: workspace.name,
+                    server: label,
+                    tail: workspace.tail,
+                    isHidden: workspace.isHidden,
+                    tabs: workspace.tabs.enumerated().map { index, tab in
+                        ShellTab(
+                            id: "\(runner)/\(workspace.id)/\(index)",
+                            title: tab.title,
+                            mark: RunnerDirectory.decayed(tab.mark))
+                    })
+            })
+    }
+
+    /// One remembered mark, aged.
+    static func decayed(_ mark: String) -> ShellMark {
+        switch mark {
+        case "needsYou": return .needsYou
+        case "unreadDiff": return .unreadDiff
+        default: return .stale
+        }
+    }
+
+    /// The word to write down for a mark. The inverse of `decayed` for the two
+    /// that survive it, and one string for the two that do not.
+    static func word(for mark: ShellMark) -> String {
+        switch mark {
+        case .needsYou: return "needsYou"
+        case .unreadDiff: return "unreadDiff"
+        case .stale: return "stale"
+        case .working: return "working"
         }
     }
 }
