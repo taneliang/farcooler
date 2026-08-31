@@ -22,6 +22,128 @@ private enum TerminalMetrics {
     }
 }
 
+/// The physics a scroll on this platform is expected to have.
+///
+/// Every number here is borrowed rather than invented, and that is the point of
+/// the file it lives in. WWDC 2018 "Designing Fluid Interfaces" makes the
+/// argument directly, about a picture-in-picture window being thrown: *"I
+/// already have a lot of muscle memory for doing exactly that with scrolling…
+/// by taking advantage of that here, we're reinforcing things that people have
+/// learned elsewhere."* A terminal that decelerated on a curve of its own would
+/// be a fifth motion vocabulary in an app that already has too many, and every
+/// thumb arriving at it has spent years learning `UIScrollView`'s.
+///
+/// So: `UIScrollView.DecelerationRate.normal` for the throw, UIScrollView's own
+/// progressive resistance curve for the edges, and a critically damped spring
+/// for the return.
+enum TerminalScrollPhysics {
+    /// `UIScrollView.DecelerationRate.normal`, as a plain number.
+    ///
+    /// It is 0.998, and the unit is "fraction of the velocity surviving one
+    /// millisecond" — which is why every formula below has a 1000 in it.
+    static let decelerationRate = UIScrollView.DecelerationRate.normal.rawValue
+
+    /// Where content thrown at `velocity` would come to rest.
+    ///
+    /// The talk's projection function, in the units it was given in: velocity
+    /// per second in, distance out. It is what makes a flick travel further
+    /// than the finger did — without it a swipe moves the content exactly as
+    /// far as the thumb moved and no further, which the talk names as the
+    /// counter-example: *"those same swipes wouldn't get you very far… you'd
+    /// have to do these long, laborious swipes."*
+    static func projection(
+        of velocity: CGFloat, decelerationRate rate: CGFloat = decelerationRate
+    ) -> CGFloat {
+        guard rate > 0, rate < 1 else { return 0 }
+        return (velocity / 1000) * rate / (1 - rate)
+    }
+
+    /// One `dt`-second step of that same deceleration.
+    ///
+    /// Integrated in closed form rather than stepped as `v *= rate` per frame,
+    /// so a dropped frame costs the same distance as two delivered ones. The
+    /// distance this returns over an infinite `dt` is exactly `projection(of:)`
+    /// — the coast and the throw distance are the same curve, stated twice.
+    static func decelerate(
+        velocity: CGFloat, dt: CGFloat, decelerationRate rate: CGFloat = decelerationRate
+    ) -> (travelled: CGFloat, velocity: CGFloat) {
+        guard rate > 0, rate < 1, dt > 0 else { return (0, velocity) }
+        let decay = pow(rate, dt * 1000)
+        return (velocity * (decay - 1) / (1000 * log(rate)), velocity * decay)
+    }
+
+    /// `UIScrollView`'s resistance past an edge.
+    ///
+    /// Progressive, not a linear multiplier: the first point of over-drag is
+    /// nearly free and the hundredth is nearly immovable, so the boundary
+    /// announces itself by getting harder rather than by arriving. The talk,
+    /// on what happens without it: *"you actually wouldn't know the difference
+    /// between a frozen phone, and phone that's just at the top of the edge of
+    /// the screen."*
+    ///
+    /// `dimension` is the viewport the content is being dragged across, which
+    /// is what makes the curve feel the same on a phone and on an iPad.
+    static func rubberband(
+        _ overshoot: CGFloat, dimension: CGFloat, coefficient: CGFloat = 0.55
+    ) -> CGFloat {
+        guard dimension > 0 else { return 0 }
+        let resisted =
+            (1 - (1 / ((abs(overshoot) * coefficient / dimension) + 1))) * dimension
+        return overshoot < 0 ? -resisted : resisted
+    }
+
+    /// One `dt`-second step of a critically damped spring towards `target`.
+    ///
+    /// Critically damped — no bounce — because nothing this settles has any
+    /// bounce to earn: content returning from an over-drag is elastic, not
+    /// springy, and content landing on a row boundary at the end of a coast
+    /// must not announce that it arrived. Solved analytically for the same
+    /// reason `decelerate` is: it is exact at any `dt`, including the long one
+    /// after a dropped frame.
+    static func settle(
+        value: CGFloat, velocity: CGFloat, toward target: CGFloat, response: CGFloat,
+        dt: CGFloat
+    ) -> (value: CGFloat, velocity: CGFloat) {
+        guard response > 0, dt > 0 else { return (target, 0) }
+        let omega = 2 * CGFloat.pi / response
+        let displacement = value - target
+        let slope = velocity + omega * displacement
+        let decay = exp(-omega * dt)
+        return (
+            target + (displacement + slope * dt) * decay,
+            (velocity - omega * slope * dt) * decay
+        )
+    }
+}
+
+/// What a scroll in progress is doing to the drawn grid, published so the
+/// `Canvas` can offset itself by it and so a UI test can see it at all.
+///
+/// **Relative to the row the core is on, never absolute.** The emulator's
+/// `display_offset` is the authority on WHICH lines are on screen; this is only
+/// the sub-row nudge between them, and stating it that way is what makes the
+/// two structurally unable to drift apart — the worst a stale reading can be is
+/// half a row, and there is nowhere for an error to accumulate.
+///
+/// The three peaks exist because a `Canvas` is pixels: there is no child view
+/// for a test to read, and "the content tracked the thumb between two rows" and
+/// "the content quantised to rows" produce the same emulator offset and the
+/// same screenshot. Only a number the drawing itself was given can tell them
+/// apart. See `TerminalScrollTests`.
+struct TerminalScrollReadout: Equatable {
+    /// How far the grid is drawn from the row the core is on, in points.
+    var offset: CGFloat = 0
+    /// The largest `offset` yet drawn while INSIDE the scrollback's own
+    /// bounds — that is, the deepest the grid has ever sat between two rows.
+    /// Zero for the whole lifetime of a pane that quantises.
+    var grainPeak: CGFloat = 0
+    /// The largest over-drag past either end, in points.
+    var bandPeak: CGFloat = 0
+    /// How far past an end the content is right now. Returns to zero, which is
+    /// the half of rubberbanding that is not resistance.
+    var over: CGFloat = 0
+}
+
 /// Shows one terminal, live.
 ///
 /// Everything about what an escape sequence means happened before this view
@@ -62,6 +184,11 @@ struct TerminalView: View {
     /// with nothing to show is a dialog that will eventually be shown with
     /// nothing to show.
     @State private var heldLink: String?
+
+    /// How far the grid is drawn from the row the emulator is on, plus the
+    /// peaks a test reads. Written by the scroll driver in `KeystrokeSink`,
+    /// once per frame while anything is moving and never otherwise.
+    @State private var scrollReadout = TerminalScrollReadout()
 
     // User-configurable, unlike the Mac's fixed terminal font: see
     // Settings.swift. Read directly from the same `UserDefaults` key
@@ -425,7 +552,11 @@ struct TerminalView: View {
 
     private func live(grid: TerminalGrid, size: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
-            Canvas { context, canvasSize in draw(grid: grid, into: context, size: canvasSize) }
+            Canvas { context, canvasSize in
+                draw(
+                    grid: grid, into: context, size: canvasSize,
+                    scrolledBy: scrollReadout.offset)
+            }
                 // The one way to ask this pane what it is showing.
                 //
                 // A `Canvas` is pixels: there are no child views for a UI test
@@ -449,11 +580,24 @@ struct TerminalView: View {
                 // `history=0` with ENDSWITH, so appending a fourth field would
                 // have silently turned three guards into no-ops. Naming the
                 // fields is what makes this string safe to extend.
+                //
+                // The last four are the physics, and they are here for the same
+                // reason `offset` is: a `Canvas` is pixels, and "the grid
+                // tracked the thumb between two rows" and "the grid quantised to
+                // rows" leave the emulator on the same line and the screenshot
+                // identical. Only a number the drawing itself was given can tell
+                // them apart. `cell` is what turns points into rows, so a test
+                // can say "further than the finger travelled" in the units the
+                // finger travelled in. See `TerminalScrollReadout`.
                 .accessibilityValue(
                     "offset=\(session.scrollPosition.offset) "
                         + "history=\(session.scrollPosition.history) "
                         + "source=\(session.scrollPosition.streaming ? "stream" : "poll") "
-                        + "mouse=\(session.scrollPosition.wantsMouse ? "on" : "off")")
+                        + "mouse=\(session.scrollPosition.wantsMouse ? "on" : "off") "
+                        + "cell=\(Int(gridLayout(for: grid, in: size).cell.height.rounded())) "
+                        + "grain=\(Int(scrollReadout.grainPeak.rounded())) "
+                        + "band=\(Int(scrollReadout.bandPeak.rounded())) "
+                        + "over=\(Int(scrollReadout.over.rounded()))")
             // A UIKit view whose only job is to be the thing the software
             // keyboard is attached to. It carries no visible state of its
             // own — every character it reports goes straight to the host and
@@ -480,12 +624,28 @@ struct TerminalView: View {
                 focusRequest: focusRequest,
                 dismissRequest: dismissRequest,
                 cellHeight: gridLayout(for: grid, in: size).cell.height,
+                coreOffset: session.scrollPosition.offset,
+                historyLines: session.scrollPosition.history,
+                alternateScreen: session.scrollPosition.alternate,
                 onInsertText: insert,
                 onDeleteBackward: { sendKey(UInt32(FARCOOLER_VT_KEY_BACKSPACE)) },
+                // Synchronous, and it answers with where the emulator ended up.
+                //
+                // There is no `Task` here any more and that is the whole of the
+                // actor-hop answer: `TerminalSession.scroll` never suspended on
+                // this path, so the hop bought nothing and cost a frame — which
+                // a finger could afford and a throw crossing fifty rows in a
+                // quarter second cannot. Reading `scrollPosition.offset` back on
+                // the same line is what makes the drawn offset and the
+                // emulator's `display_offset` unable to disagree: the driver is
+                // told the truth on every commit rather than assuming its own
+                // arithmetic won.
                 onScroll: { lines, point in
                     let target = cell(at: point, grid: grid, size: size)
-                    Task { await session.scroll(lines: lines, column: target.column, row: target.row) }
+                    session.scroll(lines: lines, column: target.column, row: target.row)
+                    return session.scrollPosition.offset
                 },
+                onReadout: { scrollReadout = $0 },
                 onHold: { point in
                     // Nothing happens away from a link. There is no terminal
                     // paste on this platform for a long press to displace, so
@@ -568,7 +728,19 @@ struct TerminalView: View {
         )
     }
 
-    private func draw(grid: TerminalGrid, into context: GraphicsContext, size: CGSize) {
+    /// `scrolledBy` is the sub-row nudge the scroll driver is asking for, in
+    /// points, measured from the row the emulator is on. Everything below is
+    /// laid out from `originY`, so adding it there moves the glyphs, the
+    /// background runs and the cursor as one thing — which is the only way the
+    /// grid can be between two rows without coming apart.
+    ///
+    /// Clamped to the canvas, because a number that large could only come from
+    /// a bug and the failure mode of not clamping is a pane that draws nothing
+    /// at all. The value in ordinary use is under half a row, or — past an end
+    /// — whatever the rubberband is currently allowing.
+    private func draw(
+        grid: TerminalGrid, into context: GraphicsContext, size: CGSize, scrolledBy: CGFloat = 0
+    ) {
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TerminalPalette.background))
         let layout = gridLayout(for: grid, in: size)
 
@@ -593,7 +765,7 @@ struct TerminalView: View {
         let scale = layout.scale
         let scaledCell = layout.cell
         let originX = layout.origin.x
-        let originY = layout.origin.y
+        let originY = layout.origin.y + min(max(scrolledBy, -size.height), size.height)
         // The chosen typeface, not a hard-coded system one — see
         // Settings.swift. Scaled the same way the cell itself is: a font
         // built at the unscaled `fontSize` would draw glyphs too big for the
@@ -909,9 +1081,20 @@ private struct KeystrokeField: UIViewRepresentable {
     /// in rather than measured here, because only `TerminalView` knows the
     /// current font, size and scale that produced it.
     var cellHeight: CGFloat
+    /// Where the emulator is in its own scrollback, and how much of one it
+    /// has — the bounds the physics rubberbands against, and the anchor the
+    /// drawn offset is measured from. Passed in on every update rather than
+    /// read from the session here, because this type is a `UIViewRepresentable`
+    /// and the session is the view's.
+    var coreOffset: Int
+    var historyLines: Int
+    /// See `TerminalScrollPosition.alternate`: a pane with no scrollback behind
+    /// it keeps the whole-line scroll it always had.
+    var alternateScreen: Bool
     var onInsertText: (String) -> Void
     var onDeleteBackward: () -> Void
-    var onScroll: (Int, CGPoint) -> Void
+    var onScroll: (Int, CGPoint) -> Int
+    var onReadout: (TerminalScrollReadout) -> Void
     /// Where a long press landed, for the link actions.
     var onHold: (CGPoint) -> Void
     /// The key row, handed to the system as the keyboard's accessory so it is
@@ -932,7 +1115,10 @@ private struct KeystrokeField: UIViewRepresentable {
         view.onDeleteBackward = onDeleteBackward
         view.onScroll = onScroll
         view.onHold = onHold
-        view.cellHeight = cellHeight
+        view.onReadout = onReadout
+        view.syncCore(
+            offset: coreOffset, history: historyLines, alternate: alternateScreen,
+            cellHeight: cellHeight)
         view.backgroundColor = .clear
 
         let host = UIHostingController(rootView: accessory)
@@ -966,7 +1152,10 @@ private struct KeystrokeField: UIViewRepresentable {
         uiView.onDeleteBackward = onDeleteBackward
         uiView.onScroll = onScroll
         uiView.onHold = onHold
-        uiView.cellHeight = cellHeight
+        uiView.onReadout = onReadout
+        uiView.syncCore(
+            offset: coreOffset, history: historyLines, alternate: alternateScreen,
+            cellHeight: cellHeight)
         context.coordinator.accessoryHost?.rootView = accessory
 
         // `updateUIView` runs on every poll, not just on a tap — the grid it
@@ -997,10 +1186,26 @@ private struct KeystrokeField: UIViewRepresentable {
 private final class KeystrokeSink: UIView, UIKeyInput {
     var onInsertText: ((String) -> Void)?
     var onDeleteBackward: (() -> Void)?
-    var onScroll: ((Int, CGPoint) -> Void)?
+    /// Move the view by whole lines, and answer with the offset the emulator
+    /// ACTUALLY landed on.
+    ///
+    /// The return value is the whole of how this class stays honest. It asks
+    /// for a delta and is told where that put things, so a clamp at either end
+    /// — or a history that grew under it — corrects the driver on the same
+    /// call rather than accumulating. It can be synchronous because
+    /// `TerminalSession.scroll` is; see the note there.
+    var onScroll: ((Int, CGPoint) -> Int)?
     /// Where a long press landed, for the link actions.
     var onHold: ((CGPoint) -> Void)?
+    /// How far the grid should be drawn from the row the core is on, and the
+    /// peaks a test reads to tell tracking from quantising.
+    var onReadout: ((TerminalScrollReadout) -> Void)?
     var cellHeight: CGFloat = 16
+    /// How many lines of scrollback sit above the live screen.
+    private(set) var historyLines = 0
+    /// Whether the pane is on the alternate screen, where none of the physics
+    /// below applies. See `TerminalScrollPosition.alternate`.
+    private(set) var alternateScreen = false
     /// The key row, shown by the system as part of the keyboard.
     var accessory: UIView?
 
@@ -1043,98 +1248,418 @@ private final class KeystrokeSink: UIView, UIKeyInput {
         addGestureRecognizer(hold)
     }
 
-    /// **The scroll is VERTICAL, so it only claims vertical drags.**
+    /// **There is no `gestureRecognizerShouldBegin` here any more, and there
+    /// never really was one.**
     ///
-    /// `handlePan` converts a drag to whole lines out of `translation.y` and
-    /// ignores `x` entirely — a sideways drag on a terminal has always
-    /// scrolled it by zero lines. What is new is that something else now wants
-    /// that drag: the navigation shell's page turn is a horizontal
-    /// `DragGesture` over the whole pane, and a `UIPanGestureRecognizer` that
-    /// BEGINS on a sideways touch wins the race against it and then does
-    /// nothing with it. The symptom is a terminal you can swipe into and never
-    /// swipe out of, and it is silent — the drag is recognized, so nothing
-    /// anywhere reports a conflict.
+    /// A rule lived on this class refusing a pan whose first ten points leaned
+    /// sideways, so that a horizontal drag would fall through to the shell's
+    /// page turn. It was measured on 2026-08-30 and it NEVER RAN:
+    /// `UIView.gestureRecognizerShouldBegin(_:)` is consulted for a view's own
+    /// recognizers only when the view is their DELEGATE, and nothing ever set
+    /// one. With the body replaced by a bare `return false` — refuse every pan,
+    /// as broken as that rule can be made — the pan still began, the terminal
+    /// still scrolled, and both of the tests it claimed to be load-bearing for
+    /// still passed.
     ///
-    /// **AND IT NEVER RUNS. Measured, 2026-08-30, and the claim that stood
-    /// here was wrong.**
-    ///
-    /// What this said was that
-    /// `TerminalScrollTests.testTheShellStillTurnsThePageOverALiveTerminal`
-    /// fails without it and passes with it. It does not: with the body of this
-    /// method replaced by a bare `return false` — refuse every pan, which is
-    /// as broken as this rule can be made — the pan still began (`handlePan`
-    /// logged `state = 1` and then `state = 2` sixteen times), the terminal
-    /// still scrolled, and both of the tests named below still passed.
-    /// `NSLog` on the first line of this method printed for
-    /// `UIKitResponderGestureRecognizer` — SwiftUI's own, from the shell above
-    /// — and never once for the `UIPanGestureRecognizer` this file adds.
-    /// `UIView.gestureRecognizerShouldBegin(_:)` is simply not consulted for
-    /// it, and a delegate is what would be.
-    ///
-    /// **Left standing deliberately rather than deleted or wired up.** Wiring
-    /// it up (`pan.delegate = self`) would make the rule real for the first
-    /// time, and a rule that refuses a pan whose first ten points lean
-    /// sideways is a rule that can silently kill a scroll — the very bug being
-    /// chased. Nothing in the suite can tell the two apart, which is exactly
-    /// why it must not be switched on off the back of an argument.
+    /// It was left standing then, with a note saying so, on the grounds that
+    /// wiring it up would make it real for the first time and a rule that can
+    /// silently kill a scroll should not be switched on off the back of an
+    /// argument. That is still true, so it is deleted rather than wired: a rule
+    /// nobody enforces reads exactly like a rule somebody does, and this one had
+    /// already convinced a comment in `ShellDrag.swift` that the terminal
+    /// refuses sideways drags. It does not, and never did.
     ///
     /// What actually arbitrates is `.simultaneousGesture` on the track
-    /// (`ShellRootView.paneTrack`): the shell's page turn runs alongside the
-    /// terminal's pan rather than instead of it, so a sideways drag turns the
-    /// page and moves the grid by the zero lines its `translation.y` is worth.
-    /// That is why the page turn works today, and it works whatever this
-    /// method returns.
-    ///
-    /// It costs nothing on the screens that have no page turn behind them: a
-    /// sideways drag there used to scroll by zero lines and now falls through
-    /// to whatever is behind it, which on a navigation stack is the
-    /// interactive back swipe this pane had quietly been eating.
-    ///
-    /// **The same rule, said by the other kind of pane, is `ShellDragClaim`.**
-    /// A pane must not take a drag it cannot use — that is this — and a pane
-    /// that IS using one sideways has to say so, because the shell now runs
-    /// alongside its panes rather than behind them. A diff's hunks say it;
-    /// this recognizer never has to, because there is no sideways use for a
-    /// drag on a terminal at all.
-    ///
-    /// Translation rather than velocity, because a drag that begins slowly has
-    /// a velocity near zero in both axes and would be decided by noise.
-    /// `abs(y) > abs(x)` is deliberately the same comparison
-    /// `ShellGesture.axis` makes, so the two cannot disagree about which way a
-    /// finger went.
-    ///
-    /// The tap is unaffected. It already `require(toFail:)`s this recognizer,
-    /// so a pan that never begins lets the tap through — and a tap has an
-    /// allowable movement of a few points, so a sideways drag long enough to
-    /// turn a page is nowhere near one.
-    override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
-        guard let pan = recognizer as? UIPanGestureRecognizer else {
-            return super.gestureRecognizerShouldBegin(recognizer)
-        }
-        let travel = pan.translation(in: self)
-        return abs(travel.y) > abs(travel.x)
-    }
+    /// (`ShellRootView.paneTrack`): the shell's page turn runs alongside this
+    /// pan rather than instead of it, and a sideways drag moves the grid by the
+    /// zero rows its `translation.y` is worth.
+    /// `testTheShellStillTurnsThePageOverALiveTerminal` and
+    /// `testTheShellDoesNotStealTheTerminalsScroll` are the two opposite
+    /// failures that pin it, and both pass with this gone.
 
     override var canBecomeFirstResponder: Bool { true }
     var hasText: Bool { true }
 
-    @objc func focus() { becomeFirstResponder() }
+    /// Raise the keyboard — unless this touch was the one that stopped a coast.
+    ///
+    /// The talk's imperceptible stop is only half a promise: *"while content is
+    /// scrolling, it makes it feel like you can just put your finger down
+    /// again, and continue scrolling. You don't have to wait for anything to
+    /// finish."* A finger put down on moving content is asking it to stop, and
+    /// on this view a finger put down and lifted again is also the gesture that
+    /// asks for the keyboard. Every scroll view on the platform resolves that
+    /// the same way, so this does too: the tap that stops the motion is spent
+    /// stopping it.
+    @objc func focus() {
+        if tapStoppedTheCoast {
+            tapStoppedTheCoast = false
+            return
+        }
+        becomeFirstResponder()
+    }
 
-    /// Convert the drag to whole lines and report each crossing.
+    // MARK: - Scroll physics
+
+    /// Where the content is, in points back from the live screen, and what it
+    /// is doing to get somewhere else.
+    ///
+    /// One continuous number rather than a line count, because the whole point
+    /// is that it is allowed to sit between two lines and outside both ends.
+    /// `shown` is what that number looks like after the edges resist it; the
+    /// core is asked for `round(shown / cellHeight)` and the leftover is drawn.
+    private enum Motion: Equatable {
+        case rest
+        case tracking
+        case coasting
+        /// Elastic return: from an over-drag to the edge, or from the tail of
+        /// a coast onto the nearest row.
+        case settling(target: CGFloat)
+    }
+
+    private var motion: Motion = .rest
+    /// Points back from the live screen. May leave `0...span` — that is what
+    /// there is to rubberband.
+    private var position: CGFloat = 0
+    /// Points per second, positive back into history.
+    private var velocity: CGFloat = 0
+    /// `position` when the current drag began.
+    private var panAnchor: CGFloat = 0
+    /// The line the emulator is on, as the emulator last reported it.
+    private var committed = 0
+    /// Where to say a scroll happened, for the wheel events the alternate
+    /// screen sends. Kept from the last touch so a coast has a column and row.
+    private var lastTouch: CGPoint = .zero
+    private var displayLink: CADisplayLink?
+    private var lastFrame: CFTimeInterval = 0
+    private var tapStoppedTheCoast = false
+    /// Whether a pan actually ran for the touch sequence in progress, so
+    /// `touchesEnded` can tell "tapped to stop a coast" from "dragged".
+    private var panRan = false
+    private var readout = TerminalScrollReadout()
+    /// The last readout SwiftUI was actually given, so a frame that changed
+    /// nothing worth drawing does not cost a redraw. See `commit`.
+    private var published = TerminalScrollReadout()
+
+    /// Below this, a coast has nothing left to say and hands over to the spring
+    /// that lands it on a row. 40 points a second is under three points a
+    /// frame — slow enough that the handover cannot be seen, fast enough that
+    /// the tail of the exponential is not left crawling for another second.
+    private static let coastFloor: CGFloat = 40
+    /// The spring that returns content from an over-drag and lands a coast on a
+    /// row. One constant for both because they are the same behaviour: content
+    /// relaxing into a resting position once the strain is off it.
+    private static let settleResponse: CGFloat = 0.3
+
+    /// How far back the content can go before there is nothing above it.
+    private var span: CGFloat { CGFloat(historyLines) * cellHeight }
+
+    /// `position` with the edges' resistance applied — what is actually drawn.
+    private var shown: CGFloat {
+        let dimension = max(bounds.height, cellHeight * 4)
+        if position < 0 {
+            return TerminalScrollPhysics.rubberband(position, dimension: dimension)
+        }
+        if position > span {
+            return span + TerminalScrollPhysics.rubberband(position - span, dimension: dimension)
+        }
+        return position
+    }
+
+    /// Tell the view what the core is on, so a scroll that came from anywhere
+    /// else — typing jumps to the bottom, a pane rebuilt by a poll — does not
+    /// leave this class believing something the emulator does not.
+    ///
+    /// Only while nothing is moving. Mid-gesture the finger is the authority
+    /// and the core is following it; the reconciliation that matters there is
+    /// the offset `onScroll` hands back on every single commit.
+    func syncCore(offset: Int, history: Int, alternate: Bool, cellHeight height: CGFloat) {
+        historyLines = history
+        alternateScreen = alternate
+        let resized = height > 0 && height != cellHeight
+        if height > 0 { cellHeight = height }
+        guard motion == .rest else { return }
+        // A font change, a rotation, or a pane that reflowed: the line the core
+        // is on has not moved but the points it is worth have.
+        if resized || offset != committed {
+            committed = offset
+            position = CGFloat(offset) * cellHeight
+            velocity = 0
+        }
+    }
+
+    /// One drag: track it one-to-one, then hand its momentum to the content.
+    ///
+    /// Sub-line, deliberately. This used to convert `translation.y` into whole
+    /// lines and put the remainder back with `setTranslation`, which meant the
+    /// content moved a row at a time under a thumb that was moving smoothly —
+    /// the talk's one-to-one tracking broken by up to half a row, on the one
+    /// surface in this app people look at longest. The whole-line part still
+    /// goes to the emulator, because whole lines are the only thing it can
+    /// show; the remainder is drawn as an offset instead of being rounded away.
+    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        guard cellHeight > 0 else { return }
+        lastTouch = recognizer.location(in: self)
+
+        // The alternate screen keeps exactly the behaviour it had. There is no
+        // scrollback behind it, so there is no local offset to track between
+        // rows, nothing to bound and no edge to rubberband against — the wheel
+        // belongs to the program, and `TerminalSession.scroll` is the one place
+        // that decides so. Sliding the grid by fractional points here would
+        // only slide a picture the program is about to repaint from scratch.
+        guard !alternateScreen else {
+            quantisedPan(recognizer)
+            return
+        }
+
+        switch recognizer.state {
+        case .began:
+            panRan = true
+            tapStoppedTheCoast = false
+            stopMotion()
+            motion = .tracking
+            panAnchor = position
+            // The peaks describe the gesture in progress, not the pane's whole
+            // life. A running maximum that never resets can only ever answer
+            // "did this pane rubberband at some point", and the question worth
+            // asking is about the drag you just made.
+            readout.grainPeak = 0
+            readout.bandPeak = 0
+            // The ten points of hysteresis a pan spends proving it is a pan are
+            // not content the finger asked to move — dropping them is what
+            // keeps the first frame from jumping.
+            recognizer.setTranslation(.zero, in: self)
+        case .changed:
+            guard motion == .tracking else { return }
+            position = panAnchor + recognizer.translation(in: self).y
+            commit()
+        case .ended, .cancelled, .failed:
+            guard motion == .tracking else { return }
+            release(velocity: recognizer.velocity(in: self).y)
+        default:
+            break
+        }
+    }
+
+    /// The drag-to-lines conversion this class used for every pane, kept for
+    /// the one kind of pane it is still right for.
     ///
     /// `setTranslation` puts back only the fractional remainder after each
     /// callback, so a slow drag accumulates towards the next line instead of
     /// being rounded away — the touchscreen equivalent of the Mac's
     /// `wheelTicks`, using the recognizer's own accumulated translation as
     /// the running total instead of a separately stored property.
-    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        guard cellHeight > 0 else { return }
+    private func quantisedPan(_ recognizer: UIPanGestureRecognizer) {
         let translation = recognizer.translation(in: self)
         let lines = Int((translation.y / cellHeight).rounded(.towardZero))
         guard lines != 0 else { return }
         recognizer.setTranslation(
             CGPoint(x: translation.x, y: translation.y - CGFloat(lines) * cellHeight), in: self)
-        onScroll?(lines, recognizer.location(in: self))
+        _ = onScroll?(lines, recognizer.location(in: self))
+    }
+
+    /// The finger left, and its momentum did not.
+    ///
+    /// Released past an edge, the content springs back to it. Released inside,
+    /// it coasts on `UIScrollView.DecelerationRate.normal` — the same curve as
+    /// every other scroll view on the phone, which is the entire argument for
+    /// using it.
+    private func release(velocity released: CGFloat) {
+        velocity = released
+        if position < 0 || position > span {
+            motion = .settling(target: position < 0 ? 0 : span)
+        } else {
+            motion = .coasting
+        }
+        startMotion()
+    }
+
+    @objc private func step(_ link: CADisplayLink) {
+        // A link that has not fired yet reports `timestamp == 0`, so the first
+        // frame has to be seeded here rather than in `startMotion` — seeded
+        // from zero it would integrate the whole clamp of 50ms on frame one,
+        // which at flick speed is a dozen rows arriving in a single jump right
+        // where the motion is supposed to be handing over from the finger.
+        if lastFrame == 0 { lastFrame = link.timestamp }
+        let now = link.targetTimestamp
+        // Clamped, so one dropped frame costs a slightly short step rather than
+        // a lurch — the talk's point about what is IN the frames, not how many
+        // of them there are.
+        let dt = min(max(CGFloat(now - lastFrame), 0), 1.0 / 20)
+        lastFrame = now
+        guard dt > 0 else { return }
+
+        switch motion {
+        case .coasting:
+            let next = TerminalScrollPhysics.decelerate(velocity: velocity, dt: dt)
+            position += next.travelled
+            velocity = next.velocity
+            if position < 0 || position > span {
+                // Ran off the end still moving. The spring takes the velocity
+                // it had, so there is no moment where one behaviour stopped and
+                // another started — the talk's seamless handoff, as arithmetic.
+                motion = .settling(target: position < 0 ? 0 : span)
+            } else if abs(velocity) < Self.coastFloor {
+                motion = .settling(target: nearestRow(to: position))
+            }
+        case .settling(let target):
+            let next = TerminalScrollPhysics.settle(
+                value: position, velocity: velocity, toward: target,
+                response: Self.settleResponse, dt: dt)
+            position = next.value
+            velocity = next.velocity
+            // Half a point and eight points a second: under one frame's worth
+            // of movement, which is the definition of "no longer visible".
+            if abs(position - target) < 0.5, abs(velocity) < 8 {
+                position = target
+                velocity = 0
+                motion = .rest
+            }
+        case .rest, .tracking:
+            motion = .rest
+        }
+
+        commit()
+        if motion == .rest { stopMotion() }
+    }
+
+    /// Ask the emulator for whatever whole rows the content has crossed, and
+    /// publish the leftover for the grid to be drawn at.
+    ///
+    /// **One call per frame at most, and only when the row changed.** A finger
+    /// crosses a row every few frames; a throw crosses fifty in the first
+    /// quarter second, and asking once per row would be fifty separate hops in
+    /// the time it takes to draw fifteen frames. So the row is computed from
+    /// where the content IS and the difference is sent as one delta — which is
+    /// coalescing in the only place it is safe to coalesce, because the drawn
+    /// offset is measured from the row that came back, not from the row that
+    /// was asked for.
+    private func commit() {
+        guard cellHeight > 0 else { return }
+        var visible = shown
+        let want = min(max(Int((visible / cellHeight).rounded()), 0), max(historyLines, 0))
+        if want != committed {
+            let actual = onScroll?(want - committed, lastTouch) ?? want
+            // The emulator refused to go as far as it was asked, which means
+            // the content ends before this class thought it did. Wherever it
+            // stopped IS the end, so the over-drag has to start from there —
+            // otherwise the grid would be drawn a row further along than the
+            // rows it is actually showing, and the two would stay apart.
+            if actual != want {
+                position -= CGFloat(want - actual) * cellHeight
+                visible = shown
+            }
+            committed = actual
+        }
+        let offset = visible - CGFloat(committed) * cellHeight
+        let over: CGFloat
+        if position < 0 {
+            over = visible
+        } else if position > span {
+            over = visible - span
+        } else {
+            over = 0
+        }
+        readout.offset = offset
+        readout.over = over
+        if over == 0 {
+            readout.grainPeak = max(readout.grainPeak, abs(offset))
+        }
+        readout.bandPeak = max(readout.bandPeak, abs(over))
+
+        // Publishing crosses into SwiftUI and redraws the grid, so it happens
+        // when there is something to see and not on every frame regardless. The
+        // tail of a coast can spend half a second moving less than a point per
+        // frame, and a redraw of several thousand cells to move the glyphs a
+        // quarter of a point is work nobody can perceive the result of. A
+        // quarter point is the threshold because that is under one device pixel
+        // at 3× — below it there is literally nothing different to draw.
+        //
+        // `motion == .rest` always publishes: the last frame is the one that
+        // sets the grid down on a row boundary, and it is the one every reader
+        // of the peaks is looking at.
+        let moved = abs(readout.offset - published.offset) >= 0.25
+        guard moved || motion == .rest else { return }
+        published = readout
+        onReadout?(readout)
+    }
+
+    private func nearestRow(to points: CGFloat) -> CGFloat {
+        guard cellHeight > 0 else { return 0 }
+        let row = min(max((points / cellHeight).rounded(), 0), CGFloat(max(historyLines, 0)))
+        return row * cellHeight
+    }
+
+    private func startMotion() {
+        guard displayLink == nil else { return }
+        let proxy = DisplayLinkProxy()
+        proxy.sink = self
+        let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+        // `.common`, so the coast does not stall while anything else on this
+        // screen is tracking a touch.
+        link.add(to: .main, forMode: .common)
+        lastFrame = 0
+        displayLink = link
+    }
+
+    private func stopMotion() {
+        displayLink?.invalidate()
+        displayLink = nil
+        lastFrame = 0
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        panRan = false
+        // Taking over from a coast happens HERE, on touch down, not in the pan
+        // recognizer — a pan does not begin until the finger has moved ten
+        // points, and content that kept sliding for those ten points would be
+        // content that ignored a finger resting on it.
+        if displayLink != nil {
+            stopMotion()
+            velocity = 0
+            motion = .rest
+            tapStoppedTheCoast = true
+        } else {
+            // Per touch sequence, never left armed. A press that stopped a
+            // coast and then became something other than a tap — a long press,
+            // a gesture the shell took — must not spend the NEXT tap's
+            // keyboard.
+            tapStoppedTheCoast = false
+        }
+        super.touchesBegan(touches, with: event)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        settleAfterATouchThatDidNotDrag()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        settleAfterATouchThatDidNotDrag()
+    }
+
+    /// A tap that stopped a coast leaves the grid wherever it caught it, which
+    /// can be half a row down. Land it.
+    private func settleAfterATouchThatDidNotDrag() {
+        guard !panRan, motion == .rest, displayLink == nil else { return }
+        let target = position < 0 || position > span
+            ? min(max(position, 0), span) : nearestRow(to: position)
+        guard abs(position - target) > 0.5 else { return }
+        motion = .settling(target: target)
+        startMotion()
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if newWindow == nil { stopMotion() }
+    }
+
+    /// A `CADisplayLink` retains its target, and this view owns the link. Held
+    /// weakly through here so that a pane torn down mid-coast is not kept alive
+    /// by its own animation.
+    private final class DisplayLinkProxy: NSObject {
+        weak var sink: KeystrokeSink?
+        @objc func tick(_ link: CADisplayLink) { sink?.step(link) }
     }
 
     /// Report where a long press landed, once, when it begins.

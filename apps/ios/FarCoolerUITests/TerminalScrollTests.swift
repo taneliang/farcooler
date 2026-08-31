@@ -229,6 +229,390 @@ final class TerminalScrollTests: XCTestCase {
         XCTAssertEqual(position(app)?.offset, 0, "the view never came back to the live screen")
     }
 
+    /// One integer field off `terminal-surface` — `cell`, `grain`, `band`,
+    /// `over`. See `TerminalScrollReadout` for what each one means.
+    private func metric(_ app: XCUIApplication, _ key: String) -> Int? {
+        surfaceValue(app).flatMap { Self.field($0, key) }.flatMap(Int.init)
+    }
+
+    /// Where the view came to rest, rather than where it happened to be when
+    /// the finger left.
+    ///
+    /// A throw keeps moving for a couple of seconds after the gesture ends —
+    /// that is the entire feature — so reading the offset straight after a
+    /// swipe reads the middle of the coast. This waits for the number to stop
+    /// changing, which is the only honest definition of "where it ended":
+    /// hard-coding a sleep would either be too short (and measure the coast) or
+    /// pin a duration the deceleration curve is free to change.
+    private func settledOffset(_ app: XCUIApplication, timeout: TimeInterval = 10) -> Int? {
+        // **Wait the coast out before asking anything.**
+        //
+        // Measured on the iPhone 17 simulator: one repaint of a 55x38 grid
+        // through `TerminalView.draw` costs 35ms, idle or scrolling — the
+        // renderer's own cost, not the physics'. A throw redraws for as long as
+        // it coasts, so the app's main thread is busy for those seconds, and
+        // every accessibility query XCUITest makes has to run on that same
+        // thread ("XCTPerformOnMainRunLoop ... waiting with 30.00s
+        // responsiveness timeout"). Polling through a coast is therefore
+        // queueing behind the drawing, and it is how this test managed to get
+        // its runner killed with `Test crashed with signal kill` four times in
+        // a row while the app itself was perfectly alive.
+        //
+        // Three seconds is `UIScrollView.DecelerationRate.normal` from a hard
+        // flick plus the spring that lands it, with room to spare.
+        Thread.sleep(forTimeInterval: 3.0)
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = position(app)?.offset
+        var unchanged = 0
+        while Date() < deadline {
+            // Paced. A tight loop here queries the accessibility tree as fast
+            // as the bridge will answer, against a view that is redrawing every
+            // frame — which is a lot of pressure on the runner for no extra
+            // information, since the thing being waited for takes seconds.
+            Thread.sleep(forTimeInterval: 0.08)
+            let now = position(app)?.offset
+            unchanged = (now == last) ? unchanged + 1 : 0
+            last = now
+            // Four consecutive reads. Each round trip through the accessibility
+            // tree is tens of milliseconds, so this is a few hundred
+            // milliseconds of stillness — longer than a dropped frame and
+            // shorter than the tail of any coast that is still moving.
+            if unchanged >= 4 { return now }
+        }
+        return last
+    }
+
+    /// A drag with a real release velocity: no hold at the end, so the finger
+    /// leaves the glass still moving and the content inherits it.
+    ///
+    /// **12000, and not `.fast`, and the difference is measured.** The velocity
+    /// asked for here is what XCUITest interpolates the synthetic touches at;
+    /// what the content actually inherits is whatever
+    /// `UIPanGestureRecognizer.velocity(in:)` estimates from the events that
+    /// arrive, and the two are nothing like each other. Measured on the iPhone
+    /// 17 simulator against a 300-point drag, printing the recognizer's own
+    /// number: `.fast` — nominally 3000 points a second — reaches the
+    /// recognizer as **508**, which is a slow deliberate drag, not a flick.
+    /// 12000 reaches it as **4453**, which is an ordinary hard thumb flick.
+    ///
+    /// So this is not a test cheating by asking for a superhuman gesture. It is
+    /// the number that makes XCUITest produce a human one, and without it the
+    /// momentum assertion below would be measuring a throw nobody would ever
+    /// make on purpose.
+    private func flick(_ surface: XCUIElement, fromY: CGFloat, toY: CGFloat) {
+        let from = surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: fromY))
+        let to = surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: toY))
+        from.press(
+            forDuration: 0.02, thenDragTo: to,
+            withVelocity: XCUIGestureVelocity(rawValue: 12000), thenHoldForDuration: 0)
+    }
+
+    /// A drag that ends stopped: the hold at the end drains the velocity, so
+    /// the content goes exactly as far as the thumb did and no further.
+    private func dragAndStop(_ surface: XCUIElement, fromY: CGFloat, toY: CGFloat) {
+        let from = surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: fromY))
+        let to = surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: toY))
+        from.press(
+            forDuration: 0.05, thenDragTo: to, withVelocity: .default, thenHoldForDuration: 0.35)
+    }
+
+    /// **A flick goes further than the finger did, and nothing else here says so.**
+    ///
+    /// This is the one assertion momentum can be pinned by. Every other scroll
+    /// test in this file asks whether the offset moved AT ALL, which a
+    /// translation-to-lines conversion with no `.ended` branch satisfies
+    /// perfectly — and did, for as long as the terminal had no physics at all.
+    ///
+    /// The number it compares against is the finger's own travel, converted to
+    /// rows through `cell`. Without `TerminalScrollPhysics.projection` the
+    /// content stops where the thumb stopped and `settled` lands within a row
+    /// of `finger`; with it, `UIScrollView.DecelerationRate.normal` carries it
+    /// several times further. WWDC 2018 803, on the version without: *"those
+    /// same swipes wouldn't get you very far… you'd have to do these long,
+    /// laborious swipes that would require a lot more manual input."*
+    ///
+    /// Negative control, run: with `release` taking `velocity = 0` — the
+    /// release velocity thrown away, which is exactly the old behaviour —
+    ///
+    ///     XCTAssertGreaterThan failed: ("0") is not greater than ("51")
+    ///
+    /// while `testTheGridTracksTheThumbBetweenRows` passed in the same run.
+    func testAFlickTravelsFurtherThanTheFingerDid() throws {
+        let app = launch()
+        let surface = try openATerminalInTheShell(app)
+        try XCTSkipUnless(
+            waitForHistory(app), "This pane has no scrollback, so a flick has nowhere to go.")
+
+        let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
+        try XCTSkipUnless(cell > 0, "the pane reported a zero row height")
+        let before = try XCTUnwrap(position(app))
+        XCTAssertEqual(before.offset, 0, "a pane opens at the live screen")
+
+        // 45% of the pane, downward, which on this surface is back into the
+        // scrollback. Stated in the surface's own frame so the finger's travel
+        // is known in points and can be compared in rows.
+        let fromY: CGFloat = 0.26
+        let toY: CGFloat = 0.71
+        let travel = surface.frame.height * (toY - fromY)
+        let finger = Int(travel / CGFloat(cell))
+        try XCTSkipUnless(
+            before.history > finger * 4,
+            """
+            \(before.history) lines of scrollback is not enough room for a throw \
+            worth \(finger) rows of finger to be told apart from a clamp at the top.
+            """)
+
+        flick(surface, fromY: fromY, toY: toY)
+        let settled = try XCTUnwrap(settledOffset(app))
+
+        // Three times the finger, against a measured seven and a half.
+        //
+        // The margin is deliberately wide in both directions, because the two
+        // outcomes this separates are not close. Measured with the projection:
+        // 130 rows, for 17 rows of finger. Measured with `release` patched to
+        // throw the release velocity away — the old behaviour, exactly: **0**.
+        //
+        // Zero rather than seventeen, and the reason is worth knowing before
+        // anybody reads too much into the ratio: XCUITest synthesizes a
+        // 12000-point-a-second drag as almost no intermediate touches at all,
+        // so the recognizer reports a release velocity and hardly any
+        // `.changed`. A real thumb produces a dense stream and the tracked
+        // distance is real. What this test can therefore say honestly is that
+        // the content went a long way further than the gesture's own
+        // displacement, and that removing the projection takes all of it away.
+        XCTAssertGreaterThan(
+            settled, finger * 3,
+            """
+            the flick carried no momentum: the finger travelled \(Int(travel)) points \
+            (\(finger) rows of \(cell)) and the content came to rest \(settled) rows back, \
+            which is no further than the gesture itself moved. That is the terminal \
+            with no `.ended` branch.
+            """
+        )
+    }
+
+    /// **The grid sits between two rows while a thumb is between two rows.**
+    ///
+    /// One-to-one tracking, which the talk calls "one of the principles of
+    /// iOS": *"the moment the touch and content stop tracking one-to-one, we
+    /// immediately notice it."* The emulator can only ever be on a whole row —
+    /// `display_offset` is a line count — so the sub-row remainder is drawn as
+    /// an offset instead of being rounded away, and `grain` is the deepest that
+    /// offset got during the drag just made.
+    ///
+    /// A pane that quantises to `cellHeight`, which is what this file used to
+    /// test, reports `grain=0` for every drag it will ever see. That is the
+    /// negative control and it is exact: there is no way to produce a non-zero
+    /// `grain` by rounding. Run, with the drawn offset forced to zero:
+    ///
+    ///     the grid never left a row boundary during a drag of several rows:
+    ///     grain=0 against a 17-point row
+    ///
+    /// and `testASwipeScrollsIntoTheScrollback` passed in the same run, which
+    /// is the pair that makes it evidence: quantising does not stop a swipe
+    /// scrolling, it stops it tracking.
+    ///
+    /// Slowly and with a hold at the end, deliberately: this is about tracking,
+    /// so the gesture must not also be a throw, and `band` is asserted to be
+    /// zero so that a rubberband cannot stand in for the thing being measured.
+    func testTheGridTracksTheThumbBetweenRows() throws {
+        let app = launch()
+        let surface = try openATerminalInTheShell(app)
+        try XCTSkipUnless(
+            waitForHistory(app), "This pane has no scrollback, so a drag has nowhere to go.")
+
+        let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
+        try XCTSkipUnless(cell >= 8, "a row of \(cell) points has no room to be between")
+
+        dragAndStop(surface, fromY: 0.30, toY: 0.68)
+
+        let band = try XCTUnwrap(metric(app, "band"))
+        XCTAssertEqual(
+            band, 0,
+            "this drag ran over an end of the scrollback, so `grain` would be measuring "
+                + "the rubberband rather than the tracking")
+        let grain = try XCTUnwrap(metric(app, "grain"))
+        XCTAssertGreaterThan(
+            grain, cell / 4,
+            """
+            the grid never left a row boundary during a drag of several rows: grain=\(grain) \
+            against a \(cell)-point row. The content is quantising to whole rows and \
+            lurching a row at a time under a thumb that moved smoothly.
+            """
+        )
+        // Rounding to the NEAREST row is what bounds this: the drawn offset can
+        // never be more than half a row from the row the emulator is on, and a
+        // `grain` above that would mean the drawing and the emulator had come
+        // apart rather than that the tracking was especially good.
+        XCTAssertLessThanOrEqual(
+            grain, cell / 2 + 2,
+            "the grid was drawn \(grain) points from the row the emulator is on, which is "
+                + "more than half of a \(cell)-point row — the drawing and `display_offset` "
+                + "have drifted apart")
+    }
+
+    /// **The live screen resists too, and it is the end people hit.**
+    ///
+    /// The same rubberband as the test below, at the other end of the same
+    /// clamp, and it is a separate test because it is a separate branch: over
+    /// the top of the scrollback the content is held at `span`, and under the
+    /// live screen it is held at zero. A pane opens AT this end, which is what
+    /// makes this the cheap half — there is nothing to climb — and it is also
+    /// the end a reader arrives at most often, by swiping back down to the
+    /// prompt and going one swipe further.
+    ///
+    /// Before this, that swipe did nothing whatsoever: `VTCore.scroll` clamps
+    /// at zero, so the pane sat still under a moving thumb. The talk, on
+    /// exactly that: *"It would feel super harsh and disconcerting. You kind of
+    /// hit a wall there."*
+    ///
+    /// Negative control, run, with `shown` reduced to a hard clamp:
+    ///
+    ///     the live screen is a wall: a 427-point drag below the newest line
+    ///     moved the content 0 points, under one 17-point row
+    func testOverDraggingPastTheLiveScreenResistsAndReturns() throws {
+        let app = launch()
+        let surface = try openATerminalInTheShell(app)
+        _ = waitForVisibleSurface(app, timeout: 10)
+
+        let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
+        try XCTSkipUnless(cell > 0, "the pane reported a zero row height")
+        let before = try XCTUnwrap(position(app))
+        XCTAssertEqual(before.offset, 0, "a pane opens at the live screen, which is this end")
+
+        // Upward, which is towards the newest line — and there is nothing newer
+        // than the live screen, so every point of this is past the end.
+        let fromY: CGFloat = 0.86
+        let toY: CGFloat = 0.22
+        let travel = surface.frame.height * (fromY - toY)
+        dragAndStop(surface, fromY: fromY, toY: toY)
+
+        let band = try XCTUnwrap(metric(app, "band"))
+        XCTAssertGreaterThan(
+            band, cell,
+            """
+            the live screen is a wall: a \(Int(travel))-point drag below the newest line moved \
+            the content \(band) points, under one \(cell)-point row. Nothing on screen \
+            distinguishes that from an app that has stopped responding.
+            """
+        )
+        XCTAssertLessThan(
+            CGFloat(band), travel * 0.55,
+            """
+            the content followed the finger \(band) points past the end of \(Int(travel)) \
+            dragged, so there is no resistance at this boundary at all.
+            """
+        )
+        XCTAssertEqual(
+            position(app)?.offset, 0,
+            "the emulator was pushed off the live screen by a drag that had nowhere to go")
+
+        let returned = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in (self.metric(app, "over") ?? -1) == 0 }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returned], timeout: 5), .completed,
+            "the content was left hanging \(metric(app, "over") ?? -1) points below the live "
+                + "screen instead of springing back")
+    }
+
+    /// **The top of the scrollback resists, and lets go.**
+    ///
+    /// The talk's rubberbanding, and the reason it is not a nicety: *"you
+    /// actually wouldn't know the difference between a frozen phone, and phone
+    /// that's just at the top of the edge of the screen."* A terminal that
+    /// stopped dead at the oldest line read exactly like one that had stopped
+    /// responding.
+    ///
+    /// Two assertions, because there are two ways to get this wrong and they
+    /// are opposites. `band > cell` says the content MOVED — a wall reports
+    /// zero. `band` well under the finger's travel says it RESISTED — content
+    /// that follows the thumb one-to-one past the end has no boundary at all.
+    /// And then `over` returning to zero is the elastic half: the content pulls
+    /// itself back inside rather than being left hanging off the end.
+    ///
+    /// The peaks reset on every gesture, so what is measured is the one
+    /// over-drag this test makes and not whatever the climb did.
+    ///
+    /// Negative control, run: with `shown` reduced to `min(max(position, 0),
+    /// span)` — a hard clamp, which is what `VTCore.scroll` does on its own and
+    /// what this pane did before —
+    ///
+    ///     the top of the scrollback is a wall: a 427-point drag past the
+    ///     oldest line moved the content 0 points
+    ///
+    /// and `testOverDraggingPastTheLiveScreenResistsAndReturns` failed with the
+    /// same sentence about the other end, in the same run.
+    func testOverDraggingPastTheTopOfTheScrollbackResistsAndReturns() throws {
+        let app = launch()
+        let surface = try openATerminalInTheShell(app)
+        try XCTSkipUnless(
+            waitForHistory(app), "This pane has no scrollback, so there is no top to reach.")
+
+        let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
+        try XCTSkipUnless(cell > 0, "the pane reported a zero row height")
+
+        // Climb until a flick stops buying anything, which is the oldest line
+        // whatever number it turns out to be — this pane's history is whatever
+        // its tmux scrollback has accumulated, not the 400 lines
+        // `scripts/demo-host.sh` prints into it, and a streamed pane replays
+        // the lot. Flicks rather than drags because a flick is worth a hundred
+        // rows and a drag twenty: the bound is on iterations, and the number of
+        // lines to climb is not something this test gets to decide.
+        var top = 0
+        var climbed = false
+        for _ in 0..<8 {
+            // Ten at a time, then one look. Reading between every flick would
+            // spend most of the test waiting for coasts to finish, and a
+            // finger put down on moving content stops it anyway — which is the
+            // interruptibility this is relying on rather than working around.
+            for _ in 0..<10 { flick(surface, fromY: 0.15, toY: 0.88) }
+            let now = settledOffset(app) ?? 0
+            if now == top {
+                climbed = top > 0
+                break
+            }
+            top = now
+        }
+        try XCTSkipUnless(
+            climbed,
+            "never reached the top of this pane's scrollback (stopped at offset \(top)); "
+                + "the swipe assertion is testASwipeScrollsIntoTheScrollback's")
+
+        // One more drag, all of which is past the end. Slow and ending
+        // stopped, so that what is measured is resistance and not a throw, and
+        // so the peaks below describe this gesture alone — they reset on every
+        // `.began`.
+        let fromY: CGFloat = 0.22
+        let toY: CGFloat = 0.86
+        let travel = surface.frame.height * (toY - fromY)
+        dragAndStop(surface, fromY: fromY, toY: toY)
+
+        let band = try XCTUnwrap(metric(app, "band"))
+        XCTAssertGreaterThan(
+            band, cell,
+            """
+            the top of the scrollback is a wall: a \(Int(travel))-point drag past the oldest \
+            line moved the content \(band) points, which is less than one \(cell)-point row. \
+            Nothing on screen distinguishes that from an app that has stopped responding.
+            """
+        )
+        XCTAssertLessThan(
+            CGFloat(band), travel * 0.55,
+            """
+            the content followed the finger \(band) points past the end of \(Int(travel)) \
+            points dragged, so there is no resistance at the boundary at all — the scrollback \
+            simply keeps going where there is nothing to show.
+            """
+        )
+
+        let returned = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in (self.metric(app, "over") ?? -1) == 0 }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [returned], timeout: 5), .completed,
+            "the content was left hanging \(metric(app, "over") ?? -1) points off the top "
+                + "instead of springing back inside")
+    }
+
     // MARK: - The same pane, inside the navigation shell
 
     /// **The shell must not steal the gesture the pane already owns.**
@@ -940,8 +1324,18 @@ final class TerminalScrollTests: XCTestCase {
         try XCTSkipUnless(
             waitForHistory(app), "This pane has no scrollback, so there is no place to lose.")
 
+        // **Where the swipe ENDED, not where it was when the finger left.**
+        //
+        // `position(app)` straight after a swipe used to be the same thing;
+        // it stopped being the same thing when the terminal grew momentum. Even
+        // `velocity: .slow` leaves the recognizer with a couple of hundred
+        // points a second, so this read caught the pane mid-coast at offset 21,
+        // the two page turns below took a couple of seconds, and the control
+        // compared 21 against the 27 the pane had actually coasted to — a test
+        // failing because the app now does something, on an assertion about
+        // something else entirely.
         surface.swipeDown(velocity: .slow)
-        let scrolled = try XCTUnwrap(position(app))
+        let scrolled = try XCTUnwrap(settledOffset(app).map { (offset: $0, history: 0) })
         try XCTSkipUnless(
             scrolled.offset > 0,
             "Could not get the pane off the bottom; the scroll assertions are elsewhere.")

@@ -104,6 +104,14 @@ final class TerminalSession: ObservableObject {
     /// last one cannot outlive the pane.
     private var historyRefresh: Task<Void, Never>?
 
+    /// The last wheel-event write, so the next one can wait for it.
+    ///
+    /// Only the alternate screen ever produces these — see `scroll`. They are
+    /// the one part of scrolling that leaves the device, and they are an
+    /// ORDERED sequence, so they cannot each be given a task of their own and
+    /// left to resume in whatever order the runtime picks.
+    private var wheelWrites: Task<Void, Never>?
+
     // MARK: - Streaming
 
     /// True once a second ssh channel is carrying this pane's bytes.
@@ -1502,7 +1510,8 @@ final class TerminalSession: ObservableObject {
         // used the emulator's own. See `capturedCursor`.
         capturedCursor = (response.cursorRow, response.cursorColumn)
         scrollPosition = TerminalScrollPosition(
-            emulator.scrollPosition, streaming: streaming, wantsMouse: emulator.wantsMouse)
+            emulator.scrollPosition, streaming: streaming, wantsMouse: emulator.wantsMouse,
+            alternate: emulator.isAlternateScreen)
         grid = emulator.withSnapshot { snapshot in
             // The host's caret only means anything on a view that is showing
             // the host's screen. Scrolled back, the rows on screen are history
@@ -1585,7 +1594,8 @@ final class TerminalSession: ObservableObject {
         // text and the host's is at the prompt.
         let host = capturedCursor
         scrollPosition = TerminalScrollPosition(
-            vt.scrollPosition, streaming: streaming, wantsMouse: vt.wantsMouse)
+            vt.scrollPosition, streaming: streaming, wantsMouse: vt.wantsMouse,
+            alternate: vt.isAlternateScreen)
         grid = vt.withSnapshot { snapshot in
             guard let host else { return TerminalGrid(snapshot: snapshot) }
             return TerminalGrid(
@@ -1685,16 +1695,34 @@ final class TerminalSession: ObservableObject {
     }
 
     /// Scroll by `lines`, positive back into history. Mirrors the Mac's
-    /// `scrollWheel(with:)` exactly, because that policy is the correct one
-    /// on any platform: ask the core to encode a wheel event for the program
-    /// running in this pane first. A full-screen program — `less`, an
-    /// agent's TUI — gets mouse reports instead, because from inside an
-    /// alternate screen a wheel means something to the program that this
-    /// device's own scrollback cannot express. Only once the core says the
-    /// program does not want the event does this fall back to scrolling the
-    /// emulator's own history and redrawing locally, which sends nothing to
-    /// the host at all.
-    func scroll(lines: Int, column: Int, row: Int) async {
+    /// `scrollWheel(with:)` exactly, because that policy is the correct one on
+    /// any platform: a full-screen program — `less`, an agent's TUI — gets
+    /// mouse reports, because from inside an alternate screen a wheel means
+    /// something to the program that this device's own scrollback cannot
+    /// express. Everywhere else the wheel scrolls the emulator's own history
+    /// and redraws locally, sending nothing to the host at all.
+    ///
+    /// (This paragraph used to say the choice was made by asking the core
+    /// whether the program would take a wheel event, and falling back only when
+    /// it would not. That was the shipped bug — see the comment in the body,
+    /// which has been right since `03636b8` while this sentence went on
+    /// describing what it replaced.)
+    ///
+    /// **Synchronous, and that is what makes deceleration affordable.** It used
+    /// to be `async` and every caller wrapped it in a `Task`, which cost an
+    /// actor hop per line crossed. A finger can only cross a line so often; a
+    /// throw cannot — the momentum this now feeds crosses sixty lines in a
+    /// second and a half, and each hop would land a frame late, so the grid on
+    /// screen and the offset it is drawn against would disagree by however many
+    /// lines went past in between. Nothing on the local path ever suspended
+    /// (`scrollLocally` has no `await` in it at all), so the hop was buying
+    /// nothing: this is `@MainActor`, the emulator is right here, and the
+    /// caller can now read the resulting offset back on the very same turn of
+    /// the run loop it drew with. The one thing that genuinely leaves this
+    /// device — the wheel bytes for a program on the alternate screen — is
+    /// still a `Task`, chained so that two of them cannot swap places on the
+    /// wire.
+    func scroll(lines: Int, column: Int, row: Int) {
         guard let vt, lines != 0 else { return }
 
         // Who gets the wheel: the program, or this device's own view.
@@ -1721,7 +1749,7 @@ final class TerminalSession: ObservableObject {
         // a swipe means on a phone, and it wins — even from a program that
         // asked for the mouse.
         guard vt.isAlternateScreen else {
-            await scrollLocally(vt, lines: lines)
+            scrollLocally(vt, lines: lines)
             return
         }
 
@@ -1735,12 +1763,20 @@ final class TerminalSession: ObservableObject {
                     mouse: button, action: UInt32(FARCOOLER_VT_MOUSE_PRESS),
                     column: column, row: row, modifiers: [])
             else {
-                await scrollLocally(vt, lines: lines)
+                scrollLocally(vt, lines: lines)
                 return
             }
             bytes.append(contentsOf: chunk)
         }
-        await write(bytes)
+        // Chained rather than a fresh detached `Task` each time. Wheel events
+        // are a sequence — three up then two down is not the same thing as two
+        // down then three up — and independent tasks reach `write` in whatever
+        // order the runtime resumes them.
+        let previous = wheelWrites
+        wheelWrites = Task { [weak self] in
+            _ = await previous?.value
+            await self?.write(bytes)
+        }
     }
 
     /// Move this device's own view of the pane, and keep the poll loop in step
@@ -1749,7 +1785,7 @@ final class TerminalSession: ObservableObject {
     /// Reached whenever the pane is on the primary screen, which is where the
     /// scrollback lives — whether or not the program asked for the mouse. See
     /// `scroll` for why that is the rule.
-    private func scrollLocally(_ vt: VTCore, lines: Int) async {
+    private func scrollLocally(_ vt: VTCore, lines: Int) {
         // Read BEFORE the scroll, because "we are at the bottom" and "we have
         // just arrived at the bottom" are different questions and only the
         // second one is worth a round trip.
@@ -1913,13 +1949,28 @@ struct TerminalScrollPosition: Equatable {
     /// a phone could not scroll at all. A test can now ask for the other one.
     var wantsMouse = false
 
+    /// Whether the pane is showing the alternate screen.
+    ///
+    /// Read by the VIEW, and only to decide how a drag should FEEL — never to
+    /// decide where the wheel goes, which is `TerminalSession.scroll`'s rule
+    /// and stays there. A pane on the alternate screen has no scrollback of its
+    /// own, so there is no local offset to track sub-line, nothing to bound and
+    /// nothing to rubberband against: the drag is quantised to whole lines and
+    /// handed to the program, exactly as it always was. Everything the
+    /// physics adds belongs to the primary screen, where the history is.
+    var alternate = false
+
     init() {}
 
-    init(_ position: (offset: Int, history: Int), streaming: Bool, wantsMouse: Bool) {
+    init(
+        _ position: (offset: Int, history: Int), streaming: Bool, wantsMouse: Bool,
+        alternate: Bool
+    ) {
         offset = position.offset
         history = position.history
         self.streaming = streaming
         self.wantsMouse = wantsMouse
+        self.alternate = alternate
     }
 }
 
