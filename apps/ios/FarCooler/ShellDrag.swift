@@ -43,6 +43,7 @@ extension ShellRootView {
                 // in the global space this gesture is measured in, so the only
                 // conversion is into the page's own coordinates.
                 begin(on: .bar, from: value.startLocation.x - pageFrame.minX)
+                noteMovement(value)
                 let dx = value.translation.width
                 let up = -value.translation.height
                 decideAxis(dx: dx, up: up)
@@ -75,6 +76,17 @@ extension ShellRootView {
                 case .vertical:
                     let up = max(0, up)
                     lift = up
+                    // WHERE THE FINGER IS, not how far it has come, because
+                    // the row it is choosing is the row drawn under it. See
+                    // `ShellRootView.columnSelection`, which is the highlight
+                    // this feeds, and `ShellGesture.columnRow`, which is the
+                    // single mapping both it and the release now go through.
+                    //
+                    // Written on every frame and read by nothing else: the
+                    // release measures its own row off `value.location` a few
+                    // lines below, so a highlight and the tab you get can
+                    // only ever disagree by the frame the finger lifted in.
+                    fingerAbove = columnAbove(value.location, lift: up)
                     reveal = ShellGesture.overviewProgress(up: up, tabCount: tabCount)
                     // The other axis, and only once there is something in
                     // your hand to move. The axis lock is NOT released
@@ -107,18 +119,43 @@ extension ShellRootView {
                 // height is computed from. Everything this needs — the lift,
                 // whether the column was pinned — is state the release is
                 // about to spend.
-                let row = decided == nil ? tappedRow(at: value.startLocation) : nil
+                //
+                // For the DRAG as well as the tap, and that is the change:
+                // a drag used to have its row derived inside `barRelease`
+                // from the lift alone, which is a different mapping from this
+                // one and disagreed with it by a whole row for any gesture
+                // that did not start on the bar row's very top edge. One
+                // mapping, one point, both gestures.
+                //
+                // `value.location` and not `startLocation`: a touch is
+                // confirmed where it goes UP. For a tap the two are within
+                // the six points the axis lock allows, so this is the same
+                // row; for a drag it is the only one of the two that means
+                // anything.
+                let row = columnRow(at: value.location, lift: up)
+                let thrown = releaseVelocity(value)
                 rest()
                 apply(
                     fleet.barRelease(
-                        axis: decided, dx: dx, up: up, at: position, tapRow: row),
+                        axis: decided, dx: dx, up: up, at: position, row: row,
+                        // SwiftUI's velocity is points per second in the
+                        // gesture's own space, `height` positive DOWN — so
+                        // the lift's is negated, the same way `up` is.
+                        dxVelocity: thrown.width,
+                        upVelocity: -thrown.height),
                     dx: dx, page: page, wasOpen: openedBefore)
                 syncMenu()
             }
     }
 
-    /// Which column row a tap at `point` chose, or nil when there was no open
-    /// column under it.
+    /// Which column row a touch at `point` chose, or nil when there was no
+    /// open column under it.
+    ///
+    /// **One function for the tap and the drag both**, which is the whole of
+    /// the second half of this change. The tap has always been measured this
+    /// way; the drag used to be measured off its own travel inside
+    /// `barRelease`, and two answers to "which row is that" is how a menu
+    /// comes to disagree with itself by exactly one row.
     ///
     /// **Measured against the bar's own bottom edge rather than against the
     /// layout that puts it there.** `barBottom` is read off the surface
@@ -132,12 +169,28 @@ extension ShellRootView {
     /// The bar's bottom and not its top: the bar row's position is fixed and
     /// the column grows UP out of it, so the top edge is a number that
     /// animates and the bottom edge is one that does not.
-    private func tappedRow(at point: CGPoint) -> Int? {
+    private func columnRow(at point: CGPoint, lift: CGFloat) -> Int? {
+        guard let above = columnAbove(point, lift: lift) else { return nil }
+        return ShellGesture.columnRow(above: above, tabCount: tabCount)
+    }
+
+    /// How far `point` is above the bar row's top edge, or nil while there is
+    /// no column for it to be above.
+    ///
+    /// The guard is the same one a release is gated on —
+    /// `ShellGesture.columnHeight` is non-zero exactly when the column is
+    /// pinned or the lift has passed `openMin` — so the highlight and the
+    /// landing appear and disappear together rather than at two thresholds.
+    ///
+    /// `lift` is passed rather than read off the state it was just written to.
+    /// `onChanged` writes `lift` a line above the call, and whether a `@State`
+    /// getter returns a value set in the same closure is not something worth
+    /// depending on for the frame a column opens in.
+    private func columnAbove(_ point: CGPoint, lift: CGFloat) -> CGFloat? {
         guard barBottom > 0,
             ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned) > 0
         else { return nil }
-        return ShellGesture.columnRow(
-            above: (barBottom - ShellMetrics.barRow) - point.y, tabCount: tabCount)
+        return (barBottom - ShellMetrics.barRow) - point.y
     }
 
     /// The content's own swipe, along the flat sequence.
@@ -191,6 +244,7 @@ extension ShellRootView {
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
                 begin(on: .content, from: value.startLocation.x - pageFrame.minX)
+                noteMovement(value)
                 let dx = value.translation.width
                 decideAxis(dx: dx, up: -value.translation.height)
                 guard axis == .horizontal else { return }
@@ -215,16 +269,45 @@ extension ShellRootView {
             }
             .onEnded { value in
                 let decided = axis
-                // The same subtraction the release is measured against. A
-                // drag the pane absorbed entirely arrives here as zero, which
-                // `contentRelease` already reads as a spring-back — so there
-                // is no arm for "the pane took it", because a drag the shell
-                // never had is a drag of no distance.
-                let dx = carriedX(value.translation.width)
+                let travelled = value.translation.width
+                // **A drag the pane used ANY of carries no momentum to the
+                // shell**, and this is the one line of this change that was
+                // found by a test rather than reasoned out.
+                //
+                // A drag the pane absorbed entirely arrives as zero distance,
+                // which `contentRelease` already reads as a spring-back — but
+                // a velocity is not zeroed by a subtraction. So the first
+                // version of this zeroed the velocity only while the pane was
+                // STILL absorbing, and let it through once the hunk hit its
+                // edge. `testACodeLineAtItsEndHandsThePageTurnBack` went red:
+                // *"reading the line to its end turned the page on the way"*.
+                // Sixty points of drag, twenty-five of them spent scrolling a
+                // code line to its end and thirty-five handed over — and a
+                // release velocity from the whole sixty projected the
+                // thirty-five past four hundred.
+                //
+                // Which is the jump `carriedX` exists to prevent, arriving
+                // through the other axis of the same gesture. The handoff is
+                // there so that a page turn "begins from zero rather than
+                // jumping to wherever the finger had got to"; momentum carried
+                // across it is that jump, restated. So the rule is the whole
+                // gesture rather than the frame: `handoff` is non-zero exactly
+                // when the pane took some of this drag, and a drag the pane
+                // was part of has to earn its seventy points on travel alone.
+                //
+                // A flick that runs off the end of a line still turns the page
+                // — it takes the next gesture, which is what the second half
+                // of that same test does and what a nested scroller at its
+                // edge does everywhere else on this platform.
+                let panesOwn = handoff != 0 || dragClaim.room.absorbs(dx: travelled) > 0.5
+                // The same subtraction the release is measured against.
+                let dx = carriedX(travelled)
                 rest()
                 apply(
-                    fleet.contentRelease(axis: decided, dx: dx, at: position), dx: dx,
-                    page: page, wasOpen: false)
+                    fleet.contentRelease(
+                        axis: decided, dx: dx, at: position,
+                        dxVelocity: panesOwn ? 0 : releaseVelocity(value).width),
+                    dx: dx, page: page, wasOpen: false)
                 syncMenu()
             }
     }
@@ -240,6 +323,10 @@ extension ShellRootView {
         // claimed any of this drag" is true by construction.
         dragClaim.room = .none
         handoff = 0
+        // No movement yet, so nothing recent enough to be momentum. A gesture
+        // that ends here without ever moving is a tap, and a tap throws
+        // nothing.
+        lastMoved = nil
         track = which
         wasOpen = columnPinned
         liftOrigin = originX
@@ -295,6 +382,38 @@ extension ShellRootView {
         return dx - handoff
     }
 
+    /// Remember when the finger last actually moved.
+    ///
+    /// Half a point of slop, because the question is whether the finger is
+    /// travelling and not whether the digitizer jittered. See
+    /// `ShellRootView.lastMoved`, which is where the measurements that make
+    /// this necessary are written down.
+    private func noteMovement(_ value: DragGesture.Value) {
+        guard let last = lastMoved else {
+            lastMoved = (at: value.translation, time: value.time)
+            return
+        }
+        guard abs(value.translation.width - last.at.width) > 0.5
+            || abs(value.translation.height - last.at.height) > 0.5
+        else { return }
+        lastMoved = (at: value.translation, time: value.time)
+    }
+
+    /// The velocity a release is actually entitled to.
+    ///
+    /// `value.velocity` when the finger was still moving, and flatly zero when
+    /// it had stopped — see `ShellRootView.lastMoved` for why the second half
+    /// cannot be left to the estimator. Zero rather than a decay, because
+    /// there is nothing to decay: a finger that has been parked for four
+    /// frames is not going anywhere, and a projection is a claim about where
+    /// it was going.
+    private func releaseVelocity(_ value: DragGesture.Value) -> CGSize {
+        guard let last = lastMoved,
+            value.time.timeIntervalSince(last.time) <= Self.stillFor
+        else { return .zero }
+        return value.velocity
+    }
+
     /// Decide the axis, once.
     ///
     /// The guard is the whole rule: once `axis` is non-nil nothing asks again
@@ -321,11 +440,26 @@ extension ShellRootView {
     /// column open with no gesture holding it — a column that is open because
     /// of a drag that ended.
     ///
-    /// The page falls back the same way, and by the same spring: `lift` is
+    /// The page falls back the same way and by the same spring: `lift` is
     /// what holds it up, so letting go of the bar drops the screen back onto
-    /// the display with whatever velocity the finger left it — SwiftUI hands
-    /// the in-flight `interactiveSpring` over to this one rather than starting
-    /// from a standstill.
+    /// the display.
+    ///
+    /// **It does NOT inherit the finger's velocity, and that is a real gap
+    /// rather than a decision.** This used to say SwiftUI handed the in-flight
+    /// `interactiveSpring` over to this one — which was true while `lift` was
+    /// written inside a tracking spring, and stopped being true the moment it
+    /// was written raw so the page could follow the finger one point per
+    /// point. There is no in-flight animation to hand anything over now, so a
+    /// page thrown upward and released still starts its fall from a
+    /// standstill. The decisions the throw feeds are all fixed —
+    /// `barRelease` reads `value.velocity` — but the MOTION of the fall is
+    /// not, and the fix is not a parameter on this line: `Animation.spring`
+    /// takes no initial velocity, and the only SwiftUI animation that does,
+    /// `interpolatingSpring`, is ADDITIVE — with `minimumDistance: 0` a
+    /// finger landing mid-settle writes `lift` raw and would draw it plus
+    /// whatever the interrupted spring had left. That is a worse defect than
+    /// the one it fixes, so the lift wants what the terminal already has:
+    /// its own stepped physics rather than a SwiftUI spring.
     ///
     /// `trackX` is deliberately NOT reset here, and neither are `crossing`,
     /// `carryX` or `reveal`. They are the shell's translation and the shell's
@@ -340,6 +474,11 @@ extension ShellRootView {
         gestureActive = false
         axis = nil
         wasOpen = false
+        // There is no finger, so there is no row under one. Cleared here for
+        // the reason everything else in this function is: a highlight left
+        // standing after the gesture that placed it would be a pinned column
+        // pointing at a row nobody is touching.
+        fingerAbove = nil
         withAnimation(Self.settle) { lift = 0 }
     }
 

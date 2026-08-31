@@ -137,9 +137,9 @@ struct ShellHarness: View {
                 // a fixture that looks designed stops being a stand-in for one
                 // that is not. Three at the front because that is the size the
                 // column and the overview threshold are usually looked at, and
-                // a one-tab workspace in the middle because
-                // `columnSelection`'s cap and the overview's reach both depend
-                // on the count and both have to be reachable by flag alone.
+                // a one-tab workspace in the middle because the column's own
+                // ends and the overview's reach both depend on the count and
+                // both have to be reachable by flag alone.
                 let tabs = [3, 2, 5, 1, 4][index % 5]
                 return ShellWorkspace(
                     id: "ws-\(index)",

@@ -82,6 +82,26 @@ final class ShellGestureTests: XCTestCase {
             forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.5)
     }
 
+    /// Lift the bar by `points` and let go while still moving.
+    ///
+    /// The same distance as `liftBar` and the opposite release: no hold, so
+    /// the finger leaves the glass while still moving, which is the only thing
+    /// that differs between the two.
+    ///
+    /// Every other gesture in this file holds for 0.4 or 0.5 seconds before
+    /// releasing, and `ShellRootView.stillFor` makes that hold mean exactly
+    /// zero velocity rather than nearly zero — so the rest of this suite is a
+    /// negative control for the projection: a release with no momentum
+    /// projects nowhere, and not one of their outcomes may change.
+    private func flickBar(_ app: XCUIApplication, by points: CGFloat) {
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
+        let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let to = from.withOffset(CGVector(dx: 0, dy: -points))
+        from.press(
+            forDuration: 0.05, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
+    }
+
     /// A swipe on the content walks the flat sequence, and the opposite swipe
     /// walks back to exactly where it started.
     ///
@@ -180,6 +200,63 @@ final class ShellGestureTests: XCTestCase {
         // gesture that has no button to open it.
         app.buttons["shell-overview-done"].tap()
         XCTAssertEqual(try state(app)["overview"], 0, "Done did not close the overview")
+    }
+
+    /// **A flick up from over a menu row reaches the overview, and a
+    /// deliberate lift from the same place stays in the workspace.** The
+    /// owner's complaint, and the whole of the momentum projection on one
+    /// screen.
+    ///
+    /// The talk's PIP example reproduced as the *before* case — *"the issue
+    /// here is that we're only looking at position, we're completely ignoring
+    /// the momentum"*. The overview used to be reachable only by dragging a
+    /// full 76 points past the last row and stopping there, so a flick, which
+    /// is how anybody who has used a task switcher asks for a grid of cards,
+    /// landed on whichever row the thumb happened to be passing.
+    ///
+    /// **The distances are chosen for what they prove, and they differ.** 60
+    /// points pins the ROW, because that is where the two mappings disagree:
+    /// the bar's centre sits 22 points below its own top edge, so a 60-point
+    /// lift puts the fingertip 38 points up the column — inside the row
+    /// nearest the bar, which is the LAST tab. The delta mapping this replaced
+    /// read the 60 rather than the 38 and answered tab 1, a whole row above
+    /// the thumb, and the further down the bar a drag began the worse it got.
+    /// 140 pins the ESCAPE, because it leaves the fingertip 118 points up —
+    /// squarely on the TOP row, with the column's last 14 points and the
+    /// overview's whole 76-point run still ahead of it. A release there is a
+    /// release from over a menu item by any reading, and it is the one the
+    /// owner reported landing on the item.
+    ///
+    /// 140 rather than 60 for the flick because a synthesized flick's velocity
+    /// is not repeatable: the same `.fast` drag measured 284 points per second
+    /// on one run of this simulator and 803 on the next. From 140 the escape
+    /// needs 136, so the slower of those two still clears it twice over; from
+    /// 60 it needs 297 and the test would be a coin toss on the machine rather
+    /// than a statement about the app.
+    func testAFlickUpFromOverAMenuRowReachesTheOverview() throws {
+        let app = launch()
+        XCTAssertEqual(try state(app)["tabs"], 3, "workspace 0 of the canned fleet has three tabs")
+        XCTAssertEqual(try state(app)["tab"], 0)
+
+        // The row, off the finger's position rather than off its travel.
+        liftBar(app, by: 60)
+        let landed = try state(app)
+        XCTAssertEqual(landed["overview"], 0, "a deliberate 60-point lift left the workspace")
+        XCTAssertEqual(
+            landed["tab"], 2,
+            "the row under the finger is the one nearest the bar, which is the last tab")
+
+        // The escape, and its negative control first: the same 140 points,
+        // held still before the finger leaves, projects nowhere.
+        liftBar(app, by: 140)
+        let held = try state(app)
+        XCTAssertEqual(held["overview"], 0, "a lift that stopped before letting go still escaped")
+        XCTAssertEqual(held["tab"], 0, "and it chose the top row, which is where the finger was")
+
+        flickBar(app, by: 140)
+        XCTAssertEqual(
+            try state(app)["overview"], 1,
+            "a flick from the same 140 points stayed in the workspace")
     }
 
     /// A tap holds the column open, and a second tap closes it.
@@ -377,8 +454,8 @@ final class ShellGestureTests: XCTestCase {
     /// Opening worked, selecting did not.
     ///
     /// The last tab and not the first, because the row nearest the bar is the
-    /// LAST one — see `ShellGesture.columnSelection` — so this fails if the
-    /// mapping is inverted as well as if the tap is ignored.
+    /// LAST one — see `ShellGesture.columnRow` — so this fails if the mapping
+    /// is inverted as well as if the tap is ignored.
     func testTappingAColumnRowSwitchesToThatTab() throws {
         let app = launch()
         let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch

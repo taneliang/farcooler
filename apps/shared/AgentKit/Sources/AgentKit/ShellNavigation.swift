@@ -45,6 +45,33 @@ enum ShellMetrics {
     /// looking native was worth more than the four points.
     static let rowHeight: CGFloat = 44
 
+    /// How far BELOW the fingertip the column row it selects sits.
+    ///
+    /// Thumb occlusion, and ONE constant rather than a second mapping. A
+    /// finger on a 44-point row covers most of it, so the row you are
+    /// choosing is the one you cannot see; shifting the hit-test down by this
+    /// much draws the highlight at or below the contact point instead of
+    /// under it. The owner asked for "menu items below the finger" and this
+    /// is the whole of it.
+    ///
+    /// **A QUARTER of a row, and the size is the argument.** The literal
+    /// reading of "the row below" is a full `rowHeight`, and a full row
+    /// breaks this mapping at both ends: the row nearest the bar would own 88
+    /// points of travel while every other row owned 44, and a TAP — which
+    /// comes through `columnRow` too, deliberately, because two mappings
+    /// disagreeing by a row is the bug this is part of fixing — would choose
+    /// the row under the one you touched. Half a row is no better for the
+    /// tap: a row's label is centred, so aiming at it lands exactly on the
+    /// boundary and resolves by rounding.
+    ///
+    /// Eleven points leaves the middle 33 of every row still selecting
+    /// itself, so a deliberate aim is never overridden, while the whole of
+    /// the selected row is drawn at most 33 points above the contact point
+    /// rather than 44. The two costs are stated where they are paid, in
+    /// `columnRow`: the bottom row takes 55 points of travel instead of 44,
+    /// and the column's hit region reaches 11 points past its own top edge.
+    static let rowBias: CGFloat = rowHeight / 4
+
     /// The bar itself, and one item of its rail. The same 44 the rest of this
     /// app calls `PaneMetrics.target`, arrived at from the other side — the
     /// bar is a thing you hit as well as a thing you read.
@@ -596,7 +623,7 @@ enum ShellGesture {
     ///
     /// A true lock costs the bar nothing, and that is why one rule can serve
     /// both. A downward flick on the bar now locks VERTICAL, where `lift` is
-    /// floored at zero, `columnSelection` answers nil below `openMin` and the
+    /// floored at zero, no column row is ever under the finger and the
     /// release is `.abandon` — a gesture that does nothing, which is what the
     /// prototype's comment wanted and reached the other way round.
     static func axis(dx: CGFloat, up dy: CGFloat) -> ShellAxis? {
@@ -622,44 +649,100 @@ enum ShellGesture {
         return nil
     }
 
-    /// Whether `dx` has travelled far enough to commit a page turn.
+    /// `UIScrollView.DecelerationRate.normal`, as a plain number.
+    ///
+    /// It is 0.998, and the unit is "fraction of the velocity surviving one
+    /// millisecond" — which is where the 1000 in `project` comes from.
+    /// Written out rather than read off `UIScrollView`, because this package
+    /// is Foundation-only and is compiled for the Mac and the watch as well;
+    /// see this file's header on AgentKit being a shared PACKAGE rather than
+    /// shared UIKit.
+    static let decelerationRate: CGFloat = 0.998
+
+    /// Where content thrown at `velocity` would come to rest.
+    ///
+    /// The talk's projection function, in the units a release arrives in:
+    /// points per second in, points out. WWDC 2018 803, on the PIP that went
+    /// to the nearest corner however hard you flicked it — *"the issue here
+    /// is that we're only looking at position, we're completely ignoring the
+    /// momentum"* — and then on the fix: *"we've taken the velocity of the
+    /// PIP when it was thrown, we've mixed in the deceleration rate, and we
+    /// end up with this projected position where it could go if we scrolled
+    /// it there."*
+    ///
+    /// A scroll view's own deceleration rate, and that is the point of using
+    /// this number rather than a tuned one: a flick in this shell travels
+    /// exactly as far as a flick in every other scroll view on the phone, so
+    /// there is nothing new to learn about how far a throw goes.
+    ///
+    /// **`TerminalScrollPhysics.projection(of:decelerationRate:)` in
+    /// `TerminalView.swift` is this same formula and this same 0.998**, and
+    /// the pair is deliberate rather than an oversight. That one is UIKit and
+    /// iOS-only — it reads `UIScrollView.DecelerationRate.normal` and steps a
+    /// per-frame integration beside it — and this one has to be reachable
+    /// from `swift test` with no simulator, which is the whole reason this
+    /// file exists. `theShellThrowsExactlyAsFarAsTheTerminalDoes` pins the
+    /// numbers against hand-computed values so the two cannot drift apart in
+    /// silence. The tidy end state is the terminal calling this one.
+    static func project(
+        velocity: CGFloat, decelerationRate rate: CGFloat = decelerationRate
+    ) -> CGFloat {
+        guard rate > 0, rate < 1 else { return 0 }
+        return (velocity / 1000) * rate / (1 - rate)
+    }
+
+    /// Where a drag that has travelled `travel` and is still moving at
+    /// `velocity` would end up.
+    ///
+    /// **Every ESCAPE decision in this shell is measured against this and not
+    /// against the translation.** An escape is a decision about where the
+    /// gesture was GOING — turn the page, leave for the overview — and the
+    /// finger's position at the instant it lifts is only half of that. A slow
+    /// deliberate drag projects almost nothing past where it already is and
+    /// so lands where it was pointed; a flick projects hundreds of points and
+    /// escapes, which is the whole of the owner's report that a flick up from
+    /// the bar stayed in the workspace because the thumb happened to lift
+    /// over a menu row.
+    ///
+    /// **What it is NOT measured against is which row you are on.** That is
+    /// live feedback with a highlight drawn under the finger, and confirming
+    /// a row other than the lit one would be a worse defect than the one this
+    /// fixes. See `barRelease`, where the two are used a line apart.
+    static func projected(_ travel: CGFloat, velocity: CGFloat) -> CGFloat {
+        travel + project(velocity: velocity)
+    }
+
+    /// Whether a horizontal throw of `dx` has gone far enough to commit a
+    /// page turn.
+    ///
+    /// **`dx` is a THROW distance, not a translation.** Both release sites
+    /// pass `projected(_:velocity:)` and so does the direction they read
+    /// beside it, which is what makes a 40-point flick across a terminal turn
+    /// the page and a 60-point deliberate drag spring back. Handed a raw
+    /// translation this is the bare threshold it always was, which is what
+    /// the default velocity of zero is for: a caller with no velocity to give
+    /// is honestly saying the gesture had none.
     static func commits(dx: CGFloat) -> Bool { abs(dx) >= ShellMetrics.pageCommit }
 
-    /// How many column rows a lift of `up` has revealed.
-    static func columnSteps(up: CGFloat, tabCount: Int) -> Int {
-        guard tabCount > 0, up > 0 else { return 0 }
-        return min(tabCount, Int((up / ShellMetrics.rowHeight).rounded(.up)))
-    }
-
-    /// Which row a lift of `up` is selecting, or nil when it is selecting none.
+    /// Which row of an open column a touch at this height chose, or nil for
+    /// a touch that is not on the column at all.
     ///
-    /// Nil below `openMin` and not "row 0": the difference between them is
-    /// whether letting go costs you the tab you were on, and a bar that
-    /// switched tabs on a 10-point twitch would make the bar untouchable.
+    /// **The only mapping from a finger to a column row, for the tap and for
+    /// the drag alike.** There used to be two. This one, absolute, measured
+    /// off the bar's drawn bottom edge, answered a tap; a second,
+    /// `columnSelection`, answered a DRAG off the lift alone —
+    /// `tabCount - ceil(up / rowHeight)`, pure delta, with no idea where the
+    /// finger had started. Write `d` for how far below the column's bottom
+    /// edge the touch landed and the two agree only at `d == 0`: at `d == 44`
+    /// the drag selected one full row ABOVE the finger for the whole gesture,
+    /// and at `d == 44` with a 20-point lift it highlighted the last row
+    /// while the thumb was still 24 points below the column entirely. That is
+    /// the owner's report that "the selected menu item will be too far above
+    /// my finger to be intuitive", and it was worth exactly one row.
     ///
-    /// **Counted DOWN from the last tab, because the menu reads top to
-    /// bottom.** The column lists tab 0 at the TOP — the same order the
-    /// ribbon draws its marks in, leftmost mark to topmost row — so the row
-    /// nearest the bar, which is the one the first `rowHeight` of lift puts
-    /// under the thumb, is the LAST tab. Every further row of lift walks one
-    /// step UPWARD through the list toward tab 0, and a lift long enough to
-    /// fill the column selects tab 0.
-    ///
-    /// It used to be `steps - 1`, against a column drawn bottom-up. Both were
-    /// self-consistent and the pair of them was wrong in the way that matters:
-    /// a menu whose first item is at the bottom is a menu you read backwards,
-    /// and it disagreed with the ribbon two points below it about which end of
-    /// a workspace tab 0 lives at. Fixing the order therefore had to invert
-    /// this — the mapping and the drawing are one decision, and this is the
-    /// half of it a test can hold.
-    static func columnSelection(up: CGFloat, tabCount: Int) -> Int? {
-        guard up >= ShellMetrics.openMin else { return nil }
-        let steps = columnSteps(up: up, tabCount: tabCount)
-        return steps > 0 ? tabCount - steps : nil
-    }
-
-    /// Which row of an OPEN column a TAP lands on, or nil for a touch that is
-    /// not on the column at all.
+    /// Two answers to "which row is that" is how a menu comes to disagree
+    /// with itself, so there is one, and the drag passes the finger's
+    /// position through `barRelease` the way the tap always did.
     ///
     /// **The column had no tap target of its own and this is it.**
     /// `ShellColumn` draws rows and declares nothing, so the only recognizer
@@ -671,21 +754,41 @@ enum ShellGesture {
     ///
     /// It is arithmetic here rather than a `Button` in the column for the
     /// reason the rest of this file exists: the row a touch lands on is a
-    /// mapping, `columnSelection` is the same mapping read off a lift, and two
-    /// answers to "which row is that" is exactly how the drag and the tap come
-    /// to disagree about a menu.
+    /// mapping, and a mapping is a thing `swift test` can hold. A `Button`
+    /// per row would also be a second answer to "which row is that" for the
+    /// drag to disagree with, which is the defect above stated twice.
     ///
-    /// `above` is how far the touch is ABOVE the bar row's top edge, so a tap
-    /// on the bar itself is zero or negative and answers nil — which leaves it
-    /// the toggle it always was. Counted from the BOTTOM of the list for the
-    /// same reason `columnSelection` counts down: the column reads top to
-    /// bottom with tab 0 first, so the row nearest the bar is the LAST tab.
-    static func columnRow(above: CGFloat, tabCount: Int) -> Int? {
-        guard tabCount > 0, above > 0, above <= columnFull(tabCount: tabCount) else { return nil }
-        // Clamped rather than trusted: `above == columnFull` is the column's
-        // very top edge and divides to exactly `tabCount`, which is one past
-        // the end of the list.
-        let fromBottom = min(tabCount - 1, Int(above / ShellMetrics.rowHeight))
+    /// `above` is how far the touch is ABOVE the bar row's top edge, so a
+    /// touch on the bar itself is zero or negative and answers nil — which
+    /// leaves a tap there the toggle it always was, and leaves a lift that
+    /// has not cleared the bar selecting nothing. Counted from the BOTTOM of
+    /// the list, because the column reads top to bottom with tab 0 first, so
+    /// the row nearest the bar is the LAST tab.
+    ///
+    /// `bias` shifts the answer DOWN the column by that many points — see
+    /// `ShellMetrics.rowBias`, which is where the eleven is argued. The two
+    /// prices it charges are both here. The bottom row's band runs from the
+    /// bar to `rowHeight + bias`, so it takes 55 points of travel rather than
+    /// 44; and the region reaches `bias` past the column's own top edge, so
+    /// the top row keeps a full 44 points of its own and gains a margin
+    /// above it rather than being squeezed to 33. That margin is the talk's
+    /// advice about targets — *"create an extra margin around the tap area…
+    /// avoid accidental cancellations if a touch moves during interaction"* —
+    /// and it is small on purpose: past it the finger has left the menu, the
+    /// page has started to rise, and `ShellRootView.menuShouldShow` has
+    /// already taken the column off the screen. Nothing is selected off a
+    /// menu that is not drawn.
+    static func columnRow(
+        above: CGFloat, tabCount: Int, bias: CGFloat = ShellMetrics.rowBias
+    ) -> Int? {
+        guard tabCount > 0, above > 0, above <= columnFull(tabCount: tabCount) + bias
+        else { return nil }
+        // Clamped at both ends rather than trusted. Below `bias` the finger is
+        // between the bar and the row it would have chosen, and the row
+        // nearest it is the bottom one; at the top, `above == columnFull`
+        // divides to exactly `tabCount`, one past the end of the list.
+        let fromBottom = min(
+            tabCount - 1, max(0, Int((above - bias) / ShellMetrics.rowHeight)))
         return tabCount - 1 - fromBottom
     }
 
@@ -716,8 +819,8 @@ enum ShellGesture {
         // dragged past most of it. A menu you can only read one item of is not
         // a menu; the owner asked for it to spring open, and it is right.
         //
-        // The lift still drives the SELECTION — `columnSelection` is unchanged
-        // — so the finger keeps choosing among rows that are all already on
+        // The finger still drives the SELECTION — `columnRow` reads its
+        // position — so it keeps choosing among rows that are all already on
         // screen. That is the part worth keeping from the original: the
         // continuous drag from "next workspace" through the tabs and on into
         // the overview still works, it just stops hiding its options.
@@ -851,23 +954,43 @@ extension ShellFleet {
     /// caller; `axis` is the one decided on the first 6 points, or nil if the
     /// gesture never grew that big — which is a tap and is why this function
     /// can return `.toggleColumn` at all.
-    /// `tapRow` is which column row a tap landed on, from
-    /// `ShellGesture.columnRow`, and is nil for every gesture that is not a
-    /// tap on an open column. It is an argument rather than something derived
-    /// here because it takes a POINT, and a point is the one thing about a
-    /// gesture this file has no business knowing how to place.
+    /// `row` is which column row the finger came up over, from
+    /// `ShellGesture.columnRow`, and is nil whenever there was no open column
+    /// under it. It is an argument rather than something derived here because
+    /// it takes a POINT, and a point is the one thing about a gesture this
+    /// file has no business knowing how to place.
+    ///
+    /// **One `row` for the tap and the drag both.** It used to be `tapRow`,
+    /// consulted only when there was no axis, and a DRAG got its row from
+    /// `columnSelection` off the lift alone — two mappings that disagreed by
+    /// a whole row for any gesture that did not start on the bar row's very
+    /// top edge. `ShellGesture.columnRow`'s header has the arithmetic.
+    ///
+    /// `dxVelocity` and `upVelocity` are the finger's speed at the instant it
+    /// lifted, in points per second, `up`-positive on the vertical the same
+    /// way `up` is. **They decide the two ESCAPES and nothing else** — has
+    /// this gone far enough sideways to turn the page, has it gone far enough
+    /// up to stay in the overview — because those are questions about where
+    /// the gesture was going, and the answer to "which row am I on" is a
+    /// highlight the person is looking at. See `ShellGesture.projected`.
+    /// Both default to zero, which is the honest reading of a caller with no
+    /// velocity to give: a gesture that was not moving.
     func barRelease(
         axis: ShellAxis?, dx: CGFloat, up: CGFloat, at position: ShellPosition,
-        tapRow: Int? = nil
+        row: Int? = nil, dxVelocity: CGFloat = 0, upVelocity: CGFloat = 0
     ) -> ShellRelease {
         // A tap, and the column is open under it: choosing a row. Ahead of
         // the toggle, because a tap that lands on a row is not a tap on the
         // bar — see `ShellGesture.columnRow`, which answers nil for the bar
         // itself and leaves the toggle exactly as it was.
-        guard let axis else { return tapRow.map { .land(tab: $0) } ?? .toggleColumn }
+        guard let axis else { return row.map { .land(tab: $0) } ?? .toggleColumn }
+        // Where the sideways half of this gesture was HEADED, which is what
+        // both of its escapes are decided on.
+        let thrownX = ShellGesture.projected(dx, velocity: dxVelocity)
         switch axis {
         case .horizontal:
-            guard ShellGesture.commits(dx: dx), let direction = ShellGesture.direction(dx: dx),
+            guard ShellGesture.commits(dx: thrownX),
+                let direction = ShellGesture.direction(dx: thrownX),
                 let step = step(from: position, direction, along: .bar)
             else { return .springBack }
             return .commit(step)
@@ -879,12 +1002,25 @@ extension ShellFleet {
             // argued. Along `.bar`, because what a lifted page is holding is
             // a WORKSPACE: the cards it can be moved between are the
             // overview's cards, and those are workspaces.
+            //
+            // `pageIsHeld` reads the finger's ACTUAL lift and not the thrown
+            // one: it is asking whether there is a page in your hand right
+            // now, which is a fact about the screen rather than a prediction.
             let sideways: ShellStep? =
                 ShellGesture.pageIsHeld(up: up, tabCount: tabs)
-                    && ShellGesture.commits(dx: dx)
-                ? ShellGesture.direction(dx: dx).flatMap { step(from: position, $0, along: .bar) }
+                    && ShellGesture.commits(dx: thrownX)
+                ? ShellGesture.direction(dx: thrownX).flatMap {
+                    step(from: position, $0, along: .bar)
+                }
                 : nil
-            if up >= ShellGesture.columnFull(tabCount: tabs) + ShellMetrics.overRun {
+            // **The escape, and the one place the lift is projected.** A slow
+            // deliberate lift adds almost nothing here and stops where it was
+            // pointed; a flick adds hundreds of points and leaves. That is
+            // the owner's report exactly: flicking up from the bar with the
+            // thumb lifting over a menu row used to land on the row, because
+            // the only thing being read was where the finger happened to be.
+            let thrownUp = ShellGesture.projected(up, velocity: upVelocity)
+            if thrownUp >= ShellGesture.columnFull(tabCount: tabs) + ShellMetrics.overRun {
                 // The lift says you are staying in the overview; the sideways
                 // says which cell the page lands in. At the ends of the fleet
                 // there is no neighbour to carry to, and the lift's answer
@@ -898,9 +1034,12 @@ extension ShellFleet {
                 // reached from a few points higher up.
                 return .commit(sideways)
             }
-            if let row = ShellGesture.columnSelection(up: up, tabCount: tabs) {
-                return .land(tab: row)
-            }
+            // Not an escape: the row under the finger, and the ACTUAL finger.
+            // The `openMin` gate is the one thing still read off the lift,
+            // and it is not a mapping — it is the line between "I touched the
+            // bar and moved a little", which must cost nothing, and "I am
+            // choosing a tab".
+            if up >= ShellMetrics.openMin, let row { return .land(tab: row) }
             return .abandon
         }
     }
@@ -916,9 +1055,20 @@ extension ShellFleet {
     /// stealing a gesture the pane already owns and has a regression test for.
     /// A gesture that locks vertical on the content therefore resolves to
     /// nothing here and the pane keeps it.
-    func contentRelease(axis: ShellAxis?, dx: CGFloat, at position: ShellPosition) -> ShellRelease {
-        guard axis == .horizontal, ShellGesture.commits(dx: dx),
-            let direction = ShellGesture.direction(dx: dx),
+    ///
+    /// `dxVelocity` is the finger's sideways speed at the instant it lifted,
+    /// and it is the whole of what makes a short fast flick across a terminal
+    /// turn the page. Forty points thrown at 600 points per second projects
+    /// past 300 and commits; forty points placed deliberately projects almost
+    /// nothing and springs back, which is the same forty points meaning two
+    /// different things and is the reason a threshold on translation alone
+    /// was wrong. See `ShellGesture.projected`.
+    func contentRelease(
+        axis: ShellAxis?, dx: CGFloat, at position: ShellPosition, dxVelocity: CGFloat = 0
+    ) -> ShellRelease {
+        let thrown = ShellGesture.projected(dx, velocity: dxVelocity)
+        guard axis == .horizontal, ShellGesture.commits(dx: thrown),
+            let direction = ShellGesture.direction(dx: thrown),
             let step = step(from: position, direction, along: .content)
         else { return .springBack }
         return .commit(step)

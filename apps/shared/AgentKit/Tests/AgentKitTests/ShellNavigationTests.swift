@@ -364,17 +364,24 @@ struct ShellNavigationTests {
     /// tab switcher was dead to the one gesture everybody tries first.
     ///
     /// `above` is measured from the bar row's TOP edge, so the first row up is
-    /// the LAST tab — the same direction `columnSelection` counts, because the
-    /// column reads top to bottom with tab 0 first.
+    /// the LAST tab, because the column reads top to bottom with tab 0 first.
+    ///
+    /// Written against `rowBias` rather than around it: the mapping is one
+    /// row-height shifted DOWN by the bias, and the numbers below are that
+    /// sentence read off at the boundaries.
     @Test func aTapOnAColumnRowPicksTheRowUnderIt() {
         let row = ShellMetrics.rowHeight
-        // The row nearest the bar is the last tab.
+        let bias = ShellMetrics.rowBias
+        // The row nearest the bar is the last tab, and it owns the bias band
+        // below its own bottom edge as well.
         #expect(ShellGesture.columnRow(above: 1, tabCount: 3) == 2)
-        #expect(ShellGesture.columnRow(above: row - 1, tabCount: 3) == 2)
-        // One row up.
-        #expect(ShellGesture.columnRow(above: row + 1, tabCount: 3) == 1)
-        // The topmost row is tab 0, right up to the column's own top edge.
-        #expect(ShellGesture.columnRow(above: 2 * row + 1, tabCount: 3) == 0)
+        #expect(ShellGesture.columnRow(above: bias, tabCount: 3) == 2)
+        #expect(ShellGesture.columnRow(above: row, tabCount: 3) == 2)
+        // One row up, once the finger is a bias past that row's bottom edge.
+        #expect(ShellGesture.columnRow(above: row + bias, tabCount: 3) == 1)
+        #expect(ShellGesture.columnRow(above: 2 * row, tabCount: 3) == 1)
+        // The topmost row is tab 0, and it keeps a full row of its own.
+        #expect(ShellGesture.columnRow(above: 2 * row + bias, tabCount: 3) == 0)
         #expect(ShellGesture.columnRow(above: 3 * row, tabCount: 3) == 0)
     }
 
@@ -382,48 +389,115 @@ struct ShellNavigationTests {
     /// tap on the BAR the toggle it has always been.
     @Test func aTapOffTheColumnPicksNoRow() {
         let row = ShellMetrics.rowHeight
+        let bias = ShellMetrics.rowBias
         // On the bar row itself, or below it.
         #expect(ShellGesture.columnRow(above: 0, tabCount: 3) == nil)
         #expect(ShellGesture.columnRow(above: -20, tabCount: 3) == nil)
-        // Above the column's top edge.
-        #expect(ShellGesture.columnRow(above: 3 * row + 1, tabCount: 3) == nil)
+        // Past the column's top edge, and past the margin above it.
+        #expect(ShellGesture.columnRow(above: 3 * row + bias, tabCount: 3) == 0)
+        #expect(ShellGesture.columnRow(above: 3 * row + bias + 1, tabCount: 3) == nil)
         // A workspace with no tabs has no rows to hit.
         #expect(ShellGesture.columnRow(above: 10, tabCount: 0) == nil)
     }
 
-    /// The release reads it: a tap with a row under it LANDS, and a tap with
+    /// The selected row sits BELOW the fingertip rather than under it, and by
+    /// a quarter of a row.
+    ///
+    /// The owner's complaint about occlusion: a thumb covers the 44-point row
+    /// it is on, so the row you are choosing is the one you cannot see.
+    /// Asserted as the property rather than as a table — for every point of a
+    /// column, the row chosen is the drawn row at the fingertip or the one
+    /// below it, and never the one above.
+    ///
+    /// The bound in the other direction is what keeps the bias honest as a
+    /// bias rather than as an off-by-one: a finger in the middle 33 points of
+    /// a row always selects that row, so a deliberate aim is never overridden.
+    @Test func theChosenRowSitsBelowTheFingerAndNeverAboveIt() {
+        let row = ShellMetrics.rowHeight
+        let bias = ShellMetrics.rowBias
+        let tabs = 4
+        var below = 0
+        for step in stride(from: CGFloat(1), through: row * CGFloat(tabs), by: 1) {
+            // The row the column actually DRAWS at this height, counting down
+            // from the bar the way the column is laid out.
+            let drawn = tabs - 1 - min(tabs - 1, Int((step - 0.0001) / row))
+            let chosen = ShellGesture.columnRow(above: step, tabCount: tabs)
+            #expect(chosen == drawn || chosen == drawn + 1, "at \(step) it may only be that row or the one below it")
+            if chosen == drawn + 1 { below += 1 }
+            // The middle of any row selects that row, whatever the bias is.
+            let intoRow = step.truncatingRemainder(dividingBy: row)
+            if intoRow > bias && intoRow <= row {
+                #expect(chosen == drawn, "a finger clear of the bias band selects the row it is on")
+            }
+        }
+        #expect(below > 0, "the bias has to actually move the answer somewhere")
+        // And the shape of where it moves it: a finger a point above a row
+        // boundary is still choosing the row below the boundary, which is the
+        // row below the fingertip.
+        #expect(ShellGesture.columnRow(above: row + 1, tabCount: tabs) == tabs - 1)
+        #expect(ShellGesture.columnRow(above: row + bias, tabCount: tabs) == tabs - 2)
+    }
+
+    /// The release reads it: a touch with a row under it LANDS, and one with
     /// none still toggles.
     @Test func aTapWithARowUnderItLandsRatherThanTogglingTheColumn() {
         let fleet = Self.crossing()
         let at = ShellPosition(workspace: 1, tab: 0)
-        #expect(fleet.barRelease(axis: nil, dx: 0, up: 0, at: at, tapRow: 2) == .land(tab: 2))
-        #expect(fleet.barRelease(axis: nil, dx: 0, up: 0, at: at, tapRow: nil) == .toggleColumn)
+        #expect(fleet.barRelease(axis: nil, dx: 0, up: 0, at: at, row: 2) == .land(tab: 2))
+        #expect(fleet.barRelease(axis: nil, dx: 0, up: 0, at: at, row: nil) == .toggleColumn)
     }
 
     // MARK: - The column
 
-    /// One row selected per `rowHeight` of travel, walking UPWARD from the row
-    /// nearest the bar, and no selection at all below `openMin`.
+    /// **The row a DRAG chooses is the row under the finger, wherever the drag
+    /// started.** The owner's complaint 3, and the one the old mapping got
+    /// wrong by exactly one row.
     ///
-    /// The menu reads top to bottom — tab 0 at the top, the same end the
-    /// ribbon draws its first mark at — so the row the first `rowHeight` of
-    /// lift puts under the thumb is the LAST tab, and a lift that fills the
-    /// column has walked all the way up to tab 0. Every number here is written
-    /// as a multiple of `ShellMetrics.rowHeight` rather than as the 44 it
-    /// happens to be: the constant moved from 34 to 44 once already.
-    @Test func theColumnSelectsOneRowPerRowHeightOfTravelWalkingUpward() {
-        #expect(ShellGesture.columnSelection(up: 0, tabCount: 3) == nil)
-        #expect(ShellGesture.columnSelection(up: ShellMetrics.openMin - 0.1, tabCount: 3) == nil)
+    /// This used to be `columnSelection(up:tabCount:)` —
+    /// `tabCount - ceil(up / rowHeight)`, a pure delta with no idea where the
+    /// finger had been put down. Write `d` for how far below the column's
+    /// bottom edge the touch landed and the two mappings agree only at
+    /// `d == 0`; at `d == 44` the delta one sat a full row above the finger
+    /// for the whole gesture. The old formula is written out below as the
+    /// counter-example, so that this test says what changed and not merely
+    /// what is.
+    ///
+    /// The finger is held at ONE height above the bar while the drag's start
+    /// is moved down through the bar row, which is the only way to state the
+    /// bug: the same finger, in the same place, over the same drawn row, used
+    /// to choose three different tabs.
+    @Test func theChosenRowFollowsTheFingerAndNotHowFarItHasTravelled() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        // 60 points above the bar's top edge is inside the MIDDLE row of a
+        // three-tab column, which is tab 1.
+        let above: CGFloat = 60
+        let row = ShellGesture.columnRow(above: above, tabCount: 3)
+        #expect(row == 1)
+
+        // The delta mapping that used to answer this, kept as the
+        // counter-example it is.
+        func oldDeltaMapping(up: CGFloat) -> Int? {
+            guard up >= ShellMetrics.openMin else { return nil }
+            let steps = min(3, Int((up / ShellMetrics.rowHeight).rounded(.up)))
+            return steps > 0 ? 3 - steps : nil
+        }
+
+        var oldAnswers: Set<Int?> = []
+        for d in stride(from: CGFloat(0), through: ShellMetrics.barRow, by: 11) {
+            // The same fingertip, reached from a touch that started `d` points
+            // lower down the bar row.
+            let up = above + d
+            #expect(
+                fleet.barRelease(axis: .vertical, dx: 0, up: up, at: at, row: row)
+                    == .land(tab: 1),
+                "the finger is over tab 1's row, so a release chooses tab 1")
+            oldAnswers.insert(oldDeltaMapping(up: up))
+        }
         #expect(
-            ShellGesture.columnSelection(up: ShellMetrics.openMin, tabCount: 3) == 2,
-            "the first points of lift select the row nearest the bar, which is the LAST tab")
-        #expect(ShellGesture.columnSelection(up: ShellMetrics.rowHeight - 1, tabCount: 3) == 2)
-        #expect(ShellGesture.columnSelection(up: ShellMetrics.rowHeight + 1, tabCount: 3) == 1)
-        #expect(ShellGesture.columnSelection(up: ShellMetrics.rowHeight * 2 - 1, tabCount: 3) == 1)
-        #expect(
-            ShellGesture.columnSelection(up: 400, tabCount: 3) == 0,
-            "capped at the TOP row, which is tab 0")
-        #expect(ShellGesture.columnSelection(up: 400, tabCount: 0) == nil)
+            oldAnswers.count > 1,
+            "the mapping this replaced gave different rows for one fingertip, which is the bug")
+        #expect(oldAnswers.contains(0), "and at the bottom of the bar it was a whole row out")
     }
 
     /// Pinned open is a SEPARATE input from the lift, and outranks it. This is
@@ -455,18 +529,37 @@ struct ShellNavigationTests {
             "and dragging further never grows it past its rows")
     }
 
-    /// The lift still chooses, even though it no longer reveals.
+    /// The finger still chooses, even though the column no longer unrolls
+    /// under it.
     ///
     /// This is the half of the original behaviour worth keeping: one
     /// continuous drag still walks the tabs and carries on into the overview.
+    /// What changed is which number it walks — the finger's height above the
+    /// bar rather than the distance it has come.
+    ///
+    /// The `openMin` gate is the one thing still read off the lift, and it is
+    /// not a mapping: it is the line between a bar you touched and moved a
+    /// little, which must cost nothing, and a tab you chose.
     @Test func theSelectionStillFollowsTheFingerThroughAnOpenColumn() {
-        #expect(ShellGesture.columnSelection(up: 10, tabCount: 4) == nil)
-        #expect(ShellGesture.columnSelection(up: 20, tabCount: 4) == 3)
-        #expect(ShellGesture.columnSelection(up: ShellMetrics.rowHeight + 6, tabCount: 4) == 2)
-        #expect(ShellGesture.columnSelection(up: ShellMetrics.rowHeight * 2 + 6, tabCount: 4) == 1)
-        #expect(
-            ShellGesture.columnSelection(up: 500, tabCount: 4) == 0,
-            "and it never selects past the TOP row, however far the finger goes")
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        func release(up: CGFloat, above: CGFloat) -> ShellRelease {
+            fleet.barRelease(
+                axis: .vertical, dx: 0, up: up, at: at,
+                row: ShellGesture.columnRow(above: above, tabCount: 3))
+        }
+        // Under the open threshold nothing is chosen, however clearly the
+        // finger is over a row.
+        #expect(release(up: ShellMetrics.openMin - 0.1, above: 40) == .abandon)
+        #expect(release(up: ShellMetrics.openMin, above: 40) == .land(tab: 2))
+        #expect(release(up: 60, above: ShellMetrics.rowHeight + 20) == .land(tab: 1))
+        #expect(release(up: 120, above: ShellMetrics.rowHeight * 2 + 20) == .land(tab: 0))
+        // Above the column there is no row to choose, and the release costs
+        // nothing rather than landing on the top tab by default. The menu is
+        // not even drawn there — `ShellRootView.menuShouldShow` takes it off
+        // the screen the moment the page starts to rise — so landing would be
+        // choosing off a list that is not on the screen.
+        #expect(release(up: 200, above: 200) == .abandon)
     }
 
     // MARK: - The overview
@@ -895,6 +988,170 @@ struct ShellNavigationTests {
             "the sort flag has to survive the cache, or a remembered blocked workspace sinks")
     }
 
+    // MARK: - Momentum
+
+    /// The throw distance is a scroll view's own, to the point.
+    ///
+    /// The talk's projection function with `UIScrollView.DecelerationRate.normal`,
+    /// which is what makes a flick in this shell travel exactly as far as a
+    /// flick in every other scroll view on the phone: a thousand points per
+    /// second coasts 499 points, and there is nothing new to learn about how
+    /// far a throw goes.
+    ///
+    /// **`TerminalScrollPhysics.projection(of:decelerationRate:)` in
+    /// `TerminalView.swift` is the same formula and the same 0.998**, and
+    /// these numbers are the join between them: that one is UIKit and
+    /// iOS-only, this one has to run under `swift test` with no simulator, so
+    /// the pair cannot be one function today and the numbers are what stop
+    /// them drifting apart in silence.
+    @Test func theProjectionIsAScrollViewsOwnThrowDistance() {
+        #expect(ShellGesture.decelerationRate == 0.998)
+        #expect(abs(ShellGesture.project(velocity: 1000) - 499) < 0.01)
+        #expect(abs(ShellGesture.project(velocity: 2000) - 998) < 0.01)
+        #expect(abs(ShellGesture.project(velocity: -1000) + 499) < 0.01)
+        #expect(ShellGesture.project(velocity: 0) == 0)
+        // A rate that is not a decay is not a projection, and answering zero
+        // is the only thing that cannot make a release worse.
+        #expect(ShellGesture.project(velocity: 1000, decelerationRate: 1) == 0)
+        #expect(ShellGesture.project(velocity: 1000, decelerationRate: 0) == 0)
+        // Nothing moving projects nowhere, so every default in this file is
+        // the old behaviour exactly.
+        #expect(ShellGesture.projected(40, velocity: 0) == 40)
+    }
+
+    /// **A flick up from the bar reaches the overview even though the thumb
+    /// lifted over a menu row.** The owner's complaint 4.
+    ///
+    /// The bug this pins is the talk's PIP example reproduced as the *before*
+    /// case: *"the issue here is that we're only looking at position, we're
+    /// completely ignoring the momentum."* The overview used to be reachable
+    /// only by dragging a full 76 points past the last row and stopping
+    /// there — so a flick, which is how anybody who has used the app switcher
+    /// asks for a grid of cards, landed on whichever row the thumb happened
+    /// to be passing.
+    ///
+    /// The negative controls are the point of the test rather than a
+    /// footnote: the same finger in the same place, released with no momentum
+    /// and with a little, still lands on the row it is over. A projection
+    /// that escaped from a standstill would have replaced a bug where you
+    /// could not leave with one where you could not stay.
+    @Test func aFlickUpFromOverAMenuRowEscapesToTheOverview() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        // Sixty points up is inside the middle row of a three-tab column, and
+        // 148 points short of the overview.
+        let up: CGFloat = 60
+        let row = ShellGesture.columnRow(above: up, tabCount: 3)
+        #expect(row == 1)
+        func release(_ velocity: CGFloat, dx: CGFloat = 0) -> ShellRelease {
+            fleet.barRelease(
+                axis: .vertical, dx: dx, up: up, at: at, row: row, dxVelocity: dx == 0 ? 0 : -3000,
+                upVelocity: velocity)
+        }
+        #expect(release(1500) == .openOverview, "a flick is going somewhere the finger has not reached")
+        #expect(release(0) == .land(tab: 1), "a finger that stopped chose the row it stopped on")
+        #expect(release(200) == .land(tab: 1), "and one still drifting has not asked to leave")
+        // A flick that is ALSO sideways still does not carry, because a carry
+        // is a page being moved between cells and there is no page in your
+        // hand yet — the column is what the finger is in. `pageIsHeld` reads
+        // the real lift and not the thrown one, and this is why.
+        #expect(release(1500, dx: -200) == .openOverview)
+    }
+
+    /// How little of a lift a flick can escape from, stated as a number so it
+    /// can be argued with.
+    ///
+    /// The projection is linear in velocity, so the velocity that escapes
+    /// from a given lift is arithmetic rather than a taste: from 60 points up
+    /// a three-tab column, 148 points of projection are needed, and 148
+    /// points is 297 points per second. That is a thumb still moving rather
+    /// than a hard flick, and it is the honest cost of using a scroll view's
+    /// own deceleration rate — the same rate makes a 1000 pt/s flick coast
+    /// 499 points, and the two cannot be tuned apart.
+    @Test func theVelocityThatEscapesFromALiftIsAKnownNumber() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let up: CGFloat = 60
+        let needed = ShellGesture.columnFull(tabCount: 3) + ShellMetrics.overRun - up
+        let velocity = needed * 1000 / ShellGesture.project(velocity: 1000)
+        #expect(abs(velocity - 296.6) < 0.5)
+        func release(_ v: CGFloat) -> ShellRelease {
+            fleet.barRelease(
+                axis: .vertical, dx: 0, up: up, at: at,
+                row: ShellGesture.columnRow(above: up, tabCount: 3), upVelocity: v)
+        }
+        #expect(release(velocity + 1) == .openOverview)
+        #expect(release(velocity - 1) == .land(tab: 1))
+    }
+
+    /// **A short fast flick across a pane turns the page.** The sideways half
+    /// of the same defect, which the owner did not report and which the bare
+    /// 70-point threshold made certain.
+    ///
+    /// Forty points is a flick anybody would make and is nowhere near
+    /// `pageCommit`, so a terminal was a pane you could only leave by a long
+    /// laborious drag — the talk's own counter-example: *"those same swipes
+    /// wouldn't get you very far… you'd have to do these long, laborious
+    /// swipes."*
+    @Test func aShortFlickAcrossAPaneTurnsThePageAndADeliberateDragDoesNot() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)
+        let next = ShellStep(position: ShellPosition(workspace: 1, tab: 1), crossesWorkspace: false)
+        #expect(
+            fleet.contentRelease(axis: .horizontal, dx: -40, at: at, dxVelocity: -600)
+                == .commit(next))
+        #expect(
+            fleet.contentRelease(axis: .horizontal, dx: -40, at: at, dxVelocity: 0) == .springBack,
+            "the same forty points, placed rather than thrown, is still nothing")
+        // And the other direction of the same rule: the velocity that commits
+        // from forty points is 60 points per second, which is a thumb that
+        // has not quite stopped. The number is here to be looked at.
+        #expect(
+            fleet.contentRelease(axis: .horizontal, dx: -40, at: at, dxVelocity: -61)
+                == .commit(next))
+        #expect(
+            fleet.contentRelease(axis: .horizontal, dx: -40, at: at, dxVelocity: -59)
+                == .springBack)
+        // A vertical lock on the content still resolves to nothing, however
+        // fast it was going: the pane owns that gesture.
+        #expect(
+            fleet.contentRelease(axis: .vertical, dx: -200, at: at, dxVelocity: -3000)
+                == .springBack)
+    }
+
+    /// The direction comes off the THROW, not off the translation.
+    ///
+    /// A drag one way that is flicked back the other way at the last moment
+    /// is asking to go where it is heading. Reading `commits` off the
+    /// projection and `direction` off the raw `dx` would turn the page
+    /// backwards, which is a worse answer than the spring-back it replaced —
+    /// so both come off one number.
+    @Test func aDragFlickedBackTheOtherWayTurnsThePageTheWayItIsHeaded() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)
+        #expect(
+            fleet.contentRelease(axis: .horizontal, dx: 30, at: at, dxVelocity: -1500)
+                == .commit(
+                    ShellStep(
+                        position: ShellPosition(workspace: 1, tab: 1), crossesWorkspace: false)),
+            "dragged 30 points right, thrown 718 points left")
+    }
+
+    /// The bar's own page turn projects too, and a flick along it crosses
+    /// workspaces.
+    @Test func aFlickAlongTheBarCrossesWorkspaces() {
+        let fleet = Self.crossing()
+        let middle = ShellPosition(workspace: 1, tab: 2)
+        #expect(
+            fleet.barRelease(axis: .horizontal, dx: -30, up: 0, at: middle, dxVelocity: -1500)
+                == .commit(
+                    ShellStep(
+                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+        #expect(
+            fleet.barRelease(axis: .horizontal, dx: -30, up: 0, at: middle) == .springBack,
+            "and thirty points placed deliberately is still thirty points")
+    }
+
     // MARK: - Release
 
     /// The bar's four answers, at the thresholds themselves.
@@ -919,24 +1176,28 @@ struct ShellNavigationTests {
                 == .springBack)
     }
 
+    ///
+    /// A drag that started at the bar row's TOP edge, so the finger's height
+    /// above the bar and the distance it has travelled are the same number —
+    /// which is the one case the mapping this replaced also got right.
     @Test func theBarsVerticalArmAbandonsLandsOrOpensTheOverview() {
         let fleet = Self.crossing()
         let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
-        #expect(fleet.barRelease(axis: .vertical, dx: 0, up: 10, at: at) == .abandon)
+        func release(up: CGFloat) -> ShellRelease {
+            fleet.barRelease(
+                axis: .vertical, dx: 0, up: up, at: at,
+                row: ShellGesture.columnRow(above: up, tabCount: 3))
+        }
+        #expect(release(up: 10) == .abandon)
         // The menu reads top to bottom, so the row the first points of lift
         // put under the thumb — the one nearest the bar — is the LAST tab,
         // and further lift walks upward toward tab 0.
+        #expect(release(up: ShellMetrics.openMin) == .land(tab: 2))
+        #expect(release(up: ShellMetrics.rowHeight + ShellMetrics.rowBias) == .land(tab: 1))
         #expect(
-            fleet.barRelease(axis: .vertical, dx: 0, up: ShellMetrics.openMin, at: at)
-                == .land(tab: 2))
-        #expect(
-            fleet.barRelease(axis: .vertical, dx: 0, up: ShellMetrics.rowHeight + 2, at: at)
-                == .land(tab: 1))
-        #expect(
-            fleet.barRelease(axis: .vertical, dx: 0, up: ShellMetrics.rowHeight * 3, at: at)
-                == .land(tab: 0),
+            release(up: ShellMetrics.rowHeight * 3) == .land(tab: 0),
             "a lift that fills the column has walked all the way up to tab 0")
-        #expect(fleet.barRelease(axis: .vertical, dx: 0, up: ShellMetrics.rowHeight * 3 + ShellMetrics.overRun, at: at) == .openOverview)
+        #expect(release(up: ShellMetrics.rowHeight * 3 + ShellMetrics.overRun) == .openOverview)
     }
 
     // MARK: - Both axes, once the page is in your hand
@@ -967,10 +1228,23 @@ struct ShellNavigationTests {
     @Test func aSidewaysWanderWhileChoosingARowStillChoosesTheRow() {
         let fleet = Self.crossing()
         let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let up = ShellMetrics.rowHeight + ShellMetrics.rowBias
         #expect(
-            fleet.barRelease(axis: .vertical, dx: -200, up: ShellMetrics.rowHeight + 2, at: at)
+            fleet.barRelease(
+                axis: .vertical, dx: -200, up: up, at: at,
+                row: ShellGesture.columnRow(above: up, tabCount: 3))
                 == .land(tab: 1))
-        #expect(fleet.barRelease(axis: .vertical, dx: 200, up: 10, at: at) == .abandon)
+        // And a wander that is a FLICK is still not a page turn while the
+        // column is what the finger is in: the sideways arm is gated on the
+        // page having left the display, not on how hard the thumb was moving.
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: -200, up: up, at: at,
+                row: ShellGesture.columnRow(above: up, tabCount: 3), dxVelocity: -3000)
+                == .land(tab: 1))
+        #expect(
+            fleet.barRelease(axis: .vertical, dx: 200, up: 10, at: at, row: 2) == .abandon,
+            "and below the open threshold a release still costs nothing")
     }
 
     /// Lifted into the overview AND far enough sideways: the page is carried

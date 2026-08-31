@@ -271,9 +271,9 @@ struct ShellRibbon: View {
 /// first `rowHeight` of lift selected it. That is the same decision as this
 /// one seen from the other side, and inverting the drawing inverts the
 /// mapping: the row nearest the bar is now the LAST tab, so
-/// `ShellGesture.columnSelection` counts DOWN from `tabCount` and a lift long
-/// enough to fill the column has walked all the way up to tab 0. The mapping
-/// lives in the pure model where a test can hold it; this file only draws.
+/// `ShellGesture.columnRow` counts DOWN from `tabCount` and a finger high
+/// enough to be at the top of the column is on tab 0. The mapping lives in the
+/// pure model where a test can hold it; this file only draws.
 ///
 /// There is deliberately **no workspace row here.** The bar sitting directly
 /// beneath already carries the name and the ribbon, and repeating it was

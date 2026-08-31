@@ -3,6 +3,7 @@ package com.farcooler.model
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import kotlin.math.min
 import org.junit.Test
 
 /**
@@ -124,10 +125,11 @@ class ShellTest {
      */
     @Test
     fun `the column row nearest the bar is the last tab`() {
-        // Four tabs, 44dp each. Just above the bar is row 3; near the top is 0.
+        // Four tabs, 44dp each, the mapping shifted down by an 11dp bias. Just
+        // above the bar is row 3; near the top is 0.
         assertEquals(3, ShellGesture.columnRow(above = 10f, tabCount = 4))
-        assertEquals(2, ShellGesture.columnRow(above = 50f, tabCount = 4))
-        assertEquals(1, ShellGesture.columnRow(above = 100f, tabCount = 4))
+        assertEquals(2, ShellGesture.columnRow(above = 61f, tabCount = 4))
+        assertEquals(1, ShellGesture.columnRow(above = 105f, tabCount = 4))
         assertEquals(0, ShellGesture.columnRow(above = 170f, tabCount = 4))
     }
 
@@ -135,26 +137,86 @@ class ShellTest {
     fun `a tap outside the column lands on nothing`() {
         assertNull(ShellGesture.columnRow(above = 0f, tabCount = 4))
         assertNull(ShellGesture.columnRow(above = -5f, tabCount = 4))
-        // 4 * 44 = 176 is the top edge; past it is not the column.
-        assertNull(ShellGesture.columnRow(above = 177f, tabCount = 4))
+        // 4 * 44 = 176 is the top edge, and the bias leaves an 11dp margin
+        // above it so the top row keeps a full row of its own; past THAT the
+        // finger has left the menu and the page has begun to rise.
+        assertEquals(0, ShellGesture.columnRow(above = 187f, tabCount = 4))
+        assertNull(ShellGesture.columnRow(above = 188f, tabCount = 4))
         assertNull(ShellGesture.columnRow(above = 20f, tabCount = 0))
     }
 
     /**
-     * Hovering during a DRAG counts the other way round from tapping, and both
-     * have to be right: the drag reveals rows from the bottom up, so the first
-     * row revealed is the last tab and the selection walks backwards as travel
-     * grows.
+     * **The row is the one BELOW the fingertip, never the one above it.**
+     *
+     * A thumb covers the 44dp row it is on, so the row being chosen is the one
+     * that cannot be seen. The bias is a quarter row, which is small enough
+     * that the middle 33dp of every row still selects itself — a deliberate aim
+     * is never overridden — and large enough to move the highlight clear of the
+     * contact point.
      */
     @Test
-    fun `dragging up selects backwards from the last tab`() {
-        assertNull("nothing chosen inside the open threshold",
-            ShellGesture.columnSelection(up = 10f, tabCount = 4))
-        assertEquals(3, ShellGesture.columnSelection(up = 20f, tabCount = 4))
-        assertEquals(2, ShellGesture.columnSelection(up = 50f, tabCount = 4))
-        assertEquals(0, ShellGesture.columnSelection(up = 176f, tabCount = 4))
-        // Past the top the selection holds at the first tab rather than running off.
-        assertEquals(0, ShellGesture.columnSelection(up = 400f, tabCount = 4))
+    fun `the chosen row sits below the finger and never above it`() {
+        val tabs = 4
+        var below = 0
+        var above = 1
+        while (above <= 176) {
+            val drawn = tabs - 1 - min(tabs - 1, ((above - 0.001f) / 44f).toInt())
+            val chosen = ShellGesture.columnRow(above = above.toFloat(), tabCount = tabs)
+            assertTrue(
+                "at $above the row must be the one under the finger or the one below it",
+                chosen == drawn || chosen == drawn + 1,
+            )
+            if (chosen == drawn + 1) below++
+            val intoRow = above % 44
+            if (intoRow > ShellMetrics.ROW_BIAS) {
+                assertEquals("a finger clear of the bias band selects its own row", drawn, chosen)
+            }
+            above++
+        }
+        assertTrue("the bias has to move the answer somewhere", below > 0)
+    }
+
+    /**
+     * **The row a DRAG chooses is the row under the finger, wherever the drag
+     * started.** The bug iOS reported, and it was worth exactly one row.
+     *
+     * There used to be a second mapping — `columnSelection(up, tabCount)`,
+     * `tabCount - ceil(up / 44)`, a pure delta with no idea where the finger
+     * went down. Write `d` for how far below the column's bottom edge the touch
+     * landed and the two agree only at `d == 0`. Here the fingertip is held at
+     * one height and the drag's START is moved down through the bar row: the
+     * same finger, over the same drawn row, used to choose two different tabs.
+     */
+    @Test
+    fun `the chosen row follows the finger and not how far it has travelled`() {
+        val fleet = ShellFleet(
+            listOf(workspace("alpha", listOf(tab("a0"), tab("a1"), tab("a2"))))
+        )
+        val at = ShellPosition(0, 0)
+        val above = 60f
+        val row = ShellGesture.columnRow(above = above, tabCount = 3)
+        assertEquals(1, row)
+
+        fun oldDeltaMapping(up: Float): Int? {
+            if (up < ShellMetrics.OPEN_MIN) return null
+            val steps = min(3, kotlin.math.ceil(up / 44f).toInt())
+            return if (steps > 0) 3 - steps else null
+        }
+
+        val oldAnswers = mutableSetOf<Int?>()
+        for (d in listOf(0f, 11f, 22f, 33f, 44f)) {
+            assertEquals(
+                "the finger is over tab 1's row, so a release chooses tab 1",
+                ShellRelease.Land(1),
+                fleet.barRelease(axis = ShellAxis.VERTICAL, dx = 0f, up = above + d, at = at, row = row),
+            )
+            oldAnswers.add(oldDeltaMapping(above + d))
+        }
+        assertTrue(
+            "the mapping this replaced gave different rows for one fingertip",
+            oldAnswers.size > 1,
+        )
+        assertTrue("and at the bottom of the bar it was a whole row out", oldAnswers.contains(0))
     }
 
     @Test
@@ -353,7 +415,7 @@ class ShellTest {
     @Test
     fun `a tap on a column row lands on that row and does not shut the menu`() {
         val release = simple.barRelease(
-            axis = null, dx = 0f, up = 0f, at = ShellPosition(0, 0), tapRow = 1)
+            axis = null, dx = 0f, up = 0f, at = ShellPosition(0, 0), row = 1)
         assertEquals(ShellRelease.Land(1), release)
     }
 
@@ -409,8 +471,8 @@ class ShellTest {
     /**
      * **A downward flick on the bar costs nothing**, which is the same guarantee
      * the old wrong axis sign was reaching for and arriving at from the other
-     * side. Down is negative `up`, `pageRise` floors at zero and
-     * `columnSelection` refuses under the open threshold, so the release is
+     * side. Down is negative `up`, `pageRise` floors at zero and there is no
+     * column row above a finger that is below the bar, so the release is
      * `Abandon` — not a page turn.
      */
     @Test
@@ -444,6 +506,113 @@ class ShellTest {
         val release =
             simple.contentRelease(axis = ShellAxis.HORIZONTAL, dx = -90f, at = ShellPosition(0, 0))
         assertEquals(ShellPosition(0, 1), (release as ShellRelease.Commit).step.position)
+    }
+
+    // MARK: - Momentum
+
+    /**
+     * The throw distance is a scroll view's own, to the point, and the same
+     * number iOS uses.
+     *
+     * `AgentKit`'s `ShellGesture.project` is this function, and
+     * `theProjectionIsAScrollViewsOwnThrowDistance` is these numbers: a
+     * thousand units a second coasts 499, so a flick here travels exactly as
+     * far as a flick in every other scroller on the device. The two platforms
+     * throw the same distance or the shell is two shells.
+     */
+    @Test
+    fun `the projection is a scroll view's own throw distance`() {
+        assertEquals(0.998f, ShellGesture.DECELERATION_RATE)
+        // A tenth of a unit of tolerance, and it is `Float` rather than
+        // slack: `1f - 0.998f` is 0.0020000339 in single precision, so the
+        // quotient lands 0.017 short of 998 on this side of the port and
+        // exactly on it in Swift's `CGFloat`. A twentieth of a millimetre of
+        // throw, and asserting past it would be asserting about IEEE 754.
+        assertEquals(499f, ShellGesture.project(1000f), 0.1f)
+        assertEquals(998f, ShellGesture.project(2000f), 0.1f)
+        assertEquals(-499f, ShellGesture.project(-1000f), 0.1f)
+        assertEquals(0f, ShellGesture.project(0f))
+        // A rate that is not a decay is not a projection, and zero is the only
+        // answer that cannot make a release worse.
+        assertEquals(0f, ShellGesture.project(1000f, decelerationRate = 1f))
+        assertEquals(0f, ShellGesture.project(1000f, decelerationRate = 0f))
+        // Nothing moving projects nowhere, so every default here is the old
+        // behaviour exactly.
+        assertEquals(40f, ShellGesture.projected(40f, 0f))
+    }
+
+    /**
+     * **A flick up from the bar reaches the overview even though the thumb
+     * lifted over a menu row.**
+     *
+     * The talk's PIP example reproduced as the *before* case: *"the issue here
+     * is that we're only looking at position, we're completely ignoring the
+     * momentum."* The overview used to be reachable only by dragging a full
+     * 76dp past the last row and stopping there, so a flick — which is how
+     * anybody who has used a task switcher asks for a grid — landed on
+     * whichever row the thumb was passing.
+     *
+     * The negative controls are the point rather than a footnote: the same
+     * finger in the same place, released with no momentum and with a little,
+     * still lands on the row it is over.
+     */
+    @Test
+    fun `a flick up from over a menu row escapes to the overview`() {
+        val at = ShellPosition(0, 0)  // two tabs, so 88 of column and 164 to escape
+        val up = 60f
+        val row = ShellGesture.columnRow(above = up, tabCount = 2)
+        assertEquals(0, row)
+        fun release(velocity: Float) = simple.barRelease(
+            axis = ShellAxis.VERTICAL, dx = 0f, up = up, at = at, row = row,
+            upVelocity = velocity,
+        )
+        assertEquals(ShellRelease.OpenOverview, release(1500f))
+        assertEquals("a finger that stopped chose the row it stopped on", ShellRelease.Land(0), release(0f))
+        assertEquals("and one still drifting has not asked to leave", ShellRelease.Land(0), release(100f))
+    }
+
+    /**
+     * **A short fast flick across a pane turns the page**, and the same forty
+     * units placed deliberately still does not.
+     *
+     * The sideways half of the same defect. Forty units is a flick anybody
+     * would make and is nowhere near `PAGE_COMMIT`, so a pane was something you
+     * could only leave by a long laborious drag — the talk's own
+     * counter-example: *"those same swipes wouldn't get you very far… you'd
+     * have to do these long, laborious swipes."*
+     */
+    @Test
+    fun `a short fast flick across a pane turns the page`() {
+        val at = ShellPosition(0, 0)
+        val flicked = simple.contentRelease(
+            axis = ShellAxis.HORIZONTAL, dx = -40f, at = at, dxVelocity = -600f)
+        assertEquals(ShellPosition(0, 1), (flicked as ShellRelease.Commit).step.position)
+        assertEquals(
+            "the same forty units, placed rather than thrown, is still nothing",
+            ShellRelease.SpringBack,
+            simple.contentRelease(axis = ShellAxis.HORIZONTAL, dx = -40f, at = at, dxVelocity = 0f),
+        )
+        assertEquals(
+            "and a vertical lock still belongs to the pane, however fast",
+            ShellRelease.SpringBack,
+            simple.contentRelease(
+                axis = ShellAxis.VERTICAL, dx = -200f, at = at, dxVelocity = -3000f),
+        )
+    }
+
+    /**
+     * The direction comes off the THROW, not off the translation.
+     *
+     * A drag one way flicked back the other way at the last moment is asking to
+     * go where it is heading. Reading `commits` off the projection and
+     * `direction` off the raw translation would turn the page backwards, which
+     * is a worse answer than the spring-back it replaced.
+     */
+    @Test
+    fun `a drag flicked back the other way turns the page the way it is headed`() {
+        val release = simple.contentRelease(
+            axis = ShellAxis.HORIZONTAL, dx = 30f, at = ShellPosition(0, 1), dxVelocity = -1500f)
+        assertEquals(ShellPosition(1, 0), (release as ShellRelease.Commit).step.position)
     }
 
     // MARK: - The overview's order

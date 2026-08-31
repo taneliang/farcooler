@@ -287,6 +287,53 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// The column, held open by a tap. Separate from `lift`, see above.
     @State var columnPinned = false
 
+    /// How far the finger is above the bar row's top edge, right now, or nil
+    /// when no finger is on an open column.
+    ///
+    /// **The highlight follows the finger, not the travel.** The column's
+    /// selection used to be `ShellGesture.columnSelection(up: lift, …)` — how
+    /// far the drag had COME, mapped a row per 44 points — and that is a
+    /// different mapping from the one a tap goes through, which measures from
+    /// the bar's drawn bottom edge. The two agree only for a drag that began
+    /// exactly on the bar row's top edge; a drag begun at its bottom lit a row
+    /// one above the thumb for the whole gesture, and a 20-point lift from
+    /// there lit the last row while the thumb was still 24 points below the
+    /// column entirely. One mapping now, `ShellGesture.columnRow`, and this is
+    /// the point it is asked about.
+    ///
+    /// A separate `@State` from `lift` rather than something derived from it,
+    /// for the reason `lift` cannot answer it at all: a lift is a distance and
+    /// a row is a place, and the difference between them is where the finger
+    /// went down — which is a fact about the gesture and not about the shell.
+    /// `ShellDrag` writes it on every frame of a vertical drag and clears it
+    /// in `rest()`.
+    @State var fingerAbove: CGFloat?
+
+    /// Where the finger was, and when, the last time it actually moved.
+    ///
+    /// **`DragGesture.Value.velocity` does not fall to zero when a finger
+    /// stops, and this is what stands in for the zero it should have
+    /// reported.** Measured on a simulator through the shell's own probe: a
+    /// 60-point drag released after holding still for 300ms still reports 131
+    /// points per second, and after 500ms it still reports 47. At a scroll
+    /// view's deceleration those are 65 and 23 points of projection — on a
+    /// threshold of 70. So a drag that was placed deliberately, paused over
+    /// its target and then released would commit a page turn that the finger
+    /// never asked for, which is the exact opposite of what projecting
+    /// momentum is for.
+    ///
+    /// The reason is the estimator rather than a bug: UIKit delivers no touch
+    /// event while a finger is stationary, so there are no new samples for a
+    /// velocity to decay against and the last real motion keeps most of its
+    /// weight. What IS knowable is when the finger last moved, and a release
+    /// more than `ShellRootView.stillFor` after that is a release from a
+    /// standstill however fast the estimator still thinks it is going.
+    ///
+    /// Written by both gestures on every frame that moves; cleared in
+    /// `begin`, so a gesture that never moved — a tap — has no movement to be
+    /// recent and carries no momentum at all.
+    @State var lastMoved: (at: CGSize, time: Date)?
+
     /// The bar surface's bottom edge, in global coordinates.
     ///
     /// What a TAP on an open column is measured against — see
@@ -429,6 +476,18 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// animation being finished, so a second swipe onto a settling one
     /// inherits its velocity rather than waiting for it.
     static var settle: Animation { .spring(response: 0.3, dampingFraction: 0.82) }
+
+    /// How long a finger may have been still and still count as moving.
+    ///
+    /// 60 milliseconds, which is nearly four frames at 60Hz and seven at 120.
+    /// A finger that is still travelling produces an event every frame, so the
+    /// gap between its last movement and its release is one frame; a finger
+    /// that has stopped produces nothing at all. The two are separated by an
+    /// order of magnitude and this sits between them, near the slow end so
+    /// that a thumb crawling the last few points of a deliberate drag is read
+    /// as the standstill it nearly is rather than as a throw. See
+    /// `lastMoved` for the measurements this exists because of.
+    static var stillFor: TimeInterval { 0.06 }
 
     /// On release, when what moved was the WHOLE screen.
     ///
@@ -943,7 +1002,12 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// that had forgotten where you are.
     private var columnSelection: Int? {
         if columnPinned && lift == 0 { return position.tab }
-        return ShellGesture.columnSelection(up: lift, tabCount: tabCount)
+        // The same `openMin` a release is gated on, and then the same
+        // `columnRow` a release resolves through — so what is lit is what
+        // letting go would choose, by construction rather than by two
+        // functions that happen to agree.
+        guard lift >= ShellMetrics.openMin, let fingerAbove else { return nil }
+        return ShellGesture.columnRow(above: fingerAbove, tabCount: tabCount)
     }
 
     // MARK: - The probe

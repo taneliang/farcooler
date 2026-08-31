@@ -1,7 +1,6 @@
 package com.farcooler.model
 
 import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
@@ -58,6 +57,25 @@ import kotlin.math.min
 object ShellMetrics {
     /** One column row. One tab revealed per 44dp of upward travel. */
     const val ROW_HEIGHT = 44f
+
+    /**
+     * How far BELOW the fingertip the column row it selects sits.
+     *
+     * Thumb occlusion, and ONE constant rather than a second mapping: a finger
+     * on a 44dp row covers most of it, so the row being chosen is the one that
+     * cannot be seen. Shifting the hit-test down by this much draws the
+     * highlight at or below the contact point instead of under it.
+     *
+     * **A quarter of a row, and the size is the argument.** The literal
+     * reading of "the row below" is a whole [ROW_HEIGHT], and a whole row
+     * breaks the mapping at both ends — the row nearest the bar would own 88dp
+     * of travel while every other row owned 44, and a TAP, which goes through
+     * [ShellGesture.columnRow] too, would choose the row under the one it
+     * touched. Half a row is no better for the tap: a row's label is centred,
+     * so aiming at it lands exactly on the boundary. Eleven leaves the middle
+     * 33dp of every row still selecting itself.
+     */
+    const val ROW_BIAS = ROW_HEIGHT / 4
 
     /** The rail item's height inside the bar. */
     const val BAR_ROW = 44f
@@ -423,33 +441,74 @@ object ShellGesture {
         else -> null
     }
 
-    /** Whether a horizontal drag has gone far enough to turn the page. */
+    /**
+     * A scroll view's own deceleration, as a plain number.
+     *
+     * 0.998 — `UIScrollView.DecelerationRate.normal`, which Android's own
+     * `ScrollView` friction is within a per cent of — and the unit is
+     * "fraction of the velocity surviving one millisecond", which is where the
+     * 1000 in [project] comes from. The same constant as iOS, deliberately:
+     * the two platforms have to throw the same distance for the same flick, or
+     * the shell is two shells.
+     */
+    const val DECELERATION_RATE = 0.998f
+
+    /**
+     * Where content thrown at [velocity] would come to rest.
+     *
+     * The projection function from WWDC 2018 803, in the units a release
+     * arrives in: units per second in, units out. The talk on the version of
+     * this shell that shipped without it — *"the issue here is that we're only
+     * looking at position, we're completely ignoring the momentum"* — and on
+     * why the rate is a scroll view's rather than a tuned one: a flick here
+     * travels exactly as far as a flick in every other scroller on the device,
+     * so there is nothing new to learn about how far a throw goes.
+     */
+    fun project(velocity: Float, decelerationRate: Float = DECELERATION_RATE): Float {
+        if (decelerationRate <= 0f || decelerationRate >= 1f) return 0f
+        return (velocity / 1000f) * decelerationRate / (1f - decelerationRate)
+    }
+
+    /**
+     * Where a drag that has travelled [travel] and is still moving at
+     * [velocity] would end up.
+     *
+     * **Every ESCAPE decision is measured against this and not against the
+     * translation** — turn the page, leave for the overview — because an
+     * escape is a decision about where the gesture was GOING. A slow
+     * deliberate drag projects almost nothing and lands where it was pointed;
+     * a flick projects hundreds of units and escapes.
+     *
+     * **Which row is selected is NOT measured against it.** That is live
+     * feedback with a highlight under the finger, and confirming a row other
+     * than the lit one would be a worse defect than the one this fixes.
+     */
+    fun projected(travel: Float, velocity: Float): Float = travel + project(velocity)
+
+    /**
+     * Whether a horizontal THROW has gone far enough to turn the page.
+     *
+     * [dx] is a throw distance, not a translation: both release sites pass
+     * [projected], and so does the [direction] read beside it.
+     */
     fun commits(dx: Float): Boolean = abs(dx) >= ShellMetrics.PAGE_COMMIT
 
-    /** How many column rows this much upward travel has revealed. */
-    fun columnSteps(up: Float, tabCount: Int): Int {
-        if (tabCount <= 0 || up <= 0f) return 0
-        return min(tabCount, ceil(up / ShellMetrics.ROW_HEIGHT).toInt())
-    }
-
     /**
-     * Which tab a drag of this length is hovering, or null when it has not
-     * travelled far enough to have chosen one.
+     * Which row a touch at [above] dp above the bar's top edge lands on, or
+     * null for a touch outside the column.
      *
-     * Counts DOWN from the last tab, because the column unfurls UPWARD from the
-     * bar: the first row revealed is the bottom one, which is the last tab.
-     */
-    fun columnSelection(up: Float, tabCount: Int): Int? {
-        if (up < ShellMetrics.OPEN_MIN) return null
-        val steps = columnSteps(up, tabCount)
-        return if (steps > 0) tabCount - steps else null
-    }
-
-    /**
-     * Which row a TAP at [above] dp above the bar's top edge lands on, or null
-     * for a tap outside the column.
+     * **The only mapping from a finger to a column row, for the tap and the
+     * drag alike.** There used to be two: this one, and `columnSelection`,
+     * which answered a DRAG off its travel alone — `tabCount - ceil(up / 44)`,
+     * a pure delta with no idea where the finger went down. Write `d` for how
+     * far below the column's bottom edge the touch landed and the two agree
+     * only at `d == 0`; at `d == 44` the delta one sat a full row ABOVE the
+     * finger for the whole gesture, and a 20dp lift from there highlighted the
+     * last row while the thumb was still 24dp below the column entirely. iOS
+     * shipped that and its owner reported it; the delta mapping is gone from
+     * both platforms.
      *
-     * **Two bugs meet in this function**, and both shipped on iOS.
+     * **Three bugs meet in this function**, and all three shipped on iOS.
      *
      * The first is the inversion: the column unfurls upward, so the row nearest
      * the bar is the LAST tab, and the arithmetic has to count from the bottom
@@ -463,10 +522,24 @@ object ShellGesture {
      * every tap one row off. The Compose form of the same mistake is computing
      * this from `WindowInsets` instead of from the bar's own `onGloballyPositioned`
      * bounds.
+     *
+     * [bias] shifts the answer DOWN the column — see [ShellMetrics.ROW_BIAS],
+     * where the eleven is argued. It charges two prices and they are both
+     * here: the row nearest the bar owns `ROW_HEIGHT + bias` of travel rather
+     * than 44, and the region reaches [bias] past the column's own top edge so
+     * that the top row keeps a full row of its own with a margin above it
+     * rather than being squeezed. Past that margin the finger has left the
+     * menu, the page has begun to rise, and there is no column drawn to choose
+     * from.
      */
-    fun columnRow(above: Float, tabCount: Int): Int? {
-        if (tabCount <= 0 || above <= 0f || above > columnFull(tabCount)) return null
-        val fromBottom = min(tabCount - 1, (above / ShellMetrics.ROW_HEIGHT).toInt())
+    fun columnRow(
+        above: Float,
+        tabCount: Int,
+        bias: Float = ShellMetrics.ROW_BIAS,
+    ): Int? {
+        if (tabCount <= 0 || above <= 0f || above > columnFull(tabCount) + bias) return null
+        val fromBottom =
+            min(tabCount - 1, max(0, ((above - bias) / ShellMetrics.ROW_HEIGHT).toInt()))
         return tabCount - 1 - fromBottom
     }
 
@@ -547,28 +620,45 @@ sealed interface ShellRelease {
 /**
  * What releasing a drag that started on the BAR means.
  *
- * @param tapRow which column row the finger came up on, when there was no drag
- *   at all. **This parameter is the whole of the third shipped bug.** The column
- *   draws rows and declares no target of its own, so the only recognizer on that
- *   surface is the bar's drag — and a tap on a row resolved to
+ * @param row which column row the finger came up over, from
+ *   [ShellGesture.columnRow], or null when there was no open column under it.
+ *   **This parameter is the whole of two shipped bugs.** The column draws rows
+ *   and declares no target of its own, so the only recognizer on that surface
+ *   is the bar's drag — and a tap on a row resolved to
  *   [ShellRelease.ToggleColumn], which SHUT the menu the person was trying to
  *   use. Opening had always worked because opening IS the toggle, which is why
- *   it took a real phone to find. A caller that passes null here has the bug
- *   back.
+ *   it took a real phone to find. A caller that passes null here has that bug
+ *   back. It answers the DRAG as well as the tap now, because deriving a
+ *   drag's row from its travel instead is the second bug, and
+ *   [ShellGesture.columnRow] has the arithmetic.
+ * @param dxVelocity horizontal speed at the instant of release, units per
+ *   second.
+ * @param upVelocity vertical speed at the instant of release, UP-positive the
+ *   same way [up] is. **The two velocities decide the two escapes and nothing
+ *   else** — far enough sideways to turn the page, far enough up to stay in the
+ *   overview — because those are questions about where the gesture was going,
+ *   while which row is lit is a highlight somebody is looking at. Both default
+ *   to zero, which is the honest reading of a caller with no velocity to give.
  */
 fun ShellFleet.barRelease(
     axis: ShellAxis?,
     dx: Float,
     up: Float,
     at: ShellPosition,
-    tapRow: Int? = null,
+    row: Int? = null,
+    dxVelocity: Float = 0f,
+    upVelocity: Float = 0f,
 ): ShellRelease {
     if (axis == null) {
-        return tapRow?.let { ShellRelease.Land(it) } ?: ShellRelease.ToggleColumn
+        return row?.let { ShellRelease.Land(it) } ?: ShellRelease.ToggleColumn
     }
+    // Where the sideways half of this gesture was HEADED, which is what both of
+    // its escapes are decided on.
+    val thrownX = ShellGesture.projected(dx, dxVelocity)
     return when (axis) {
         ShellAxis.HORIZONTAL -> {
-            val direction = if (ShellGesture.commits(dx)) ShellGesture.direction(dx) else null
+            val direction =
+                if (ShellGesture.commits(thrownX)) ShellGesture.direction(thrownX) else null
             val step = direction?.let { step(at, it, ShellTrack.BAR) }
             step?.let { ShellRelease.Commit(it) } ?: ShellRelease.SpringBack
         }
@@ -576,19 +666,30 @@ fun ShellFleet.barRelease(
             val tabs = tabCount(at.workspace)
             // A sideways component only counts once the page has left the glass:
             // below that the gesture is unfurling the column and a little
-            // horizontal drift is a thumb, not an instruction.
+            // horizontal drift is a thumb, not an instruction. `pageIsHeld`
+            // reads the REAL lift and not the thrown one — it asks whether
+            // there is a page in your hand right now, which is a fact about the
+            // screen rather than a prediction.
             val sideways =
-                if (ShellGesture.pageIsHeld(up, tabs) && ShellGesture.commits(dx)) {
-                    ShellGesture.direction(dx)?.let { step(at, it, ShellTrack.BAR) }
+                if (ShellGesture.pageIsHeld(up, tabs) && ShellGesture.commits(thrownX)) {
+                    ShellGesture.direction(thrownX)?.let { step(at, it, ShellTrack.BAR) }
                 } else null
 
+            // The escape, and the one place the lift is projected. A flick up
+            // from over a menu row is asking for the grid; only reading where
+            // the thumb happened to be when it left the glass gave it the row.
+            val thrownUp = ShellGesture.projected(up, upVelocity)
             when {
-                up >= ShellGesture.columnFull(tabs) + ShellMetrics.OVER_RUN ->
+                thrownUp >= ShellGesture.columnFull(tabs) + ShellMetrics.OVER_RUN ->
                     sideways?.let { ShellRelease.Carry(it) } ?: ShellRelease.OpenOverview
                 sideways != null -> ShellRelease.Commit(sideways)
-                else -> ShellGesture.columnSelection(up, tabs)
-                    ?.let { ShellRelease.Land(it) }
-                    ?: ShellRelease.Abandon
+                // Not an escape: the row under the finger, and the ACTUAL
+                // finger. The OPEN_MIN gate is the one thing still read off the
+                // travel, and it is not a mapping — it is the line between a
+                // bar touched and moved a little, which must cost nothing, and
+                // a tab chosen.
+                up >= ShellMetrics.OPEN_MIN && row != null -> ShellRelease.Land(row)
+                else -> ShellRelease.Abandon
             }
         }
     }
@@ -600,14 +701,25 @@ fun ShellFleet.barRelease(
  * Same thresholds as the bar, one flat sequence instead of whole workspaces, and
  * no vertical behaviour at all: a vertical drag on a pane belongs to the pane,
  * which is scrolling.
+ *
+ * @param dxVelocity the finger's sideways speed at release, and the whole of
+ *   what makes a short fast flick across a pane turn the page. Forty units
+ *   thrown at 600 a second projects past 300 and commits; forty units placed
+ *   deliberately projects almost nothing and springs back. The same forty
+ *   units meaning two different things is why a threshold on translation alone
+ *   was wrong — [ShellGesture.projected].
  */
 fun ShellFleet.contentRelease(
     axis: ShellAxis?,
     dx: Float,
     at: ShellPosition,
+    dxVelocity: Float = 0f,
 ): ShellRelease {
-    if (axis != ShellAxis.HORIZONTAL || !ShellGesture.commits(dx)) return ShellRelease.SpringBack
-    val direction = ShellGesture.direction(dx) ?: return ShellRelease.SpringBack
+    val thrown = ShellGesture.projected(dx, dxVelocity)
+    if (axis != ShellAxis.HORIZONTAL || !ShellGesture.commits(thrown)) {
+        return ShellRelease.SpringBack
+    }
+    val direction = ShellGesture.direction(thrown) ?: return ShellRelease.SpringBack
     val step = step(at, direction, ShellTrack.CONTENT) ?: return ShellRelease.SpringBack
     return ShellRelease.Commit(step)
 }

@@ -147,11 +147,16 @@ class PaneTrackState internal constructor() {
     internal suspend fun settle(
         fleet: ShellFleet,
         position: ShellPosition,
+        velocity: Float,
         onCommit: (ShellStep) -> Unit,
     ) {
         travel = 0f
-        val release = fleet.contentRelease(ShellAxis.HORIZONTAL, offset, position)
-        val direction = ShellGesture.direction(offset)
+        val release = fleet.contentRelease(ShellAxis.HORIZONTAL, offset, position, velocity)
+        // Where the throw was HEADED, which is what decided the release, so
+        // the direction it commits in is the same number rather than a second
+        // reading of the same gesture. A drag one way flicked back the other
+        // way at the last moment turns the page the way it is going.
+        val direction = ShellGesture.direction(ShellGesture.projected(offset, velocity))
         if (release is ShellRelease.Commit && direction != null) {
             Snapshot.withMutableSnapshot {
                 offset = ShellTrackGeometry.residual(offset, direction, pageWidth)
@@ -262,13 +267,20 @@ fun Modifier.paneTrack(
     val fling = remember(state) {
         object : FlingBehavior {
             override suspend fun ScrollScope.performFling(initialVelocity: Float): Float {
-                // Distance decides, not velocity, which is the model's rule and
-                // the one the other two platforms follow —
-                // `ShellGesture.commits` is a threshold on `dx` alone. The
-                // velocity is available here if a flick should ever count for
-                // less than 70dp of travel; that would be a change to the shared
-                // model rather than to this file.
-                state.settle(fleetNow, positionNow, commitNow)
+                // **The velocity is spent rather than dropped**, which it used
+                // to be. The note that stood here said distance decides and not
+                // velocity, "the model's rule and the one the other two
+                // platforms follow" — and it was an accurate description of a
+                // defect on all three. A release that reads only where the
+                // finger stopped is the talk's own counter-example: forty units
+                // thrown hard and forty placed deliberately mean opposite
+                // things, and the shell answered both with a spring-back.
+                //
+                // `ShellGesture.projected` inside `contentRelease` is where it
+                // is spent. Nothing is consumed here — the whole fling is the
+                // settle, and reporting any of it back would let an ancestor
+                // scroll on what this one used.
+                state.settle(fleetNow, positionNow, initialVelocity, commitNow)
                 return 0f
             }
         }
