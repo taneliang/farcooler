@@ -123,22 +123,86 @@ class PaneDeckTest {
      *
      * The two only differ when somebody revisits, and when they do,
      * first-mounted evicts the tab they just came back to — which is the worst
-     * answer available. Here `a` is re-shown before the fourth tab arrives, so
-     * `b` is what has been sitting unread the longest.
+     * answer available. So `t0` is re-shown just before the deck overflows,
+     * which leaves `t1` as the one that has been sitting unread the longest.
+     *
+     * **The tab count is derived from the limit and that is not tidiness.** This
+     * was written with four literal tabs against a limit that happened to be
+     * three, and when the limit went to five it stopped overflowing at all: the
+     * test still ran, still asserted, and was no longer about eviction. It
+     * failed loudly — `expected:<5> but was:<4>` — only because it also pinned
+     * `mountedPanes` to the constant. A version that had checked eviction alone
+     * would have gone quietly green while testing nothing, which is this repo's
+     * defining failure mode wearing a passing badge.
      */
     @Test
     fun theTabShownLongestAgoIsTheOneEvicted() {
-        var deck = PaneDeck.opening(tab("a"))
-        deck = deck.select(tab("b"))
-        deck = deck.select(tab("c"))
-        deck = deck.select(tab("a"))
-        deck = deck.select(tab("d"))
+        // Fill the deck exactly: t0 through t(limit - 1).
+        var deck = PaneDeck.opening(tab("t0"))
+        for (i in 1 until PaneDeck.MOUNT_LIMIT) deck = deck.select(tab("t$i"))
+        assertEquals("the deck should be full and not yet over", PaneDeck.MOUNT_LIMIT, deck.mountedPanes)
+
+        // Come back to the oldest, which makes the SECOND-oldest the least
+        // recently shown. This is the step that separates least-recently-shown
+        // from first-mounted; without it both rules would evict `t0`.
+        deck = deck.select(tab("t0"))
+
+        // One more, which must now overflow.
+        deck = deck.select(tab("overflow"))
 
         assertEquals(PaneDeck.MOUNT_LIMIT, deck.mountedPanes)
-        assertFalse(deck.isMounted(tab("b")))
-        assertTrue(deck.isMounted(tab("a")))
-        assertTrue(deck.isMounted(tab("c")))
-        assertEquals(tab("d"), deck.current)
+        assertFalse("the least recently shown goes", deck.isMounted(tab("t1")))
+        assertTrue("the one just revisited stays", deck.isMounted(tab("t0")))
+        assertTrue(deck.isMounted(tab("t${PaneDeck.MOUNT_LIMIT - 1}")))
+        assertEquals(tab("overflow"), deck.current)
+        assertConsistent(deck)
+    }
+
+    /**
+     * **The limit is five, and five is three plus two.**
+     *
+     * Every other test in this file is written against [PaneDeck.MOUNT_LIMIT]
+     * rather than a number, which is right — they are about the RULE and should
+     * survive the constant moving. But it means they would all pass at a limit
+     * of one, so nothing here pinned the value itself, and the value is a
+     * decision with an argument behind it:
+     *
+     *   - THREE is what "the agents I am working with" means in one worktree,
+     *     the same answer `AGENTS_PER_WORKSPACE` reached independently.
+     *   - TWO more are the shell's track, which draws the pane you are on with
+     *     a real neighbour either side — that is what makes an incoming
+     *     terminal a terminal rather than a placeholder that appears on commit
+     *     — and either neighbour can sit in another workspace.
+     *
+     * If this fails, the limit moved. That is allowed, and `PaneDeck`'s comment
+     * says what evidence should move it (`REASON_LOW_MEMORY` in `ProcessExit`'s
+     * log); this test is here so it cannot move by accident, and so that the
+     * next person reads the argument before changing the number.
+     */
+    @Test
+    fun theLimitIsThreeAgentsPlusTheTrackTwoNeighbours() {
+        assertEquals(3 + 2, PaneDeck.MOUNT_LIMIT)
+    }
+
+    /**
+     * A track's worth of panes fits without evicting anything.
+     *
+     * The arithmetic above, exercised rather than asserted: the pane you are on,
+     * two more you have been working with, and the two neighbours the track
+     * mounts either side of you. If the limit ever drops below this, a swipe
+     * starts destroying a pane to draw its neighbour — which is the one thing
+     * this whole type exists to prevent.
+     */
+    @Test
+    fun aTrackWithBothNeighboursEvictsNothing() {
+        var deck = PaneDeck.opening(tab("current"))
+        for (name in listOf("second", "third", "previous", "next")) {
+            deck = deck.select(tab(name))
+        }
+        for (name in listOf("current", "second", "third", "previous", "next")) {
+            assertTrue("$name should still be mounted", deck.isMounted(tab(name)))
+        }
+        assertEquals(5, deck.mountedPanes)
         assertConsistent(deck)
     }
 

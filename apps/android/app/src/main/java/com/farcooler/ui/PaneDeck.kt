@@ -175,15 +175,50 @@ data class PaneDeck(
 
     companion object {
         /**
-         * How many of a workspace's PANES stay mounted.
+         * How many PANES stay mounted.
          *
-         * Three, which is what "the agents I am working with" means in one
-         * worktree. `AGENTS_PER_WORKSPACE` in `model/NeedsYou.kt` independently
-         * arrived at three for the front door, and the agreement is not a
-         * coincidence — both are asking how many agents of one worktree a
-         * person holds in their head at once. It is deliberately NOT that
-         * constant: one is a memory budget and the other is a row budget, and a
-         * shared name would tie a phone's RSS to a list's height.
+         * **Five: three, plus a previous and a next.** The three are what "the
+         * agents I am working with" means in one worktree — `AGENTS_PER_WORKSPACE`
+         * in `model/NeedsYou.kt` independently arrived at three for the front
+         * door, and the agreement is not a coincidence, since both are asking
+         * how many agents of one worktree a person holds in their head at once.
+         * It is deliberately NOT that constant: one is a memory budget and the
+         * other is a row budget, and a shared name would tie a phone's RSS to a
+         * list's height.
+         *
+         * The other two are the shell's track. It draws the pane you are on
+         * with its neighbours either side, genuinely mounted and genuinely
+         * drawn — that is what makes the incoming terminal real rather than a
+         * placeholder that appears on commit — and either neighbour can sit in
+         * another workspace, since the content track walks one flat sequence
+         * across the whole fleet (`model/Shell.kt`).
+         *
+         * ## This was three, and raising it was a decision rather than a drift
+         *
+         * The argument below is still correct and is the reason the number is
+         * argued at all rather than picked. What changed is which risk is worth
+         * taking: the alternative on the table was a PLACEHOLDER neighbour — the
+         * workspace's name and its last few lines, with a real pane built only
+         * on commit — which would have kept the budget at three and bought it
+         * with a page turn that lands on something that then has to become a
+         * terminal. The owner's call was to raise the limit and **watch for real
+         * memory pressure rather than design around a predicted one**.
+         *
+         * **So the signal has to be observable, and it was not.** A low-memory
+         * kill is silent: the app simply appears to have started cold, which is
+         * indistinguishable from a crash or a first launch. `ProcessExit` now
+         * reads `ActivityManager.getHistoricalProcessExitReasons` at startup and
+         * logs what actually happened, so `REASON_LOW_MEMORY` shows up in a
+         * bug report instead of being invisible. **That instrumentation is part
+         * of this decision, not a follow-up to it** — without it this number
+         * stays at five by default rather than by choice, because nothing would
+         * ever say otherwise.
+         *
+         * **What would bring it back down.** `REASON_LOW_MEMORY` appearing in
+         * `ProcessExit`'s log on a real device with a real fleet. The lever to
+         * reach for first is this constant; the one after that is
+         * `SCROLLBACK_LINES` in `crates/vt/src/lib.rs`, which is what each of
+         * these panes is actually large because of.
          *
          * **The Changes tab does not count against it and is never evicted.**
          * This is a budget for emulators, streams and native scrollback, and
@@ -204,7 +239,7 @@ data class PaneDeck(
          * tab that starts costing something is a reason to revisit it rather
          * than to widen it quietly.
          */
-        const val MOUNT_LIMIT = 3
+        const val MOUNT_LIMIT = 5
 
         /** A workspace opening on one tab, with nothing else mounted yet. */
         fun opening(pane: Pane) = PaneDeck(pane, listOf(pane), listOf(pane))
