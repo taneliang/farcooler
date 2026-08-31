@@ -93,10 +93,40 @@ object ShellMetrics {
     const val BAR_INSET = 16f
 
     /**
-     * The first 6dp of movement decides horizontal versus vertical, once, and
-     * the answer never changes for the rest of the gesture.
+     * The first 6dp of movement decides horizontal versus vertical. On the
+     * CONTENT that is the answer for the rest of the gesture; on the bar it is
+     * only the first answer, and [ShellGesture.lean] is asked again every
+     * frame after it.
      */
     const val AXIS_LOCK = 6f
+
+    /**
+     * How much further one axis has to have travelled than the other before a
+     * BAR gesture already leaning one way changes its mind.
+     *
+     * **A ratio rather than a distance, because it is an angle.** 1.4 is
+     * `tan 54.5°`: a gesture leaning horizontal keeps the gesture until the
+     * finger is travelling more than 54.5° off horizontal, and one leaning
+     * vertical keeps it until the finger is within 35.5° of horizontal.
+     * Between them is a 19° band in which the answer is whatever it already
+     * was — which is what a hysteresis is, and the answer to what happens on
+     * the diagonal: nothing happens on the diagonal.
+     *
+     * Without it, a finger crawling the diagonal arrives as integer points and
+     * lands either side of 1 from frame to frame: a 120-frame crawl changes
+     * its answer 115 times, each of them a menu told to open and then to shut
+     * over a surface that never finishes arriving.
+     *
+     * Scale-free, which is the second reason it is a ratio. Ten points up
+     * takes fourteen across to redirect, which costs nothing; two hundred up
+     * takes two hundred and eighty, by which point you have opened a menu and
+     * are reading it, and leaving it should look like a decision.
+     *
+     * **The bar only.** The content keeps a true lock — see [ShellGesture.axis]
+     * and `PaneTrack`'s header, where the same split is reached from Android's
+     * own side.
+     */
+    const val REDIRECT = 1.4f
 
     /**
      * How much of a drag survives at the true ends of the fleet, where there is
@@ -414,14 +444,67 @@ object ShellGesture {
      * 511dp down is about 9° off vertical and well past [ShellMetrics.PAGE_COMMIT],
      * so scrolling a transcript turned the page.
      *
-     * Decided ONCE, on the first movement past [ShellMetrics.AXIS_LOCK] in
-     * either direction, and never revisited for the rest of the gesture. A
-     * caller that recomputes this every frame has reintroduced the class of bug
-     * this returns null to prevent.
+     * **The FIRST answer, and on the CONTENT the only one.** A caller on the
+     * content that recomputes this every frame has reintroduced the class of
+     * bug this returns null to prevent: vertical there belongs to whatever
+     * vertical scroller is under the finger. On the BAR nothing else is
+     * listening — down does nothing, up is the column, sideways is the
+     * workspace — so [lean] starts here and then keeps asking.
+     *
+     * The tie goes to VERTICAL, and that is the answer to what wins on the
+     * diagonal for a gesture with no history. After the first six points there
+     * IS a history, and [lean] hands the diagonal to it.
      */
     fun axis(dx: Float, up: Float): ShellAxis? {
         if (max(abs(dx), abs(up)) <= ShellMetrics.AXIS_LOCK) return null
         return if (abs(dx) > abs(up)) ShellAxis.HORIZONTAL else ShellAxis.VERTICAL
+    }
+
+    /**
+     * Which axis a BAR gesture is leaning toward NOW, given what it was leaning
+     * toward a frame ago.
+     *
+     * **This is the redirection.** The owner's ask: *"the user can start
+     * swiping horizontally, then decide they want to swipe vertically instead,
+     * or vice versa."* WWDC 2018 803 on why it is worth the machinery: *"when
+     * it's redirectable, the thought and gesture happen in parallel. And you
+     * sort of think it with the gesture, and it turns out this is way faster
+     * than thinking before doing."*
+     *
+     * The first answer is [axis] unchanged, so a gesture that never redirects
+     * means exactly what it always meant — every straight-line drag, since
+     * along a straight line the ratio is constant and an incumbent can never be
+     * beaten by [ShellMetrics.REDIRECT] times itself.
+     *
+     * **Null is not reachable a second time.** A gesture that has decided an
+     * axis has moved, and a thing that has moved is not a tap however far back
+     * toward the origin it comes; the [ShellMetrics.AXIS_LOCK] guard is asked
+     * only while there is no incumbent. Reaching null again would resolve a
+     * drag out and back to [ShellRelease.ToggleColumn].
+     *
+     * **[holdingPage] takes the gesture away from the lean entirely.** Once the
+     * page has left the display it is in your hand and both directions are its
+     * own — see [pageIsHeld], and [ShellFleet.barRelease]'s Carry arm, which is
+     * that composition and predates all of this. Handing a held page to
+     * HORIZONTAL would drop it back onto the display while the thumb was still
+     * up in the air holding it. So the redirection is bounded by exactly the
+     * line the page leaves the glass at: below it the two axes are alternatives
+     * and this arbitrates; at and above it they compose and there is nothing to
+     * arbitrate.
+     */
+    fun lean(dx: Float, up: Float, from: ShellAxis?, holdingPage: Boolean = false): ShellAxis? {
+        if (holdingPage) return ShellAxis.VERTICAL
+        val current = from ?: return axis(dx, up)
+        val across = abs(dx)
+        val along = abs(up)
+        return when (current) {
+            ShellAxis.HORIZONTAL ->
+                if (along > across * ShellMetrics.REDIRECT) ShellAxis.VERTICAL
+                else ShellAxis.HORIZONTAL
+            ShellAxis.VERTICAL ->
+                if (across > along * ShellMetrics.REDIRECT) ShellAxis.HORIZONTAL
+                else ShellAxis.VERTICAL
+        }
     }
 
     /**
@@ -563,7 +646,18 @@ object ShellGesture {
     /** How far past the last row the drag has gone, in dp. */
     fun pageRise(up: Float, tabCount: Int): Float = max(0f, up - columnFull(tabCount))
 
-    /** Whether the page has left the glass and is being carried. */
+    /**
+     * Whether the page has left the glass and is being carried.
+     *
+     * **The line where the bar stops arbitrating between its two axes and
+     * starts composing them.** Below it they are alternatives: the vertical
+     * draws a menu, the horizontal slides the whole track, and drawing both at
+     * once slides an open column sideways off the bar it grew out of — so
+     * exactly one is drawn and [ShellGesture.lean] says which. At and above it
+     * they compose: the lift decides whether you stay up, sideways decides
+     * which cell you land in, and `barRelease`'s Carry arm answers both off one
+     * release.
+     */
     fun pageIsHeld(up: Float, tabCount: Int): Boolean = pageRise(up, tabCount) > 0f
 
     /** How far into the overview this drag has got, 0…1. */
@@ -591,6 +685,143 @@ object ShellGesture {
      */
     fun overviewDismisses(begunAtTop: Boolean, down: Float): Boolean =
         begunAtTop && down >= ShellMetrics.PAGE_COMMIT
+}
+
+/**
+ * The part of a BAR gesture that is not a pure function of where the finger is:
+ * which axis it is leaning toward, and what each axis owes the other once it has
+ * changed its mind.
+ *
+ * **The one stateful thing in this file, and it is here for the same reason
+ * everything else is.** [ShellGesture] is deliberately stateless, which works
+ * for as long as every question can be answered from the current translation
+ * alone. The redirection cannot: whether this frame is a handover depends on
+ * what the last frame answered, and what a handover charges depends on where
+ * the finger was when it happened. Left in a view that is three pieces of
+ * remembered state and a fifteen-line callback — the shape of thing no test can
+ * reach, and the reason the axis stayed a lock for as long as it did.
+ *
+ * **It decides nothing on its own.** [ShellGesture.lean] for the axis,
+ * [ShellGesture.pageIsHeld] for when the two axes stop competing,
+ * [ShellGesture.pageRise] for what a handover charges the lift. This type is
+ * their lifetime and nothing else.
+ *
+ * Android has no bar surface yet — `PaneTrack` is the content, and its header
+ * is where the split between the two surfaces is argued from Android's own
+ * side — so nothing calls this today. It is here because the model is the story
+ * both platforms tell, and a bar built later against a shared model that had
+ * quietly stopped sharing this would be a bar with a locked axis and no note
+ * saying why.
+ */
+class ShellBarDrag {
+    /** Which axis the gesture is answering, or null while it is still a tap. */
+    var axis: ShellAxis? = null
+        private set
+
+    /**
+     * Sideways travel this gesture spent on an axis it has since left.
+     *
+     * Both sideways channels measure from it — the track below the last row,
+     * the carried card above it — because it is one fact about the gesture
+     * rather than a property of either.
+     */
+    var spentSideways = 0f
+        private set
+
+    /**
+     * Lift this gesture spent before the vertical claimed it, and NOT the same
+     * rule as [spentSideways].
+     *
+     * **Positions are re-based; a pop is adopted whole.** The column is shut
+     * and then whole, and the row it lights is read off the finger's absolute
+     * place on the glass — no in-between to teleport through, and nothing
+     * bought by making a finger already 200dp above the bar travel 16 more
+     * before the menu it is plainly asking for appears. The PAGE past the last
+     * row is a position and may not jump, so everything past the last row is
+     * travel this gesture has not made yet.
+     *
+     * Which is [ShellGesture.pageRise] exactly, and deliberately: "how much of
+     * this lift has moved the page" and "how much of it may not be handed to
+     * whoever claims it next" are the same question.
+     *
+     * **It is a charge on TRAVEL, never on PLACE.** The row a column
+     * highlights is read off the finger's absolute point on the glass, so this
+     * never moves a highlight. But whatever decides whether the menu is DRAWN
+     * must add this back first: iOS asked the charged lift whether the finger
+     * was past the last row, and after a charge that is a different question
+     * with a different answer — a gesture that swipes 150dp sideways and turns
+     * upward hands over at 212, this puts the travel at exactly the column's
+     * last row, and the menu sprang open with the thumb 80dp above every row
+     * in it and shut on the next frame.
+     */
+    var spentLift = 0f
+        private set
+
+    /**
+     * Whether the page has been off the display at any point in this gesture.
+     *
+     * Latched: a card brought back down out of the overview's run is still in
+     * your hand, and one that fell out of it because you lowered your thumb
+     * forty dp would be the drop the rule exists to prevent, reached more
+     * slowly.
+     */
+    var holdingPage = false
+        private set
+
+    /** What one frame of a bar drag comes to. */
+    data class Frame(
+        val axis: ShellAxis?,
+        /** The lift the column and the page are drawn at: floored, and net of any handover. */
+        val lift: Float,
+        /** The sideways travel the track — or the carried card — is drawn at, before banding. */
+        val sideways: Float,
+        /**
+         * Which axis has just taken the gesture off the other, or null if
+         * nothing changed hands this frame.
+         *
+         * A view needs this and only this to run the handover's other half:
+         * putting back what the abandoned channel had drawn, eased, because it
+         * is no longer the finger's position but an apology for having moved.
+         * That is a transaction, not a number, so it cannot live here.
+         */
+        val claimed: ShellAxis?,
+    )
+
+    /**
+     * One frame of the finger.
+     *
+     * [up] is up-positive and RAW — the whole translation, not the lift —
+     * because the lean is about which way the finger is going while the charges
+     * are about how much of that each channel has been given. Mixing them would
+     * make the ratio a function of its own history.
+     */
+    fun moved(dx: Float, up: Float, tabCount: Int): Frame {
+        val lift = max(0f, up - spentLift)
+        // Read before the lean and never unset: once the page is off the
+        // display both directions are its own, and the lean stops being asked
+        // for the rest of the gesture.
+        if (axis == ShellAxis.VERTICAL && ShellGesture.pageIsHeld(lift, tabCount)) {
+            holdingPage = true
+        }
+        val was = axis
+        axis = ShellGesture.lean(dx, up, was, holdingPage)
+        val claimed = axis
+        // A first answer hands nothing over: both channels are at rest, so
+        // there is nothing to put back and nothing to charge.
+        if (claimed == null || claimed == was || was == null) {
+            return Frame(axis, lift, dx - spentSideways, null)
+        }
+        // One line for both directions, because it is one fact: the sideways
+        // travel this gesture has already spent.
+        spentSideways = dx
+        // The lift's charge belongs to whoever is holding the vertical, so it
+        // is recomputed when the vertical takes the gesture and DROPPED when it
+        // loses it. Left standing across a hand-back it is a number that no
+        // longer describes anything.
+        spentLift =
+            if (claimed == ShellAxis.VERTICAL) ShellGesture.pageRise(up, tabCount) else 0f
+        return Frame(axis, max(0f, up - spentLift), dx - spentSideways, claimed)
+    }
 }
 
 /** What a release means. */

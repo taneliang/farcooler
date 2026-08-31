@@ -3,7 +3,10 @@ package com.farcooler.model
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.sin
 import org.junit.Test
 
 /**
@@ -111,6 +114,248 @@ class ShellTest {
     fun `a perfect diagonal is vertical and is stable`() {
         assertEquals(ShellAxis.VERTICAL, ShellGesture.axis(dx = 40f, up = 40f))
         assertEquals(ShellAxis.VERTICAL, ShellGesture.axis(dx = -40f, up = -40f))
+    }
+
+    // MARK: - Redirection
+
+    /** One frame of a bar drag, folded over a whole path the way a frame loop does. */
+    private fun drive(
+        path: List<Pair<Float, Float>>,
+        tabCount: Int,
+    ): Triple<ShellBarDrag, ShellBarDrag.Frame, Int> {
+        val drag = ShellBarDrag()
+        var frame = ShellBarDrag.Frame(null, 0f, 0f, null)
+        var flips = 0
+        for ((dx, up) in path) {
+            frame = drag.moved(dx, up, tabCount)
+            if (frame.claimed != null) flips++
+        }
+        return Triple(drag, frame, flips)
+    }
+
+    /** A straight run of samples, the way a finger at a constant speed arrives. */
+    private fun leg(
+        from: Pair<Float, Float>,
+        to: Pair<Float, Float>,
+        steps: Int = 24,
+    ): List<Pair<Float, Float>> =
+        (1..steps).map { i ->
+            val t = i.toFloat() / steps
+            Pair(from.first + (to.first - from.first) * t, from.second + (to.second - from.second) * t)
+        }
+
+    /**
+     * **A drag that goes sideways and then turns upward opens the column**, and
+     * the same ninety points that do not turn are the workspace crossing they
+     * always were.
+     *
+     * The owner's ask: *"the user can start swiping horizontally, then decide
+     * they want to swipe vertically instead."* Nothing asserted it before,
+     * because nothing could: the axis was decided on the first six points and
+     * never revisited.
+     */
+    @Test
+    fun `a drag that turns upward out of a sideways swipe reaches the column`() {
+        val turned = drive(leg(0f to 0f, -90f to 0f) + leg(-90f to 0f, -90f to 200f), 3)
+        assertEquals(ShellAxis.VERTICAL, turned.second.axis)
+        assertEquals(1, turned.third)
+        // The sideways it spent on the page turn it abandoned, so the next
+        // thing to read `dx` starts from nothing instead of jumping 90dp.
+        assertEquals(-90f, turned.first.spentSideways, 0.01f)
+        assertEquals(0f, turned.second.sideways, 0.01f)
+
+        val straight = drive(leg(0f to 0f, -90f to 0f), 3)
+        assertEquals(ShellAxis.HORIZONTAL, straight.second.axis)
+        assertEquals(0, straight.third)
+    }
+
+    /**
+     * **And the mirror: a lift that turns sideways crosses the workspace.**
+     *
+     * The half that looks like it already worked and did not. A lifted page
+     * could go sideways, but only past the last row where the two axes stop
+     * competing; inside the column sideways meant nothing at all however
+     * decisive it was.
+     */
+    @Test
+    fun `a lift that turns sideways out of an open column crosses the workspace`() {
+        val turned = drive(leg(0f to 0f, 0f to 100f) + leg(0f to 100f, -220f to 100f), 3)
+        assertEquals(ShellAxis.HORIZONTAL, turned.second.axis)
+        assertEquals(1, turned.third)
+        assertTrue(turned.first.spentSideways < -139f && turned.first.spentSideways > -150f)
+        assertEquals(
+            "a charge on the lift belongs to whoever is holding the vertical",
+            0f,
+            turned.first.spentLift,
+            0.01f,
+        )
+
+        // A hundred points of wander off the same lift is short of taking the
+        // gesture, and the column keeps it.
+        val wandered = drive(leg(0f to 0f, 0f to 100f) + leg(0f to 100f, -100f to 100f), 3)
+        assertEquals(ShellAxis.VERTICAL, wandered.second.axis)
+        assertEquals(0, wandered.third)
+    }
+
+    /**
+     * **A straight drag means exactly what it meant before any of this**, at
+     * every angle and in both signs.
+     *
+     * Provable rather than sampled: along a straight line the ratio is
+     * constant, so an incumbent is by construction already the larger of the
+     * two and can never be beaten by [ShellMetrics.REDIRECT] times itself.
+     */
+    @Test
+    fun `a straight drag means exactly what it always did`() {
+        for (degrees in 0 until 360 step 5) {
+            val radians = degrees * PI.toFloat() / 180f
+            val end = Pair(300f * cos(radians), 300f * sin(radians))
+            val run = drive(leg(0f to 0f, end, steps = 60), 3)
+            assertEquals(
+                "a straight drag at $degrees° changed its meaning",
+                ShellGesture.axis(end.first, end.second),
+                run.second.axis,
+            )
+            assertEquals("a straight drag at $degrees° changed its mind", 0, run.third)
+        }
+    }
+
+    /**
+     * **The diagonal keeps whatever the gesture already is**, and without the
+     * hysteresis a jittering diagonal changes its answer on nearly every frame.
+     *
+     * The memoryless rule is counted below as the counter-example it is, so
+     * this test says what changed rather than merely what is.
+     */
+    @Test
+    fun `the diagonal keeps whatever the gesture already is`() {
+        assertEquals(ShellAxis.HORIZONTAL, ShellGesture.lean(100f, 100f, ShellAxis.HORIZONTAL))
+        assertEquals(ShellAxis.VERTICAL, ShellGesture.lean(100f, 100f, ShellAxis.VERTICAL))
+        // tan 54.5° = 1.4, so a hair past it the horizontal lets go and a hair
+        // short of it does not.
+        assertEquals(ShellAxis.VERTICAL, ShellGesture.lean(100f, 141f, ShellAxis.HORIZONTAL))
+        assertEquals(ShellAxis.HORIZONTAL, ShellGesture.lean(100f, 139f, ShellAxis.HORIZONTAL))
+        assertEquals(ShellAxis.HORIZONTAL, ShellGesture.lean(141f, 100f, ShellAxis.VERTICAL))
+        assertEquals(ShellAxis.VERTICAL, ShellGesture.lean(139f, 100f, ShellAxis.VERTICAL))
+
+        val jittered = (1..120).map { i ->
+            Pair(i.toFloat() + if (i % 2 == 0) 1f else -1f, i.toFloat())
+        }
+        var memoryless = 0
+        var last: ShellAxis? = null
+        for ((dx, up) in jittered) {
+            val answer = ShellGesture.axis(dx, up)
+            if (answer != null && answer != last) memoryless++
+            if (answer != null) last = answer
+        }
+        assertTrue(
+            "the rule with no memory answers a different axis on nearly every frame",
+            memoryless > 100,
+        )
+        assertEquals(0, drive(jittered, 3).third)
+    }
+
+    /**
+     * A gesture that has moved is never a tap again, however far back toward
+     * the origin it comes.
+     *
+     * The trap in re-asking a question that used to be asked once: the tap is
+     * the ABSENCE of an axis, so a rule that could answer null a second time
+     * would toggle the column under a finger that asked for neither.
+     */
+    @Test
+    fun `a gesture that has moved is never a tap again`() {
+        assertEquals(ShellAxis.HORIZONTAL, ShellGesture.lean(0f, 0f, ShellAxis.HORIZONTAL))
+        assertEquals(ShellAxis.VERTICAL, ShellGesture.lean(0f, 0f, ShellAxis.VERTICAL))
+        val run = drive(leg(0f to 0f, 60f to 0f) + leg(60f to 0f, 0f to 0f), 3)
+        assertEquals(ShellAxis.HORIZONTAL, run.second.axis)
+    }
+
+    /**
+     * **Once the page is in your hand the lean stops being asked.** The bound
+     * on the whole change, and the one thing the old lock was protecting.
+     *
+     * Latched rather than recomputed: the second run brings the card back DOWN
+     * into the column, which is a thumb lowering rather than a thumb letting
+     * go.
+     */
+    @Test
+    fun `the lift claims both axes once the page is in your hand`() {
+        assertEquals(
+            ShellAxis.VERTICAL,
+            ShellGesture.lean(900f, 10f, ShellAxis.VERTICAL, holdingPage = true),
+        )
+        val carried = drive(leg(0f to 0f, 0f to 260f) + leg(0f to 260f, -500f to 260f), 3)
+        assertEquals(ShellAxis.VERTICAL, carried.second.axis)
+        assertTrue(carried.first.holdingPage)
+        assertEquals(-500f, carried.second.sideways, 0.01f)
+
+        val lowered = drive(leg(0f to 0f, 0f to 260f) + leg(0f to 260f, -300f to 100f), 3)
+        assertEquals(ShellAxis.VERTICAL, lowered.second.axis)
+        assertEquals(0, lowered.third)
+    }
+
+    /**
+     * **A handover charges the claimed lift exactly what the page would have
+     * jumped, and not a point more.**
+     *
+     * Two halves, two rules, because of what each channel is. The track is a
+     * POSITION and re-bases whole. The column is not: it is shut, then whole,
+     * and its row is read off the finger's absolute place on the glass. What is
+     * a position on the vertical is the page's own rise past the last row,
+     * which is [ShellGesture.pageRise].
+     */
+    @Test
+    fun `a handover charges the lift only for what would have moved the page`() {
+        // Inside the column: nothing to charge, and the menu opens under the
+        // finger the moment the gesture turns.
+        val inside = drive(leg(0f to 0f, -60f to 0f) + leg(-60f to 0f, -60f to 120f), 3)
+        assertEquals(ShellAxis.VERTICAL, inside.second.axis)
+        assertEquals(0f, inside.first.spentLift, 0.01f)
+        assertEquals(120f, inside.second.lift, 0.01f)
+
+        // A one-tab workspace is where an uncharged handover was worst: 44dp of
+        // column, so the same turn would have thrown the page most of the way
+        // into the overview in a single frame.
+        val single = drive(leg(0f to 0f, -60f to 0f) + leg(-60f to 0f, -60f to 120f), 1)
+        assertEquals(40f, single.first.spentLift, 2f)
+        assertEquals(
+            "the page starts the overview's run at nothing, not halfway through it",
+            0f,
+            ShellGesture.overviewProgress(84f - single.first.spentLift, 1),
+            0.001f,
+        )
+    }
+
+    /**
+     * A charge handed back is a charge dropped.
+     *
+     * [ShellBarDrag.spentLift] describes what the VERTICAL was given, so it
+     * means nothing while the horizontal holds the gesture; left standing it is
+     * a phantom thumb some number of dp above a column nobody is in.
+     *
+     * The path is the one shape that can reach it, and it is narrow on purpose.
+     * A charge is only non-zero when the vertical claims a gesture already past
+     * the last row — and the charge puts the lift back ON the last row, which
+     * is not yet [ShellGesture.pageIsHeld], so the page is not in your hand and
+     * the lean is still being asked. One dp more of RISE and it would be held
+     * and this could never happen; so the finger turns sideways instead.
+     */
+    @Test
+    fun `a charge on the lift is dropped when the horizontal takes the gesture back`() {
+        val run = drive(
+            leg(0f to 0f, -143f to 0f) +
+                leg(-143f to 0f, -143f to 201f) +
+                leg(-143f to 201f, -400f to 201f),
+            3,
+        )
+        assertEquals(ShellAxis.HORIZONTAL, run.second.axis)
+        assertEquals(2, run.third)
+        assertTrue("the page never left the display", !run.first.holdingPage)
+        assertEquals(0f, run.first.spentLift, 0.01f)
+        // The sideways charge is not dropped but RE-TAKEN: it is however far
+        // sideways the gesture had gone the last time it changed its mind.
+        assertTrue(run.first.spentSideways < -281f && run.first.spentSideways > -290f)
     }
 
     // MARK: - The column, and the row that was one off

@@ -287,16 +287,19 @@ final class ShellGestureTests: XCTestCase {
 
     /// A lift that also travels sideways lands in the NEIGHBOUR's cell.
     ///
-    /// The one gesture that used to be impossible: the axis lock made the two
-    /// mutually exclusive, so a drag that started upward could do nothing
-    /// sideways however far it went. The lock is still never released — this
-    /// is the vertical gesture throughout — the lift simply owns both
-    /// directions once the page is off the display, which is the rule written
-    /// down at `ShellGesture.pageIsHeld`.
+    /// **The mechanism the rest of the redirection generalises**, and it was
+    /// here first. Past the last row the page is off the display and the two
+    /// axes stop competing: the lift decides whether you stay up, sideways
+    /// decides which cell you land in, and `ShellGesture.lean` stops being
+    /// asked for the rest of the gesture — `ShellBarDrag.holdingPage` latches
+    /// and answers `.vertical` whatever the thumb does sideways. That is the
+    /// one thing the axis lock was genuinely protecting, and it is protected
+    /// by a narrower rule now rather than by refusing to look.
     ///
-    /// The offsets are chosen so the axis cannot be in doubt: 320 up against
-    /// 130 across is well past `abs(dx) > dy`, so the first six points decide
-    /// vertical, and 130 is well past the 70-point commit.
+    /// The offsets are chosen so the lean cannot be in doubt anywhere along
+    /// the path: this is a straight line at 130 across to 320 up, so its
+    /// running ratio is 0.41 for every frame of it and no threshold in
+    /// `lean` is anywhere near. 130 is also well past the 70-point commit.
     func testALiftedPageFlickedSidewaysCarriesToTheNeighbour() throws {
         let app = launch()
         XCTAssertEqual(try state(app)["ws"], 0)
@@ -319,13 +322,76 @@ final class ShellGestureTests: XCTestCase {
     ///
     /// The other side of the rule, and the one that would break first: a
     /// carry read out of the sideways wander every long drag has would move
-    /// the workspace under somebody who only ever swiped up.
+    /// the workspace under somebody who only ever swiped up. It is also the
+    /// negative control for the redirection — a gesture with no sideways
+    /// component has nothing to redirect INTO, so the lean must never fire.
     func testAStraightLiftStaysOnTheWorkspaceItStartedOn() throws {
         let app = launch()
         liftBar(app, by: 320)
         let after = try state(app)
         XCTAssertEqual(after["overview"], 1)
         XCTAssertEqual(after["ws"], 0, "a straight lift changed workspace")
+    }
+
+    /// **A diagonal drag on the bar resolves by which way it leans, and it
+    /// leans the way it always did.**
+    ///
+    /// The negative control for making the bar's axis redirectable, on a real
+    /// finger. `XCUIElement.press(forDuration:thenDragTo:)` interpolates a
+    /// STRAIGHT line, so its running `|dx| : |dy|` is constant — and along a
+    /// constant ratio an incumbent axis is by construction already the larger
+    /// of the two and can never be beaten by `ShellMetrics.redirect` times
+    /// itself. Which is to say: no gesture this suite can synthesize
+    /// redirects, and every one of the bar tests above therefore means today
+    /// exactly what it meant when the axis was decided once and never
+    /// revisited. `ShellNavigationTests.aStraightDragMeansExactlyWhatItAlwaysDid`
+    /// proves that for every angle in five-degree steps; this proves the
+    /// finger reaches it.
+    ///
+    /// **The same two numbers, swapped.** 80 across against 52 up is a
+    /// workspace crossing; 52 across against 80 up is a tab chosen off the
+    /// column. Both are well inside the 19° band `redirect` would hold a
+    /// gesture through if either of them ever got there — they are 33° and
+    /// 57° — and both are unambiguous outcomes rather than two flavours of
+    /// nothing: the first changes workspace, the second changes tab while
+    /// leaving the workspace alone.
+    ///
+    /// 52 across is also deliberately SHORT of the 70-point commit, so a
+    /// gesture that leaned the wrong way would spring back and change no tab,
+    /// and 80 up puts the fingertip 58 points above the bar row — inside the
+    /// second row from the bar, which on a three-tab column is tab 1.
+    func testADiagonalDragOnTheBarResolvesByWhichWayItLeans() throws {
+        let app = launch()
+        XCTAssertEqual(try state(app)["tabs"], 3, "workspace 0 of the canned fleet has three tabs")
+        XCTAssertEqual(try state(app)["ws"], 0)
+        XCTAssertEqual(try state(app)["tab"], 0)
+
+        // Leaning vertical: 52 across, 80 up.
+        dragBar(app, by: CGVector(dx: -52, dy: -80))
+        let lifted = try state(app)
+        XCTAssertEqual(lifted["ws"], 0, "a drag that leans vertical changed workspace")
+        XCTAssertEqual(
+            lifted["tab"], 1,
+            "the fingertip was over the second row from the bar, which is tab 1")
+        XCTAssertEqual(lifted["overview"], 0)
+
+        // Leaning horizontal: the same two numbers the other way round.
+        dragBar(app, by: CGVector(dx: -80, dy: -52))
+        let crossed = try state(app)
+        XCTAssertEqual(crossed["ws"], 1, "a drag that leans horizontal did not change workspace")
+        XCTAssertEqual(crossed["tab"], 0, "the bar lands on the next workspace's first tab")
+        XCTAssertEqual(crossed["overview"], 0)
+    }
+
+    /// One straight drag from the bar's centre, held before release so it
+    /// throws nothing.
+    private func dragBar(_ app: XCUIApplication, by offset: CGVector) {
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
+        let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        from.press(
+            forDuration: 0.05, thenDragTo: from.withOffset(offset), withVelocity: .slow,
+            thenHoldForDuration: 0.5)
     }
 
     // MARK: - The pane-retention invariant

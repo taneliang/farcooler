@@ -306,10 +306,15 @@ struct ShellNavigationTests {
         #expect(ShellGesture.translation(dx: 100, rubberBanding: true) == 34)
     }
 
-    // MARK: - The axis lock
+    // MARK: - The first six points
 
     /// Nothing under 6 points has an axis at all, which is what stops a tap
     /// from being a tiny drag.
+    ///
+    /// `lean` with nothing to lean from is this same function, so a gesture
+    /// on the BAR begins exactly where a gesture on the content begins. That
+    /// is the whole of why unlocking the axis changed no straight drag: it
+    /// changed no FIRST answer.
     @Test func theAxisIsUndecidedUnderSixPoints() {
         #expect(ShellGesture.axis(dx: 0, up: 0) == nil)
         #expect(ShellGesture.axis(dx: 5.9, up: 0) == nil)
@@ -317,6 +322,15 @@ struct ShellNavigationTests {
         #expect(ShellGesture.axis(dx: -5.9, up: -5.9) == nil)
         #expect(ShellGesture.axis(dx: 6.1, up: 0) == .horizontal)
         #expect(ShellGesture.axis(dx: 0, up: 6.1) == .vertical)
+
+        #expect(ShellGesture.lean(dx: 5.9, up: 0, from: nil) == nil)
+        #expect(ShellGesture.lean(dx: 6.1, up: 0, from: nil) == .horizontal)
+        #expect(ShellGesture.lean(dx: 0, up: 6.1, from: nil) == .vertical)
+        // The tie, and the answer to "what wins at the diagonal" for a
+        // gesture with no history: vertical, because the comparison is `>`.
+        // It matters only here — after this there IS a history, and the
+        // diagonal is handed to it.
+        #expect(ShellGesture.lean(dx: 40, up: 40, from: nil) == .vertical)
     }
 
     /// **A drag down the screen is VERTICAL, however far it wanders
@@ -352,6 +366,426 @@ struct ShellNavigationTests {
             fleet.barRelease(
                 axis: .vertical, dx: 0, up: 0, at: ShellPosition(workspace: 1, tab: 0))
                 == .abandon)
+    }
+
+    // MARK: - Redirection
+
+    /// One frame of a bar drag, folded over a whole path the way the frame
+    /// loop does.
+    ///
+    /// `ShellDrag.barGesture` is the other caller of exactly this, and it
+    /// adds only pixels: `frame.axis` picks the arm, `frame.lift` and
+    /// `frame.sideways` are what it writes, `frame.claimed` runs the eased
+    /// put-back. So a path driven through here is the shipped redirection
+    /// and not a replica of it.
+    private func drive(_ path: [(dx: CGFloat, up: CGFloat)], tabCount: Int)
+        -> (drag: ShellBarDrag, frame: ShellBarDrag.Frame, flips: Int)
+    {
+        var drag = ShellBarDrag()
+        var frame = ShellBarDrag.Frame(axis: nil, lift: 0, sideways: 0, claimed: nil)
+        var flips = 0
+        for point in path {
+            frame = drag.moved(dx: point.dx, up: point.up, tabCount: tabCount)
+            if frame.claimed != nil { flips += 1 }
+        }
+        return (drag, frame, flips)
+    }
+
+    /// A straight run of samples between two corners, the way a finger
+    /// travelling at a constant speed arrives.
+    private func leg(
+        from: (dx: CGFloat, up: CGFloat), to: (dx: CGFloat, up: CGFloat), steps: Int = 24
+    ) -> [(dx: CGFloat, up: CGFloat)] {
+        (1...steps).map { i in
+            let t = CGFloat(i) / CGFloat(steps)
+            return (dx: from.dx + (to.dx - from.dx) * t, up: from.up + (to.up - from.up) * t)
+        }
+    }
+
+    /// **A drag that goes sideways and then turns upward opens the column.**
+    /// The owner's ask, in one direction: *"the user can start swiping
+    /// horizontally, then decide they want to swipe vertically instead."*
+    ///
+    /// Nothing in this shell asserted it before, and nothing could: the axis
+    /// was decided on the first six points and never revisited, so a gesture
+    /// that began sideways was a page turn until the finger left the glass
+    /// however far up the phone it went. WWDC 2018 803 on the cost of that —
+    /// *"you'd have to think what you want to do… then perform the gesture"*
+    /// — against what it buys: *"the thought and gesture happen in parallel.
+    /// And you sort of think it with the gesture, and it turns out this is
+    /// way faster than thinking before doing."*
+    ///
+    /// Ninety points sideways is well past the seventy that commits, so under
+    /// the lock this gesture WAS a workspace crossing and the counter-example
+    /// below says so in the same breath. The turn is then straight up, and
+    /// the axis changes hands at 126 points of lift — 1.4 × 90, which is
+    /// `ShellMetrics.redirect` and nothing else.
+    @Test func aDragThatTurnsUpwardOutOfASidewaysSwipeReachesTheColumn() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let path = leg(from: (0, 0), to: (-90, 0)) + leg(from: (-90, 0), to: (-90, 200))
+        let run = drive(path, tabCount: 3)
+
+        #expect(run.frame.axis == .vertical, "the gesture never changed its mind")
+        #expect(run.flips == 1, "it changed its mind once, not once per frame")
+        // The sideways travel it spent on the page turn it abandoned, which
+        // is what stops the carried card jumping ninety points across the
+        // display the moment the vertical claims the gesture.
+        #expect(abs(run.drag.spentSideways + 90) < 0.01)
+        #expect(run.frame.sideways == 0, "and so the sideways channel starts from nothing")
+        // The gesture changes hands at 126 points of lift, a hair inside a
+        // three-tab column's 132, so there is next to nothing of the page's
+        // own travel to charge — the frame it lands on overshoots by a point
+        // and a third, and a point and a third is what it costs.
+        #expect(run.drag.spentLift < 2)
+        #expect(
+            abs(run.frame.lift - (200 - run.drag.spentLift)) < 0.01,
+            "the column's own stretch is adopted whole; only the page's is charged")
+
+        // And what letting go of it does. The finger is 200 points up, which
+        // is past the last row of a three-tab column, so there is no row to
+        // land on and the run past it is what the release reads.
+        #expect(
+            fleet.barRelease(
+                axis: run.frame.axis, dx: run.frame.sideways, up: run.frame.lift, at: at,
+                row: ShellGesture.columnRow(above: 200, tabCount: 3))
+                == .abandon,
+            "past the last row there is no row, and 200 is short of the overview's run")
+        // And carried on to where the overview's own run ends, it leaves.
+        let further = drive(
+            leg(from: (0, 0), to: (-90, 0)) + leg(from: (-90, 0), to: (-90, 340)), tabCount: 3)
+        #expect(
+            fleet.barRelease(
+                axis: further.frame.axis, dx: further.frame.sideways, up: further.frame.lift,
+                at: at, row: nil)
+                == .openOverview)
+        // The same finger, one row down the column, chooses the row — which
+        // is the outcome that was unreachable, not merely the axis.
+        let shorter = leg(from: (0, 0), to: (-90, 0)) + leg(from: (-90, 0), to: (-90, 145))
+        let short = drive(shorter, tabCount: 3)
+        #expect(short.frame.axis == .vertical)
+        #expect(
+            fleet.barRelease(
+                axis: short.frame.axis, dx: short.frame.sideways, up: short.frame.lift, at: at,
+                row: ShellGesture.columnRow(above: 100, tabCount: 3))
+                == .land(tab: 0))
+
+        // The counter-example, and it is the same ninety points: a gesture
+        // that does NOT turn is the workspace crossing it always was.
+        let straight = drive(leg(from: (0, 0), to: (-90, 0)), tabCount: 3)
+        #expect(straight.frame.axis == .horizontal)
+        #expect(straight.flips == 0)
+        #expect(
+            fleet.barRelease(
+                axis: straight.frame.axis, dx: straight.frame.sideways, up: 0, at: at)
+                == .commit(
+                    ShellStep(
+                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+    }
+
+    /// **And the mirror: a lift that turns sideways crosses the workspace.**
+    /// *"…or vice versa."*
+    ///
+    /// The half that looks like it already worked and did not. A lifted page
+    /// COULD go sideways — `.carry` — but only past the last row, where the
+    /// page is off the display and the two axes have stopped competing. Below
+    /// it, inside the column, sideways meant nothing at all however decisive
+    /// it was: `aSidewaysWanderWhileChoosingARowStillChoosesTheRow` is the
+    /// test that said so, and it said it with two hundred points.
+    ///
+    /// A hundred points of lift into a three-tab column is a menu open with a
+    /// row lit under the thumb. From there it takes 140 points sideways to
+    /// take the gesture back — 1.4 × 100 — and that is the price being right
+    /// rather than incidental: leaving a menu you have opened and are reading
+    /// should look like a decision, and the ratio makes it cost more the
+    /// further into the menu you are.
+    @Test func aLiftThatTurnsSidewaysOutOfAnOpenColumnCrossesTheWorkspace() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 2)  // three tabs
+        let path = leg(from: (0, 0), to: (0, 100)) + leg(from: (0, 100), to: (-220, 100))
+        let run = drive(path, tabCount: 3)
+
+        #expect(run.frame.axis == .horizontal, "the lift never gave the gesture up")
+        #expect(run.flips == 1)
+        #expect(
+            run.drag.spentLift == 0,
+            "a charge on the lift belongs to whoever is holding the vertical")
+        // Charged for the 140-odd points it spent inside the column, so the
+        // page turn begins from nothing rather than jumping most of the way
+        // to the neighbour in the frame the gesture changed its mind.
+        #expect(run.drag.spentSideways < -139 && run.drag.spentSideways > -150)
+        #expect(
+            run.frame.sideways > -81 && run.frame.sideways < -70,
+            "and what is left still earns its own seventy points")
+        #expect(
+            fleet.barRelease(axis: run.frame.axis, dx: run.frame.sideways, up: 0, at: at)
+                == .commit(
+                    ShellStep(
+                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+
+        // The counter-example: the same lift, turned sideways by a hundred
+        // points rather than two hundred and twenty. That is a long way for a
+        // thumb to wander and it is still short of taking the gesture, so the
+        // column keeps it and the row under the finger is what you get.
+        let wandered = drive(
+            leg(from: (0, 0), to: (0, 100)) + leg(from: (0, 100), to: (-100, 100)),
+            tabCount: 3)
+        #expect(wandered.frame.axis == .vertical)
+        #expect(wandered.flips == 0)
+        #expect(
+            fleet.barRelease(
+                axis: wandered.frame.axis, dx: wandered.frame.sideways, up: wandered.frame.lift,
+                at: at, row: ShellGesture.columnRow(above: 100, tabCount: 3))
+                == .land(tab: 0))
+    }
+
+    /// **A straight drag means exactly what it meant before any of this.**
+    ///
+    /// The negative control for the whole change, and it is provable rather
+    /// than sampled: along a straight line `|dx| : |dy|` is constant, so an
+    /// incumbent axis is by construction already the larger of the two and
+    /// can never be beaten by `redirect` times itself. Every angle, both
+    /// signs, and the answer is `axis` on the endpoint every time.
+    ///
+    /// It is also why the UI suite's eight bar tests did not have to change a
+    /// number: `XCUIElement.press(forDuration:thenDragTo:)` interpolates a
+    /// straight line, so not one gesture anybody can synthesize redirects.
+    @Test func aStraightDragMeansExactlyWhatItAlwaysDid() {
+        for degrees in stride(from: 0, through: 355, by: 5) {
+            let radians = CGFloat(degrees) * .pi / 180
+            let end: (dx: CGFloat, up: CGFloat) = (300 * cos(radians), 300 * sin(radians))
+            let run = drive(leg(from: (0, 0), to: end, steps: 60), tabCount: 3)
+            #expect(
+                run.frame.axis == ShellGesture.axis(dx: end.dx, up: end.up),
+                "a straight drag at \(degrees)° changed its meaning")
+            #expect(run.flips == 0, "a straight drag at \(degrees)° changed its mind")
+            #expect(run.drag.spentSideways == 0)
+            #expect(run.drag.spentLift == 0)
+        }
+    }
+
+    /// **The diagonal keeps whatever the gesture already is, and the band it
+    /// keeps it through is 19° wide.**
+    ///
+    /// This is what a hysteresis IS, and the answer to "what happens at the
+    /// diagonal": nothing happens at the diagonal. Without one the comparison
+    /// is `abs(dx) > abs(dy)` in both directions, so a finger travelling
+    /// within a point of 45° resolves by rounding and re-resolves the other
+    /// way on the next sample — and each of those is `ShellMotion.menu`'s own
+    /// 0.28-second spring being told to open and then to shut, over a surface
+    /// that never finishes arriving.
+    ///
+    /// The two edges are stated as numbers so the band can be argued with.
+    /// From horizontal it takes 54.5° off horizontal to be let go of; from
+    /// vertical it takes 35.5°. `atan(1.4)` and its complement, which is what
+    /// makes `ShellMetrics.redirect` an angle rather than a distance.
+    @Test func theDiagonalKeepsWhateverTheGestureAlreadyIs() {
+        // Dead on 45°, from either side, is whatever it already was.
+        #expect(ShellGesture.lean(dx: 100, up: 100, from: .horizontal) == .horizontal)
+        #expect(ShellGesture.lean(dx: 100, up: 100, from: .vertical) == .vertical)
+        #expect(ShellGesture.lean(dx: -100, up: -100, from: .horizontal) == .horizontal)
+
+        // The band's edges. `tan 54.5° = 1.4`, so a hair past it the
+        // horizontal lets go and a hair short of it does not.
+        #expect(ShellGesture.lean(dx: 100, up: 141, from: .horizontal) == .vertical)
+        #expect(ShellGesture.lean(dx: 100, up: 139, from: .horizontal) == .horizontal)
+        #expect(ShellGesture.lean(dx: 141, up: 100, from: .vertical) == .horizontal)
+        #expect(ShellGesture.lean(dx: 139, up: 100, from: .vertical) == .vertical)
+
+        // And the strobe it exists to prevent, driven as a path: a finger
+        // crawling up the exact diagonal and landing a point either side of
+        // it, which is what integer input on a 45° path looks like. The
+        // memoryless rule is written out below as the counter-example it is,
+        // the way `theChosenRowFollowsTheFinger` writes out the delta mapping
+        // it replaced — so this test says what changed and not merely what
+        // is.
+        var jittered: [(dx: CGFloat, up: CGFloat)] = []
+        for i in 1...120 {
+            let t = CGFloat(i)
+            jittered.append((dx: t + (i % 2 == 0 ? 1 : -1), up: t))
+        }
+        var memoryless = 0
+        var last: ShellAxis?
+        for point in jittered {
+            let answer = ShellGesture.axis(dx: point.dx, up: point.up)
+            if let answer, answer != last { memoryless += 1 }
+            last = answer ?? last
+        }
+        #expect(
+            memoryless > 100,
+            "the rule with no memory answers a different axis on nearly every frame")
+
+        let run = drive(jittered, tabCount: 3)
+        #expect(run.flips == 0, "the shell changed its mind mid-diagonal")
+        // Whichever it first answered, and it keeps it. The first sample past
+        // the axis lock lands a point to the horizontal side, so that is the
+        // answer for all 120 frames — which is the property, rather than the
+        // side it happened to land on.
+        #expect(run.frame.axis == .horizontal)
+    }
+
+    /// A gesture that has moved is never a tap again, however far back toward
+    /// the origin it comes.
+    ///
+    /// The trap in re-asking a question that used to be asked once: the tap
+    /// is the ABSENCE of an axis, so a rule that could answer nil a second
+    /// time would make a drag out and back resolve to `.toggleColumn` —
+    /// opening or shutting the column under a finger that had plainly asked
+    /// for neither.
+    @Test func aGestureThatHasMovedIsNeverATapAgain() {
+        #expect(ShellGesture.lean(dx: 0, up: 0, from: .horizontal) == .horizontal)
+        #expect(ShellGesture.lean(dx: 0, up: 0, from: .vertical) == .vertical)
+        let run = drive(
+            leg(from: (0, 0), to: (60, 0)) + leg(from: (60, 0), to: (0, 0)), tabCount: 3)
+        #expect(run.frame.axis == .horizontal)
+    }
+
+    /// A charge handed back is a charge dropped.
+    ///
+    /// `spentLift` describes what the VERTICAL was given, so it means nothing
+    /// while the horizontal holds the gesture — and left standing it is a
+    /// phantom: `ShellRootView.fingerLift` adds it to a lift the horizontal
+    /// arm has just zeroed, which puts a thumb 80 points above a column that
+    /// a tap is holding open and shuts a menu nobody asked to shut.
+    @Test func aChargeOnTheLiftIsDroppedWhenTheHorizontalTakesTheGestureBack() {
+        // The one shape that can reach it, and it is narrow on purpose. A
+        // charge is only non-zero when the vertical claims a gesture already
+        // past the last row — and the charge itself puts the lift back ON the
+        // last row, which is not yet `pageIsHeld`, so the page is not in your
+        // hand and the lean is still being asked. One point more of RISE and
+        // it would be held and this could never happen; so the finger turns
+        // sideways instead, and takes the gesture back.
+        let path =
+            leg(from: (0, 0), to: (-143, 0)) + leg(from: (-143, 0), to: (-143, 201))
+            + leg(from: (-143, 201), to: (-400, 201))
+        let run = drive(path, tabCount: 3)
+        #expect(!run.drag.holdingPage, "the page never left the display, so nothing is held")
+        #expect(run.frame.axis == .horizontal)
+        #expect(run.flips == 2, "it changed its mind twice")
+        #expect(run.drag.spentLift == 0)
+        // And the sideways charge is not dropped but RE-TAKEN, because that
+        // one is a fact about the gesture rather than about either axis: it
+        // is however far sideways this gesture had gone the last time it
+        // changed its mind, which is 1.4 times a 201-point lift.
+        #expect(run.drag.spentSideways < -281 && run.drag.spentSideways > -290)
+        #expect(
+            run.frame.sideways > -119 && run.frame.sideways < -110,
+            "so the page turn it hands back to still earns its own seventy points")
+    }
+
+    /// **Once the page is in your hand the lean stops being asked**, and
+    /// nothing sideways can put the page back on the display.
+    ///
+    /// The bound on the whole change, and the one place the old lock was
+    /// protecting something real. Past the last row the two axes have stopped
+    /// competing and started composing — the lift says whether you stay up,
+    /// sideways says which cell you land in, and `barRelease`'s `.carry` arm
+    /// has answered both off one release since before any of this. Handing
+    /// that gesture to `.horizontal` because the thumb went far enough
+    /// sideways would drop the page onto the display while your thumb was
+    /// still up in the air holding it.
+    ///
+    /// Latched rather than recomputed: the second half drives the card back
+    /// DOWN out of the overview's run, which is a thumb lowering rather than
+    /// a thumb letting go.
+    @Test func theLiftClaimsBothAxesOnceThePageIsInYourHand() {
+        #expect(ShellGesture.lean(dx: 900, up: 10, from: .vertical, holdingPage: true) == .vertical)
+        #expect(ShellGesture.lean(dx: 900, up: 10, from: nil, holdingPage: true) == .vertical)
+
+        // A three-tab column runs out at 132 and the overview's run is 76
+        // past that, so 260 is a page well clear of the display.
+        // 500 across against 260 up is past `redirect` twice over, so the
+        // latch is the only thing keeping this vertical.
+        let carried = drive(
+            leg(from: (0, 0), to: (0, 260)) + leg(from: (0, 260), to: (-500, 260)), tabCount: 3)
+        #expect(carried.frame.axis == .vertical, "a held page was handed to the other axis")
+        #expect(carried.flips == 0)
+        #expect(carried.drag.holdingPage)
+        #expect(abs(carried.frame.sideways + 500) < 0.01, "and it follows the finger sideways")
+
+        // Brought back down to the middle of the column, and still in your
+        // hand. Recomputed rather than latched, this is where the card would
+        // fall out of it.
+        let lowered = drive(
+            leg(from: (0, 0), to: (0, 260)) + leg(from: (0, 260), to: (-300, 100)), tabCount: 3)
+        #expect(lowered.frame.axis == .vertical)
+        #expect(lowered.flips == 0)
+    }
+
+    /// **A handover charges the claimed axis exactly what the page would have
+    /// jumped, and not a point more.**
+    ///
+    /// The two halves of a handover are two different rules, and the reason
+    /// is what each channel IS. The track is a POSITION — the page is AT
+    /// `trackX` — so it re-bases whole: `carriedX`'s rule at a pane's edge,
+    /// *"a page turn that starts from nothing rather than jumping to wherever
+    /// the finger had got to"*, restated for an axis. The column is not a
+    /// position: it is shut, then whole, and the row it lights is read off
+    /// the finger's absolute place on the glass, so there is no in-between to
+    /// jump through and nothing is bought by making a finger already 200
+    /// points above the bar travel 16 more before the menu appears.
+    ///
+    /// What IS a position on the vertical is the page's own rise past the
+    /// last row, and that is `ShellGesture.pageRise` exactly — which is why
+    /// the charge is that function and not a fresh subtraction.
+    @Test func aHandoverChargesTheLiftOnlyForWhatWouldHaveMovedThePage() {
+        // Inside the column: nothing to charge, and the menu opens under the
+        // finger the moment the gesture turns.
+        let inside = drive(
+            leg(from: (0, 0), to: (-60, 0)) + leg(from: (-60, 0), to: (-60, 120)), tabCount: 3)
+        #expect(inside.frame.axis == .vertical)
+        #expect(inside.drag.spentLift == 0)
+        #expect(abs(inside.frame.lift - 120) < 0.01)
+
+        // Past it: a gesture that went 143 sideways only lets go at 200 up,
+        // which is 68 past a three-tab column's last row. Charge those 68 and
+        // the page is flat on the display at the instant of the handover, so
+        // it travels its own full run from there instead of teleporting two
+        // thirds of the way into the overview.
+        let past = drive(
+            leg(from: (0, 0), to: (-143, 0)) + leg(from: (-143, 0), to: (-143, 260)),
+            tabCount: 3)
+        #expect(past.frame.axis == .vertical)
+        #expect(past.drag.spentLift > 60 && past.drag.spentLift < 76)
+        #expect(
+            !ShellGesture.pageIsHeld(
+                up: past.drag.spentLift == 0
+                    ? 1 : ShellGesture.columnFull(tabCount: 3), tabCount: 3),
+            "the page is on the display at the handover, by construction")
+
+        // **The charge never loses the finger's place**, and the whole of
+        // `ShellRootView.menuShouldShow` rests on it: the lift a gesture has
+        // been GIVEN and the height the finger is actually AT differ by
+        // exactly `spentLift`, so adding it back recovers the thumb.
+        //
+        // Asking the charged lift where the finger was is a menu that lies
+        // for one frame, and it was found by watching the frames rather than
+        // by reading the code. The charge puts a handover past the last row
+        // at exactly `columnFull` — inside the column by a hair — so the
+        // menu sprang open with the thumb 80 points above every row in it,
+        // and shut again on the next frame. `ShellMotion.menu` is a
+        // 0.28-second spring; what that draws is a blink.
+        for up in stride(from: CGFloat(0), through: 400, by: 17) {
+            var drag = ShellBarDrag()
+            var frame = ShellBarDrag.Frame(axis: nil, lift: 0, sideways: 0, claimed: nil)
+            for point in leg(from: (0, 0), to: (-143, 0)) + leg(from: (-143, 0), to: (-143, up)) {
+                frame = drag.moved(dx: point.dx, up: point.up, tabCount: 3)
+            }
+            #expect(
+                abs(frame.lift + drag.spentLift - max(0, up)) < 0.01,
+                "the finger's place went missing at \(up) points of lift")
+        }
+
+        // A one-tab workspace is where an uncharged handover was worst: its
+        // column runs out after 44 points, so the same turn would have put
+        // the page most of the way into the overview in one frame.
+        let single = drive(
+            leg(from: (0, 0), to: (-60, 0)) + leg(from: (-60, 0), to: (-60, 120)), tabCount: 1)
+        #expect(single.frame.axis == .vertical)
+        #expect(abs(single.drag.spentLift - 40) < 2, "84 at the turn, less a 44-point column")
+        #expect(
+            ShellGesture.overviewProgress(up: 84 - single.drag.spentLift, tabCount: 1) == 0,
+            "so the page starts the overview's run at nothing, not halfway through it")
     }
 
     // MARK: - Tapping a column row
@@ -1217,34 +1651,68 @@ struct ShellNavigationTests {
         #expect(ShellGesture.pageIsHeld(up: full + 0.5, tabCount: 3))
     }
 
-    /// A thumb that wanders sideways while it is choosing a column row still
-    /// chooses the row.
+    /// **A thumb that ARCS sideways while it is choosing a column row still
+    /// chooses the row**, and one that decisively swipes sideways does not.
     ///
-    /// The reason `pageIsHeld` gates the sideways arm at all. A 70-point
-    /// wander is a big one, but it is reachable: the travel that opens a
-    /// three-tab column is 132 points up a phone held in one hand, and an arc
-    /// is what a thumb draws. Reading a page turn out of it would make every
-    /// tab choice a coin toss.
-    @Test func aSidewaysWanderWhileChoosingARowStillChoosesTheRow() {
+    /// This test used to make its point with two hundred points of "wander",
+    /// which it could, because the axis was locked and the vertical arm threw
+    /// away `dx` entirely below `pageIsHeld`. Two hundred points is not a
+    /// wander. It is a swipe, and under a redirectable bar it is read as one
+    /// — so the assertion has to be made with a number a thumb can actually
+    /// produce, and the second half of the test is the number it cannot.
+    ///
+    /// The arc is what makes the whole change safe, and it is geometry rather
+    /// than taste: a thumb pivots about the palm at roughly 100mm, so
+    /// sweeping the 132 points that open a three-tab column deviates about 24
+    /// points sideways — a ratio of 0.18 against a `ShellMetrics.redirect` of
+    /// 1.4, which is not a near miss. An arc's deviation is by definition
+    /// small compared to the travel that draws it, and that is the property
+    /// being leaned on.
+    ///
+    /// Driven as a PATH rather than as an endpoint, because that is the only
+    /// way to state it now: the answer depends on how the finger got there.
+    @Test func aSidewaysArcWhileChoosingARowStillChoosesTheRow() {
         let fleet = Self.crossing()
         let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
-        let up = ShellMetrics.rowHeight + ShellMetrics.rowBias
+        // A thumb sweeping to the middle of a three-tab column, arcing 24
+        // points across on the way — leaning further the higher it goes,
+        // which is what a pivot does.
+        let arc: [(dx: CGFloat, up: CGFloat)] = (1...60).map { i in
+            let t = CGFloat(i) / 60
+            return (dx: -24 * t * t, up: 76 * t)
+        }
+        let drawn = drive(arc, tabCount: 3)
+        #expect(drawn.frame.axis == .vertical, "an arc took the gesture off the column")
+        #expect(drawn.flips == 0)
+        let above = ShellMetrics.rowHeight + ShellMetrics.rowBias
         #expect(
             fleet.barRelease(
-                axis: .vertical, dx: -200, up: up, at: at,
-                row: ShellGesture.columnRow(above: up, tabCount: 3))
+                axis: drawn.frame.axis, dx: drawn.frame.sideways, up: drawn.frame.lift, at: at,
+                row: ShellGesture.columnRow(above: above, tabCount: 3))
                 == .land(tab: 1))
-        // And a wander that is a FLICK is still not a page turn while the
-        // column is what the finger is in: the sideways arm is gated on the
-        // page having left the display, not on how hard the thumb was moving.
+        // And an arc released as a FLICK is still not a page turn: below
+        // `pageIsHeld` the vertical arm reads no sideways at all, however
+        // hard the thumb was moving when it left.
         #expect(
             fleet.barRelease(
-                axis: .vertical, dx: -200, up: up, at: at,
-                row: ShellGesture.columnRow(above: up, tabCount: 3), dxVelocity: -3000)
+                axis: drawn.frame.axis, dx: drawn.frame.sideways, up: drawn.frame.lift, at: at,
+                row: ShellGesture.columnRow(above: above, tabCount: 3), dxVelocity: -3000)
                 == .land(tab: 1))
         #expect(
             fleet.barRelease(axis: .vertical, dx: 200, up: 10, at: at, row: 2) == .abandon,
             "and below the open threshold a release still costs nothing")
+
+        // The other side of the same line, and the reason it is a line: 200
+        // points sideways off the same 76-point lift is not an arc, and it
+        // now means what it looks like.
+        let swiped = drive(arc + leg(from: (-24, 76), to: (-200, 76)), tabCount: 3)
+        #expect(swiped.frame.axis == .horizontal)
+        #expect(
+            fleet.barRelease(
+                axis: swiped.frame.axis, dx: swiped.frame.sideways, up: 0, at: at)
+                == .commit(
+                    ShellStep(
+                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
     }
 
     /// Lifted into the overview AND far enough sideways: the page is carried

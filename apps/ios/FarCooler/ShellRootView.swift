@@ -7,7 +7,7 @@ import SwiftUI
 // comes out of `AgentKit/ShellNavigation.swift`, which is where they can be
 // tested without a simulator; nothing here decides anything a `swift test`
 // could have checked. What is here and could not be there is the part that is
-// about SwiftUI itself: the retained track, the axis lock's lifetime, the
+// about SwiftUI itself: the retained track, how long an axis lasts, the
 // no-bounce commit, and the transforms below.
 //
 // ## The invariant, and the new way there now is to break it
@@ -55,9 +55,10 @@ import SwiftUI
 // - `ShellPageLayer.swift` — the page as one moving object: the shape it is
 //   clipped to, the card it carries, and the transforms. Its arithmetic is
 //   `AgentKit/ShellFlight.swift`, which `swift test` can reach.
-// - `ShellDrag.swift` — the finger: the axis lock, the drag channel, and the
-//   six things a release can be. Its decisions are `ShellGesture` and
-//   `ShellFleet.barRelease`, which `swift test` can also reach.
+// - `ShellDrag.swift` — the finger: the axis and the handovers between its
+//   two directions, the drag channel, and the seven things a release can be.
+//   Its decisions are `ShellGesture`, `ShellBarDrag` and
+//   `ShellFleet.barRelease`, all of which `swift test` can also reach.
 //
 // Three files, one type, and that is why the state below is not `private`: an
 // extension in another file cannot see a private member. It is still not
@@ -270,7 +271,16 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// motion on top of `carryX` and the same class of mistake as letting the
     /// destination cell pull the page mid-drag.
     @State var liftOrigin: CGFloat?
-    /// The axis, decided once on the first 6 points and never revisited.
+    /// The CONTENT gesture's axis, decided once on the first 6 points and
+    /// never revisited.
+    ///
+    /// **The bar's is not here**, and the split is the point rather than an
+    /// oversight: the two surfaces differ in how long an axis lasts, so they
+    /// differ in what holds it. Vertical on the content is the terminal's
+    /// scrollback and there is a second party to yield it to, so the answer
+    /// is given once; on the bar nothing else is listening, so it is re-asked
+    /// every frame and lives in `barDrag`. `ShellGesture.lean` is where that
+    /// difference is argued.
     @State var axis: ShellAxis?
     /// Which sequence this gesture walks. Set when the finger goes down, not
     /// when the axis is decided: the three panes on the track depend on it,
@@ -403,6 +413,17 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// every drag over the ground between a diff's cards. See
     /// `ShellRootView.carriedX`.
     @State var handoff: CGFloat = 0
+
+    /// The bar gesture's axis, and what each of its two axes owes the other.
+    ///
+    /// **Its own type, in AgentKit, because the redirection has a lifetime
+    /// and a lifetime is the one thing a pure function cannot hold.** Whether
+    /// this frame is a handover depends on what the last frame answered;
+    /// what a handover charges depends on where the finger was when it
+    /// happened. As three pieces of `@State` and a closure that is a shape
+    /// no test can reach, which is what made the axis a lock for as long as
+    /// it was one. See `ShellBarDrag`.
+    @State var barDrag = ShellBarDrag()
 
     /// How many flights between the page and its cell are in the air.
     ///
@@ -903,9 +924,9 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     ///
     /// Nothing at all unless the swipe will actually change workspace, which
     /// is what makes the two weights two weights. Reading the direction off
-    /// `trackX` rather than latching it at the axis lock keeps this continuous
-    /// through a drag that reverses: the answer only changes as `trackX`
-    /// passes zero, and at zero both answers are zero.
+    /// `trackX` rather than latching it when the axis is decided keeps this
+    /// continuous through a drag that reverses: the answer only changes as
+    /// `trackX` passes zero, and at zero both answers are zero.
     ///
     /// A carried LIFT moves it too, and by the same rule rather than as a
     /// special case: a page held off the display and moved sideways is asking
@@ -932,9 +953,10 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     ///
     /// The gate on both of the things that make a crossing heavier than a tab
     /// swipe: the bar travelling with the page, and the page becoming a card.
-    /// Read off the translation rather than latched at the axis lock so it
-    /// stays continuous through a drag that reverses — the answer only changes
-    /// as the translation passes zero, and at zero both answers are zero.
+    /// Read off the translation rather than latched when the axis is decided,
+    /// so it stays continuous through a drag that reverses — the answer only
+    /// changes as the translation passes zero, and at zero both answers are
+    /// zero.
     func crossesWorkspace(_ dx: CGFloat) -> Bool {
         guard let direction = ShellGesture.direction(dx: dx),
             let step = fleet.step(from: position, direction, along: track)
@@ -966,10 +988,35 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     }
 
     /// Whether the menu ought to be showing, given everything else.
+    ///
+    /// **Travel opens the column; PLACE decides whether there is anything in
+    /// it**, and the two are different numbers as soon as a gesture has
+    /// redirected. `lift` is the travel this gesture has been given — net of
+    /// whatever `ShellBarDrag` charged a handover — and `fingerLift` is where
+    /// the thumb actually is above the bar.
+    ///
+    /// Asking `pageIsHeld` about the travel was a menu that lied for one
+    /// frame, and it was found by watching the frames rather than by reading
+    /// the code. A gesture that swipes 150 points sideways and then turns
+    /// upward hands over at 212 points of lift, and the charge puts the
+    /// travel at exactly the column's last row — which is inside the column
+    /// by a hair, so the menu sprang open with the thumb 80 points above
+    /// every row in it, and shut again on the next frame. `ShellMotion.menu`
+    /// is a 0.28-second spring: what that draws is a blink.
     private var menuShouldShow: Bool {
-        guard !overview, !ShellGesture.pageIsHeld(up: lift, tabCount: tabCount) else { return false }
+        guard !overview,
+            !ShellGesture.pageIsHeld(up: fingerLift, tabCount: tabCount)
+        else { return false }
         return ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned) > 0
     }
+
+    /// How far above the bar the finger actually is, as opposed to how much
+    /// lift this gesture has been given.
+    ///
+    /// The two are the same number until a redirection charges one of them,
+    /// and after that only one of them is a fact about the thumb. See
+    /// `ShellBarDrag.spentLift`, which is the difference.
+    private var fingerLift: CGFloat { lift + barDrag.spentLift }
 
     /// Bring the menu into line with everything else, on the menu's own
     /// spring.

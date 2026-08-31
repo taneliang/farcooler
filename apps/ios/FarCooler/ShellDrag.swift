@@ -2,18 +2,19 @@ import SwiftUI
 
 // The finger, and what letting go of it means.
 //
-// Two `DragGesture`s, one axis lock, and the six things a release can be. It
-// was all inside `ShellRootView` and is here now for the reason the file split
-// at all: reading a finger and drawing a shell are two jobs, and a type that
-// does both is a type where a change to one is reviewed against the other by
-// accident.
+// Two `DragGesture`s, two different lifetimes for one axis rule, and the seven
+// things a release can be. It was all inside `ShellRootView` and is here now
+// for the reason the file split at all: reading a finger and drawing a shell
+// are two jobs, and a type that does both is a type where a change to one is
+// reviewed against the other by accident.
 //
 // Nothing here DECIDES anything. Every threshold is `ShellGesture`'s and every
 // release is `ShellFleet.barRelease` / `contentRelease`, both in
 // `AgentKit/ShellNavigation.swift` and both covered by `swift test`. What is
-// here is the part a pure function cannot hold: the lifetime of the axis lock,
-// which transaction each write belongs to, and the silent re-seat at the end
-// of a commit.
+// here is the part a pure function cannot hold: how long an axis lasts — once
+// for the content, a frame at a time for the bar — what a handover between the
+// two of them puts back, which transaction each write belongs to, and the
+// silent re-seat at the end of a commit.
 
 extension ShellRootView {
     // MARK: - The gestures
@@ -44,70 +45,19 @@ extension ShellRootView {
                 // conversion is into the page's own coordinates.
                 begin(on: .bar, from: value.startLocation.x - pageFrame.minX)
                 noteMovement(value)
-                let dx = value.translation.width
-                let up = -value.translation.height
-                decideAxis(dx: dx, up: up)
-                // NOT inside an animation, and that is the whole of "one point
-                // of page for one point of drag".
-                //
-                // Every value written here is a continuous function of where
-                // the finger is right now, so every one of them is already the
-                // answer — there is nothing for a spring to interpolate
-                // TOWARD except a target the finger has since left. Wrapped in
-                // `Self.tracking`, as this was, `lift` reached the screen
-                // through an `interactiveSpring`, which is a low-pass filter
-                // on the input: the page settled about 44 points behind the
-                // thumb for the whole of a 1300 pt/s lift and kept travelling
-                // for ~90ms after the thumb stopped. That is the lag the owner
-                // reported, and WWDC 2018 803 is unambiguous about it — "the
-                // moment the touch and content stop tracking one-to-one, we
-                // immediately notice it".
-                //
-                // The discrete things a lift changes are all animated
-                // ELSEWHERE and on their own transactions, which is why there
-                // is nothing left in here that wants easing: the column pops
-                // whole on `ShellMotion.menu` through `syncMenu` below, and
-                // every release spring is `apply`'s. What is left is the
-                // tracked path, and the tracked path is not animated.
-                switch axis {
-                case .horizontal:
-                    trackX = ShellGesture.translation(dx: dx, rubberBanding: rubberBands(dx))
-                    crossing = crossProgress(trackX)
-                case .vertical:
-                    let up = max(0, up)
-                    lift = up
-                    // WHERE THE FINGER IS, not how far it has come, because
-                    // the row it is choosing is the row drawn under it. See
-                    // `ShellRootView.columnSelection`, which is the highlight
-                    // this feeds, and `ShellGesture.columnRow`, which is the
-                    // single mapping both it and the release now go through.
-                    //
-                    // Written on every frame and read by nothing else: the
-                    // release measures its own row off `value.location` a few
-                    // lines below, so a highlight and the tab you get can
-                    // only ever disagree by the frame the finger lifted in.
-                    fingerAbove = columnAbove(value.location, lift: up)
-                    reveal = ShellGesture.overviewProgress(up: up, tabCount: tabCount)
-                    // The other axis, and only once there is something in
-                    // your hand to move. The axis lock is NOT released
-                    // here — this is still the vertical gesture — the
-                    // lift simply owns both directions from the moment the
-                    // page leaves the display, which is the decision
-                    // written down at `ShellGesture.pageIsHeld`.
-                    carryX =
-                        ShellGesture.pageIsHeld(up: up, tabCount: tabCount)
-                        ? ShellGesture.translation(dx: dx, rubberBanding: rubberBands(dx))
-                        : 0
-                case nil:
-                    break
-                }
-                // Its own transaction, and now the only one here. See
-                // `syncMenu`.
-                syncMenu()
+                barMoved(
+                    dx: value.translation.width, up: -value.translation.height,
+                    at: value.location)
             }
             .onEnded { value in
-                let decided = axis
-                let dx = value.translation.width
+                let decided = barDrag.axis
+                // Net of the handover, and for one reason: what a release
+                // measures is what the shell has been DRAWING, and what it
+                // has been drawing since the gesture changed its mind is the
+                // travel since it changed its mind. `up` gets this for free —
+                // `lift` is already net of `ShellBarDrag.spentLift` because
+                // that is what was written to it — and `dx` has to be told.
+                let dx = value.translation.width - barDrag.spentSideways
                 // The lift the page is actually AT, which it now is: `lift` is
                 // written straight in `onChanged`, so this is the number on
                 // screen rather than a spring's target the finger had never
@@ -129,7 +79,7 @@ extension ShellRootView {
                 //
                 // `value.location` and not `startLocation`: a touch is
                 // confirmed where it goes UP. For a tap the two are within
-                // the six points the axis lock allows, so this is the same
+                // the six points the axis rule allows, so this is the same
                 // row; for a drag it is the only one of the two that means
                 // anything.
                 let row = columnRow(at: value.location, lift: up)
@@ -146,6 +96,96 @@ extension ShellRootView {
                     dx: dx, page: page, wasOpen: openedBefore)
                 syncMenu()
             }
+    }
+
+    /// One frame of the BAR's finger.
+    ///
+    /// A named function rather than the closure it was, for the reason the
+    /// rest of this lane is: a redirection is a thing you have to WATCH, and
+    /// a gesture callback is the one shape of code neither `swift test` nor a
+    /// screenshot can reach. `ShellBarDrag` holds the arithmetic and this
+    /// holds the transactions, and between them the only thing left in
+    /// `onChanged` is where the numbers came from.
+    private func barMoved(dx: CGFloat, up: CGFloat, at point: CGPoint) {
+        // **One frame of the redirection, and the whole of it.** Which axis
+        // this gesture is leaning toward NOW, what each channel is drawn at
+        // once the handovers have been charged, and whether an axis has just
+        // taken the gesture off the other. All of it is `ShellBarDrag`'s, in
+        // AgentKit, under `swift test`; what is left here is the transaction.
+        let frame = barDrag.moved(dx: dx, up: up, tabCount: tabCount)
+        if let claimed = frame.claimed { handOver(to: claimed) }
+        // NOT inside an animation, and that is the whole of "one point of page
+        // for one point of drag".
+        //
+        // Every value written here is a continuous function of where the
+        // finger is right now, so every one of them is already the answer —
+        // there is nothing for a spring to interpolate TOWARD except a target
+        // the finger has since left. Wrapped in `Self.tracking`, as this was,
+        // `lift` reached the screen through an `interactiveSpring`, which is a
+        // low-pass filter on the input: the page settled about 44 points
+        // behind the thumb for the whole of a 1300 pt/s lift and kept
+        // travelling for ~90ms after the thumb stopped. That is the lag the
+        // owner reported, and WWDC 2018 803 is unambiguous about it — "the
+        // moment the touch and content stop tracking one-to-one, we
+        // immediately notice it".
+        //
+        // The discrete things a lift changes are all animated ELSEWHERE and on
+        // their own transactions, which is why there is nothing left in here
+        // that wants easing: the column pops whole on `ShellMotion.menu`
+        // through `syncMenu` below, and every release spring is `apply`'s.
+        // What is left is the tracked path, and the tracked path is not
+        // animated.
+        //
+        // **Neither arm writes the other's channel.** What an abandoned
+        // channel does is not a per-frame fact, it is the one-off apology
+        // `handOver` makes on the frame the gesture changed its mind, eased
+        // over `Self.tracking` for exactly the reason `carriedX` eases its own
+        // put-back. Zeroing it again here every frame would snap that ease
+        // flat.
+        switch frame.axis {  // and not the view's `axis`, which is the content's
+        case .horizontal:
+            trackX = ShellGesture.translation(
+                dx: frame.sideways, rubberBanding: rubberBands(frame.sideways))
+            crossing = crossProgress(trackX)
+        case .vertical:
+            lift = frame.lift
+            // WHERE THE FINGER IS, not how far it has come, because the row it
+            // is choosing is the row drawn under it. See
+            // `ShellRootView.columnSelection`, which is the highlight this
+            // feeds, and `ShellGesture.columnRow`, which is the single mapping
+            // both it and the release go through.
+            //
+            // Written on every frame and read by nothing else: the release
+            // measures its own row off the point the finger came up at, so a
+            // highlight and the tab you get can only ever disagree by the
+            // frame the finger lifted in.
+            //
+            // **A place on the glass, so it survives a redirection
+            // untouched.** A gesture that turns upward out of a sideways drag
+            // has its lift charged for the page's travel —
+            // `ShellBarDrag.spentLift` — and none of that reaches the
+            // highlight: the row under your thumb is the row under your thumb
+            // whichever axis owns the gesture and whatever the lift has been
+            // charged. That is the property the previous lane established, and
+            // it is what made unlocking the axis safe to attempt at all.
+            fingerAbove = columnAbove(point, lift: frame.lift)
+            reveal = ShellGesture.overviewProgress(up: frame.lift, tabCount: tabCount)
+            // The other axis, and only once there is something in your hand to
+            // move. This is not a redirection — the gesture is still the
+            // vertical one and `lean` has stopped being asked — it is the lift
+            // owning both directions from the moment the page leaves the
+            // display, which is the decision written down at
+            // `ShellGesture.pageIsHeld`.
+            carryX =
+                ShellGesture.pageIsHeld(up: frame.lift, tabCount: tabCount)
+                ? ShellGesture.translation(
+                    dx: frame.sideways, rubberBanding: rubberBands(frame.sideways))
+                : 0
+        case nil:
+            break
+        }
+        // Its own transaction, and the only one here. See `syncMenu`.
+        syncMenu()
     }
 
     /// Which column row a touch at `point` chose, or nil when there was no
@@ -236,8 +276,8 @@ extension ShellRootView {
     /// the call site in `ShellRootView.paneTrack`, and what a pane does when it
     /// genuinely wants the same drag is `ShellDragClaim`.
     ///
-    /// `minimumDistance: 0` still, and zero rather than the axis lock's six so
-    /// the lock stays the only thing deciding what a drag means.
+    /// `minimumDistance: 0` still, and zero rather than the axis rule's six so
+    /// `decideAxis` stays the only thing deciding what a drag means.
     func contentGesture(page: CGFloat) -> some Gesture {
         // `.global` for the same reason the bar's is, kept the same here so
         // the two gestures cannot come to measure different things.
@@ -414,15 +454,56 @@ extension ShellRootView {
         return value.velocity
     }
 
-    /// Decide the axis, once.
+    /// Decide the axis, once, for the CONTENT.
     ///
     /// The guard is the whole rule: once `axis` is non-nil nothing asks again
-    /// for the rest of the gesture. An axis that could be revisited is a swipe
-    /// that starts sideways and ends up opening the column, which is every
-    /// accidental gesture in the design review.
+    /// for the rest of this gesture. Vertical on the content is the
+    /// terminal's scrollback, so an axis that could be revisited per frame is
+    /// the shell reaching into a gesture the pane owns — the failure class of
+    /// `b192f17`, which shipped and was reported off a real phone. The bar
+    /// asks `ShellBarDrag` instead, once per frame; `ShellGesture.lean` is
+    /// where the difference between the two surfaces is argued.
     private func decideAxis(dx: CGFloat, up: CGFloat) {
         guard axis == nil else { return }
         axis = ShellGesture.axis(dx: dx, up: up)
+    }
+
+    /// The half of a handover that is a transaction rather than a number.
+    ///
+    /// `ShellBarDrag` has already charged the claimed channel so that it
+    /// starts from where the finger is now — the rule `carriedX` states for a
+    /// pane's edge, restated for an axis. What is left is the abandoned
+    /// channel, and putting it back is not the finger's position any more: it
+    /// is a page turn that is not going to happen, or a menu that is not
+    /// being chosen from. Easing an apology is the one thing in this file
+    /// `Self.tracking` is still for — the argument is in `carriedX`, and it
+    /// is the same argument. Snapped, a redirection reads as a glitch; eased,
+    /// it reads as the shell letting go of one answer and offering the other,
+    /// which is what the talk means by hinting in the direction of the
+    /// gesture.
+    ///
+    /// **It runs on the frame the gesture changed its mind and never again**,
+    /// which is why the arms of `onChanged` do not zero each other's channel:
+    /// a raw write of the same zero on the next frame would snap this ease
+    /// flat.
+    ///
+    /// There is no arm for a page in your hand, because there cannot be one:
+    /// `ShellGesture.lean` answers `.vertical` unconditionally once
+    /// `ShellBarDrag.holdingPage` is latched, so a held page is never handed
+    /// anywhere. That is also why nothing here puts back `reveal` or
+    /// `carryX`: both are zero for the whole stretch in which a handover can
+    /// happen at all.
+    private func handOver(to claimed: ShellAxis) {
+        switch claimed {
+        case .horizontal:
+            fingerAbove = nil
+            withAnimation(Self.tracking) { lift = 0 }
+        case .vertical:
+            withAnimation(Self.tracking) {
+                trackX = 0
+                crossing = 0
+            }
+        }
     }
 
     private func rubberBands(_ dx: CGFloat) -> Bool {
@@ -479,6 +560,12 @@ extension ShellRootView {
         // standing after the gesture that placed it would be a pinned column
         // pointing at a row nobody is touching.
         fingerAbove = nil
+        // And no axis, no handover, and nothing in anybody's hand. Here
+        // rather than in `begin` because `menuShouldShow` reads it BETWEEN
+        // gestures: a `spentLift` left standing over a tap-pinned column is a
+        // menu suppressed by a redirection that finished a minute ago. Both
+        // `onEnded`s spend what they need of it before calling this.
+        barDrag = ShellBarDrag()
         withAnimation(Self.settle) { lift = 0 }
     }
 

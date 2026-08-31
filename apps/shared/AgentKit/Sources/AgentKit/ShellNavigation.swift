@@ -8,7 +8,8 @@ import Foundation
 // test target it generates, and a UI test needs a booted simulator), so a
 // threshold that lives in a `View` can only ever be checked by a person
 // swiping at it. The rules below are the ones that are wrong in ways a
-// screenshot cannot show: stepping off the end of a workspace, the axis lock,
+// screenshot cannot show: stepping off the end of a workspace, which axis a
+// gesture is leaning toward,
 // which end of the fleet rubber-bands, and the order the overview sorts in.
 //
 // So the gesture state machine transcribed in
@@ -114,8 +115,56 @@ enum ShellMetrics {
     /// changing a number nobody has looked at on a screen.
     static let barInset: CGFloat = 16
 
-    /// First movement past this decides the axis, once, for the whole gesture.
+    /// First movement past this decides the axis. On the CONTENT that
+    /// decision is final; on the bar it is only the first answer, and
+    /// `ShellGesture.lean` is asked again every frame after it.
     static let axisLock: CGFloat = 6
+
+    /// How much further one axis has to have travelled than the other before
+    /// a BAR gesture that is already leaning one way changes its mind.
+    ///
+    /// **A ratio rather than a distance, because it is an angle.** 1.4 is
+    /// `tan 54.5°`: a gesture leaning horizontal keeps the gesture until the
+    /// finger is travelling more than 54.5° off horizontal, and a gesture
+    /// leaning vertical keeps it until the finger is within 35.5° of
+    /// horizontal. Between those two lies a 19° band in which the answer is
+    /// whatever the answer already was, which is what a hysteresis IS: the
+    /// diagonal keeps what the gesture is, rather than resolving by rounding
+    /// and re-resolving the other way one point later.
+    ///
+    /// **Without it the shell strobes, and that is counted rather than
+    /// feared.** A finger travelling the diagonal arrives as integer points,
+    /// so its running `|dx| : |dy|` lands either side of 1 from one frame to
+    /// the next. At a ratio of 1.0 — which is the memoryless comparison
+    /// `axis` makes, correct for a question asked once and wrong for one
+    /// asked every frame — a 120-frame crawl up the diagonal changes its
+    /// answer **115 times**, each of them `ShellMotion.menu`'s own
+    /// 0.28-second spring being told to open and then to shut over a surface
+    /// that never finishes arriving. At 1.4 the same path resolves once and
+    /// stays. `theDiagonalKeepsWhateverTheGestureAlreadyIs` counts both.
+    ///
+    /// **And it is nowhere near a thumb.** The lateral wander this has to
+    /// absorb is an arc, and an arc's deviation is small compared to the
+    /// travel that draws it: a thumb pivoting about the palm at roughly 100mm
+    /// and sweeping the 132 points that open a three-tab column deviates
+    /// about 24 points sideways, a ratio of 0.18. That is the geometry that
+    /// makes the whole change safe, and it is why the guard this replaces
+    /// could be a guard rather than a lock: a gesture whose sideways travel
+    /// EXCEEDS its upward travel by forty per cent did not draw an arc up a
+    /// phone, it swiped sideways.
+    ///
+    /// Scale-free, and that is the second reason it is a ratio. Early in a
+    /// gesture — ten points up — fourteen points across redirects it, which
+    /// costs nothing and is the talk's *"you can be on your way home and peek
+    /// at multitasking"*. Two hundred points up, and it takes two hundred and
+    /// eighty across: by then you have opened a menu and are reading it, and
+    /// leaving it should look like a decision. A fixed margin would be the
+    /// same 6 points in both places and would be wrong in both.
+    ///
+    /// The bar only. The content keeps a true lock, because vertical there is
+    /// the terminal's scrollback and there is a second party to yield it to —
+    /// see `ShellGesture.axis`.
+    static let redirect: CGFloat = 1.4
 
     /// What a drag is multiplied by when there is nothing to bring in.
     static let rubberBand: CGFloat = 0.34
@@ -586,7 +635,13 @@ struct ShellFleet: Hashable {
 
 // MARK: - The gesture
 
-/// The one axis a gesture is allowed to have.
+/// The one axis a gesture is answering at a time.
+///
+/// One at a time, not one for all time. The content decides once — see
+/// `ShellGesture.axis` — and the bar re-decides every frame, see
+/// `ShellGesture.lean`. What both share is that a gesture is only ever
+/// drawing one of these, right up until the page leaves the display and the
+/// two stop competing.
 enum ShellAxis: Hashable {
     case horizontal
     case vertical
@@ -600,11 +655,14 @@ enum ShellAxis: Hashable {
 enum ShellGesture {
     /// Which axis this gesture is, or nil while it is still too small to say.
     ///
-    /// **Decided once and never revisited.** The caller stores the first
-    /// non-nil answer and keeps asking nothing further for the rest of the
-    /// gesture; an axis that could change mid-drag means a swipe that starts
-    /// sideways and ends up opening the column, which is every accidental
-    /// gesture in the design review.
+    /// **The FIRST answer, and on the content the only one.** The content
+    /// stores the first non-nil answer and asks nothing further for the rest
+    /// of the gesture, because vertical there is the terminal's scrollback
+    /// and an axis that could be re-decided per frame is the shell reaching
+    /// into a gesture another party already owns — the failure class of the
+    /// sign error two paragraphs down, arrived at from the other direction.
+    /// The bar asks `lean` instead, which starts here and then keeps asking;
+    /// its header is where that difference is argued.
     ///
     /// `dy` is measured UP-positive — `startY - y` — and the comparison is
     /// against its MAGNITUDE. It was `abs(dx) > dy`, verbatim from the
@@ -621,14 +679,92 @@ enum ShellGesture {
     /// reading a terminal turned the page under you, which is what the owner
     /// reported from a real phone.
     ///
-    /// A true lock costs the bar nothing, and that is why one rule can serve
-    /// both. A downward flick on the bar now locks VERTICAL, where `lift` is
-    /// floored at zero, no column row is ever under the finger and the
-    /// release is `.abandon` — a gesture that does nothing, which is what the
-    /// prototype's comment wanted and reached the other way round.
+    /// A downward flick on the bar answers VERTICAL, where `lift` is floored
+    /// at zero, no column row is ever under the finger and the release is
+    /// `.abandon` — a gesture that does nothing, which is what the
+    /// prototype's comment wanted and reached the other way round. The
+    /// magnitude is what makes that true of a downward drag that also
+    /// wanders, and `lean` keeps reading magnitudes for the same reason.
+    ///
+    /// The tie goes to VERTICAL — `>` and not `>=` — and that is the answer
+    /// to "what wins at the diagonal" for the first six points. It matters
+    /// only for a gesture that is exactly 45° and has no history to fall back
+    /// on; after that there is a history, and `lean` hands the diagonal to
+    /// it.
     static func axis(dx: CGFloat, up dy: CGFloat) -> ShellAxis? {
         guard max(abs(dx), abs(dy)) > ShellMetrics.axisLock else { return nil }
         return abs(dx) > abs(dy) ? .horizontal : .vertical
+    }
+
+    /// Which axis a BAR gesture is leaning toward NOW, given what it was
+    /// leaning toward a frame ago.
+    ///
+    /// **This is the redirection, and it is the whole of it.** The owner's
+    /// ask: *"the user can start swiping horizontally, then decide they want
+    /// to swipe vertically instead, or vice versa."* WWDC 2018 803 on why:
+    /// *"if it wasn't redirectable… you'd have to think what you want to do…
+    /// then perform the gesture. But when it's redirectable, the thought and
+    /// gesture happen in parallel. And you sort of think it with the gesture,
+    /// and it turns out this is way faster than thinking before doing."*
+    ///
+    /// **Why the BAR can have this and the content cannot.** Two axes may be
+    /// re-decided per frame only where nothing else is listening. On the bar
+    /// there is no competing scroller: down does nothing, up is the column,
+    /// sideways is the workspace, and the only party that could be
+    /// interrupted is the shell itself. On the CONTENT vertical is the
+    /// terminal's scrollback — a gesture the pane owns and has a regression
+    /// test for — and re-deciding it per frame reintroduces `b192f17` from
+    /// the other side: that was `abs(dx) > dy` with `dy` up-positive, which
+    /// called every downward drag horizontal, shipped, and was reported off a
+    /// real phone. Android's `PaneTrack` reaches the same split by a
+    /// different road, and its note says so: nested scrolling disposes of the
+    /// axis problem for content, *"`ShellGesture.axis` is still the right
+    /// thing for the bar"*. It is right that the bar has a rule. It was not
+    /// right that the rule was a LOCK.
+    ///
+    /// **The first answer is `axis`, unchanged**, so a gesture that never
+    /// redirects means exactly what it meant before — every straight-line
+    /// drag anybody can perform, including every one this suite drives.
+    /// After that the comparison is the same comparison with
+    /// `ShellMetrics.redirect` on the incumbent's side, so the diagonal keeps
+    /// what the gesture already is.
+    ///
+    /// **Nil is not reachable a second time.** A gesture that has decided an
+    /// axis has moved, and a thing that has moved is not a tap however far
+    /// back toward the origin it comes; the guard on `axisLock` is asked only
+    /// while there is no incumbent. Reaching nil again would make a drag out
+    /// and back resolve to `.toggleColumn`.
+    ///
+    /// **`holdingPage` takes the gesture away from the lean entirely.** Once
+    /// the page has left the display it is in your hand, and both directions
+    /// are its own — the decision written down at `pageIsHeld` and the
+    /// mechanism `barRelease`'s `.carry` arm already runs on. Handing that
+    /// gesture to `.horizontal` because the thumb went far enough sideways
+    /// would drop the page back onto the display while your thumb was still
+    /// up in the air holding it, which is the one thing the old lock was
+    /// genuinely protecting. So the redirection is bounded by exactly the
+    /// line the page leaves the glass at: below it the two axes are
+    /// ALTERNATIVES and this arbitrates between them; at and above it they
+    /// COMPOSE, and there is nothing left to arbitrate.
+    ///
+    /// The caller latches `holdingPage` rather than recomputing it from the
+    /// lift, so a card brought back down out of the overview's run stays in
+    /// your hand until you let go of it. A card that fell out of your hand
+    /// because you lowered it forty points would be the same drop, reached
+    /// more slowly.
+    static func lean(
+        dx: CGFloat, up dy: CGFloat, from current: ShellAxis?, holdingPage: Bool = false
+    ) -> ShellAxis? {
+        if holdingPage { return .vertical }
+        guard let current else { return axis(dx: dx, up: dy) }
+        let across = abs(dx)
+        let along = abs(dy)
+        switch current {
+        case .horizontal:
+            return along > across * ShellMetrics.redirect ? .vertical : .horizontal
+        case .vertical:
+            return across > along * ShellMetrics.redirect ? .horizontal : .vertical
+        }
     }
 
     /// How far the track actually moves for a drag of `dx`.
@@ -863,24 +999,34 @@ enum ShellGesture {
     /// The whole of what makes a lift able to answer the OTHER axis, and the
     /// place the decision the owner asked for is written down.
     ///
-    /// **The axis lock is never released; the lift takes both axes.** The
-    /// alternative — letting `axis` be re-decided once a lift is established
-    /// — was considered and is wrong here, because the two axes are not
-    /// competing for one meaning: the lift decides WHERE you end up (holding
-    /// the page, or in the overview) and sideways decides WHICH workspace you
-    /// end up holding. Handing the gesture over to `.horizontal` mid-drag
-    /// would drop the page back onto the display while your thumb was still
-    /// up in the air holding it, which is the same "a swipe that started as
-    /// one thing finished as another" the lock exists to stop. Owning both is
-    /// what a card in the app switcher does: you can move it sideways among
-    /// its neighbours without ever stopping holding it.
+    /// **This is where the bar stops arbitrating between its two axes and
+    /// starts composing them**, and the line is drawn here rather than
+    /// anywhere else because it is the line the page leaves the glass at.
+    ///
+    /// BELOW it the two axes are ALTERNATIVES. The vertical draws a menu and
+    /// the horizontal slides the whole track, they are two different surfaces
+    /// answering one thumb, and drawing both at once slides an open column
+    /// sideways off the bar it grew out of — `ShellRootView.barTrack` is one
+    /// `offset(x:)` around the bar and its column together. So exactly one of
+    /// them is drawn, `lean` says which, and a gesture may change its mind
+    /// about that as often as it likes.
+    ///
+    /// AT AND ABOVE it they compose, and `lean` stops being asked. The lift
+    /// decides WHERE you end up — holding the page, or in the overview — and
+    /// sideways decides WHICH workspace you end up holding; neither is an
+    /// answer to the other's question. Handing the gesture to `.horizontal`
+    /// here would drop the page back onto the display while your thumb was
+    /// still up in the air holding it. Owning both is what a card in the app
+    /// switcher does: you can move it sideways among its neighbours without
+    /// ever stopping holding it. `barRelease`'s `.carry` arm is that
+    /// composition, and it was in the shell before the redirection was — this
+    /// is the mechanism the rest generalises, not a new one.
     ///
     /// Not held for the whole column phase, and that is the same line
-    /// `pageRise` draws. Below it the finger is choosing a column ROW and
-    /// `dx` is nothing but the sideways wander of a thumb travelling up a
-    /// phone; a page turn read out of that would make every tab choice a coin
-    /// toss. Past the last row there is no row left to choose and the page has
-    /// left the glass, so sideways has nothing else it could mean.
+    /// `pageRise` draws. Below it the finger is choosing a column ROW, and
+    /// the sideways channel there is the TRACK rather than the card: a page
+    /// still on the display slides, a page in your hand travels. Two
+    /// drawings of "sideways", one line between them, and it is this one.
     static func pageIsHeld(up: CGFloat, tabCount: Int) -> Bool {
         pageRise(up: up, tabCount: tabCount) > 0
     }
@@ -913,6 +1059,143 @@ enum ShellGesture {
         let full = columnFull(tabCount: tabCount)
         guard full > 0 else { return 1 }
         return min(1, max(0, up / full))
+    }
+}
+
+/// The part of a BAR gesture that is not a pure function of where the finger
+/// is: which axis it is leaning toward, and what each axis owes the other
+/// once it has changed its mind.
+///
+/// **The one stateful thing in this file, and it is here for the same reason
+/// everything else is.** `ShellGesture` is deliberately stateless — the view
+/// holds the drag channel and asks it questions — and that works for as long
+/// as every question can be answered from the current translation alone. The
+/// redirection cannot: whether this frame is a handover depends on what the
+/// last frame answered, and what a handover charges depends on where the
+/// finger was when it happened. Left in the view that is three pieces of
+/// `@State` and a fifteen-line closure, which is exactly the shape of thing
+/// no test can reach. Here it is a value you can drive a whole path through
+/// in a millisecond, and `ShellDrag.barGesture` becomes the six lines that
+/// turn a `Frame` into pixels.
+///
+/// **It decides nothing on its own.** Every rule it applies belongs to
+/// `ShellGesture` — `lean` for the axis, `pageIsHeld` for when the two axes
+/// stop competing, `pageRise` for what a handover charges the lift — and this
+/// type is their lifetime and nothing else.
+struct ShellBarDrag {
+    /// Which axis the gesture is answering, or nil while it is still small
+    /// enough to be a tap.
+    ///
+    /// Re-asked every frame. The CONTENT's axis is a separate thing with a
+    /// separate lifetime and lives in the view; `ShellGesture.lean` is where
+    /// the difference between the two surfaces is argued.
+    private(set) var axis: ShellAxis?
+
+    /// Sideways travel this gesture spent on an axis it has since left.
+    ///
+    /// Both sideways channels measure from it — the track below the last row,
+    /// the carried card above it — because it is one fact about the gesture
+    /// rather than a property of either.
+    private(set) var spentSideways: CGFloat = 0
+
+    /// Lift this gesture spent before the vertical claimed it, and it is not
+    /// the same rule as `spentSideways`.
+    ///
+    /// **Positions are re-based; a pop is adopted whole.** The column is shut
+    /// and then whole, on its own spring, and the row it highlights is read
+    /// off the finger's absolute place on the glass — so it has no in-between
+    /// to teleport through, and making a finger that is already 200 points
+    /// above the bar travel 16 more before the menu it is plainly asking for
+    /// appears would be a delay with nothing behind it. The PAGE past the
+    /// last row is a position and may not jump: at the instant a sideways
+    /// drag turns upward the page is flat on the display, and everything past
+    /// the last row is travel this gesture has not made yet.
+    ///
+    /// Which is `ShellGesture.pageRise` exactly, and deliberately: "how much
+    /// of this lift has moved the page" and "how much of this lift may not be
+    /// handed to whoever claims it next" are the same question.
+    ///
+    /// **It is a charge on TRAVEL, never on PLACE.** The row a column
+    /// highlights is read off the finger's absolute point on the glass, so
+    /// this never moves a highlight — the property the previous lane
+    /// established, and what made unlocking the axis safe to attempt at all.
+    /// But `ShellRootView.menuShouldShow` used to ask the charged lift
+    /// whether the finger was past the last row, and after a charge that is a
+    /// different question with a different answer: a gesture that swipes 150
+    /// points sideways and turns upward hands over at 212, this puts the
+    /// travel at exactly the column's last row — inside it by a hair — and
+    /// the menu sprang open with the thumb 80 points above every row in it,
+    /// then shut on the next frame. Add this back to recover the thumb, and
+    /// ask the thumb about place.
+    private(set) var spentLift: CGFloat = 0
+
+    /// Whether the page has been off the display at any point in this
+    /// gesture.
+    ///
+    /// Latched, and `ShellGesture.lean`'s header is why: a card brought back
+    /// down out of the overview's run is still in your hand, and one that
+    /// fell out of it because you lowered your thumb forty points would be
+    /// the drop the whole rule exists to prevent, reached more slowly.
+    private(set) var holdingPage = false
+
+    /// What one frame of a bar drag comes to.
+    struct Frame: Equatable {
+        /// The axis this frame is leaning toward.
+        var axis: ShellAxis?
+        /// The lift the column and the page are drawn at: floored at zero,
+        /// and net of whatever a handover charged.
+        var lift: CGFloat
+        /// The sideways travel the track — or the carried card — is drawn at,
+        /// net of the same handover and before anything rubber-bands it.
+        var sideways: CGFloat
+        /// Which axis has just taken the gesture off the other one, or nil if
+        /// nothing changed hands on this frame.
+        ///
+        /// The view needs this and only this to run the handover's other
+        /// half: putting back what the abandoned channel had drawn, eased,
+        /// because it is no longer the finger's position but an apology for
+        /// having moved. Nothing here can do that — it is a transaction, not
+        /// a number.
+        var claimed: ShellAxis?
+    }
+
+    /// One frame of the finger.
+    ///
+    /// `up` is up-positive and RAW — the whole translation, not the lift —
+    /// because the lean is about which way the finger is going and the
+    /// charges are about how much of that each channel has been given. Mixing
+    /// the two would make the ratio a function of its own history.
+    mutating func moved(dx: CGFloat, up: CGFloat, tabCount: Int) -> Frame {
+        let lift = max(0, up - spentLift)
+        // Read before the lean and never unset: once the page is off the
+        // display both directions are its own, and the lean stops being asked
+        // for the rest of the gesture.
+        if axis == .vertical, ShellGesture.pageIsHeld(up: lift, tabCount: tabCount) {
+            holdingPage = true
+        }
+        let was = axis
+        axis = ShellGesture.lean(dx: dx, up: up, from: was, holdingPage: holdingPage)
+        // A first answer hands nothing over: both channels are at rest, so
+        // there is nothing to put back and nothing to charge. `was` is nil for
+        // exactly that case — a gesture that has only just grown past the
+        // axis lock — and `axis` is nil for a gesture that has not.
+        guard let claimed = axis, claimed != was, was != nil else {
+            return Frame(axis: axis, lift: lift, sideways: dx - spentSideways, claimed: nil)
+        }
+        // One line for both directions, because it is one fact: the sideways
+        // travel this gesture has already spent.
+        spentSideways = dx
+        // The lift's charge belongs to whoever is holding the vertical, so it
+        // is recomputed when the vertical takes the gesture and DROPPED when
+        // it loses it. Left standing across a hand-back it is a number that
+        // no longer describes anything — and `ShellRootView.fingerLift` adds
+        // it to a lift the horizontal arm has just zeroed, which would put a
+        // phantom thumb 80 points above a column that a tap is holding open.
+        spentLift = claimed == .vertical
+            ? ShellGesture.pageRise(up: up, tabCount: tabCount) : 0
+        return Frame(
+            axis: axis, lift: max(0, up - spentLift), sideways: dx - spentSideways,
+            claimed: claimed)
     }
 }
 
@@ -950,10 +1233,21 @@ enum ShellRelease: Hashable {
 extension ShellFleet {
     /// What letting go of the BAR does.
     ///
-    /// `up` is the lift, up-positive and already floored at zero by the
-    /// caller; `axis` is the one decided on the first 6 points, or nil if the
-    /// gesture never grew that big — which is a tap and is why this function
-    /// can return `.toggleColumn` at all.
+    /// `up` is the lift, up-positive, already floored at zero by the caller
+    /// and already net of whatever an axis handover charged it; `axis` is the
+    /// one the gesture was LEANING toward at the instant the finger left —
+    /// `ShellGesture.lean`'s last answer, which on the bar is re-asked every
+    /// frame — or nil if the gesture never grew past the axis lock, which is
+    /// a tap and is why this function can return `.toggleColumn` at all.
+    ///
+    /// **The axis is the drawn one, and the escapes are the thrown ones.**
+    /// That split is the same one `ShellGesture.projected` argues for one
+    /// level down, applied to the redirection: which axis won is a question
+    /// about what the shell had on screen when you let go — a menu, or a
+    /// track halfway to the neighbour — and confirming an outcome other than
+    /// the one being drawn is the defect a hint exists to prevent. How far
+    /// along that axis you got is a question about where the gesture was
+    /// GOING, and that is what the velocities answer.
     /// `row` is which column row the finger came up over, from
     /// `ShellGesture.columnRow`, and is nil whenever there was no open column
     /// under it. It is an argument rather than something derived here because
@@ -998,8 +1292,9 @@ extension ShellFleet {
             let tabs = tabCount(ofWorkspace: position.workspace)
             // The sideways half of a lift, and it only exists once the page
             // is off the display — see `ShellGesture.pageIsHeld`, which is
-            // also where the decision not to release the axis lock is
-            // argued. Along `.bar`, because what a lifted page is holding is
+            // also where the line between the two axes competing and the two
+            // axes composing is argued. Along `.bar`, because what a lifted
+            // page is holding is
             // a WORKSPACE: the cards it can be moved between are the
             // overview's cards, and those are workspaces.
             //
