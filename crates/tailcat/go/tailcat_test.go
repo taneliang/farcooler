@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -14,18 +15,19 @@ import (
 	"time"
 
 	"github.com/tailscale/tailcat"
+	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )
 
 // Two node keys in the form the fence writes: 43 unpadded base64-URL
 // characters.
 //
-// keyA is the constant the Rust allowlist tests use. keyB is NOT theirs: their
-// second constant ends "…AAB" against this one's "…AAA", and 43 characters
-// carry 258 bits, so those two differ only in padding and decode to the same
-// 32 bytes. Two node keys that a Rust test can tell apart by string are one
-// key here, which is exactly the kind of thing a test should not be quiet
-// about.
+// These are the constants the Rust allowlist tests use, and they now agree.
+// They did not: that file's second key ended "…AAD" against this one's "…AAA",
+// and 43 characters carry 258 bits, so the last character's low two bits are
+// padding and those two decoded to the same 32 bytes — two devices to a test
+// that compares strings, one device to the runner that decodes them. Both
+// sides say "…AAE" now.
 const (
 	keyA = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	keyB = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE"
@@ -412,9 +414,23 @@ func TestDialRefusesArgumentsItCannotRead(t *testing.T) {
 	if rc := dial("", keyA, 22); rc != -int(syscall.EINVAL) {
 		t.Fatalf("dial with no token: rc=%d, want %d", rc, -int(syscall.EINVAL))
 	}
-	if rc := dial("tcsomething", "not-a-node-key", 22); rc != -int(syscall.EINVAL) {
+	// A token good enough to get past the parse, so this tests the key.
+	token := mustFakeToken(t, "127.0.0.1", closedPort(t))
+	if rc := dial(token, "not-a-node-key", 22); rc != -int(syscall.EINVAL) {
 		t.Fatalf("dial with an unreadable client key: rc=%d, want %d", rc, -int(syscall.EINVAL))
 	}
+}
+
+// closedPort returns a loopback port nothing is listening on.
+func closedPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+	return port
 }
 
 // A zero private key is not an error to tailcat: it means "generate an
@@ -422,9 +438,13 @@ func TestDialRefusesArgumentsItCannotRead(t *testing.T) {
 // in no allowlist, be ignored without a word, and spend the whole ten-second
 // handshake arriving at a timeout that names the runner rather than the key.
 func TestDialRefusesAZeroPrivateKey(t *testing.T) {
+	captureLog(t)
 	zero := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	// The token has to be one this would otherwise use, or the refusal below
+	// could be the token's and the guard would be untested.
+	token := mustFakeToken(t, "127.0.0.1", closedPort(t))
 	done := make(chan int, 1)
-	go func() { done <- dial("tcsomething", zero, 22) }()
+	go func() { done <- dial(token, zero, 22) }()
 	select {
 	case rc := <-done:
 		if rc != -int(syscall.EINVAL) {
@@ -435,19 +455,86 @@ func TestDialRefusesAZeroPrivateKey(t *testing.T) {
 	}
 }
 
-// A revoked device is ignored in silence, so the only thing separating "the
-// relay is unreachable" from "the runner did not answer" is which leg of the
-// handshake failed. This is the relay leg, and it needs no network: a token
-// that names no relay fails inside the client's own startup, before any meow
-// is sent.
-func TestATokenThatNamesNoRelayBlamesTheRendezvous(t *testing.T) {
+// A token that is not a token is the caller's mistake, and saying "can't reach
+// the rendezvous service" about it blames the network for a typo. It is also
+// what enforces the invariant the attribution below rests on: our tokens
+// always embed their region, so the handshake's first leg never goes to the
+// network.
+func TestDialRefusesATokenItCannotUse(t *testing.T) {
 	captureLog(t)
-	priv, err := key.NewNode().MarshalText()
+	priv := newPrivateKeyText(t)
+	for _, bad := range []string{"tcnotarealtoken", "not a token at all", string(mustFakeToken(t, "", 0))} {
+		if rc := dial(bad, priv, 22); rc != -int(syscall.EINVAL) {
+			t.Fatalf("dial on %q: rc=%d, want %d", bad, rc, -int(syscall.EINVAL))
+		}
+	}
+}
+
+// newPrivateKeyText returns a usable client key in tailscale's own text form.
+func newPrivateKeyText(t *testing.T) string {
+	t.Helper()
+	text, err := key.NewNode().MarshalText()
 	if err != nil {
 		t.Fatalf("MarshalText: %v", err)
 	}
-	if rc := dial("tcnotarealtoken", string(priv), 22); rc != -int(syscall.EHOSTUNREACH) {
-		t.Fatalf("dial on an unreadable token: rc=%d, want %d", rc, -int(syscall.EHOSTUNREACH))
+	return string(text)
+}
+
+// mustFakeToken builds a token naming one DERP node at host:port, or, with an
+// empty host, one that embeds no region at all.
+func mustFakeToken(t *testing.T, host string, port int) string {
+	t.Helper()
+	srv := key.NewNode()
+	ci := tailcat.ConnInfo{
+		ServerPublic:      tailcat.NodePublic{NodePublic: srv.Public()},
+		ServerDiscoPublic: tailcat.DiscoPublicForNode(srv),
+	}
+	if host != "" {
+		ci.Region = []*tailcfg.DERPRegion{{
+			RegionID:   900,
+			RegionCode: "test",
+			RegionName: "test",
+			Nodes: []*tailcfg.DERPNode{{
+				Name:             "900a",
+				RegionID:         900,
+				HostName:         host,
+				IPv4:             host,
+				DERPPort:         port,
+				STUNPort:         -1,
+				InsecureForTests: true,
+			}},
+		}}
+	}
+	return string(ci.ConnBlob())
+}
+
+// The probe that makes "Can't reach the rendezvous service" a sentence that
+// can actually be shown. Upstream's meow is fire-and-forget — magicsock
+// answers "sent" as soon as the packet lands on a channel — so a dead relay
+// and a silent runner look identical without it.
+func TestARelayIsProbedForReachability(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	up := listener.Addr().(*net.TCPAddr).Port
+
+	live, err := tailcat.ParseConnBlob(tailcat.ConnBlob(mustFakeToken(t, "127.0.0.1", up)))
+	if err != nil {
+		t.Fatalf("ParseConnBlob: %v", err)
+	}
+	if !relayReachable(live) {
+		t.Fatal("a relay that is listening was reported unreachable")
+	}
+
+	listener.Close()
+	dead, err := tailcat.ParseConnBlob(tailcat.ConnBlob(mustFakeToken(t, "127.0.0.1", up)))
+	if err != nil {
+		t.Fatalf("ParseConnBlob: %v", err)
+	}
+	if relayReachable(dead) {
+		t.Fatal("a relay that is not listening was reported reachable")
 	}
 }
 
@@ -613,5 +700,59 @@ func TestADeviceOutsideTheAllowlistIsBlamedOnTheRunnerNotTheRelay(t *testing.T) 
 	t.Logf("a stranger's dial answered %d after %s", rc, time.Since(start).Round(time.Millisecond))
 	if rc != -int(syscall.ETIMEDOUT) {
 		t.Fatalf("a device outside the allowlist: rc=%d, want %d", rc, -int(syscall.ETIMEDOUT))
+	}
+}
+
+// The dial-level half of the probe, and the sentence it earns. A token whose
+// relay is not there must blame the rendezvous, not the runner — the runner is
+// blameless and may not even exist. It costs upstream's ten-second handshake
+// timer, which is not ours to shorten.
+func TestATokenWhoseRelayIsGoneBlamesTheRendezvous(t *testing.T) {
+	captureLog(t)
+	token := mustFakeToken(t, "127.0.0.1", closedPort(t))
+	start := time.Now()
+	rc := dial(token, newPrivateKeyText(t), 22)
+	t.Logf("a dead relay answered %d after %s", rc, time.Since(start).Round(time.Millisecond))
+	if rc != -int(syscall.EHOSTUNREACH) {
+		t.Fatalf("dial through a relay that is gone: rc=%d, want %d", rc, -int(syscall.EHOSTUNREACH))
+	}
+}
+
+// A pinned region that has left the DERP map is fatal to Start, and the pin is
+// on disk — so a runner that did not forget it would fail identically on every
+// start until somebody edited the file. It used to re-pick and serve; that is
+// not a regression this is willing to ship.
+func TestARegionThatWillNotStartIsForgotten(t *testing.T) {
+	captureLog(t)
+	defer restoreServerState(t, nil, closeServer)()
+	path := filepath.Join(t.TempDir(), "node.key")
+	id, err := loadOrCreateIdentity(path)
+	if err != nil {
+		t.Fatalf("loadOrCreateIdentity: %v", err)
+	}
+	if err := pinRegion(path, identity{priv: id.priv, regionID: 900}); err != nil {
+		t.Fatalf("pinRegion: %v", err)
+	}
+
+	// A DERP map source that refuses instantly, so Start fails for a reason
+	// that has nothing to do with the network being slow.
+	mu.Lock()
+	prev := derpMapURL
+	derpMapURL = fmt.Sprintf("http://127.0.0.1:%d/derpmap.json", closedPort(t))
+	mu.Unlock()
+	defer func() { mu.Lock(); derpMapURL = prev; mu.Unlock() }()
+
+	if rc := serve(path, 22, keyA); rc != -int(syscall.EIO) {
+		t.Fatalf("serve with an unusable pinned region: rc=%d, want %d", rc, -int(syscall.EIO))
+	}
+	after, err := loadOrCreateIdentity(path)
+	if err != nil {
+		t.Fatalf("loadOrCreateIdentity after the failure: %v", err)
+	}
+	if after.regionID != 0 {
+		t.Fatalf("the runner kept region %d after it would not start; every restart fails the same way", after.regionID)
+	}
+	if !after.priv.Equal(id.priv) {
+		t.Fatal("forgetting the region lost the runner's key")
 	}
 }

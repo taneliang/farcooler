@@ -28,6 +28,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,6 +73,11 @@ const dialTimeout = 30 * time.Second
 // regionPickTimeout bounds the one netcheck a runner runs on its first start,
 // to choose the relay it then keeps.
 const regionPickTimeout = 15 * time.Second
+
+// relayProbeTimeout bounds one TCP connect to a DERP node, on the failure path
+// only, to decide whether a handshake that went nowhere was the relay's fault
+// or the runner's.
+const relayProbeTimeout = 3 * time.Second
 
 // One server per process. A daemon has one runner and one sshd to front.
 var (
@@ -443,6 +449,15 @@ func pinRegion(path string, id identity) error {
 		os.Remove(tmp)
 		return err
 	}
+	// The rename is only atomic against a crash if the bytes are on the disk
+	// before it happens. Some filesystems order that for you and some do not,
+	// and the argument above is not worth making if it rests on which one this
+	// is. The directory is synced too, so the rename itself survives.
+	if err := file.Sync(); err != nil {
+		file.Close()
+		os.Remove(tmp)
+		return err
+	}
 	if err := file.Close(); err != nil {
 		os.Remove(tmp)
 		return err
@@ -451,7 +466,17 @@ func pinRegion(path string, id identity) error {
 		os.Remove(tmp)
 		return err
 	}
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		dir.Sync()
+		dir.Close()
+	}
 	return nil
+}
+
+// unpinRegion forgets a region that no longer works, so the next start chooses
+// again instead of failing the same way forever.
+func unpinRegion(path string, priv key.NodePrivate) error {
+	return pinRegion(path, identity{priv: priv})
 }
 
 // chooseRegion picks the relay this runner will listen on, so that the choice
@@ -530,7 +555,38 @@ func serve(keyPath string, sshPort uint16, allow string) (rc int) {
 			id.regionID = picked
 		}
 	}
-	s := &tailcat.Server{
+	s := newServer(id, sshPort, allowed)
+	if err := s.Start(); err != nil {
+		// A pinned region that has left the DERP map is fatal to Start, and
+		// the pin is on disk — so without this, every serve after it fails the
+		// same way until somebody edits the file by hand. The map carries a
+		// handful of regions and upstream notes the map server may filter them
+		// by client IP, so a region going away is ordinary rather than exotic.
+		// Forget it and start again unpinned; the next serve chooses a fresh
+		// one and writes that down.
+		if id.regionID == 0 {
+			return -int(syscall.EIO)
+		}
+		log.Printf("tailcat: DERP region %d would not start (%v); forgetting the pin and choosing again", id.regionID, err)
+		if err := unpinRegion(keyPath, id.priv); err != nil {
+			log.Printf("tailcat: could not forget DERP region %d: %v", id.regionID, err)
+		}
+		// A Server cannot be started twice, so the retry gets a fresh one.
+		retry := newServer(identity{priv: id.priv}, sshPort, allowed)
+		if err := retry.Start(); err != nil {
+			return -int(syscall.EIO)
+		}
+		s = retry
+	}
+	server = s
+	return 0
+}
+
+// newServer builds this runner's tunnel server. It is the only place a
+// tailcat.Server is constructed, which is where the allowlist's second guard
+// lives.
+func newServer(id identity, sshPort uint16, allowed []key.NodePublic) *tailcat.Server {
+	return &tailcat.Server{
 		Key:            id.priv,
 		RegionID:       id.regionID,
 		Logf:           tailcatLogf,
@@ -558,11 +614,6 @@ func serve(keyPath string, sshPort uint16, allow string) (rc int) {
 			}
 		},
 	}
-	if err := s.Start(); err != nil {
-		return -int(syscall.EIO)
-	}
-	server = s
-	return 0
 }
 
 // allowAdd admits one more device to the running server.
@@ -610,27 +661,73 @@ func connBlob(buf []byte) (rc int) {
 	return len(blob)
 }
 
+// relayReachable reports whether the DERP node a token names will accept a TCP
+// connection.
+//
+// It exists because upstream's meow is fire-and-forget: magicsock queues the
+// packet to its DERP writer and answers "sent" whether or not the relay is
+// there, so a relay that is down and a runner that is ignoring you produce the
+// same ten-second silence. Measured, not assumed — magicsock.sendAddr returns
+// true as soon as the write lands on a channel. Without this probe the spec's
+// "Can't reach the rendezvous service" is a sentence that can never be shown.
+//
+// It runs only after a handshake has already failed, so it costs nothing on
+// the path anybody is waiting on. A relay that accepts TCP is not proof the
+// DERP protocol is healthy — it is proof the network reaches it, which is what
+// "check your connection" is about.
+func relayReachable(ci tailcat.ConnInfo) bool {
+	for _, region := range ci.Region {
+		for _, node := range region.Nodes {
+			port := node.DERPPort
+			if port == 0 {
+				port = 443
+			}
+			for _, host := range []string{node.HostName, node.IPv4, node.IPv6} {
+				if host == "" {
+					continue
+				}
+				conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), relayProbeTimeout)
+				if err == nil {
+					conn.Close()
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // dial opens a tunneled connection to a runner and hands back a descriptor.
 //
-// The handshake is run explicitly, in two legs, because the spec asks for two
-// different sentences and a single call cannot tell them apart. "Can't reach
-// the rendezvous service" and "This runner didn't answer, its access may have
-// been revoked" are different facts about different parties, and an
-// unrecognized client is ignored SILENTLY by the runner — the only thing a
-// revoked device would otherwise get is a generic timeout, which is exactly
-// what this tree keeps committing fixes against.
+// The failures are told apart because the spec asks for different sentences
+// and an unrecognized client is ignored SILENTLY by the runner: the only thing
+// a revoked device would otherwise get is a generic timeout, which is what
+// this tree keeps committing fixes against.
 //
-// The seam is upstream's own: Client.Ping starts the client and then waits for
-// the runner's acknowledgment under a ten-second timer of its own. A deadline
-// means the meow went out and nothing came back — the runner. Anything else
-// failed before that, resolving the relay or bringing the engine up — the
-// rendezvous. (A token whose DERP map had to be fetched could in principle
-// time out on the first leg too; ours never does, because Server.ConnBlob
-// always embeds the region.) A failure after both legs is the tunnel working
-// and sshd not answering on the other side.
+//	EINVAL        the token or the key is not one this can use
+//	EHOSTUNREACH  the relay the token names does not answer   → the rendezvous
+//	ETIMEDOUT     the relay answers, the runner does not       → the runner
+//	ENETDOWN      the local data plane would not come up       → us
+//	ECONNREFUSED  the tunnel is up and the TCP connect through it failed
+//
+// The token is parsed here rather than left to the client, for two reasons: a
+// corrupt token is the caller's mistake and must not be reported as the
+// network, and the parse is what turns "our tokens always embed their region"
+// from an assumption into a refusal. That invariant is load-bearing — a token
+// that had to fetch a DERP map could fail on the first leg for a reason this
+// would misattribute.
+//
+// The last row is worth reading exactly: OnTCP on the runner accepts before it
+// dials sshd, so an sshd that is refusing gives a connect that SUCCEEDS and
+// then an immediate EOF. ECONNREFUSED here means the TCP connect through the
+// tunnel failed, not that SSH said no.
 func dial(token, clientKey string, port uint16) (rc int) {
 	defer recoverToErrno(&rc)
 	if token == "" {
+		return -int(syscall.EINVAL)
+	}
+	ci, err := tailcat.ParseConnBlob(tailcat.ConnBlob(token))
+	if err != nil || len(ci.Region) == 0 {
 		return -int(syscall.EINVAL)
 	}
 	priv, err := parseNodePrivate(clientKey)
@@ -658,10 +755,14 @@ func dial(token, clientKey string, port uint16) (rc int) {
 	defer cancel()
 	if _, err := client.Ping(ctx); err != nil {
 		client.Close()
-		if errors.Is(err, context.DeadlineExceeded) {
+		switch {
+		case !relayReachable(ci):
+			return -int(syscall.EHOSTUNREACH)
+		case errors.Is(err, context.DeadlineExceeded):
 			return -int(syscall.ETIMEDOUT)
+		default:
+			return -int(syscall.ENETDOWN)
 		}
-		return -int(syscall.EHOSTUNREACH)
 	}
 	conn, err := client.DialTCPPort(ctx, port)
 	if err != nil {
