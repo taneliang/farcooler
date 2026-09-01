@@ -230,6 +230,57 @@ struct ShellCardFace: View {
     static let size = CGSize(width: 168, height: 132)
 }
 
+/// A card, under a thumb.
+///
+/// **The platform's plain style answers a touch by FADING**, and that is the
+/// thing this app already has a written rule against. Measured on iOS 26 with
+/// `.buttonStyle(.plain)`, which is what both card kinds used to carry: a
+/// press takes the card's fill and its text together from `#494E59` down to
+/// `#42474F` — seven levels down a channel, on a 168-point card, and dimmer
+/// rather than livelier. `TerminalKeyStyle` states the rule one file over:
+/// *"Pressed is one step UP the hierarchy, not a lower opacity: a key that
+/// fades under a finger looks like a key that did not take the press."* On the
+/// app's primary navigation — up to forty of these, and the only way into a
+/// workspace by touch — a fade is the wrong half of the sentence.
+///
+/// So this draws the same thing the key row draws: one step up. A second
+/// `TranscriptFill.container` over the one `ShellCardFace` already carries
+/// takes the fill to `#626771`, twenty-five levels UP, and leaves the words on
+/// it at full strength. WWDC 2018 803 asks for the rest of it and `Button`
+/// already gives it: *"the button should highlight immediately when I touch
+/// down on it… but we shouldn't confirm the tap until my touch goes up"*, a
+/// drag out of the target cancels, and a finger that comes back highlights
+/// again. What was missing was only something for those to show WITH.
+///
+/// A `ButtonStyle` rather than anything inside the label, for the reason
+/// `TerminalKeyStyle` gives: `configuration.isPressed` is reachable from here
+/// and from nowhere else.
+///
+/// **A fill, and no scale.** It is deliberately not a `scaleEffect`: the card
+/// publishes its own frame through `ShellTileFrame`, that frame is the
+/// rectangle a lifted page flies INTO, and a transform between the geometry
+/// reader and the screen is a destination that moves while a thumb rests on
+/// it.
+///
+/// The face itself is untouched, which is the other half of that. The flight
+/// draws a `ShellCardFace` too — see `ShellPageLayer.cardFace` — and a pressed
+/// state built into the face would be a page in mid-air with a thumb on it.
+private struct ShellCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .overlay {
+                RoundedRectangle(cornerRadius: ShellMotion.cardRadius, style: .continuous)
+                    .fill(
+                        configuration.isPressed
+                            ? TranscriptFill.container : AnyShapeStyle(.clear))
+            }
+            // Quick enough to read as the card going down rather than as the
+            // grid animating, and the same 0.08 the key row uses: a highlight
+            // that eases in over a tap arrives after the tap did.
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
 /// One workspace as a card in the grid: a face, a frame it publishes, and a
 /// tap that opens it.
 private struct ShellOverviewCard: View {
@@ -261,7 +312,7 @@ private struct ShellOverviewCard: View {
                     }
                 }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ShellCardStyle())
         // The card is content, so its type does not grow: the grid is 168 by
         // 132 by design — the number the flight lands on — and text that keeps
         // scaling inside a frame that cannot walks straight out of the corner.
@@ -313,7 +364,7 @@ private struct ShellElsewhereCard: View {
         Button(action: onOpen) {
             ShellCardFace(workspace: workspace, isCurrent: false)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ShellCardStyle())
         .dynamicTypeSize(...DynamicTypeSize.large)
         .accessibilityIdentifier("shell-elsewhere-\(workspace.id)")
         // Named with its runner, because that is the whole of what makes this

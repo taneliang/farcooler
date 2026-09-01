@@ -650,6 +650,203 @@ final class ShellGestureTests: XCTestCase {
             try state(app)["overview"], 0, "the pull-down out of the grid stopped working")
     }
 
+    // MARK: - Touch-down feedback
+
+    /// **The control, and it comes first.**
+    ///
+    /// The assertions below are of the form "these two renders differ", and
+    /// such an assertion passes for free if the screen simply does not render
+    /// the same way twice. This is the one that fails in that case: an
+    /// untouched card, left alone for exactly as long as the press below
+    /// lasts, has to come out byte for byte the same at the end of it. The
+    /// same argument `GlanceMarkTests` makes about `ImageRenderer` one package
+    /// over, made here about a simulator's glass.
+    ///
+    /// **Two seconds apart and not back to back**, because back to back is
+    /// the interval the press test does NOT use. A pair of screenshots taken
+    /// in the same breath can agree for reasons that have nothing to do with
+    /// the screen holding still — the same frame served twice would do it —
+    /// and the claim the press test needs is about a gap of exactly this
+    /// length. So the control waits it out.
+    func testACardLeftAloneRendersTheSameBytes() throws {
+        let app = launch(["-shell-overview", "-shell-4"])
+        let card = try firstCard(app)
+        let rect = card.frame
+        let settled = try settledFingerprint(in: rect)
+        XCTAssertNotEqual(settled, "no such rectangle", "the card's frame is off the screenshot")
+        Thread.sleep(forTimeInterval: pressHold)
+        XCTAssertEqual(
+            settled, fingerprint(XCUIScreen.main.screenshot().image, in: rect),
+            "a card nobody touched rendered differently \(pressHold) seconds later")
+    }
+
+    /// **A card lights UP under a thumb — it does not fade.** The defect, as
+    /// an assertion, and the direction is the whole of it.
+    ///
+    /// The audit this came from expected to find no pressed treatment at all:
+    /// `.buttonStyle(.plain)` has historically rendered custom label content
+    /// with nothing. Measured on iOS 26 that is not what happens, and it is
+    /// worth knowing before writing the assertion — a first draft of this test
+    /// asked only whether the pixels CHANGED, and it passed with the style
+    /// removed. A plain card does answer a touch, and it answers it by
+    /// DIMMING, fill and text together, from `#494E59` to `#42474F`: mean
+    /// brightness over the whole card 84.9 at rest and 76.9 under the thumb.
+    ///
+    /// Which is the thing this app already has a written rule against, one
+    /// file over: *"Pressed is one step UP the hierarchy, not a lower opacity:
+    /// a key that fades under a finger looks like a key that did not take the
+    /// press"* — `TerminalKeyStyle`. So the assertion is not that something
+    /// changed, which `.plain` would satisfy; it is that the card got
+    /// BRIGHTER, which only a treatment that adds a fill can. `ShellCardStyle`
+    /// takes it to `#626771`, twenty-five levels up.
+    ///
+    /// **Pixels, and not the tap.** A test that only checked that tapping a
+    /// card opens its workspace would have passed on either treatment and on
+    /// none at all, which is why nobody noticed: the tap always worked. The
+    /// only thing that can go red is a comparison of what is on screen.
+    ///
+    /// The screenshot is taken from another queue while the press is still
+    /// being synthesized on this one, because there is no XCTest call that
+    /// puts a finger down and returns. Half way into the hold: far enough past
+    /// touch-down that the 0.08-second highlight has finished, and far enough
+    /// from the release that nothing is easing back out.
+    func testACardLightsUpUnderAThumb() throws {
+        let app = launch(["-shell-overview", "-shell-4"])
+        let card = try firstCard(app)
+        let rect = card.frame
+        // Belt and braces on a shared simulator: `waitForExistence` says an
+        // element is in the tree, not that the navigation bar has finished
+        // arriving over it, and a shot of a screen still settling compared
+        // with one taken two seconds later measures the arrival rather than
+        // the press.
+        _ = try settledFingerprint(in: rect)
+        let rest = XCUIScreen.main.screenshot().image
+
+        var shot: XCUIScreenshot?
+        let taken = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + pressHold / 2) {
+            shot = XCUIScreen.main.screenshot()
+            taken.signal()
+        }
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: pressHold)
+        XCTAssertEqual(taken.wait(timeout: .now() + 10), .success, "no screenshot was taken")
+        let pressed = try XCTUnwrap(shot).image
+
+        XCTAssertNotEqual(
+            fingerprint(rest, in: rect), fingerprint(pressed, in: rect),
+            "the card renders identically with a thumb on it and at rest — a touch on "
+                + "it says nothing until it opens")
+        // The MEAN over the whole card rather than one sampled point, so the
+        // claim does not depend on finding a spot the fixture's own text never
+        // reaches. The fill is most of a card either way.
+        let atRest = try meanBrightness(rest, in: rect)
+        let underThumb = try meanBrightness(pressed, in: rect)
+        XCTAssertGreaterThan(
+            underThumb, atRest + 8,
+            "the card is \(String(format: "%.1f", atRest)) bright at rest and "
+                + "\(String(format: "%.1f", underThumb)) under a thumb — a card that fades "
+                + "under a finger looks like a card that did not take the press")
+    }
+
+    /// How long a finger stays down, and how long the control waits. One
+    /// number, because the two only mean anything as a pair.
+    private let pressHold: TimeInterval = 2.0
+
+    /// The card's pixels once the screen has stopped changing.
+    ///
+    /// Two screenshots in a row that agree, which is the only definition of
+    /// "settled" available from outside the app. In practice the first shot
+    /// after `waitForExistence` has always been the settled one on this
+    /// simulator; this is what makes that a fact the test checks rather than
+    /// one it assumes, and it costs a fifth of a second.
+    private func settledFingerprint(in rect: CGRect) throws -> String {
+        var last = fingerprint(XCUIScreen.main.screenshot().image, in: rect)
+        for _ in 0..<25 {
+            Thread.sleep(forTimeInterval: 0.2)
+            let next = fingerprint(XCUIScreen.main.screenshot().image, in: rect)
+            if next == last { return next }
+            last = next
+        }
+        throw XCTSkip("The card never stopped changing with nothing touching it.")
+    }
+
+    /// The first workspace card in the grid, which is the one both assertions
+    /// above are made about.
+    private func firstCard(_ app: XCUIApplication) throws -> XCUIElement {
+        let card = app.descendants(matching: .any).matching(identifier: "shell-card-ws-0")
+            .firstMatch
+        guard card.waitForExistence(timeout: 30) else {
+            print(app.debugDescription)
+            throw XCTSkip("The grid never drew a card.")
+        }
+        XCTAssertTrue(card.isHittable, "the card is on screen but not touchable")
+        return card
+    }
+
+    /// One rectangle of a screenshot, in the app's own POINTS, as RGBA bytes.
+    ///
+    /// A screenshot is in pixels and a frame is in points, so the scale is
+    /// applied here rather than at each call site — getting that wrong reads a
+    /// region a third of the way down the screen from the one being asked
+    /// about, which is a different picture and a passing test.
+    private func pixels(_ shot: UIImage, in rect: CGRect)
+        -> (width: Int, height: Int, bytes: [UInt8])?
+    {
+        guard let cg = shot.cgImage else { return nil }
+        let scale = shot.scale
+        let x = Int((rect.minX * scale).rounded())
+        let y = Int((rect.minY * scale).rounded())
+        let width = Int((rect.width * scale).rounded())
+        let height = Int((rect.height * scale).rounded())
+        guard x >= 0, y >= 0, width > 0, height > 0,
+            x + width <= cg.width, y + height <= cg.height,
+            let crop = cg.cropping(to: CGRect(x: x, y: y, width: width, height: height))
+        else { return nil }
+        var buffer = [UInt8](repeating: 0, count: width * height * 4)
+        buffer.withUnsafeMutableBytes { raw in
+            let context = CGContext(
+                data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            context?.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return (width, height, buffer)
+    }
+
+    /// The pixels of one rectangle of a screenshot, as a short fingerprint.
+    ///
+    /// **A digest and not the buffer, because of what a failure PRINTS.** A
+    /// 168x132 card at scale 3 is most of a megabyte of decimal integers, and
+    /// a failure that arrives as an unreadable wall is a failure nobody reads.
+    /// FNV-1a rather than `hashValue`, which is seeded per process and would
+    /// make the numbers in that message meaningless between runs.
+    private func fingerprint(_ shot: UIImage, in rect: CGRect) -> String {
+        guard let read = pixels(shot, in: rect) else { return "no such rectangle" }
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in read.bytes {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return String(hash, radix: 16)
+    }
+
+    /// How bright that rectangle is on average, 0…255.
+    ///
+    /// The plain mean of the three colour channels and not a weighted
+    /// luminance: this card's fill is a near-neutral slate and both treatments
+    /// move all three channels together, so a perceptual weighting would be
+    /// arithmetic that changes no answer and one more thing to be wrong.
+    private func meanBrightness(_ shot: UIImage, in rect: CGRect) throws -> Double {
+        let read = try XCTUnwrap(pixels(shot, in: rect), "the rectangle is off the screenshot")
+        var total = 0
+        for index in stride(from: 0, to: read.bytes.count, by: 4) {
+            total += Int(read.bytes[index]) + Int(read.bytes[index + 1])
+                + Int(read.bytes[index + 2])
+        }
+        return Double(total) / Double(read.width * read.height * 3)
+    }
+
     // MARK: - A grid that spans runners
 
     /// **The grid lists worktrees across all servers, grouped by runner.**
