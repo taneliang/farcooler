@@ -367,7 +367,29 @@ async fn output_lines_are_counted_off_a_real_pane() {
 
     let before = srv.capture_screen(&win.pane_id).await.unwrap();
     let at_before = furthest(&before).expect("the pane should be printing numbered lines");
-    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+    // Wait for the pane to MOVE, rather than sleeping and hoping it did.
+    //
+    // This was a flat 120ms sleep, and it failed on CI with "got 0": on a
+    // loaded runner the shell had not printed a single line in that window, so
+    // the precondition below failed for a reason that has nothing to do with
+    // what this test is about. A fixed sleep is a bet on the machine's speed at
+    // both ends — too slow and the delta is zero, too fast and it saturates the
+    // pane and trips the upper bound.
+    //
+    // Polling every 25ms bounds it from both sides instead. It returns on the
+    // first captured advance, which is one line more often than not and cannot
+    // be zero; and the 25ms cadence is far below the time this pane takes to
+    // print the ten lines that would make the measurement a saturation rather
+    // than a count.
+    until("the pane to print another line", || async {
+        srv.capture_screen(&win.pane_id)
+            .await
+            .ok()
+            .and_then(|s| furthest(&s))
+            .is_some_and(|n| n > at_before)
+    })
+    .await;
     let after = srv.capture_screen(&win.pane_id).await.unwrap();
     let at_after = furthest(&after).expect("the pane should still be printing numbered lines");
 
