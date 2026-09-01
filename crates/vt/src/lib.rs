@@ -130,6 +130,55 @@ impl Terminal {
         self.parser.advance(&mut self.term, bytes);
     }
 
+    /// Whether a synchronized update is being held back.
+    ///
+    /// A program that wraps an atomic repaint in `\e[?2026h` … `\e[?2026l`
+    /// (DECSET 2026) is asking not to be drawn half-finished, and the parser
+    /// obliges by buffering everything between the two rather than applying it.
+    /// While this is true the screen is deliberately stale: it is the LAST
+    /// complete frame, which is exactly what should be on display.
+    ///
+    /// A renderer does not have to consult this to be correct — the bytes
+    /// simply have not landed, so `revision` does not move and the frame is
+    /// skipped anyway. It is here because the timeout below needs something to
+    /// test, and because a client that wants to say why a pane looks frozen can
+    /// only find out from the emulator.
+    pub fn sync_pending(&self) -> bool {
+        self.parser.sync_timeout().sync_timeout().is_some()
+    }
+
+    /// Apply a synchronized update that has outlived its deadline, if there is
+    /// one. Returns whether anything was released.
+    ///
+    /// This is the safety catch on the mechanism above, and it is not optional.
+    /// `\e[?2026h` hands the emulator a promise that a matching `\e[?2026l` is
+    /// coming, and a program that is killed mid-frame — or an ssh link that
+    /// drops between the two — never keeps it. The parser's own
+    /// `pending_timeout` answers "is a sync in progress", NOT "has it expired":
+    /// it is `Option::is_some` on a deadline nobody checks. So without this
+    /// call every subsequent byte joins the buffer and the pane freezes on its
+    /// last good frame until 2 MiB of output happens to overflow the buffer.
+    /// That is minutes of an agent's output on a pane that looks dead.
+    ///
+    /// The deadline is the parser's own, not a number chosen here: vte sets it
+    /// to 150 ms when it sees the opening sequence, which is what Alacritty
+    /// ships and what the sequence's reference implementations use. Inventing a
+    /// second number would only create something to disagree with.
+    ///
+    /// Cheap enough to call every frame — it compares one `Instant` and returns
+    /// — which is how it is driven, because the case it exists for is precisely
+    /// the case where no more bytes are coming to drive anything else.
+    pub fn flush_expired_sync(&mut self) -> bool {
+        let Some(deadline) = self.parser.sync_timeout().sync_timeout() else {
+            return false;
+        };
+        if std::time::Instant::now() < deadline {
+            return false;
+        }
+        self.parser.stop_sync(&mut self.term);
+        true
+    }
+
     /// Resize the grid. The emulator reflows its own content.
     pub fn resize(&mut self, columns: u16, rows: u16) {
         let (columns, rows) = clamp(columns, rows);
@@ -656,6 +705,128 @@ mod tests {
 
         t.feed(b"\x1b[?1049l");
         assert_eq!(shift_enter(&t), vec![0x0d], "the primary screen never asked for it");
+    }
+
+    /// One atomic repaint, arriving the way the transport actually delivers it.
+    ///
+    /// A full-screen program repaints by clearing and redrawing, and that
+    /// crosses the wire as several chunks. `pipe-pane` hands them over as tmux
+    /// reads them from the pty, and a renderer driven by a display link can
+    /// take a frame between any two — so the shape below is not hypothetical,
+    /// it is what a 120 Hz redraw of a busy pane is sampling.
+    fn repaint_chunks(sync: bool) -> Vec<&'static [u8]> {
+        let mut chunks: Vec<&'static [u8]> = Vec::new();
+        if sync {
+            chunks.push(b"\x1b[?2026h");
+        }
+        // The clear, and the redraw, in separate chunks. This is the split that
+        // matters: everything between them is a screen with nothing on it.
+        chunks.push(b"\x1b[2J\x1b[H");
+        chunks.push(b"first line back\r\n");
+        chunks.push(b"second line back");
+        if sync {
+            chunks.push(b"\x1b[?2026l");
+        }
+        chunks
+    }
+
+    #[test]
+    fn a_synchronized_repaint_is_never_seen_half_finished() {
+        // The mechanism, stated as a test. Feed a clear-then-redraw one chunk
+        // at a time and look at the screen after every one, which is the most a
+        // renderer could ever do. Wrapped in DECSET 2026, every look shows the
+        // OLD screen until the closing sequence lands, and then the new one.
+        // There is no moment at which the screen is blank, so there is no frame
+        // a display link could sample that would flash.
+        let mut t = Terminal::new(20, 4);
+        t.feed(b"before the repaint");
+        let before = render(&t);
+
+        for chunk in repaint_chunks(true) {
+            t.feed(chunk);
+            let now = render(&t);
+            if now != before {
+                assert_eq!(now[0], "first line back", "only the finished frame may appear");
+            }
+        }
+        assert_eq!(render(&t)[0], "first line back");
+        assert_eq!(render(&t)[1], "second line back");
+    }
+
+    #[test]
+    fn without_the_marker_the_same_repaint_goes_through_a_blank_screen() {
+        // The negative control, and the reason the one above is worth having.
+        // The identical bytes with the two sequences removed DO pass through a
+        // cleared screen: feed the clear, look, and there is nothing there.
+        // That blank is the flash.
+        let mut t = Terminal::new(20, 4);
+        t.feed(b"before the repaint");
+
+        let mut saw_blank = false;
+        for chunk in repaint_chunks(false) {
+            t.feed(chunk);
+            if render(&t).iter().all(|line| line.is_empty()) {
+                saw_blank = true;
+            }
+        }
+        assert!(saw_blank, "an unsynchronized repaint is visibly empty part way through");
+        assert_eq!(render(&t)[0], "first line back", "and still ends in the right place");
+    }
+
+    #[test]
+    fn the_marker_still_works_when_the_transport_splits_it() {
+        // The sequences are eight bytes and the transport does not care. A
+        // 16 KiB read from the pipe can end in the middle of either one, and if
+        // a split `\e[?2026l` were missed the pane would be held on its last
+        // frame until the deadline — the exact freeze the flush exists for,
+        // arriving on ordinary traffic rather than on a crash.
+        let mut t = Terminal::new(20, 4);
+        for byte in b"\x1b[?2026hone byte at a time\x1b[?2026l" {
+            t.feed(&[*byte]);
+        }
+        assert!(!t.sync_pending(), "a closing sequence split byte by byte still closes it");
+        assert_eq!(render(&t)[0], "one byte at a time");
+    }
+
+    #[test]
+    fn the_sync_flag_is_set_and_cleared_by_the_escape_sequences() {
+        let mut t = Terminal::new(20, 4);
+        assert!(!t.sync_pending(), "nothing is held before a program asks for it");
+
+        t.feed(b"\x1b[?2026h");
+        assert!(t.sync_pending(), "\\e[?2026h opens a synchronized update");
+
+        t.feed(b"held back");
+        assert!(t.sync_pending(), "and it stays open while the frame is written");
+        assert_eq!(render(&t)[0], "", "whose bytes are not on the screen yet");
+
+        t.feed(b"\x1b[?2026l");
+        assert!(!t.sync_pending(), "\\e[?2026l closes it");
+        assert_eq!(render(&t)[0], "held back", "and releases the frame");
+    }
+
+    #[test]
+    fn a_program_that_dies_mid_frame_cannot_hold_the_pane_forever() {
+        // The failure this exists for: `\e[?2026h`, some output, and then the
+        // program is killed — or the link drops — so the closing sequence never
+        // comes. The parser's own timeout is a deadline nobody checks, so
+        // without a flush every later byte joins the buffer and the pane sits on
+        // its last frame until two megabytes of output overflow it.
+        let mut t = Terminal::new(20, 4);
+        t.feed(b"\x1b[?2026hstranded");
+        assert!(t.sync_pending());
+        assert_eq!(render(&t)[0], "", "correctly withheld while the deadline stands");
+        assert!(!t.flush_expired_sync(), "and not released early");
+
+        // The parser sets 150 ms when it sees the opening sequence. Waiting it
+        // out is the whole point of the test; there is no shorter way to
+        // observe a deadline than to pass it.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        assert!(t.flush_expired_sync(), "an expired update is released");
+        assert_eq!(render(&t)[0], "stranded", "and what it was holding reaches the screen");
+        assert!(!t.sync_pending(), "with nothing left held");
+        assert!(!t.flush_expired_sync(), "and nothing to release a second time");
     }
 
     #[test]

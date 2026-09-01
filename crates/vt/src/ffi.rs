@@ -470,6 +470,49 @@ pub unsafe extern "C" fn farcooler_vt_alt_screen(handle: *mut c_void) -> bool {
     }
 }
 
+/// True while a synchronized update (DECSET 2026) is being held back.
+///
+/// The program asked not to be drawn half-repainted, so the emulator is sitting
+/// on the bytes and the screen is showing the last complete frame. A renderer
+/// needs no special case for this: the held bytes never reach the grid, so the
+/// revision does not move and the frame is skipped for free.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_sync_pending(handle: *mut c_void) -> bool {
+    match unsafe { as_handle(handle) } {
+        Some(h) => h.terminal.sync_pending(),
+        None => false,
+    }
+}
+
+/// Release a synchronized update whose deadline has passed. True if it did.
+///
+/// Call it on every frame, beside `farcooler_vt_revision`. It costs one
+/// comparison when nothing is held, and it is the only thing standing between a
+/// program that dies between `\e[?2026h` and `\e[?2026l` and a pane frozen on
+/// its last frame for the next two megabytes of output. See
+/// `Terminal::flush_expired_sync` for why the parser cannot do this by itself.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_flush_sync(handle: *mut c_void) -> bool {
+    let Some(h) = (unsafe { as_handle(handle) }) else { return false };
+    if !h.terminal.flush_expired_sync() {
+        return false;
+    }
+    // The same bookkeeping a feed does, because this IS the deferred half of
+    // one: the bytes have only now reached the grid, so the screen has changed
+    // and whatever they signalled on the way past is only now ours to collect.
+    h.revision = h.revision.wrapping_add(1);
+    let signals = h.terminal.take_signals();
+    h.bell |= signals.bell;
+    h.pending_writes.extend_from_slice(&signals.pty_writes);
+    if let Some(t) = signals.title {
+        h.title = std::ffi::CString::new(t).ok();
+    }
+    if let Some(text) = signals.clipboard {
+        h.pending_clipboard = Some(text);
+    }
+    true
+}
+
 /// The URL under a cell, or 0 if there is none.
 ///
 /// Returns the byte length the URL needs and writes nothing when that exceeds
@@ -838,6 +881,41 @@ mod tests {
         feed(h, b"\x1b[?1049l");
         assert!(!unsafe { farcooler_vt_alt_screen(h) });
         unsafe { farcooler_vt_free(h) };
+    }
+
+    #[test]
+    fn a_held_frame_crosses_the_boundary_and_the_deadline_releases_it() {
+        // The ABI half of the synchronized-output contract, which is what every
+        // renderer actually calls. The flush also has to move the revision:
+        // this is the one path that can change the screen with no feed behind
+        // it, and a display link comparing revisions would otherwise never
+        // notice the frame it just released.
+        let h = farcooler_vt_new(40, 6);
+        assert!(!unsafe { farcooler_vt_sync_pending(h) });
+
+        feed(h, b"\x1b[?2026hheld");
+        assert!(unsafe { farcooler_vt_sync_pending(h) });
+        assert!(!unsafe { farcooler_vt_flush_sync(h) }, "not before the deadline");
+        let before = unsafe { farcooler_vt_revision(h) };
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(unsafe { farcooler_vt_flush_sync(h) });
+        assert!(!unsafe { farcooler_vt_sync_pending(h) });
+        assert_ne!(unsafe { farcooler_vt_revision(h) }, before, "the frame must be redrawn");
+
+        let (_, cells) = read(h);
+        let first: String = cells[..4].iter().map(|c| char::from_u32(c.ch).unwrap()).collect();
+        assert_eq!(first, "held");
+
+        assert!(!unsafe { farcooler_vt_flush_sync(h) }, "and nothing is released twice");
+        unsafe { farcooler_vt_free(h) };
+    }
+
+    #[test]
+    fn neither_sync_call_trips_over_a_null_handle() {
+        let null = std::ptr::null_mut();
+        assert!(!unsafe { farcooler_vt_sync_pending(null) });
+        assert!(!unsafe { farcooler_vt_flush_sync(null) });
     }
 
     #[test]

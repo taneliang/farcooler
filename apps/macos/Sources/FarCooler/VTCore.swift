@@ -63,6 +63,24 @@ final class VTCore {
         return farcooler_vt_alt_screen(handle)
     }
 
+    /// Release a synchronized update the program never closed.
+    ///
+    /// A full-screen program wraps an atomic repaint in `\e[?2026h` …
+    /// `\e[?2026l` so it is never drawn half-finished, and the core holds those
+    /// bytes back until the closing sequence — which is what keeps a clear and
+    /// its redraw from being sampled as a blank frame. When the program is
+    /// killed between the two, or the link drops, that sequence never arrives.
+    ///
+    /// So this is the deadline, and it has to be driven by something that ticks,
+    /// because the case it exists for is the one where no more bytes are coming.
+    /// The display link is the only thing here that ticks regardless. It costs
+    /// one comparison in the core when nothing is held, which is nearly always.
+    @discardableResult
+    func flushExpiredSync() -> Bool {
+        guard let handle else { return false }
+        return farcooler_vt_flush_sync(handle)
+    }
+
     /// Scroll the view. Positive goes back into history.
     func scroll(lines: Int32) {
         guard let handle else { return }

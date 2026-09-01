@@ -177,6 +177,28 @@ const char *farcooler_vt_title(void *handle);
 bool farcooler_vt_alt_screen(void *handle);
 
 /*
+ * True while a synchronized update (DECSET 2026) is being held back.
+ *
+ * The program wrapped an atomic repaint in \e[?2026h … \e[?2026l to say "do not
+ * draw me half-finished", so the emulator is sitting on those bytes and the
+ * grid still holds the last complete frame. A renderer needs no special case:
+ * the held bytes never reach the grid, so the revision does not move and the
+ * frame is skipped for free.
+ */
+bool farcooler_vt_sync_pending(void *handle);
+
+/*
+ * Release a synchronized update whose deadline has passed. True if it did.
+ *
+ * Call it on every frame, beside farcooler_vt_revision. It costs one comparison
+ * when nothing is held. It is the only thing standing between a program that
+ * dies between \e[?2026h and \e[?2026l — or a link that drops between them —
+ * and a pane frozen on its last frame for the next two megabytes of output. The
+ * deadline is the parser's own 150 ms, not a number chosen here.
+ */
+bool farcooler_vt_flush_sync(void *handle);
+
+/*
  * The URL under a cell, or 0 if there is none.
  *
  * Returns the byte length the URL needs and writes NOTHING when that exceeds

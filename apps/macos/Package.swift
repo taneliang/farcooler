@@ -119,6 +119,21 @@ let package = Package(
         // color. It is just that three rows of it are cells tmux will never
         // paint again, so whatever was left there stays — and it reads as the
         // terminal being buggy rather than as a number being wrong.
+        // What one frame of terminal costs, in milliseconds.
+        //
+        // Not a correctness suite, and the only target here that asserts
+        // nothing. It exists because "the renderer is fast enough" was believed
+        // rather than measured, and because the only way to say WHICH part of a
+        // frame the milliseconds are in is to draw the same grid with the
+        // characters taken out and subtract. Silent unless
+        // `FARCOOLER_RENDER_BENCH` is set — a benchmark that runs on every
+        // `swift test` is a slow suite that tells you nothing new, and one that
+        // fails on a loaded machine is a suite people learn to ignore.
+        .testTarget(
+            name: "RenderBenchTests",
+            dependencies: ["Far Cooler"],
+            path: "Tests/RenderBenchTests"
+        ),
         .testTarget(
             name: "TilingTests",
             dependencies: ["Far Cooler"],

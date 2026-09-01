@@ -212,6 +212,14 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     }
 
     @objc private func tick() {
+        // Before reading the revision, not after: this is the one call that can
+        // MOVE it without a byte having arrived. A program that opened a
+        // synchronized update and then died leaves the core holding a frame
+        // nobody will ever close, and the deadline for that can only be noticed
+        // by something that ticks — which, when no more bytes are coming, is
+        // only this. See `VTCore.flushExpiredSync`.
+        core.flushExpiredSync()
+
         // The core tells us when something might have changed. An idle terminal
         // — which is most of a night — costs one comparison per frame.
         let revision = core.revision
@@ -355,6 +363,11 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         font = Preferences.shared.terminalFont()
         boldFont = Preferences.shared.terminalFont(weight: .bold)
         italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        // The only thing that can change what a character's glyph is. Emptied
+        // rather than left to be overwritten, because the three faces above are
+        // new objects and the old entries are now keyed on fonts nothing will
+        // ask for again.
+        glyphs.removeAll(keepingCapacity: true)
         applyTheme()
         measure()
         lastReportedGeometry = PaneGrid(columns: 0, rows: 0)
@@ -604,15 +617,43 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         return font
     }
 
+    /// Which character maps to which glyph in which face, remembered.
+    ///
+    /// The lookup underneath is a CoreText call, and it was being made once per
+    /// CELL per FRAME — ten thousand times a frame on a full-width pane, at 120
+    /// Hz, for an answer that cannot change while the font does not. Worse, the
+    /// old spelling built a `String` and an `Array` from the character to reach
+    /// its UTF-16, so each of those ten thousand lookups also allocated twice.
+    ///
+    /// A terminal is the ideal shape for this cache: the alphabet on screen is
+    /// a few hundred characters across at most three faces, so it fills in the
+    /// first frame and never misses again. Emptied by `applyPreferences`, which
+    /// is the only thing that can change the answer.
+    private struct GlyphKey: Hashable {
+        let unit: UInt16
+        let face: ObjectIdentifier
+    }
+    /// Zero is stored for "this face has no glyph for it", which is a real
+    /// answer worth caching — emoji hit it on every cell of every frame — and
+    /// is also the value CoreText uses for the missing glyph, so it can never
+    /// collide with a usable one.
+    private var glyphs: [GlyphKey: CGGlyph] = [:]
+
     private func glyph(for character: Character, in face: NSFont) -> CGGlyph? {
-        let utf16 = Array(String(character).utf16)
         // A surrogate pair is one glyph in two units; the simple path handles
         // the BMP, and the fallback handles the rest.
-        guard utf16.count == 1 else { return nil }
+        let scalars = character.unicodeScalars
+        guard scalars.count == 1, let value = scalars.first?.value, value <= 0xFFFF else {
+            return nil
+        }
+        let key = GlyphKey(unit: UInt16(value), face: ObjectIdentifier(face))
+        if let known = glyphs[key] { return known == 0 ? nil : known }
+
         var glyph = CGGlyph()
-        var unit = utf16[0]
-        guard CTFontGetGlyphsForCharacters(face, &unit, &glyph, 1), glyph != 0 else { return nil }
-        return glyph
+        var unit = UInt16(value)
+        let found = CTFontGetGlyphsForCharacters(face, &unit, &glyph, 1) ? glyph : 0
+        glyphs[key] = found
+        return found == 0 ? nil : found
     }
 
     /// Draw one character the mono font cannot, letting CoreText pick a font
@@ -1157,11 +1198,36 @@ enum Palette {
     static var cursor: NSColor { theme.cursorColor }
     static var selection: NSColor { theme.selectionColor }
 
+    /// Packed RGB as a `CGColor`, memoised.
+    ///
+    /// Called once per run of same-coloured cells, in both the background pass
+    /// and the glyph pass — so on a screen of syntax-highlighted output, which
+    /// is what an agent produces, it is called a thousand times a frame at 120
+    /// Hz. `CGColor` is a reference type and each of those was an allocation.
+    ///
+    /// The key is the packed value the core already resolved, and it never
+    /// needs invalidating: a theme change changes which packed values arrive,
+    /// not what a packed value means.
+    ///
+    /// Capped because the key space is not small. Sixteen palette entries and a
+    /// handful of truecolour picks is the normal case, but `\e[38;2;r;g;bm` can
+    /// name sixteen million colours — a program drawing an image in the
+    /// terminal would name a great many of them — and an unbounded table would
+    /// grow to hundreds of megabytes to save an allocation. Emptied wholesale
+    /// rather than evicted one at a time: the cheap case is a screen with a few
+    /// dozen colours on it, which refills in one frame.
+    private static var colors: [UInt32: CGColor] = [:]
+    private static let colorCeiling = 4096
+
     static func cgColor(_ packed: UInt32) -> CGColor {
-        CGColor(
+        if let known = colors[packed] { return known }
+        if colors.count >= colorCeiling { colors.removeAll(keepingCapacity: true) }
+        let color = CGColor(
             srgbRed: CGFloat((packed >> 16) & 0xFF) / 255,
             green: CGFloat((packed >> 8) & 0xFF) / 255,
             blue: CGFloat(packed & 0xFF) / 255,
             alpha: 1)
+        colors[packed] = color
+        return color
     }
 }
