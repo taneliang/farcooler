@@ -82,15 +82,25 @@ public final class PushRegistration: ObservableObject {
     /// about, one level up.
     public func sendIfPossible() async {
         guard let token, Account.shared.isSignedIn else { return }
-        let ok = await Account.shared.registerDevice(
+        switch await Account.shared.registerDevice(
             pushToken: token,
             platform: platform,
             label: label(),
             environment: Self.environment,
             liveActivityStartToken: liveActivityStartToken,
             notifyOnDone: notifyOnDone())
-        registered = ok
-        lastError = ok ? nil : "Could not tell the relay how to reach this device."
+        {
+        case .success:
+            registered = true
+            lastError = nil
+        case .failure(let why):
+            // The lead sentence says what did not happen; the cause says why,
+            // in the relay's own vocabulary. This used to be one fixed string
+            // for every failure, so a phone with no network and a phone whose
+            // session had expired were told the same thing.
+            registered = false
+            lastError = "Couldn’t tell the relay how to reach this device. \(why.message)"
+        }
     }
 
     /// Which APNs issued this device's token: `development` or `production`.

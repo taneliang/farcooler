@@ -2,6 +2,7 @@ import AuthenticationServices
 import CryptoKit
 import Foundation
 import SwiftUI
+import os
 
 /// Who you are, so a runner you own can reach a phone you carry.
 ///
@@ -24,6 +25,16 @@ public final class Account: NSObject, ObservableObject {
     @Published public private(set) var userId: String = ""
     @Published public private(set) var signingIn = false
     @Published public private(set) var lastError: String?
+
+    /// The last relay call that produced no answer, and why.
+    ///
+    /// Set by every authenticated call that fails and cleared by the next one
+    /// that works, so what it holds is a problem still happening rather than
+    /// one that happened once. Settings ▸ Account reads it; nothing else does,
+    /// and it draws nothing while there is nothing wrong.
+    ///
+    /// See ``RelayDiagnostic`` for why it can carry no credential.
+    @Published public private(set) var lastRelayFailure: RelayDiagnostic?
 
     public var isSignedIn: Bool { !userId.isEmpty }
 
@@ -133,11 +144,11 @@ public final class Account: NSObject, ObservableObject {
             let callback = try await authenticate(url)
             let returned = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems
             guard let code = returned?.first(where: { $0.name == "code" })?.value else {
-                lastError = "Sign-in did not complete."
+                lastError = AccountError.signInIncomplete.message
                 return
             }
             guard returned?.first(where: { $0.name == "state" })?.value == state else {
-                lastError = "Sign-in did not complete."
+                lastError = AccountError.signInIncomplete.message
                 return
             }
             try await exchange(code: code, verifier: verifier)
@@ -173,11 +184,21 @@ public final class Account: NSObject, ObservableObject {
     /// WorkOS wants the API key on that call, and an app that could refresh
     /// alone would be an app carrying the key.
     public func accessToken(forceRefresh: Bool = false) async -> String? {
-        guard let refresh = TokenStore.read(Self.refreshKey) else { return nil }
+        try? await credential(forceRefresh: forceRefresh).get()
+    }
+
+    /// The same token, or the reason there isn't one.
+    ///
+    /// This is the version everything inside this file uses. `nil` was the
+    /// whole defect one level down: "the Keychain holds nothing", "the relay
+    /// refused the refresh token" and "this laptop has no network" are three
+    /// different things to tell somebody, and an Optional makes them one.
+    func credential(forceRefresh: Bool = false) async -> Result<String, AccountError> {
+        guard let refresh = TokenStore.read(Self.refreshKey) else { return .failure(.notSignedIn) }
         if !forceRefresh, let access = TokenStore.read(Self.accessKey),
             let expiry = Self.jwtExpiry(access), expiry.timeIntervalSinceNow > 60
         {
-            return access
+            return .success(access)
         }
         // One refresh at a time, however many callers want one.
         //
@@ -199,7 +220,7 @@ public final class Account: NSObject, ObservableObject {
         if let inFlight = refreshInFlight {
             return await inFlight.value
         }
-        let task = Task { @MainActor [self] () -> String? in
+        let task = Task { @MainActor [self] () -> Result<String, AccountError> in
             // Cleared by the task itself rather than by whoever created it, so
             // the slot is empty the moment the answer exists. A later caller
             // that genuinely needs a NEW refresh — a `forceRefresh` after a 401
@@ -219,7 +240,7 @@ public final class Account: NSObject, ObservableObject {
     ///
     /// Not `@Published`: nothing draws it, and publishing it would send the
     /// object through `objectWillChange` twice per refresh for no reader.
-    private var refreshInFlight: Task<String?, Never>?
+    private var refreshInFlight: Task<Result<String, AccountError>, Never>?
 
     /// Refresh without inferring anything destructive from failure.
     ///
@@ -231,10 +252,21 @@ public final class Account: NSObject, ObservableObject {
         refreshToken: String,
         request: (String) async throws -> [String: Any],
         store: ([String: Any]) -> Void
-    ) async -> String? {
-        guard let body = try? await request(refreshToken) else { return nil }
+    ) async -> Result<String, AccountError> {
+        let body: [String: Any]
+        do {
+            body = try await request(refreshToken)
+        } catch {
+            // The cause travels; the session does not move. `store` is not
+            // reached and nothing local is cleared, so an unreachable relay
+            // still leaves a signed-in app.
+            return .failure(named(error))
+        }
         store(body)
-        return body["accessToken"] as? String
+        guard let access = body["accessToken"] as? String else {
+            return .failure(.malformedResponse)
+        }
+        return .success(access)
     }
 
     /// Tell the relay where to reach this device, and what version is asking.
@@ -243,6 +275,10 @@ public final class Account: NSObject, ObservableObject {
     /// the product's central promise going quietly missing: the device is never
     /// filed, the daemon's pushes reach zero addresses, and the settings screen
     /// goes on saying "Notifications can reach this device."
+    ///
+    /// And WHY it did not work, which it also did not used to: the reason is
+    /// the difference between "sign in again" and "you are offline", and a Bool
+    /// could say neither.
     @discardableResult
     public func registerDevice(
         pushToken: String,
@@ -251,7 +287,7 @@ public final class Account: NSObject, ObservableObject {
         environment: String,
         liveActivityStartToken: String? = nil,
         notifyOnDone: Bool = true
-    ) async -> Bool {
+    ) async -> Result<Void, AccountError> {
         var payload: [String: Any] = [
             "pushToken": pushToken, "platform": platform, "label": label,
             // "When an agent finishes or fails", so the toggle reaches the
@@ -283,8 +319,7 @@ public final class Account: NSObject, ObservableObject {
         if let liveActivityStartToken {
             payload["liveActivityStartToken"] = liveActivityStartToken
         }
-        let body = await authenticatedPost("/v1/devices", payload)
-        return body != nil
+        return await authenticatedPost("/v1/devices", payload).map { _ in () }
     }
 
     /// File the push token for one running Live Activity, or clear it.
@@ -309,62 +344,85 @@ public final class Account: NSObject, ObservableObject {
     @discardableResult
     public func registerActivityToken(
         terminal: String, updateToken: String?, environment: String, dismissed: Bool = false
-    ) async -> Bool {
+    ) async -> Result<Void, AccountError> {
         // NSNull rather than leaving the key out or passing the Optional along:
         // JSONSerialization throws on a bare `Optional.none`, and an absent key
         // reads to the relay as "no change" — but clearing is the entire point
         // of the nil case.
         let update: Any = updateToken.map { $0 as Any } ?? NSNull()
-        let body = await authenticatedPost(
+        // Nothing reads this result — the two callers in `LiveActivities` are
+        // reporting a token, not asking a question. It carries the cause
+        // anyway so there is ONE vocabulary here rather than a Bool for the
+        // calls nobody watches and a reason for the ones somebody does; the
+        // failure still reaches `lastRelayFailure` and the log either way.
+        return await authenticatedPost(
             "/v1/devices/activity",
             [
                 "terminal": terminal, "updateToken": update, "environment": environment,
                 "dismissed": dismissed,
-            ])
-        return body != nil
+            ]
+        ).map { _ in () }
     }
 
     /// Ask for a token that lets one runner notify this account.
     ///
     /// Returned once and stored on the relay only as a hash, so this is the only
     /// moment it exists in readable form — hand it straight to the runner.
-    public func pairDaemon(label: String) async -> String? {
-        let body = await authenticatedPost("/v1/daemons", ["label": label])
-        return body?["token"] as? String
+    ///
+    /// A `Result`, not an Optional. This call is the front door to the entire
+    /// notification product — an account with no paired runner posts no agent
+    /// state, so no Live Activity can ever be raised — and for as long as it
+    /// answered `nil` the one sentence its caller could write was "Try signing
+    /// in again", said with equal confidence to somebody signed out, somebody
+    /// on a plane, and somebody whose relay was returning 500.
+    public func pairDaemon(label: String) async -> Result<String, AccountError> {
+        await authenticatedPost("/v1/daemons", ["label": label]).flatMap { body in
+            // A 200 with no token in it is the relay answering something this
+            // app cannot use. It is not a credential problem and must not be
+            // reported as one.
+            guard let token = body["token"] as? String, !token.isEmpty else {
+                return .failure(.malformedResponse)
+            }
+            return .success(token)
+        }
     }
 
     /// Everything this account has registered, for the management screen.
-    public func fetchRegistrations() async -> Registrations? {
-        guard let body = await authenticatedPost("/v1/account", [:]) else { return nil }
-        let devices = (body["devices"] as? [[String: Any]] ?? []).map {
-            Registration(
-                id: $0["id"] as? String ?? "",
-                label: $0["label"] as? String ?? "Device",
-                detail: ($0["platform"] as? String) == "fcm" ? "Android" : "Apple",
-                version: $0["version"] as? String,
-                at: $0["updatedAt"] as? Double)
+    public func fetchRegistrations() async -> Result<Registrations, AccountError> {
+        await authenticatedPost("/v1/account", [:]).map { body in
+            let devices = (body["devices"] as? [[String: Any]] ?? []).map {
+                Registration(
+                    id: $0["id"] as? String ?? "",
+                    label: $0["label"] as? String ?? "Device",
+                    detail: ($0["platform"] as? String) == "fcm" ? "Android" : "Apple",
+                    version: $0["version"] as? String,
+                    at: $0["updatedAt"] as? Double)
+            }
+            // `machines` is the relay's own JSON key. It names a paired daemon —
+            // a runner — and stays spelled that way because the relay's API is a
+            // contract, not a word this app gets to choose.
+            let runners = (body["machines"] as? [[String: Any]] ?? []).map {
+                Registration(
+                    id: $0["id"] as? String ?? "",
+                    label: $0["label"] as? String ?? "Runner",
+                    detail: "Paired",
+                    version: $0["version"] as? String,
+                    at: ($0["lastSeenAt"] as? Double) ?? ($0["createdAt"] as? Double))
+            }
+            return Registrations(devices: devices, runners: runners)
         }
-        // `machines` is the relay's own JSON key. It names a paired daemon —
-        // a runner — and stays spelled that way because the relay's API is a
-        // contract, not a word this app gets to choose.
-        let runners = (body["machines"] as? [[String: Any]] ?? []).map {
-            Registration(
-                id: $0["id"] as? String ?? "",
-                label: $0["label"] as? String ?? "Runner",
-                detail: "Paired",
-                version: $0["version"] as? String,
-                at: ($0["lastSeenAt"] as? Double) ?? ($0["createdAt"] as? Double))
-        }
-        return Registrations(devices: devices, runners: runners)
     }
 
     /// Stop notifying a device, or stop a runner notifying anything.
     ///
     /// Revoking here rather than on the runner is the case that matters: a
     /// laptop you no longer have is exactly the one you cannot run a command on.
-    public func revoke(_ registration: Registration, kind: RegistrationKind) async -> Bool {
+    @discardableResult
+    public func revoke(_ registration: Registration, kind: RegistrationKind) async
+        -> Result<Void, AccountError>
+    {
         let path = kind == .device ? "/v1/devices/revoke" : "/v1/daemons/revoke"
-        return await authenticatedPost(path, ["id": registration.id]) != nil
+        return await authenticatedPost(path, ["id": registration.id]).map { _ in () }
     }
 
     // MARK: - Plumbing
@@ -402,38 +460,132 @@ public final class Account: NSObject, ObservableObject {
     /// and kept sending the same rejected token on every retry.
     private func authenticatedPost(
         _ path: String, _ body: [String: Any]
-    ) async -> [String: Any]? {
-        guard let token = await accessToken() else { return nil }
-        return await Self.retryingUnauthorized(
-            token: token,
-            refresh: { await self.accessToken(forceRefresh: true) },
+    ) async -> Result<[String: Any], AccountError> {
+        let outcome = await Self.authenticating(
+            credential: { await self.credential(forceRefresh: $0) },
             request: { try await self.post(path, body, bearer: $0) })
+        note(outcome, path: path)
+        return outcome
     }
+
+    /// One authenticated call, from "find a credential" to "give up and say
+    /// why".
+    ///
+    /// Static and closure-fed for the same reason ``retryingUnauthorized`` is:
+    /// the ways this can fail are exactly the sentences somebody reads, and
+    /// they have to be regression-testable without a relay or an identity
+    /// provider. Every one of them leaves by a different door.
+    static func authenticating<Value>(
+        credential: (Bool) async -> Result<String, AccountError>,
+        request: (String) async throws -> Value
+    ) async -> Result<Value, AccountError> {
+        switch await credential(false) {
+        case .failure(let why):
+            // Nothing to send. Told apart from a credential the relay refused,
+            // because one of those is fixed by signing in and the other is
+            // fixed by having a network.
+            return .failure(why)
+        case .success(let token):
+            return await retryingUnauthorized(
+                token: token,
+                refresh: { await credential(true) },
+                request: request)
+        }
+    }
+
+    /// Remember, and log, what the relay just did.
+    ///
+    /// Cleared by a later success on the SAME call, so `lastRelayFailure` is a
+    /// problem still happening rather than one that happened once — and, just
+    /// as importantly, not erased by an unrelated call that worked. Settings
+    /// ▸ Account loads through `/v1/account`; if any success cleared this, the
+    /// screen would wipe the pairing failure somebody opened it to read, at the
+    /// moment they opened it.
+    private func note(_ outcome: Result<[String: Any], AccountError>, path: String) {
+        switch outcome {
+        case .success:
+            if lastRelayFailure?.path == path { lastRelayFailure = nil }
+        case .failure(let failure):
+            let diagnostic = RelayDiagnostic(path: path, failure: failure, at: Date())
+            lastRelayFailure = diagnostic
+            // `.public` on purpose. Every component of `line` is a literal in
+            // this file or an integer read off the transport — see
+            // ``RelayDiagnostic`` — so the default redaction would hide the
+            // only thing worth logging while protecting nothing.
+            Self.log.error("\(diagnostic.line, privacy: .public)")
+        }
+    }
+
+    /// Where a failure goes when nobody is looking at a screen.
+    ///
+    /// `os.Logger`, so it reaches Console and `log stream` with no build flag,
+    /// no setting, and no file anybody has to remember to delete.
+    private static let log = Logger(subsystem: "com.farcooler.agentkit", category: "relay")
 
     /// Retry an authenticated operation once with a freshly minted bearer.
     /// Kept separate from HTTP so the retry limit and session behavior are
     /// regression-testable without a live identity provider.
+    ///
+    /// Every exit carries its cause. It used to answer `nil` five different
+    /// ways, and the caller's only honest option was to name none of them.
     static func retryingUnauthorized<Value>(
         token: String,
-        refresh: () async -> String?,
+        refresh: () async -> Result<String, AccountError>,
         request: (String) async throws -> Value
-    ) async -> Value? {
+    ) async -> Result<Value, AccountError> {
         do {
-            return try await request(token)
+            return .success(try await request(token))
         } catch AccountError.unauthorized {
-            guard let refreshed = await refresh() else { return nil }
-            do {
-                return try await request(refreshed)
-            } catch AccountError.unauthorized {
-                // The relay still refused the request, but it does not own the
-                // app's local identity. Keep the session intact so a transient
-                // account or configuration problem cannot sign the user out.
-                return nil
-            } catch {
-                return nil
+            switch await refresh() {
+            case .failure(let why):
+                // Why the REFRESH failed, not why the request did. A relay that
+                // could not be reached during the refresh is not a session that
+                // has ended, and saying "sign in again" to somebody on a train
+                // sends them to a sign-in sheet that also cannot work.
+                return .failure(why)
+            case .success(let refreshed):
+                do {
+                    return .success(try await request(refreshed))
+                } catch {
+                    // The relay still refused, but it does not own the app's
+                    // local identity. Keep the session intact so a transient
+                    // account or configuration problem cannot sign the user
+                    // out — nothing here touches `clearSession`.
+                    return .failure(named(error))
+                }
             }
         } catch {
-            return nil
+            return .failure(named(error))
+        }
+    }
+
+    /// Any thrown thing, named as precisely as this app can name it.
+    ///
+    /// The `catch` that used to be here threw the cause away. Anything that is
+    /// not already an `AccountError` never reached the relay, so it is a
+    /// transport failure — recorded by code, never by message.
+    static func named(_ error: Error) -> AccountError {
+        (error as? AccountError) ?? .unreachable(reason: transportReason(error))
+    }
+
+    /// A transport failure named by its code, never by its text.
+    ///
+    /// `localizedDescription` is prose other frameworks assemble, sometimes
+    /// from the failing URL. This string is logged, so it is limited to values
+    /// this file enumerates: a word, or a number.
+    static func transportReason(_ error: Error) -> String {
+        guard let urlError = error as? URLError else {
+            return String(describing: type(of: error))
+        }
+        switch urlError.code {
+        case .notConnectedToInternet: return "offline"
+        case .cannotFindHost, .dnsLookupFailed: return "DNS"
+        case .cannotConnectToHost: return "connection refused"
+        case .timedOut: return "timed out"
+        case .networkConnectionLost: return "connection lost"
+        case .secureConnectionFailed, .serverCertificateUntrusted: return "TLS"
+        case .dataNotAllowed: return "no data allowance"
+        default: return "URLError \(urlError.errorCode)"
         }
     }
 
@@ -444,26 +596,42 @@ public final class Account: NSObject, ObservableObject {
         // Not force-unwrapped: `relay` is a setting anyone can type into, and
         // a stray space in it would crash the app on the next sign-in rather
         // than surface as a relay that would not answer.
-        guard let url = URL(string: relay + path) else { throw AccountError.relayRefused }
+        guard let url = URL(string: relay + path) else { throw AccountError.relayAddressInvalid }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let statusCode = (response as? HTTPURLResponse)?.statusCode else {
-            throw AccountError.relayRefused
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            // The request never completed. Told apart from every answer the
+            // relay could have given, because "you are offline" and "the relay
+            // refused you" are opposite instructions.
+            throw AccountError.unreachable(reason: Self.transportReason(error))
         }
-        switch Self.responseAction(for: statusCode) {
-        case .accept:
-            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { throw AccountError.relayRefused }
-            return parsed
-        case .refreshSession:
-            throw AccountError.unauthorized
-        case .fail:
-            throw AccountError.relayRefused
+        guard let statusCode = (response as? HTTPURLResponse)?.statusCode else {
+            throw AccountError.malformedResponse
+        }
+        if let failure = Self.failure(forStatus: statusCode) { throw failure }
+        guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { throw AccountError.malformedResponse }
+        return body
+    }
+
+    /// What one HTTP answer means, or nil when it is not a failure at all.
+    ///
+    /// The seam a test starts from, because the wire starts there too: a status
+    /// code goes in and the cause a person will read about comes out, with no
+    /// relay and no identity provider in between.
+    static func failure(forStatus statusCode: Int) -> AccountError? {
+        switch responseAction(for: statusCode) {
+        case .accept: return nil
+        case .refreshSession: return .unauthorized
+        case .fail: return failure(for: statusCode)
         }
     }
 
@@ -476,9 +644,27 @@ public final class Account: NSObject, ObservableObject {
         }
     }
 
+    /// What a status code the app cannot repair actually means.
+    ///
+    /// The relay says almost nothing in its body, and that reticence is right:
+    /// an error from D1 or WorkOS can carry a query or a token fragment, and
+    /// the body goes to whoever asked. But the STATUS is not a secret, this
+    /// client already has it, and it is the whole difference between "the relay
+    /// is broken", "this build is asking for something that isn't there" and
+    /// "you are asking too often".
+    static func failure(for statusCode: Int) -> AccountError {
+        switch statusCode {
+        case 404: return .endpointMissing
+        case 429: return .rateLimited
+        case 500...599: return .relayFailed(status: statusCode)
+        default: return .requestRefused(status: statusCode)
+        }
+    }
+
     private func clearSession() {
         userId = ""
         email = ""
+        lastRelayFailure = nil
         defaults.removeObject(forKey: "account.userId")
         defaults.removeObject(forKey: "account.email")
         TokenStore.delete(Self.accessKey)
@@ -511,7 +697,7 @@ public final class Account: NSObject, ObservableObject {
             if let callback {
                 continuation.resume(returning: callback)
             } else {
-                continuation.resume(throwing: error ?? AccountError.relayRefused)
+                continuation.resume(throwing: error ?? AccountError.signInIncomplete)
             }
         }
     }
@@ -580,9 +766,126 @@ enum AccountResponseAction: Equatable {
     case fail
 }
 
-public enum AccountError: Error {
-    case relayRefused
+/// Why a call to the relay produced no answer.
+///
+/// One case per thing that can actually go wrong, because there used to be
+/// none: no local token, a bearer the relay refused twice, a 500, a 404 and a
+/// laptop with no network all arrived as `nil`, and the app turned that single
+/// `nil` into a single sentence — "Try signing in again." That sentence was
+/// right about one of the five, and there was no way, from the outside or from
+/// the inside, to tell which time.
+///
+/// The relay itself will not say why it failed, and that is correct: its body
+/// can carry a query or a token fragment out to whoever asked, so it answers a
+/// bare `{"error":"internal"}` with a 500. It does not have to explain itself.
+/// The CLIENT holds the status code and the transport error, and those are
+/// enough to name every cause below without the relay giving anything up.
+public enum AccountError: Error, Equatable, Sendable, LocalizedError {
+    /// Nothing on this device to authenticate with.
+    case notSignedIn
+    /// The sign-in sheet closed without a callback.
+    case signInIncomplete
+    /// The relay setting is not a URL this app could send anything to.
+    case relayAddressInvalid
+    /// The request never completed: offline, DNS, TLS, a timeout. `reason` is a
+    /// code for the log and never reaches a screen.
+    case unreachable(reason: String)
+    /// The relay answered, and would not take this credential — after a
+    /// refresh. The one case where signing in again is the right advice.
     case unauthorized
+    /// Too many auth requests, too fast. 429.
+    case rateLimited
+    /// The relay has no such endpoint. 404.
+    case endpointMissing
+    /// The relay broke on its own account. 5xx.
+    case relayFailed(status: Int)
+    /// The relay answered and refused the request itself. Any other status.
+    case requestRefused(status: Int)
+    /// An answer this app cannot read: not JSON, not an object, or missing the
+    /// one field the call existed to fetch.
+    case malformedResponse
+
+    /// One sentence somebody can act on.
+    ///
+    /// No status codes and no error text — those go to ``diagnostic``. Exactly
+    /// one of these says "sign in again", and it is the only one where signing
+    /// in again does anything.
+    public var message: String {
+        switch self {
+        case .notSignedIn:
+            return "You’re not signed in on this device. Sign in under Settings ▸ Account."
+        case .signInIncomplete:
+            return "Sign-in didn’t complete."
+        case .relayAddressInvalid:
+            return "The relay address isn’t a valid URL. Fix it under Settings ▸ Advanced."
+        case .unreachable:
+            return "Couldn’t reach the relay. Check your internet connection."
+        case .unauthorized:
+            return "The relay wouldn’t accept your session. Try signing in again."
+        case .rateLimited:
+            return "The relay is turning away sign-ins right now. Wait a minute and try again."
+        case .endpointMissing:
+            return "This relay doesn’t offer what the app asked for. "
+                + "Check the relay address under Settings ▸ Advanced."
+        case .relayFailed:
+            return "The relay had a problem of its own. Nothing on this device is wrong — "
+                + "try again in a few minutes."
+        case .requestRefused:
+            return "The relay turned this request down. "
+                + "Check the relay address under Settings ▸ Advanced."
+        case .malformedResponse:
+            return "The relay’s answer didn’t make sense. Try again in a few minutes."
+        }
+    }
+
+    /// What a developer needs, in codes rather than prose.
+    ///
+    /// Every branch is a literal in this file or an integer read off the
+    /// transport. Nothing here is copied out of a header, a request body or a
+    /// response body, which is the rule that keeps a token out of the log.
+    public var diagnostic: String {
+        switch self {
+        case .notSignedIn: return "no local credential"
+        case .signInIncomplete: return "sign-in returned no callback"
+        case .relayAddressInvalid: return "relay address is not a URL"
+        case .unreachable(let reason): return "unreachable (\(reason))"
+        case .unauthorized: return "HTTP 401 after refresh"
+        case .rateLimited: return "HTTP 429"
+        case .endpointMissing: return "HTTP 404"
+        case .relayFailed(let status): return "HTTP \(status)"
+        case .requestRefused(let status): return "HTTP \(status)"
+        case .malformedResponse: return "unreadable response"
+        }
+    }
+
+    /// So `localizedDescription` — which `signIn` reports — is the sentence
+    /// rather than "The operation couldn’t be completed."
+    public var errorDescription: String? { message }
+}
+
+/// One failed relay call, in the words a developer needs.
+///
+/// Deliberately small: a path that is a literal in `Account.swift`, an
+/// enumerated cause, and a time. Nothing is built from a header, a request body
+/// or a response body, so there is no route by which a bearer, a session token
+/// or a pairing token reaches it — which matters, because this is the one thing
+/// here that gets logged and copied to a clipboard. `AccountTests` asserts it.
+public struct RelayDiagnostic: Sendable, Equatable {
+    /// The endpoint, e.g. `/v1/daemons`.
+    public let path: String
+    public let failure: AccountError
+    public let at: Date
+
+    public init(path: String, failure: AccountError, at: Date) {
+        self.path = path
+        self.failure = failure
+        self.at = at
+    }
+
+    /// The one line worth pasting into a bug report.
+    public var line: String {
+        "\(at.formatted(.iso8601)) POST \(path) — \(failure.diagnostic)"
+    }
 }
 
 /// One row on the management screen.

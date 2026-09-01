@@ -126,31 +126,50 @@ final class Runners: ObservableObject {
     /// Two steps that must not be split: ask the relay for a token, then hand it
     /// to the runner over ssh. The token exists in readable form for exactly
     /// the span between those two lines — the relay keeps only a hash — so it is
-    /// never stored here, never logged, and never shown.
+    /// never stored here, never logged, and never shown. It is bound inside the
+    /// `.success` branch below and nowhere else, so that span is now what the
+    /// compiler enforces rather than what this comment asks for.
     ///
     /// The runner itself does no signing in. That is the whole point: a
     /// headless Linux box has no browser, and a token that names an account and
     /// carries no destination is worth only "notify its own owner".
+    ///
+    /// This is the front door to the whole notification product. An account
+    /// with no paired runner posts no agent state, so the relay has nothing to
+    /// push and no Live Activity can ever be raised — a permanently empty
+    /// Dynamic Island, whose only visible cause is whatever this line says. For
+    /// as long as that line was "The relay wouldn’t issue a token. Try signing
+    /// in again." it was a guess: `pairDaemon` answered `nil` for a signed-out
+    /// app, a bearer refused twice, a 500, a 404 and a Mac with no route to the
+    /// relay, and every one of those sent the reader to a sign-in sheet — which
+    /// helps with exactly one of them.
     func pairForNotifications(_ target: String) async -> String {
         guard Account.shared.isSignedIn else {
             return "Sign in first — Settings ▸ Account."
         }
         let label = target.isEmpty ? "This Mac" : target
-        guard let token = await Account.shared.pairDaemon(label: label) else {
-            return "The relay wouldn’t issue a token. Try signing in again."
-        }
-
-        var arguments = target.isEmpty ? [] : ["--host", target]
-        arguments += ["push", "pair"]
         // Down a pipe, never as an argument. `ps` is readable by every process
         // running as this user, and the CLI forwards the same way over ssh, so
         // a token passed here would be visible on both ends for the life of
-        // the command.
-        let result = await CLI.run(arguments, stdin: token)
-        // The CLI's own words on failure, and a fixed sentence on success — the
-        // success output would otherwise be the only place the token could
-        // surface, and it must not.
-        return result.ok ? "This runner can now notify your devices." : result.output
+        // the command. Built before the token exists so that nothing sits
+        // between issuing it and spending it.
+        var arguments = target.isEmpty ? [] : ["--host", target]
+        arguments += ["push", "pair"]
+
+        switch await Account.shared.pairDaemon(label: label) {
+        case .failure(let why):
+            // What did not happen, then why — in the relay's own vocabulary,
+            // so this screen and Settings ▸ Account say the same thing about
+            // the same failure. The status code is not here; it is in the log
+            // and behind Copy Details on the account screen.
+            return "Couldn’t pair this runner. \(why.message)"
+        case .success(let token):
+            let result = await CLI.run(arguments, stdin: token)
+            // The CLI's own words on failure, and a fixed sentence on success —
+            // the success output would otherwise be the only place the token
+            // could surface, and it must not.
+            return result.ok ? "This runner can now notify your devices." : result.output
+        }
     }
 
     /// Stop a runner notifying you, from the runner's side.
