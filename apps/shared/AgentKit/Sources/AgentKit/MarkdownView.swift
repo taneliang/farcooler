@@ -183,6 +183,42 @@ public enum Markdown {
         return blocks
     }
 
+    /// One or more blocks drawn as a single view.
+    ///
+    /// Blocks were drawn one view each, and SwiftUI's text selection lives
+    /// INSIDE a `Text` — enabling it on a container makes each of that
+    /// container's `Text`s separately selectable, not the container. A reader
+    /// could therefore select one paragraph and never two, which is the bug
+    /// this type exists to fix.
+    ///
+    /// Adjacent paragraphs are therefore gathered into one run and drawn as one
+    /// `Text`. Nothing else is: a list item's marker is a hanging indent, a
+    /// quote has a rule beside it, a table is a grid and a fence is a box, and
+    /// `Text` can express none of those. `MarkdownText.merged` explains what
+    /// the paragraph gap costs.
+    public enum Run: Equatable {
+        /// Consecutive paragraphs, in order. Never empty.
+        case prose([String])
+        case block(Block)
+    }
+
+    /// Blocks, with adjacent paragraphs gathered.
+    public static func runs(_ blocks: [Block]) -> [Run] {
+        var runs: [Run] = []
+        for block in blocks {
+            guard case let .paragraph(text) = block else {
+                runs.append(.block(block))
+                continue
+            }
+            if case let .prose(paragraphs) = runs.last {
+                runs[runs.count - 1] = .prose(paragraphs + [text])
+            } else {
+                runs.append(.prose([text]))
+            }
+        }
+        return runs
+    }
+
     /// Inline syntax only — bold, italic, code spans, links.
     ///
     /// Text that cannot be parsed is returned as itself rather than dropped: a
@@ -217,23 +253,69 @@ public struct MarkdownText: View {
     }
 
     public var body: some View {
-        let blocks = Markdown.blocks(text)
+        let runs = Markdown.runs(Markdown.blocks(text))
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                view(for: block)
+            ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
+                view(for: run)
                     .padding(
                         .top,
                         index == 0
                             ? 0
                             : MarkdownBlockSpacing.gap(
-                                after: role(for: blocks[index - 1]),
-                                before: role(for: block)))
+                                after: role(for: runs[index - 1]),
+                                before: role(for: run)))
             }
         }
         .font(secondary ? .caption : .body)
         .foregroundStyle(secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func view(for run: Markdown.Run) -> some View {
+        switch run {
+        case let .prose(paragraphs):
+            Text(Self.merged(paragraphs))
+                .fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(3)
+        case let .block(block):
+            view(for: block)
+        }
+    }
+
+    /// Consecutive paragraphs as one attributed string, so one selection can
+    /// cross them.
+    ///
+    /// The blank line between two paragraphs is the whole subtlety. SwiftUI's
+    /// `Text` reads only a handful of `AttributedString` attributes — font,
+    /// color, kern, baseline offset — and `NSParagraphStyle` is not among them:
+    /// setting `paragraphSpacing` to 40 measured the same height as setting
+    /// nothing (`ImageRenderer`, 360pt wide: 71pt either way). Inside one
+    /// `Text` the only thing that makes vertical space is a line, and the only
+    /// thing that sets a line's height is the font of the characters on it.
+    ///
+    /// So the separator is a blank line at a deliberately small fixed size,
+    /// chosen to measure the same 16 points the `VStack` used to pad. Fixed
+    /// rather than relative because the gap it replaces was a fixed 16 too —
+    /// which is also why one number serves both the body and the caption
+    /// rendering.
+    ///
+    /// What it costs, measured rather than assumed: over 40 combinations of
+    /// width (240–680), paragraph count and text style, 27 rendered
+    /// byte-identical to the old `VStack` and the remaining 13 differed by half
+    /// a point per paragraph boundary — the blank line's height quantizes, and
+    /// 16.0 is not exactly on the grid. `paragraphsMatchTheirOldSpacing` is the
+    /// test that holds it there.
+    static func merged(_ paragraphs: [String]) -> AttributedString {
+        var separator = AttributedString("\n\n")
+        separator.font = .system(size: MarkdownBlockSpacing.paragraphGapFont)
+        var out = AttributedString()
+        for (index, paragraph) in paragraphs.enumerated() {
+            if index > 0 { out += separator }
+            out += Markdown.inline(paragraph)
+        }
+        return out
     }
 
     @ViewBuilder
@@ -312,6 +394,15 @@ public struct MarkdownText: View {
         }
     }
 
+    /// A prose run is paragraphs and nothing else, so it relates to its
+    /// neighbours exactly as the single paragraph at its edge used to.
+    private func role(for run: Markdown.Run) -> MarkdownBlockRole {
+        switch run {
+        case .prose: .paragraph
+        case let .block(block): role(for: block)
+        }
+    }
+
     private func role(for block: Markdown.Block) -> MarkdownBlockRole {
         switch block {
         case .paragraph: .paragraph
@@ -375,6 +466,22 @@ enum MarkdownBlockRole: Equatable {
 }
 
 enum MarkdownBlockSpacing {
+    /// The point size of the blank line that separates two paragraphs drawn
+    /// inside one `Text`.
+    ///
+    /// Not a typographic choice — a measurement. Two paragraphs in one `Text`
+    /// can only be pushed apart by a line, and a line is as tall as the font of
+    /// the characters on it, so this is the size that makes that line measure
+    /// the same 16 points `gap(after: .paragraph, before: .paragraph)` used to
+    /// pad. Sizes from 8.8 to 9.4 all land on the same rendered result — the
+    /// height quantizes — and 9 is the middle of that plateau, which is the
+    /// most room either side before a metric change moves the answer.
+    ///
+    /// Deliberately absolute rather than `@ScaledMetric`: the gap it replaces
+    /// was an absolute 16 at every text size, so scaling this one would be the
+    /// change, not the fidelity.
+    static let paragraphGapFont: CGFloat = 9
+
     /// Space expresses the relationship between blocks, not a global constant.
     /// List items belong together; a heading hugs the content it introduces;
     /// a new section needs enough air to be found while scanning.

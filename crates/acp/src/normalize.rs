@@ -99,9 +99,13 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
             }]
         }
         SessionUpdate::UserMessageChunk { content, meta } => {
+            // The adapter replays a Claude Code transcript verbatim, markup and
+            // all — see `agent_core::markup`. Only the USER's own words are
+            // rewritten: the agent's arrive a delta at a time, where a tag can
+            // straddle two chunks and half of one would survive the rewrite.
             vec![AgentEvent::Message {
                 role: Role::User,
-                text: content.text.clone(),
+                text: farcooler_agent_core::markup::without_harness_markup(&content.text),
                 parent: meta.claude_code.parent_tool_use_id.clone(),
             }]
         }
@@ -240,6 +244,38 @@ mod tests {
                 .expect("parses");
         let events = update_to_events(&update);
         assert_eq!(events, vec![AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None }]);
+    }
+
+    /// A replayed Claude Code prompt carries the CLI's bookkeeping. The reader
+    /// gets the words, not the wrapper.
+    #[test]
+    fn a_user_message_chunk_arrives_without_the_clis_own_markup() {
+        let update: SessionUpdate = serde_json::from_str(
+            r#"{"sessionUpdate":"user_message_chunk","content":{"text":"Ship it.<system-reminder>The user opened a file.</system-reminder>"}}"#,
+        )
+        .expect("parses");
+        assert_eq!(
+            update_to_events(&update),
+            vec![AgentEvent::Message { role: Role::User, text: "Ship it.".into(), parent: None }]
+        );
+    }
+
+    /// The agent's chunk is left exactly as it arrived — it streams, so a tag
+    /// can straddle two of these.
+    #[test]
+    fn an_agent_message_chunk_is_never_rewritten() {
+        let update: SessionUpdate = serde_json::from_str(
+            r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"<system-reminder>half"}}"#,
+        )
+        .expect("parses");
+        assert_eq!(
+            update_to_events(&update),
+            vec![AgentEvent::Message {
+                role: Role::Agent,
+                text: "<system-reminder>half".into(),
+                parent: None
+            }]
+        );
     }
 
     #[test]

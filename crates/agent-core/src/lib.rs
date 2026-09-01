@@ -9,3 +9,4 @@
 pub mod backend;
 pub mod event;
 pub mod fs_guard;
+pub mod markup;
