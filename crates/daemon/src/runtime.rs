@@ -670,6 +670,26 @@ fn history_bytes(
     out
 }
 
+/// How large a replay may be and still be sent as one synchronized update.
+///
+/// vte holds everything between `\e[?2026h` and `\e[?2026l` in a buffer of
+/// exactly 2 MiB (`SYNC_BUFFER_SIZE`, vte 0.15) and, when the next chunk would
+/// overflow it, gives up and applies what it has. That is a half-drawn screen
+/// shown deliberately — the very thing the marker was asked for to prevent —
+/// so a replay that cannot fit is better off without it.
+///
+/// A megabyte, which is not a new number: `attach` hands the whole replay to
+/// the client as ONE protocol frame, and `MAX_CONTROL_ENVELOPE_BYTES` refuses a
+/// frame larger than 1 MiB. So a replay above this is already undeliverable on
+/// the wire, and on the transport where it does arrive — a pipe, from
+/// `stream` — it goes out exactly as it did before rather than wrapped in a
+/// promise the emulator cannot keep.
+///
+/// Reachable, and measured rather than assumed: `capture-pane -e -p -J -S -`
+/// on a pane holding tmux's default 2000 lines came back at 439 KiB of
+/// ordinary build output, and 2.6 MiB when every cell carried its own color.
+const SYNCHRONIZED_REPLAY_BUDGET: usize = 1024 * 1024;
+
 /// The bytes that put a fresh emulator into the state a pane is already in.
 ///
 /// Split out from `stream` because it is the whole of what a client sees when
@@ -678,6 +698,9 @@ fn history_bytes(
 /// Every part is optional and every part is skipped rather than guessed at: a
 /// tmux that could not answer leaves that piece out, which costs the client one
 /// property, where inventing a value would cost it the truth about all of them.
+///
+/// Wrapped in a synchronized update, because this is a clear followed by a
+/// redraw and a person is looking at it. See the tail of the function.
 fn replay(
     modes: Option<farcooler_tmux::windows::PaneModes>,
     scrollback: Option<&str>,
@@ -737,12 +760,65 @@ fn replay(
         }
     }
 
-    out
+    synchronized(out)
+}
+
+/// One replay, marked as one picture: `\e[?2026h` … `\e[?2026l` (DECSET 2026).
+///
+/// The bytes above are a clear and then a redraw, and until now they went out
+/// naked. That is the shape that flashes. The transport does not deliver a
+/// replay in one piece and no client waits for the last byte of one — the Mac
+/// hands every `availableData` read to its emulator on a main-thread hop and
+/// the display link draws between them — so a replay that spans two reads is
+/// two pictures, and any boundary that falls after the `ESC[2J` and before the
+/// screen finishes redrawing is a frame with a blank or half-filled screen in
+/// it. It lands on every open, every layout switch and every reconnect, which
+/// is exactly when somebody is watching the pane.
+///
+/// Between the two markers the emulator buffers rather than applies, so its
+/// revision does not move and the renderer skips the frame: every look shows
+/// the screen the client already had, and then the finished one.
+///
+/// Safe for all three clients, because there are not three emulators. iOS,
+/// Android and the Mac all feed `farcooler_vt`, so all three honour 2026
+/// identically. What differs is who could be left holding an update that never
+/// closes, and the two transports differ in whether that is even possible:
+///
+/// - `attach` (iOS, Android) sends this whole vector as one `TerminalFrame`.
+///   Framing is all-or-nothing, so the client's single `feed` contains both
+///   markers and the update opens and closes inside one call — there is no
+///   moment at which those clients are holding an open one.
+/// - `stream` (the Mac) writes it to a pipe, which is where the splitting
+///   happens and where the marker earns its keep. A link that dies after the
+///   opening marker leaves the update open, and the Mac is the client that
+///   drives `farcooler_vt_flush_sync`, so it releases it 150ms later. That
+///   deadline is the backstop and not the mechanism: the two markers are in one
+///   buffer written by one `write_all`, so separating them takes a transport
+///   that delivers a strict prefix of it and then dies — and a client whose
+///   stream just died re-attaches, which on iOS and Android rebuilds the
+///   emulator outright.
+///
+/// Not applied above the budget, and not applied to nothing: an empty replay is
+/// a pane that answered no question, and sixteen bytes of marker around it
+/// would be a synchronized update containing no update.
+fn synchronized(out: Vec<u8>) -> Vec<u8> {
+    const OPEN: &[u8] = b"\x1b[?2026h";
+    const CLOSE: &[u8] = b"\x1b[?2026l";
+
+    if out.is_empty() || out.len() + OPEN.len() + CLOSE.len() > SYNCHRONIZED_REPLAY_BUDGET {
+        return out;
+    }
+
+    let mut framed = Vec::with_capacity(OPEN.len() + out.len() + CLOSE.len());
+    framed.extend_from_slice(OPEN);
+    framed.extend_from_slice(&out);
+    framed.extend_from_slice(CLOSE);
+    framed
 }
 
 #[cfg(test)]
 mod replay_tests {
-    use super::replay;
+    use super::{SYNCHRONIZED_REPLAY_BUDGET, replay};
     use farcooler_tmux::windows::PaneModes;
     use farcooler_vt::Terminal;
 
@@ -871,6 +947,240 @@ mod replay_tests {
         let snapshot = farcooler_vt::grid::snapshot(&t);
         assert_eq!((snapshot.cursor_column, snapshot.cursor_row), (3, 0));
     }
+
+    // MARK: the flash
+    //
+    // The replay is a clear followed by a redraw, and it is the one a person is
+    // most likely to be looking at: it runs on every open, every layout switch
+    // and every reconnect, into a view that is already showing something.
+
+    /// One replay the size a real one is.
+    ///
+    /// A pane that has been running for an hour, captured with color. Measured
+    /// rather than imagined: `tmux capture-pane -e -p -J -S - -E -1` on a pane
+    /// sitting at tmux's default 2000-line history came back at 439 KiB of
+    /// ordinary build output, and 2.6 MiB when every cell carried its own
+    /// color. This one assembles to about 330 KiB.
+    fn busy_pane_replay() -> Vec<u8> {
+        let history: Vec<String> = (1..=1500)
+            .map(|i| {
+                format!("\x1b[3{}m{i:>6} compiling farcooler-daemon: {}", i % 8, "x".repeat(180))
+            })
+            .collect();
+        let screen: Vec<String> =
+            (1..=40).map(|i| format!("screen line {i} {}", "-".repeat(180))).collect();
+        replay(
+            Some(primary()),
+            Some(&history.join("\n")),
+            Some(&screen.join("\n")),
+            Some((0, 39)),
+        )
+    }
+
+    fn rows(t: &Terminal) -> Vec<String> {
+        let snapshot = farcooler_vt::grid::snapshot(t);
+        snapshot
+            .rows
+            .iter()
+            .map(|r| r.cells.iter().map(|c| c.ch).collect::<String>().trim_end().to_string())
+            .collect()
+    }
+
+    /// A client that is already showing this pane, which is what a re-attach
+    /// replays into. A fresh one would be blank to start with and a blank frame
+    /// in the middle would be indistinguishable from where it began.
+    fn already_showing() -> Terminal {
+        let mut t = Terminal::new(200, 40);
+        // No trailing newline, for the reason `replay` gives about the capture
+        // it writes: one more line feed on the bottom row scrolls the top one
+        // into history and leaves the screen a row short of full.
+        let lines: Vec<String> = (1..=40)
+            .map(|i| format!("the screen this pane was already showing, line {i}"))
+            .collect();
+        t.feed(lines.join("\r\n").as_bytes());
+        t
+    }
+
+    fn filled(t: &Terminal) -> usize {
+        rows(t).iter().filter(|r| !r.is_empty()).count()
+    }
+
+    /// The same replay with the two markers taken off again, for the control.
+    ///
+    /// Asserting on the way past, so this cannot quietly become a no-op if the
+    /// wrapping is ever dropped: a control that stopped removing anything would
+    /// go on passing and would be measuring the fixed code twice.
+    fn unwrapped(bytes: &[u8]) -> Vec<u8> {
+        assert!(bytes.starts_with(b"\x1b[?2026h"), "the replay opens a synchronized update");
+        assert!(bytes.ends_with(b"\x1b[?2026l"), "and closes it");
+        bytes[8..bytes.len() - 8].to_vec()
+    }
+
+    /// Every screen a renderer could draw while a replay arrives in chunks.
+    ///
+    /// Not a worst case: a 440 KiB replay written to a pipe in one `write_all`
+    /// comes back out of it in seven reads of 64 KiB — measured — and
+    /// `TerminalStream` on the Mac hands each read to the emulator on its own
+    /// main-thread hop, with the display link drawing between them. So a replay
+    /// that does not fit in one read IS several pictures. The sizes below are
+    /// the reads that happen: the daemon's own fanout buffer is 16 KiB, a pipe
+    /// hands over at most 64 KiB, and an ssh channel splits finer than either.
+    fn looks_while_it_arrives(replay: &[u8], chunk: usize) -> Vec<Vec<String>> {
+        let mut t = already_showing();
+        let mut seen = vec![rows(&t)];
+        for piece in replay.chunks(chunk) {
+            t.feed(piece);
+            seen.push(rows(&t));
+        }
+        seen
+    }
+
+    /// The fix, stated as the property it buys: a replay is one picture, and a
+    /// renderer that looks at every chunk boundary sees the screen it had or
+    /// the screen that arrived, never a stage in between.
+    #[test]
+    fn a_replay_is_never_seen_half_drawn() {
+        let bytes = busy_pane_replay();
+        for chunk in [4 * 1024, 16 * 1024, 64 * 1024] {
+            let looks = looks_while_it_arrives(&bytes, chunk);
+            let before = looks.first().expect("the screen before any of it landed").clone();
+            let after = looks.last().expect("the finished screen").clone();
+            assert_ne!(before, after, "the replay must change the screen to mean anything");
+            for look in &looks {
+                let filled = look.iter().filter(|r| !r.is_empty()).count();
+                assert!(
+                    look == &before || look == &after,
+                    "at {chunk} bytes a chunk the screen went through a picture that is neither \
+                     what was there nor what arrived: {filled} of 40 rows, starting {:?}",
+                    look.iter().find(|r| !r.is_empty()).cloned().unwrap_or_default()
+                );
+            }
+        }
+    }
+
+    /// The negative control, and the reason the one above is worth having.
+    ///
+    /// The identical replay with the two sequences taken off DOES pass through
+    /// a blank screen. That blank is the flash.
+    #[test]
+    fn without_the_marker_the_same_replay_goes_through_a_blank_screen() {
+        let bytes = unwrapped(&busy_pane_replay());
+        let clear = bytes
+            .windows(7)
+            .position(|w| w == b"\x1b[H\x1b[2J")
+            .expect("the replay clears before it redraws");
+
+        // The boundary that falls between the clear and the first character of
+        // the redraw. Nothing contrived about it: a read ends where the pane's
+        // own scrollback length happens to put it, and this pane's replay is
+        // 330 KiB, so which of the 65536 offsets in the last read the clear
+        // lands on is a property of how long the pane has been running.
+        let mut t = already_showing();
+        assert_eq!(filled(&t), 40, "a pane being re-attached is showing a full screen");
+        t.feed(&bytes[..clear + 7]);
+        assert_eq!(filled(&t), 0, "the clear has landed and the redraw has not: every row is gone");
+
+        // And it is not one byte wide. The transport can split anywhere in the
+        // redraw, and every split in it is a screen missing most of itself, so
+        // this sweeps rather than picking one. A stride, because a full replay
+        // is parsed per split; odd, so it cannot alias the capture's own line
+        // length.
+        let mut emptiest = 40;
+        for split in (clear..bytes.len()).step_by(97) {
+            let mut t = already_showing();
+            t.feed(&bytes[..split]);
+            emptiest = emptiest.min(filled(&t));
+        }
+        assert!(
+            emptiest <= 2,
+            "an unsynchronized replay is visibly empty part way through, and the emptiest \
+             frame in the sweep held {emptiest} of 40 rows"
+        );
+    }
+
+    /// And the update closes: whatever else the marker does, it must not leave
+    /// a client holding a frame that never lands. The closing sequence is the
+    /// last thing in the same vector as the opening one, so a client that
+    /// receives the replay at all receives both.
+    #[test]
+    fn the_replay_leaves_no_update_open() {
+        let bytes = busy_pane_replay();
+
+        let mut half = already_showing();
+        half.feed(&bytes[..bytes.len() / 2]);
+        assert!(half.sync_pending(), "a replay that is half delivered is being held back");
+
+        let mut whole = already_showing();
+        whole.feed(&bytes);
+        assert!(!whole.sync_pending(), "and a whole one is not");
+    }
+
+    /// vte buffers a synchronized update in 2 MiB and, when the next chunk
+    /// would overflow that, gives up and applies what it has — a half-drawn
+    /// screen shown deliberately. A replay that cannot fit therefore goes out
+    /// exactly as it did before the marker existed.
+    #[test]
+    fn a_replay_too_large_to_synchronize_is_sent_unwrapped() {
+        let huge = "x".repeat(SYNCHRONIZED_REPLAY_BUDGET + 1);
+        let bytes = replay(Some(primary()), Some(&huge), Some("now"), Some((0, 0)));
+        assert!(bytes.len() > SYNCHRONIZED_REPLAY_BUDGET);
+        assert!(!bytes.starts_with(b"\x1b[?2026h"), "not a promise the emulator cannot keep");
+
+        let mut t = Terminal::new(200, 4);
+        t.feed(&bytes);
+        assert!(!t.sync_pending(), "and nothing left holding it");
+        assert_eq!(row(&t, 0), "now", "still the screen tmux captured");
+    }
+
+    /// And the budget is a number about vte's buffer, so it is checked against
+    /// vte rather than against itself.
+    ///
+    /// The test above scales with the constant and would go on passing if the
+    /// constant were raised to a gigabyte. This one would not: a replay of very
+    /// nearly the whole budget has to survive being delivered in pieces and
+    /// still arrive as one picture, which it stops doing the moment the budget
+    /// is larger than the 2 MiB vte will hold — at that point the emulator
+    /// overflows, gives up, and applies a half-drawn screen on purpose.
+    #[test]
+    fn a_replay_at_the_budget_is_still_held_whole() {
+        let line = "x".repeat(190);
+        // Two per line, not one: `replay` turns the capture's bare LF into CRLF,
+        // so a history sized by its own length would come out over the budget
+        // and be sent unwrapped — which is this test passing for the wrong
+        // reason rather than failing.
+        let lines = (SYNCHRONIZED_REPLAY_BUDGET - 8192) / (line.len() + 2);
+        let history = vec![line; lines].join("\n");
+        let screen: Vec<String> =
+            (1..=40).map(|i| format!("the finished screen, line {i}")).collect();
+        let bytes =
+            replay(Some(primary()), Some(&history), Some(&screen.join("\n")), Some((0, 39)));
+        assert!(
+            bytes.len() > SYNCHRONIZED_REPLAY_BUDGET - 16 * 1024,
+            "close enough to the ceiling to mean something: {} bytes",
+            bytes.len()
+        );
+        assert!(bytes.starts_with(b"\x1b[?2026h"), "at the budget it is still wrapped");
+
+        let looks = looks_while_it_arrives(&bytes, 64 * 1024);
+        let before = looks.first().expect("the screen it replaced").clone();
+        let after = looks.last().expect("the finished screen").clone();
+        assert_ne!(before, after);
+        for look in &looks {
+            assert!(
+                look == &before || look == &after,
+                "a replay the size of the budget was applied in pieces: {} of 40 rows",
+                look.iter().filter(|r| !r.is_empty()).count()
+            );
+        }
+    }
+
+    /// A pane that answered nothing is not a picture, and sixteen bytes of
+    /// marker around it would be a synchronized update containing no update.
+    #[test]
+    fn an_empty_replay_is_still_empty() {
+        assert!(replay(None, None, None, None).is_empty());
+    }
+
 }
 
 #[cfg(test)]

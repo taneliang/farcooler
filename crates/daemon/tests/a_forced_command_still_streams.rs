@@ -129,6 +129,24 @@ async fn a_forced_command_key_replays_the_scrollback() {
     while Instant::now() < deadline {
         replay = replay_over(&runner, &runner.forced_key, terminal).await;
         if contains(&replay, b"far-cooler-scrollback-marker") {
+            // And it arrives as one picture. The replay is a clear followed by
+            // a redraw and the transport splits it — a 440 KiB replay written
+            // to a pipe in one `write_all` comes back out in seven reads — so
+            // a client that is already showing this pane would draw the cleared
+            // screen between them. `runtime::synchronized` wraps it in DECSET
+            // 2026 to stop that, and this is the only test that sees the bytes
+            // after a real sshd has carried them rather than as the function
+            // returned them.
+            assert!(
+                replay.starts_with(b"\x1b[?2026h"),
+                "the replay did not open a synchronized update: {:?}",
+                &replay[..replay.len().min(16)]
+            );
+            assert!(
+                contains(&replay, b"\x1b[?2026l"),
+                "the replay opened a synchronized update it never closed, which is a pane \
+                 held on its last frame until the client's own deadline fires"
+            );
             return;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
