@@ -7,7 +7,14 @@ Everything below was measured on 2026-08-31 against `github.com/tailscale/tailca
 Go 1.27.0 darwin/arm64, Xcode at `/Applications/Xcode.app`, on this Mac.
 
 The spike code was throwaway and lives in no repository. The iOS project was
-patched, measured, and restored byte-for-byte; `git status` shows no iOS change.
+patched, measured, and restored byte-for-byte; `git status` shows no iOS change,
+and the phone was left with a clean build of `com.farcooler.ios.local` from the
+restored tree.
+
+Findings 2, 4 and 5 were re-run on the owner's **iPhone 15 Pro Max
+(`00008130-000805E81A20001C`, iOS device build, `Debug`, signed
+`H6A2TRW47J`)** after the device became reachable again. Those results replace
+the earlier "device unavailable" entries; only cellular remains unmeasured.
 
 ## The number that goes first
 
@@ -19,14 +26,17 @@ finding 3.
 
 ## What could not be measured, stated up front
 
-The owner's iPhone reports `unavailable`. Three things therefore remain open,
-and none of them is inferred below:
+One thing, and it is named rather than inferred:
 
-- **`fc_probe()` returning 42 on a real device.** The link is proved; the
-  runtime is not. See finding 2.
-- **Tunnel survival across app suspension.** Entirely unmeasured. Finding 4.
-- **Time to first byte on cellular.** LAN measured, cellular unmeasured.
-  Finding 5.
+- **Time to first byte on cellular.** Measured on Wi-Fi from both a Mac and the
+  phone; **not** measured on cellular. The phone is paired to this Mac over
+  `localNetwork` — the same Wi-Fi — so taking it off Wi-Fi ends the connection
+  that drives the measurement, and nothing here can toggle the radio. Finding 5
+  says what that leaves undecided.
+
+Everything else on the original list was measured on hardware: `fc_probe()`
+returns 42 on the phone (finding 2), and the tunnel survives suspension
+(finding 4).
 
 ---
 
@@ -108,7 +118,7 @@ Downstream:
 
 ## 2. iOS linking
 
-**Holds for linking. Runtime unverified — no device was available.**
+**Holds, on both counts. It links, and it returns 42 on the phone.**
 
 The c-archive built on the first attempt with the brief's command exactly as
 written, no added flags:
@@ -152,23 +162,42 @@ binary shows `T _fc_probe`, `T _fc_dial`, 1,965 `runtime.*` symbols, and 4,723
 symbols matching `gvisor|netstack|wireguard|magicsock` — the whole data plane is
 in the binary, and `strings` finds `go1.27.0` in it.
 
-**What is proved:** a Go `c-archive` compiles for `ios-arm64` and links into
-this app beside the Rust staticlib, device-targeted, with no linker
-intervention.
+**And it runs.** A signed `Debug` build was installed on the owner's iPhone 15
+Pro Max with `xcrun devicectl device install app` from an explicit
+`-derivedDataPath`, launched, and its first log line is, verbatim from the file
+pulled back off the device:
 
-**What is not proved:** that `fc_probe()` returns 42 when the app runs. That
-requires hardware. It was not run on the Simulator and called equivalent — a
-Simulator build is a different platform triple and, per the standing note on
-this repository, lies about platform limits. **Whoever first has a device
-should run the app once and check that `fc_probe()` returns 42 before Task 5's
-iOS half is considered done.**
+```
+   0.00s  fc_probe() = 42
+```
+
+No Simulator was involved at any point. The Simulator is a different platform
+triple and, per the standing note on this repository, lies about platform
+limits; a Simulator result would not have counted and was not taken.
+
+The device build also does real work, which is what findings 4 and 5 rest on: a
+second exported entry point brings up a `tailcat.Client`, dials a port through
+the tunnel to a `tailcat` server on this Mac, and does line-oriented request and
+response. From the same file:
+
+```
+   0.12s  fc_connect -> 109 ms; dial 94ms, first byte 109ms, echo "pong hello-0\n"
+   0.13s  warm write 1 -> 8 ms
+   0.67s  warm write 2 -> 6 ms
+   1.19s  warm write 3 -> 12 ms
+```
+
+So on an iPhone the Go data plane starts, registers, completes a WireGuard
+handshake, and carries bytes. Nothing about `wireguard-go`, `magicsock` or the
+gVisor netstack needed a TUN device, an entitlement beyond the app's normal
+networking, or root.
 
 **Branch selected: "If it holds."** The failure branch exists for a link that
 does not work; this one does.
 
 Downstream: Task 5 proceeds in full, including step 3. Task 10's iOS half
 proceeds. The generator change in point 2 above is a required part of Task 5,
-not an optional nicety.
+not an optional nicety. Nothing about the iOS half is now unproven.
 
 ## 3. Size
 
@@ -220,13 +249,50 @@ this.
 
 ## 4. Suspension
 
-**Unmeasured. No device was available, and this cannot be faked.**
+**The tunnel survived. Twice — 76 seconds and 301 seconds of the app in the
+background — and the first write back cost 109 ms and 146 ms respectively.**
 
-Nothing below is a measurement; it is the state of the code the branch says to
-rely on.
+Method: the device build above opened one TCP connection through the tunnel and
+did three warm round trips (6–12 ms each). The app was then backgrounded by
+launching Settings through `devicectl`, left there, and foregrounded by
+relaunching it. On the `scenePhase` transition back to `.active` it wrote one
+more line on the **same** connection and waited for the echo. Verbatim from the
+device:
 
-The decision table's branch is "proceed" whichever way this falls, and the
-mechanism it names is already in the tree. `crates/client/src/ssh.rs:143-149`:
+```
+  66.33s  scenePhase -> background
+ 142.34s  scenePhase -> active after 76.0s away
+ 142.46s  post-suspend write -> 109 (0.11s elapsed); write 4 ok in 109ms, echo "pong hello-4\n"
+ 142.47s  tunnel SURVIVED suspension
+ 208.39s  scenePhase -> background
+ 509.32s  scenePhase -> active after 300.9s away
+ 509.47s  post-suspend write -> 146 (0.15s elapsed); write 5 ok in 146ms, echo "pong hello-5\n"
+ 509.49s  tunnel SURVIVED suspension
+```
+
+The timestamps are continuous across both gaps, so this is one process throughout
+— the app was suspended, not killed and restarted. Both intervals are well past
+the roughly 30 seconds of background execution iOS grants before suspending.
+
+**A write costs about 100–150 ms on the first attempt after waking, against
+6–12 ms warm.** That is the cost of the WireGuard and DERP state re-warming
+itself, and it is paid once per wake, not per write.
+
+Three limits on this result, so it is not read as more than it is:
+
+- **The phone was on the same Wi-Fi as the server, and the path was direct.**
+  A `DiscoPing` after the dial reported `direct 192.168.1.180:62497`. A
+  DERP-relayed tunnel, or one whose direct path dies because the phone changed
+  network while asleep, is a different test and was not run.
+- **The network did not change during suspension.** The realistic bad case —
+  Wi-Fi to cellular in a pocket — is the one this does not cover.
+- **Two trials, not a distribution.** They agree, but they are two.
+
+**Branch selected: "Proceed"** — which the table says either way. The relevant
+consequence is unchanged and worth stating plainly: **add no new reconnect
+machinery in any task.** When a tunnel does die, it surfaces as a dead SSH
+session, and `crates/client/src/ssh.rs:143-149` already notices within about 90
+seconds:
 
 ```rust
 let config = Arc::new(Config {
@@ -238,27 +304,41 @@ let config = Arc::new(Config {
 });
 ```
 
-A tunnel that does not survive suspension surfaces as a dead SSH session, and
-that configuration notices within roughly 90 seconds (three missed keepalives at
-30-second intervals) rather than at the first write. **Add no new reconnect
-machinery in any task.**
-
-The cost that is therefore unknown: how long a wake-and-reconnect takes end to
-end. Finding 5 puts the tunnel's own share of that at roughly 170 ms on this
-network, so the reconnect is dominated by SSH authentication and by however long
-the keepalive takes to declare the old session dead — not by tailcat.
-
-**Still to do when a device exists:** open a tunnel, background the app 60 s,
-foreground it, write, and record whether the tunnel survived and what the
-reconnect cost. Until then no claim about pocket behavior is supported.
+Three missed keepalives at 30-second intervals. Finding 5 puts a fresh tunnel at
+109 ms on this phone, so a reconnect after a genuine drop is dominated by that
+detection window and by SSH authentication — not by tailcat.
 
 ## 5. Time to first byte
 
-**Measured on LAN. Not measured on cellular.**
+**Measured on Wi-Fi, from both a Mac and the phone. Not measured on cellular.**
 
-Measurements are from this Mac on Wi-Fi, with a tailcat server and a tailcat
-client as two separate processes, so every number includes full process startup
-— which is what a per-`git fetch` `ProxyCommand` actually pays.
+Two different costs, and they should not be confused:
+
+- **On a phone, the app holds one `tailcat.Client` for its lifetime.** What it
+  pays is tunnel bring-up inside an already-running process.
+- **On a Mac or the CLI, a `ProxyCommand` per `git fetch` pays process startup
+  too** — the Go runtime, netcheck, and the WireGuard engine, from cold.
+
+### On the phone
+
+From the device build, cold tunnel bring-up to the first response byte:
+
+```
+   0.12s  fc_connect -> 109 ms; dial 94ms, first byte 109ms, path direct 192.168.1.180:62497
+```
+
+**109 ms**, of which 94 ms is the dial. Warm round trips on that connection then
+run **6–12 ms**, and the first write after a wake costs 109–146 ms (finding 4).
+The reported path is from a `DiscoPing` taken *after* the dial, and `DiscoPing`
+actively triggers direct-path discovery — so it describes where the connection
+ended up, not necessarily how the first bytes traveled. Treat "109 ms" as the
+number and "direct" as context.
+
+### On this Mac
+
+Measurements below are from this Mac on Wi-Fi, with a tailcat server and a
+tailcat client as two separate processes, so every number includes full process
+startup — which is what a per-`git fetch` `ProxyCommand` actually pays.
 
 Against Tailscale's public DERP (region 302, `sfo`; netcheck reported 6–7 ms to
 the relay):
@@ -287,10 +367,14 @@ second.
 
 Two things the measurement is not:
 
-- **Cellular is unmeasured.** The arithmetic above says the fixed 75 ms stays
-  and the round-trip term scales; a relay 60 ms away would land near 500 ms, and
-  one 150 ms away near 1.1 s. That is extrapolation, not measurement, and is
-  written here as such.
+- **Cellular is unmeasured, and the reason is mechanical.** The phone is paired
+  to this Mac over `localNetwork`, so it is reached across the same Wi-Fi the
+  measurement would have to leave, and nothing available here can toggle the
+  radio. The arithmetic above says the fixed 75 ms stays and the round-trip term
+  scales; a relay 60 ms away would land near 500 ms, and one 150 ms away near
+  1.1 s. That is extrapolation, not measurement, and is written here as such.
+  **Someone with the phone in hand can close this in two minutes:** turn Wi-Fi
+  off, open a tunnel, and time the first byte.
 - **Direct-path upgrade is unreliable and slow, even here.** `tailcat ping
   --until-direct --timeout=20s`, three runs between two processes on this same
   machine: one upgraded at **11.0 s** (to an IPv6 endpoint), two never upgraded
@@ -301,15 +385,21 @@ Two things the measurement is not:
 **Branch selected: "If it holds" — do not add `ControlMaster` in Task 11.**
 
 The table's condition is a measurement showing the handshake is cheap, and there
-is one: 168 ms median, cold, including process startup. A control socket buys
-back a sixth of a second per `git fetch` and pays for it with stale state
-pointing at a tunnel that can die underneath it — and finding 4 says a tunnel
-dying underneath it is the expected case on a phone, not the exotic one.
+are two: 168 ms median cold on this Mac including process startup, and 109 ms on
+the phone. A control socket buys back a sixth of a second per `git fetch` and
+pays for it with stale state pointing at a tunnel that can die underneath it.
+
+The honest caveat: both numbers are from a network 6–7 ms from its DERP relay,
+and cellular is unmeasured. An unmeasured cost is not a measured absence — but
+the branch is not being selected on an absence here, it is being selected on two
+measurements that agree, and the extrapolation to a distant relay stays inside
+a second.
 
 Downstream, and the condition under which this flips: Task 11 step 5's
 `ControlMaster` block is omitted. **If a cellular measurement ever puts cold
 time to first byte above about one second, reopen this** — the block is already
-written out in that task and adding it is a small change.
+written out in that task and adding it is a small change. That is the one
+outstanding measurement in this document, and it is cheap.
 
 ## 6. Test harness
 
@@ -416,5 +506,6 @@ four concrete amendments:
 3. **Task 11** omits the `ControlMaster` block.
 4. **Task 13** sets `TS_DEBUG_USE_DERP_HTTP=1` and uses a full-address token.
 
-And three things stay open until hardware exists: `fc_probe()` at runtime,
-suspension survival, and cellular time to first byte.
+One thing stays open, and it is small: **cellular time to first byte**, which
+needs someone holding the phone with Wi-Fi off. Everything else in this document
+was measured, most of it on the owner's iPhone 15 Pro Max.
