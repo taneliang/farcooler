@@ -704,6 +704,40 @@ class ShellTest {
         assertEquals(ShellPosition(1, 0), (release as ShellRelease.Carry).step.position)
     }
 
+    /**
+     * **A fast upward fling reaches the overview and does NOT carry.** The
+     * owner: *"when I fling the workspace up, quite often it animates the
+     * workspace to the n-1th or n+1th grid square… if my fling is angled too
+     * much it picks either the previous or next workspace to land on."*
+     *
+     * A thumb's arc deviates about 0.18 of its travel sideways, but its
+     * TANGENT at the release leans twice as far — 0.36 — so a 3000 dp/s fling
+     * leaves at 1090 sideways, which projects 544 dp past a `dx` of 24 that
+     * could never have committed. See [ShellGesture.carried].
+     */
+    @Test
+    fun `a fast angled fling reaches the overview without carrying`() {
+        assertEquals(
+            ShellRelease.OpenOverview,
+            simple.barRelease(
+                axis = ShellAxis.VERTICAL, dx = -24f, up = 96f, at = ShellPosition(0, 0),
+                dxVelocity = -1090f, upVelocity = 3000f),
+        )
+    }
+
+    /**
+     * And the gesture the carry EXISTS for still works: a lifted page flicked
+     * across, from short of the 70 dp that commits on translation alone. The
+     * gate is on the momentum, never on the drawing.
+     */
+    @Test
+    fun `a lifted page flicked sideways still carries`() {
+        val release = simple.barRelease(
+            axis = ShellAxis.VERTICAL, dx = -40f, up = 164f, at = ShellPosition(0, 0),
+            dxVelocity = -1500f, upVelocity = 0f)
+        assertEquals(ShellPosition(1, 0), (release as ShellRelease.Carry).step.position)
+    }
+
     @Test
     fun `a vertical drag that reveals nothing costs nothing`() {
         assertEquals(

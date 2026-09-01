@@ -577,6 +577,52 @@ object ShellGesture {
     fun commits(dx: Float): Boolean = abs(dx) >= ShellMetrics.PAGE_COMMIT
 
     /**
+     * How far sideways a HELD page has been thrown — the carry's own throw,
+     * which is [projected] with the momentum admitted only when the momentum
+     * is going sideways.
+     *
+     * **The one place a throw is asked which way it is pointing**, and it
+     * exists because above [pageIsHeld] the two axes compose. Below that line
+     * [lean] arbitrates, so a mostly-upward gesture is not a horizontal one
+     * and never reaches a sideways test. Above it nothing arbitrates by
+     * design, and an unconditional projection let a vertical fling's own
+     * lateral shadow answer the sideways question: the owner's *"if my fling
+     * is angled too much it picks either the previous or next workspace to
+     * land on."*
+     *
+     * A thumb pivoting about the palm deviates about 24 dp across the 132
+     * that open a three-tab column — a displacement ratio of 0.18, nowhere
+     * near [ShellMetrics.REDIRECT], which is why [lean] is safe. But an arc's
+     * TANGENT leans twice as far as its chord, so a 3000 dp/s fling leaves at
+     * about 1090 sideways and [project] turns that into 544 dp: eight times
+     * PAGE_COMMIT, off a [dx] of 24 that could never have committed alone.
+     *
+     * **Velocities, and not the two translations.** Comparing the raw
+     * translations kills the deliberate carry — lifting a page into the
+     * overview costs 208 dp of up against the 70 of dx that moves it one
+     * cell — and comparing the projected throws kills it harder, since a
+     * fling's thrown lift is 1600 dp. The velocities are the only pair that
+     * separates the two gestures: a deliberate carry is released with the
+     * thumb moving ACROSS, a fling with it still going UP.
+     *
+     * **A gate on the momentum only, never on the drawing.** [dx] is always
+     * returned in full, so a card drawn 70 dp into the neighbour's cell still
+     * carries with no velocity at all. Nothing that committed on translation
+     * alone stops committing.
+     *
+     * [ShellMetrics.REDIRECT] and the same 35.5° it always meant: the release
+     * has to be within 35.5° of horizontal for its momentum to count
+     * sideways, the identical angle at which [lean] takes a gesture off the
+     * vertical. `abs` on the vertical because the question is which way the
+     * thumb is travelling, not which way is up — a fast angled fling DOWN has
+     * the same lateral shadow.
+     */
+    fun carried(dx: Float, dxVelocity: Float, upVelocity: Float): Float =
+        if (abs(dxVelocity) > abs(upVelocity) * ShellMetrics.REDIRECT) {
+            projected(dx, dxVelocity)
+        } else dx
+
+    /**
      * Which row a touch at [above] dp above the bar's top edge lands on, or
      * null for a touch outside the column.
      *
@@ -883,11 +929,11 @@ fun ShellFleet.barRelease(
     if (axis == null) {
         return row?.let { ShellRelease.Land(it) } ?: ShellRelease.ToggleColumn
     }
-    // Where the sideways half of this gesture was HEADED, which is what both of
-    // its escapes are decided on.
-    val thrownX = ShellGesture.projected(dx, dxVelocity)
     return when (axis) {
         ShellAxis.HORIZONTAL -> {
+            // Where the sideways half of this gesture was HEADED. The vertical
+            // arm asks a narrower question — see [ShellGesture.carried].
+            val thrownX = ShellGesture.projected(dx, dxVelocity)
             val direction =
                 if (ShellGesture.commits(thrownX)) ShellGesture.direction(thrownX) else null
             val step = direction?.let { step(at, it, ShellTrack.BAR) }
@@ -901,9 +947,18 @@ fun ShellFleet.barRelease(
             // reads the REAL lift and not the thrown one — it asks whether
             // there is a page in your hand right now, which is a fact about the
             // screen rather than a prediction.
+            //
+            // [ShellGesture.carried] and not the plain projection, and this is
+            // the whole of the difference between the two arms. The horizontal
+            // arm above has already been arbitrated by [ShellGesture.lean] — a
+            // gesture that reaches it beat the vertical by REDIRECT and its
+            // momentum is not in doubt. Nothing arbitrates this arm, because
+            // above pageIsHeld the two axes COMPOSE, so the sideways throw has
+            // to ask on its own account which way the thumb was going.
+            val carriedX = ShellGesture.carried(dx, dxVelocity, upVelocity)
             val sideways =
-                if (ShellGesture.pageIsHeld(up, tabs) && ShellGesture.commits(thrownX)) {
-                    ShellGesture.direction(thrownX)?.let { step(at, it, ShellTrack.BAR) }
+                if (ShellGesture.pageIsHeld(up, tabs) && ShellGesture.commits(carriedX)) {
+                    ShellGesture.direction(carriedX)?.let { step(at, it, ShellTrack.BAR) }
                 } else null
 
             // The escape, and the one place the lift is projected. A flick up

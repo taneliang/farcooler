@@ -1739,6 +1739,145 @@ struct ShellNavigationTests {
                 == .openOverview)
     }
 
+    /// **A fast upward fling reaches the overview and does NOT carry.** The
+    /// owner's report: *"when I fling the workspace up, quite often it
+    /// animates the workspace to the n-1th or n+1th grid square… if my fling
+    /// is angled too much it picks either the previous or next workspace to
+    /// land on, seemingly assuming I already switched to it (clearly I
+    /// didn't)."*
+    ///
+    /// The arc is the same one `aSidewaysArcWhileChoosingARowStillChoosesTheRow`
+    /// measures — a thumb pivoting about the palm deviates about 24 points
+    /// across the 132 that open a three-tab column, a displacement ratio of
+    /// 0.18. **Its VELOCITY ratio at the release is twice that**, because for
+    /// `x = -24t²` against `y = 132t` the tangent is `dx/dy = -48t/132`, which
+    /// at `t = 1` is 0.36. So a thumb leaving at 3000 points per second
+    /// upward is leaving at about 1090 sideways, and 1090 projects 544 points
+    /// — eight times the 70 that commits a page turn.
+    ///
+    /// That is the whole defect: `dx` of 24 could never commit, and the
+    /// momentum was mixed into the sideways channel without ever being asked
+    /// which way the thumb was actually going.
+    @Test func aFastAngledFlingReachesTheOverviewWithoutCarrying() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        // Past the last row and still climbing: the page is in your hand.
+        let up = ShellGesture.columnFull(tabCount: 3) + 8
+        #expect(ShellGesture.pageIsHeld(up: up, tabCount: 3))
+        let upVelocity: CGFloat = 3000
+        let dxVelocity = -0.36 * upVelocity  // the arc's tangent, not its chord
+        #expect(abs(ShellGesture.projected(-24, velocity: dxVelocity)) > ShellMetrics.pageCommit,
+            "the sideways THROW clears the commit on its own — this is the trap")
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: -24, up: up, at: at,
+                dxVelocity: dxVelocity, upVelocity: upVelocity) == .openOverview,
+            "an overwhelmingly vertical fling landed the page in a neighbour's cell")
+        // The mirror image, so the fix cannot be a sign error.
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: 24, up: up, at: at,
+                dxVelocity: -dxVelocity, upVelocity: upVelocity) == .openOverview)
+    }
+
+    /// **A lifted page genuinely flicked sideways still carries**, which is
+    /// the gesture the `.carry` arm exists for and the thing the fix above
+    /// must not have cost.
+    ///
+    /// Three ways of asking for it, and all three still work:
+    /// placed with no momentum at all, flicked from short of the commit, and
+    /// flicked from a standstill after the lift has finished. The first is
+    /// the one that proves the narrowing is on the MOMENTUM only — `dx` is
+    /// never discounted, so a card drawn into the neighbour's cell carries
+    /// however it got there.
+    @Test func aLiftedPageFlickedSidewaysStillCarries() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 2)
+        let up = ShellGesture.columnFull(tabCount: 3) + ShellMetrics.overRun
+        let next = ShellRelease.carry(
+            ShellStep(position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true))
+        // Placed: seventy points of drawn card, nothing moving.
+        #expect(fleet.barRelease(axis: .vertical, dx: -70, up: up, at: at) == next)
+        // Flicked from forty points — short of the commit on translation
+        // alone, and carried by the momentum. The thumb has finished rising
+        // and is moving across, which is what a deliberate carry IS.
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: -40, up: up, at: at,
+                dxVelocity: -1500, upVelocity: 0) == next)
+        // And still carried while the thumb is drifting upward, so long as it
+        // is going sideways faster: 1500 across against 1000 up is 56° off
+        // vertical, past the 54.5° the ratio draws.
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: -40, up: up, at: at,
+                dxVelocity: -1500, upVelocity: 1000) == next)
+        // The lower branch of the same composition — lifted but not far
+        // enough to stay up — flicked sideways is still an ordinary crossing.
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: -40, up: ShellGesture.columnFull(tabCount: 3) + 1, at: at,
+                dxVelocity: -1500, upVelocity: 0)
+                == .commit(
+                    ShellStep(
+                        position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true)))
+    }
+
+    /// **The angle at which a release stops carrying, as a number.**
+    ///
+    /// `ShellMetrics.redirect` is `tan 54.5°`, so a release whose velocity is
+    /// more than 54.46° off vertical has its momentum counted sideways and
+    /// one within it does not. Equivalently: the thumb has to be leaving
+    /// within 35.54° of horizontal to throw the page into a neighbour's cell.
+    /// It is the same angle `lean` uses to take a gesture off the vertical,
+    /// which is the point — one ratio, asked once about where the finger has
+    /// been and once about where it is going.
+    ///
+    /// Below the angle the drawn `dx` is all that is left, so the carry
+    /// depends on whether the card was actually moved into the cell. Both
+    /// sides of THAT are checked too, because a gate that swallowed a
+    /// committed translation would be a different bug.
+    @Test func theCarryTakesTheMomentumOnlyWithin35PointFiveDegreesOfHorizontal() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 2)
+        let up = ShellGesture.columnFull(tabCount: 3) + ShellMetrics.overRun
+        let speed: CGFloat = 3000
+        let boundary = atan(1 / ShellMetrics.redirect)  // from horizontal
+        #expect(abs(boundary * 180 / .pi - 35.5376) < 0.001)
+        func release(offVertical degrees: CGFloat, dx: CGFloat) -> ShellRelease {
+            let radians = degrees * .pi / 180
+            return fleet.barRelease(
+                axis: .vertical, dx: dx, up: up, at: at,
+                dxVelocity: -speed * sin(radians), upVelocity: speed * cos(radians))
+        }
+        let carried = ShellRelease.carry(
+            ShellStep(position: ShellPosition(workspace: 2, tab: 0), crossesWorkspace: true))
+        // Twenty-four points of drawn card — the thumb's arc, which cannot
+        // commit on its own. Only the momentum could carry it, and only
+        // past the angle.
+        #expect(release(offVertical: 54.5, dx: -24) == carried)
+        #expect(release(offVertical: 54.4, dx: -24) == .openOverview)
+        // The owner's fling is at 20°, nowhere near it.
+        #expect(release(offVertical: 20, dx: -24) == .openOverview)
+        // Seventy points of drawn card carries at EVERY angle, because the
+        // gate is on the momentum and never on the drawing.
+        #expect(release(offVertical: 0, dx: -70) == carried)
+        #expect(release(offVertical: 20, dx: -70) == carried)
+        // A fast angled fling DOWN out of the overview's run has the same
+        // lateral shadow, and is refused the same way — `abs` on the vertical
+        // is what makes the two symmetric. The row under the thumb wins,
+        // which is the answer a gesture that is not escaping should get; the
+        // bug would have crossed a workspace on the way down. Eight points
+        // past the last row is the TOP of the column, so the row is tab 0 —
+        // `columnRow` counts down from the bar and inverts.
+        let lowered = ShellGesture.columnFull(tabCount: 3) + 8
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: -24, up: lowered, at: at,
+                row: ShellGesture.columnRow(above: lowered, tabCount: 3),
+                dxVelocity: -1090, upVelocity: -3000) == .land(tab: 0))
+    }
+
     /// At the ends of the fleet there is no neighbour to carry to, and the
     /// lift's answer stands on its own.
     @Test func aCarryOffTheEndOfTheFleetIsJustTheOverview() {

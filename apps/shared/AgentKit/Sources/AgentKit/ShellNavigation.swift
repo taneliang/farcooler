@@ -877,6 +877,67 @@ enum ShellGesture {
     /// is honestly saying the gesture had none.
     static func commits(dx: CGFloat) -> Bool { abs(dx) >= ShellMetrics.pageCommit }
 
+    /// How far sideways a HELD page has been thrown — the carry's own throw,
+    /// which is `projected(_:velocity:)` with the momentum admitted only when
+    /// the momentum is going sideways.
+    ///
+    /// **This is the one place a throw is asked which way it is pointing**,
+    /// and it exists because above `pageIsHeld` the two axes compose. Below
+    /// that line `lean` arbitrates, so a gesture that is mostly upward is
+    /// simply not a horizontal gesture and never reaches a sideways test.
+    /// Above it nothing arbitrates by design, and an unconditional projection
+    /// let the vertical fling's own lateral shadow answer the sideways
+    /// question: the owner's *"if my fling is angled too much it picks either
+    /// the previous or next workspace to land on."*
+    ///
+    /// **The arithmetic that made it certain.** A thumb pivoting about the
+    /// palm deviates about 24 points across the 132 that open a three-tab
+    /// column — a displacement ratio of 0.18, which is nowhere near
+    /// `ShellMetrics.redirect` and is why `lean` is safe. But an arc's
+    /// TANGENT leans twice as far as its chord: for `x = -24t²` against
+    /// `y = 132t` the release direction is `48/132 = 0.36` off vertical. A
+    /// 3000 pt/s fling therefore leaves at about 1090 pt/s sideways, and
+    /// `project` turns that into 544 points — eight times `pageCommit`, off a
+    /// `dx` of 24 that could never have committed on its own. Every fast
+    /// angled fling carried.
+    ///
+    /// **Velocities, and not the two translations.** The three candidates are
+    /// not equally honest. Compare the raw translations and the deliberate
+    /// carry dies: lifting a page into the overview costs 208 points of `up`
+    /// against the 70 of `dx` that moves it one cell, a ratio of 0.34, so
+    /// "sideways must beat upward" fails for the gesture the carry EXISTS
+    /// for. Compare the projected throws and it dies harder — a fling's
+    /// `thrownUp` is 1600 points, so nothing could ever carry while the
+    /// finger was still rising. The velocities are the only pair that
+    /// separates the two gestures, and they separate them cleanly: at the
+    /// instant a deliberate carry is released the thumb has finished rising
+    /// and is moving across, and at the instant a fling is released it is
+    /// still going up. That is the actual difference between the two, so it
+    /// is the thing to measure.
+    ///
+    /// **And it is a gate on the MOMENTUM only, never on the drawing.** `dx`
+    /// is always returned in full. A card drawn 70 points into the
+    /// neighbour's cell still carries with no velocity at all, however the
+    /// finger got there — which is what keeps this a narrowing of a
+    /// prediction rather than the removal of a capability. Nothing that
+    /// committed on translation alone stops committing.
+    ///
+    /// `ShellMetrics.redirect`, and the same 35.5° it always meant: the
+    /// release has to be within 35.5° of horizontal for its momentum to count
+    /// sideways, which is the identical angle at which `lean` lets the
+    /// horizontal take a gesture off the vertical. One ratio, asked once
+    /// about where the finger has BEEN and once about where it is GOING.
+    /// `abs` on the vertical because the question is which way the thumb is
+    /// travelling and not which way is up — a fast angled fling DOWN out of
+    /// the overview's run has the same lateral shadow and reaches the same
+    /// sideways test one branch further down `barRelease`.
+    static func carried(
+        dx: CGFloat, dxVelocity: CGFloat, upVelocity: CGFloat
+    ) -> CGFloat {
+        guard abs(dxVelocity) > abs(upVelocity) * ShellMetrics.redirect else { return dx }
+        return projected(dx, velocity: dxVelocity)
+    }
+
     /// Which row of an open column a touch at this height chose, or nil for
     /// a touch that is not on the column at all.
     ///
@@ -1329,11 +1390,11 @@ extension ShellFleet {
         // bar — see `ShellGesture.columnRow`, which answers nil for the bar
         // itself and leaves the toggle exactly as it was.
         guard let axis else { return row.map { .land(tab: $0) } ?? .toggleColumn }
-        // Where the sideways half of this gesture was HEADED, which is what
-        // both of its escapes are decided on.
-        let thrownX = ShellGesture.projected(dx, velocity: dxVelocity)
         switch axis {
         case .horizontal:
+            // Where the sideways half of this gesture was HEADED. The
+            // vertical arm asks a narrower question — see `carried`.
+            let thrownX = ShellGesture.projected(dx, velocity: dxVelocity)
             guard ShellGesture.commits(dx: thrownX),
                 let direction = ShellGesture.direction(dx: thrownX),
                 let step = step(from: position, direction, along: .bar)
@@ -1352,10 +1413,21 @@ extension ShellFleet {
             // `pageIsHeld` reads the finger's ACTUAL lift and not the thrown
             // one: it is asking whether there is a page in your hand right
             // now, which is a fact about the screen rather than a prediction.
+            //
+            // `carried` and not `thrownX`, and this is the whole of the
+            // difference between the two axes here. The horizontal arm above
+            // has already been arbitrated by `lean` — a gesture that reaches
+            // it beat the vertical by `ShellMetrics.redirect` and its
+            // momentum is not in doubt. Nothing arbitrates this arm, because
+            // above `pageIsHeld` the two axes COMPOSE, so the sideways throw
+            // has to ask on its own account which way the thumb was going.
+            // Unasked, a vertical fling's lateral shadow answered for it.
+            let carriedX = ShellGesture.carried(
+                dx: dx, dxVelocity: dxVelocity, upVelocity: upVelocity)
             let sideways: ShellStep? =
                 ShellGesture.pageIsHeld(up: up, tabCount: tabs)
-                    && ShellGesture.commits(dx: thrownX)
-                ? ShellGesture.direction(dx: thrownX).flatMap {
+                    && ShellGesture.commits(dx: carriedX)
+                ? ShellGesture.direction(dx: carriedX).flatMap {
                     step(from: position, $0, along: .bar)
                 }
                 : nil
