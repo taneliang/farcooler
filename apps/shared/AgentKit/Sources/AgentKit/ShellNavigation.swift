@@ -97,6 +97,23 @@ enum ShellMetrics {
     /// Horizontal distance that commits a page turn.
     static let pageCommit: CGFloat = 70
 
+    /// Downward travel that commits the pull back out of the overview.
+    ///
+    /// **A THROW distance, not a translation**, the same way `pageCommit` is:
+    /// `ShellGesture.pullCommits` measures `projected` against it, so a
+    /// deliberate pull is judged on where the finger got and a flick on where
+    /// it was going. It was a bare `> 40` on the translation, read once, in
+    /// `onEnded`.
+    ///
+    /// Just past half of `overRun`, which is the distance the pull TRACKS
+    /// over — so a pull released past the half way point of the motion it is
+    /// drawing goes, and one released before it comes back. That relationship
+    /// is the reason the number is stated here beside the travel rather than
+    /// written into the gesture, and it is why 40 rather than the 38 that
+    /// would make it exactly half: 40 is what the threshold has always been
+    /// and no shipped gesture needed to change length to gain a middle.
+    static let pullDismiss: CGFloat = 40
+
     /// The device width the prototype was built at, and one content pane.
     ///
     /// The views take their real width from the geometry they are handed and
@@ -926,6 +943,40 @@ enum ShellGesture {
         let fromBottom = min(
             tabCount - 1, max(0, Int((above - bias) / ShellMetrics.rowHeight)))
         return tabCount - 1 - fromBottom
+    }
+
+    /// How far a pull-down out of the overview has got, 0…1.
+    ///
+    /// **The reverse of the lift, and tracked for its whole length.** Leaving
+    /// the overview used to be a `DragGesture(minimumDistance: 20)` whose
+    /// `onChanged` recorded one boolean and whose `onEnded` either dismissed
+    /// or did not — so the way IN was a continuous, abandonable, one-to-one
+    /// gesture and the way OUT was a threshold that moved nothing until you
+    /// let go. WWDC 2018 803 names that exactly: *"when implementing your
+    /// gestures, you should avoid methods that are only detected at the end of
+    /// the gesture"*, and one page earlier makes the case for why it matters
+    /// — while nothing moves *"you actually wouldn't know the difference
+    /// between a frozen phone, and phone that's just at the top of the edge of
+    /// the screen"*. The path was already symmetric; the TRACKING was not, and
+    /// tracking is what makes a path readable.
+    ///
+    /// Over `overRun`, which is the same 76 points the lift spends carrying
+    /// the page off the display — so the page is taken back out of the grid
+    /// over exactly the distance it was put in by. There is no second number
+    /// to learn and no direction in which this gesture is longer than itself.
+    static func pullProgress(down: CGFloat) -> CGFloat {
+        min(1, max(0, down / ShellMetrics.overRun))
+    }
+
+    /// Whether letting go of a pull-down leaves the overview.
+    ///
+    /// The ESCAPE, so it is measured on the throw and not on the translation —
+    /// see `projected`, and `commits(dx:)` next door, which is this same
+    /// sentence about the other axis. A flick down off the top of the grid
+    /// leaves even though the thumb barely moved; a pull dragged half way and
+    /// parked comes back, because a finger that stopped was asking to stop.
+    static func pullCommits(down: CGFloat, velocity: CGFloat = 0) -> Bool {
+        projected(down, velocity: velocity) >= ShellMetrics.pullDismiss
     }
 
     /// The lift at which the column has nothing left to reveal.

@@ -297,6 +297,49 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// The column, held open by a tap. Separate from `lift`, see above.
     @State var columnPinned = false
 
+    /// How far a finger has taken the page back out of the grid, 0…1.
+    ///
+    /// **The overview's dismissal, as a tracked value rather than as a
+    /// threshold.** It is the reverse of `reveal`, and it exists for the
+    /// reason `reveal` does: the page's place, size and shape are all
+    /// continuous functions of a gesture, and the way OUT of this screen used
+    /// to be the one part of the journey that was not — a `DragGesture` whose
+    /// `onChanged` recorded a boolean and whose `onEnded` either dismissed or
+    /// did not. WWDC 2018 803, on exactly that: *"avoid methods that are only
+    /// detected at the end of the gesture."*
+    ///
+    /// Read by `ShellPageLayer.flightOffset` through `ShellFlight.returning`,
+    /// which is where the arithmetic is and where `swift test` can reach it.
+    /// Zero is the cell and one is the display, and at zero the offset it
+    /// produces is byte for byte the landed one — so this being here costs a
+    /// page that is not being pulled exactly nothing.
+    @State var pullOut: CGFloat = 0
+
+    /// Whether a finger is on that pull right now.
+    ///
+    /// Separate from `pullOut > 0`, and for the same reason `columnPinned` is
+    /// separate from `lift`: the first frame of a pull is at zero progress and
+    /// still has to do the handover, and the last frame of an abandoned one is
+    /// back at zero while a spring is still finishing. One source of truth per
+    /// thing — a finger owns this, a spring owns `pullOut`.
+    @State var pullingOut = false
+
+    /// How far the pull had come, and when, the last time it actually moved.
+    ///
+    /// The overview's own copy of `lastMoved`, and it is here for exactly the
+    /// reason that one is: `DragGesture.Value.velocity` does not fall to zero
+    /// when a finger stops. A pull dragged half way and PARKED still reports
+    /// enough speed to project past the threshold, so without this the one
+    /// gesture the tracking exists to make abandonable — go half way, think
+    /// better of it, hold still, let go — would dismiss anyway. Same 60
+    /// milliseconds, same half point of slop, same argument.
+    ///
+    /// The clock is read in the handler rather than off `DragGesture.Value`,
+    /// which would mean a third argument through two closures for a difference
+    /// of one dispatch: the handler runs synchronously from the gesture
+    /// callback, and the threshold it feeds is sixty milliseconds wide.
+    @State var pullMoved: (down: CGFloat, at: Date)?
+
     /// How far the finger is above the bar row's top edge, right now, or nil
     /// when no finger is on an open column.
     ///
@@ -497,6 +540,52 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// animation being finished, so a second swipe onto a settling one
     /// inherits its velocity rather than waiting for it.
     static var settle: Animation { .spring(response: 0.3, dampingFraction: 0.82) }
+
+    /// The same release, for the directions no finger threw.
+    ///
+    /// **The same response and no overshoot**, so it is the same object
+    /// arriving at the same speed and only the ringing is gone — the split
+    /// `ShellMotion.menu` / `menuSettled` makes, made for the other spring.
+    /// WWDC 2018 803 is the rule: *"start with 100% damping… if the gesture
+    /// that's driving the motion itself has momentum, then you should reward
+    /// that momentum with a little bit of overshoot."*
+    ///
+    /// Two of `settle`'s uses have no such momentum, and they are the two
+    /// where the motion runs OPPOSITE to the thumb or does not exist at all.
+    ///
+    /// **`rest()`, and it is not cosmetic.** A lift is thrown UP and the page
+    /// falls DOWN when you let go, so an overshoot there is a page rewarding a
+    /// momentum it was given in the other direction. Traced frame by frame off
+    /// a 200-point lift released and abandoned, `lift` ran 191 → 0 and then
+    /// **through −1.38, back up through +0.0098, and sat positive for thirteen
+    /// frames.** Nothing DRAWS a lift that small — every consumer clamps:
+    /// `pageRise` is a `max(0,)`, `columnHeight` is a threshold,
+    /// `overviewProgress` is clamped at both ends. But `ShellRootView.shell`
+    /// mounts the whole overview on `lift > 0 || reveal > 0 || overview ||
+    /// flying`, and THAT is not clamped. So for about a tenth of a second
+    /// after a lift had visibly finished and the page was back on the display,
+    /// the shell was still holding a `NavigationStack`, a `LazyVGrid` and
+    /// forty cards in the tree behind a workspace nobody was looking at — the
+    /// same shape of defect the menu's `columnHeight > 0` turned out to have,
+    /// found the same way. At 1.0 the trace is monotone and ends at 0.0000.
+    ///
+    /// **`.land`, where it draws nothing at all and is still wrong.** Choosing
+    /// a row has no momentum toward the row: the finger is resting on it.
+    /// Traced, that animation carries literally nothing — `lift`, `reveal`,
+    /// `cropped`, `trackX` and `pullOut` are all flat 0.0000 across it,
+    /// because a landing happens with the finger ON the column, where
+    /// everything `flatten` touches is already at rest, and the column's own
+    /// furl runs on `syncMenu`'s spring rather than this one. It is changed
+    /// anyway, because a spring that says "this arrived with momentum" on a
+    /// gesture that had none is a claim the next person to add something to
+    /// that arm inherits for free.
+    ///
+    /// **Everything else keeps `settle`, and that is checked rather than
+    /// asserted.** A commit, a spring-back and a toggle all have a real throw
+    /// behind them. `trackX` across a committed page turn peaks at
+    /// **403.2226** — 1.2 points past the page it is turning to, which is the
+    /// overshoot being earned — and it reads 403.2226 after this change too.
+    static var settled: Animation { .spring(response: 0.3, dampingFraction: 1) }
 
     /// How long a finger may have been still and still count as moving.
     ///
@@ -731,6 +820,11 @@ struct ShellRootView<Pane: View, Actions: View>: View {
                     onOpen: open(workspace:),
                     onCross: onCross,
                     onDismiss: closeOverview,
+                    // The tracked way out. `ShellOverview` reads the finger
+                    // and decides nothing; these two spend it. See
+                    // `ShellDrag.overviewPulled`.
+                    onPull: overviewPulled,
+                    onPullEnded: overviewPullReleased,
                     actions: overviewActions)
                     // Revealed over exactly the stretch where the page is
                     // moving to reveal it, which is the run past the last row.
@@ -1121,6 +1215,32 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// to follow, and a pinned column with nothing highlighted would be a list
     /// that had forgotten where you are.
     private var columnSelection: Int? {
+        // **The finger first, wherever there is one on an open column**, and
+        // the pinned default only where there is not.
+        //
+        // This branch is the whole of the touch-down feedback the column had
+        // none of. A column held open by a tap has `lift == 0`, so without it
+        // every frame of the next touch fell through to `position.tab` below —
+        // the highlight stayed on the tab you were already on for the whole
+        // press and jumped to the row you chose at the instant you let go,
+        // which is the confirmation arriving without the acknowledgement.
+        // Measured before the fix, with a thumb held on the row nearest the
+        // bar while tab 0 was current: the row under the thumb stood 0.95
+        // brightness levels above its neighbour, against the 24.74 the lit row
+        // stood above it — the highlight had not moved at all. See
+        // `ShellGestureTests.testAColumnRowLightsUpUnderAThumb`.
+        //
+        // Both halves are `ShellGesture.columnRow`'s, so there is still one
+        // mapping: it answers nil for a touch on the bar itself and nil for a
+        // touch past the top of the column, and `fingerAbove` is nil whenever
+        // no column is showing. So a finger dragged OFF the rows falls back to
+        // the line below — which is the talk's cancel, drawn — and one that
+        // comes back lights the row again.
+        if let fingerAbove,
+            let row = ShellGesture.columnRow(above: fingerAbove, tabCount: tabCount)
+        {
+            return row
+        }
         if columnPinned && lift == 0 { return position.tab }
         // The same `openMin` a release is gated on, and then the same
         // `columnRow` a release resolves through — so what is lit is what
@@ -1153,7 +1273,15 @@ struct ShellRootView<Pane: View, Actions: View>: View {
                 "ws=\(position.workspace) tab=\(position.tab) "
                     + "workspaces=\(fleet.workspaces.count) tabs=\(tabCount) "
                     + "column=\(Int(ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned).rounded())) "
-                    + "pinned=\(columnPinned ? 1 : 0) overview=\(overview ? 1 : 0)")
+                    + "pinned=\(columnPinned ? 1 : 0) overview=\(overview ? 1 : 0) "
+                    // The tracked way out of the overview, in hundredths, so
+                    // a test can ask how far a pull has got WHILE it is going
+                    // rather than only what it resolved to. Nothing else in
+                    // this string is a mid-gesture value, and this one has to
+                    // be: the defect it exists to pin is a gesture that moved
+                    // nothing until the release, and "it dismissed in the end"
+                    // is exactly the assertion that passed all along.
+                    + "pull=\(Int((pullOut * 100).rounded()))")
     }
 }
 
@@ -1196,3 +1324,5 @@ extension EnvironmentValues {
     /// somewhere with no shell furniture over it.
     @Entry var shellDisplayBottom: CGFloat = 0
 }
+
+

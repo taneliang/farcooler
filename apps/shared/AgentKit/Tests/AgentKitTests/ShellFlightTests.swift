@@ -281,4 +281,62 @@ struct ShellFlightTests {
                 == .zero)
         #expect(ShellFlight.radius(scale: 0, rise: 100, cropped: 1) == 0)
     }
+
+    // MARK: - The way back, under a thumb
+
+    /// **A tracked return begins exactly where the grid was drawing the card
+    /// and ends exactly where a finished flight leaves the page.**
+    ///
+    /// The two ends are the assertion. A pull-down hands over from the grid on
+    /// its first frame and hands over to a full-bleed page on its last, and a
+    /// blend that did not agree with `offset`'s own two branches at 0 and 1
+    /// would put a step at one end or the other — which is the defect this
+    /// whole gesture exists to remove, moved to its edges.
+    @Test func aTrackedReturnAgreesWithTheFlightAtBothEnds() {
+        // At the cell: the same scale the landed page is drawn at.
+        let landed = ShellFlight.scale(page: page, tile: tile, rise: 0, cropped: 1)
+        #expect(
+            ShellFlight.returning(page: page, tile: tile, scale: landed, progress: 0)
+                == ShellFlight.offset(
+                    page: page, tile: tile, landing: true, scale: landed, rise: 0,
+                    anchorX: 0, carryX: 0))
+        // At the display: a page at scale 1 sits at the display's own origin,
+        // which is where every other resting page in this shell sits.
+        #expect(
+            ShellFlight.returning(page: page, tile: tile, scale: 1, progress: 1)
+                == CGSize(width: 0, height: 0))
+    }
+
+    /// And it MOVES in between, monotonically, on both axes.
+    ///
+    /// The one thing the threshold it replaced could not do. Sampled rather
+    /// than reasoned about: each step has to be in the same direction as the
+    /// last, so a blend that stalled, doubled back or jumped is a failure
+    /// here rather than something a person has to notice on a phone.
+    @Test func aTrackedReturnMovesAtEveryPointOfTheDrag() {
+        var last: CGSize?
+        var steps: [CGFloat] = []
+        for step in 0...20 {
+            let along = CGFloat(step) / 20
+            let scale = ShellFlight.scale(
+                page: page, tile: tile, rise: 0, cropped: 1 - along)
+            let now = ShellFlight.returning(
+                page: page, tile: tile, scale: scale, progress: along)
+            if let last {
+                #expect(now != last, "the page did not move between \(along) and the step before")
+                steps.append(now.height - last.height)
+            }
+            last = now
+        }
+        #expect(steps.allSatisfy { $0 < 0 }, "the page stopped rising on its way home")
+    }
+
+    /// With no cell to come out of there is still an answer, and it is the
+    /// display. A grid that has not laid out yet must not park the page
+    /// somewhere it cannot be seen.
+    @Test func aReturnWithNoCellIsStillOnTheDisplay() {
+        #expect(
+            ShellFlight.returning(page: page, tile: nil, scale: 1, progress: 0)
+                == CGSize(width: 0, height: 0))
+    }
 }

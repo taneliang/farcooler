@@ -428,6 +428,28 @@ struct ShellOverview<Actions: View>: View {
     /// costs; `ShellScreen` does, and it is the one that asks.
     var onCross: (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in }
     let onDismiss: () -> Void
+    /// How far the pull-down out of the grid has come, in points, on every
+    /// frame of it — and never called at all for a drag the gate below turned
+    /// down.
+    ///
+    /// **The whole of what makes leaving symmetric with arriving.** The lift
+    /// that opens this screen is tracked one point of page per point of thumb
+    /// for its entire length and can be abandoned at any moment of it; the way
+    /// back out was a boolean and a threshold. This is the reverse channel,
+    /// and `ShellRootView` is where it is spent — the page is not this view's
+    /// to move.
+    ///
+    /// Points and not a fraction, so the only thing this file decides is how
+    /// far the finger went. `ShellGesture.pullProgress` turns that into a
+    /// journey, which keeps the distance in the same place as `overRun` — the
+    /// distance the lift spends — rather than in a view.
+    var onPull: (CGFloat) -> Void = { _ in }
+    /// The pull let go of: how far it had come, and how fast it was still
+    /// going, in points per second downward.
+    ///
+    /// Both, because the decision is an ESCAPE and escapes in this shell are
+    /// decided on where the gesture was GOING. See `ShellGesture.pullCommits`.
+    var onPullEnded: (CGFloat, CGFloat) -> Void = { _, _ in }
     /// What this app puts in the navigation bar opposite `Done`.
     ///
     /// A builder rather than anything this file knows about, and that seam is
@@ -467,6 +489,19 @@ struct ShellOverview<Actions: View>: View {
     /// be there. Begun alone would dismiss a scroll that started at the top
     /// and travelled; still-there alone is the bug.
     @State private var pullBegan: Bool?
+
+    /// The translation this pull started TRACKING at, or nil while nothing is
+    /// being tracked.
+    ///
+    /// **The hysteresis, subtracted.** `minimumDistance: 20` is what keeps this
+    /// gesture out of the scroll view's way, and it means the first change
+    /// this ever sees has already travelled twenty points — so a progress
+    /// computed straight off `translation` would begin every pull a quarter of
+    /// the way home, in one frame, which is the pop this gesture exists to
+    /// remove appearing at its start instead of its end. Recorded once and
+    /// taken off every frame after, which is the same subtraction `carriedX`
+    /// makes for the same reason: a handover is arithmetic, not a state.
+    @State private var pullFrom: CGFloat?
 
     private var order: [Int] { fleet.overviewOrder(matching: search) }
 
@@ -855,18 +890,65 @@ struct ShellOverview<Actions: View>: View {
                 // The first movement of each drag, and only the first: this is
                 // where "was the grid at its top" is still a fact about the
                 // gesture rather than about what the gesture has since done.
-                .onChanged { _ in if pullBegan == nil { pullBegan = atTop } }
+                //
+                // **The gate is unchanged and it is load-bearing.** Every
+                // scroll back up through forty cards finishes at the top with
+                // a large downward translation behind it, character for
+                // character the same release a deliberate pull-down produces,
+                // and reading `atTop` at the release alone is what threw the
+                // owner back onto the workspace they came from. Making the
+                // gesture continuous does not soften that — it sharpens the
+                // cost of getting it wrong, because now a scroll that was
+                // wrongly read would not merely dismiss at the end, it would
+                // drag the page up over the grid the whole way. So the tracked
+                // channel below runs INSIDE the same gate, and a drag the gate
+                // turned down never reaches it at all.
+                .onChanged { value in
+                    if pullBegan == nil { pullBegan = atTop }
+                    guard pullBegan == true, atTop else { return }
+                    guard let from = pullFrom else {
+                        // Only a predominantly DOWNWARD drag STARTS one. A
+                        // diagonal flick across the cards is not a pull-down
+                        // and the distance alone cannot tell the two apart, so
+                        // while the drag is still anybody's nothing moves —
+                        // which is the arbitration with the grid's own scroll,
+                        // and it is a subtraction rather than a delay.
+                        guard value.translation.height > 0,
+                            value.translation.height > abs(value.translation.width)
+                        else { return }
+                        pullFrom = value.translation.height
+                        onPull(0)
+                        return
+                    }
+                    // And once started it tracks BOTH ways. A finger that has
+                    // taken the page half out of the grid and changes its mind
+                    // takes it back on the way up, point for point, rather
+                    // than leaving it parked where the last downward frame put
+                    // it — the difference between a gesture you can reverse
+                    // and one you can only let go of, which is the whole
+                    // argument for tracking. The `max` is the floor at the
+                    // cell: past it there is nothing further back to go.
+                    onPull(max(0, value.translation.height - from))
+                }
                 .onEnded { value in
                     let began = pullBegan ?? atTop
+                    let from = pullFrom
                     pullBegan = nil
-                    guard began, atTop else { return }
-                    // Predominantly downward as well as far enough. A diagonal
-                    // flick across the cards is not a pull-down, and the
-                    // distance alone cannot tell the two apart.
-                    guard value.translation.height > 40,
+                    pullFrom = nil
+                    // Nothing was ever tracked, so there is nothing to let go
+                    // of. This is the scroll's release, and it belongs to the
+                    // scroll.
+                    guard began, atTop, let from else { return }
+                    // Predominantly downward at the END as well, so a pull
+                    // that turned into a sideways flick puts the page back
+                    // rather than committing on the distance it had banked.
+                    let down =
                         value.translation.height > abs(value.translation.width)
-                    else { return }
-                    onDismiss()
+                        ? max(0, value.translation.height - from) : 0
+                    // `velocity.height` is points per second, positive DOWN,
+                    // which is the direction this gesture measures in — so
+                    // unlike the lift's it is passed through unnegated.
+                    onPullEnded(down, value.velocity.height)
                 })
     }
 }

@@ -214,8 +214,20 @@ extension ShellRootView {
     /// whatever the page was last drawn at — including its velocity — to the
     /// cell, with nothing in between for a mid-drag destination to bend.
     private var flightOffset: CGSize {
-        ShellFlight.offset(
-            page: pageFrame, tile: tile, landing: overview, scale: flightScale,
+        // In the overview the page is ON its cell — or on its way off it under
+        // a thumb, which is the same journey at a fraction of the way along.
+        //
+        // `ShellFlight.returning` at progress 0 is byte for byte the landing
+        // branch this used to pass `landing: overview` for, so a page sitting
+        // in the grid with nobody touching it is drawn in exactly the same
+        // place it always was. What is new is only that there is somewhere for
+        // it to be in between.
+        if overview {
+            return ShellFlight.returning(
+                page: pageFrame, tile: tile, scale: flightScale, progress: pullOut)
+        }
+        return ShellFlight.offset(
+            page: pageFrame, tile: tile, landing: false, scale: flightScale,
             rise: pageRise, anchorX: shrinkAnchorX, carryX: carryX)
     }
 

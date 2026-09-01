@@ -1816,4 +1816,52 @@ struct ShellNavigationTests {
         #expect(ShellMetrics.railWidth() == 361)
         #expect(ShellMetrics.railWidth(page: 440) == 408)
     }
+
+    // MARK: - Leaving the overview by hand
+
+    /// **The pull back out is tracked for its whole length**, over exactly the
+    /// distance the lift spent putting the page away.
+    ///
+    /// The point of the assertion is the pair of endpoints and the fact that
+    /// there is something in between: what this replaced had no in-between at
+    /// all, only a boolean read at the release.
+    @Test func thePullOutOfTheOverviewIsTrackedOverTheLiftsOwnRun() {
+        #expect(ShellGesture.pullProgress(down: 0) == 0)
+        #expect(ShellGesture.pullProgress(down: ShellMetrics.overRun) == 1)
+        #expect(ShellGesture.pullProgress(down: ShellMetrics.overRun / 2) == 0.5)
+        // Clamped at both ends: a drag that wanders upward moves nothing, and
+        // one that keeps going past the display has nothing left to grow.
+        #expect(ShellGesture.pullProgress(down: -120) == 0)
+        #expect(ShellGesture.pullProgress(down: 400) == 1)
+    }
+
+    /// **The release reads momentum**, which is what makes a flick down off
+    /// the top of the grid mean the same thing as a deliberate pull.
+    ///
+    /// Two gestures that travelled the SAME distance and resolve differently,
+    /// which is the whole of the projection: 20 points placed and let go of
+    /// stays, 20 points still moving at 600 points a second leaves.
+    @Test func aFlickOutOfTheGridLeavesAndAPlacedTwentyPointsDoesNot() {
+        #expect(!ShellGesture.pullCommits(down: 20))
+        #expect(ShellGesture.pullCommits(down: 20, velocity: 600))
+        // And the deliberate pull is unchanged: the threshold is still the
+        // same 40 points it was when it was read off the translation alone,
+        // so nothing anybody had learned about this gesture stopped being
+        // true.
+        #expect(!ShellGesture.pullCommits(down: 39.9))
+        #expect(ShellGesture.pullCommits(down: 40))
+    }
+
+    /// The commit sits just past the half way point of the motion the pull
+    /// draws, so letting go of a page more than half way home sends it home.
+    ///
+    /// Stated as a relationship rather than as two numbers, because the two
+    /// numbers only mean anything together — a threshold beyond the travel
+    /// would be a gesture that tracks all the way and then refuses.
+    @Test func lettingGoPastHalfWayHomeGoesHome() {
+        #expect(ShellMetrics.pullDismiss > ShellMetrics.overRun / 2)
+        #expect(ShellMetrics.pullDismiss < ShellMetrics.overRun)
+        #expect(ShellGesture.pullCommits(down: ShellMetrics.overRun * 0.6))
+        #expect(!ShellGesture.pullCommits(down: ShellMetrics.overRun * 0.4))
+    }
 }

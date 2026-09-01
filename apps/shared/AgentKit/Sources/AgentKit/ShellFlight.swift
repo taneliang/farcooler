@@ -380,4 +380,49 @@ enum ShellFlight {
             width: anchorX * (1 - scale) + carryX,
             height: page.height * (1 - scale) - rise)
     }
+
+    /// Where a page sits while a FINGER is taking it back out of the grid.
+    ///
+    /// **The straight line between `offset`'s two branches, walked by a
+    /// thumb.** Those branches are the two ends of this journey already — the
+    /// cell a card is drawn in, and the display a page fills — and the flight
+    /// that runs between them on release is a spring interpolating one into
+    /// the other. A pull-down is that same interpolation with the clock taken
+    /// off it, so this is the same arithmetic and not a second opinion about
+    /// where a returning page goes.
+    ///
+    /// `progress` 0 is the cell and 1 is the display. At 0 it is byte for byte
+    /// `offset(landing: true)` and at 1 it is the display's own origin, which
+    /// is the property that lets a pull begin and end without a step: the
+    /// first frame of a tracked pull draws the page exactly where the grid was
+    /// already drawing its card, and the last frame draws it exactly where a
+    /// finished flight leaves it.
+    ///
+    /// Only the PLACE. How big the page is drawn is `scale`'s job and how much
+    /// of it is drawn is `height`'s, and both of those already read `cropped`
+    /// — which the same thumb is driving. Three functions of one progress, and
+    /// no fourth thing to keep in step.
+    ///
+    /// The home end is anchored at the middle of the display rather than under
+    /// the finger, and that matches the release flight's own rule: a page
+    /// growing back out of a cell has no grab point on it — the finger is on
+    /// the grid, not on the page — so growing about its own centre is the only
+    /// unbiased answer. See `ShellPageLayer.shrinkAnchorX`, which says the
+    /// same thing about the same journey run by a spring.
+    static func returning(
+        page: CGRect, tile: CGRect?, scale: CGFloat, progress: CGFloat
+    ) -> CGSize {
+        guard page.width > 0 else { return .zero }
+        let home = offset(
+            page: page, tile: tile, landing: false, scale: scale, rise: 0,
+            anchorX: page.width / 2, carryX: 0)
+        guard let tile else { return home }
+        let cell = offset(
+            page: page, tile: tile, landing: true, scale: scale, rise: 0, anchorX: 0,
+            carryX: 0)
+        let along = min(1, max(0, progress))
+        return CGSize(
+            width: cell.width + (home.width - cell.width) * along,
+            height: cell.height + (home.height - cell.height) * along)
+    }
 }

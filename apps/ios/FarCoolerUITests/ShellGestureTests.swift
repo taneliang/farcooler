@@ -635,6 +635,68 @@ final class ShellGestureTests: XCTestCase {
             try state(app)["overview"], 1, "scrolling the grid back to its top closed it")
     }
 
+    /// **The grid moves DURING the pull, not only at the end of it — and it
+    /// comes back if you change your mind.**
+    ///
+    /// The way into the overview is a continuous, tracked, abandonable lift.
+    /// The way out was a `DragGesture(minimumDistance: 20)` whose `onChanged`
+    /// recorded one boolean and whose `onEnded` either dismissed or did not:
+    /// the path was symmetric and the TRACKING was not, and tracking is what
+    /// makes a path readable. WWDC 2018 803: *"avoid methods that are only
+    /// detected at the end of the gesture"*, and, on why it matters, *"you
+    /// actually wouldn't know the difference between a frozen phone, and phone
+    /// that's just at the top of the edge of the screen."*
+    ///
+    /// **Asserted on the probe and not on pixels**, and that is the whole
+    /// design of this test. Pixels change mid-pull either way: the grid is a
+    /// scroll view at its top, so a downward drag rubberbands the cards down
+    /// whether or not anything else is happening, and a screenshot comparison
+    /// would have passed on the bounce alone — the same trap the card and
+    /// column tests each had to be rewritten to get out of. `pull=` is the
+    /// tracked value itself, in hundredths, and nothing but the reverse reveal
+    /// can move it.
+    ///
+    /// The drag is held for two seconds so the probe can be read while the
+    /// finger is still down, and it is released from a standstill on purpose:
+    /// 38 points is inside the 40 that commits, so this is the ABANDON, and
+    /// the assertion after it is that everything went back.
+    func testThePullOutOfTheGridTracksTheFingerAndCanBeAbandoned() throws {
+        let app = launch(["-shell-40"])
+        liftBar(app, by: 320)
+        XCTAssertEqual(try state(app)["overview"], 1, "the lift never reached the overview")
+        XCTAssertEqual(try state(app)["pull"], 0, "the overview opened part way out of itself")
+
+        // 58 points: twenty of hysteresis the gesture subtracts before it
+        // tracks anything, and thirty-eight of travel after it — which is half
+        // of `overRun` and two points inside the throw that commits.
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let to = from.withOffset(CGVector(dx: 0, dy: 58))
+
+        var midPull: [String: Int]?
+        let read = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) {
+            midPull = try? self.state(app)
+            read.signal()
+        }
+        from.press(
+            forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 2.0)
+        XCTAssertEqual(read.wait(timeout: .now() + 15), .success, "the probe was never read")
+
+        let during = try XCTUnwrap(midPull, "the shell never answered mid-pull")
+        XCTAssertGreaterThan(
+            during["pull"] ?? 0, 20,
+            "the grid was \(during["pull"] ?? -1)% of the way out with a thumb 58 points down "
+                + "it — the pull-down moves nothing until the finger lifts")
+        XCTAssertEqual(
+            during["overview"], 1,
+            "the overview left before the finger did")
+
+        // And the release puts it back, because it was abandoned.
+        let after = try state(app)
+        XCTAssertEqual(after["overview"], 1, "a pull released short of the threshold dismissed")
+        XCTAssertEqual(after["pull"], 0, "the page never went back into its cell")
+    }
+
     /// The other half of the same rule: a pull-down that BEGINS at the top is
     /// still the way out by touch, and the fix must not have removed it.
     func testAPullDownFromTheTopOfTheGridStillClosesIt() throws {
@@ -747,6 +809,68 @@ final class ShellGestureTests: XCTestCase {
             "the card is \(String(format: "%.1f", atRest)) bright at rest and "
                 + "\(String(format: "%.1f", underThumb)) under a thumb — a card that fades "
                 + "under a finger looks like a card that did not take the press")
+    }
+
+    /// **A pinned column highlights the row under the thumb, not the tab you
+    /// are already on.** The second half of the touch-down defect, on the
+    /// surface the first half does not reach.
+    ///
+    /// A column held open by a tap answered the next touch with nothing:
+    /// `fingerAbove` was written only once a drag had chosen a vertical axis,
+    /// and `columnSelection` short-circuited on `columnPinned && lift == 0`
+    /// straight to the current tab. So the shell's primary tab switcher kept
+    /// its highlight where you already were for the whole press and moved it
+    /// at the instant you let go.
+    ///
+    /// **Measured against a NEIGHBOURING row rather than against the same row
+    /// at rest, and that is what makes this test mean anything.** The bar is
+    /// `GlassSurface(interactive: true)`, so the platform lights the whole
+    /// surface up at the point of contact — about nine levels of brightness,
+    /// which is plenty to carry a naive assertion. A first draft compared the
+    /// pressed row with itself at rest and passed on that reaction alone while
+    /// the highlight sat on the wrong row. Both rows are inside the same piece
+    /// of glass and take the same reaction, so the difference BETWEEN them is
+    /// the selection fill and nothing else.
+    func testAColumnRowLightsUpUnderAThumb() throws {
+        let app = launch()
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertEqual(try state(app)["pinned"], 1, "a tap did not hold the column open")
+
+        // Workspace 0 has three tabs and the current one is 0, which is the
+        // row at the TOP of the column — so the row nearest the bar is tab 2,
+        // is unlit at rest, and is the one this puts a thumb on. The row above
+        // it is tab 1, which is lit in neither picture and is the reference.
+        let frame = bar.frame
+        func row(_ fromBottom: Int) -> CGRect {
+            CGRect(
+                x: frame.minX, y: frame.maxY - CGFloat(rowHeight) * CGFloat(fromBottom + 2),
+                width: frame.width, height: CGFloat(rowHeight))
+        }
+        _ = try settledFingerprint(in: row(0))
+        let rest = XCUIScreen.main.screenshot().image
+
+        var shot: XCUIScreenshot?
+        let taken = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + pressHold / 2) {
+            shot = XCUIScreen.main.screenshot()
+            taken.signal()
+        }
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX, dy: frame.maxY - CGFloat(rowHeight) * 1.5))
+            .press(forDuration: pressHold)
+        XCTAssertEqual(taken.wait(timeout: .now() + 10), .success, "no screenshot was taken")
+        let pressed = try XCTUnwrap(shot).image
+
+        let apart = try meanBrightness(pressed, in: row(0)) - meanBrightness(pressed, in: row(1))
+        let atRest = try meanBrightness(rest, in: row(0)) - meanBrightness(rest, in: row(1))
+        XCTAssertGreaterThan(
+            apart, 8,
+            "the row under the thumb stands \(String(format: "%.2f", apart)) above the row "
+                + "over it, against \(String(format: "%.2f", atRest)) with nothing touching "
+                + "either — a pinned column keeps its highlight on the tab you are already "
+                + "on until the finger lifts")
     }
 
     /// How long a finger stays down, and how long the control waits. One

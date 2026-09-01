@@ -182,7 +182,30 @@ extension ShellRootView {
                     dx: frame.sideways, rubberBanding: rubberBands(frame.sideways))
                 : 0
         case nil:
-            break
+            // **No axis yet is not "nothing to draw" — it is TOUCH-DOWN**, and
+            // it is the only frame a column held open by a tap ever gets.
+            //
+            // A pinned column has `lift == 0` and a finger that has not moved,
+            // so it never reaches the vertical arm above and the highlight sat
+            // on the tab you were already on until the finger LIFTED, and then
+            // jumped. That is the shell's primary tab switcher answering a
+            // touch with nothing, on the one surface where the answer is
+            // already drawn and only needs pointing at. WWDC 2018 803 puts it
+            // first among the things a tap owes: *"the button should highlight
+            // immediately when I touch down on it… but we shouldn't confirm the
+            // tap until my touch goes up."*
+            //
+            // `columnAbove` is the same guard and `ShellGesture.columnRow` the
+            // same mapping the release resolves through, so this adds a
+            // MOMENT, not a second answer: it is nil unless a column is
+            // actually showing and nil unless the touch is on it, which leaves
+            // an ordinary bar drag writing nothing here and a tap on the bar
+            // itself the toggle it always was.
+            //
+            // `lift` and not a frame value: this arm runs before any axis has
+            // been decided, so the shell is drawing whatever it was drawing —
+            // for a pinned column, zero.
+            fingerAbove = columnAbove(point, lift: lift)
         }
         // Its own transaction, and the only one here. See `syncMenu`.
         syncMenu()
@@ -566,7 +589,11 @@ extension ShellRootView {
         // menu suppressed by a redirection that finished a minute ago. Both
         // `onEnded`s spend what they need of it before calling this.
         barDrag = ShellBarDrag()
-        withAnimation(Self.settle) { lift = 0 }
+        // `settled`, not `settle`: the thumb went UP and the page falls DOWN,
+        // so there is no momentum here to reward. See `ShellRootView.settled`,
+        // which carries the trace — the bounce was thirteen frames of the
+        // whole overview kept mounted behind a workspace.
+        withAnimation(Self.settled) { lift = 0 }
     }
 
     private func apply(_ release: ShellRelease, dx: CGFloat, page: CGFloat, wasOpen: Bool) {
@@ -576,7 +603,11 @@ extension ShellRootView {
         case .springBack, .abandon:
             withAnimation(Self.settle) { flatten() }
         case .land(let tab):
-            withAnimation(Self.settle) {
+            // `settled`, for the reason a tapped menu is: choosing a row has
+            // no momentum toward the row — the finger is resting on it. See
+            // `ShellRootView.settled`, including the trace showing that this
+            // animation currently carries nothing at all.
+            withAnimation(Self.settled) {
                 position.tab = tab
                 // Landing on a row is choosing from the column, so the column
                 // has done its job. It furls whether it was pinned or dragged
@@ -844,6 +875,146 @@ extension ShellRootView {
                 reveal = 0
                 overviewSearch = ""
             }
+        }
+    }
+
+    // MARK: - The way back out, under a thumb
+
+    /// One frame of the pull-down that takes the page back out of the grid.
+    ///
+    /// **`flyOut`, with the clock taken off it.** Everything the release
+    /// spring does — the handover, the crop unwrapping, the corner, the card's
+    /// face dissolving, the page finding the display — is a function of
+    /// `cropped` and `pullOut`, and this hands both of them to a thumb. There
+    /// is no second motion here and no second set of numbers: a tracked
+    /// dismissal and a sprung one draw the same frames in the same order, and
+    /// only the thing advancing them differs.
+    ///
+    /// **Not inside an animation, which is the whole of "one point for one
+    /// point".** Every value written is already the answer for where the
+    /// finger is right now, so there is nothing for a spring to interpolate
+    /// toward except a target the thumb has since left — the rule
+    /// `ShellDrag.barMoved` states for the lift, applied to the lift's
+    /// reverse. Wrapped in `tracking` this would be the same 43-point lag
+    /// measured on the way up, felt on the way down.
+    func overviewPulled(_ down: CGFloat) {
+        guard overview else { return }
+        if !pullingOut { beginPullOut() }
+        notePullMovement(down)
+        let along = ShellGesture.pullProgress(down: down)
+        pullOut = along
+        // The page unwraps out of the card as it comes: crop, scale, corner
+        // and the card's own face all hang off this one number, the same way
+        // they do on the flight. See `ShellFlight` — none of the four is
+        // computed twice.
+        cropped = 1 - along
+        // And the grid goes as the page covers it, which is `reveal` run
+        // backwards. It is the same fade the lift brought it up on.
+        reveal = 1 - along
+    }
+
+    /// The page takes its cell back before it has moved a point.
+    ///
+    /// The handover half of `flyOut`, run once on the first frame of a pull
+    /// rather than at the start of a spring. It is invisible when it happens
+    /// and that is by construction: at zero progress the page is drawn at
+    /// exactly the cell's rectangle with `cropped` still 1, so what fades in
+    /// over the card is a picture of the card, in its place, at its size.
+    /// `ShellFlight.returning`'s zero end is what guarantees that, and it is
+    /// asserted in `ShellFlightTests`.
+    private func beginPullOut() {
+        pullingOut = true
+        flights += 1
+        // A page a finger is pulling out of the grid still has no grab point
+        // ON it — the thumb is on the cards — so it grows about its own
+        // centre, the same as one a spring is growing. See
+        // `ShellFlight.returning`.
+        liftOrigin = nil
+        withAnimation(Self.handover, completionCriteria: .logicallyComplete) {
+            pageAlpha = 1
+        } completion: {
+            var silent = Transaction()
+            silent.disablesAnimations = true
+            withTransaction(silent) { cellIsHole = true }
+        }
+    }
+
+    /// The pull let go of.
+    ///
+    /// Two arms and one rule between them: the ESCAPE is decided on where the
+    /// gesture was going — `ShellGesture.pullCommits`, which projects the
+    /// finger's momentum the way every other release in this shell now does —
+    /// and whichever arm runs, it starts from what is on the screen rather
+    /// than from a state the release invented.
+    func overviewPullReleased(_ down: CGFloat, velocity: CGFloat) {
+        guard pullingOut else { return }
+        pullingOut = false
+        let thrown = pullReleaseVelocity(velocity)
+        pullMoved = nil
+        guard ShellGesture.pullCommits(down: down, velocity: thrown) else {
+            return abandonPullOut()
+        }
+        withAnimation(Self.settleOpen, completionCriteria: .logicallyComplete) {
+            // `overview` goes here and not a frame earlier, for the reason
+            // `flyToCell` sets it inside its own spring: it is what chooses
+            // which end of `ShellFlight`'s journey the page is being drawn
+            // against, so a spring that owns the change interpolates from
+            // whatever was last drawn to the display with nothing in between.
+            overview = false
+            reveal = 0
+            cropped = 0
+            overviewSearch = ""
+        } completion: {
+            flights -= 1
+            var silent = Transaction()
+            silent.disablesAnimations = true
+            withTransaction(silent) { pullOut = 0 }
+        }
+    }
+
+    /// Half a point of slop, because the question is whether the finger is
+    /// travelling and not whether the digitizer jittered. `noteMovement`, for
+    /// the gesture that does not go through it — see `ShellRootView.pullMoved`.
+    private func notePullMovement(_ down: CGFloat) {
+        guard let last = pullMoved else {
+            pullMoved = (down: down, at: Date())
+            return
+        }
+        guard abs(down - last.down) > 0.5 else { return }
+        pullMoved = (down: down, at: Date())
+    }
+
+    /// The velocity a pull's release is entitled to: what it reports while it
+    /// was still moving, and flatly zero once it had stopped.
+    ///
+    /// `releaseVelocity`, for the same reason and with the same number. A
+    /// finger parked on a half-open overview is not going anywhere, and a
+    /// projection is a claim about where it was going.
+    private func pullReleaseVelocity(_ velocity: CGFloat) -> CGFloat {
+        guard let last = pullMoved, Date().timeIntervalSince(last.at) <= Self.stillFor
+        else { return 0 }
+        return velocity
+    }
+
+    /// The page goes back into its cell, because the finger changed its mind.
+    ///
+    /// **The half a threshold cannot have.** A gesture you can see is a
+    /// gesture you can abandon, and abandoning is the thing this whole change
+    /// buys: the dismissal it replaced moved nothing until the release, so
+    /// there was never a moment at which there was something to put back.
+    ///
+    /// `settle` rather than `settleOpen`: what runs this IS a finger, with
+    /// real downward momentum that the shell is now refusing — the page has to
+    /// climb back against it — which is the case the talk says to reward with
+    /// a little overshoot. `settleOpen` is fully damped because everything
+    /// that reaches it is a tap.
+    private func abandonPullOut() {
+        withAnimation(Self.settle, completionCriteria: .logicallyComplete) {
+            pullOut = 0
+            cropped = 1
+            reveal = 1
+        } completion: {
+            land()
         }
     }
 
