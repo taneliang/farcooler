@@ -35,6 +35,7 @@ fn entry(key: &str, client_id: &str) -> String {
         client_id,
         Scope::Control,
         fence::Grant::FarCooler,
+        None,
     )
     .expect("render")
 }

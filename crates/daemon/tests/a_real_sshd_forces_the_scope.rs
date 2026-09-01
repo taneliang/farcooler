@@ -273,8 +273,9 @@ async fn start(client_id: &str, scope: Scope) -> Runner {
 
     // The line, from the shipped renderer. Not a string in this file: what is on
     // trial is whether OpenSSH accepts what `render` writes.
-    let line = fence::render(received.trim(), "Test Device", client_id, scope, Grant::FarCooler)
-        .expect("render a Key A line");
+    let line =
+        fence::render(received.trim(), "Test Device", client_id, scope, Grant::FarCooler, None)
+            .expect("render a Key A line");
     let authorized_keys = home.join(".ssh").join("authorized_keys");
     fence::write(
         &authorized_keys,

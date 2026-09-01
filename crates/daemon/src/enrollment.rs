@@ -61,6 +61,8 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
         &request.client_id,
         Scope::try_from(request.scope).unwrap_or(Scope::Unspecified),
         grant,
+        // Task 9's enrollment ceremony carries a node key; nothing does yet.
+        None,
     )
     .map_err(refused)?;
     // Read the line just rendered with the parser that will read it back out of
@@ -311,6 +313,7 @@ fn refused(rejected: Rejected) -> DomainError {
             // For `ShellScope` the field that disagrees with `shell_access` is
             // `scope`, and naming it is what says which of the two to change.
             Rejected::Unscoped | Rejected::ShellScope => "scope",
+            Rejected::NodeKey => "node_key",
         },
     }
 }
@@ -381,6 +384,7 @@ mod tests {
             client_id: client_id.into(),
             scope: Scope::Read,
             label: "farcooler-phone-aaaaaaaa".into(),
+            node_key: String::new(),
             account: None,
             line: line.into(),
             shell_access: false,
@@ -399,12 +403,14 @@ mod tests {
             Rejected::ClientId,
             Rejected::Unscoped,
             Rejected::ShellScope,
+            Rejected::NodeKey,
         ] {
             let DomainError::InvalidArgument { what } = refused(rejected) else {
                 panic!("{rejected:?} did not map to an invalid argument");
             };
             assert!(
-                ["public_key", "public_key algorithm", "client_id", "scope"].contains(&what),
+                ["public_key", "public_key algorithm", "client_id", "scope", "node_key"]
+                    .contains(&what),
                 "{rejected:?} named {what}, which is not a field of the request"
             );
         }
@@ -417,7 +423,7 @@ mod tests {
         // find again.
         let key = "ssh-ed25519 \
                    AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA x";
-        let line = fence::render(key, "iPhone", "c1", Scope::Control, fence::Grant::FarCooler)
+        let line = fence::render(key, "iPhone", "c1", Scope::Control, fence::Grant::FarCooler, None)
             .expect("render");
         let entry = read_back(&line).expect("read back");
         assert_eq!(entry.client_id, "c1");
@@ -437,8 +443,9 @@ mod tests {
     fn a_plain_line_of_ours_is_managed_rather_than_mistaken_for_a_strangers() {
         let key = "ssh-ed25519 \
                    AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA x";
-        let line = fence::render(key, "MacBook Air", "mac-1", Scope::HostAdmin, fence::Grant::Shell)
-            .expect("render");
+        let line =
+            fence::render(key, "MacBook Air", "mac-1", Scope::HostAdmin, fence::Grant::Shell, None)
+                .expect("render");
         let entry = read_back(&line).expect("read back");
         assert_eq!(entry.client_id, "mac-1");
         assert!(entry.shell_access);

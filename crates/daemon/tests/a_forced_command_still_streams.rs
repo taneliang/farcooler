@@ -438,6 +438,7 @@ async fn start() -> Runner {
         "phone-7",
         Scope::Control,
         Grant::FarCooler,
+        None,
     )
     .expect("render a Key A line");
     let plain = fence::render(
@@ -446,6 +447,7 @@ async fn start() -> Runner {
         "mac-1",
         Scope::HostAdmin,
         Grant::Shell,
+        None,
     )
     .expect("render a Key B line");
 
