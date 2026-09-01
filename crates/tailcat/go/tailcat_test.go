@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -728,7 +729,7 @@ func TestATokenWhoseRelayIsGoneBlamesTheRendezvous(t *testing.T) {
 // The nodes are loopback with STUN disabled, so netcheck fails against them
 // fast rather than probing the internet: nothing here is meant to carry a
 // packet, only to be a map that either does or does not list a region.
-func serveDERPMap(t *testing.T, regionIDs ...int) {
+func serveDERPMap(t *testing.T, regionIDs ...int) *atomic.Int64 {
 	t.Helper()
 	regions := map[string]any{}
 	for _, id := range regionIDs {
@@ -746,12 +747,15 @@ func serveDERPMap(t *testing.T, regionIDs ...int) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
+	var fetches atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(body)
 	}))
 	t.Cleanup(server.Close)
 	pointAtDERPMap(t, server.URL+"/derpmap.json")
+	return &fetches
 }
 
 // pointAtDERPMap sets the package's DERP map URL for the length of the test.
@@ -802,11 +806,24 @@ func pinnedIdentity(t *testing.T, regionID tailcfg.DERPRegionID) string {
 func TestARegionThatHasLeftTheMapIsForgotten(t *testing.T) {
 	captureLog(t)
 	defer restoreServerState(t, nil, closeServer)()
-	serveDERPMap(t, 901) // 900 is not in it
+	fetches := serveDERPMap(t, 901) // 900 is not in it
 	path := pinnedIdentity(t, 900)
 
-	if rc := serve(path, 22, keyA); rc != 0 {
+	start := time.Now()
+	rc := serve(path, 22, keyA)
+	elapsed := time.Since(start)
+	t.Logf("recovering from a withdrawn region took %s and %d map fetches", elapsed.Round(time.Millisecond), fetches.Load())
+	if rc != 0 {
 		t.Fatalf("serve did not recover from a withdrawn region: rc=%d", rc)
+	}
+	// The worst path reads the map twice by the code's shape -- once inside
+	// Start, once to ask whether the region is still listed -- and serve holds
+	// mu for both. Upstream caches a fetched map process-wide for an hour, so
+	// the second read should cost no request at all. That is the difference
+	// between one regionPickTimeout under the lock and two, and it is asserted
+	// here rather than assumed.
+	if got := fetches.Load(); got != 1 {
+		t.Fatalf("the DERP map was fetched %d times; the process-wide cache did not collapse the second read", got)
 	}
 	if server == nil {
 		t.Fatal("the retry succeeded and its server was not recorded")
@@ -861,6 +878,9 @@ func TestARegionStillInTheMapKeepsThePin(t *testing.T) {
 		t.Fatalf("parseAllowed: %v", err)
 	}
 
+	// serve holds mu across this call; nothing here is driven concurrently, so
+	// it is called bare. A test that ever drives two of these at once has to
+	// take mu, because the recovery reads derpMapURL and writes server.
 	var s *tailcat.Server
 	rc := recoverFromAPinThatWillNotStart(&s, path, id, 22, allowed, errors.New("something else went wrong"))
 	if rc != -int(syscall.EIO) {

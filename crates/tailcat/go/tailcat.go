@@ -70,8 +70,10 @@ const drainTimeout = 2 * time.Second
 // whatever context it is given.
 const dialTimeout = 30 * time.Second
 
-// regionPickTimeout bounds the one netcheck a runner runs on its first start,
-// to choose the relay it then keeps.
+// regionPickTimeout bounds choosing a relay, END TO END: fetching the DERP map
+// and running the netcheck that picks from it share one deadline rather than
+// getting one each. Two would make the real worst case twice the number
+// written here, and this number is the one `serve` holds mu for.
 const regionPickTimeout = 15 * time.Second
 
 // relayProbeTimeout bounds one TCP connect to a DERP node, on the failure path
@@ -477,7 +479,9 @@ func pinRegion(path string, id identity) error {
 	if err := dir.Sync(); err != nil {
 		log.Printf("tailcat: could not sync %s after pinning: %v", filepath.Dir(path), err)
 	}
-	dir.Close()
+	if err := dir.Close(); err != nil {
+		log.Printf("tailcat: could not close %s after pinning: %v", filepath.Dir(path), err)
+	}
 	return nil
 }
 
@@ -492,20 +496,20 @@ func pinRegion(path string, id identity) error {
 // Doing the pick here costs one netcheck on a runner's very first start and
 // nothing on every start after it.
 func chooseRegion(mapURL string) (tailcfg.DERPRegionID, error) {
-	dm, err := regionMap(mapURL)
+	ctx, cancel := context.WithTimeout(context.Background(), regionPickTimeout)
+	defer cancel()
+	dm, err := regionMap(ctx, mapURL)
 	if err != nil {
 		return 0, err
 	}
-	return pickRegionIn(dm)
+	return pickRegionIn(ctx, dm)
 }
 
 // regionMap fetches the DERP map this runner chooses from. It is split out of
 // chooseRegion because deciding whether a pinned region is gone means asking
 // the map, and a map that cannot be read is a different answer from a map that
 // no longer lists it.
-func regionMap(mapURL string) (*tailcfg.DERPMap, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), regionPickTimeout)
-	defer cancel()
+func regionMap(ctx context.Context, mapURL string) (*tailcfg.DERPMap, error) {
 	opts := []any{tailcat.ExpandForServer}
 	if mapURL != "" {
 		opts = append(opts, tailcat.DERPMapURL(mapURL))
@@ -513,9 +517,7 @@ func regionMap(mapURL string) (*tailcfg.DERPMap, error) {
 	return tailcat.FetchDERPMap(ctx, opts...)
 }
 
-func pickRegionIn(dm *tailcfg.DERPMap) (tailcfg.DERPRegionID, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), regionPickTimeout)
-	defer cancel()
+func pickRegionIn(ctx context.Context, dm *tailcfg.DERPMap) (tailcfg.DERPRegionID, error) {
 	return tailcat.PickBestRegion(ctx, dm)
 }
 
@@ -543,6 +545,18 @@ func stopServer() {
 // with no server at all, which is the correct end state for a runner that
 // admits nobody: tailcat reads an empty AllowedClients as "admit everyone", so
 // forwarding one would open this runner's sshd to anyone holding the token.
+//
+// It holds mu throughout, and that is worth a number rather than a shrug. The
+// happy path is one Start — 170 to 450 ms measured. A first start adds one
+// region pick, bounded by regionPickTimeout. The worst path is a pinned region
+// that has gone: a failed Start, then a map read that upstream's process-wide
+// cache serves without a request (measured: the second fetch of the same URL
+// makes no HTTP call at all), then a pick, then a second Start. So the bound
+// is roughly two Starts plus one regionPickTimeout, not two of them.
+//
+// What waits behind it is conn_blob and allow_add on the same runner. dial
+// takes mu only to read the DERP map URL, and in practice a process is a
+// runner or a client rather than both.
 func serve(keyPath string, sshPort uint16, allow string) (rc int) {
 	defer recoverToErrno(&rc)
 	mu.Lock()
@@ -601,7 +615,9 @@ func serve(keyPath string, sshPort uint16, allow string) (rc int) {
 // written down here, so the runner does not go on serving a token that would
 // move again at the next start.
 func recoverFromAPinThatWillNotStart(s **tailcat.Server, keyPath string, id identity, sshPort uint16, allowed []key.NodePublic, startErr error) int {
-	dm, err := regionMap(derpMapURL)
+	ctx, cancel := context.WithTimeout(context.Background(), regionPickTimeout)
+	defer cancel()
+	dm, err := regionMap(ctx, derpMapURL)
 	if err != nil {
 		log.Printf("tailcat: DERP region %d would not start (%v) and the map could not be read (%v); keeping the pin", id.regionID, startErr, err)
 		return -int(syscall.EIO)
@@ -613,7 +629,7 @@ func recoverFromAPinThatWillNotStart(s **tailcat.Server, keyPath string, id iden
 
 	log.Printf("tailcat: DERP region %d has left the map; choosing again", id.regionID)
 	next := identity{priv: id.priv}
-	if picked, err := pickRegionIn(dm); err != nil || picked == 0 {
+	if picked, err := pickRegionIn(ctx, dm); err != nil || picked == 0 {
 		log.Printf("tailcat: could not choose a region to replace %d (%v); serving unpinned", id.regionID, err)
 	} else {
 		next.regionID = picked
