@@ -1,3 +1,4 @@
+import CoreText
 import FarCoolerVT
 import PhotosUI
 import SwiftUI
@@ -20,6 +21,622 @@ private enum TerminalMetrics {
             width: width.rounded(.up),
             height: (font.ascender - font.descender + font.leading).rounded(.up))
     }
+}
+
+/// Where the grid sits inside the canvas, and at what scale.
+///
+/// The same numbers `TerminalRenderer.draw` lays glyphs out with, and what
+/// `TerminalView.cell(at:grid:size:)` inverts to turn a touch back into a
+/// column and row. Kept as one calculation because the two had a habit of
+/// drifting apart the moment they were two.
+struct TerminalGridLayout {
+    var scale: CGFloat
+    var cell: CGSize
+    var origin: CGPoint
+}
+
+/// Which character sits at which index inside which typeface, worked out once
+/// and then never again.
+///
+/// This is the whole of why the terminal draws at frame rate. The renderer
+/// used to hand SwiftUI a `Text` per cell — 2,090 of them on a 55×38 grid —
+/// and each one is a full text pipeline: an attributed string, a `CTLine`,
+/// shaping, a run, a rasterisation. Nothing about that work changes between
+/// frames, or between the thousand cells on screen showing the letter `e`.
+///
+/// A glyph *index* does not depend on point size, so one cache serves every
+/// size the pane is ever drawn at, including the fractional ones a reflow
+/// produces. Only the sized `CTFont` handles are per-size, and there are two
+/// of those.
+///
+/// ## Why this is also the ligature answer
+///
+/// A terminal must never show `!=` as `≠`: the grid is one glyph per cell at
+/// an exact position, and a program that printed two characters must get two
+/// characters. Batching cells into a shared `Text` — the obvious way to cut
+/// 2,090 draws down to 38 — is exactly what turns those two characters into a
+/// ligature.
+///
+/// Measured against the font this app actually bundles, `kCTLigatureAttributeName
+/// = 0` does NOT prevent it. Iosevka Nerd Font Mono carries its coding
+/// ligatures in `calt`, contextual alternates, not in `liga`; `CTLineCreate`
+/// on `"!="` returns glyphs 28119 and 27864 — the two halves of `≠` — with
+/// ligatures explicitly disabled just as it does without. The attribute
+/// governs `liga`, and this font does not have a `liga` table at all.
+///
+/// Placing glyphs by index sidesteps the question rather than arguing with
+/// it. `CTFontGetGlyphsForCharacters` on `"!"` and `"="` gives 4 and 32, the
+/// plain forms, because it is a `cmap` lookup: there is no shaper in the path
+/// to substitute anything, and no context for it to substitute on. See
+/// `TerminalLigatureTests`.
+@MainActor
+final class TerminalGlyphCache {
+    static let shared = TerminalGlyphCache()
+
+    /// A character's glyph, and the face it had to be found in.
+    struct Resolved: Equatable {
+        /// nil for the terminal's own face; a PostScript name when the
+        /// character was not in it and CoreText named a fallback.
+        var fallback: String?
+        var glyph: CGGlyph
+    }
+
+    private struct GlyphKey: Hashable {
+        var character: Character
+        var bold: Bool
+        var choice: TerminalFontChoice
+    }
+
+    private struct FontKey: Hashable {
+        var name: String?
+        var bold: Bool
+        var size: CGFloat
+        var choice: TerminalFontChoice
+    }
+
+    /// `Resolved?` inside the dictionary, so a character that resolves to
+    /// nothing is remembered as resolving to nothing rather than being
+    /// re-asked on every frame — which is the case that would otherwise be
+    /// the slowest one.
+    private var glyphs: [GlyphKey: Resolved?] = [:]
+    private var fonts: [FontKey: CTFont] = [:]
+    private var colors: [UInt32: CGColor] = [:]
+    private var cells: [FontKey: CGSize] = [:]
+    private var baselines: [FontKey: CGFloat] = [:]
+
+    /// The box one character occupies, measured once per font and size.
+    ///
+    /// `TerminalMetrics.cell` lays a glyph out to measure it, which is a text
+    /// layout — and the renderer asks for this on every draw, as do the
+    /// accessibility value and the keystroke sink beside it. Three text
+    /// layouts a frame to re-derive a number that only changes when somebody
+    /// opens Settings.
+    func cell(bold: Bool = false, size: CGFloat, choice: TerminalFontChoice) -> CGSize {
+        let key = FontKey(name: nil, bold: bold, size: size, choice: choice)
+        if let cached = cells[key] { return cached }
+        let measured = TerminalMetrics.cell(.terminal(choice, size: size, bold: bold))
+        if cells.count > 24 { cells.removeAll(keepingCapacity: true) }
+        cells[key] = measured
+        return measured
+    }
+
+    /// How far below the top of a row its glyphs sit, for the same font and
+    /// size `cell(bold:size:choice:)` measured the row from — the two are the
+    /// same arithmetic read in opposite directions, so they are answered from
+    /// the same place.
+    func baseline(size: CGFloat, choice: TerminalFontChoice) -> CGFloat {
+        let key = FontKey(name: nil, bold: false, size: size, choice: choice)
+        if let cached = baselines[key] { return cached }
+        let face = UIFont.terminal(choice, size: size)
+        let answer = face.leading + face.ascender
+        if baselines.count > 24 { baselines.removeAll(keepingCapacity: true) }
+        baselines[key] = answer
+        return answer
+    }
+
+    /// The sized face to draw a run with.
+    func font(
+        fallback: String?, bold: Bool, size: CGFloat, choice: TerminalFontChoice
+    ) -> CTFont {
+        let key = FontKey(name: fallback, bold: bold, size: size, choice: choice)
+        if let cached = fonts[key] { return cached }
+        let font: CTFont
+        if let fallback {
+            font = CTFontCreateWithName(fallback as CFString, size, nil)
+        } else {
+            font = UIFont.terminal(choice, size: size, bold: bold) as CTFont
+        }
+        // A reflow walks `size` through a range of fractional values, and
+        // every one of them would otherwise be remembered for the life of the
+        // app. Two dozen is more than any pane needs and small enough that
+        // throwing the lot away costs nothing.
+        if fonts.count > 24 { fonts.removeAll(keepingCapacity: true) }
+        fonts[key] = font
+        return font
+    }
+
+    /// The colour the core packed, as CoreGraphics wants it.
+    ///
+    /// Cached because a terminal has sixteen colours, or two hundred and
+    /// fifty-six of them, and building a `CGColor` per run per frame is a
+    /// per-frame allocation for a value that never changes.
+    func color(_ packed: UInt32) -> CGColor {
+        if let cached = colors[packed] { return cached }
+        // sRGB by name, not `CGColor(red:green:blue:alpha:)`, which is generic
+        // device RGB. `Color(packed:)` is a SwiftUI `Color(red:green:blue:)`
+        // and that is sRGB, so the device variant drew every cell of the grid
+        // in a colour a few values off the one the rest of the app uses — a
+        // difference too small to notice by eye and large enough that a
+        // pixel comparison of the two drawing paths found 88% of the screen
+        // disagreeing.
+        let color = CGColor(
+            colorSpace: Self.srgb,
+            components: [
+                CGFloat((packed >> 16) & 0xFF) / 255,
+                CGFloat((packed >> 8) & 0xFF) / 255,
+                CGFloat(packed & 0xFF) / 255,
+                1,
+            ]) ?? CGColor(gray: 0, alpha: 1)
+        colors[packed] = color
+        return color
+    }
+
+    private static let srgb = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+
+    /// The glyph one character maps to, or nil when no single glyph can stand
+    /// for it.
+    ///
+    /// nil is not a failure: a ZWJ emoji or a base-plus-combining-mark pair is
+    /// genuinely more than one glyph, and the renderer sends those back through
+    /// SwiftUI's own text drawing, which is slow and correct. There are never
+    /// many on a terminal screen.
+    func glyph(
+        for character: Character, bold: Bool, choice: TerminalFontChoice
+    ) -> Resolved? {
+        let key = GlyphKey(character: character, bold: bold, choice: choice)
+        if let cached = glyphs[key] { return cached }
+        let answer = resolve(character, bold: bold, choice: choice)
+        // A ceiling, because the key is a `Character` and the alphabet a
+        // terminal can print is the whole of Unicode. Four thousand is every
+        // character any pane has ever shown and then some; the cost of being
+        // wrong about that is re-resolving them, which is a `cmap` lookup.
+        if glyphs.count > 4096 { glyphs.removeAll(keepingCapacity: true) }
+        glyphs[key] = answer
+        return answer
+    }
+
+    private func resolve(
+        _ character: Character, bold: Bool, choice: TerminalFontChoice
+    ) -> Resolved? {
+        let units = Array(String(character).utf16)
+        // One UTF-16 unit, or a surrogate pair. Anything longer is a sequence,
+        // and a sequence is not one glyph.
+        guard units.count == 1 || units.count == 2 else { return nil }
+        // Any size at all: a glyph index is a property of the typeface, not of
+        // the size it is drawn at.
+        let base = font(fallback: nil, bold: bold, size: 16, choice: choice)
+        if let glyph = single(of: units, in: base) {
+            return Resolved(fallback: nil, glyph: glyph)
+        }
+        // Not in the terminal face — a CJK ideograph, a box-drawing character
+        // some faces lack. Ask CoreText which face does have it, once, and
+        // remember the answer by name so the sized handle can be rebuilt at
+        // any scale.
+        let fallback = CTFontCreateForString(
+            base, String(character) as CFString, CFRangeMake(0, units.count))
+        guard
+            let glyph = single(of: units, in: fallback),
+            let name = CTFontCopyPostScriptName(fallback) as String?
+        else { return nil }
+        return Resolved(fallback: name, glyph: glyph)
+    }
+
+    /// The one non-zero glyph these units map to, or nil.
+    ///
+    /// A surrogate pair reports its glyph in the first slot and zero in the
+    /// second, so "exactly one non-zero" is the test for both lengths. Zero is
+    /// `.notdef`, which is CoreText's way of saying this face does not have
+    /// the character.
+    private func single(of units: [UTF16.CodeUnit], in font: CTFont) -> CGGlyph? {
+        var found = [CGGlyph](repeating: 0, count: units.count)
+        _ = CTFontGetGlyphsForCharacters(font, units, &found, units.count)
+        let real = found.filter { $0 != 0 }
+        return real.count == 1 ? real[0] : nil
+    }
+}
+
+/// How the grid becomes pixels.
+///
+/// Production always draws `.glyphs`. The other two exist so the cost of this
+/// one can be stated as a number rather than asserted, and so the ligature
+/// guard has something that actually fires a ligature to be broken against —
+/// see `TerminalBenchHarness`.
+enum TerminalDrawPath: String {
+    /// Glyph indices placed at cell positions. One CoreText call per distinct
+    /// (face, colour) on the whole screen, and no shaper anywhere in the path.
+    case glyphs
+    #if DEBUG
+    /// One `context.draw(Text)` per cell, which is what this renderer did
+    /// before. Kept only as the measurement's other end.
+    case cellText
+    /// One `Text` per row — the obvious batching, and the wrong one. This
+    /// fires Iosevka's `calt` ligatures, so a row reading `a != b` draws `≠`.
+    /// It is here to be failed against.
+    case rowText
+    #endif
+}
+
+/// The grid, in points.
+///
+/// Split out of `TerminalView` so that a benchmark and a ligature fixture can
+/// drive exactly the drawing the app ships, rather than a copy of it that can
+/// drift.
+@MainActor
+struct TerminalRenderer {
+    var fontChoice: TerminalFontChoice
+    var fontSize: CGFloat
+    var path: TerminalDrawPath = .glyphs
+
+    /// The cell grid the current font and size produce.
+    var cellSize: CGSize {
+        TerminalGlyphCache.shared.cell(size: fontSize, choice: fontChoice)
+    }
+
+    /// Almost never a straight reflow: the pane resizes itself to roughly fit
+    /// (see `TerminalSession.configure`), but the two round trips that takes —
+    /// asking the host, the host reflowing tmux — leave a gap where the grid
+    /// on screen is still the OLD size, and this scales that leftover
+    /// mismatch down rather than cropping it. `scale` is 1 the rest of the
+    /// time.
+    func layout(for grid: TerminalGrid, in size: CGSize) -> TerminalGridLayout {
+        let padding = TerminalMetrics.padding
+        let cell = cellSize
+        let content = CGSize(
+            width: padding.left + padding.right + CGFloat(grid.columns) * cell.width,
+            height: padding.top + padding.bottom + CGFloat(grid.rows) * cell.height)
+        guard content.width > 0, content.height > 0 else {
+            return TerminalGridLayout(scale: 1, cell: cell, origin: .zero)
+        }
+        let scale = min(size.width / content.width, size.height / content.height, 1)
+        return TerminalGridLayout(
+            scale: scale,
+            cell: CGSize(width: cell.width * scale, height: cell.height * scale),
+            origin: CGPoint(x: padding.left * scale, y: padding.top * scale))
+    }
+
+    /// `scrolledBy` is the sub-row nudge the scroll driver is asking for, in
+    /// points, measured from the row the emulator is on. Everything below is
+    /// laid out from `originY`, so adding it there moves the glyphs, the
+    /// background runs and the cursor as one thing — which is the only way the
+    /// grid can be between two rows without coming apart.
+    ///
+    /// Clamped to the canvas, because a number that large could only come from
+    /// a bug and the failure mode of not clamping is a pane that draws nothing
+    /// at all. The value in ordinary use is under half a row, or — past an end
+    /// — whatever the rubberband is currently allowing.
+    ///
+    /// Scaled by hand — every position and font size below is multiplied by
+    /// `scale` directly — rather than through `GraphicsContext.scaleBy`. The
+    /// cell size comes from a fixed font, which is right for a Mac window sized
+    /// to its own terminal and wrong here: the phone renders whatever grid the
+    /// HOST has — 75 columns is normal — and at 13pt that is far wider than any
+    /// phone. `scaleBy` looks like the right tool and reads as one, but it did
+    /// not touch glyphs drawn through `context.draw(_ text: Text, at:anchor:)`:
+    /// a scale of 0.69 was computed correctly and applied to the context on
+    /// every frame while the glyphs kept landing at their full, untransformed
+    /// size. So the fills and the text agree by construction: both are laid out
+    /// in coordinates that already have `scale` baked in.
+    func draw(
+        grid: TerminalGrid, into context: GraphicsContext, size: CGSize,
+        scrolledBy: CGFloat = 0
+    ) {
+        context.fill(
+            Path(CGRect(origin: .zero, size: size)),
+            with: .color(TerminalPalette.background))
+        let layout = layout(for: grid, in: size)
+        guard layout.cell.width > 0, layout.cell.height > 0 else { return }
+        let origin = CGPoint(
+            x: layout.origin.x,
+            y: layout.origin.y + min(max(scrolledBy, -size.height), size.height))
+
+        switch path {
+        case .glyphs:
+            drawByGlyph(grid: grid, into: context, layout: layout, origin: origin)
+        #if DEBUG
+        case .cellText:
+            drawByCellText(grid: grid, into: context, layout: layout, origin: origin)
+        case .rowText:
+            drawByRowText(grid: grid, into: context, layout: layout, origin: origin)
+        #endif
+        }
+    }
+
+    // MARK: - The glyph path
+
+    /// One character that no single glyph stands for, on its way back to
+    /// SwiftUI's text drawing.
+    private struct Leftover {
+        var character: Character
+        var point: CGPoint
+        var color: Color
+        var bold: Bool
+    }
+
+    private struct GlyphBatch: Hashable {
+        var fallback: String?
+        var bold: Bool
+        var color: UInt32
+    }
+
+    /// Where a glyph goes, in the space CoreText will read it in.
+    ///
+    /// The y is negated because the text matrix below is, and the positions
+    /// are transformed by it: see the note on `cg.textMatrix`. Kept as one
+    /// named function so the negation happens in exactly one place — the
+    /// cursor's glyph is placed by the same rule as every other one, and a
+    /// cursor half a screen from its own block is the bug this prevents.
+    static func textSpace(x: CGFloat, baseline: CGFloat) -> CGPoint {
+        CGPoint(x: x, y: -baseline)
+    }
+
+    /// The glyphs of one batch and where each of them goes.
+    ///
+    /// Appended to through `Dictionary`'s defaulting subscript, which mutates
+    /// the stored value in place. Reading the pair out, appending to it and
+    /// writing it back would hold a second reference to both arrays across the
+    /// append and so copy them — every glyph, every frame.
+    private struct GlyphRun {
+        var glyphs: [CGGlyph] = []
+        var positions: [CGPoint] = []
+
+        mutating func append(_ glyph: CGGlyph, at position: CGPoint) {
+            glyphs.append(glyph)
+            positions.append(position)
+        }
+    }
+
+    private func drawByGlyph(
+        grid: TerminalGrid, into context: GraphicsContext, layout: TerminalGridLayout,
+        origin: CGPoint
+    ) {
+        let cache = TerminalGlyphCache.shared
+        let ground = TerminalPalette.backgroundPacked
+        let cell = layout.cell
+        let scaledSize = fontSize * layout.scale
+        // The baseline the glyphs sit on. `TerminalMetrics.cell` builds the
+        // row's height out of ascent, descent and leading, and CoreText puts
+        // the leading above the ascent, so this is the same arithmetic read
+        // downwards from the top of the row.
+        let baseline = cache.baseline(size: scaledSize, choice: fontChoice)
+
+        // Filled by colour across the WHOLE grid rather than per row: a screen
+        // has a handful of distinct colours and thousands of cells, and
+        // `CGContext.fill(_ rects:)` takes the lot in one call.
+        var fills: [UInt32: [CGRect]] = [:]
+        var batches: [GlyphBatch: GlyphRun] = [:]
+        var leftovers: [Leftover] = []
+
+        for row in 0..<grid.rows {
+            let y = origin.y + CGFloat(row) * cell.height
+            var column = 0
+            while column < grid.columns {
+                let background = grid[row, column].backgroundPacked
+                var end = column + 1
+                while end < grid.columns, grid[row, end].backgroundPacked == background {
+                    end += 1
+                }
+                if background != ground {
+                    fills[background, default: []].append(
+                        CGRect(
+                            x: origin.x + CGFloat(column) * cell.width, y: y,
+                            width: CGFloat(end - column) * cell.width, height: cell.height))
+                }
+                column = end
+            }
+
+            column = 0
+            while column < grid.columns {
+                let occupant = grid[row, column]
+                let x = origin.x + CGFloat(column) * cell.width
+                if let character = occupant.character {
+                    if let resolved = cache.glyph(
+                        for: character, bold: occupant.bold, choice: fontChoice)
+                    {
+                        let key = GlyphBatch(
+                            fallback: resolved.fallback, bold: occupant.bold,
+                            color: occupant.foregroundPacked)
+                        batches[key, default: GlyphRun()].append(
+                            resolved.glyph, at: Self.textSpace(x: x, baseline: y + baseline))
+                    } else {
+                        leftovers.append(
+                            Leftover(
+                                character: character, point: CGPoint(x: x, y: y),
+                                color: occupant.foreground, bold: occupant.bold))
+                    }
+                }
+                // A wide character's neighbour is its own spacer; drawing it
+                // too would put a second, blank glyph where the wide one
+                // already reaches.
+                column += occupant.wide ? 2 : 1
+            }
+        }
+
+        // The cursor, resolved before the CoreGraphics pass so the block and
+        // the glyph inside it can be drawn in the same one.
+        var cursor: (rect: CGRect, glyph: TerminalGlyphCache.Resolved?, character: Character?)?
+        if grid.cursorRow < grid.rows, grid.cursorColumn < grid.columns {
+            let occupant = grid[grid.cursorRow, grid.cursorColumn]
+            let rect = CGRect(
+                x: origin.x + CGFloat(grid.cursorColumn) * cell.width,
+                y: origin.y + CGFloat(grid.cursorRow) * cell.height,
+                width: occupant.wide ? cell.width * 2 : cell.width,
+                height: cell.height)
+            let resolved = occupant.character.flatMap {
+                cache.glyph(for: $0, bold: false, choice: fontChoice)
+            }
+            cursor = (rect, resolved, occupant.character)
+        }
+
+        context.withCGContext { cg in
+            for (packed, rects) in fills {
+                cg.setFillColor(cache.color(packed))
+                cg.fill(rects)
+            }
+            // A flipped text matrix, because a `Canvas` hands out a context
+            // whose y grows downwards and CoreText draws glyphs upwards from
+            // their baseline. Without it every glyph is mirrored about its own
+            // baseline.
+            //
+            // The flip is not free of consequence, and the consequence is the
+            // whole of `textSpace(x:baseline:)`: glyph positions handed to
+            // CoreText are in TEXT space, so they go through this matrix too,
+            // and a baseline of 40 lands at user-space y of -40. The first
+            // version of this drew a perfectly correct screenful of glyphs
+            // just above the top edge of the canvas, which looks exactly like
+            // drawing nothing at all.
+            cg.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+            for (key, run) in batches {
+                cg.setFillColor(cache.color(key.color))
+                let font = cache.font(
+                    fallback: key.fallback, bold: key.bold, size: scaledSize,
+                    choice: fontChoice)
+                CTFontDrawGlyphs(font, run.glyphs, run.positions, run.glyphs.count, cg)
+            }
+            if let cursor {
+                cg.setFillColor(cache.color(TerminalPalette.cursorPacked))
+                cg.fill([cursor.rect])
+                if let resolved = cursor.glyph {
+                    cg.setFillColor(cache.color(ground))
+                    let font = cache.font(
+                        fallback: resolved.fallback, bold: false, size: scaledSize,
+                        choice: fontChoice)
+                    var glyph = resolved.glyph
+                    var position = Self.textSpace(
+                        x: cursor.rect.minX, baseline: cursor.rect.minY + baseline)
+                    CTFontDrawGlyphs(font, &glyph, &position, 1, cg)
+                }
+            }
+        }
+
+        // After the CoreGraphics pass, so a character SwiftUI has to draw
+        // still lands on top of the background behind it. Empty on almost
+        // every frame of almost every pane, which is why the two fonts are
+        // built here rather than at the top: nothing about this branch should
+        // cost anything on a screen that never enters it.
+        //
+        // Written out with `if let` rather than as `cursor?.glyph == nil`,
+        // which reads correctly and is not: optional chaining on an optional
+        // tuple gives `Resolved??`, and comparing THAT to nil asks whether the
+        // cursor exists, not whether its glyph resolved. It is false whenever
+        // there is a cursor at all, so the branch below would never run.
+        var cursorNeedsText = false
+        if let cursor, cursor.glyph == nil, cursor.character != nil { cursorNeedsText = true }
+        guard !leftovers.isEmpty || cursorNeedsText else { return }
+        let regular = Font.terminal(fontChoice, size: scaledSize)
+        let bold = Font.terminal(fontChoice, size: scaledSize, bold: true)
+        for leftover in leftovers {
+            context.draw(
+                Text(String(leftover.character))
+                    .font(leftover.bold ? bold : regular)
+                    .foregroundColor(leftover.color),
+                at: leftover.point, anchor: .topLeading)
+        }
+        if let cursor, cursor.glyph == nil, let character = cursor.character {
+            context.draw(
+                Text(String(character)).font(regular)
+                    .foregroundColor(TerminalPalette.background),
+                at: cursor.rect.origin, anchor: .topLeading)
+        }
+    }
+
+    #if DEBUG
+    // MARK: - The two paths that exist to be compared against
+
+    /// What this renderer did before: a `Text` per cell.
+    private func drawByCellText(
+        grid: TerminalGrid, into context: GraphicsContext, layout: TerminalGridLayout,
+        origin: CGPoint
+    ) {
+        let cell = layout.cell
+        let regularFont = Font.terminal(fontChoice, size: fontSize * layout.scale)
+        let boldFont = Font.terminal(fontChoice, size: fontSize * layout.scale, bold: true)
+        for row in 0..<grid.rows {
+            let y = origin.y + CGFloat(row) * cell.height
+            var column = 0
+            while column < grid.columns {
+                let background = grid[row, column].background
+                var end = column + 1
+                while end < grid.columns, grid[row, end].background == background { end += 1 }
+                if background != TerminalPalette.background {
+                    context.fill(
+                        Path(
+                            CGRect(
+                                x: origin.x + CGFloat(column) * cell.width, y: y,
+                                width: CGFloat(end - column) * cell.width,
+                                height: cell.height)),
+                        with: .color(background))
+                }
+                column = end
+            }
+            column = 0
+            while column < grid.columns {
+                let occupant = grid[row, column]
+                if let character = occupant.character {
+                    context.draw(
+                        Text(String(character))
+                            .font(occupant.bold ? boldFont : regularFont)
+                            .foregroundColor(occupant.foreground),
+                        at: CGPoint(x: origin.x + CGFloat(column) * cell.width, y: y),
+                        anchor: .topLeading)
+                }
+                column += occupant.wide ? 2 : 1
+            }
+        }
+        drawCursorAsText(grid: grid, into: context, layout: layout, origin: origin, font: regularFont)
+    }
+
+    /// The obvious batching, and the wrong one: one `Text` per row. Fewer
+    /// draws, and Iosevka's `calt` turns `!=` into `≠` along the way.
+    private func drawByRowText(
+        grid: TerminalGrid, into context: GraphicsContext, layout: TerminalGridLayout,
+        origin: CGPoint
+    ) {
+        let cell = layout.cell
+        let font = Font.terminal(fontChoice, size: fontSize * layout.scale)
+        for row in 0..<grid.rows {
+            let y = origin.y + CGFloat(row) * cell.height
+            var line = ""
+            for column in 0..<grid.columns {
+                line.append(grid[row, column].character ?? " ")
+            }
+            guard !line.allSatisfy({ $0 == " " }) else { continue }
+            context.draw(
+                Text(line).font(font).foregroundColor(grid[row, 0].foreground),
+                at: CGPoint(x: origin.x, y: y), anchor: .topLeading)
+        }
+        drawCursorAsText(grid: grid, into: context, layout: layout, origin: origin, font: font)
+    }
+
+    private func drawCursorAsText(
+        grid: TerminalGrid, into context: GraphicsContext, layout: TerminalGridLayout,
+        origin: CGPoint, font: Font
+    ) {
+        guard grid.cursorRow < grid.rows, grid.cursorColumn < grid.columns else { return }
+        let occupant = grid[grid.cursorRow, grid.cursorColumn]
+        let rect = CGRect(
+            x: origin.x + CGFloat(grid.cursorColumn) * layout.cell.width,
+            y: origin.y + CGFloat(grid.cursorRow) * layout.cell.height,
+            width: occupant.wide ? layout.cell.width * 2 : layout.cell.width,
+            height: layout.cell.height)
+        context.fill(Path(rect), with: .color(TerminalPalette.cursor))
+        if let character = occupant.character {
+            context.draw(
+                Text(String(character)).font(font)
+                    .foregroundColor(TerminalPalette.background),
+                at: rect.origin, anchor: .topLeading)
+        }
+    }
+    #endif
 }
 
 /// The physics a scroll on this platform is expected to have.
@@ -205,8 +822,19 @@ struct TerminalView: View {
     /// under it, and a stale cell size is a grid that no longer lines up with
     /// what `columns(for:)`/`rows(for:)` and `draw(grid:into:size:)` assume
     /// about it.
-    private var cellSize: CGSize {
-        TerminalMetrics.cell(.terminal(fontChoice, size: fontSize))
+    private var cellSize: CGSize { renderer.cellSize }
+
+    /// The drawing, as a value.
+    ///
+    /// Built fresh on each access for the same reason `cellSize` was computed
+    /// rather than cached: both `@AppStorage` values behind it can change out
+    /// from under this view at any moment, and a renderer holding a stale
+    /// point size is a grid that no longer lines up with what
+    /// `columns(for:)`/`rows(for:)` assume about it. It carries no state — the
+    /// glyphs and the sized faces live in `TerminalGlyphCache.shared`, which
+    /// is what makes rebuilding this per frame free.
+    private var renderer: TerminalRenderer {
+        TerminalRenderer(fontChoice: fontChoice, fontSize: fontSize)
     }
 
     /// Images on their way into this pane, owned by `ShellScreen` so a transfer
@@ -553,7 +1181,7 @@ struct TerminalView: View {
     private func live(grid: TerminalGrid, size: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
             Canvas { context, canvasSize in
-                draw(
+                renderer.draw(
                     grid: grid, into: context, size: canvasSize,
                     scrolledBy: scrollReadout.offset)
             }
@@ -681,39 +1309,6 @@ struct TerminalView: View {
 
     // MARK: - Drawing
 
-    /// Where the grid sits inside the canvas, and at what scale — the same
-    /// numbers `draw(grid:into:size:)` lays glyphs out with, and what
-    /// `cell(at:grid:size:)` inverts to turn a touch back into a column and
-    /// row. Kept as one calculation because the two had a habit of drifting
-    /// apart the moment they were two.
-    private struct GridLayout {
-        var scale: CGFloat
-        var cell: CGSize
-        var origin: CGPoint
-    }
-
-    /// Almost never a straight reflow: the pane resizes itself to roughly fit
-    /// (see `TerminalSession.configure`), but the two round trips that takes —
-    /// asking the host, the host reflowing tmux — leave a gap where the grid
-    /// on screen is still the OLD size, and this scales that leftover
-    /// mismatch down rather than cropping it. `scale` is 1 the rest of the
-    /// time.
-    private func gridLayout(for grid: TerminalGrid, in size: CGSize) -> GridLayout {
-        let padding = TerminalMetrics.padding
-        let cell = cellSize
-        let content = CGSize(
-            width: padding.left + padding.right + CGFloat(grid.columns) * cell.width,
-            height: padding.top + padding.bottom + CGFloat(grid.rows) * cell.height)
-        guard content.width > 0, content.height > 0 else {
-            return GridLayout(scale: 1, cell: cell, origin: .zero)
-        }
-        let scale = min(size.width / content.width, size.height / content.height, 1)
-        return GridLayout(
-            scale: scale,
-            cell: CGSize(width: cell.width * scale, height: cell.height * scale),
-            origin: CGPoint(x: padding.left * scale, y: padding.top * scale))
-    }
-
     /// The grid cell under a point in the canvas's own coordinates, clamped
     /// onto the grid so a touch a pixel past the last row still lands
     /// somewhere real rather than off the edge of `grid`'s backing array.
@@ -728,103 +1323,8 @@ struct TerminalView: View {
         )
     }
 
-    /// `scrolledBy` is the sub-row nudge the scroll driver is asking for, in
-    /// points, measured from the row the emulator is on. Everything below is
-    /// laid out from `originY`, so adding it there moves the glyphs, the
-    /// background runs and the cursor as one thing — which is the only way the
-    /// grid can be between two rows without coming apart.
-    ///
-    /// Clamped to the canvas, because a number that large could only come from
-    /// a bug and the failure mode of not clamping is a pane that draws nothing
-    /// at all. The value in ordinary use is under half a row, or — past an end
-    /// — whatever the rubberband is currently allowing.
-    private func draw(
-        grid: TerminalGrid, into context: GraphicsContext, size: CGSize, scrolledBy: CGFloat = 0
-    ) {
-        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TerminalPalette.background))
-        let layout = gridLayout(for: grid, in: size)
-
-        // Scaled by hand — every position and font size below is multiplied
-        // by `scale` directly — rather than through `GraphicsContext.scaleBy`.
-        //
-        // The cell size comes from a fixed font, which is right for a Mac window
-        // sized to its own terminal and wrong here: the phone renders whatever
-        // grid the HOST has — 75 columns is normal — and at 13pt that is far
-        // wider than any phone. `scaleBy` looks like the right tool and reads
-        // as one, but it does not touch glyphs drawn through `context.draw(_
-        // text: Text, at:anchor:)`: only `size` and `content` were logged
-        // against a live 40-column pane, and a scale of 0.69 was computed
-        // correctly and applied to the context on every frame while the
-        // glyphs kept landing at their full, untransformed size — the CTM
-        // reached the `Path`-based fills below but never the text. So the
-        // fills and the text now agree by construction: both are laid out in
-        // coordinates that already have `scale` baked in, which is correct
-        // regardless of which drawing calls a given `GraphicsContext` happens
-        // to honour its own transform for.
-        guard layout.cell.width > 0, layout.cell.height > 0 else { return }
-        let scale = layout.scale
-        let scaledCell = layout.cell
-        let originX = layout.origin.x
-        let originY = layout.origin.y + min(max(scrolledBy, -size.height), size.height)
-        // The chosen typeface, not a hard-coded system one — see
-        // Settings.swift. Scaled the same way the cell itself is: a font
-        // built at the unscaled `fontSize` would draw glyphs too big for the
-        // very cell `scale` just shrank to make everything fit.
-        let regularFont = Font.terminal(fontChoice, size: fontSize * scale)
-        let boldFont = Font.terminal(fontChoice, size: fontSize * scale, bold: true)
-
-        for row in 0..<grid.rows {
-            let y = originY + CGFloat(row) * scaledCell.height
-
-            // Background first, batched into runs: a wide stretch of the
-            // terminal's own default background is the common case, and
-            // skipping it entirely is one comparison instead of one fill per
-            // cell across a mostly-empty screen.
-            var column = 0
-            while column < grid.columns {
-                let background = grid[row, column].background
-                var end = column + 1
-                while end < grid.columns, grid[row, end].background == background { end += 1 }
-                if background != TerminalPalette.background {
-                    let rect = CGRect(
-                        x: originX + CGFloat(column) * scaledCell.width, y: y,
-                        width: CGFloat(end - column) * scaledCell.width, height: scaledCell.height)
-                    context.fill(Path(rect), with: .color(background))
-                }
-                column = end
-            }
-
-            column = 0
-            while column < grid.columns {
-                let occupant = grid[row, column]
-                if let character = occupant.character {
-                    let point = CGPoint(x: originX + CGFloat(column) * scaledCell.width, y: y)
-                    context.draw(
-                        Text(String(character))
-                            .font(occupant.bold ? boldFont : regularFont)
-                            .foregroundColor(occupant.foreground),
-                        at: point, anchor: .topLeading)
-                }
-                // A wide character's neighbour is its own spacer; drawing it
-                // too would put a second, blank glyph where the wide one
-                // already reaches.
-                column += occupant.wide ? 2 : 1
-            }
-        }
-
-        guard grid.cursorRow < grid.rows, grid.cursorColumn < grid.columns else { return }
-        let cursorCell = grid[grid.cursorRow, grid.cursorColumn]
-        let cursorRect = CGRect(
-            x: originX + CGFloat(grid.cursorColumn) * scaledCell.width,
-            y: originY + CGFloat(grid.cursorRow) * scaledCell.height,
-            width: cursorCell.wide ? scaledCell.width * 2 : scaledCell.width,
-            height: scaledCell.height)
-        context.fill(Path(cursorRect), with: .color(TerminalPalette.cursor))
-        if let character = cursorCell.character {
-            context.draw(
-                Text(String(character)).font(regularFont).foregroundColor(TerminalPalette.background),
-                at: cursorRect.origin, anchor: .topLeading)
-        }
+    private func gridLayout(for grid: TerminalGrid, in size: CGSize) -> TerminalGridLayout {
+        renderer.layout(for: grid, in: size)
     }
 
     // MARK: - Geometry
@@ -1687,3 +2187,355 @@ private final class KeystrokeSink: UIView, UIKeyInput {
     var keyboardType: UIKeyboardType = .asciiCapable
     var returnKeyType: UIReturnKeyType = .send
 }
+
+#if DEBUG
+
+/// What one `draw` costs, and how many of them a second actually gets.
+///
+/// Both numbers, because either alone can lie. Time inside the closure misses
+/// anything a `GraphicsContext` defers to its own rasterisation pass; frames a
+/// second misses nothing but says nothing about where the time went. When the
+/// two agree — when `ms` is about `1000 / draws` — the closure is the frame.
+final class TerminalDrawMeter {
+    private(set) var latest = "measuring…"
+    private var samples: [Double] = []
+    private var windowStart = CFAbsoluteTimeGetCurrent()
+    private let label: String
+
+    init(label: String) {
+        self.label = label
+    }
+
+    func record(_ seconds: Double) {
+        samples.append(seconds)
+        let now = CFAbsoluteTimeGetCurrent()
+        let elapsed = now - windowStart
+        guard elapsed >= 1 else { return }
+        let sorted = samples.sorted()
+        let mean = samples.reduce(0, +) / Double(samples.count)
+        let median = sorted[sorted.count / 2]
+        let worst = sorted[sorted.count * 9 / 10]
+        latest = String(
+            format: "%@  %.0f draws/s  mean %.2fms  median %.2fms  p90 %.2fms",
+            label, Double(samples.count) / elapsed, mean * 1000, median * 1000,
+            worst * 1000)
+        // The unified log rather than stdout, so `simctl spawn <device> log
+        // stream` is the whole harness — an app launched by `simctl launch`
+        // has no console attached and a `print` from it reaches nobody. A
+        // number that has to be read off a screenshot is a number nobody
+        // takes twice.
+        NSLog("terminal-bench %@", latest)
+        samples.removeAll(keepingCapacity: true)
+        windowStart = now
+    }
+}
+
+/// The terminal renderer under a stopwatch, and under a magnifying glass.
+///
+/// `-terminal-bench` draws a 55×38 grid — the size the owner's panes actually
+/// are — at the display's refresh rate and reports what each draw costs.
+/// Nothing about it touches the network or a host: the grid is a fixture, so
+/// the number is the renderer's and not a poll's, and it is the same number on
+/// a simulator and on a phone.
+///
+/// The flags exist so the answer can be attributed rather than asserted:
+///
+///   -terminal-bench                 the grid as it ships
+///   -terminal-bench -bench-blank    the same grid with no characters in it,
+///                                   which is every cost except the glyphs
+///   -terminal-bench -bench-cell-text   one `Text` per cell, what it used to do
+///   -terminal-bench -bench-row-text    one `Text` per row, the wrong batching
+///
+/// `-terminal-ligature` is not a benchmark: it is the fixture
+/// `TerminalLigatureTests` photographs. See `TerminalBenchHarness.ligature`.
+struct TerminalBenchHarness: View {
+    static var isRequested: Bool {
+        CommandLine.arguments.contains("-terminal-bench")
+            || CommandLine.arguments.contains("-terminal-ligature")
+    }
+
+    private static var isLigatureFixture: Bool {
+        CommandLine.arguments.contains("-terminal-ligature")
+    }
+
+    private static var path: TerminalDrawPath {
+        if CommandLine.arguments.contains("-bench-cell-text") { return .cellText }
+        if CommandLine.arguments.contains("-bench-row-text") { return .rowText }
+        return .glyphs
+    }
+
+    /// Static, so that a body re-evaluation cannot quietly hand the benchmark
+    /// a fresh stopwatch and start the window again.
+    private static let meter = TerminalDrawMeter(
+        label: "\(path.rawValue)\(CommandLine.arguments.contains("-bench-blank") ? "+blank" : "")")
+
+    var body: some View {
+        if Self.isLigatureFixture {
+            ligature
+        } else {
+            benchmark
+        }
+    }
+
+    // MARK: - The benchmark
+
+    private static let columns = 55
+    private static let rows = 38
+    private static let fontSize: Double = 13
+
+    private var renderer: TerminalRenderer {
+        TerminalRenderer(fontChoice: .iosevka, fontSize: Self.fontSize, path: Self.path)
+    }
+
+    private var benchmark: some View {
+        let grid = Self.benchGrid
+        return VStack(spacing: 0) {
+            // A live schedule, so the canvas is asked for a frame as often as
+            // the screen can show one. Anything slower and the benchmark would
+            // be measuring the schedule.
+            TimelineView(.animation) { timeline in
+                // The date is USED, and it has to be: a `Canvas` whose closure
+                // captures nothing that changed is a `Canvas` SwiftUI can
+                // legitimately decline to re-run, and the first version of this
+                // benchmark measured exactly one draw and then sat there
+                // reporting "measuring…". Feeding it through `scrolledBy` also
+                // makes the benchmark the case that matters — a grid nudged
+                // between two rows, sixty times a second, which is what a
+                // finger on the scroll and the shell animating over the pane
+                // both ask for.
+                let phase = timeline.date.timeIntervalSinceReferenceDate
+                // `-bench-still` pins the nudge at zero so two paths can be
+                // photographed and compared pixel for pixel. It stops being a
+                // benchmark at that point — a canvas whose inputs never change
+                // is one SwiftUI need never redraw — and that is the point.
+                let nudge: CGFloat =
+                    CommandLine.arguments.contains("-bench-still")
+                    ? 0 : CGFloat(sin(phase * 3) * 3)
+                Canvas { context, size in
+                    let start = CFAbsoluteTimeGetCurrent()
+                    renderer.draw(
+                        grid: grid, into: context, size: size, scrolledBy: nudge)
+                    Self.meter.record(CFAbsoluteTimeGetCurrent() - start)
+                }
+                .overlay(alignment: .bottom) {
+                    Text(Self.meter.latest)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(6)
+                        .background(.black.opacity(0.7))
+                        .accessibilityIdentifier("terminal-bench-readout")
+                }
+            }
+        }
+        .background(TerminalPalette.background)
+        .ignoresSafeArea()
+        .preferredColorScheme(.dark)
+    }
+
+    /// A screenful that looks like work: code, punctuation a coding face has
+    /// opinions about, a coloured prompt, a diff, and a selected line with a
+    /// background of its own.
+    ///
+    /// Deterministic — the same screen every run, on every machine — because a
+    /// benchmark whose input changes is two measurements of two things.
+    private static let benchGrid: TerminalGrid = {
+        let blank = CommandLine.arguments.contains("-bench-blank")
+        let ground: UInt32 = 0x1E1E1E
+        let lines = [
+            "\u{1}~/overnight \u{4}main\u{0} $ cargo test -p farcooler-vt",
+            "   Compiling farcooler-vt v0.1.0 (/Users/e/overnight/crates/vt)",
+            "\u{2}    Finished\u{0} test profile [unoptimized] in 4.21s",
+            "     Running unittests src/lib.rs (target/debug/deps/vt-9f2)",
+            // The row that is not ASCII, and is here on purpose: a wide
+            // ideograph that must take two columns, box drawing and arrows
+            // Iosevka does have, an accented letter, and an emoji it does not
+            // — which is the fallback face, and then the character no single
+            // glyph stands for at all. Every one of those is a different
+            // branch of the glyph path, and the pixel comparison against the
+            // old renderer covers all of them at once.
+            "\u{5}日本語\u{0} ┌─┤√≈✓ café 🚀 e\u{301}",
+            "running 41 tests",
+            "test grid::tests::a_wide_cell_takes_two_columns ... \u{2}ok\u{0}",
+            "test grid::tests::inverse_swaps_fg_and_bg ... \u{2}ok\u{0}",
+            "test parse::tests::csi_with_no_params_is_a_default ... \u{2}ok\u{0}",
+            "test parse::tests::osc_52_round_trips ... \u{2}ok\u{0}",
+            "test scroll::tests::display_offset_never_exceeds_history ... \u{2}ok\u{0}",
+            "",
+            "  if cursor.column != grid.columns - 1 {",
+            "      let next = grid.cell(row, column + 1);",
+            "      if next.width == 0 { return None; }   // wide spacer",
+            "  }",
+            "  let advance = if cell.is_wide() { 2 } else { 1 };",
+            "  debug_assert!(column + advance <= self.columns);",
+            "",
+            "\u{3}diff --git a/crates/vt/src/grid.rs b/crates/vt/src/grid.rs\u{0}",
+            "\u{5}@@ -211,7 +211,7 @@ impl Grid {\u{0}",
+            "\u{2}+    pub fn cell(&self, row: usize, column: usize) -> Cell {\u{0}",
+            "\u{6}-    pub fn cell(&self, row: usize, col: usize) -> Cell {\u{0}",
+            "       self.rows[row].cells[column]",
+            "   }",
+            "",
+            "\u{1}~/overnight \u{4}main\u{0} $ git status --short",
+            " M crates/vt/src/grid.rs",
+            " M apps/ios/FarCooler/TerminalView.swift",
+            "?? docs/notes/frame-budget.md",
+            "",
+            "\u{1}~/overnight \u{4}main\u{0} $ rg -n 'CTFontDrawGlyphs' apps/",
+            "apps/ios/FarCooler/TerminalView.swift:412:  CTFontDrawGlyphs(font,",
+            "apps/macos/Sources/FarCooler/Terminal.swift:88:  CTFontDrawGlyphs(",
+            "",
+            "\u{1}~/overnight \u{4}main\u{0} $ ",
+        ]
+        // The palette, by the escape-like markers above: 0 default, 1 green,
+        // 2 bright green, 3 white bold, 4 blue, 5 cyan, 6 red.
+        let colors: [UInt32] = [
+            0xD4D4D4, 0x6A9955, 0x4EC9B0, 0xE0E0E0, 0x569CD6, 0x9CDCFE, 0xF14C4C,
+        ]
+        var cells: [TerminalCell] = []
+        cells.reserveCapacity(columns * rows)
+        for row in 0..<rows {
+            let line = row < lines.count ? lines[row] : ""
+            var color = colors[0]
+            var bold = false
+            var background = ground
+            // One row given a selection band, so the background-run batching
+            // has something to batch.
+            if row == 21 { background = 0x14301C }
+            if row == 22 { background = 0x3A1418 }
+            var written = 0
+            for character in line {
+                if let marker = character.asciiValue, marker < 8 {
+                    color = colors[Int(marker)]
+                    bold = marker == 3
+                    continue
+                }
+                guard written < columns else { break }
+                let wide = Self.isWide(character)
+                cells.append(
+                    TerminalCell(
+                        character: blank ? nil : character, bold: bold, wide: wide,
+                        foregroundPacked: color, backgroundPacked: background))
+                written += 1
+                // A wide character owns the column after it. The emulator emits
+                // that spacer for real; the fixture has to as well, or every
+                // column after an ideograph is off by one.
+                if wide, written < columns {
+                    cells.append(
+                        TerminalCell(
+                            character: nil, foregroundPacked: color,
+                            backgroundPacked: background))
+                    written += 1
+                }
+            }
+            while written < columns {
+                cells.append(
+                    TerminalCell(
+                        character: nil, foregroundPacked: colors[0],
+                        backgroundPacked: background))
+                written += 1
+            }
+        }
+        return TerminalGrid(
+            columns: columns, rows: rows, cells: cells, cursorRow: 36, cursorColumn: 14)
+    }()
+
+    /// The two-column characters, roughly: enough of East Asian Wide and of
+    /// emoji for a fixture. The real answer lives in the core, which is where
+    /// a pane's own `isWide` comes from.
+    private static func isWide(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first else { return false }
+        switch scalar.value {
+        case 0x1100...0x115F, 0x2E80...0x303E, 0x3041...0x33FF,
+            0x3400...0x4DBF, 0x4E00...0x9FFF, 0xA000...0xA4CF,
+            0xAC00...0xD7A3, 0xF900...0xFAFF, 0xFE30...0xFE6F,
+            0xFF00...0xFF60, 0xFFE0...0xFFE6,
+            0x1F300...0x1F64F, 0x1F900...0x1F9FF, 0x20000...0x3FFFD:
+            return true
+        default:
+            return false
+        }
+    }
+
+    // MARK: - The ligature fixture
+
+    /// Two characters a coding face wants to join, and the same two characters
+    /// on their own, drawn by the renderer the app ships.
+    ///
+    /// The whole assertion is that the pair looks like the singletons. Iosevka
+    /// carries `!=` and `->` in `calt`, so a renderer that ever hands CoreText
+    /// a run to shape draws half of `≠` in the first cell — a different glyph
+    /// from `!`, at the same place — and the comparison fails. See
+    /// `TerminalLigatureTests`, and `-bench-row-text`, which is a renderer
+    /// that does exactly that and is here to be failed against.
+    private static let ligatureFontSize: Double = 30
+    private static let ligatureColumns = 16
+
+    private var ligatureRenderer: TerminalRenderer {
+        TerminalRenderer(
+            fontChoice: .iosevka, fontSize: Self.ligatureFontSize, path: Self.path)
+    }
+
+    private var ligature: some View {
+        let renderer = ligatureRenderer
+        let cell = renderer.cellSize
+        // Sized to exactly the content, so `layout` cannot scale it: the test
+        // reads cell width off this view's own frame, and a scale it did not
+        // know about would move every column it looks at.
+        let width = 12 + CGFloat(Self.ligatureColumns) * cell.width
+        let height = 12 + 2 * cell.height
+        return VStack {
+            // Clear of the status bar, which draws over anything that reaches
+            // the top of the screen and would put the system clock through the
+            // middle of the very cells the test measures.
+            Spacer().frame(height: 80)
+            Canvas { context, size in
+                renderer.draw(grid: Self.ligatureGrid, into: context, size: size)
+            }
+            .frame(width: width, height: height)
+            .accessibilityElement()
+            .accessibilityIdentifier("terminal-ligature-fixture")
+            // By name, like `terminal-surface`'s: the test reads `cell` and
+            // `pad` out of it rather than recomputing the font metrics in the
+            // test process, where the font is not even registered.
+            .accessibilityValue(
+                "cell=\(cell.width) line=\(cell.height) pad=6 "
+                    + "columns=\(Self.ligatureColumns)")
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(TerminalPalette.background)
+        .preferredColorScheme(.dark)
+    }
+
+    /// `!=` at columns 0–1, `!` alone at 4, `=` alone at 6; `->` at 8–9, `-`
+    /// alone at 12, `>` alone at 14. The cursor is parked on the second row,
+    /// out of the way of everything the test looks at.
+    static let ligatureGrid: TerminalGrid = {
+        var row: [Character?] = Array(repeating: nil, count: ligatureColumns)
+        row[0] = "!"
+        row[1] = "="
+        row[4] = "!"
+        row[6] = "="
+        row[8] = "-"
+        row[9] = ">"
+        row[12] = "-"
+        row[14] = ">"
+        var cells: [TerminalCell] = []
+        for character in row {
+            cells.append(
+                TerminalCell(
+                    character: character, foregroundPacked: 0xFFFFFF,
+                    backgroundPacked: 0x000000))
+        }
+        for _ in 0..<ligatureColumns {
+            cells.append(
+                TerminalCell(
+                    character: nil, foregroundPacked: 0xFFFFFF, backgroundPacked: 0x000000))
+        }
+        return TerminalGrid(
+            columns: ligatureColumns, rows: 2, cells: cells, cursorRow: 1,
+            cursorColumn: ligatureColumns - 1)
+    }()
+}
+
+#endif

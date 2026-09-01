@@ -2011,6 +2011,17 @@ struct TerminalGrid {
         self.cursorColumn = min(max(cursorColumn, 0), max(columns - 1, 0))
     }
 
+    /// A grid built by hand rather than by an emulator, for the benchmark and
+    /// the ligature fixture — the two things that have to say exactly what is
+    /// on screen in order to measure or assert about it.
+    init(columns: Int, rows: Int, cells: [TerminalCell], cursorRow: Int, cursorColumn: Int) {
+        self.columns = columns
+        self.rows = rows
+        self.cells = cells
+        self.cursorRow = min(max(cursorRow, 0), max(rows - 1, 0))
+        self.cursorColumn = min(max(cursorColumn, 0), max(columns - 1, 0))
+    }
+
     subscript(row: Int, column: Int) -> TerminalCell {
         cells[row * columns + column]
     }
@@ -2020,19 +2031,47 @@ struct TerminalCell {
     var character: Character?
     var bold: Bool
     var wide: Bool
+    /// Packed 0x00RRGGBB, as the core reports it, and NOT a `Color`.
+    ///
+    /// Both were `Color` and both are read thousands of times per frame — the
+    /// renderer compares neighbouring cells to batch background runs, and
+    /// batches glyphs by the colour they are drawn in. `Color` is an opaque
+    /// box: comparing two of them is a protocol-witness call into SwiftUI, and
+    /// building one is an allocation. As `UInt32` both are a register compare
+    /// and a hash of four bytes, and the renderer turns the handful that
+    /// actually reach the screen into `CGColor`s once, in
+    /// `TerminalGlyphCache.color`.
+    ///
     /// Already resolved for `FARCOOLER_VT_FLAG_INVERSE` — the core reports
     /// foreground and background separately from the flag, and a renderer
     /// that forgot to swap them would draw reverse-video text invisibly on
     /// itself.
-    var foreground: Color
-    var background: Color
+    var foregroundPacked: UInt32
+    var backgroundPacked: UInt32
+
+    /// The same two colours for anything drawing a handful of cells rather
+    /// than a screenful of them — the theme editor's preview, above all.
+    var foreground: Color { Color(packed: foregroundPacked) }
+    var background: Color { Color(packed: backgroundPacked) }
 
     init(_ cell: FarCoolerVtCell) {
         character = cell.character
         bold = cell.isBold
         wide = cell.isWide
-        foreground = Color(packed: cell.isInverse ? cell.bg : cell.fg)
-        background = Color(packed: cell.isInverse ? cell.fg : cell.bg)
+        foregroundPacked = cell.isInverse ? cell.bg : cell.fg
+        backgroundPacked = cell.isInverse ? cell.fg : cell.bg
+    }
+
+    /// A cell built by hand, for fixtures and benchmarks.
+    init(
+        character: Character?, bold: Bool = false, wide: Bool = false,
+        foregroundPacked: UInt32, backgroundPacked: UInt32
+    ) {
+        self.character = character
+        self.bold = bold
+        self.wide = wide
+        self.foregroundPacked = foregroundPacked
+        self.backgroundPacked = backgroundPacked
     }
 }
 
@@ -2056,6 +2095,7 @@ extension Color {
 @MainActor
 enum TerminalPalette {
     static var backgroundPacked: UInt32 { Themes.shared.current.background }
+    static var cursorPacked: UInt32 { Themes.shared.current.cursor }
     static var background: Color { Themes.shared.current.backgroundColor }
     static var cursor: Color { Themes.shared.current.cursorColor }
 }

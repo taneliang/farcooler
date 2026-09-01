@@ -386,6 +386,10 @@ UI_TEST_SOURCES = [
     "ChangesPullRequestTests.swift",
     "KeyboardTabStripTests.swift",
     "ShellGestureTests.swift",
+    # Photographs the terminal renderer's own fixture and compares cells. Needs
+    # no runner: the grid it draws is built in the app, so this one cannot skip
+    # itself green when the demo daemon is down.
+    "TerminalLigatureTests.swift",
     # The other half of the terminal's pair, for panes the app did not write
     # the scroller of. See its header.
     "ShellPaneScrollTests.swift",

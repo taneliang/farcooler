@@ -38,7 +38,14 @@ struct FarCoolerApp: App {
     @ViewBuilder
     private var harnessOrRoot: some View {
         #if DEBUG
-        if AgentLayoutHarness.isRequested {
+        if TerminalBenchHarness.isRequested {
+            // The terminal renderer on its own, over a fixture — a stopwatch
+            // under `-terminal-bench`, and the ligature fixture under
+            // `-terminal-ligature`. First, because it must not have a fleet,
+            // a connection or a poll anywhere near it: what it measures is one
+            // `draw` and nothing else.
+            TerminalBenchHarness()
+        } else if AgentLayoutHarness.isRequested {
             AgentLayoutHarness()
         } else if ChangesLayoutHarness.isRequested {
             ChangesLayoutHarness()

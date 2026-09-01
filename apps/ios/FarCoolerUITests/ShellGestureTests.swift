@@ -98,8 +98,24 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
         let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let to = from.withOffset(CGVector(dx: 0, dy: -points))
+        // An explicit velocity, not `.fast`, and the margin is the point.
+        //
+        // `.fast` is what a synthesized flick negotiates, not what it delivers:
+        // the same `.fast` drag measured 284 points per second on one run of
+        // this simulator and 803 on the next, and 508 in another suite where
+        // 12000 produced 4453. Against an escape threshold of 136 that looks
+        // like room until the whole suite is running and the slow reading is
+        // the likely one — this test failed exactly once in a full run and
+        // passed four times in isolation, which is what a three-times spread
+        // around a threshold looks like.
+        //
+        // Naming a large velocity widens the margin instead of weakening the
+        // assertion: the thing under test is still "a flick escapes and a held
+        // lift does not", and the held control two lines up is what keeps this
+        // honest — it uses the same 140 points and must still stay.
         from.press(
-            forDuration: 0.05, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
+            forDuration: 0.05, thenDragTo: to,
+            withVelocity: XCUIGestureVelocity(rawValue: 12000), thenHoldForDuration: 0)
     }
 
     /// A swipe on the content walks the flat sequence, and the opposite swipe
@@ -315,6 +331,60 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(carried["overview"], 1, "the lift did not reach the overview")
         XCTAssertEqual(carried["ws"], 1, "the sideways half of the lift was ignored")
         XCTAssertEqual(carried["tab"], 0, "a carry lands on the neighbour's first tab")
+    }
+
+    /// **A fast, slightly angled fling up reaches the overview and does NOT
+    /// carry.** The owner's report, on a finger.
+    ///
+    /// *"when I fling the workspace up, quite often it animates the workspace
+    /// to the n-1th or n+1th grid square… if my fling is angled too much it
+    /// picks either the previous or next workspace to land on, seemingly
+    /// assuming I already switched to it (clearly I didn't)."*
+    ///
+    /// Sixty points across 320 up is a ratio of 0.19 — a thumb's arc, and
+    /// nowhere near the 70 points that commit a page turn on translation
+    /// alone. What carried it was the momentum: at a scroll view's
+    /// deceleration rate the sideways component of a hard fling projects
+    /// hundreds of points, and `barRelease` mixed that into the sideways
+    /// channel without ever asking which way the thumb was going. Nothing in
+    /// this suite asserted the negative, which is why it shipped.
+    ///
+    /// **The second half is the control that matters**: the same fling, same
+    /// speed, same angle-ish path, but 130 points across — genuinely into the
+    /// neighbour's cell — still carries. The fix narrows a PREDICTION and
+    /// never the drawing, so a card actually moved sideways still goes.
+    ///
+    /// An explicit 12000 rather than `.fast`, for the reason `flickBar`
+    /// gives: a synthesized flick's velocity is not repeatable, and the
+    /// assertion has to survive the slow reading.
+    func testAFastAngledFlingUpDoesNotCarryToANeighbour() throws {
+        let app = launch()
+        XCTAssertEqual(try state(app)["ws"], 0)
+
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
+        func fling(across: CGFloat) throws -> [String: Int] {
+            let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            from.press(
+                forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -across, dy: -320)),
+                withVelocity: XCUIGestureVelocity(rawValue: 12000), thenHoldForDuration: 0)
+            return try state(app)
+        }
+
+        let flung = try fling(across: 60)
+        XCTAssertEqual(flung["overview"], 1, "a hard fling did not reach the overview")
+        XCTAssertEqual(
+            flung["ws"], 0,
+            "a fling angled 60 points across 320 landed in a neighbour's cell")
+
+        // Back to the workspace, then the control: genuinely sideways still
+        // carries, at the same speed.
+        app.buttons["shell-card-ws-0"].tap()
+        XCTAssertEqual(try state(app)["overview"], 0, "the tap did not leave the overview")
+
+        let carried = try fling(across: 130)
+        XCTAssertEqual(carried["overview"], 1, "the deliberate carry did not reach the overview")
+        XCTAssertEqual(carried["ws"], 1, "a page flicked 130 points sideways no longer carries")
     }
 
     /// The same lift with no sideways travel still opens the overview on the
