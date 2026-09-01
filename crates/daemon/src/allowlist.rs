@@ -63,8 +63,14 @@ mod tests {
         }
     }
 
+    // Two node keys that are genuinely two keys. 43 base64 characters carry
+    // 258 bits, so the last character's low two bits are padding: "...AAA"
+    // through "...AAD" all decode to the same 32 bytes, and only "...AAE"
+    // moves a bit that is really there. These tests compare strings and so
+    // would pass either way, but "two devices" has to mean two devices to the
+    // runner, which decodes them.
     const A: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    const B: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB";
+    const B: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE";
 
     #[test]
     fn no_entries_admits_nobody() {
