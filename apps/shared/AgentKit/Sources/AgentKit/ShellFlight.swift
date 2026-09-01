@@ -178,6 +178,19 @@ enum ShellMotion {
     /// never duration, it was the overshoot.
     static var menu: Animation { .spring(response: 0.28, dampingFraction: 0.7) }
 
+    /// The same menu, for the changes no finger threw.
+    ///
+    /// **The same response and no overshoot**, so it is the same object moving
+    /// at the same speed and only the ringing is gone. Three of the four ways
+    /// the column changes are like this: it is TAPPED open, it furls after a
+    /// row is chosen, and it pops shut past the last row while the thumb is
+    /// still travelling the other way. Only the drag that opens it is going
+    /// where the finger is going, and that one keeps `menu`.
+    ///
+    /// See `ShellRootView.syncMenu`, which is the single place the two are
+    /// chosen between, and which carries the frames this was decided on.
+    static var menuSettled: Animation { .spring(response: 0.28, dampingFraction: 1) }
+
     /// The elongated mark travelling between marks.
     ///
     /// Its own animation and not the release's, because what moves is a width

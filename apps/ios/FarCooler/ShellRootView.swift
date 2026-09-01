@@ -522,11 +522,28 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// A workspace growing out of its cell to fill the screen.
     ///
     /// Its own spring rather than `settleAcross`, which is a CROSSING — two
-    /// cards passing each other, where damping close to 1 is right because
-    /// nothing should wobble as it arrives at a place it is only passing
-    /// through. Opening is the opposite: something small becomes the whole
-    /// screen, and that wants to arrive with a bit of spring in it.
-    static var settleOpen: Animation { .spring(response: 0.34, dampingFraction: 0.74) }
+    /// cards passing each other, and a different response is right for a
+    /// different distance.
+    ///
+    /// **Fully damped, because nothing that runs it has momentum toward it.**
+    /// This was 0.74 — the bounciest spring in the shell — on the argument
+    /// that something small becoming the whole screen "wants to arrive with a
+    /// bit of spring in it". Every gesture that reaches it says otherwise:
+    /// `open(at:)` is a tapped card, `honorRequest` is a notification, and
+    /// `closeOverview` is the `Done` button. A tap has no momentum in the
+    /// direction of the presentation, which is exactly the case WWDC 2018 803
+    /// picks out — the Music app's minibar presents Now Playing at 100%
+    /// damping for tapping it and 80% for swiping it away, and this was the
+    /// tap wired to the swipe's number.
+    ///
+    /// What it drew was not subtle, and it was read off the frames rather than
+    /// argued: `cropped` ran 1 → 0 and dipped to **−0.026** for eighteen
+    /// frames before coming back. `ShellFlight.scale` turns that into
+    /// **1.0152** — a tapped card grew into a page one and a half percent
+    /// LARGER than the display, hung there for three hundred milliseconds with
+    /// its right and bottom edges off the glass, and settled back. At 1.0 the
+    /// same trace is monotone and lands on 0.
+    static var settleOpen: Animation { .spring(response: 0.34, dampingFraction: 1) }
 
     /// The moment the page and its card change places.
     ///
@@ -641,10 +658,46 @@ struct ShellRootView<Pane: View, Actions: View>: View {
             // the finger leaves, and for one render that used to leave every
             // term of this condition false — so the grid was removed from the
             // tree and re-inserted on the next frame, fading in from nothing
-            // underneath the flight. `lift` is still here for the head start:
-            // the column phase mounts the grid so the tiles are measured
-            // before the page has anywhere to fly.
-            if lift > 0 || reveal > 0 || overview || flying {
+            // underneath the flight.
+            //
+            // **`gestureActive && track == .bar` and not `lift > 0`, and
+            // the difference is a frame the thumb is standing still in.**
+            //
+            // The head start was right. What was wrong was WHEN it was taken:
+            // `lift > 0` is first true on the frame the thumb starts MOVING,
+            // so a `NavigationStack`, a `ScrollView`, a `LazyVGrid` and its
+            // first row of cards were all built in the middle of the tracking.
+            // Measured off a `CADisplayLink` through a driven drag, on a Debug
+            // simulator build: a bar drag lost **47 to 133 milliseconds** on
+            // one frame six frames into the gesture, on every lift, in a fleet
+            // of ten — 65 to 155 in a fleet of forty, so nearly all of it is
+            // fixed cost and very little of it is the cards. A content drag
+            // over the same panes never left 17. Taking the term out entirely
+            // dropped every one of those frames to 17, which is how we know
+            // this and not the pane track was where the cost was.
+            //
+            // `track` is set to `.bar` by `begin(on:)` on the first
+            // `onChanged`, which a `DragGesture(minimumDistance: 0)` delivers
+            // at touch DOWN — before the thumb has gone anywhere. So the same
+            // work now lands on the frame the finger arrives, and the drag
+            // that follows it tracks at 17 milliseconds a frame from its first
+            // moving frame to its last: measured 43,20,17,17,17… where it used
+            // to be 17,17,17,17,17,17,133,17. The work did not get cheaper. It
+            // moved to the one frame in the gesture where nothing is being
+            // drawn to a finger's position yet, which is the only frame in it
+            // that can afford the work.
+            //
+            // The other half of why it is here and not on a `.task` at launch:
+            // mounting the grid permanently is faster still — every lift then
+            // costs 17 — but a grid in the tree at rest is a grid in the
+            // ACCESSIBILITY tree at rest, and that was measured too: forty
+            // static texts and every card's button, behind the workspace
+            // somebody is actually in. Gating that on `overview` the way hit
+            // testing already is destabilized the UI suite in a way this lane
+            // could reproduce and not explain, so the version that keeps the
+            // grid off the screen when nothing is touching it is the one that
+            // ships.
+            if (gestureActive && track == .bar) || lift > 0 || reveal > 0 || overview || flying {
                 ShellOverview(
                     fleet: fleet, current: position.workspace,
                     // The cell the page is going to is a HOLE while it is on
@@ -1029,7 +1082,27 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     func syncMenu() {
         let wanted = menuShouldShow
         guard wanted != menuOpen else { return }
-        withAnimation(ShellMotion.menu) { menuOpen = wanted }
+        // **The bounce is for the one direction that earned it**, and which
+        // one that is, is a question about the finger rather than about the
+        // menu. A column growing out of the bar under a thumb travelling up is
+        // motion in the direction the gesture already has — the case WWDC 2018
+        // 803 says to reward. A column that appears because the bar was TAPPED
+        // has no momentum behind it at all, and a column that pops shut past
+        // the last row is travelling DOWN while the thumb goes up.
+        //
+        // `ShellBar` clamps the height at both ends —
+        // `max(0, min(columnHeight, fullColumnHeight))` — so an unearned
+        // overshoot mostly draws nothing, and that is the reason to be precise
+        // about what it does draw rather than a reason to leave it. Traced
+        // frame by frame, the close rings through zero: −5.07 points, back up
+        // through **+0.195 for nineteen frames**, and down again. Height is
+        // clamped, but `columnHeight > 0` is not — it is what tells the bar
+        // its menu is open, what turns the ribbon's mark row on, and what
+        // feeds `menuMark` a selection. So for three hundred milliseconds
+        // after the column has visibly gone, the bar was still being told it
+        // was showing one.
+        let earned = wanted && lift >= ShellMetrics.openMin
+        withAnimation(earned ? ShellMotion.menu : ShellMotion.menuSettled) { menuOpen = wanted }
     }
 
     var tabCount: Int { fleet.tabCount(ofWorkspace: position.workspace) }
