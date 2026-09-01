@@ -452,7 +452,10 @@ func pinRegion(path string, id identity) error {
 	// The rename is only atomic against a crash if the bytes are on the disk
 	// before it happens. Some filesystems order that for you and some do not,
 	// and the argument above is not worth making if it rests on which one this
-	// is. The directory is synced too, so the rename itself survives.
+	// is. The directory sync after the rename is best effort by contrast: by
+	// then the pin is in place and readable, and failing a write that
+	// succeeded because a directory handle would not sync would be a worse
+	// answer than a durability window.
 	if err := file.Sync(); err != nil {
 		file.Close()
 		os.Remove(tmp)
@@ -466,17 +469,16 @@ func pinRegion(path string, id identity) error {
 		os.Remove(tmp)
 		return err
 	}
-	if dir, err := os.Open(filepath.Dir(path)); err == nil {
-		dir.Sync()
-		dir.Close()
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		log.Printf("tailcat: could not sync %s after pinning: %v", filepath.Dir(path), err)
+		return nil
 	}
+	if err := dir.Sync(); err != nil {
+		log.Printf("tailcat: could not sync %s after pinning: %v", filepath.Dir(path), err)
+	}
+	dir.Close()
 	return nil
-}
-
-// unpinRegion forgets a region that no longer works, so the next start chooses
-// again instead of failing the same way forever.
-func unpinRegion(path string, priv key.NodePrivate) error {
-	return pinRegion(path, identity{priv: priv})
 }
 
 // chooseRegion picks the relay this runner will listen on, so that the choice
@@ -490,16 +492,30 @@ func unpinRegion(path string, priv key.NodePrivate) error {
 // Doing the pick here costs one netcheck on a runner's very first start and
 // nothing on every start after it.
 func chooseRegion(mapURL string) (tailcfg.DERPRegionID, error) {
+	dm, err := regionMap(mapURL)
+	if err != nil {
+		return 0, err
+	}
+	return pickRegionIn(dm)
+}
+
+// regionMap fetches the DERP map this runner chooses from. It is split out of
+// chooseRegion because deciding whether a pinned region is gone means asking
+// the map, and a map that cannot be read is a different answer from a map that
+// no longer lists it.
+func regionMap(mapURL string) (*tailcfg.DERPMap, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), regionPickTimeout)
 	defer cancel()
 	opts := []any{tailcat.ExpandForServer}
 	if mapURL != "" {
 		opts = append(opts, tailcat.DERPMapURL(mapURL))
 	}
-	dm, err := tailcat.FetchDERPMap(ctx, opts...)
-	if err != nil {
-		return 0, err
-	}
+	return tailcat.FetchDERPMap(ctx, opts...)
+}
+
+func pickRegionIn(dm *tailcfg.DERPMap) (tailcfg.DERPRegionID, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), regionPickTimeout)
+	defer cancel()
 	return tailcat.PickBestRegion(ctx, dm)
 }
 
@@ -557,28 +573,60 @@ func serve(keyPath string, sshPort uint16, allow string) (rc int) {
 	}
 	s := newServer(id, sshPort, allowed)
 	if err := s.Start(); err != nil {
-		// A pinned region that has left the DERP map is fatal to Start, and
-		// the pin is on disk — so without this, every serve after it fails the
-		// same way until somebody edits the file by hand. The map carries a
-		// handful of regions and upstream notes the map server may filter them
-		// by client IP, so a region going away is ordinary rather than exotic.
-		// Forget it and start again unpinned; the next serve chooses a fresh
-		// one and writes that down.
 		if id.regionID == 0 {
 			return -int(syscall.EIO)
 		}
-		log.Printf("tailcat: DERP region %d would not start (%v); forgetting the pin and choosing again", id.regionID, err)
-		if err := unpinRegion(keyPath, id.priv); err != nil {
-			log.Printf("tailcat: could not forget DERP region %d: %v", id.regionID, err)
+		if rc := recoverFromAPinThatWillNotStart(&s, keyPath, id, sshPort, allowed, err); rc != 0 {
+			return rc
 		}
-		// A Server cannot be started twice, so the retry gets a fresh one.
-		retry := newServer(identity{priv: id.priv}, sshPort, allowed)
-		if err := retry.Start(); err != nil {
-			return -int(syscall.EIO)
-		}
-		s = retry
 	}
 	server = s
+	return 0
+}
+
+// recoverFromAPinThatWillNotStart decides whether a pinned region is actually
+// gone, and if it is, replaces it inside this same serve.
+//
+// The distinction is the whole function. Start fetches the DERP map before it
+// does anything else, so its commonest failure is not a withdrawn region — it
+// is a map that could not be read: a runner serving at boot before the network
+// is up, a laptop resuming from sleep, a blip at tailcat.dev. Forgetting a
+// good pin over one of those would re-run the latency race on the next start
+// and could land somewhere else, silently invalidating every token already in
+// a device's manifest. That is the harm the pin exists to prevent, so a
+// transient failure keeps the pin and says no.
+//
+// Only a map that reads cleanly and does not list the region is proof the
+// region is gone. Then the replacement is chosen from that same map and
+// written down here, so the runner does not go on serving a token that would
+// move again at the next start.
+func recoverFromAPinThatWillNotStart(s **tailcat.Server, keyPath string, id identity, sshPort uint16, allowed []key.NodePublic, startErr error) int {
+	dm, err := regionMap(derpMapURL)
+	if err != nil {
+		log.Printf("tailcat: DERP region %d would not start (%v) and the map could not be read (%v); keeping the pin", id.regionID, startErr, err)
+		return -int(syscall.EIO)
+	}
+	if _, ok := dm.Regions[id.regionID]; ok {
+		log.Printf("tailcat: DERP region %d would not start (%v) but is still in the map; keeping the pin", id.regionID, startErr)
+		return -int(syscall.EIO)
+	}
+
+	log.Printf("tailcat: DERP region %d has left the map; choosing again", id.regionID)
+	next := identity{priv: id.priv}
+	if picked, err := pickRegionIn(dm); err != nil || picked == 0 {
+		log.Printf("tailcat: could not choose a region to replace %d (%v); serving unpinned", id.regionID, err)
+	} else {
+		next.regionID = picked
+	}
+	if err := pinRegion(keyPath, next); err != nil {
+		log.Printf("tailcat: could not record DERP region %d: %v", next.regionID, err)
+	}
+	// A Server cannot be started twice, so the retry gets a fresh one.
+	retry := newServer(next, sshPort, allowed)
+	if err := retry.Start(); err != nil {
+		return -int(syscall.EIO)
+	}
+	*s = retry
 	return 0
 }
 

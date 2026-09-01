@@ -2,9 +2,13 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -718,41 +722,154 @@ func TestATokenWhoseRelayIsGoneBlamesTheRendezvous(t *testing.T) {
 	}
 }
 
-// A pinned region that has left the DERP map is fatal to Start, and the pin is
-// on disk — so a runner that did not forget it would fail identically on every
-// start until somebody edited the file. It used to re-pick and serve; that is
-// not a regression this is willing to ship.
-func TestARegionThatWillNotStartIsForgotten(t *testing.T) {
-	captureLog(t)
-	defer restoreServerState(t, nil, closeServer)()
+// serveDERPMap stands up a DERP map server listing exactly the regions given,
+// and points this package at it for the length of the test.
+//
+// The nodes are loopback with STUN disabled, so netcheck fails against them
+// fast rather than probing the internet: nothing here is meant to carry a
+// packet, only to be a map that either does or does not list a region.
+func serveDERPMap(t *testing.T, regionIDs ...int) {
+	t.Helper()
+	regions := map[string]any{}
+	for _, id := range regionIDs {
+		regions[fmt.Sprint(id)] = map[string]any{
+			"RegionID": id, "RegionCode": fmt.Sprint(id), "RegionName": fmt.Sprint(id),
+			"Nodes": []any{map[string]any{
+				"Name": fmt.Sprintf("%da", id), "RegionID": id,
+				"HostName": "127.0.0.1", "IPv4": "127.0.0.1",
+				"DERPPort": closedPort(t), "STUNPort": -1,
+				"InsecureForTests": true,
+			}},
+		}
+	}
+	body, err := json.Marshal(map[string]any{"Regions": regions})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+	}))
+	t.Cleanup(server.Close)
+	pointAtDERPMap(t, server.URL+"/derpmap.json")
+}
+
+// pointAtDERPMap sets the package's DERP map URL for the length of the test.
+// Each caller gets a distinct URL, because upstream caches a fetched map
+// process-wide for an hour and a shared URL would leak one test's map into the
+// next.
+func pointAtDERPMap(t *testing.T, url string) {
+	t.Helper()
+	mu.Lock()
+	prev := derpMapURL
+	derpMapURL = url
+	mu.Unlock()
+	t.Cleanup(func() { mu.Lock(); derpMapURL = prev; mu.Unlock() })
+}
+
+// pinnedRegion reads the region an identity file currently names.
+func pinnedRegion(t *testing.T, path string) tailcfg.DERPRegionID {
+	t.Helper()
+	id, err := loadOrCreateIdentity(path)
+	if err != nil {
+		t.Fatalf("loadOrCreateIdentity: %v", err)
+	}
+	return id.regionID
+}
+
+// pinnedIdentity creates an identity file already naming a region.
+func pinnedIdentity(t *testing.T, regionID tailcfg.DERPRegionID) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "node.key")
 	id, err := loadOrCreateIdentity(path)
 	if err != nil {
 		t.Fatalf("loadOrCreateIdentity: %v", err)
 	}
-	if err := pinRegion(path, identity{priv: id.priv, regionID: 900}); err != nil {
+	if err := pinRegion(path, identity{priv: id.priv, regionID: regionID}); err != nil {
 		t.Fatalf("pinRegion: %v", err)
 	}
+	return path
+}
 
-	// A DERP map source that refuses instantly, so Start fails for a reason
-	// that has nothing to do with the network being slow.
-	mu.Lock()
-	prev := derpMapURL
-	derpMapURL = fmt.Sprintf("http://127.0.0.1:%d/derpmap.json", closedPort(t))
-	mu.Unlock()
-	defer func() { mu.Lock(); derpMapURL = prev; mu.Unlock() }()
+// A pinned region that has genuinely left the DERP map is fatal to Start, and
+// the pin is on disk — so a runner that did not forget it would fail
+// identically on every start until somebody edited the file. It used to
+// re-pick and serve; that is not a regression this is willing to ship.
+//
+// The recovery finishes inside this one serve: a replacement is chosen from
+// the same map, written down, and started, rather than leaving the runner up
+// with a token that would move again next time.
+func TestARegionThatHasLeftTheMapIsForgotten(t *testing.T) {
+	captureLog(t)
+	defer restoreServerState(t, nil, closeServer)()
+	serveDERPMap(t, 901) // 900 is not in it
+	path := pinnedIdentity(t, 900)
+
+	if rc := serve(path, 22, keyA); rc != 0 {
+		t.Fatalf("serve did not recover from a withdrawn region: rc=%d", rc)
+	}
+	if server == nil {
+		t.Fatal("the retry succeeded and its server was not recorded")
+	}
+	got := pinnedRegion(t, path)
+	t.Logf("region 900 left the map; the runner is now pinned to %d", got)
+	if got == 900 {
+		t.Fatal("the runner kept region 900 after it left the map; every restart fails the same way")
+	}
+}
+
+// The other arm, and the one that matters more, because it is the common case.
+// Start fetches the DERP map before it does anything else, so its commonest
+// failure is a map it could not read — a runner serving at boot before the
+// network is up, or a laptop resuming from sleep. Forgetting a good pin over
+// one of those trades a brick for a token that silently moves, which is the
+// harm the pin exists to prevent.
+func TestATransientlyUnreachableMapKeepsThePin(t *testing.T) {
+	captureLog(t)
+	defer restoreServerState(t, nil, closeServer)()
+	pointAtDERPMap(t, fmt.Sprintf("http://127.0.0.1:%d/derpmap.json", closedPort(t)))
+	path := pinnedIdentity(t, 900)
 
 	if rc := serve(path, 22, keyA); rc != -int(syscall.EIO) {
-		t.Fatalf("serve with an unusable pinned region: rc=%d, want %d", rc, -int(syscall.EIO))
+		t.Fatalf("serve with an unreachable map: rc=%d, want %d", rc, -int(syscall.EIO))
 	}
-	after, err := loadOrCreateIdentity(path)
+	if got := pinnedRegion(t, path); got != 900 {
+		t.Fatalf("a network blip erased the pin (region is now %d); every token in a manifest may now be stale", got)
+	}
+	if server != nil {
+		t.Fatal("a server was recorded although none started")
+	}
+}
+
+// And the third: the map reads fine and still lists the region, so whatever
+// stopped Start was not the region going away.
+//
+// This calls the decision directly, because there is no way to make Start fail
+// for an unrelated reason while its region is present — and a test that let
+// Start succeed would assert nothing at all.
+func TestARegionStillInTheMapKeepsThePin(t *testing.T) {
+	captureLog(t)
+	defer restoreServerState(t, nil, closeServer)()
+	serveDERPMap(t, 900)
+	path := pinnedIdentity(t, 900)
+	id, err := loadOrCreateIdentity(path)
 	if err != nil {
-		t.Fatalf("loadOrCreateIdentity after the failure: %v", err)
+		t.Fatalf("loadOrCreateIdentity: %v", err)
 	}
-	if after.regionID != 0 {
-		t.Fatalf("the runner kept region %d after it would not start; every restart fails the same way", after.regionID)
+	allowed, err := parseAllowed(keyA)
+	if err != nil {
+		t.Fatalf("parseAllowed: %v", err)
 	}
-	if !after.priv.Equal(id.priv) {
-		t.Fatal("forgetting the region lost the runner's key")
+
+	var s *tailcat.Server
+	rc := recoverFromAPinThatWillNotStart(&s, path, id, 22, allowed, errors.New("something else went wrong"))
+	if rc != -int(syscall.EIO) {
+		t.Fatalf("a region still in the map: rc=%d, want %d", rc, -int(syscall.EIO))
+	}
+	if got := pinnedRegion(t, path); got != 900 {
+		t.Fatalf("region 900 is still in the map and the pin was dropped anyway (region is now %d)", got)
+	}
+	if s != nil {
+		t.Fatal("a server was built for a region that never went away")
 	}
 }
