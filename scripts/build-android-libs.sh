@@ -102,6 +102,17 @@ build() {
   local cc="$TOOLCHAIN/bin/${prefix}${api}-clang"
 
   echo "==> $abi (API $api)"
+  # The tunnel is NOT wired in here. `go build -buildmode=c-archive` refuses
+  # GOOS=android outright ("not supported on android/arm64") — confirmed
+  # against this repo's Go 1.27.0, not assumed. Go only offers `c-shared` on
+  # Android, which is a dynamically-linked `.so`, not the static archive every
+  # other platform script links at build time. Shipping that would mean a
+  # second `.so` per ABI in `jniLibs/` and a dynamic link from
+  # `libfarcooler_jni.so`, a different packaging model than this script or
+  # `farcooler-jni`'s `Cargo.toml` has today. That is a real decision, not a
+  # detail this script can absorb — Android stays on the stub until it is
+  # made.
+  #
   # Cargo's per-target linker variable, upper-cased with dashes as underscores.
   # Set for this invocation only: a global `.cargo/config.toml` entry would make
   # every build on this machine depend on one NDK version being installed.

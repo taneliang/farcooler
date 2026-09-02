@@ -22,6 +22,9 @@ case "$ARCH" in
   *) echo "unknown architecture: $ARCH (try x86_64 or aarch64)"; exit 1 ;;
 esac
 
+./scripts/build-tailcat.sh "linux-musl-$ARCH"
+export RUSTFLAGS="${RUSTFLAGS:-} -L $PWD/dist/tailcat/linux-musl-$ARCH -l static=tailcat"
+
 OUT="dist/$ARCH-linux"
 
 if ! command -v cross >/dev/null 2>&1 && ! rustup target list --installed | grep -q "^$TARGET$"; then
@@ -46,9 +49,9 @@ fi
 
 echo "==> Building $TARGET"
 if command -v cross >/dev/null 2>&1; then
-  cross build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli
+  cross build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli --features farcooler-tailcat/linked
 else
-  cargo build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli
+  cargo build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli --features farcooler-tailcat/linked
 fi
 
 mkdir -p "$OUT"

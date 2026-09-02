@@ -50,7 +50,19 @@ for CRATE in farcooler-vt farcooler-client farcooler-review; do
 
   if [ "$WITH_DEVICE" = "1" ]; then
     echo "==> $CRATE for the device"
-    SDKROOT="$DEVICE_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-ios
+    if [ "$CRATE" = "farcooler-client" ]; then
+      # The tunnel is only linked into the device slice. A device archive in a
+      # simulator build fails at link (see the module comment above and the
+      # standing note on iOS framework slices), so the simulator build just
+      # above this stays on the stub, unconditionally, until someone builds a
+      # simulator archive too.
+      ./scripts/build-tailcat.sh ios-arm64
+      SDKROOT="$DEVICE_SDK" RUSTFLAGS="${RUSTFLAGS:-} -L $PWD/dist/tailcat/ios-arm64 -l static=tailcat" \
+        cargo build --release -p "$CRATE" --target aarch64-apple-ios --features farcooler-tailcat/linked
+      cp dist/tailcat/ios-arm64/libtailcat.a "$OUT/"
+    else
+      SDKROOT="$DEVICE_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-ios
+    fi
     ARGS+=(-library "target/aarch64-apple-ios/release/$LIB" -headers "$STAGE")
   fi
 
