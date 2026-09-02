@@ -85,6 +85,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          # aarch64 Linux, added alongside the host target rather than in
+          # place of it — see the `farcooler-tailcat` check below for why.
+          targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}
@@ -146,6 +149,25 @@ jobs:
       # CI is not. Clippy, which finds real defects rather than disagreeing
       # about widths, runs at -D warnings.
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Nothing above type-checks `crates/tailcat`'s `linked` backend: clippy
+      # just ran `--workspace`, which builds every crate at DEFAULT features,
+      # and so does `cargo test --workspace` below. `linked` is off by
+      # default on purpose (see that crate's `Cargo.toml`) so a checkout with
+      # no Go toolchain still builds — but that means the only backend that
+      # will ever run in production, every FFI declaration and every errno
+      # mapping in it, was previously checked by nothing in this repo at all.
+      # `cargo check` doesn't link, so it needs no Go archive; it still
+      # catches a type mismatch in the `extern "C"` block, which is exactly
+      # what shipped once before this step existed — `c_char` is `u8` on ARM
+      # Linux and a hardcoded `i8` compiled cleanly on this job's own host
+      # while failing on `aarch64-unknown-linux-musl`, this crate's own
+      # release target and the same architecture Android ships on. The
+      # second invocation below is the one that catches that: the host arm
+      # of this matrix is darwin or x86_64 Linux, neither of which disagrees
+      # with `i8`.
+      - run: cargo check -p farcooler-tailcat --features linked
+      - run: cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl
 
       # A `changes` pane runs THIS CHANNEL'S CLI by name — `changes_host_command`
       # asks `shim_binary`, which looks beside the daemon's own executable and

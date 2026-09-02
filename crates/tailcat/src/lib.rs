@@ -52,6 +52,14 @@ pub async fn dial(
     client_key: &str,
     port: u16,
 ) -> Result<tokio::net::UnixStream, TunnelError> {
+    // Tailcat's dial always asks for this port — a runner's `OnTCP` maps it
+    // to whatever port its own sshd actually uses, on loopback, which is a
+    // fact only the runner has (see the design doc's "the port number is
+    // virtual"). A caller that gets this wrong is told ECONNREFUSED at the Go
+    // layer, indistinguishable from a dead sshd, which sends whoever reads it
+    // looking in the wrong place. Catching the mistake here, in debug builds,
+    // is cheap and names the actual bug instead.
+    debug_assert_eq!(port, 22, "tailcat only dials port 22; got {port}");
     backend::dial(token, client_key, port).await
 }
 
@@ -114,5 +122,16 @@ mod tests {
     fn every_error_has_a_stable_word() {
         assert_eq!(TunnelError::Derp.code(), "derp");
         assert_eq!(TunnelError::NoAnswer.code(), "no_answer");
+        assert_eq!(TunnelError::Io(std::io::Error::other("x")).code(), "io");
+    }
+
+    /// `dial`'s port must always be 22 — see the doc comment at its one call
+    /// site. A caller that gets this wrong should hear about it from a panic
+    /// in a debug build, not from an `ECONNREFUSED` that reads exactly like a
+    /// dead sshd.
+    #[tokio::test]
+    #[should_panic(expected = "tailcat only dials port 22")]
+    async fn dialing_a_port_other_than_22_is_refused_in_debug_builds() {
+        let _ = dial("tc-anything", "key", 2222).await;
     }
 }

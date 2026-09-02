@@ -15,7 +15,12 @@ default = []
 linked = ["dep:libc"]
 
 [dependencies]
-tokio = { workspace = true, features = ["net"] }
+# "net" for `UnixStream`, "rt" for `spawn_blocking` (the `linked` backend
+# blocks a worker thread on `dial`'s DERP/WireGuard handshake) and for the
+# runtime `#[tokio::test]` builds under it. Listed explicitly rather than
+# relying on some other workspace member's broader feature list reaching this
+# crate by accident of a shared `Cargo.lock`.
+tokio = { workspace = true, features = ["net", "rt"] }
 thiserror.workspace = true
 tracing.workspace = true
 # Only the linked backend compares errnos, and it must compare `libc::`
