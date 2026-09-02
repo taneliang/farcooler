@@ -21,6 +21,7 @@
 
 use std::sync::Arc;
 
+use farcooler_tailcat::TunnelError;
 use russh::client::{self, Config, Handle, Handler, Msg};
 use russh::keys::{PrivateKeyWithHashAlg, ssh_key};
 use russh::{Channel, ChannelMsg};
@@ -52,6 +53,11 @@ pub enum SshError {
     HostKeyUnknown { host: String, fingerprint: String },
     #[error("the remote command could not be started: {0}")]
     Exec(String),
+    /// The tunnel never opened. `code` is the stable word from
+    /// `farcooler_tailcat::TunnelError::code`, which the apps map to a
+    /// sentence — no Rust error string reaches a screen.
+    #[error("cannot open the tunnel: {code}")]
+    Tunnel { code: &'static str },
 }
 
 /// What to do about the host's key.
@@ -110,16 +116,45 @@ impl Handler for Verifier {
     }
 }
 
+/// How to reach a runner, and the one thing that decides it is how the runner
+/// was set up: a QR ceremony gives a tunnel, a manual key exchange gives an
+/// address.
+///
+/// One reach per runner, and no fallback. A `Direct` runner never quietly
+/// tries the tunnel and a `Tailcat` runner never quietly tries an address —
+/// because a transport that races two paths reports the wrong failure, and the
+/// failure message is most of what this product is.
+#[derive(Debug, Clone)]
+pub enum Reach {
+    /// You exchanged a key yourself and you know where the box is.
+    Direct { host: String, port: u16 },
+    /// The runner told you its token and you told it your node key.
+    Tailcat { token: String, client_key: String },
+}
+
+impl Reach {
+    /// What to name in an error. Never a token: it is long, it is meaningless
+    /// to a person, and it is the one field here worth stealing.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Direct { host, port } => format!("{host}:{port}"),
+            Self::Tailcat { .. } => "the tunnel".to_string(),
+        }
+    }
+}
+
 /// Where and as whom to connect.
 #[derive(Debug, Clone)]
 pub struct Destination {
-    pub host: String,
-    pub port: u16,
+    pub reach: Reach,
     pub user: String,
     /// An OpenSSH private key, as text. ed25519 in practice.
     pub private_key: String,
     /// Passphrase, if the key has one.
     pub passphrase: Option<String>,
+    /// Pinned the same way whichever reach is in play: a tunnel carries
+    /// plain SSH end to end, so the host key it presents is the runner's own,
+    /// not the tunnel's.
     pub host_key: HostKeyPolicy,
 }
 
@@ -148,35 +183,32 @@ impl Session {
             ..Config::default()
         });
 
-        let address = (destination.host.as_str(), destination.port);
-        let mut handle = match client::connect(config, address, verifier).await {
-            Ok(handle) => handle,
-            Err(russh::Error::IO(source)) => {
-                return Err(SshError::Connect {
-                    host: destination.host.clone(),
-                    port: destination.port,
-                    source,
-                });
+        let mut handle = match &destination.reach {
+            Reach::Direct { host, port } => {
+                match client::connect(config, (host.as_str(), *port), verifier).await {
+                    Ok(handle) => handle,
+                    Err(russh::Error::IO(source)) => {
+                        return Err(SshError::Connect {
+                            host: host.clone(),
+                            port: *port,
+                            source,
+                        });
+                    }
+                    Err(other) => return Err(translate(other, destination, &verdict)),
+                }
             }
-            Err(other) => {
-                // A refused host key surfaces as a generic handshake failure,
-                // so translate it into the thing the user has to decide about.
-                if let Some((expected, actual)) = verdict.mismatch.lock().unwrap().take() {
-                    return Err(SshError::HostKeyChanged {
-                        host: destination.host.clone(),
-                        expected,
-                        actual,
-                    });
+            Reach::Tailcat { token, client_key } => {
+                // Port 22 is a name, not an address. It is the number the
+                // tunnel is keyed on; where sshd actually listens is a fact
+                // only the runner has, and its OnTCP handler maps it.
+                let stream = match farcooler_tailcat::dial(token, client_key, 22).await {
+                    Ok(stream) => stream,
+                    Err(e) => return Err(tunnel_error(destination, e)),
+                };
+                match client::connect_stream(config, stream, verifier).await {
+                    Ok(handle) => handle,
+                    Err(other) => return Err(translate(other, destination, &verdict)),
                 }
-                if matches!(destination.host_key, HostKeyPolicy::RequireApproval)
-                    && let Some(fingerprint) = verdict.fingerprint.lock().unwrap().clone()
-                {
-                    return Err(SshError::HostKeyUnknown {
-                        host: destination.host.clone(),
-                        fingerprint,
-                    });
-                }
-                return Err(SshError::Handshake(other.to_string()));
             }
         };
 
@@ -191,7 +223,7 @@ impl Session {
         if !authenticated.success() {
             return Err(SshError::AuthRejected {
                 user: destination.user.clone(),
-                host: destination.host.clone(),
+                host: destination.reach.label(),
             });
         }
 
@@ -211,6 +243,50 @@ impl Session {
             .map_err(|e| SshError::Exec(e.to_string()))?;
         channel.exec(true, command).await.map_err(|e| SshError::Exec(e.to_string()))?;
         Ok(Streams::new(channel))
+    }
+}
+
+/// Turn a russh handshake failure into the specific thing a person has to
+/// decide about, when the verifier caught one — a changed or unknown host
+/// key — and a generic message otherwise.
+///
+/// Shared by both transports, direct and tunneled: a host key is pinned the
+/// same way in either case (see `Destination::host_key`'s doc), because it is
+/// still plain SSH inside the tunnel, so a mismatch or an unknown key reads
+/// the same regardless of which reach carried the bytes.
+fn translate(other: russh::Error, destination: &Destination, verdict: &KeyVerdict) -> SshError {
+    if let Some((expected, actual)) = verdict.mismatch.lock().unwrap().take() {
+        return SshError::HostKeyChanged { host: destination.reach.label(), expected, actual };
+    }
+    if matches!(destination.host_key, HostKeyPolicy::RequireApproval)
+        && let Some(fingerprint) = verdict.fingerprint.lock().unwrap().clone()
+    {
+        return SshError::HostKeyUnknown { host: destination.reach.label(), fingerprint };
+    }
+    SshError::Handshake(other.to_string())
+}
+
+/// Map a failed `dial` to the specific thing it deserves.
+///
+/// `TunnelError::Io` with `kind() == ConnectionRefused` is special: the
+/// tunnel reached the runner and nothing was listening on the port `OnTCP`
+/// maps onto — a dead or misconfigured sshd, not a rejected handshake. That
+/// is the same fact the direct path already names, over the same
+/// `io::ErrorKind`, on a real TCP connection — so it gets the same
+/// `SshError::Connect`, never a sentence that says "SSH refused."
+///
+/// Everything else — `NoTailcatLinked`, `Derp`, `NoAnswer`, and every other
+/// `Io` — crosses as `SshError::Tunnel`'s stable word. `Io`'s word in
+/// particular, `"io"`, has to stay true of a malformed token, a dead sshd
+/// reached before this special case (should the errno ever differ across
+/// platforms) and `EMFILE` alike, so the word is deliberately generic and the
+/// apps own the sentence.
+fn tunnel_error(destination: &Destination, error: TunnelError) -> SshError {
+    match error {
+        TunnelError::Io(source) if source.kind() == std::io::ErrorKind::ConnectionRefused => {
+            SshError::Connect { host: destination.reach.label(), port: 22, source }
+        }
+        other => SshError::Tunnel { code: other.code() },
     }
 }
 
@@ -449,5 +525,102 @@ mod tests {
         let message =
             SshError::AuthRejected { user: "me".into(), host: "box".into() }.to_string();
         assert!(message.contains("authorized_keys"));
+    }
+
+    /// A syntactically valid, unencrypted key — good enough to get past
+    /// `decode_key`. Neither test below reaches a real sshd, so nothing here
+    /// needs to be usable beyond that.
+    fn test_key() -> String {
+        use russh::keys::ssh_key::{Algorithm, LineEnding, PrivateKey};
+        let key =
+            PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("generate a key");
+        key.to_openssh(LineEnding::LF).expect("encode the key").to_string()
+    }
+
+    /// `Session` holds a russh `Handle`, which has no `Debug` impl, so
+    /// `unwrap_err` — which formats the `Ok` side for its panic message —
+    /// cannot be used on `Session::open`'s result. This does the same thing
+    /// without that bound.
+    async fn open_err(destination: &Destination) -> SshError {
+        match Session::open(destination).await {
+            Ok(_) => panic!("expected the connection to fail"),
+            Err(error) => error,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_direct_destination_still_reports_where_it_could_not_reach() {
+        let destination = Destination {
+            // Port 1 is reserved and nothing listens there.
+            reach: Reach::Direct { host: "127.0.0.1".into(), port: 1 },
+            user: "u".into(),
+            private_key: test_key(),
+            passphrase: None,
+            host_key: HostKeyPolicy::RequireApproval,
+        };
+        let error = open_err(&destination).await;
+        let message = error.to_string();
+        assert!(message.contains("127.0.0.1:1"), "lost the address: {message}");
+    }
+
+    /// A build with no archive must fail at the tunnel with the one word that
+    /// names what is missing, and must not fall back to anything.
+    #[cfg(not(feature = "tailcat"))]
+    #[tokio::test]
+    async fn a_tunnel_destination_without_an_archive_says_so() {
+        let destination = Destination {
+            reach: Reach::Tailcat { token: "tc-x".into(), client_key: "k".into() },
+            user: "u".into(),
+            private_key: test_key(),
+            passphrase: None,
+            host_key: HostKeyPolicy::RequireApproval,
+        };
+        let error = open_err(&destination).await;
+        assert!(matches!(error, SshError::Tunnel { code: "no_tailcat" }), "{error:?}");
+    }
+
+    fn tunnel_destination() -> Destination {
+        Destination {
+            reach: Reach::Tailcat { token: "tc-x".into(), client_key: "k".into() },
+            user: "u".into(),
+            private_key: test_key(),
+            passphrase: None,
+            host_key: HostKeyPolicy::Accept,
+        }
+    }
+
+    /// The reason this branch exists at all: `ECONNREFUSED` on the tunnel
+    /// means the tunnel worked and sshd is not listening, not that SSH
+    /// refused a handshake. Wording it as a rejected handshake would send
+    /// whoever reads it looking in the wrong place, so this reuses
+    /// `SshError::Connect` — the same fact the direct path already names.
+    #[test]
+    fn a_refused_tunnel_port_reads_like_a_dead_sshd_not_a_rejected_handshake() {
+        let destination = tunnel_destination();
+        let source = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        let error = tunnel_error(&destination, TunnelError::Io(source));
+
+        assert!(matches!(error, SshError::Connect { .. }), "{error:?}");
+        let message = error.to_string().to_lowercase();
+        assert!(!message.contains("ssh refused"), "wrong story: {message}");
+        assert!(message.contains("the tunnel"), "lost which reach failed: {message}");
+    }
+
+    /// Every other tunnel failure — including every other `io::Error`, whose
+    /// kind might be `EMFILE` or anything else — crosses as the stable word
+    /// and nothing more specific, because `SshError::Tunnel`'s whole point is
+    /// that the apps own the sentence.
+    #[test]
+    fn every_other_tunnel_error_crosses_as_its_stable_word() {
+        let destination = tunnel_destination();
+
+        let derp = tunnel_error(&destination, TunnelError::Derp);
+        assert!(matches!(derp, SshError::Tunnel { code: "derp" }), "{derp:?}");
+
+        let unrelated_io = tunnel_error(
+            &destination,
+            TunnelError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+        );
+        assert!(matches!(unrelated_io, SshError::Tunnel { code: "io" }), "{unrelated_io:?}");
     }
 }

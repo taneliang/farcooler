@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Value, json};
 
 use crate::session::{Session, SessionError, uuid_of};
-use crate::ssh::{Destination, HostKeyPolicy};
+use crate::ssh::{Destination, HostKeyPolicy, Reach};
 
 /// Run an entry point's body so that a panic cannot leave this crate.
 ///
@@ -2068,8 +2068,13 @@ fn parse_destination(config: &str) -> Result<Destination, String> {
     };
 
     Ok(Destination {
-        host: text("host").ok_or("config needs a host")?,
-        port: value.get("port").and_then(|v| v.as_u64()).unwrap_or(22) as u16,
+        // Every runner a phone or Mac configures today is reached by
+        // address; the tunnel ceremony that produces a `Reach::Tailcat`
+        // config is a later task's to wire.
+        reach: Reach::Direct {
+            host: text("host").ok_or("config needs a host")?,
+            port: value.get("port").and_then(|v| v.as_u64()).unwrap_or(22) as u16,
+        },
         user: text("user").ok_or("config needs a user")?,
         private_key: text("private_key").ok_or("config needs a private_key")?,
         passphrase: text("passphrase"),
@@ -2279,7 +2284,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(destination.host_key, HostKeyPolicy::RequireApproval));
-        assert_eq!(destination.port, 22);
+        assert!(matches!(destination.reach, Reach::Direct { port: 22, .. }));
     }
 
     #[test]

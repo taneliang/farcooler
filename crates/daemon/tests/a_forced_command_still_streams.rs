@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use farcooler_client::session::Session;
-use farcooler_client::ssh::{Destination, HostKeyPolicy};
+use farcooler_client::ssh::{Destination, HostKeyPolicy, Reach};
 use farcooler_fence::{self as fence, Grant, Placement};
 use farcooler_protocol::v1::{Scope, request, result};
 use farcooler_transport::{Client, request as rpc};
@@ -250,8 +250,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 
 fn destination(runner: &Runner, key: &Path) -> Destination {
     Destination {
-        host: "127.0.0.1".into(),
-        port: runner.port,
+        reach: Reach::Direct { host: "127.0.0.1".into(), port: runner.port },
         user: whoami(),
         private_key: std::fs::read_to_string(key).expect("the private key"),
         passphrase: None,

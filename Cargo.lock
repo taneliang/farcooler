@@ -923,6 +923,7 @@ dependencies = [
  "farcooler-daemon",
  "farcooler-fence",
  "farcooler-protocol",
+ "farcooler-tailcat",
  "farcooler-transport",
  "rand",
  "russh",

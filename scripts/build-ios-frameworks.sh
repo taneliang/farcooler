@@ -50,12 +50,26 @@ for CRATE in farcooler-vt farcooler-client farcooler-review; do
 
   if [ "$WITH_DEVICE" = "1" ]; then
     echo "==> $CRATE for the device"
-    # Task 6 wires the tunnel in here, once farcooler-client depends on
-    # farcooler-tailcat: for that one crate, `./scripts/build-tailcat.sh ios-arm64`,
-    # then RUSTFLAGS="-L $PWD/dist/tailcat/ios-arm64 -l static=tailcat" (absolute
-    # -L, explicit -l — either omission silently fails to link) and
-    # --features farcooler-tailcat/linked, device slice only.
-    SDKROOT="$DEVICE_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-ios
+    if [ "$CRATE" = "farcooler-client" ]; then
+      # Only this crate depends on farcooler-tailcat, so only its build gets
+      # the archive and the feature that asks for it — farcooler-vt and
+      # farcooler-review would fail outright: cargo refuses a feature naming
+      # a package that is not in that crate's own dependency graph.
+      #
+      # The `-L` MUST be absolute: `$PWD` here is the repo root (the script
+      # `cd`s there at the top), so this is, but a relative path silently
+      # fails to resolve. `-l static=tailcat` MUST be explicit too: nothing
+      # in this crate has `#[link(name = "tailcat")]` or a `build.rs`, so
+      # without it the linker never asks for the archive at all — both traps
+      # were found the hard way, by actually linking.
+      ./scripts/build-tailcat.sh ios-arm64
+      SDKROOT="$DEVICE_SDK" \
+        RUSTFLAGS="-L $PWD/dist/tailcat/ios-arm64 -l static=tailcat" \
+        cargo build --release -p "$CRATE" --target aarch64-apple-ios \
+        --features farcooler-tailcat/linked
+    else
+      SDKROOT="$DEVICE_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-ios
+    fi
     ARGS+=(-library "target/aarch64-apple-ios/release/$LIB" -headers "$STAGE")
   fi
 

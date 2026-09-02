@@ -14,10 +14,22 @@ name = "farcooler_client"
 # that produces something nothing would ever load.
 crate-type = ["staticlib", "rlib"]
 
+# The default build has no Go archive linked into `farcooler-tailcat`, and
+# that is fine: the tunnel path exists in this crate's code either way, it
+# just always fails with `no_tailcat` until a platform script supplies the
+# archive with `--features farcooler-tailcat/linked`. `tailcat` here is a
+# thin mirror of that flag, for the one place inside this crate that needs to
+# know at compile time whether the archive is really linked: the test that
+# proves a build without one fails the tunnel by name.
+[features]
+default = []
+tailcat = ["farcooler-tailcat/linked"]
+
 [dependencies]
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
 farcooler-transport.workspace = true
+farcooler-tailcat.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 uuid.workspace = true
