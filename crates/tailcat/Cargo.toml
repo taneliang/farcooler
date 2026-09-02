@@ -1,0 +1,25 @@
+[package]
+name = "farcooler-tailcat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# Off by default, and that is the whole build story. `cargo build` with no Go
+# toolchain gets `stub.rs`, which fails at the one call site with the one error
+# that names what is missing — so a plain checkout still produces a `farcooler`
+# that does direct SSH perfectly. The platform scripts turn this on and supply
+# the archive at the final link.
+default = []
+linked = ["dep:libc"]
+
+[dependencies]
+tokio = { workspace = true, features = ["net"] }
+thiserror.workspace = true
+tracing.workspace = true
+# Only the linked backend compares errnos, and it must compare `libc::`
+# constants rather than platform-specific literals (darwin and linux number
+# these differently). Optional so the default, no-Go-toolchain build never
+# needs it at all.
+libc = { workspace = true, optional = true }

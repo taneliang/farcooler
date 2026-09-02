@@ -1052,6 +1052,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "farcooler-tailcat"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "farcooler-tmux"
 version = "0.1.0"
 dependencies = [
