@@ -48,10 +48,11 @@ cargo build --release
 ./target/release/farcooler --help
 ```
 
-Go 1.23+ is needed only to build the tunnel, which shipping builds use to reach
-runners behind NAT. Without it, `cargo build` still produces a working
-`farcooler` — it reaches runners by address, and reports `no_tailcat` for
-tunneled ones.
+Go 1.23+ is needed only to build the tunnel archive
+(`./scripts/build-tailcat.sh <target>`), which the platform build scripts will
+link into shipping builds so they can reach runners behind NAT. `cargo build`
+itself never needs Go: it always produces a working `farcooler` that reaches
+runners by address, and reports `no_tailcat` for tunneled ones.
 
 The macOS app:
 

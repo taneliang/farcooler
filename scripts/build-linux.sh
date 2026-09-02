@@ -22,8 +22,11 @@ case "$ARCH" in
   *) echo "unknown architecture: $ARCH (try x86_64 or aarch64)"; exit 1 ;;
 esac
 
-./scripts/build-tailcat.sh "linux-musl-$ARCH"
-export RUSTFLAGS="${RUSTFLAGS:-} -L $PWD/dist/tailcat/linux-musl-$ARCH -l static=tailcat"
+# Task 7 wires the tunnel in here, once farcooler-daemon/-cli depend on
+# farcooler-tailcat: `./scripts/build-tailcat.sh "linux-musl-$ARCH"`, then
+# RUSTFLAGS="-L $PWD/dist/tailcat/linux-musl-$ARCH -l static=tailcat" (must be
+# an absolute -L and an explicit -l; either omission silently fails to link)
+# and --features farcooler-tailcat/linked on the build below.
 
 OUT="dist/$ARCH-linux"
 
@@ -49,9 +52,9 @@ fi
 
 echo "==> Building $TARGET"
 if command -v cross >/dev/null 2>&1; then
-  cross build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli --features farcooler-tailcat/linked
+  cross build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli
 else
-  cargo build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli --features farcooler-tailcat/linked
+  cargo build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli
 fi
 
 mkdir -p "$OUT"
