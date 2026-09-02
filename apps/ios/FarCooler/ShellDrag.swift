@@ -43,7 +43,16 @@ extension ShellRootView {
                 // the first frame of the gesture. `startLocation` is already
                 // in the global space this gesture is measured in, so the only
                 // conversion is into the page's own coordinates.
-                begin(on: .bar, from: value.startLocation.x - pageFrame.minX)
+                //
+                // `startAbove` travels alongside it, for the same reason and
+                // on the same frame: how far the TOUCH-DOWN point sat above
+                // the bar's own top edge, in `columnAbove`'s own units. See
+                // `ShellBarDrag.startAbove`'s header — this is where the
+                // owner's report is fixed, by giving the redirection struct
+                // the one fact about the touch it did not have before.
+                begin(
+                    on: .bar, from: value.startLocation.x - pageFrame.minX,
+                    startAbove: aboveBarTopEdge(value.startLocation.y))
                 noteMovement(value)
                 barMoved(
                     dx: value.translation.width, up: -value.translation.height,
@@ -84,10 +93,17 @@ extension ShellRootView {
                 // anything.
                 let row = columnRow(at: value.location, lift: up)
                 let thrown = releaseVelocity(value)
+                // The finger's real place, read before `rest()` zeroes it —
+                // the same reason `up` is read from `lift` a few lines up.
+                // Handed to `barRelease` so a release reads the same place
+                // the drag was drawing rather than falling back to `up`
+                // alone, which would revive the low-in-the-bar defect at the
+                // one moment a person actually lets go.
+                let above = pageAbove
                 rest()
                 apply(
                     fleet.barRelease(
-                        axis: decided, dx: dx, up: up, at: position, row: row,
+                        axis: decided, dx: dx, up: up, at: position, row: row, above: above,
                         // SwiftUI's velocity is points per second in the
                         // gesture's own space, `height` positive DOWN — so
                         // the lift's is negated, the same way `up` is.
@@ -169,7 +185,15 @@ extension ShellRootView {
             // charged. That is the property the previous lane established, and
             // it is what made unlocking the axis safe to attempt at all.
             fingerAbove = columnAbove(point, lift: frame.lift)
-            reveal = ShellGesture.overviewProgress(up: frame.lift, tabCount: tabCount)
+            // The finger's own place above the bar, carried into a `@State`
+            // so `ShellPageLayer.pageRise` and `ShellRootView.menuShouldShow`
+            // can read it outside this function. `frame.above` and not
+            // `frame.lift` — see `ShellBarDrag.Frame.above`'s header — which
+            // is the fix for a drag that starts low in the bar: `lift` alone
+            // said the page should already be rising with the fingertip
+            // still short of the topmost row.
+            pageAbove = frame.above
+            reveal = ShellGesture.overviewProgress(up: frame.above, tabCount: tabCount)
             // The other axis, and only once there is something in your hand to
             // move. This is not a redirection — the gesture is still the
             // vertical one and `lean` has stopped being asked — it is the lift
@@ -177,7 +201,7 @@ extension ShellRootView {
             // display, which is the decision written down at
             // `ShellGesture.pageIsHeld`.
             carryX =
-                ShellGesture.pageIsHeld(up: frame.lift, tabCount: tabCount)
+                ShellGesture.pageIsHeld(up: frame.above, tabCount: tabCount)
                 ? ShellGesture.translation(
                     dx: frame.sideways, rubberBanding: rubberBands(frame.sideways))
                 : 0
@@ -253,7 +277,21 @@ extension ShellRootView {
         guard barBottom > 0,
             ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned) > 0
         else { return nil }
-        return (barBottom - ShellMetrics.barRow) - point.y
+        return aboveBarTopEdge(point.y)
+    }
+
+    /// The same number `columnAbove` guards on, without the guard.
+    ///
+    /// Pulled out so the touch-down anchor `begin` hands `ShellBarDrag` — see
+    /// `ShellBarDrag.startAbove` — is measured exactly the same way the
+    /// column's own row selection is, rather than a second formula that
+    /// could drift from it. It is safe to ask before any column is showing:
+    /// a touch anywhere on the bar itself answers a small negative number
+    /// (the bar's own row is `ShellMetrics.barRow` tall), never a number a
+    /// real column row could be confused with, and `pageRise`'s own
+    /// `max(0, …)` treats every negative alike regardless.
+    private func aboveBarTopEdge(_ y: CGFloat) -> CGFloat {
+        (barBottom - ShellMetrics.barRow) - y
     }
 
     /// The content's own swipe, along the flat sequence.
@@ -376,7 +414,14 @@ extension ShellRootView {
     }
 
     /// The first `onChanged` of a gesture, and only the first.
-    private func begin(on which: ShellTrack, from originX: CGFloat) {
+    ///
+    /// `startAbove` is `.bar`-only — the content has no column to be above —
+    /// and defaults to zero, which is what `contentGesture`'s call gets by
+    /// never mentioning it. It seeds `barDrag` fresh, in the same breath as
+    /// every other per-gesture reset here, with the one fact about the touch
+    /// `ShellBarDrag` could not otherwise have: where it landed. See
+    /// `ShellBarDrag.startAbove`'s header.
+    private func begin(on which: ShellTrack, from originX: CGFloat, startAbove: CGFloat = 0) {
         guard !gestureActive else { return }
         gestureActive = true
         // A new finger, so nothing under it has spoken yet. Cleared HERE
@@ -393,6 +438,7 @@ extension ShellRootView {
         track = which
         wasOpen = columnPinned
         liftOrigin = originX
+        if which == .bar { barDrag = ShellBarDrag(startAbove: startAbove) }
     }
 
     /// How much of a horizontal drag of `dx` belongs to the SHELL, once the
@@ -520,7 +566,18 @@ extension ShellRootView {
         switch claimed {
         case .horizontal:
             fingerAbove = nil
-            withAnimation(Self.tracking) { lift = 0 }
+            // `pageAbove` alongside `lift`: it is the same put-back, for the
+            // same page. In practice this is never a visible ease — a
+            // handover to horizontal can only happen while `holdingPage` is
+            // still false, which is exactly the stretch in which `pageAbove`
+            // has never exceeded the column's own run — but it is put back
+            // for the reason `lift` is: a value left standing after the
+            // channel that drew it let go of the gesture is a value that no
+            // longer describes anything.
+            withAnimation(Self.tracking) {
+                lift = 0
+                pageAbove = 0
+            }
         case .vertical:
             withAnimation(Self.tracking) {
                 trackX = 0
@@ -587,13 +644,23 @@ extension ShellRootView {
         // rather than in `begin` because `menuShouldShow` reads it BETWEEN
         // gestures: a `spentLift` left standing over a tap-pinned column is a
         // menu suppressed by a redirection that finished a minute ago. Both
-        // `onEnded`s spend what they need of it before calling this.
+        // `onEnded`s spend what they need of it before calling this. `begin`
+        // ALSO resets it, with the next gesture's own touch-down anchor —
+        // the two are not redundant, they cover the two different windows.
         barDrag = ShellBarDrag()
         // `settled`, not `settle`: the thumb went UP and the page falls DOWN,
         // so there is no momentum here to reward. See `ShellRootView.settled`,
         // which carries the trace — the bounce was thirteen frames of the
         // whole overview kept mounted behind a workspace.
-        withAnimation(Self.settled) { lift = 0 }
+        //
+        // `pageAbove` falls the same way and on the same spring as `lift`:
+        // it is what `ShellPageLayer.pageRise` now reads to draw the fall,
+        // so leaving it standing here would freeze the page wherever the
+        // gesture last left it while `lift` alone sprang back to zero.
+        withAnimation(Self.settled) {
+            lift = 0
+            pageAbove = 0
+        }
     }
 
     private func apply(_ release: ShellRelease, dx: CGFloat, page: CGFloat, wasOpen: Bool) {

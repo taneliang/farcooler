@@ -162,6 +162,18 @@ struct ShellRootView<Pane: View, Actions: View>: View {
 
     /// How far the bar has been lifted, up-positive, floored at zero.
     @State var lift: CGFloat = 0
+    /// How far the finger is above the bar's own top edge — a PLACE, not a
+    /// travel, and the number the PAGE answers to.
+    ///
+    /// `lift` and this one are the same number until a redirect charges one
+    /// of them, or until a gesture starts somewhere other than the bar's own
+    /// top edge, and after that only this one is a fact about where the
+    /// finger actually is. See `ShellBarDrag.startAbove` and `Frame.above`,
+    /// which is what this is written from, on every frame the vertical owns
+    /// the gesture; `ShellPageLayer.pageRise` and `menuShouldShow` are its
+    /// two readers, replacing what `lift` and `fingerLift` used to answer
+    /// for them respectively.
+    @State var pageAbove: CGFloat = 0
     /// How far the track has been dragged sideways, in points.
     @State var trackX: CGFloat = 0
     /// How far the finger has carried a LIFTED page sideways, in points.
@@ -1137,10 +1149,12 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// Whether the menu ought to be showing, given everything else.
     ///
     /// **Travel opens the column; PLACE decides whether there is anything in
-    /// it**, and the two are different numbers as soon as a gesture has
-    /// redirected. `lift` is the travel this gesture has been given — net of
-    /// whatever `ShellBarDrag` charged a handover — and `fingerLift` is where
-    /// the thumb actually is above the bar.
+    /// it**, and the two are different numbers both as soon as a gesture has
+    /// redirected and whenever it did not start at the bar's own top edge.
+    /// `lift` is the travel this gesture has been given — net of whatever
+    /// `ShellBarDrag` charged a handover — and `pageAbove` is where the
+    /// thumb actually is above the bar, which is `ShellBarDrag.Frame.above`
+    /// carried into a `@State`.
     ///
     /// Asking `pageIsHeld` about the travel was a menu that lied for one
     /// frame, and it was found by watching the frames rather than by reading
@@ -1150,20 +1164,20 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// by a hair, so the menu sprang open with the thumb 80 points above
     /// every row in it, and shut again on the next frame. `ShellMotion.menu`
     /// is a 0.28-second spring: what that draws is a blink.
+    ///
+    /// The SAME lie is available a second way — the owner's report — for a
+    /// gesture that never redirected at all: touch down low in the bar and
+    /// the raw travel to the column's own run reads as more lift than the
+    /// thumb has actually climbed, so this used to be told the page was held
+    /// (and hide the menu) before the thumb had genuinely cleared the last
+    /// row. `pageAbove` is a place rather than a travel and does not have
+    /// that failure mode either way.
     private var menuShouldShow: Bool {
         guard !overview,
-            !ShellGesture.pageIsHeld(up: fingerLift, tabCount: tabCount)
+            !ShellGesture.pageIsHeld(up: pageAbove, tabCount: tabCount)
         else { return false }
         return ShellGesture.columnHeight(up: lift, tabCount: tabCount, pinned: columnPinned) > 0
     }
-
-    /// How far above the bar the finger actually is, as opposed to how much
-    /// lift this gesture has been given.
-    ///
-    /// The two are the same number until a redirection charges one of them,
-    /// and after that only one of them is a fact about the thumb. See
-    /// `ShellBarDrag.spentLift`, which is the difference.
-    private var fingerLift: CGFloat { lift + barDrag.spentLift }
 
     /// Bring the menu into line with everything else, on the menu's own
     /// spring.

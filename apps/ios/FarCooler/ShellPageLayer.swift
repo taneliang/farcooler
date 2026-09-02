@@ -121,8 +121,14 @@ extension ShellRootView {
 
     /// How far past the last row the finger has gone, which is the only part
     /// of the lift the page answers at all.
+    ///
+    /// `pageAbove` and not `lift`: the page's own rise is a question about
+    /// where the finger IS relative to the column's top edge, not about how
+    /// far it has travelled since touch-down — see `pageAbove`'s header,
+    /// and `ShellGesture.pageRise`'s, for the drag that starts low in the
+    /// bar this used to get wrong.
     private var pageRise: CGFloat {
-        overview ? 0 : ShellGesture.pageRise(up: lift, tabCount: tabCount)
+        overview ? 0 : ShellGesture.pageRise(up: pageAbove, tabCount: tabCount)
     }
 
     /// How far off the display the page is, 0…1, whichever half of the journey

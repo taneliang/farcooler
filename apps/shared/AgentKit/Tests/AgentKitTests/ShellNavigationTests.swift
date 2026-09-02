@@ -788,6 +788,120 @@ struct ShellNavigationTests {
             "so the page starts the overview's run at nothing, not halfway through it")
     }
 
+    // MARK: - The page's own join, and where the drag started
+
+    /// **The page's own join moves with WHERE THE DRAG STARTED, not with how
+    /// far it has travelled — the owner's report, pinned in screen terms.**
+    ///
+    /// A touch forty points short of the bar's own top edge — a few points
+    /// off the very bottom of a 44-point bar row — has to travel forty
+    /// points FURTHER than one that starts at the top edge before the page
+    /// may rise, because "past the last row" is a place on the glass and the
+    /// touch-down point was not that place. Before `startAbove` existed
+    /// `ShellBarDrag.moved` fed `ShellGesture.pageRise` the raw travel since
+    /// touch-down — `up` alone — which crossed a three-tab column's 132-point
+    /// join at 132 points of travel whichever height the finger touched down
+    /// at. Reverting `above` to `up + 0` below (ignoring `startAbove`)
+    /// reproduces exactly that: this test goes red at the FIRST expectation,
+    /// "the finger is forty points short of the real top edge", with
+    /// `pageRise` reporting 1 rather than 0.
+    @Test func thePageJoinMovesWithWhereTheDragStarted() {
+        let tabs = 3
+        let join = ShellGesture.columnFull(tabCount: tabs)  // 132
+        let startedLow: CGFloat = -40
+
+        var lowStart = ShellBarDrag(startAbove: startedLow)
+        // Travel alone reaches the join at 132 — the OLD reading, and the
+        // one the owner reported: the page starting to move with the
+        // fingertip still over the topmost row.
+        let atOldJoin = lowStart.moved(dx: 0, up: join, tabCount: tabs)
+        #expect(
+            ShellGesture.pageRise(up: atOldJoin.above, tabCount: tabs) == 0,
+            "the finger is forty points short of the real top edge; the page must not have risen")
+
+        // The finger's OWN place reaches the join forty points later — at
+        // 172, `join - startedLow` — which is where the page may finally
+        // move, and not a point before.
+        let atRealJoin = lowStart.moved(dx: 0, up: join - startedLow, tabCount: tabs)
+        #expect(ShellGesture.pageRise(up: atRealJoin.above, tabCount: tabs) == 0)
+        let pastRealJoin = lowStart.moved(dx: 0, up: join - startedLow + 1, tabCount: tabs)
+        #expect(ShellGesture.pageRise(up: pastRealJoin.above, tabCount: tabs) == 1)
+
+        // And it is the SAME boundary in screen terms wherever the drag
+        // began. A touch at the bar's own top edge reaches it at 132 points
+        // of travel exactly — `ShellGesture.columnFull` itself — which is
+        // forty points sooner in TRAVEL than the low touch above, but the
+        // same POINT on the glass: both fingers are, at their own join,
+        // exactly `columnFull` above the bar's own top edge.
+        var topStart = ShellBarDrag(startAbove: 0)
+        let topJoin = topStart.moved(dx: 0, up: join, tabCount: tabs)
+        #expect(ShellGesture.pageRise(up: topJoin.above, tabCount: tabs) == 0)
+        let topPast = topStart.moved(dx: 0, up: join + 1, tabCount: tabs)
+        #expect(ShellGesture.pageRise(up: topPast.above, tabCount: tabs) == 1)
+    }
+
+    /// **The join is unaffected by a redirect that has already charged the
+    /// lift**, which is the case `startAbove`'s header argues by name: once
+    /// a handover has re-based the vertical channel, `lift` already IS the
+    /// place that channel was granted, and `above` reads it rather than
+    /// adding `startAbove` on top of it a second time.
+    ///
+    /// This is the negative control for the fix: every existing redirection
+    /// test in this file drives a `ShellBarDrag()` with the default
+    /// `startAbove` of zero, so this pins the OTHER half — a real anchor,
+    /// carried through a real handover — so a future change cannot "fix" the
+    /// straight-drag case by double-charging the redirected one.
+    @Test func aChargedHandoverIsNotChargedTwiceByTheStartingAnchor() {
+        let tabs = 3
+        // A touch forty points low in the bar, that then wanders sideways
+        // 143 points before turning upward — the shape
+        // `aHandoverChargesTheLiftOnlyForWhatWouldHaveMovedThePage` drives
+        // for its "past" case, with an anchor added.
+        var drag = ShellBarDrag(startAbove: -40)
+        var frame = ShellBarDrag.Frame(axis: nil, lift: 0, sideways: 0, claimed: nil)
+        for point in leg(from: (0, 0), to: (-143, 0)) + leg(from: (-143, 0), to: (-143, 260)) {
+            frame = drag.moved(dx: point.dx, up: point.up, tabCount: tabs)
+        }
+        #expect(frame.axis == .vertical)
+        #expect(drag.spentLift > 0, "the handover happened after the column's own run")
+        // `above` is exactly `lift` at and after the charge — not `lift`
+        // shifted by another forty points — which is what this asserts.
+        #expect(frame.above == frame.lift)
+    }
+
+    /// **A release reads the same real place the drag was drawing**, which
+    /// is what keeps a release from doing something the screen never showed
+    /// as imminent.
+    ///
+    /// The same two hundred and twenty points of travel, from a touch forty
+    /// points low in the bar: the OLD basis — `above` omitted, so `up` reads
+    /// for itself, which is every caller before this change — has already
+    /// travelled past a three-tab column's overview run and leaves for the
+    /// grid. The finger's actual place is forty points short of that, still
+    /// short of even the column's own row margin, and abandons instead —
+    /// which is the release-time half of the owner's report: a drag that
+    /// never visibly reached the overview must not open it.
+    @Test func aReleaseReadsTheFingersRealPlaceRatherThanTheRawTravel() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 0)  // three tabs
+        let travelled: CGFloat = 220
+        let realPlace: CGFloat = 180  // travelled - 40, the low start
+
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: 0, up: travelled, at: at,
+                row: ShellGesture.columnRow(above: travelled, tabCount: 3))
+                == .openOverview,
+            "the default reading is `up` itself, which is every caller before `above` existed")
+
+        #expect(
+            fleet.barRelease(
+                axis: .vertical, dx: 0, up: travelled, at: at,
+                row: ShellGesture.columnRow(above: realPlace, tabCount: 3), above: realPlace)
+                == .abandon,
+            "the finger's real place is short of the column's own margin — nothing was picked, and nothing moved")
+    }
+
     // MARK: - Tapping a column row
 
     /// **A tap on an open column row chooses that row.**

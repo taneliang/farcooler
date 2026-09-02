@@ -1098,6 +1098,20 @@ enum ShellGesture {
     /// `overviewProgress` starts, so the two say the same thing about the same
     /// point and cannot come apart.
     ///
+    /// **`up` has to be a PLACE, not a distance travelled, for that last
+    /// sentence to mean anything in screen terms.** This function does not
+    /// know where a gesture began, so it can only answer the question it is
+    /// asked; a caller that hands it raw translation since touch-down is
+    /// silently asking a different one, and the two only agree when the
+    /// touch happened to land exactly on the bar's own top edge. Off that one
+    /// point, "the same distance travelled" stops meaning "the same place
+    /// arrived at" — which is how a drag that starts low in the bar used to
+    /// cross this join with the fingertip still short of the topmost row.
+    /// `ShellBarDrag.startAbove` is where a caller turns a travel back into a
+    /// place before asking; see its header, and `Frame.above`, which is the
+    /// number its two callers — `ShellDrag.swift` and
+    /// `ShellRootView.menuShouldShow` — actually pass here now.
+    ///
     /// Unclamped above, unlike `overviewProgress`. Past the overview's own run
     /// the page has finished shrinking but the finger has not finished moving,
     /// and a card that stopped following the thumb at some invisible line
@@ -1250,6 +1264,36 @@ struct ShellBarDrag {
     /// the drop the whole rule exists to prevent, reached more slowly.
     private(set) var holdingPage = false
 
+    /// How far the finger's TOUCH-DOWN point sat above the bar's own top
+    /// edge — `(barBottom - ShellMetrics.barRow) - point.y`, the same
+    /// number `ShellGesture.columnRow`'s `above` is — captured once, at the
+    /// start of the gesture, and never touched again.
+    ///
+    /// **The fix for the owner's report, and the reason it belongs here
+    /// rather than in `ShellDrag.swift`.** `pageRise` and `overviewProgress`
+    /// used to be asked about `up` alone — the RAW travel since touch-down —
+    /// which is the finger's true place above the bar only when the finger
+    /// happened to land exactly on the bar's own top edge. Touch down lower
+    /// and drag the same distance, and the travel reads as more lift than
+    /// the finger actually climbed: touch sixteen points above the bar's
+    /// bottom and drag to `columnFull`, and the RAW travel already equals
+    /// `columnFull` while the fingertip is still sixteen points short of the
+    /// topmost row's own bottom edge — the page starts rising with a whole
+    /// menu item still unpicked. That is the bug, and it is the row
+    /// selection defect `columnRow`'s header already fixed once, reached
+    /// from the other side: there the finger's PLACE decides which row
+    /// lights; here it decides where the page itself starts to move.
+    ///
+    /// Zero by default, which is what every caller that does not supply it
+    /// gets: a gesture nobody has told where it started reads exactly as
+    /// `up` always has, so nothing below this line changes for a caller
+    /// that never passes one — every existing test in this file among them.
+    let startAbove: CGFloat
+
+    init(startAbove: CGFloat = 0) {
+        self.startAbove = startAbove
+    }
+
     /// What one frame of a bar drag comes to.
     struct Frame: Equatable {
         /// The axis this frame is leaning toward.
@@ -1257,6 +1301,21 @@ struct ShellBarDrag {
         /// The lift the column and the page are drawn at: floored at zero,
         /// and net of whatever a handover charged.
         var lift: CGFloat
+        /// How far the finger is drawn above the bar's own top edge — a
+        /// POSITION, and the number `ShellGesture.pageRise`,
+        /// `overviewProgress` and `pageIsHeld` should be asked about once the
+        /// vertical owns the gesture, in place of `lift`.
+        ///
+        /// Equal to `lift` for as long as a handover has charged something —
+        /// see `ShellBarDrag.startAbove`, where the two cases are told
+        /// apart — because a charge has already re-based `lift` to the
+        /// position the vertical channel was granted, and adding
+        /// `startAbove` on top would count the touch-down twice. `lift`
+        /// itself keeps meaning "how much this channel has been given",
+        /// which is the right question for `ShellMetrics.openMin` and the
+        /// column's own height, and is why those keep reading `lift` rather
+        /// than this.
+        var above: CGFloat = 0
         /// The sideways travel the track — or the carried card — is drawn at,
         /// net of the same handover and before anything rubber-bands it.
         var sideways: CGFloat
@@ -1279,10 +1338,19 @@ struct ShellBarDrag {
     /// the two would make the ratio a function of its own history.
     mutating func moved(dx: CGFloat, up: CGFloat, tabCount: Int) -> Frame {
         let lift = max(0, up - spentLift)
+        // The finger's actual place above the bar, net of the same charge —
+        // `lift` once a handover has re-based this channel, `startAbove`
+        // added onto the raw travel while nothing has. See `startAbove`'s
+        // header for why the two cases are different rather than the same
+        // arithmetic asked twice.
+        let above = spentLift == 0 ? up + startAbove : lift
         // Read before the lean and never unset: once the page is off the
         // display both directions are its own, and the lean stops being asked
-        // for the rest of the gesture.
-        if axis == .vertical, ShellGesture.pageIsHeld(up: lift, tabCount: tabCount) {
+        // for the rest of the gesture. `above` and not `lift`, for the same
+        // reason `ShellDrag.barMoved` reads it for `reveal` rather than
+        // `lift`: this is the question "is there a page in your hand", and a
+        // page is a place, not a distance travelled.
+        if axis == .vertical, ShellGesture.pageIsHeld(up: above, tabCount: tabCount) {
             holdingPage = true
         }
         let was = axis
@@ -1292,7 +1360,8 @@ struct ShellBarDrag {
         // exactly that case — a gesture that has only just grown past the
         // axis lock — and `axis` is nil for a gesture that has not.
         guard let claimed = axis, claimed != was, was != nil else {
-            return Frame(axis: axis, lift: lift, sideways: dx - spentSideways, claimed: nil)
+            return Frame(
+                axis: axis, lift: lift, above: above, sideways: dx - spentSideways, claimed: nil)
         }
         // One line for both directions, because it is one fact: the sideways
         // travel this gesture has already spent.
@@ -1300,14 +1369,16 @@ struct ShellBarDrag {
         // The lift's charge belongs to whoever is holding the vertical, so it
         // is recomputed when the vertical takes the gesture and DROPPED when
         // it loses it. Left standing across a hand-back it is a number that
-        // no longer describes anything — and `ShellRootView.fingerLift` adds
-        // it to a lift the horizontal arm has just zeroed, which would put a
-        // phantom thumb 80 points above a column that a tap is holding open.
+        // no longer describes anything — and `ShellRootView.menuShouldShow`
+        // reads `above`, computed off this state, on every render; left
+        // stale it would put a phantom thumb 80 points above a column that a
+        // tap is holding open.
         spentLift = claimed == .vertical
             ? ShellGesture.pageRise(up: up, tabCount: tabCount) : 0
+        let liftNow = max(0, up - spentLift)
         return Frame(
-            axis: axis, lift: max(0, up - spentLift), sideways: dx - spentSideways,
-            claimed: claimed)
+            axis: axis, lift: liftNow, above: spentLift == 0 ? up + startAbove : liftNow,
+            sideways: dx - spentSideways, claimed: claimed)
     }
 }
 
@@ -1381,9 +1452,22 @@ extension ShellFleet {
     /// highlight the person is looking at. See `ShellGesture.projected`.
     /// Both default to zero, which is the honest reading of a caller with no
     /// velocity to give: a gesture that was not moving.
+    ///
+    /// `above` is the finger's actual place above the bar's own top edge —
+    /// `ShellBarDrag.startAbove` and `Frame.above`, or `columnAbove` at the
+    /// instant of release — and it is what decides whether the page is held
+    /// at all: `pageIsHeld` and the escape into the overview both read it.
+    /// `up` keeps deciding `ShellMetrics.openMin` and stays what it always
+    /// was for that one question, because a caller three points into an
+    /// accidental touch is not asking "is my thumb past the last row" — it
+    /// is asking "did I mean to move this at all", which is a question about
+    /// TRAVEL and rightly stays one. Nil by default, which reads as `up`
+    /// itself: a caller with no place to give is a caller for whom the two
+    /// have always been the same number, which is every existing caller of
+    /// this function before `above` existed.
     func barRelease(
         axis: ShellAxis?, dx: CGFloat, up: CGFloat, at position: ShellPosition,
-        row: Int? = nil, dxVelocity: CGFloat = 0, upVelocity: CGFloat = 0
+        row: Int? = nil, above: CGFloat? = nil, dxVelocity: CGFloat = 0, upVelocity: CGFloat = 0
     ) -> ShellRelease {
         // A tap, and the column is open under it: choosing a row. Ahead of
         // the toggle, because a tap that lands on a row is not a tap on the
@@ -1402,6 +1486,11 @@ extension ShellFleet {
             return .commit(step)
         case .vertical:
             let tabs = tabCount(ofWorkspace: position.workspace)
+            // The finger's real place, where the caller has one — and `up`
+            // itself where it does not, which is what `up` has always meant
+            // to a caller that never told this function where the gesture
+            // began. See this function's header and `ShellBarDrag.startAbove`.
+            let above = above ?? up
             // The sideways half of a lift, and it only exists once the page
             // is off the display — see `ShellGesture.pageIsHeld`, which is
             // also where the line between the two axes competing and the two
@@ -1410,9 +1499,11 @@ extension ShellFleet {
             // a WORKSPACE: the cards it can be moved between are the
             // overview's cards, and those are workspaces.
             //
-            // `pageIsHeld` reads the finger's ACTUAL lift and not the thrown
-            // one: it is asking whether there is a page in your hand right
-            // now, which is a fact about the screen rather than a prediction.
+            // `pageIsHeld` reads the finger's ACTUAL place and not the
+            // thrown one: it is asking whether there is a page in your hand
+            // right now, which is a fact about the screen rather than a
+            // prediction — and it is a fact about PLACE, so `above` and not
+            // `up`, for the reason this function's header gives.
             //
             // `carried` and not `thrownX`, and this is the whole of the
             // difference between the two axes here. The horizontal arm above
@@ -1425,19 +1516,23 @@ extension ShellFleet {
             let carriedX = ShellGesture.carried(
                 dx: dx, dxVelocity: dxVelocity, upVelocity: upVelocity)
             let sideways: ShellStep? =
-                ShellGesture.pageIsHeld(up: up, tabCount: tabs)
+                ShellGesture.pageIsHeld(up: above, tabCount: tabs)
                     && ShellGesture.commits(dx: carriedX)
                 ? ShellGesture.direction(dx: carriedX).flatMap {
                     step(from: position, $0, along: .bar)
                 }
                 : nil
-            // **The escape, and the one place the lift is projected.** A slow
-            // deliberate lift adds almost nothing here and stops where it was
-            // pointed; a flick adds hundreds of points and leaves. That is
-            // the owner's report exactly: flicking up from the bar with the
-            // thumb lifting over a menu row used to land on the row, because
-            // the only thing being read was where the finger happened to be.
-            let thrownUp = ShellGesture.projected(up, velocity: upVelocity)
+            // **The escape, and the one place the place is projected.** A
+            // slow deliberate lift adds almost nothing here and stops where
+            // it was pointed; a flick adds hundreds of points and leaves.
+            // That is the owner's report exactly: flicking up from the bar
+            // with the thumb lifting over a menu row used to land on the
+            // row, because the only thing being read was where the finger
+            // happened to be. `above` and not `up`, so a gesture that started
+            // low in the bar escapes at the same PLACE a gesture that started
+            // at the bar's own top edge does, rather than at the same amount
+            // of travel.
+            let thrownUp = ShellGesture.projected(above, velocity: upVelocity)
             if thrownUp >= ShellGesture.columnFull(tabCount: tabs) + ShellMetrics.overRun {
                 // The lift says you are staying in the overview; the sideways
                 // says which cell the page lands in. At the ends of the fleet
