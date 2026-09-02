@@ -391,6 +391,127 @@ final class TerminalScrollTests: XCTestCase {
         )
     }
 
+    /// **A finger put down on a coasting pane stops it, and that touch is not
+    /// also the tap that raises the keyboard.**
+    ///
+    /// Native `UIScrollView` resolves a tap-during-a-throw the same way every
+    /// time: the touch kills the coast and goes no further. This view is not a
+    /// `UIScrollView` — it runs its own momentum — so `touchesBegan` has to
+    /// reproduce both halves on purpose: stop `motion` on touch DOWN rather
+    /// than waiting for `focus()` to fire, and mark that touch spent so
+    /// `focus()` declines to raise the keyboard for it. Getting only the first
+    /// half right is worse than doing nothing: a pane that stops but still
+    /// pops the keyboard open reads as the app answering a tap nobody made.
+    ///
+    /// A second, separate tap — made once the pane is actually at rest — must
+    /// still raise the keyboard, or the fix would have traded one broken
+    /// interaction for another (a pane that can never be focused by touch).
+    /// Both halves are asserted here so a regression in either direction goes
+    /// red.
+    ///
+    /// Flung the same way as `testAFlickTravelsFurtherThanTheFingerDid`, and
+    /// the interrupted settle is checked against the same `finger * 3`
+    /// threshold that test uses to prove momentum carried — inverted here to
+    /// prove momentum did NOT carry once the second finger landed.
+    func testTappingAMovingPaneStopsItWithoutRaisingTheKeyboard() throws {
+        let app = launch()
+        let surface = try openATerminalInTheShell(app)
+
+        // A pane raises the keyboard the moment it appears (see the note on
+        // `testThePaneIsPaintedOnTheTerminalsOwnGround`), which would sit in
+        // `app.keyboards.count` for the rest of the test and make the "did
+        // NOT raise the keyboard" assertion below vacuous — true whether or
+        // not the interrupting tap behaved, because something else already
+        // put a keyboard up before either tap ran.
+        let dismiss = app.buttons["keyboard.chevron.compact.down"]
+        if dismiss.exists { dismiss.tap() }
+        let down = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in app.keyboards.count == 0 }, object: nil)
+        try XCTSkipUnless(
+            XCTWaiter.wait(for: [down], timeout: 10) == .completed,
+            "the keyboard never went away, so a later absence of one proves nothing")
+
+        try XCTSkipUnless(
+            waitForHistory(app), "This pane has no scrollback, so a flick has nowhere to go.")
+
+        let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
+        try XCTSkipUnless(cell > 0, "the pane reported a zero row height")
+        let before = try XCTUnwrap(position(app))
+        XCTAssertEqual(before.offset, 0, "a pane opens at the live screen")
+
+        let fromY: CGFloat = 0.26
+        let toY: CGFloat = 0.71
+        let travel = surface.frame.height * (toY - fromY)
+        let finger = Int(travel / CGFloat(cell))
+        try XCTSkipUnless(
+            before.history > finger * 4,
+            """
+            \(before.history) lines of scrollback is not enough room for a throw \
+            worth \(finger) rows of finger to be told apart from a clamp at the top.
+            """)
+
+        flick(surface, fromY: fromY, toY: toY)
+        // No wait between the flick and the tap: `flick` returns the instant
+        // the synthetic release lands, which is the moment the coast starts —
+        // exactly when a real second finger landing "while it's still
+        // scrolling" would arrive. XCUITest's own event-synthesis overhead
+        // still puts a few hundred milliseconds between the two (measured:
+        // ~0.6s), which is enough for a healthy coast to have already crossed
+        // dozens of rows — so "how far back it ended up" cannot be the
+        // assertion; see below for why it is "did it stop moving" instead.
+        surface.tap()
+
+        // Half a second is generous for a keyboard that a working `focus()`
+        // never asked to raise — nothing here is waiting on network or the
+        // runner, just a gesture recognizer's action closure running.
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(
+            app.keyboards.count, 0,
+            "the tap that stopped the coast also raised the keyboard — that touch "
+                + "should have been spent stopping the scroll, not spent twice")
+
+        // **"Stopped" is read off the clock, not off a distance.**
+        //
+        // A distance threshold (row N or fewer) assumes the interrupting tap
+        // always lands at roughly the same point in the coast, but it does
+        // not: XCUITest's own synthesis latency between the flick and the
+        // follow-up tap varies run to run, and the coast is exponential — the
+        // commit that added momentum measured 82 rows crossed by 0.54s into a
+        // ~130-row throw, so a tap arriving anywhere from 0.4s to 0.8s in can
+        // legitimately catch the pane already dozens of rows back. What a
+        // WORKING interruption promises is not a row number, it is that the
+        // row number stops changing the instant the tap lands. So this reads
+        // the offset once shortly after the tap (letting the tiny
+        // settle-onto-a-row spring finish; see `settleAfterATouchThatDidNotDrag`)
+        // and again 1.5s later — long enough that an uninterrupted coast would
+        // have crossed another several dozen rows (105 at 1.07s, 117 at 1.51s
+        // in that same measurement) — and asks whether anything moved between
+        // the two reads.
+        Thread.sleep(forTimeInterval: 0.8)
+        let stopped = try XCTUnwrap(position(app)?.offset)
+        Thread.sleep(forTimeInterval: 1.5)
+        let stillThere = try XCTUnwrap(position(app)?.offset)
+        XCTAssertEqual(
+            stillThere, stopped,
+            """
+            the pane kept moving after a finger landed on it: it was at \(stopped) \
+            rows back shortly after the tap and \(stillThere) 1.5s later. A touch \
+            landing mid-coast must stop it immediately and leave it stopped, not \
+            merely slow it down.
+            """
+        )
+
+        // The pane the interrupting tap left behind is landed on a row (see
+        // `settleAfterATouchThatDidNotDrag`), so this second tap starts from
+        // rest — the ordinary case `focus()` still has to serve.
+        surface.tap()
+        let raised = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in app.keyboards.count > 0 }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [raised], timeout: 10), .completed,
+            "a plain tap on a pane already at rest must still raise the keyboard")
+    }
+
     /// **The grid sits between two rows while a thumb is between two rows.**
     ///
     /// One-to-one tracking, which the talk calls "one of the principles of

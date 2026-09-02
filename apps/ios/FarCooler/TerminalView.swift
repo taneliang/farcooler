@@ -1683,7 +1683,7 @@ private struct KeystrokeField: UIViewRepresentable {
     }
 }
 
-private final class KeystrokeSink: UIView, UIKeyInput {
+private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     var onInsertText: ((String) -> Void)?
     var onDeleteBackward: (() -> Void)?
     /// Move the view by whole lines, and answer with the offset the emulator
@@ -1734,6 +1734,8 @@ private final class KeystrokeSink: UIView, UIKeyInput {
         let tap = UITapGestureRecognizer(target: self, action: #selector(focus))
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         tap.require(toFail: pan)
+        tap.delegate = self
+        pan.delegate = self
         addGestureRecognizer(tap)
         addGestureRecognizer(pan)
 
@@ -1745,7 +1747,62 @@ private final class KeystrokeSink: UIView, UIKeyInput {
         // paste on this platform to preserve, so a press away from a link simply
         // does nothing rather than being given a new meaning nobody asked for.
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
+        hold.delegate = self
         addGestureRecognizer(hold)
+    }
+
+    /// Every touch that lands on this view, the instant it lands — the hook a
+    /// coasting scroll has to be stopped from, and the one place that reliably
+    /// fires.
+    ///
+    /// `UIView.touchesBegan` looks like the obvious place for that and it is
+    /// where this used to live: override it, check whether something is
+    /// moving, stop it. It never ran. Measured on 2026-09-02 with `NSLog` in
+    /// `touchesBegan`/`touchesEnded`/`touchesCancelled` and in every gesture
+    /// recognizer's action, streamed live off the simulator with `log
+    /// stream`: a tap synthesized onto a coasting pane fired the PAN
+    /// recognizer's `.began`/`.ended` for the flick and then the TAP
+    /// recognizer's action for the interrupting touch — and not one of this
+    /// view's own `touchesXXX` overrides, for either touch. This view sits
+    /// inside a `UIViewRepresentable`, and SwiftUI's own hosting does not
+    /// forward raw touch delivery down into it the way a plain `UIView`
+    /// hierarchy would — only the gesture recognizers attached to it, which
+    /// are asked about a touch independently of who UIKit hit-tested. Which
+    /// is this delegate method: called once per touch per recognizer, before
+    /// any of them have decided anything, and it is what a tap gesture
+    /// recognizer's `require(toFail:)` neighbour is normally used FOR.
+    ///
+    /// One touch reaches every recognizer here (tap, pan, hold all sit on
+    /// this same view), so this fires two or three times for a single
+    /// finger going down — `lastTouchDownHandled` is what keeps the second
+    /// and third calls from re-deriving "was something moving" from a
+    /// `displayLink` the first call already tore down.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard touch !== lastTouchDownHandled else { return true }
+        lastTouchDownHandled = touch
+        stopWhateverIsMoving()
+        return true
+    }
+
+    /// A touch just landed. If a coast or a settle was under way, it is
+    /// over — content stays exactly where it was caught, and the touch that
+    /// caught it is marked spent (`tapStoppedTheCoast`) so `focus()` knows
+    /// not to also raise the keyboard for it.
+    private func stopWhateverIsMoving() {
+        guard displayLink != nil else {
+            // Per touch sequence, never left armed. A press that stopped a
+            // coast and then became something other than a tap — a long
+            // press, a gesture the shell took — must not spend the NEXT
+            // tap's keyboard; see `handlePan` and `handleHold` for the two
+            // ways a touch that stopped a coast is *not* the one that
+            // consumes this.
+            tapStoppedTheCoast = false
+            return
+        }
+        stopMotion()
+        velocity = 0
+        motion = .rest
+        tapStoppedTheCoast = true
     }
 
     /// **There is no `gestureRecognizerShouldBegin` here any more, and there
@@ -1790,9 +1847,17 @@ private final class KeystrokeSink: UIView, UIKeyInput {
     /// asks for the keyboard. Every scroll view on the platform resolves that
     /// the same way, so this does too: the tap that stops the motion is spent
     /// stopping it.
+    ///
+    /// Spent stopping it, not spent doing nothing: `require(toFail: pan)`
+    /// guarantees this only fires for a touch that did not drag, and a touch
+    /// that stopped a coast and then lifted without dragging is the exact
+    /// case this class quantises for — the content may be sitting half a row
+    /// from where the emulator can put it, and this is where that gets
+    /// landed. See `settleAfterATouchThatDidNotDrag`.
     @objc func focus() {
         if tapStoppedTheCoast {
             tapStoppedTheCoast = false
+            settleAfterATouchThatDidNotDrag()
             return
         }
         becomeFirstResponder()
@@ -1832,9 +1897,10 @@ private final class KeystrokeSink: UIView, UIKeyInput {
     private var displayLink: CADisplayLink?
     private var lastFrame: CFTimeInterval = 0
     private var tapStoppedTheCoast = false
-    /// Whether a pan actually ran for the touch sequence in progress, so
-    /// `touchesEnded` can tell "tapped to stop a coast" from "dragged".
-    private var panRan = false
+    /// The touch `gestureRecognizer(_:shouldReceive:)` last acted on, so the
+    /// two or three recognizers on this view asking about the same finger
+    /// going down cost one stop rather than three.
+    private weak var lastTouchDownHandled: UITouch?
     private var readout = TerminalScrollReadout()
     /// The last readout SwiftUI was actually given, so a frame that changed
     /// nothing worth drawing does not cost a redraw. See `commit`.
@@ -1913,7 +1979,12 @@ private final class KeystrokeSink: UIView, UIKeyInput {
 
         switch recognizer.state {
         case .began:
-            panRan = true
+            // This touch already went through `gestureRecognizer(_:shouldReceive:)`
+            // on the way here, so anything it was going to stop is already
+            // stopped. What only becoming a drag settles is `tapStoppedTheCoast`:
+            // a touch that stopped a coast and THEN dragged must not spend the
+            // NEXT tap's keyboard — `tap.require(toFail:)` already keeps this
+            // touch itself from reaching `focus()`, this is for the one after it.
             tapStoppedTheCoast = false
             stopMotion()
             motion = .tracking
@@ -2107,41 +2178,20 @@ private final class KeystrokeSink: UIView, UIKeyInput {
         lastFrame = 0
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        panRan = false
-        // Taking over from a coast happens HERE, on touch down, not in the pan
-        // recognizer — a pan does not begin until the finger has moved ten
-        // points, and content that kept sliding for those ten points would be
-        // content that ignored a finger resting on it.
-        if displayLink != nil {
-            stopMotion()
-            velocity = 0
-            motion = .rest
-            tapStoppedTheCoast = true
-        } else {
-            // Per touch sequence, never left armed. A press that stopped a
-            // coast and then became something other than a tap — a long press,
-            // a gesture the shell took — must not spend the NEXT tap's
-            // keyboard.
-            tapStoppedTheCoast = false
-        }
-        super.touchesBegan(touches, with: event)
-    }
-
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        super.touchesEnded(touches, with: event)
-        settleAfterATouchThatDidNotDrag()
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        super.touchesCancelled(touches, with: event)
-        settleAfterATouchThatDidNotDrag()
-    }
-
-    /// A tap that stopped a coast leaves the grid wherever it caught it, which
-    /// can be half a row down. Land it.
+    /// A touch that stopped a coast leaves the grid wherever it caught it,
+    /// which can be half a row down. Land it — called once that touch
+    /// resolves as a lift with no drag, from `focus()` for the ordinary case
+    /// and from `handleHold` for a press held long enough to win the
+    /// platform's default exclusivity over the tap.
+    ///
+    /// Deliberately not called from `.changed`, and not called at all while
+    /// the touch is still down: the content stays frozen exactly where the
+    /// touch caught it for as long as that touch is on the glass — landing it
+    /// on a row is the LIFT's business, not the touch-down's, or a finger
+    /// resting on the pane while deciding what to do next would see the grid
+    /// creep to the nearest row out from under it.
     private func settleAfterATouchThatDidNotDrag() {
-        guard !panRan, motion == .rest, displayLink == nil else { return }
+        guard motion == .rest, displayLink == nil else { return }
         let target = position < 0 || position > span
             ? min(max(position, 0), span) : nearestRow(to: position)
         guard abs(position - target) > 0.5 else { return }
@@ -2162,13 +2212,33 @@ private final class KeystrokeSink: UIView, UIKeyInput {
         @objc func tick(_ link: CADisplayLink) { sink?.step(link) }
     }
 
-    /// Report where a long press landed, once, when it begins.
+    /// Report where a long press landed, once, when it begins — and, if this
+    /// press is the one that stopped a coast, land the content on a row when
+    /// it finally lifts.
     ///
-    /// `.began` only: a press that is held reports repeatedly otherwise, and a
-    /// dialog presented several times over is a dialog you cannot dismiss.
+    /// The second half exists because a long press wins the platform's
+    /// default exclusivity over a tap once it reaches its own `.began` (0.5s
+    /// by default): the tap on this same view never fires for that touch, so
+    /// `focus()` — the usual place a stopped, undragged touch gets settled —
+    /// never runs for it either. Without this, a press held long enough to
+    /// open a link's menu, or just held and released over plain text, would
+    /// leave the grid stranded mid-row until something else nudged it.
+    ///
+    /// `onHold?` fires once, on `.began` only — a press that is held reports
+    /// repeatedly otherwise, and a dialog presented several times over is a
+    /// dialog you cannot dismiss. The settle fires once too, on lift, and
+    /// only when this press actually was the one that caught a moving pane.
     @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
-        guard recognizer.state == .began else { return }
-        onHold?(recognizer.location(in: self))
+        switch recognizer.state {
+        case .began:
+            onHold?(recognizer.location(in: self))
+        case .ended, .cancelled:
+            guard tapStoppedTheCoast else { return }
+            tapStoppedTheCoast = false
+            settleAfterATouchThatDidNotDrag()
+        default:
+            break
+        }
     }
 
     func insertText(_ text: String) { onInsertText?(text) }
