@@ -34,7 +34,6 @@ EOF
   exit 1
 }
 
-mkdir -p "$OUT"
 case "$TARGET" in
   ios-arm64)
     export CGO_ENABLED=1 GOOS=ios GOARCH=arm64
@@ -57,5 +56,21 @@ case "$TARGET" in
   *) echo "unknown target: $TARGET"; exit 1 ;;
 esac
 
-(cd crates/tailcat/go && go build -buildmode=c-archive -o "../../../$OUT/libtailcat.a" .)
+mkdir -p "$OUT"
+
+# A failed or interrupted build must never leave a stale or partial archive
+# at $OUT — a caller that does not check this script's exit code (a manual
+# run, an IDE build step) would otherwise silently link whatever an old
+# commit last put there. Removed up front, so a build that fails leaves
+# nothing rather than something stale; built to a scratch directory and
+# `mv`'d into place only once complete, so a build that succeeds is atomic
+# and a build that is interrupted mid-write never leaves a half-written file
+# at the final path either.
+rm -f "$OUT/libtailcat.a" "$OUT/libtailcat.h"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+(cd crates/tailcat/go && go build -buildmode=c-archive -o "$TMP/libtailcat.a" .)
+mv "$TMP/libtailcat.a" "$OUT/libtailcat.a"
+mv "$TMP/libtailcat.h" "$OUT/libtailcat.h"
 ls -l "$OUT/libtailcat.a"
