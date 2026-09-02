@@ -546,13 +546,35 @@ func stopServer() {
 // admits nobody: tailcat reads an empty AllowedClients as "admit everyone", so
 // forwarding one would open this runner's sshd to anyone holding the token.
 //
-// It holds mu throughout, and that is worth a number rather than a shrug. The
-// happy path is one Start — 170 to 450 ms measured. A first start adds one
-// region pick, bounded by regionPickTimeout. The worst path is a pinned region
-// that has gone: a failed Start, then a map read that upstream's process-wide
-// cache serves without a request (measured: the second fetch of the same URL
-// makes no HTTP call at all), then a pick, then a second Start. So the bound
-// is roughly two Starts plus one regionPickTimeout, not two of them.
+// It holds mu throughout, and that is worth a number rather than a shrug —
+// including the part of the number that is not ours.
+//
+//	happy path            one Start, 170-450 ms measured
+//	first start ever      + chooseRegion, bounded by regionPickTimeout
+//	pinned region gone    + a failed Start, a cached map read, our pick, and a
+//	                      second Start that runs a netcheck of ITS own
+//
+// The last line is the one that was wrong here before. A replacement region
+// this cannot choose leaves RegionID 0, and 0 does not mean "no region" to
+// upstream: Start does cmp.Or(s.RegionID, -1), so 0 becomes -1, which is
+// "choose one for me", and that netcheck runs inside Expand on
+// context.Background() under upstream's own hardcoded ten seconds. It is not
+// covered by regionPickTimeout and it is not ours to shorten.
+//
+// Measured, in one run against a map netcheck can make nothing of: the whole
+// withdrawn-region path 6.051 s = 3.002 s of our pick + 3.004 s of upstream's.
+// Two netchecks, one of them ours. The map itself is free after the first
+// read — upstream caches it process-wide by URL, and the same run counts one
+// HTTP request for the whole path.
+//
+// Ceilings, since the measurement is one machine and one map: our pick is
+// capped by regionPickTimeout, each Start's DERP work by upstream's ten
+// seconds. So the withdrawn-region branch tops out near 25 s, and a genuinely
+// fresh runner can compose worse — chooseRegion can spend a full
+// regionPickTimeout, and if the region it just pinned then fails to start,
+// recovery spends another, which is two of them plus two upstream ten-second
+// segments in a single call. Narrow, but it is a real path and it is written
+// down rather than discovered.
 //
 // What waits behind it is conn_blob and allow_add on the same runner. dial
 // takes mu only to read the DERP map URL, and in practice a process is a
@@ -578,7 +600,7 @@ func serve(keyPath string, sshPort uint16, allow string) (rc int) {
 		// choosing again; refusing to serve over a failed write would be the
 		// worse trade.
 		if picked, err := chooseRegion(derpMapURL); err != nil || picked == 0 {
-			log.Printf("tailcat: serving without a pinned DERP region (%v); the token may move on restart", err)
+			log.Printf("tailcat: serving without a pinned DERP region (%v); the token may move on restart, and every start pays its own netcheck", err)
 		} else if err := pinRegion(keyPath, identity{priv: id.priv, regionID: picked}); err != nil {
 			log.Printf("tailcat: could not pin DERP region %d: %v", picked, err)
 		} else {
@@ -630,7 +652,11 @@ func recoverFromAPinThatWillNotStart(s **tailcat.Server, keyPath string, id iden
 	log.Printf("tailcat: DERP region %d has left the map; choosing again", id.regionID)
 	next := identity{priv: id.priv}
 	if picked, err := pickRegionIn(ctx, dm); err != nil || picked == 0 {
-		log.Printf("tailcat: could not choose a region to replace %d (%v); serving unpinned", id.regionID, err)
+		// "Unpinned" is not free and the log should not imply it is: RegionID
+		// 0 reaches upstream as -1, so every start from here on runs its own
+		// netcheck to choose again — measured at 3 s against a map with
+		// nothing to measure, capped at upstream's ten.
+		log.Printf("tailcat: could not choose a region to replace %d (%v); serving unpinned, which costs a netcheck on every start", id.regionID, err)
 	} else {
 		next.regionID = picked
 	}

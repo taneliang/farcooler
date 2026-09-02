@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -891,5 +892,77 @@ func TestARegionStillInTheMapKeepsThePin(t *testing.T) {
 	}
 	if s != nil {
 		t.Fatal("a server was built for a region that never went away")
+	}
+}
+
+// Where the withdrawn-region path actually spends its time, and which half of
+// it this package bounds.
+//
+// The comment on serve used to say "two Starts plus one regionPickTimeout",
+// which holds only when the recovery's pick succeeds. When it returns 0 the
+// replacement Server carries RegionID 0 — and to upstream that is not "no
+// region", it is cmp.Or(0, -1) = -1, "choose one for me", whose netcheck runs
+// inside Expand on context.Background() under a hardcoded ten seconds that
+// nothing here bounds.
+//
+// So the path is two netchecks and only one of them is ours. This measures all
+// three numbers in one run so the attribution is an assertion rather than
+// arithmetic across two test runs.
+func TestTheWithdrawnRegionPathIsTwoPicksAndOnlyOneIsOurs(t *testing.T) {
+	captureLog(t)
+	defer restoreServerState(t, nil, closeServer)()
+	serveDERPMap(t, 901) // 900 is not in it
+	allowed, err := parseAllowed(keyA)
+	if err != nil {
+		t.Fatalf("parseAllowed: %v", err)
+	}
+
+	// The whole path, as serve pays for it with mu held.
+	beforeTotal := time.Now()
+	if rc := serve(pinnedIdentity(t, 900), 22, keyA); rc != 0 {
+		t.Fatalf("serve did not recover from a withdrawn region: rc=%d", rc)
+	}
+	total := time.Since(beforeTotal)
+
+	// Segment one: the pick this package bounds with regionPickTimeout.
+	ctx, cancel := context.WithTimeout(context.Background(), regionPickTimeout)
+	dm, err := regionMap(ctx, derpMapURL)
+	if err != nil {
+		t.Fatalf("regionMap: %v", err)
+	}
+	beforeOurs := time.Now()
+	picked, pickErr := pickRegionIn(ctx, dm)
+	ours := time.Since(beforeOurs)
+	cancel()
+
+	// Segment two: what a Start with no region of its own costs, which is the
+	// second netcheck and the one on upstream's clock.
+	id, err := loadOrCreateIdentity(filepath.Join(t.TempDir(), "node.key"))
+	if err != nil {
+		t.Fatalf("loadOrCreateIdentity: %v", err)
+	}
+	unpinned := newServer(identity{priv: id.priv}, 22, allowed)
+	beforeTheirs := time.Now()
+	startErr := unpinned.Start()
+	theirs := time.Since(beforeTheirs)
+	unpinned.Close()
+
+	t.Logf("the whole withdrawn-region path: %s", total.Round(time.Millisecond))
+	t.Logf("  our bounded pick:                     %s (region %d, err %v)", ours.Round(time.Millisecond), picked, pickErr)
+	t.Logf("  upstream's pick inside a Start at 0:  %s (err %v)", theirs.Round(time.Millisecond), startErr)
+
+	// Both halves have to be real, or the comment on serve is describing a
+	// cost that is not there. The floor is a tenth of what either measured, so
+	// this fails on a change of shape rather than on a slow afternoon.
+	if ours < 500*time.Millisecond {
+		t.Fatalf("our own region pick cost %s; serve's bound describes a netcheck that is no longer happening", ours)
+	}
+	if theirs < 500*time.Millisecond {
+		t.Fatalf("a Start with RegionID 0 cost %s; upstream no longer auto-picks, and serve's bound overstates the cost", theirs)
+	}
+	// And they have to be most of it, or the attribution names the wrong
+	// thing.
+	if accounted := ours + theirs; accounted*4 < total*3 {
+		t.Fatalf("two netchecks account for only %s of a %s path; the time is going somewhere unnamed", accounted, total)
 	}
 }
