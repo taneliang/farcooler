@@ -452,6 +452,30 @@ impl Service {
         &self.authorized_keys
     }
 
+    /// This runner's persistent tailcat identity, mode 0600, under
+    /// `FARCOOLER_HOME`.
+    ///
+    /// Its existence IS the feature flag. No file, no server, no DERP
+    /// connection, and rule 1 stays literally and practically true for every
+    /// runner that was never enrolled through a QR ceremony.
+    pub fn tailcat_key(&self) -> PathBuf {
+        self.root.join("tailcat.key")
+    }
+
+    /// Where this runner's own sshd actually listens, on loopback.
+    ///
+    /// Always 22 today. That is real, not a placeholder pretending to be
+    /// configurable: nothing in this daemon reads `sshd_config`, and no
+    /// manifest field carries a different answer yet — a deliberate omission,
+    /// not an oversight, per "The port number is virtual" in
+    /// `docs/superpowers/specs/2026-08-31-tailcat-transport-design.md`. A
+    /// client's own dial always asks for port 22 too, as a name rather than a
+    /// claim about where sshd listens, so nothing on the other end needs this
+    /// method to change before the day sshd's real port does.
+    pub fn ssh_port(&self) -> u16 {
+        22
+    }
+
     /// The connections this daemon is serving right now.
     pub fn sessions(&self) -> &Arc<crate::sessions::Sessions> {
         &self.sessions

@@ -975,6 +975,7 @@ dependencies = [
  "farcooler-protocol",
  "farcooler-review",
  "farcooler-store",
+ "farcooler-tailcat",
  "farcooler-tmux",
  "farcooler-transport",
  "farcooler-vt",

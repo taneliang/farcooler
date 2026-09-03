@@ -13,11 +13,27 @@ path = "src/lib.rs"
 name = "farcoolerd"
 path = "src/main.rs"
 
+# The default build has no Go archive linked into `farcooler-tailcat`, and
+# that is fine: `allowlist::start_tunnel` exists in this crate's code either
+# way, it just always fails with `no_tailcat` until a platform script supplies
+# the archive with `--features farcooler-tailcat/linked`. `tailcat` here is a
+# thin mirror of that flag, the same one `crates/client/Cargo.toml` carries,
+# for the one place inside this crate that would need to know at compile time
+# whether the archive is really linked.
+[features]
+default = []
+tailcat = ["farcooler-tailcat/linked"]
+
 [dependencies]
 farcooler-agent.workspace = true
 farcooler-core.workspace = true
 farcooler-fence.workspace = true
 farcooler-review.workspace = true
+# The tunnel. Stubbed by default — see the `tailcat` feature above — so a
+# plain checkout with no Go toolchain still produces a `farcoolerd` that
+# serves nothing but fails with one named error rather than silently opening
+# an empty allowlist to the world. See `allowlist::start_tunnel`.
+farcooler-tailcat.workspace = true
 sha2 = "0.10"
 # Recursive filesystem watching for the three session-log roots. Not already
 # in the tree (checked `Cargo.lock` and every crate's `Cargo.toml` first).

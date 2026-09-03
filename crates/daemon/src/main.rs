@@ -188,6 +188,13 @@ async fn run() -> Result<(), i32> {
     // is listening on and every agent pane goes silent while looking healthy.
     service.resume_agent_listeners();
 
+    // Not fatal, ever. A runner that cannot start its tunnel is still a runner
+    // reachable by address, and refusing to boot would take away the access
+    // somebody would use to fix it.
+    if let Some(blob) = farcooler_daemon::allowlist::start_tunnel(&service).await {
+        tracing::info!(token = %blob, "serving the tunnel");
+    }
+
     // One watcher for the runner, shared by every connection. Deriving activity
     // once and pushing it is the whole point: N clients must not mean N
     // processes reading the same screens.

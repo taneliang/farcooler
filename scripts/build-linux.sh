@@ -17,16 +17,10 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 ARCH="${1:-$(uname -m)}"
 case "$ARCH" in
-  arm64|aarch64) ARCH=aarch64; TARGET=aarch64-unknown-linux-musl ;;
-  x86_64|amd64)  ARCH=x86_64;  TARGET=x86_64-unknown-linux-musl ;;
+  arm64|aarch64) ARCH=aarch64; TARGET=aarch64-unknown-linux-musl; TAILCAT_TARGET=linux-musl-aarch64 ;;
+  x86_64|amd64)  ARCH=x86_64;  TARGET=x86_64-unknown-linux-musl; TAILCAT_TARGET=linux-musl-x86_64 ;;
   *) echo "unknown architecture: $ARCH (try x86_64 or aarch64)"; exit 1 ;;
 esac
-
-# Task 7 wires the tunnel in here, once farcooler-daemon/-cli depend on
-# farcooler-tailcat: `./scripts/build-tailcat.sh "linux-musl-$ARCH"`, then
-# RUSTFLAGS="-L $PWD/dist/tailcat/linux-musl-$ARCH -l static=tailcat" (must be
-# an absolute -L and an explicit -l; either omission silently fails to link)
-# and --features farcooler-tailcat/linked on the build below.
 
 OUT="dist/$ARCH-linux"
 
@@ -50,12 +44,41 @@ EOF
   exit 1
 fi
 
+# This is a shipping build, unlike `cargo build`/`cargo test --workspace` —
+# those stay on the stub in `farcooler-tailcat` and need no Go at all.
+# `build-tailcat.sh` refuses with its own actionable message if Go is
+# missing, so this script does not repeat the check; it just needs the
+# archive it produces.
+./scripts/build-tailcat.sh "$TAILCAT_TARGET"
+# Absolute, not relative: a relative `-L` silently fails to resolve. The
+# script `cd`s to the repo root at the top, so `$PWD` is that root.
+TAILCAT_DIR="$PWD/dist/tailcat/$TAILCAT_TARGET"
+
 echo "==> Building $TARGET"
 if command -v cross >/dev/null 2>&1; then
-  cross build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli
+  BUILD=(cross)
 else
-  cargo build --release --target "$TARGET" -p farcooler-daemon -p farcooler-cli
+  BUILD=(cargo)
 fi
+
+# `farcooler-cli` does not depend on `farcooler-tailcat` yet — dialing the
+# tunnel from the CLI is a later task — so it builds plain.
+"${BUILD[@]}" build --release --target "$TARGET" -p farcooler-cli
+
+# `-p farcooler-daemon` alone, through `rustc` rather than `build`, and
+# scoped to exactly one target with `--bin farcoolerd`: the package carries
+# both a lib and a bin, and `cargo rustc`/`cross rustc` refuse trailing `--`
+# args unless exactly one target is selected.
+#
+# NOT a global `RUSTFLAGS`. That applies to every crate rustc compiles for
+# this target, and `-l static=` bundles the named archive's objects into
+# whichever crate it is attached to at compile time — a plain `RUSTFLAGS`
+# duplicated a 47.6 MB archive into all 142 rlibs in the dependency graph and
+# produced a 6.4 GB artifact, found the hard way while wiring the iOS build
+# (see `scripts/build-ios-frameworks.sh`'s comment on the same trap). Scoping
+# the flags to this one `rustc` invocation is what keeps it to one copy.
+"${BUILD[@]}" rustc --release --target "$TARGET" -p farcooler-daemon --bin farcoolerd \
+  --features tailcat -- -L "$TAILCAT_DIR" -l static=tailcat
 
 mkdir -p "$OUT"
 cp "target/$TARGET/release/farcoolerd" "$OUT/"

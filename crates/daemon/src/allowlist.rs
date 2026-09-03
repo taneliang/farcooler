@@ -44,6 +44,71 @@ pub fn from_entries(entries: &[Entry]) -> Option<Allowlist> {
     (!keys.is_empty()).then_some(Allowlist(keys))
 }
 
+/// Start this runner's tunnel, if it has one to start.
+///
+/// Two things must both be true, and neither is a default. The runner must
+/// hold a persistent identity — an operator who never ran a QR ceremony has no
+/// key file and gets no tunnel. And `authorized_keys` must admit at least one
+/// device, because tailcat reads an empty allowlist as "admit everyone" and a
+/// runner that opened its sshd to the world would look, from here, exactly
+/// like one that worked.
+///
+/// Reads `authorized_keys` through `farcooler_fence::read` directly rather
+/// than `enrollment::list`: the wire's `ClientList` never carries a node key —
+/// nothing a client displays needs one, so `EnrolledClient` has no field for
+/// it — and it is the one thing this function exists to ask about.
+///
+/// `farcooler_tailcat::serve` and `conn_blob` are synchronous and can block
+/// for 30-45 seconds: the Go side holds a package-wide mutex for the whole of
+/// `serve`, which includes up to two 15-second region-pick budgets plus two
+/// `Start` attempts. Both run on the blocking pool so a slow tunnel start
+/// never stalls the runtime workers serving this daemon's Unix socket.
+pub async fn start_tunnel(service: &crate::service::Service) -> Option<String> {
+    let key_path = service.tailcat_key();
+    if !key_path.exists() {
+        tracing::debug!("no tailcat identity; this runner serves no tunnel");
+        return None;
+    }
+
+    let auth_path = service.authorized_keys().to_path_buf();
+    let entries = tokio::task::spawn_blocking(move || {
+        farcooler_fence::read(&auth_path, farcooler_fence::AUTHORIZED_KEYS)
+    })
+    .await
+    .inspect_err(|error| tracing::warn!(%error, "the authorized_keys read task did not finish"))
+    .ok()?
+    .inspect_err(|error| {
+        tracing::warn!(%error, "authorized_keys could not be read; this runner serves no tunnel")
+    })
+    .ok()?;
+
+    let Some(allowed) = from_entries(&entries) else {
+        tracing::info!("no enrolled device carries a node key; this runner serves no tunnel");
+        return None;
+    };
+
+    let ssh_port = service.ssh_port();
+    let serve_key_path = key_path.clone();
+    let allowed_keys = allowed.keys().to_vec();
+    let served = tokio::task::spawn_blocking(move || {
+        farcooler_tailcat::serve(&serve_key_path, ssh_port, &allowed_keys)
+    })
+    .await;
+    match served {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(code = error.code(), "the tunnel did not start");
+            return None;
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the tunnel-serving task did not finish");
+            return None;
+        }
+    }
+
+    tokio::task::spawn_blocking(farcooler_tailcat::conn_blob).await.ok()?.ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
