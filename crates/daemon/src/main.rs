@@ -191,9 +191,23 @@ async fn run() -> Result<(), i32> {
     // Not fatal, ever. A runner that cannot start its tunnel is still a runner
     // reachable by address, and refusing to boot would take away the access
     // somebody would use to fix it.
-    if let Some(blob) = farcooler_daemon::allowlist::start_tunnel(&service).await {
-        tracing::info!(token = %blob, "serving the tunnel");
-    }
+    //
+    // `tokio::spawn`, not `.await`ed inline. `start_tunnel` can block on the
+    // blocking pool for 30-45 seconds — the Go side holds a package-wide
+    // mutex across up to two 15-second region-pick budgets plus two `Start`
+    // attempts — and the Unix socket this runner is reached through does not
+    // exist until `UnixListenerServer::bind` a few lines down. Awaiting this
+    // here would leave the runner unreachable, still holding the daemon
+    // lock so nothing else could take over either, for the whole of that
+    // window. `farcooler daemon ensure` gives a starting daemon 5 seconds
+    // (`crates/cli/src/daemon_link.rs`) — a runner on a slow DERP region
+    // would look dead rather than busy.
+    let tunnel_service = service.clone();
+    tokio::spawn(async move {
+        if let Some(blob) = farcooler_daemon::allowlist::start_tunnel(&tunnel_service).await.blob() {
+            tracing::info!(token = %blob, "serving the tunnel");
+        }
+    });
 
     // One watcher for the runner, shared by every connection. Deriving activity
     // once and pushing it is the whole point: N clients must not mean N

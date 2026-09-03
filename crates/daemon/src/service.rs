@@ -470,8 +470,21 @@ impl Service {
     /// not an oversight, per "The port number is virtual" in
     /// `docs/superpowers/specs/2026-08-31-tailcat-transport-design.md`. A
     /// client's own dial always asks for port 22 too, as a name rather than a
-    /// claim about where sshd listens, so nothing on the other end needs this
-    /// method to change before the day sshd's real port does.
+    /// claim about where sshd listens, so a Direct destination and a Tailcat
+    /// one agree on the wire until this method starts telling the truth for
+    /// runners it does not yet.
+    ///
+    /// A runner whose sshd is genuinely not on 22 already exists in this
+    /// product's own model — `Destination::Direct` reads a configurable
+    /// `port` off a config (`crates/client/src/ffi.rs`, `"port"`, default
+    /// 22) — and this method has no way to learn that value yet for a
+    /// tunneled one. For such a runner, Go dials loopback `:22`, finds
+    /// nothing listening, and the client renders `ECONNREFUSED` as
+    /// `SshError::TunnelPortClosed` (`crates/client/src/ssh.rs:287-303`).
+    /// That fails closed and is not silently wrong, but it names a plausible
+    /// cause — a closed tunnel — that is not the true one. Fixing it needs
+    /// this method to actually vary, which is the same later work the doc
+    /// above already defers.
     pub fn ssh_port(&self) -> u16 {
         22
     }

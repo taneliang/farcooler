@@ -17,9 +17,15 @@ path = "src/main.rs"
 # that is fine: `allowlist::start_tunnel` exists in this crate's code either
 # way, it just always fails with `no_tailcat` until a platform script supplies
 # the archive with `--features farcooler-tailcat/linked`. `tailcat` here is a
-# thin mirror of that flag, the same one `crates/client/Cargo.toml` carries,
-# for the one place inside this crate that would need to know at compile time
-# whether the archive is really linked.
+# thin mirror of that flag, the same one `crates/client/Cargo.toml` carries.
+# Not used by any `cfg` inside this crate's own `src/` — the daemon's tunnel
+# logic (`allowlist::tunnel_plan`/`start_tunnel`) needs no compile-time branch
+# on it, unlike the client's dialing path. It stays load-bearing for
+# `scripts/build-linux.sh`, which passes `--features tailcat` to make
+# `cfg(feature = "linked")` true two crates down at the point it links the
+# real archive, and for `crates/daemon/tests/an_empty_allowlist_starts_no_tunnel.rs`'s
+# `#[cfg(not(feature = "tailcat"))]` test, the daemon-side counterpart to
+# `crates/client/src/ssh.rs`'s `a_tunnel_destination_without_an_archive_says_so`.
 [features]
 default = []
 tailcat = ["farcooler-tailcat/linked"]

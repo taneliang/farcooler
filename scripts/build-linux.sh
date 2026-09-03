@@ -24,22 +24,40 @@ esac
 
 OUT="dist/$ARCH-linux"
 
-if ! command -v cross >/dev/null 2>&1 && ! rustup target list --installed | grep -q "^$TARGET$"; then
+# `cross` cannot build what this script ships, so its presence does not
+# satisfy this check on its own — a NATIVE `$TARGET` is required regardless.
+# Two independent reasons, both fatal: `cross` builds inside a Docker/Podman
+# container that mounts this repo at a path of ITS choosing, so the absolute
+# `-L "$TAILCAT_DIR"` this script hands `farcooler-daemon`'s link step below
+# cannot resolve inside it — and the Go archive itself needs a Go toolchain
+# plus a musl cross-compiler ON THIS HOST regardless of any container, which
+# is exactly the setup `cross` exists so a contributor does not need. An
+# earlier version of this script offered `cross` as a fix for a missing
+# native target; it was not one, and the help text below no longer says it is.
+HAVE_NATIVE_TARGET=0
+rustup target list --installed 2>/dev/null | grep -q "^$TARGET$" && HAVE_NATIVE_TARGET=1
+
+if [ "$HAVE_NATIVE_TARGET" -ne 1 ]; then
   cat <<EOF
-Cannot build $TARGET yet. Pick one:
+Cannot build $TARGET with the tunnel linked — this script needs a NATIVE musl
+target on this machine; \`cross\` cannot supply one (see the comment above this
+message in the script for why). Pick one:
 
-  1. cross (needs Docker or Podman, no other setup):
-         cargo install cross
-         ./scripts/build-linux.sh $ARCH
-
-  2. A native toolchain:
+  1. A native toolchain:
          rustup target add $TARGET
          brew install FiloSottile/musl-cross/musl-cross
      then set the linker in .cargo/config.toml.
 
-  3. Build on the host itself:
+  2. Build on the host itself:
          ssh HOST 'git clone <repo> && cd farcooler && cargo build --release'
      and install with:  farcooler host install HOST --from <that>/target/release
+
+  3. \`cross\` alone can still build $TARGET WITHOUT the tunnel, outside this
+     script:
+         cargo install cross
+         cross build --release --target $TARGET -p farcooler-cli -p farcooler-daemon
+     The resulting \`farcoolerd\` fails every tunnel with \`no_tailcat\` rather
+     than serving one.
 EOF
   exit 1
 fi
@@ -55,20 +73,20 @@ fi
 TAILCAT_DIR="$PWD/dist/tailcat/$TAILCAT_TARGET"
 
 echo "==> Building $TARGET"
-if command -v cross >/dev/null 2>&1; then
-  BUILD=(cross)
-else
-  BUILD=(cargo)
-fi
+
+# Plain `cargo`, never `cross` — see the comment above the toolchain check:
+# `cross`'s container can neither resolve this script's absolute `-L` nor
+# supply the archive itself, and the check above already refused unless a
+# native `$TARGET` is present.
 
 # `farcooler-cli` does not depend on `farcooler-tailcat` yet — dialing the
 # tunnel from the CLI is a later task — so it builds plain.
-"${BUILD[@]}" build --release --target "$TARGET" -p farcooler-cli
+cargo build --release --target "$TARGET" -p farcooler-cli
 
 # `-p farcooler-daemon` alone, through `rustc` rather than `build`, and
 # scoped to exactly one target with `--bin farcoolerd`: the package carries
-# both a lib and a bin, and `cargo rustc`/`cross rustc` refuse trailing `--`
-# args unless exactly one target is selected.
+# both a lib and a bin, and `cargo rustc` refuses trailing `--` args unless
+# exactly one target is selected.
 #
 # NOT a global `RUSTFLAGS`. That applies to every crate rustc compiles for
 # this target, and `-l static=` bundles the named archive's objects into
@@ -77,7 +95,7 @@ fi
 # produced a 6.4 GB artifact, found the hard way while wiring the iOS build
 # (see `scripts/build-ios-frameworks.sh`'s comment on the same trap). Scoping
 # the flags to this one `rustc` invocation is what keeps it to one copy.
-"${BUILD[@]}" rustc --release --target "$TARGET" -p farcooler-daemon --bin farcoolerd \
+cargo rustc --release --target "$TARGET" -p farcooler-daemon --bin farcoolerd \
   --features tailcat -- -L "$TAILCAT_DIR" -l static=tailcat
 
 mkdir -p "$OUT"

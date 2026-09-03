@@ -2,12 +2,29 @@
 //!
 //! Tailcat reads an empty `AllowedClients` as "admit everyone", so a runner
 //! that started a server from a fleet enrolled before the tunnel existed would
-//! open its sshd to anyone holding its token. Deleting the guard in
-//! `start_tunnel` must break this test.
+//! open its sshd to anyone holding its token.
+//!
+//! `cargo test` builds this crate's DEFAULT features — no Go archive linked —
+//! which makes `farcooler_tailcat::serve` return `Err(NoTailcatLinked)`
+//! unconditionally, for any input at all. An assertion here that only checked
+//! `start_tunnel(&service).await.is_none()` could not tell a guard that ran
+//! from a guard that was deleted: either way the stub refuses, and either way
+//! the answer is "no tunnel". `allowlist.rs`'s own unit tests assert on
+//! `tunnel_plan` directly for exactly that reason — it never reaches
+//! `farcooler_tailcat` at all, so a stub cannot stand in for a guard that was
+//! removed. The two tests below assert on `start_tunnel`'s distinguishing
+//! `TunnelOutcome` variant instead of a bare `Option`, which gets the same
+//! property for the end-to-end path: deleting either guard in `start_tunnel`
+//! routes to `serve`, which the stub still refuses, but with a DIFFERENT
+//! variant (`ServeFailed("no_tailcat")`) than the guard would have produced —
+//! so the specific variant asserted below is what a deleted guard breaks.
 
 use std::path::Path;
 
-use farcooler_daemon::{allowlist, service::Service};
+use farcooler_daemon::{
+    allowlist::{self, TunnelOutcome},
+    service::Service,
+};
 use farcooler_fence::Grant;
 use farcooler_protocol::v1::Scope;
 
@@ -109,9 +126,11 @@ async fn a_runner_whose_devices_have_no_node_keys_starts_no_tunnel() {
     let service = test_service(home.path()).await;
     enroll_without_a_node_key(&service, "c1").await;
 
-    assert!(
-        allowlist::start_tunnel(&service).await.is_none(),
-        "a runner with no admitted devices started a tunnel"
+    let outcome = allowlist::start_tunnel(&service).await;
+    assert_eq!(
+        outcome,
+        TunnelOutcome::NobodyAdmitted,
+        "a runner with no admitted devices did not refuse with NobodyAdmitted: {outcome:?}"
     );
 }
 
@@ -122,8 +141,34 @@ async fn a_runner_with_no_key_file_starts_no_tunnel() {
     enroll_with_a_node_key(&service, "c1", NODE_KEY).await;
     std::fs::remove_file(service.tailcat_key()).ok();
 
-    // Without the archive linked this is None for the stub's reason too, so
-    // assert the file was never created rather than only the return value.
-    allowlist::start_tunnel(&service).await;
+    let outcome = allowlist::start_tunnel(&service).await;
+    assert_eq!(
+        outcome,
+        TunnelOutcome::NoIdentity,
+        "a runner with no key file did not refuse with NoIdentity: {outcome:?}"
+    );
+    // A second, independent signal: even under a build with the real archive
+    // linked, `serve` must never be reached (it is what would call Go's
+    // `loadOrCreateKey`, which writes this file if absent).
     assert!(!service.tailcat_key().exists(), "a key file appeared for a runner with no tunnel");
+}
+
+/// The daemon-side counterpart to `crates/client/src/ssh.rs`'s
+/// `a_tunnel_destination_without_an_archive_says_so`. A runner that clears
+/// BOTH guards — real identity, a real admitted device — must still fail by
+/// name, not by accident, when this build carries no archive. `cargo test`
+/// with no `--features tailcat` is exactly that build.
+#[cfg(not(feature = "tailcat"))]
+#[tokio::test]
+async fn a_runner_with_no_archive_linked_fails_the_tunnel_by_name() {
+    let home = tempfile::tempdir().unwrap();
+    let service = test_service(home.path()).await;
+    enroll_with_a_node_key(&service, "c1", NODE_KEY).await;
+
+    let outcome = allowlist::start_tunnel(&service).await;
+    assert_eq!(
+        outcome,
+        TunnelOutcome::ServeFailed("no_tailcat"),
+        "a runner past both guards did not fail by the stub's own name: {outcome:?}"
+    );
 }
