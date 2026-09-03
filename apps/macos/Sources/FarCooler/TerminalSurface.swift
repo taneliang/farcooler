@@ -150,20 +150,45 @@ struct TerminalCanvas: NSViewRepresentable {
         }
     }
 
+    /// The view is going, but the picture it holds is not.
+    ///
+    /// SwiftUI destroys every pane of a layout you switch away from, so without
+    /// this the emulator — the only thing that holds what the terminal looked
+    /// like — dies with it, and coming back means waiting on a whole replay
+    /// before there is anything on screen at all. The stream and the input
+    /// channel DO go: they are a process each, and on a remote runner an ssh
+    /// session each, and a pane nobody is looking at must not hold one. See
+    /// `TerminalScreens`.
     static func dismantleNSView(_ view: TerminalRenderView, coordinator: Coordinator) {
+        if let terminal = coordinator.attached {
+            TerminalScreens.shared.keep(terminal, core: view.core)
+        }
         coordinator.stop()
     }
 
-    /// Point the view at a terminal: open the input channel, size the pane to
-    /// the view, then stream.
+    /// Point the view at a terminal: draw whatever it last showed, open the
+    /// input channel, size the pane to the view, then stream.
     ///
     /// Order matters. The stream's first act is to replay the pane's history,
     /// and tmux wraps that history at the PANE width. Replaying a 190-column
     /// pane into a 95-column view would wrap every line a second time and the
     /// screen would arrive staggered. So: learn our size, resize the pane to
     /// match, and only then start streaming.
+    ///
+    /// The kept frame does not disturb that, and gets the same guarantee for
+    /// free: it is resized to this pane before it is drawn, and the core the
+    /// replay lands in is built at that same grid, after the resize, by
+    /// `beginLiveCore` — so nothing is ever wrapped at a width it did not come
+    /// from.
     private func attach(_ view: TerminalRenderView, context: Context) {
         let coord = context.coordinator
+        // Whatever this terminal was last seen holding, on screen now — before
+        // anything is asked of the runner, and in the same turn the view
+        // mounts. The replay below is what makes it live again; this is what
+        // stops the pane being a black rectangle until it lands.
+        if let retained = TerminalScreens.shared.take(terminal) {
+            view.showRetained(retained)
+        }
         coord.stop()
         coord.attached = terminal
         coord.linkGeneration = linkGeneration
@@ -232,6 +257,11 @@ struct TerminalCanvas: NSViewRepresentable {
 
                 guard !coord.started, let binary else { return }
                 coord.started = true
+                // The replay needs a core of its own when a kept frame is on
+                // screen, and it has to exist before the stream does — bytes
+                // start arriving the moment the process does. See
+                // `TerminalRenderView.beginLiveCore`.
+                box.value.beginLiveCore()
                 let stream = TerminalStream(onBytes: { bytes in
                     DispatchQueue.main.async {
                         MainActor.assumeIsolated { box.value.feed(bytes) }

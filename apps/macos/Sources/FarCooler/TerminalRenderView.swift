@@ -50,6 +50,31 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     var onGeometry: ((Int, Int) -> Void)?
 
     private(set) var core: VTCore
+    /// The core the live stream is filling, until its first byte arrives.
+    ///
+    /// A pane that has been on screen before draws its LAST frame the instant
+    /// it mounts — see `showRetained` — while its replay is still being
+    /// captured on the runner. The replay must not be fed into that frame's
+    /// core: it opens with the pane's scrollback, so the emulator would end up
+    /// holding two copies of the same history and scrolling up would walk
+    /// through it twice.
+    ///
+    /// So the replay fills a core of its own, and `feed` swaps onto it in the
+    /// same main-actor turn as the first byte, with nothing drawn in between.
+    /// `TerminalSession.consume` on iOS is the same handover for the same
+    /// reason, between the same two kinds of picture.
+    private var pendingCore: VTCore?
+    /// Whether the core on screen already holds a picture.
+    ///
+    /// The gate on `beginLiveCore`, and the rule it encodes is about the replay
+    /// rather than about where the picture came from: a replay opens with the
+    /// pane's scrollback, so it may only be fed into an emulator that has none.
+    /// Two views satisfy that and one does not — a view that mounted cold is
+    /// empty and the replay belongs in it; a view showing a kept frame is not;
+    /// and neither is a view re-attaching because its runner reconnected, which
+    /// is the case that has been quietly appending a second copy of every
+    /// pane's history since re-attach stopped resetting the core.
+    private var corePainted = false
     private var displayLink: CADisplayLink?
     /// Watches the theme, so a pick in Settings reaches a live terminal.
     ///
@@ -304,6 +329,10 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         guard grid.columns > 0, grid.rows > 0, grid != paneGrid else { return }
         paneGrid = grid
         core.resize(columns: grid.columns, rows: grid.rows)
+        // The core waiting for the replay is resized too, or a pane that
+        // changed size between opening its stream and receiving a byte would
+        // apply that replay at the grid it USED to have. See `pendingCore`.
+        pendingCore?.resize(columns: grid.columns, rows: grid.rows)
         needsDisplay = true
     }
 
@@ -324,6 +353,8 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
         if paneGrid == nil {
             core.resize(columns: fits.columns, rows: fits.rows)
+            // See `setPaneGrid` for why the pending core follows every resize.
+            pendingCore?.resize(columns: fits.columns, rows: fits.rows)
         }
         needsDisplay = true
         onGeometry?(fits.columns, fits.rows)
@@ -383,12 +414,19 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// every character in the old colours.
     func applyTheme() {
         core.setPalette(Themes.shared.current.packed)
+        // And the core waiting for the replay, which will be on screen shortly
+        // and would otherwise arrive in the previous theme's colours.
+        pendingCore?.setPalette(Themes.shared.current.packed)
         layer?.backgroundColor = Palette.background.cgColor
     }
 
     /// Replace the core, for when the view is pointed at a different terminal.
     func reset(columns: Int, rows: Int) {
         core = VTCore(columns: columns, rows: rows)
+        // Whatever was waiting for a replay was waiting for the terminal this
+        // call is replacing, so it can only ever be adopted by mistake now.
+        pendingCore = nil
+        corePainted = false
         // A fresh core starts on the VT crate's own default palette, which is
         // not the theme in force. Without this, pointing a view at a different
         // terminal repainted its chrome correctly and left every character in
@@ -409,7 +447,70 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     }
 
     func feed(_ bytes: [UInt8]) {
+        // The handover, and it happens before the bytes rather than after: these
+        // are the replay, and the replay belongs in the core built for it. Both
+        // halves are one turn on the main actor with no draw between them, so
+        // no frame is ever half of each.
+        if let pending = pendingCore {
+            pendingCore = nil
+            adopt(pending)
+        }
         core.feed(bytes)
+        corePainted = true
+    }
+
+    /// Draw this terminal's last frame, from before its view was destroyed.
+    ///
+    /// The screen is a photograph until the first live byte: the pane may have
+    /// moved on, and the runner has not been asked yet. It is still the right
+    /// thing to draw, because the alternative — which is what this replaces —
+    /// is a black rectangle for as long as it takes a process to start, open a
+    /// database, and capture four things from tmux.
+    func showRetained(_ retained: VTCore) {
+        adopt(retained)
+        corePainted = true
+    }
+
+    /// Build the core the live stream will fill, at this view's current grid.
+    ///
+    /// Called when the stream is opened, not when the first byte lands, so that
+    /// a core exists for bytes that arrive while the main actor is busy — and
+    /// so the grid it is built at is the one the pane was just resized to,
+    /// which is what the replay is wrapped at. See `TerminalSurface.attach` on
+    /// why that ordering is load-bearing.
+    ///
+    /// Nothing to do for a view that mounted cold: its own core is empty and
+    /// already the right size, and the replay belongs in it. See `corePainted`
+    /// for the two views that are not that.
+    func beginLiveCore() {
+        guard corePainted else { return }
+        let grid = self.grid
+        let fresh = VTCore(columns: grid.columns, rows: grid.rows)
+        fresh.setPalette(Themes.shared.current.packed)
+        pendingCore = fresh
+    }
+
+    /// Point this view at another emulator.
+    ///
+    /// Everything remembered ABOUT the old core goes with it: a selection is a
+    /// pair of coordinates in a grid that is no longer on screen, and the drawn
+    /// revision is a claim about a core this view no longer holds.
+    private func adopt(_ replacement: VTCore) {
+        core = replacement
+        // A core built elsewhere — or kept from before a theme change — is not
+        // necessarily on the theme in force. Same reasoning as `reset`.
+        core.setPalette(Themes.shared.current.packed)
+        // The size this view is, not the size that core happened to be. A kept
+        // frame was last drawn in whatever pane it left, and this one may be
+        // wider; the emulator reflows, which is exactly what it is for.
+        let grid = paneGrid ?? lastReportedGeometry
+        if grid.columns > 0, grid.rows > 0 {
+            core.resize(columns: grid.columns, rows: grid.rows)
+        }
+        selection = nil
+        lastDrawnRevision = .max
+        corePainted = false
+        needsDisplay = true
     }
 
     // MARK: - Focus
