@@ -49,8 +49,8 @@ cargo build --release
 ```
 
 Go 1.23+ is needed only to build the tunnel archive
-(`./scripts/build-tailcat.sh <target>`), which the platform build scripts link
-into shipping builds so they can reach runners behind NAT. `cargo build`
+(`./scripts/build-tailcat.sh <target>`), which the platform build scripts will
+link into shipping builds so they can reach runners behind NAT. `cargo build`
 itself never needs Go: it always produces a working `farcooler` that reaches
 runners by address, and reports `no_tailcat` for tunneled ones.
 
