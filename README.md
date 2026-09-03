@@ -148,10 +148,13 @@ agents ship one, the config file for adding your own, and known gaps.
 ## The phone apps
 
 ```sh
-# iOS
+# iOS — needs Go (see Build, above): --device builds and links the real
+# tunnel archive into farcooler-client, and fails outright without one
+# rather than quietly shipping a build with no tunnel.
 ./scripts/build-ios-frameworks.sh --device && open apps/ios/FarCooler.xcodeproj
 
-# Android
+# Android — stays on the tunnel stub regardless: Go's own toolchain refuses
+# `-buildmode=c-archive` for android/arm64.
 ./scripts/build-android-libs.sh && (cd apps/android && ./gradlew installDebug)
 ```
 

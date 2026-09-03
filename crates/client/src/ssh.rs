@@ -58,6 +58,19 @@ pub enum SshError {
     /// sentence — no Rust error string reaches a screen.
     #[error("cannot open the tunnel: {code}")]
     Tunnel { code: &'static str },
+    /// The tunnel itself worked — it reached the runner — but nothing is
+    /// listening on the port `OnTCP` maps onto. Deliberately its own
+    /// sentence rather than `Connect`'s: "cannot reach {host}:{port}" would
+    /// be false here (the tunnel *did* reach it), and interpolating a label
+    /// like "the tunnel" into an address slot reads as an address to a
+    /// person who cannot tell the difference. The underlying OS error is
+    /// kept as `#[source]` for logs, never interpolated into the message
+    /// itself — no raw error string reaches a screen here either.
+    #[error("the tunnel reached the runner, but nothing is listening for SSH there")]
+    TunnelPortClosed {
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// What to do about the host's key.
@@ -203,7 +216,7 @@ impl Session {
                 // only the runner has, and its OnTCP handler maps it.
                 let stream = match farcooler_tailcat::dial(token, client_key, 22).await {
                     Ok(stream) => stream,
-                    Err(e) => return Err(tunnel_error(destination, e)),
+                    Err(e) => return Err(tunnel_error(e)),
                 };
                 match client::connect_stream(config, stream, verifier).await {
                     Ok(handle) => handle,
@@ -270,10 +283,12 @@ fn translate(other: russh::Error, destination: &Destination, verdict: &KeyVerdic
 ///
 /// `TunnelError::Io` with `kind() == ConnectionRefused` is special: the
 /// tunnel reached the runner and nothing was listening on the port `OnTCP`
-/// maps onto — a dead or misconfigured sshd, not a rejected handshake. That
-/// is the same fact the direct path already names, over the same
-/// `io::ErrorKind`, on a real TCP connection — so it gets the same
-/// `SshError::Connect`, never a sentence that says "SSH refused."
+/// maps onto — a dead or misconfigured sshd, not a rejected handshake. It
+/// gets its own `SshError::TunnelPortClosed`, not `Connect`: `Connect`'s
+/// message is "cannot reach {host}:{port}", which would be false here (the
+/// tunnel DID reach it) and has no real host/port to put in that slot for a
+/// `Tailcat` reach anyway — `destination.reach.label()` there would read as
+/// an address ("the tunnel:22") to someone who cannot tell it is not one.
 ///
 /// Everything else — `NoTailcatLinked`, `Derp`, `NoAnswer`, and every other
 /// `Io` — crosses as `SshError::Tunnel`'s stable word. `Io`'s word in
@@ -281,10 +296,10 @@ fn translate(other: russh::Error, destination: &Destination, verdict: &KeyVerdic
 /// reached before this special case (should the errno ever differ across
 /// platforms) and `EMFILE` alike, so the word is deliberately generic and the
 /// apps own the sentence.
-fn tunnel_error(destination: &Destination, error: TunnelError) -> SshError {
+fn tunnel_error(error: TunnelError) -> SshError {
     match error {
         TunnelError::Io(source) if source.kind() == std::io::ErrorKind::ConnectionRefused => {
-            SshError::Connect { host: destination.reach.label(), port: 22, source }
+            SshError::TunnelPortClosed { source }
         }
         other => SshError::Tunnel { code: other.code() },
     }
@@ -559,6 +574,7 @@ mod tests {
             host_key: HostKeyPolicy::RequireApproval,
         };
         let error = open_err(&destination).await;
+        assert!(matches!(error, SshError::Connect { .. }), "{error:?}");
         let message = error.to_string();
         assert!(message.contains("127.0.0.1:1"), "lost the address: {message}");
     }
@@ -579,48 +595,47 @@ mod tests {
         assert!(matches!(error, SshError::Tunnel { code: "no_tailcat" }), "{error:?}");
     }
 
-    fn tunnel_destination() -> Destination {
-        Destination {
-            reach: Reach::Tailcat { token: "tc-x".into(), client_key: "k".into() },
-            user: "u".into(),
-            private_key: test_key(),
-            passphrase: None,
-            host_key: HostKeyPolicy::Accept,
-        }
-    }
-
     /// The reason this branch exists at all: `ECONNREFUSED` on the tunnel
     /// means the tunnel worked and sshd is not listening, not that SSH
-    /// refused a handshake. Wording it as a rejected handshake would send
-    /// whoever reads it looking in the wrong place, so this reuses
-    /// `SshError::Connect` — the same fact the direct path already names.
+    /// refused a handshake — and not that the tunnel could not be reached
+    /// either, which `Connect`'s "cannot reach ..." would have said. This
+    /// pins the actual meaning, not just that the wrong words are absent: a
+    /// version that dropped the special case (falling through to the
+    /// generic `Tunnel { code: "io" }`) or one that kept the misleading
+    /// "cannot reach the tunnel:22" wording would both have to fail this.
     #[test]
     fn a_refused_tunnel_port_reads_like_a_dead_sshd_not_a_rejected_handshake() {
-        let destination = tunnel_destination();
         let source = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
-        let error = tunnel_error(&destination, TunnelError::Io(source));
+        let error = tunnel_error(TunnelError::Io(source));
 
-        assert!(matches!(error, SshError::Connect { .. }), "{error:?}");
+        assert!(matches!(error, SshError::TunnelPortClosed { .. }), "{error:?}");
         let message = error.to_string().to_lowercase();
         assert!(!message.contains("ssh refused"), "wrong story: {message}");
-        assert!(message.contains("the tunnel"), "lost which reach failed: {message}");
+        assert!(!message.contains("cannot reach"), "says the opposite of what happened: {message}");
+        assert!(
+            message.contains("reached the runner") && message.contains("nothing is listening"),
+            "lost the actual meaning: {message}"
+        );
+        assert!(!message.contains("os error"), "leaked the raw OS error text: {message}");
     }
 
-    /// Every other tunnel failure — including every other `io::Error`, whose
-    /// kind might be `EMFILE` or anything else — crosses as the stable word
-    /// and nothing more specific, because `SshError::Tunnel`'s whole point is
-    /// that the apps own the sentence.
+    /// Every other tunnel failure — including `NoAnswer`, whose entire
+    /// reason for existing is that a revoked device looks like a timeout
+    /// rather than a refusal, and every other `io::Error`, whose kind might
+    /// be `EMFILE` or anything else — crosses as the stable word and nothing
+    /// more specific, because `SshError::Tunnel`'s whole point is that the
+    /// apps own the sentence.
     #[test]
     fn every_other_tunnel_error_crosses_as_its_stable_word() {
-        let destination = tunnel_destination();
-
-        let derp = tunnel_error(&destination, TunnelError::Derp);
+        let derp = tunnel_error(TunnelError::Derp);
         assert!(matches!(derp, SshError::Tunnel { code: "derp" }), "{derp:?}");
 
-        let unrelated_io = tunnel_error(
-            &destination,
-            TunnelError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
-        );
+        let no_answer = tunnel_error(TunnelError::NoAnswer);
+        assert!(matches!(no_answer, SshError::Tunnel { code: "no_answer" }), "{no_answer:?}");
+
+        let unrelated_io = tunnel_error(TunnelError::Io(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        )));
         assert!(matches!(unrelated_io, SshError::Tunnel { code: "io" }), "{unrelated_io:?}");
     }
 }

@@ -56,17 +56,34 @@ for CRATE in farcooler-vt farcooler-client farcooler-review; do
       # farcooler-review would fail outright: cargo refuses a feature naming
       # a package that is not in that crate's own dependency graph.
       #
+      # `cargo rustc -p`, not `cargo build` under a global `RUSTFLAGS`. No
+      # linker runs at this step — crate-type is `staticlib, rlib`, so cargo
+      # only archives object files — but `-l static=` still BUNDLES the
+      # named archive's objects into whichever crate it is attached to,
+      # unpacked, at compile time. A plain `RUSTFLAGS` applies to every crate
+      # rustc compiles for this target, so it bundled a copy of the 47 MB
+      # archive into all 142 rlibs in the dependency graph: a 6.8 GB
+      # staticlib and a 6.4 GB XCFramework, found the hard way, by actually
+      # measuring one. `cargo rustc`'s trailing `--` args go to the final
+      # crate only, so exactly one copy lands, in `farcooler-client` itself,
+      # which is what should carry it.
+      #
       # The `-L` MUST be absolute: `$PWD` here is the repo root (the script
       # `cd`s there at the top), so this is, but a relative path silently
       # fails to resolve. `-l static=tailcat` MUST be explicit too: nothing
       # in this crate has `#[link(name = "tailcat")]` or a `build.rs`, so
-      # without it the linker never asks for the archive at all — both traps
-      # were found the hard way, by actually linking.
+      # without it nothing bundles the archive at all.
+      #
+      # `--features tailcat`, not `farcooler-tailcat/linked` directly: this
+      # crate's own `tailcat` feature (`Cargo.toml`) mirrors the dependency's
+      # `linked` feature so `cfg(feature = "tailcat")` reads true inside
+      # `farcooler-client` itself. Enabling the dependency's feature straight
+      # bypasses that mirror — the archive still links, but the crate cannot
+      # tell it did.
       ./scripts/build-tailcat.sh ios-arm64
-      SDKROOT="$DEVICE_SDK" \
-        RUSTFLAGS="-L $PWD/dist/tailcat/ios-arm64 -l static=tailcat" \
-        cargo build --release -p "$CRATE" --target aarch64-apple-ios \
-        --features farcooler-tailcat/linked
+      SDKROOT="$DEVICE_SDK" cargo rustc -p "$CRATE" --release \
+        --target aarch64-apple-ios --features tailcat \
+        -- -L "$PWD/dist/tailcat/ios-arm64" -l static=tailcat
     else
       SDKROOT="$DEVICE_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-ios
     fi

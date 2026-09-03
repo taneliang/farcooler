@@ -79,6 +79,14 @@ jobs:
         with:
           targets: aarch64-apple-ios, aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
+      # --device links the real tailcat archive into farcooler-client, which
+      # needs a Go toolchain to build (see scripts/build-tailcat.sh). GitHub's
+      # macOS image happens to ship one, which is exactly the kind of
+      # unstated dependency that breaks on an image bump with an error that
+      # never mentions Go — pin it explicitly instead of relying on that.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
 
       # `--device`, because this job ARCHIVES. The default is simulator-only —
       # fast, and right for the CI job that merely compiles — but an archive
