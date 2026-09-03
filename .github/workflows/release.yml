@@ -116,6 +116,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # Go, for the tunnel archive `build-app.sh` links into the bundled
+      # `farcoolerd`. The Mac app is the other half of the release that SERVES
+      # a tunnel, and every Mac build before this one bundled a daemon built
+      # from the stub — every tunnel it was asked to serve failed with
+      # `no_tailcat`.
+      #
+      # Its own step in this job rather than borrowed from the iOS job's:
+      # jobs get separate runners, so nothing the iOS job installs is here.
+      # Pinned by `go-version-file` for the reason that job's copy gives — the
+      # macOS image happens to ship a Go, and an image bump that drops it fails
+      # with an error that never mentions Go.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+
       # The Linux binaries this app will carry, from the jobs that just built
       # them. `build-app.sh` reads `dist/<arch>-linux/` at the repo root, which
       # is exactly the layout the tarballs unpack into — they were packed with

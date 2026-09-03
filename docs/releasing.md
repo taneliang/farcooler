@@ -227,6 +227,108 @@ machine would quietly share a database.
 ./scripts/build-linux.sh` reaches the build script the same way it does in CI,
 where before it stopped at the container.
 
+## Only a shipping build links the tunnel, and only the Mac's can
+
+`farcooler-tailcat` compiles two ways. By default it is `stub.rs`, which fails
+every tunnel with the code `no_tailcat`; that default is what lets `cargo
+build` and `cargo test --workspace` work on a checkout with no Go toolchain,
+and it is not meant to ship. The real backend is a Go archive built by
+`scripts/build-tailcat.sh`, turned on with `--features tailcat` and linked with
+a `-l static=tailcat` **scoped to a single `cargo rustc --bin` invocation** —
+never a global `RUSTFLAGS`, which attaches the archive to every crate rustc
+compiles and once turned a 47.6 MB archive into a 6.4 GB artifact.
+
+Every platform that *serves* a tunnel has to do that at release time, and for a
+while none of them did: `build-app.sh` built the daemon in the same plain
+`cargo build` as the CLI, and `linux-binaries.yml` restated its build inline
+rather than calling `scripts/build-linux.sh`. Both shipped a stub daemon on
+every channel, while iOS — which *dials* a tunnel rather than serving one — was
+wired correctly and made the feature look present.
+
+**The Mac is fixed. Linux is not, and cannot be while its binaries are musl.**
+
+`build-app.sh` now builds `farcoolerd` through its own `cargo rustc` with the
+`darwin-arm64` archive linked, unconditionally, and `ci.yml` runs the bundled
+binary to prove it (`scripts/tunnel-smoke.sh`). Unconditionally is the point: a
+build that quietly fell back to the stub when Go was missing is precisely how
+this went unnoticed for as long as it did, with every job green. It also needs
+`-l framework=Security`, because Go's `crypto/x509` reaches the system roots
+through it on darwin and nothing in the Rust graph links that framework.
+
+### Why Linux still ships the stub
+
+Not for want of trying, and not a toolchain problem — that part works. A Linux
+daemon built with the archive linked **segfaults before it logs a line**:
+
+```
+dist/x86_64-linux/farcoolerd: ELF 64-bit LSB pie executable, x86-64,
+  static-pie linked, Go BuildID=6BImF5uB-…
+Segmentation fault (core dumped)
+```
+
+The cause is not this repository's Go code, and not the Rust link. A five-line
+Go program with one exported function, built `-buildmode=c-archive` and linked
+into a C program, crashes identically. Measured on linux/arm64 with a native
+Go 1.25.1, one `main.go` and one `main.c`:
+
+| archive built with | linked with | result |
+| --- | --- | --- |
+| glibc `gcc` | `gcc`, dynamic | works |
+| glibc `gcc` | `gcc -static` | works |
+| `musl-gcc` | `musl-gcc -static` | SIGSEGV |
+| `musl-gcc` | `musl-gcc`, dynamic | SIGSEGV |
+
+So it is musl, not static linking, and not PIE — which is worth stating plainly
+because `file` says `static-pie` right next to the Go build id and that is the
+obvious thing to blame. `strace` puts the fault inside the Go runtime's own
+startup, immediately after it maps its profiler hash buckets, as a null
+dereference:
+
+```
+mmap(NULL, 1439992, …) = …   prctl(… " Go: profiler hash buckets")
+--- SIGSEGV {si_signo=SIGSEGV, si_code=SEGV_MAPERR, si_addr=NULL} ---
+```
+
+Go prints nothing, even under `GOTRACEBACK=system`: it dies before the runtime
+can report anything. The same crash reproduces on x86_64 with an archive built
+natively on a Linux runner, so it is neither architecture-specific nor an
+artifact of cross-compiling the archive from a Mac.
+
+musl is not incidental to this release — it is the reason a self-installed
+daemon runs on Debian, Alpine and a NAS alike, and "GLIBC_2.38 not found" is
+the failure it exists to prevent. So the choice is a real one and has not been
+made: keep musl and leave Linux tunnels unavailable, or move the Linux daemon
+to glibc (the table says static glibc does work with Go) and pay for it in
+NSS — `getaddrinfo` and `getpwnam` in a static glibc binary need the matching
+`libnss_*` at runtime, which is precisely the "works on my distribution" class
+of failure musl was chosen to end.
+
+Until that is decided, the Linux release keeps the stub deliberately, and a
+tunneled runner on Linux answers `no_tailcat` — one named error, at one call
+site, rather than a daemon that dies on boot.
+
+### What a machine needs to build the Mac's daemon
+
+- **Go**, which every workflow that runs `build-app.sh` installs with
+  `actions/setup-go` pinned by `go-version-file: crates/tailcat/go/go.mod`
+  rather than trusting the runner image — an image that drops Go fails with an
+  error that never mentions Go.
+- Nothing else. `darwin-arm64` is host-native: no cross-compiler, no
+  `-isysroot`.
+
+`scripts/build-linux.sh` additionally wants `x86_64-linux-musl-gcc` or
+`aarch64-linux-musl-gcc` — both names load-bearing twice over, since
+`build-tailcat.sh` hands them to cgo as `CC` and `.cargo/config.toml` names the
+same binaries as Rust's linkers — from `brew install
+FiloSottile/musl-cross/musl-cross`. What it produces is the segfaulting binary
+above, so do not ship it.
+
+The check that matters is behavioural, and `scripts/tunnel-smoke.sh` is it:
+start the packaged `farcoolerd` against a scratch `FARCOOLER_HOME` and
+`authorized_keys`, and confirm the tunnel it tries to serve comes back as
+anything other than `no_tailcat`. A size or `file` check is only a proxy — and
+the Linux crash is exactly why: that binary passes every proxy there is.
+
 ## Updating a Mac that already has one
 
 Cutting a release gets a build onto GitHub. It does nothing for the Mac that
@@ -392,7 +494,7 @@ tester having to update. Canary and local freeze nothing.
 | --- | --- |
 | `wire` | that a client already in the field can still talk to this — the proto lint, its own self-tests, what `version.sh` answers, that the four channels stay four WorkOS projects, and that `appcast.py` emits a feed Sparkle can actually read |
 | `rust` (Linux + macOS) | clippy at -D warnings and tests, against a real tmux — a fake one would agree with whatever this code believed |
-| `swift` | the full `build-app.sh`, a check that the bundle's stamp matches the workspace, and that each channel's icon renders (byte-identical for stable) |
+| `swift` | the full `build-app.sh`, a check that the bundle's stamp matches the workspace, a run of the bundled `farcoolerd` to prove the tunnel is linked into it, and that each channel's icon renders (byte-identical for stable) |
 | `ios` | project generation then build, so a file added to AgentKit cannot compile locally and be missing from the app |
 | `relay` | typecheck, `vitest` inside workerd against a real D1, and a `wrangler deploy --dry-run` |
 

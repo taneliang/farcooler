@@ -49,10 +49,12 @@ cargo build --release
 ```
 
 Go 1.23+ is needed only to build the tunnel archive
-(`./scripts/build-tailcat.sh <target>`), which the platform build scripts will
-link into shipping builds so they can reach runners behind NAT. `cargo build`
+(`./scripts/build-tailcat.sh <target>`), which the Mac app's build script links
+into the daemon it bundles so it can be reached behind NAT. `cargo build`
 itself never needs Go: it always produces a working `farcooler` that reaches
-runners by address, and reports `no_tailcat` for tunneled ones.
+runners by address, and reports `no_tailcat` for tunneled ones — which is also
+what a Linux release still does, deliberately, for the reason
+`docs/releasing.md` gives.
 
 The macOS app:
 
