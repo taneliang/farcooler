@@ -13,7 +13,13 @@
 # nothing anywhere would say so. It fails silently in CI, silently on the host,
 # and shows up only as two channels standing on each other.
 #
-# This is also what makes `scripts/build-linux.sh` on a laptop agree with CI:
-# the same variables reach the same build script either way.
+# Nothing in `.github/` uses `cross` any more: `linux-binaries.yml` calls
+# `scripts/build-linux.sh`, which refuses `cross` outright — the container
+# mounts this repo at a path of its own choosing, so the absolute `-L` that
+# script hands the daemon's link step cannot resolve inside it, and the Go
+# archive it links needs a toolchain on the host regardless of any container.
+# This file is kept for the tunnel-less `cross build` that same script still
+# suggests by hand, which is a real thing to want and would otherwise stamp
+# itself `local`.
 [build.env]
 passthrough = ["FARCOOLER_CHANNEL", "FARCOOLER_TAG"]

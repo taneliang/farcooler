@@ -214,18 +214,65 @@ the trade.
 
 The channel is stamped into those binaries like any other build, and for a
 canary it has to be **said** rather than derived: a commit on `main` carries no
-tag. `linux-binaries.yml` resolves the channel on the runner and passes it in
-as `FARCOOLER_CHANNEL`, and `Cross.toml` is what carries it across the
-container boundary — `cross` forwards `CARGO_*`, `CROSS_*` and `RUSTFLAGS` and
-nothing else, so a variable not named there never reaches the build script.
-Both halves are needed and the failure is silent in the usual direction: an
-unstamped binary calls itself `local` and writes the Local channel's runtime
-directory on every host it reaches, so a stable and a canary install on one
-machine would quietly share a database.
+tag. `linux-binaries.yml` resolves the channel in a step of its own and exports
+it as `FARCOOLER_CHANNEL`, which the build reads directly. The failure is
+silent in the usual direction: an unstamped binary calls itself `local` and
+writes the Local channel's runtime directory on every host it reaches, so a
+stable and a canary install on one machine would quietly share a database.
+That is why the step refuses outright rather than continuing when
+`version.sh` answers nothing.
 
-`Cross.toml` earns its keep on a laptop too: `FARCOOLER_CHANNEL=preview
-./scripts/build-linux.sh` reaches the build script the same way it does in CI,
-where before it stopped at the container.
+That job used to run under `cross`, and then `Cross.toml` was the other half of
+this: a container starts with almost none of the host's environment, and
+`cross` forwards `CARGO_*`, `CROSS_*` and `RUSTFLAGS` and nothing else, so a
+variable not named in its `passthrough` never reached the build script. The job
+calls `scripts/build-linux.sh` now — see the next section — so there is no
+container and no other half. `Cross.toml` stays only for the tunnel-less
+`cross build` that script still suggests by hand.
+
+## Only a shipping build links the tunnel
+
+`farcooler-tailcat` compiles two ways. By default it is `stub.rs`, which fails
+every tunnel with the code `no_tailcat`; that default is what lets `cargo
+build` and `cargo test --workspace` work on a checkout with no Go toolchain,
+and it is not meant to ship. The real backend is a Go archive built by
+`scripts/build-tailcat.sh`, turned on with `--features tailcat` and linked with
+a `-l static=tailcat` **scoped to a single `cargo rustc --bin` invocation** —
+never a global `RUSTFLAGS`, which attaches the archive to every crate rustc
+compiles and once turned a 47.6 MB archive into a 6.4 GB artifact.
+
+Every platform that *serves* a tunnel has to do that at release time, and for a
+while none of them did. `linux-binaries.yml` restated its build inline instead
+of calling `scripts/build-linux.sh`, and `build-app.sh` built the daemon in the
+same plain `cargo build` as the CLI — so both shipped a stub daemon, on every
+channel, while iOS (which *dials* a tunnel rather than serving one) was wired
+correctly and made the feature look present. Both call the linked path now, and
+unconditionally: a build that quietly fell back to the stub when Go was missing
+is precisely how this went unnoticed for as long as it did, with every job
+green.
+
+So a machine that produces a shipping daemon needs three things beyond a Rust
+toolchain:
+
+- **Go**, which every workflow installs with `actions/setup-go` pinned by
+  `go-version-file: crates/tailcat/go/go.mod` rather than trusting the runner
+  image — an image that drops Go fails with an error that never mentions Go.
+- **`x86_64-linux-musl-gcc` and `aarch64-linux-musl-gcc`**, for the Linux
+  targets. Both names are load-bearing twice over: `build-tailcat.sh` hands
+  them to cgo as `CC`, and `.cargo/config.toml` names the same binaries as
+  Rust's linkers. A laptop gets them from `brew install
+  FiloSottile/musl-cross/musl-cross`; CI unpacks a checksum-pinned prebuilt
+  toolchain from `musl-cross/musl-cross` and symlinks it to those names.
+  Ubuntu supplies neither — `musl-tools` installs x86_64's as `musl-gcc`, and
+  apt has no aarch64 musl cross-compiler at all.
+- **The matching rustup target**, which `dtolnay/rust-toolchain` installs from
+  the workflow's `targets:` list.
+
+The check that matters is behavioural: take the packaged `farcoolerd`, start
+it, and confirm the tunnel it tries to serve does not fail with `no_tailcat`.
+A size check is only a proxy — though a useful one in the other direction, since
+a daemon hundreds of megabytes larger than expected means the link flags leaked
+into a global `RUSTFLAGS`.
 
 ## Updating a Mac that already has one
 
@@ -392,7 +439,7 @@ tester having to update. Canary and local freeze nothing.
 | --- | --- |
 | `wire` | that a client already in the field can still talk to this — the proto lint, its own self-tests, what `version.sh` answers, that the four channels stay four WorkOS projects, and that `appcast.py` emits a feed Sparkle can actually read |
 | `rust` (Linux + macOS) | clippy at -D warnings and tests, against a real tmux — a fake one would agree with whatever this code believed |
-| `swift` | the full `build-app.sh`, a check that the bundle's stamp matches the workspace, and that each channel's icon renders (byte-identical for stable) |
+| `swift` | the full `build-app.sh`, a check that the bundle's stamp matches the workspace, a run of the bundled `farcoolerd` to prove the tunnel is linked into it, and that each channel's icon renders (byte-identical for stable) |
 | `ios` | project generation then build, so a file added to AgentKit cannot compile locally and be missing from the app |
 | `relay` | typecheck, `vitest` inside workerd against a real D1, and a `wrangler deploy --dry-run` |
 

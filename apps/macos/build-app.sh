@@ -193,8 +193,67 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 # launched, the tests passed, and the bug under investigation was still there,
 # because the code that fixed it was never in the bundle. A stale binary must
 # not be a thing this script is capable of producing.
-echo "==> Building the CLI and daemon (release)"
-(cd ../.. && cargo build --release --bin farcooler --bin farcoolerd) || {
+#
+# Two cargo invocations rather than one, because the daemon needs flags the CLI
+# must not get — see the block below.
+ROOT="$(cd ../.. && pwd)"
+
+echo "==> Building the CLI (release)"
+(cd "$ROOT" && cargo build --release --bin farcooler) || {
+  echo "    the Rust build failed; refusing to bundle a stale binary"
+  exit 1
+}
+
+# The daemon, with the tunnel actually linked into it.
+#
+# This is the binary that SERVES a tunnel, and until this was split out every
+# Mac release shipped one built from the plain `cargo build` above — no
+# feature, no archive — so `farcooler-tailcat`'s stub answered every tunnel
+# with `no_tailcat` and the feature reached nobody. The stub exists so the tree
+# compiles without Go and so `cargo test --workspace` can run; it was never
+# meant to ship.
+#
+# Unconditional, deliberately. A version of this that quietly fell back to the
+# plain build when Go was absent would ship exactly the daemon this replaces,
+# and CI would stay green while it did — the workflows that run this script
+# install Go for it (`actions/setup-go`, pinned by `crates/tailcat/go/go.mod`).
+# `build-tailcat.sh` refuses with its own actionable message when Go is
+# missing, so this script does not repeat that check.
+#
+# `cargo rustc` and `--bin farcoolerd`, not `cargo build`: the trailing `--`
+# flags are only accepted when exactly one target is selected, and
+# `farcooler-daemon` carries a lib beside the bin.
+#
+# NOT a global `RUSTFLAGS`, and that is the expensive half of this comment.
+# `-l static=` bundles the named archive's objects into whichever crate the
+# flag is attached to at compile time, so a plain `RUSTFLAGS` applies it to
+# every crate rustc compiles for the target: it duplicated a 47.6 MB archive
+# into all 142 rlibs in the dependency graph and produced a 6.4 GB artifact,
+# found the hard way while wiring the iOS build. Scoping the flags to this one
+# `rustc` invocation is what keeps the archive to a single copy.
+# `scripts/build-linux.sh` and `scripts/build-ios-frameworks.sh` carry the same
+# warning at their own call sites, because the trap is per-call-site.
+#
+# `-L` absolute, not relative: a relative one silently fails to resolve and the
+# link fails on missing symbols rather than on a missing directory.
+#
+# `-l framework=Security` is macOS-only and not optional. Go's `crypto/x509`
+# verifies against the system roots through Security.framework on darwin, so
+# the archive arrives carrying undefined `SecTrustEvaluateWithError`,
+# `SecKeyCreateSignature` and two dozen `kSec*` constants. Nothing in the Rust
+# graph links that framework, so without this the build dies on
+# "Undefined symbols for architecture arm64" listing symbols no Rust or Go
+# source in this repository mentions. The iOS build needs no equivalent because
+# Xcode links Security into the app that consumes the xcframework.
+TAILCAT_TARGET="darwin-$(uname -m)"
+echo "==> Building the daemon with the tunnel linked (release)"
+(cd "$ROOT" && ./scripts/build-tailcat.sh "$TAILCAT_TARGET") || {
+  echo "    the tunnel archive did not build; refusing to bundle a daemon that serves no tunnel"
+  exit 1
+}
+(cd "$ROOT" && cargo rustc --release -p farcooler-daemon --bin farcoolerd \
+  --features tailcat -- -L "$ROOT/dist/tailcat/$TAILCAT_TARGET" -l static=tailcat \
+  -l framework=Security) || {
   echo "    the Rust build failed; refusing to bundle a stale binary"
   exit 1
 }

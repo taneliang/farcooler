@@ -208,6 +208,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # Go, for the tunnel archive `build-app.sh` links into `farcoolerd`.
+      # This job runs the whole bundle assembly, which is the point of it —
+      # so it needs everything that assembly needs. Pinned by `go-version-file`
+      # rather than trusted to the image: the macOS runner happens to ship a
+      # Go, and an image bump that drops it fails with an error that never
+      # mentions Go.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+
       # Resolved ONCE, here, before the build step below runs `cargo build
       # --release`. That build rewrites the tracked `Cargo.lock` whenever it and
       # `Cargo.toml` have drifted — an ordinary version bump does exactly that —
@@ -229,6 +239,16 @@ jobs:
       # building one — so the assembly step is what CI should exercise.
       - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
+
+      # The bundled daemon, actually run. `build-app.sh` links the tunnel
+      # archive into `farcoolerd`, and until it did, every Mac release carried
+      # a daemon that answered `no_tailcat` to every tunnel it was asked to
+      # serve — while building, signing, notarising and passing every check
+      # there was. This is the check that would have caught it, and it runs
+      # here rather than only in the release workflows because it is the same
+      # `build-app.sh` producing the same binary, on every pull request.
+      - name: Check the bundled daemon has the tunnel linked
+        run: scripts/tunnel-smoke.sh "apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd"
 
       - name: Check the bundle is stamped with this commit's version
         run: |
