@@ -238,8 +238,13 @@ fn main() {
     // the line rather than written down here, the way
     // `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` reads it, so this
     // follows the spelling wherever `fence` takes it next.
-    let fenced = fence::render(key, "Simulator", "demo-simulator", Scope::Control, Grant::FarCooler)
-        .expect("render the restricted line");
+    // `None` for the node key: this host serves the simulator over a direct
+    // address, so there is no tunnel for a key to admit anybody to. `render`
+    // refuses a node key on `Grant::Shell` anyway, which the plain line below
+    // would trip over.
+    let fenced =
+        fence::render(key, "Simulator", "demo-simulator", Scope::Control, Grant::FarCooler, None)
+            .expect("render the restricted line");
     let program = fenced
         .split_once("command=\"")
         .and_then(|(_, rest)| rest.split_once('"'))
@@ -251,8 +256,10 @@ fn main() {
         // comment, and a shell behind it. `render` refuses this shape for any
         // scope but host_admin, because an unrestricted line IS every power the
         // account has.
-        "plain" => fence::render(key, "Simulator", "demo-simulator", Scope::HostAdmin, Grant::Shell)
-            .expect("render the plain line"),
+        "plain" => {
+            fence::render(key, "Simulator", "demo-simulator", Scope::HostAdmin, Grant::Shell, None)
+                .expect("render the plain line")
+        }
         _ => fenced.clone(),
     };
     // How the extra options join the rendered line is not cosmetic, and getting
