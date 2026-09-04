@@ -20,6 +20,80 @@ fn npm_package(spec: &farcooler_core::activity::AdapterSpec) -> Option<&str> {
         .map(|s| s.as_str())
 }
 
+/// Build the tree `npx` runs, before the handshake starts timing it.
+///
+/// The handshake's 90-second bound is there to catch an adapter that starts and
+/// never answers, and it used to describe itself as "generous enough that a cold
+/// `npx` fetching a package on first use is not killed mid-download". That
+/// quietly stopped being safe to lean on. These packages carry their agent's
+/// whole runtime now — the trees `npx` builds measure 261MB for claude and
+/// 320MB for codex — and none of that work happens until the first run, so the
+/// bound was covering an unbounded install and a protocol exchange at once.
+///
+/// Which one it was actually measuring showed up the day CI went red: this test
+/// took 20s on one commit and 258s on the next, and the next touched only Swift.
+/// All three adapters failed together with "the adapter started and then went
+/// silent" — a sentence about OUR integration, for a run in which every one of
+/// them answers `initialize` correctly the moment it is installed. Three
+/// packages, from two orgs plus a standalone, do not break in lockstep; an
+/// install budget they all share does. Ten hours later the same commit passed on
+/// Linux and still failed on macOS, and by then only claude — the largest — was
+/// over the line. That is a bound sitting on a threshold, not a broken adapter.
+///
+/// Installing first splits the two questions that failure was conflating. This
+/// step is npm's to be slow at and is not bounded by us; the handshake after it
+/// is timing the adapter and nothing else. Neither is a skip — an adapter whose
+/// package will not install still FAILS this test, and has to, for the reason
+/// the test gives three times over below — but the two no longer get blamed for
+/// each other, and a red main now says which of them it was.
+///
+/// It has to be `npx` running the adapter's own package, because that is the
+/// only thing that fills the `_npx` tree the handshake's `npx` then reuses.
+/// `npm install` populates the tarball cache and leaves the tree still to build,
+/// and `npm exec --package` skips installing altogether when the command it is
+/// handed already exists. `--version` is what makes this terminate: the adapter
+/// itself does not exit when its stdin closes — codex sits there indefinitely —
+/// whereas every built-in answers `--version` and exits within a second.
+fn install(spec: &farcooler_core::activity::AdapterSpec, package: &str) -> Result<(), String> {
+    // Resolved through `dispatch::resolve` rather than spawned by name, so this
+    // runs the very command the handshake is about to run — same `npx`, same
+    // `PATH` — and cannot warm a tree some other node install would not find.
+    let launch = farcooler_agent::dispatch::resolve(spec)?;
+    let out = std::process::Command::new(&launch.program)
+        .args(&launch.args)
+        .arg("--version")
+        .envs(launch.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        // Bounds through npm's own config rather than a thread and a kill, and
+        // through the environment rather than the argument list, which past the
+        // package name belongs to the adapter. A registry that accepts the
+        // connection and then stops answering has no timeout of its own, and
+        // this repo has been bitten by that exact shape before — see the
+        // `apt-get update` step of the workflow that runs this test, which hung
+        // for an hour on two consecutive runs against a mirror doing it.
+        .env("npm_config_fetch_timeout", "60000")
+        .env("npm_config_fetch_retries", "3")
+        // An install is not scoped to a project and should not be able to touch
+        // one — the same reason the handshake itself runs in a temp directory.
+        .current_dir(std::env::temp_dir())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("could not start `{}`: {e}", launch.program.display()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    // npm puts the useful half in the first two lines — a code, then the URL or
+    // the registry's own words. The rest is the "complete log" footer.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let lines: Vec<&str> =
+        stderr.lines().map(str::trim).filter(|l| !l.is_empty()).take(2).collect();
+    let why =
+        if lines.is_empty() { "npm said nothing".to_string() } else { lines.join("; ") };
+    Err(format!(
+        "npm could not install {package}, which is npm being unavailable rather than a \
+         broken adapter: {why}"
+    ))
+}
+
 #[test]
 fn no_built_in_adapter_is_deprecated_on_npm() {
     for rules in Registry::built_in().all() {
@@ -47,10 +121,13 @@ fn no_built_in_adapter_is_deprecated_on_npm() {
 
 #[test]
 fn every_built_in_backend_completes_a_handshake() {
-    // A cold `npx` fetches a package on first use, so this is slow the first
-    // time and fast afterwards. A missing program is a FAILURE, not a skip: on
-    // a machine without the agent installed, silently passing would mean the
-    // one test that can catch a broken adapter never runs where it matters.
+    // A cold `npx` builds a several-hundred-megabyte tree on first use, so this
+    // is slow the first time and fast afterwards. That install is done as its
+    // own step by `install` above rather than inside the handshake's timeout —
+    // see there for what it cost to have those two share one bound. A missing
+    // program is a FAILURE, not a skip: on a machine without the agent
+    // installed, silently passing would mean the one test that can catch a
+    // broken adapter never runs where it matters.
     //
     // The handshake itself lives in the backend that performs it, and
     // `dispatch::handshake` chooses between them, so this test and the Test
@@ -67,6 +144,16 @@ fn every_built_in_backend_completes_a_handshake() {
     let mut failures = Vec::new();
     for rules in Registry::built_in().all() {
         let Some(spec) = &rules.adapter else { continue };
+        // Installing is npm's to be slow at; the handshake below is timing the
+        // adapter. An adapter that cannot be installed is still a failure, so
+        // nothing here can pass by being unable to try — it just says which of
+        // the two went wrong instead of reporting npm's bad hour as ours.
+        if let Some(package) = npm_package(spec) {
+            if let Err(e) = install(spec, package) {
+                failures.push(format!("{}: {e}", rules.preset));
+                continue;
+            }
+        }
         if let Err(e) = handshake(&rules.preset, spec, HANDSHAKE_TIMEOUT) {
             failures.push(format!("{}: {e}", rules.preset));
         }

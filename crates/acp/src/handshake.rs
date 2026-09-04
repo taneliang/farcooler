@@ -19,9 +19,19 @@ use farcooler_agent_core::backend::Launch;
 /// reasons about the identical state under the identical name
 /// (`Status::AdapterSilent`): "an adapter that starts but never answers
 /// `initialize` is a real state and it looks like nothing at all: the process is
-/// alive, the pane is `running`, and the screen stays blank forever." 90s is
-/// generous enough that a cold `npx` fetching a package on first use is not
-/// killed mid-download.
+/// alive, the pane is `running`, and the screen stays blank forever."
+///
+/// This used to add that 90s was "generous enough that a cold `npx` fetching a
+/// package on first use is not killed mid-download". That is no longer safe to
+/// lean on and should not be repeated: the adapter packages now carry their
+/// agent's whole runtime, and the tree `npx` builds on first use is 261MB for
+/// claude and 320MB for codex. CI has already spent the whole 90s of this bound
+/// on that install and reported the result as a silent adapter.
+///
+/// So this bound is for an adapter that is INSTALLED and will not answer. A
+/// caller that may be starting a cold one has to let it install first — see the
+/// `install` step in `crates/agent/tests/backends.rs`, which exists because this
+/// timeout was otherwise measuring npm and blaming the adapter for the answer.
 pub const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 /// What an adapter said when asked to identify itself.
