@@ -38,3 +38,9 @@ libc = { workspace = true, optional = true }
 # default build and both Apple platforms never pull protoc's vendored binary
 # into a crate that has nothing to do with the wire format.
 farcooler-protocol = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The helper backend's tests spawn a fake helper — a shell script in a scratch
+# directory — to prove that `allow_add` reaches a RUNNING one rather than
+# answering ENOTCONN. Nothing outside `cfg(test)` needs it.
+tempfile = "3"

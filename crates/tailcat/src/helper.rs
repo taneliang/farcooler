@@ -311,6 +311,35 @@ pub fn set_derp_map_url(url: &str) {
 mod tests {
     use super::*;
 
+    /// Serialises the tests that touch this module's PROCESS-WIDE state — the
+    /// running-helper slot and `FARCOOLER_TUNNEL_HELPER`. `cargo test` runs
+    /// these in one process on many threads, so a test that starts a helper
+    /// and one that asserts none is running would otherwise take turns
+    /// failing.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    /// A helper that is a shell script: it appends every command it is given
+    /// to `log`, and answers each with `ok`. Enough to be spawned, talked to,
+    /// and asked what it heard.
+    ///
+    /// SAFETY for the `set_var`: every test that reads this variable holds
+    /// `SERIAL`, and nothing else in this crate touches the environment.
+    fn fake_helper(dir: &Path, log: &Path) {
+        let script = dir.join("fake-tunnel-helper");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> {}\n  echo ok\ndone\n",
+                log.display()
+            ),
+        )
+        .expect("the fake helper is written");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("the fake helper is executable");
+        unsafe { std::env::set_var(HELPER_PATH_ENV, &script) };
+    }
+
     /// The guard that matters, at the boundary that would be exploited: an
     /// allowlist admitting nobody must not reach a helper, and it must not
     /// start one either.
@@ -362,10 +391,53 @@ mod tests {
     /// the C entry points answer with, and it must never be a spawn.
     #[test]
     fn asking_about_a_tunnel_that_is_not_serving_says_so() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
         let Err(TunnelError::Io(error)) = conn_blob() else {
             panic!("conn_blob answered for a runner with no helper");
         };
         assert_eq!(error.raw_os_error(), Some(libc::ENOTCONN), "{error:?}");
+    }
+
+    /// Admitting one more device REACHES the running tunnel, rather than
+    /// answering `ENOTCONN` because the tunnel now lives in another process.
+    ///
+    /// This is the question the migration path turns on. `client.set_node_key`
+    /// lets a device register its node key over the SSH access it already
+    /// holds, and calls `allow_add` so the route opens immediately instead of
+    /// at the next tunnel start — the Go side's `AddAllowedClient` mutates a
+    /// live server on purpose, because rebuilding would drop every other
+    /// device's tunnel. Moving the tunnel into a child process is exactly the
+    /// change that could have turned that into a silent no-op on Linux, so it
+    /// is asserted here rather than reasoned about: after a successful
+    /// `serve`, the helper is held open, and `allow_add` is a command down the
+    /// same pipe.
+    ///
+    /// The fake helper records what it was actually sent, so this cannot pass
+    /// on a call that returned `Ok` without saying anything.
+    #[test]
+    fn admitting_one_more_device_reaches_the_running_tunnel() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("commands");
+        fake_helper(dir.path(), &log);
+
+        let key = dir.path().join("tailcat.key");
+        serve(&key, 22, &["a".repeat(43)]).expect("the fake helper accepted serve");
+        allow_add(&"b".repeat(43)).expect("allow_add reached the running helper");
+
+        let heard = std::fs::read_to_string(&log).expect("the helper recorded what it heard");
+        let lines: Vec<&str> = heard.lines().collect();
+        assert_eq!(
+            lines,
+            [format!("serve 22 {}", "a".repeat(43)), format!("allow {}", "b".repeat(43))],
+            "the helper did not hear both commands on one connection: {lines:?}"
+        );
+
+        // And the slot really is torn down between serves, which is what makes
+        // a revocation revoke: the allowlist is read at Start and never again.
+        *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
     }
 
     /// Nothing on Linux dials a tunnel yet, and this backend cannot grow the

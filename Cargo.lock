@@ -1059,6 +1059,7 @@ version = "0.1.0"
 dependencies = [
  "farcooler-protocol",
  "libc",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
