@@ -562,14 +562,7 @@ pub fn render(
         Rejected::Unparseable
     })?;
     let line = match grant {
-        Grant::FarCooler => {
-            let node = node_key.map(|k| format!(" --node-key {k}")).unwrap_or_default();
-            format!(
-                "restrict,command=\"{} --client {client_id} --scope {}{node}\" {body}",
-                forced_program(),
-                scope_word(scope),
-            )
-        }
+        Grant::FarCooler => key_a_line(&body, client_id, scope, node_key),
         // No options field at all, which is the entire difference: sshd gives
         // this key a shell, so Zed, git and Terminal work. The key material and
         // the comment are still rebuilt above, so a plain line is not a way to
@@ -579,6 +572,93 @@ pub fn render(
     // Not an assertion about the input — every part of this line is now
     // something this function built — but about the rules above still holding
     // together if one of them is ever edited.
+    debug_assert!(!line.contains(['\r', '\n']));
+    Ok(line)
+}
+
+/// The exact spelling of a Key A line, in the one place it is spelled.
+///
+/// `render` writes one for a device being enrolled and `with_node_key` writes
+/// one for a device that is already enrolled. Two `format!`s would be two
+/// spellings of the options field, and the day they drift is the day a
+/// re-rendered line stops being the line the parser reads back — which for this
+/// file means a device that Settings says is enrolled and that cannot log in.
+///
+/// Every argument is something this crate chose or has already filtered:
+/// `body` is re-encoded key material, `client_id` passed `usable_client_id`,
+/// `scope` is one of three words `scope_word` owns, and `node_key` passed
+/// `usable_node_key`. Nothing off the wire reaches here unchecked.
+fn key_a_line(body: &str, client_id: &str, scope: Scope, node_key: Option<&str>) -> String {
+    let node = node_key.map(|k| format!(" --node-key {k}")).unwrap_or_default();
+    format!(
+        "restrict,command=\"{} --client {client_id} --scope {}{node}\" {body}",
+        forced_program(),
+        scope_word(scope),
+    )
+}
+
+/// One of our own Key A lines, rewritten to admit a node key to the tunnel.
+///
+/// **The migration path, and the reason it needs no ceremony.** A fleet
+/// enrolled before the tunnel existed carries lines with no node key, which
+/// `allowlist::from_entries` reads as a runner that admits nobody. This is how
+/// such a device registers one: over the SSH access it already holds, onto the
+/// line it already has. It grants nothing — the line's forced command, its
+/// client id and its scope all come back byte-identical, and the only thing
+/// that changes is a route to access the caller is using to ask.
+///
+/// **Rebuilt, never spliced.** The line is composed from the entry's DECODED
+/// key material and the fields the parser read back out of it, through the same
+/// `key_a_line` that wrote it in the first place. Appending ` --node-key …`
+/// into the string that was read would be the exact mistake `render`'s doc
+/// comment exists to forbid: `authorized_keys` is line-oriented, options come
+/// before the key, and a line edited in place is a line whose options field
+/// something else can end early.
+///
+/// Refuses a plain line: Key B has no forced command, so there is nowhere to
+/// put the flag — the same refusal `render` makes for `Grant::Shell`.
+pub fn with_node_key(entry: &Entry, node_key: &str) -> Result<String, Rejected> {
+    // A plain line of ours, or a foreign one. Neither has a forced command to
+    // hold this, and a foreign line is somebody's hand-added key that this
+    // crate must never rewrite at all.
+    if entry.shell_access || !usable_client_id(&entry.client_id) {
+        return Err(Rejected::NodeKey);
+    }
+    if !usable_node_key(node_key) {
+        return Err(Rejected::NodeKey);
+    }
+    // A line whose scope word this build does not have parses as `Unspecified`,
+    // and `scope_word` renders `Unspecified` as `host_admin` — so re-rendering
+    // one would silently promote a word this daemon cannot read into the whole
+    // runner. Refusing leaves the line exactly as it was, which is what a
+    // daemon that cannot read the line should do to it.
+    if matches!(entry.scope, Scope::Unspecified) {
+        return Err(Rejected::Unscoped);
+    }
+    // The key half of the line, as the parser found it. `split_options` and not
+    // a split on the first space: our own forced command contains five of them
+    // inside its quotes.
+    let (_, rest) = split_options(&entry.line).ok_or(Rejected::Unparseable)?;
+    let parsed = ssh_key::PublicKey::from_openssh(rest).map_err(|e| {
+        tracing::debug!(error = %e, "a line in the fence did not parse back as a key");
+        Rejected::Unparseable
+    })?;
+    if !matches!(parsed.algorithm(), ssh_key::Algorithm::Ed25519) {
+        return Err(Rejected::Algorithm);
+    }
+    // The comment is carried through rather than rebuilt from a label: it is
+    // the name `render` already chose for this device, and re-deriving it would
+    // wrap `farcooler-…` around itself and rename the device in Settings on
+    // every migration.
+    let key = ssh_key::PublicKey::new(parsed.key_data().clone(), parsed.comment().to_string());
+    let body = key.to_openssh().map_err(|e| {
+        tracing::debug!(error = %e, "a parsed key could not be re-encoded");
+        Rejected::Unparseable
+    })?;
+    let line = key_a_line(&body, &entry.client_id, entry.scope, Some(node_key));
+    // Same assertion `render` makes, for the same reason: not about the input,
+    // which is all filtered above, but about the rules still holding together
+    // if one of them is ever edited.
     debug_assert!(!line.contains(['\r', '\n']));
     Ok(line)
 }
@@ -1417,6 +1497,109 @@ mod tests {
     fn a_foreign_line_has_no_node_key() {
         let entry = entry_from_line(&format!("ssh-ed25519 {OTHER_KEY} someone"));
         assert_eq!(entry.node_key, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // `with_node_key`: the migration path
+    //
+    // A device enrolled before the tunnel existed registers a node key over
+    // the access it already holds, and its line is REBUILT rather than edited.
+    // -----------------------------------------------------------------------
+
+    /// The line already in the file, as the parser reads it.
+    fn enrolled(scope: Scope, grant: Grant, node_key: Option<&str>) -> Entry {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let line = render(&key, "iPhone 15", "c1", scope, grant, node_key).expect("render");
+        entry_from_line(&line)
+    }
+
+    /// Everything except the node key comes back byte-identical.
+    ///
+    /// The whole claim of this call: it adds a route and changes nothing else.
+    /// A rewrite that moved the fingerprint would be a different key — the
+    /// device could no longer log in — and one that moved the comment would
+    /// rename the device in Settings on every migration, which is what a
+    /// re-render from `entry.label` would do (`comment_for` wraps `farcooler-`
+    /// around whatever it is given).
+    #[test]
+    fn a_migrated_line_changes_only_its_node_key() {
+        let before = enrolled(Scope::Control, Grant::FarCooler, None);
+        assert_eq!(before.node_key, "", "the fixture already carried one");
+
+        let line = with_node_key(&before, NODE_KEY).expect("a Key A line takes a node key");
+        let after = entry_from_line(&line);
+
+        assert_eq!(after.node_key, NODE_KEY);
+        assert_eq!(after.fingerprint, before.fingerprint);
+        assert_eq!(after.client_id, before.client_id);
+        assert_eq!(after.scope, before.scope);
+        assert_eq!(after.label, before.label);
+        assert!(!after.shell_access);
+        // And the ONE difference, stated as a difference: strip the flag back
+        // out and the two lines are the same string.
+        assert_eq!(line.replace(&format!(" --node-key {NODE_KEY}"), ""), before.line);
+    }
+
+    /// A device that regenerated its node key replaces the one on its line
+    /// rather than accumulating a second flag the parser would read past.
+    #[test]
+    fn a_second_registration_replaces_the_first() {
+        const OTHER_NODE_KEY: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE";
+        let before = enrolled(Scope::Read, Grant::FarCooler, Some(NODE_KEY));
+        let after = entry_from_line(&with_node_key(&before, OTHER_NODE_KEY).expect("re-register"));
+        assert_eq!(after.node_key, OTHER_NODE_KEY);
+        assert_eq!(after.line.matches("--node-key").count(), 1, "two flags: {}", after.line);
+    }
+
+    /// Key B has no forced command, so there is nowhere to put this — and
+    /// rewriting it into one would take the Mac's shell away, which is the key
+    /// Zed, git and Terminal use.
+    #[test]
+    fn a_plain_line_refuses_a_node_key_here_too() {
+        let plain = enrolled(Scope::HostAdmin, Grant::Shell, None);
+        assert!(plain.shell_access, "the fixture is not a plain line");
+        let out = with_node_key(&plain, NODE_KEY);
+        assert!(matches!(out, Err(Rejected::NodeKey)), "a plain line took one: {out:?}");
+    }
+
+    /// A key somebody added by hand is not ours to rewrite at all.
+    #[test]
+    fn a_foreign_line_is_never_rewritten() {
+        let foreign = entry_from_line(&format!("ssh-ed25519 {OTHER_KEY} someone"));
+        assert!(foreign.client_id.is_empty(), "the fixture is not foreign");
+        let out = with_node_key(&foreign, NODE_KEY);
+        assert!(matches!(out, Err(Rejected::NodeKey)), "a foreign line was rewritten: {out:?}");
+    }
+
+    /// The same hostile strings `render` refuses, refused on the same terms.
+    /// This is the second door into the forced command and it must not be the
+    /// unlocked one.
+    #[test]
+    fn a_node_key_that_could_end_the_command_is_refused_on_migration_too() {
+        let before = enrolled(Scope::Read, Grant::FarCooler, None);
+        for hostile in ["ab\" ssh-ed25519 AAAA them", "ab cd", "ab\nrestrict", ""] {
+            let out = with_node_key(&before, hostile);
+            assert!(matches!(out, Err(Rejected::NodeKey)), "accepted {hostile:?}: {out:?}");
+        }
+    }
+
+    /// A line whose scope word this build does not have reads back as
+    /// `Unspecified`, and `scope_word` renders `Unspecified` as `host_admin` —
+    /// so re-rendering one would silently promote a word this daemon cannot
+    /// read into the whole runner. Refusing leaves the line exactly as it was.
+    #[test]
+    fn a_line_with_a_scope_this_build_cannot_read_is_left_alone() {
+        let key = format!("ssh-ed25519 {KEY} x");
+        let line = render(&key, "phone", "c1", Scope::Read, Grant::FarCooler, None).unwrap();
+        let future = entry_from_line(&line.replace("--scope read", "--scope fleet_admin"));
+        assert_eq!(future.scope, Scope::Unspecified, "the fixture's scope was readable");
+        assert_eq!(future.client_id, "c1", "the fixture stopped being one of ours");
+
+        let out = with_node_key(&future, NODE_KEY);
+        assert!(
+            matches!(out, Err(Rejected::Unscoped)),
+            "an unreadable scope was rewritten: {out:?}"
+        );
     }
 
     // -----------------------------------------------------------------------

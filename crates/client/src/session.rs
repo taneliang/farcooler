@@ -1732,6 +1732,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::ChangesInbox(_) => "changes_inbox",
         result::Value::ClientList(_) => "client_list",
         result::Value::ClientEnroll(_) => "client_enroll",
+        result::Value::ClientSetNodeKey(_) => "client_set_node_key",
     }
 }
 

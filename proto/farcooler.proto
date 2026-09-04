@@ -161,6 +161,7 @@ message Request {
     ClientEnroll client_enroll = 66;
     ClientRevoke client_revoke = 67;
     TerminalsWatched terminals_watched = 68;
+    ClientSetNodeKey client_set_node_key = 69;
   }
 }
 
@@ -213,6 +214,7 @@ message Result {
     ChangesInbox changes_inbox = 33;
     ClientList client_list = 34;
     ClientEnrollResult client_enroll = 35;
+    ClientSetNodeKeyResult client_set_node_key = 36;
   }
 }
 
@@ -2191,3 +2193,37 @@ message ClientEnrollResult {
 // It does not close a shell that is already open — nothing on a runner can, and
 // that shell can put both lines back. See `enrollment::revoke`.
 message ClientRevoke { string client_id = 1; }
+
+// A device tells its runner which node key to admit to the tunnel.
+//
+// The runner writes onto the CALLER's line, identified by the connection's own
+// client id, and ignores any device named here. That is what makes this safe
+// without a ceremony: a device cannot register a key for another device, and
+// registering one for itself grants nothing — it adds a route to access the
+// caller is already using to make this call.
+//
+// This is the migration path. A fleet enrolled before the tunnel existed has
+// lines with no node key, and `crates/daemon/src/allowlist.rs` reads such a
+// runner as admitting nobody — which is the only safe reading, since tailcat
+// treats an empty allowlist as "admit everyone". Without this call, every one
+// of those devices would have to be re-enrolled by hand to gain a route it is
+// already entitled to.
+message ClientSetNodeKey {
+  // Ignored. Present so a log of the request shows what the caller believed;
+  // the line written is always the connection's own.
+  string client_id = 1;
+  // 43 characters of unpadded base64: one X25519 public key. Refused if it
+  // could not survive being written into a forced command.
+  string node_key = 2;
+}
+
+message ClientSetNodeKeyResult {
+  // This runner's tailcat token, so the caller can reach it through the tunnel
+  // from now on. Empty when this runner serves no tunnel.
+  //
+  // Empty is ordinary rather than a failure: the first device to register a
+  // key on a migrating runner writes the line that makes an allowlist possible,
+  // and the runner starts serving on its next boot. The line is written either
+  // way — this field only says whether there is a token to dial yet.
+  string conn_blob = 1;
+}

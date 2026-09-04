@@ -234,6 +234,21 @@ pub mod capability {
     /// falls back to polling if that stays silent. See
     /// `Session::open_stream` in `crates/client`.
     pub const TERMINAL_STREAM: &str = "terminal_stream";
+    /// Registering a device's tailcat node key on this runner:
+    /// `client.set_node_key`, answered with the runner's own connection token.
+    ///
+    /// Its own capability rather than part of `ENROLLMENT`, for the reason
+    /// `WATCHING` and `TERMINAL_STREAM` above are their own: every daemon that
+    /// ever shipped advertises `enrollment` and none of them before this one
+    /// can serve this method. Folding it in would have every runner in the
+    /// field claim a call half of them refuse — and the client asking is a
+    /// device deciding whether it can reach this runner at all, which is a
+    /// question it should be able to answer from the hello rather than from a
+    /// failed round trip.
+    ///
+    /// Absent means the runner has no tunnel to be admitted to, so the client
+    /// keeps reaching it by address exactly as it always did.
+    pub const TUNNEL: &str = "tunnel";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -242,7 +257,7 @@ pub mod capability {
     pub const ALL: &[&str] =
         &[
             WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
-            ENROLLMENT, WATCHING, TERMINAL_STREAM,
+            ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -301,6 +316,7 @@ pub mod capability {
             "adapter.list" | "adapter.upsert" | "adapter.delete" | "adapter.test" => ADAPTERS,
             "theme.list" | "theme.upsert" | "theme.delete" | "settings.set_branch_prefix" => THEMES,
             "client.list" | "client.enroll" | "client.revoke" => ENROLLMENT,
+            "client.set_node_key" => TUNNEL,
             "terminal.watching" => WATCHING,
             "terminal.attach" => TERMINAL_STREAM,
             _ => return None,
@@ -406,6 +422,7 @@ mod tests {
             "adapter.list",
             "theme.list",
             "client.enroll",
+            "client.set_node_key",
             "terminal.attach",
         ] {
             let cap = capability::for_method(method).expect("a known method");

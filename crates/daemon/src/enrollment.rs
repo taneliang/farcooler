@@ -1,5 +1,5 @@
-//! Which devices may log in to this runner: `client.list`, `client.enroll`,
-//! `client.revoke`.
+//! Which devices may log in to this runner, and how they reach it:
+//! `client.list`, `client.enroll`, `client.revoke`, `client.set_node_key`.
 //!
 //! The policy layer above `fence`, which owns the bytes. Free functions taking
 //! the service rather than methods on it, the shape `review_ops` already uses:
@@ -21,8 +21,10 @@
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{
-    ClientEnroll, ClientEnrollResult, ClientList, ClientRevoke, Scope,
+    ClientEnroll, ClientEnrollResult, ClientList, ClientRevoke, ClientSetNodeKey,
+    ClientSetNodeKeyResult, Scope,
 };
+use farcooler_transport::Peer;
 
 use farcooler_fence::{self as fence, Entry, FenceError, Rejected};
 use crate::service::Service;
@@ -143,6 +145,144 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
         })
     })
     .await
+}
+
+/// Admit a device's node key to the tunnel, on the line it already holds.
+///
+/// **The whole safety argument for skipping the ceremony.** The line written is
+/// the one this runner's own `authorized_keys` gave the CONNECTION — never the
+/// device the request names, which is ignored and kept only so a log shows what
+/// the caller believed. A device therefore cannot register a key for another
+/// device. And registering one for itself grants nothing: it adds a route to
+/// access the caller is demonstrably already holding, because it is using that
+/// access to make this call. That is why this sits at `read` rather than
+/// `host_admin` — see `rpc::required_scope`.
+///
+/// **What it is for.** A fleet enrolled before the tunnel existed has lines
+/// with no node key at all, which `allowlist::from_entries` reads as a runner
+/// that admits nobody — the only safe reading, since tailcat treats an empty
+/// allowlist as "admit everyone". Without this call every one of those devices
+/// would have to be re-enrolled by hand.
+///
+/// **Adding is not revoking, and the two use different mechanisms on purpose.**
+/// This admits the key to the LIVE server through `allow_add`, which mutates
+/// the running server's allowed set. Withdrawing a key cannot work that way —
+/// tailcat copies the allowlist at `Start` and consults it only when a client
+/// first registers, so a revoked device that is already peered would keep its
+/// route — which is why revocation rebuilds the server and drops every live
+/// tunnel with it. Adding must not pay that price: the caller is holding a
+/// session on this runner right now, and every other device is holding one too.
+///
+/// Nothing here touches `allowlist::tunnel_plan` or `start_tunnel`. Those
+/// decide whether a booting runner may serve at all, and their refusal to serve
+/// an empty allowlist is the guard that keeps sshd from being opened to
+/// everyone. This function only ever makes an allowlist longer.
+pub async fn set_node_key(
+    svc: &Service,
+    peer: &Peer,
+    request: &ClientSetNodeKey,
+) -> Result<ClientSetNodeKeyResult> {
+    // A caller that named no device has no line here. That is every local
+    // socket client — the owner's own Mac app talking to its own daemon — and
+    // it is not an error worth guessing around: there is nothing to write onto,
+    // and picking a line for such a caller is precisely the thing this call
+    // must never do. Named as `client_id` because that is the field of the
+    // request a caller would think supplied it, and the answer is that nothing
+    // in the request ever can.
+    let Some(client_id) = peer.client_id.as_deref() else {
+        return Err(DomainError::InvalidArgument { what: "client_id" });
+    };
+    let client_id = client_id.to_string();
+    let node_key = request.node_key.clone();
+    let path = svc.authorized_keys().to_path_buf();
+
+    // Read and write under ONE lock hold, the same as `enroll` and `revoke`:
+    // this rebuilds the whole block from what it read, so a snapshot taken
+    // before a concurrent enrollment would put the file back without that
+    // device's key. See `fence::update`.
+    let rewriting = node_key.clone();
+    blocking(move || {
+        fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
+            Ok((rerender_with_node_key(entries, &client_id, &rewriting)?, ()))
+        })
+    })
+    .await?;
+
+    // The allowlist is a projection of that file, so it is now one entry
+    // longer. `allow_add` and `conn_blob` are synchronous and hold the Go
+    // side's package-wide mutex — `serve` on the same runner can hold it for
+    // 30-45 seconds — so neither may run on a runtime worker, and this RPC
+    // must not be the thing that waits behind one inline.
+    let admitting = node_key;
+    let conn_blob = match tokio::task::spawn_blocking(move || {
+        // Best effort, and the line is already written either way. A runner
+        // serving no tunnel yet answers `ENOTCONN` here: the first device to
+        // register on a migrating runner is exactly that case, and what it has
+        // done is write the line that lets the next boot start a server at all.
+        if let Err(error) = farcooler_tailcat::allow_add(&admitting) {
+            tracing::warn!(
+                code = error.code(),
+                "the running tunnel did not admit a newly registered node key"
+            );
+        }
+        farcooler_tailcat::conn_blob()
+    })
+    .await
+    {
+        Ok(Ok(blob)) => blob,
+        Ok(Err(error)) => {
+            tracing::debug!(code = error.code(), "this runner has no tunnel token to hand back");
+            String::new()
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "the tunnel task did not finish");
+            String::new()
+        }
+    };
+
+    tracing::info!(client = %peer.client_id.as_deref().unwrap_or("-"), "registered a node key");
+    Ok(ClientSetNodeKeyResult { conn_blob })
+}
+
+/// The block as it should read once the caller's own line carries a node key.
+///
+/// Exactly one line changes. Every other line in the block goes back byte for
+/// byte, including this device's OWN plain line — a Mac's Key B has no forced
+/// command to hold the flag — every other device's lines, and every foreign
+/// line, which is somebody's hand-added key that this daemon must never rewrite.
+///
+/// A caller with no Key A line is `NotFound` rather than a cheerful success. It
+/// cannot happen over SSH, where the client id came from the very line being
+/// looked for, but answering "registered" to a caller whose key was revoked a
+/// microsecond ago would be telling a device it has a route it does not have.
+fn rerender_with_node_key(
+    entries: &[Entry],
+    client_id: &str,
+    node_key: &str,
+) -> std::result::Result<fence::Change, Refusal> {
+    // `!shell_access`, because a plain line carries no forced command; a
+    // non-empty client id, because a foreign line has none and must never be
+    // matched by one.
+    let at = entries
+        .iter()
+        .position(|e| !e.shell_access && !e.client_id.is_empty() && e.client_id == client_id)
+        .ok_or(Refusal(DomainError::NotFound))?;
+    // `Rejected::NodeKey` is carried out to the caller as a refusal rather than
+    // swallowed: a device told its key was registered when it was not would
+    // wait forever for a tunnel that never admits it.
+    let rewritten = fence::with_node_key(&entries[at], node_key).map_err(|r| Refusal(refused(r)))?;
+
+    let mut ours: Vec<String> = Vec::new();
+    let mut foreign: Vec<String> = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let line = if index == at { rewritten.clone() } else { entry.line.clone() };
+        if entry.client_id.is_empty() {
+            foreign.push(line);
+        } else {
+            ours.push(line);
+        }
+    }
+    Ok(fence::Change::Write { entries: ours, foreign })
 }
 
 /// Remove a device's lines, close the sessions it was holding, and answer with

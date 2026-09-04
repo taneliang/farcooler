@@ -397,6 +397,18 @@ fn required_scope(method: &str) -> Option<Scope> {
         // would make every scope beneath this one advisory.
         "client.list" => Scope::Read,
         "client.enroll" | "client.revoke" => Scope::HostAdmin,
+        // Registering a node key is `read`, and that is not an oversight.
+        //
+        // It writes into `authorized_keys`, which everything else in this
+        // paragraph is `host_admin` for — but what it writes is a route onto
+        // the CALLER'S OWN line, chosen by this runner's file rather than by
+        // the request, and a route to access the caller is already using to
+        // make the call. It widens nobody's access, least of all its own: a
+        // device that could not log in cannot make this call, and a device
+        // that can gains nothing it did not have. Requiring `host_admin` here
+        // would mean a read-scoped phone could never migrate onto the tunnel,
+        // which is the entire purpose of the method.
+        "client.set_node_key" => Scope::Read,
         "settings.set_branch_prefix"
         | "theme.upsert"
         | "theme.delete"
@@ -929,6 +941,36 @@ impl Rpc {
                 };
                 tracing::info!(by = self.who(), client = %p.client_id, "revoking a device");
                 Ok(result::Value::ClientList(crate::enrollment::revoke(svc, &p).await?))
+            }
+
+            // A device registers its own node key over the access it already
+            // holds.
+            //
+            // `&self.peer` and NEVER `p.client_id`. The peer is this
+            // connection's identity as sshd proved it and this runner's own
+            // `authorized_keys` names it; `p.client_id` is a string the caller
+            // chose. Passing the latter — or building a `Peer` out of it here —
+            // would let any enrolled device add a tunnel route to any other
+            // device's line, which is the one thing this method must never do.
+            // `enrollment::set_node_key` reads the peer and ignores the
+            // request's field, and it can only do that if this arm hands it the
+            // connection's own.
+            "client.set_node_key" => {
+                let Some(request::Payload::ClientSetNodeKey(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                // Both ids, deliberately: `by` is the line that will be
+                // written and `client` is the line the caller believed it was
+                // writing. When they differ, the log is the only place that
+                // shows a client got this wrong.
+                tracing::info!(
+                    by = self.who(),
+                    client = %p.client_id,
+                    "registering a device's node key"
+                );
+                Ok(result::Value::ClientSetNodeKey(
+                    crate::enrollment::set_node_key(svc, &self.peer, &p).await?,
+                ))
             }
 
             "repository.list" => {
