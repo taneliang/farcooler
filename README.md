@@ -156,8 +156,9 @@ agents ship one, the config file for adding your own, and known gaps.
 # rather than quietly shipping a build with no tunnel.
 ./scripts/build-ios-frameworks.sh --device && open apps/ios/FarCooler.xcodeproj
 
-# Android — stays on the tunnel stub regardless: Go's own toolchain refuses
-# `-buildmode=c-archive` for android/arm64.
+# Android — links the tunnel dynamically, as `libtailcat.so` beside the core:
+# Go's own toolchain refuses `-buildmode=c-archive` for android/arm64, so this
+# is the one platform that loads the tunnel rather than bundling it.
 ./scripts/build-android-libs.sh && (cd apps/android && ./gradlew installDebug)
 ```
 

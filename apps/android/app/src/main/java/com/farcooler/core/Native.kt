@@ -16,6 +16,21 @@ package com.farcooler.core
  */
 internal object NativeLibrary {
     /**
+     * Whether the tunnel loaded.
+     *
+     * The Go half, `libtailcat.so`, which is how this app reaches a runner
+     * whose reach is Tailcat. It is loaded FIRST and on purpose:
+     * `libfarcooler_jni.so` carries a `DT_NEEDED` on it, and while Android's
+     * linker will usually resolve that out of the app's own library directory
+     * unaided, naming it here makes the order certain and makes a failure to
+     * find it say so on its own line rather than as a core that mysteriously
+     * would not load.
+     *
+     * Recorded, never thrown, for the same reason [loaded] is.
+     */
+    val tunnelLoaded: Boolean = runCatching { System.loadLibrary("tailcat") }.isSuccess
+
+    /**
      * Whether the shared object loaded.
      *
      * Recorded rather than thrown, because the honest failure here is a build
@@ -36,6 +51,19 @@ internal object NativeLibrary {
  * be inferred from every screen failing at once.
  */
 val coreIsAvailable: Boolean get() = NativeLibrary.loaded
+
+/**
+ * Whether the tunnel is available to this build.
+ *
+ * Separate from [coreIsAvailable] because the two fail for different reasons
+ * and a diagnostics block that conflates them sends someone looking in the
+ * wrong place: the core missing is an ABI nobody built, the tunnel missing is
+ * an APK packaged without `libtailcat.so`. When this is false, a runner whose
+ * reach is Tailcat cannot be connected to at all — there is no fallback path,
+ * the reach is chosen once per runner where this app cannot see it — while
+ * every Direct runner still works.
+ */
+val tunnelIsAvailable: Boolean get() = NativeLibrary.tunnelLoaded
 
 internal object NativeClient {
     external fun nativeNew(): Long

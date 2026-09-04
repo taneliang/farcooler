@@ -19,6 +19,19 @@ name = "farcooler_jni"
 # not.
 crate-type = ["cdylib"]
 
+# A mirror of `farcooler-client`'s own `tailcat` feature, which is itself a
+# mirror of `farcooler-tailcat/linked` — the same chain iOS and macOS turn on,
+# so the crates below can read `cfg(feature = "tailcat")` and know the tunnel
+# is really there. Off by default: a plain `cargo build` of this crate links no
+# Go and gets the stub, and only `scripts/build-android-libs.sh` turns it on,
+# alongside the `-L`/`-l dylib=tailcat` that supplies the library.
+#
+# Android's tunnel is a `.so` the app loads, not an archive bundled in here.
+# See that script, and `Native.kt`, which loads it.
+[features]
+default = []
+tailcat = ["farcooler-client/tailcat"]
+
 [dependencies]
 farcooler-client.workspace = true
 farcooler-vt = { path = "../vt" }

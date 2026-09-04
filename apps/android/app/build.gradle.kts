@@ -139,14 +139,25 @@ android {
         // libraries have slices for it — with no `libfarcooler_jni.so` beside
         // them, so the app installs on an emulator and dies at the first screen
         // with an `UnsatisfiedLinkError`.
+        //
+        // BOTH libraries, not just the core. `libfarcooler_jni.so` carries a
+        // `DT_NEEDED` on `libtailcat.so` since the tunnel arrived, so an ABI
+        // directory left over from a build before it holds a core that cannot
+        // load at all — the very `UnsatisfiedLinkError` this check exists to
+        // turn into a build-time fact, and one that a check asking only about
+        // the core would wave through.
         val builtAbis = file("src/main/jniLibs")
-            .listFiles { file -> file.isDirectory && file.resolve("libfarcooler_jni.so").exists() }
+            .listFiles { file ->
+                file.isDirectory &&
+                    file.resolve("libfarcooler_jni.so").exists() &&
+                    file.resolve("libtailcat.so").exists()
+            }
             ?.map { it.name }
             ?.sorted()
             .orEmpty()
         if (builtAbis.isEmpty()) {
             logger.warn(
-                "No Rust core found in app/src/main/jniLibs. " +
+                "No Rust core and tunnel found in app/src/main/jniLibs. " +
                     "Run ./scripts/build-android-libs.sh before building the app."
             )
         }

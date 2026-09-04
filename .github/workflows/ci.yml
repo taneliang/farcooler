@@ -442,11 +442,20 @@ jobs:
           echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             'ndk;29.0.14206865' 'platforms;android-37.1' 'build-tools;37.0.0'
 
-      # The `.so` is gitignored — it is build output — so CI has to build it
-      # before the Gradle project that packages it. Without this the APK ships
-      # for an ABI with no core in it and the failure arrives as an
+      # The tunnel is Go, and `build-android-libs.sh` builds it before the
+      # crate that links it. Pinned by `go-version-file` rather than trusted to
+      # the image, for the reason release.yml's iOS job gives at its own copy
+      # of this step: an image bump that drops Go fails with an error that
+      # never mentions Go.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+
+      # Both `.so` are gitignored — they are build output — so CI has to build
+      # them before the Gradle project that packages them. Without this the APK
+      # ships for an ABI with no core in it and the failure arrives as an
       # UnsatisfiedLinkError on the first screen rather than here.
-      - name: Build the Rust core for Android
+      - name: Build the Rust core and the tunnel for Android
         run: ./scripts/build-android-libs.sh
 
       # The ported logic, against the same fixtures the Swift suite uses. This

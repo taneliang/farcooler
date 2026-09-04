@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build the tailcat Go shim as a C archive for one target.
+# Build the tailcat Go shim as a C archive — or, on Android, a shared library —
+# for one target.
 #
 # Go lives here rather than in a build.rs on purpose. `crates/protocol/build.rs`
 # vendors protoc so that "the build has no system dependency", and the README
@@ -10,9 +11,16 @@
 #   ./scripts/build-tailcat.sh ios-arm64
 #   ./scripts/build-tailcat.sh darwin-arm64
 #   ./scripts/build-tailcat.sh linux-musl-x86_64
+#   ./scripts/build-tailcat.sh android-arm64
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+# The NDK lookup the Android targets need, shared with
+# `scripts/build-android-libs.sh` so both halves of the Android build compile
+# against the same one. Sourcing it costs nothing on the other targets: it
+# defines functions and finds nothing until `android_toolchain` is called.
+. scripts/android-ndk.sh
 
 # Homebrew's Go is not on every shell's PATH on this machine. Appended, not
 # prepended and not exported alone, so nothing already on PATH (npm included)
@@ -97,18 +105,56 @@ case "$TARGET" in
     export CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-musl-gcc
     need_cc
     ;;
-  # No android-* case. `go build -buildmode=c-archive` refuses GOOS=android
-  # outright ("not supported on android/arm64", confirmed against this repo's
-  # Go 1.27.0) — Android only gets `c-shared`, a dynamically-linked `.so`, not
-  # the static archive every case above produces. That is a different
-  # packaging model (a second `.so` per ABI, loaded and linked at runtime
-  # rather than at Rust's build time) and a real decision for whoever wires
-  # Android's tunnel support, not a detail this script can paper over. See
-  # `scripts/build-android-libs.sh`, which leaves Android on the stub.
+  # Android is the one target that gets a shared library rather than an
+  # archive, and not by preference: `go build -buildmode=c-archive` refuses
+  # GOOS=android outright ("not supported on android/arm64", confirmed against
+  # this repo's Go 1.27.0). Android's class loader can only open a `.so`
+  # anyway, so `libtailcat.so` ships in `jniLibs/<abi>/` beside the Rust core
+  # and `libfarcooler_jni.so` links it dynamically — see
+  # `scripts/build-android-libs.sh`, which builds both halves and is the only
+  # caller of these two cases.
+  #
+  # The compiler is discovered rather than named: `android-ndk.sh` picks the
+  # highest NDK wrapper at or below the app's `minSdk`, and the same call in
+  # `build-android-libs.sh` gives cargo the very same binary.
+  android-arm64)
+    export CGO_ENABLED=1 GOOS=android GOARCH=arm64
+    android_toolchain
+    CC="$(ndk_cc aarch64-linux-android)"
+    export CC
+    ;;
+  android-x86_64)
+    export CGO_ENABLED=1 GOOS=android GOARCH=amd64
+    android_toolchain
+    CC="$(ndk_cc x86_64-linux-android)"
+    export CC
+    ;;
   *)
     echo "unknown target: $TARGET" >&2
     echo "known: ios-arm64 darwin-arm64 linux-musl-x86_64 linux-musl-aarch64" >&2
+    echo "       android-arm64 android-x86_64" >&2
     exit 1
+    ;;
+esac
+
+# What this target's build produces, and how. Every case above but Android is
+# a static `c-archive` the consuming crate bundles at Rust build time; Android
+# is a `c-shared` `.so` its consumer links against and the app loads at
+# runtime.
+MODE=c-archive
+LIB=libtailcat.a
+LDFLAGS=""
+case "$TARGET" in
+  android-*)
+    MODE=c-shared
+    LIB=libtailcat.so
+    # Go's c-shared build sets no DT_SONAME, and without one the linker that
+    # consumes this records the path it was handed — an absolute path on
+    # whichever machine built it — as the DT_NEEDED. Android's loader looks
+    # only for a bare `libtailcat.so` in the app's own library directory, so
+    # that binary would fail to load on every device. Verified both ways with
+    # `llvm-readelf -d`.
+    LDFLAGS="-extldflags=-Wl,-soname,libtailcat.so"
     ;;
 esac
 
@@ -122,11 +168,11 @@ mkdir -p "$OUT"
 # `mv`'d into place only once complete, so a build that succeeds is atomic
 # and a build that is interrupted mid-write never leaves a half-written file
 # at the final path either.
-rm -f "$OUT/libtailcat.a" "$OUT/libtailcat.h"
+rm -f "$OUT/libtailcat.a" "$OUT/libtailcat.so" "$OUT/libtailcat.h"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-(cd crates/tailcat/go && go build -buildmode=c-archive -o "$TMP/libtailcat.a" .)
-mv "$TMP/libtailcat.a" "$OUT/libtailcat.a"
+(cd crates/tailcat/go && go build -buildmode="$MODE" -ldflags "$LDFLAGS" -o "$TMP/$LIB" .)
+mv "$TMP/$LIB" "$OUT/$LIB"
 mv "$TMP/libtailcat.h" "$OUT/libtailcat.h"
-ls -l "$OUT/libtailcat.a"
+ls -l "$OUT/$LIB"

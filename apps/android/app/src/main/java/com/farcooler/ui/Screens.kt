@@ -553,6 +553,7 @@ private fun diagnostics(model: AppModel, connections: List<Connection>): String 
     appendLine("device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
     appendLine("android: ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
     appendLine("core loaded: ${com.farcooler.core.coreIsAvailable}")
+    appendLine("tunnel loaded: ${com.farcooler.core.tunnelIsAvailable}")
     for (connection in connections) {
         val daemon = connection.daemon.value
         appendLine(

@@ -35,7 +35,11 @@ rustup target add aarch64-linux-android
 ./scripts/build-android-libs.sh --emulator   # plus x86_64
 ```
 
-That writes `libfarcooler_jni.so` into `app/src/main/jniLibs/<abi>/`. Then:
+That writes two libraries into `app/src/main/jniLibs/<abi>/`:
+`libfarcooler_jni.so`, the Rust cores, and `libtailcat.so`, the Go tunnel it
+links against — Android is the one platform that loads the tunnel rather than
+bundling it, because Go cannot build an archive for Android at all. Both are
+needed: the core will not load without the tunnel beside it. Then:
 
 ```sh
 cd apps/android

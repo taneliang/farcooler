@@ -1,9 +1,13 @@
-// The C entry points the iOS and macOS builds link against.
+// The C entry points the iOS, macOS and Android builds link against.
 //
 // Split out of `tailcat.go` so that the rest of this package builds with
 // `CGO_ENABLED=0`. A file that imports "C" is excluded from the build
 // whenever cgo is off — that implicit constraint is the whole mechanism — so
-// this file, and only this file, is what makes the package a c-archive.
+// this file, and only this file, is what makes the package a c-archive — or,
+// on Android, a c-shared library. Android turns cgo on, gets exactly this
+// file, and links the result dynamically: `go build -buildmode=c-archive`
+// refuses GOOS=android, and Android's class loader can only open a `.so`
+// anyway. Nothing here changes for it; see `scripts/build-tailcat.sh`.
 //
 // Why that matters: a Go c-archive linked into a **musl** binary segfaults
 // inside Go's runtime startup, before it can print a word. Measured, not
@@ -15,7 +19,8 @@
 // no C library and so cannot hit it. See `.claude/agent/done/
 // keep-musl-and-get-the-tunnel.md` and `docs/releasing.md`.
 //
-// iOS and macOS keep the archive. It works there and it ships today.
+// iOS and macOS keep the archive. It works there and it ships today, and
+// Android's `.so` is this same code in the only packaging it can load.
 package main
 
 /*
