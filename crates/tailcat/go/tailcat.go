@@ -1,6 +1,13 @@
-// Package main is the C archive the Rust side links against.
+// Package main is the tunnel, in the two shapes the platforms need.
 //
-// It owns exactly one thing: turning a tailcat connection into a file
+// Everything in THIS file is plain Go with no cgo in it, and the two shapes
+// are only how it is entered. `exports_cgo.go` wraps it as a C archive, which
+// is what iOS and macOS link. `main_helper.go` wraps it as a standalone
+// program a runner spawns and talks to over a pipe, which is what Linux runs —
+// because a Go c-archive linked into a musl binary segfaults inside Go's
+// runtime startup, and `exports_cgo.go` records the measurement.
+//
+// Dialing owns exactly one thing: turning a tailcat connection into a file
 // descriptor. A file descriptor is not addressable, which is why this is a
 // socketpair and not a loopback listener — on iOS a loopback port is reachable
 // by every other app on the phone.
@@ -13,11 +20,6 @@
 // No message from this file reaches a screen. Every entry point answers with a
 // negative errno and the Rust side turns that into a stable word the apps own.
 package main
-
-/*
-#include <stdint.h>
-*/
-import "C"
 
 import (
 	"context"
@@ -34,7 +36,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"go4.org/mem"
 
@@ -90,6 +91,15 @@ var (
 	// shipping three apps and every runner.
 	derpMapURL string
 )
+
+// setDerpMapURL points this process at a different DERP map. Process-wide,
+// because it is deployment configuration rather than a property of one
+// connection — see the Rust side's `set_derp_map_url` for the whole reasoning.
+func setDerpMapURL(url string) {
+	mu.Lock()
+	defer mu.Unlock()
+	derpMapURL = url
+}
 
 // closeServer closes a running server. It is a variable so that a test can see
 // that serve tears the old server down before doing anything else, which is
@@ -867,36 +877,3 @@ func dial(token, clientKey string, port uint16) (rc int) {
 	}
 	return fd
 }
-
-//export fc_tailcat_dial
-func fc_tailcat_dial(token, clientKey *C.char, port C.uint16_t) C.int {
-	return C.int(dial(C.GoString(token), C.GoString(clientKey), uint16(port)))
-}
-
-//export fc_tailcat_serve
-func fc_tailcat_serve(keyPath *C.char, sshPort C.uint16_t, allow *C.char) C.int {
-	return C.int(serve(C.GoString(keyPath), uint16(sshPort), C.GoString(allow)))
-}
-
-//export fc_tailcat_conn_blob
-func fc_tailcat_conn_blob(buf *C.char, length C.size_t) C.int {
-	if buf == nil || length == 0 {
-		return C.int(-int(syscall.EINVAL))
-	}
-	return C.int(connBlob(unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(length))))
-}
-
-//export fc_tailcat_allow_add
-func fc_tailcat_allow_add(nodeKey *C.char) C.int {
-	return C.int(allowAdd(C.GoString(nodeKey)))
-}
-
-//export fc_tailcat_set_derp_map_url
-func fc_tailcat_set_derp_map_url(url *C.char) C.int {
-	mu.Lock()
-	defer mu.Unlock()
-	derpMapURL = C.GoString(url)
-	return 0
-}
-
-func main() {}
