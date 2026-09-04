@@ -462,7 +462,7 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// answer can be acted on. See `ShellDragClaim`.
     @State var dragClaim = ShellDragClaim()
 
-    /// The furthest the shell's own track strayed from centre during the
+    /// The furthest the shell's own track strayed from center during the
     /// gesture now under way, in points, and the highest it reached during the
     /// last one once that gesture is over.
     ///

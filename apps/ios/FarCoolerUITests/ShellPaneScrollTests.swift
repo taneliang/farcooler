@@ -231,7 +231,7 @@ final class ShellPaneScrollTests: XCTestCase {
     /// assertions above can be read, held perfectly still.
     ///
     /// So this reads the PEAK — `ShellRootView.strayed`, the furthest the
-    /// track got from centre at any frame of the gesture — which is the only
+    /// track got from center at any frame of the gesture — which is the only
     /// number that can tell the two apart. Measured at 25 points before the
     /// claim was seeded at touch-down; the room was not reported until the
     /// hunk's own scroll view began, which takes UIKit its usual ten points of
