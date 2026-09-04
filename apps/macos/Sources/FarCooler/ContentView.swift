@@ -1327,9 +1327,18 @@ struct ContentView: View {
             // selecting a pane belonging to a different layout showed it on its
             // own and the view bounced between arrangement and single terminal as
             // you clicked down the sidebar.
+            //
+            // And that same layout is the one DRAWN — it used to be a guard whose
+            // answer was thrown away in favour of `activeGroup`. Selecting a pane
+            // asks the runner to focus it, and focusing brings its layout
+            // forward, but that is a `farcooler` process and a `tmux
+            // select-window` away: until it answered, the runner still called the
+            // layout you left active, so the pane on screen was another
+            // terminal's, drawn live and indistinguishable from the one asked
+            // for. Measured at 123ms and 269ms of that on a quiet local runner.
             if let ws = workspace(host: host, id: wsID),
-                let c = store.client(for: ws), c.group(holding: termID, in: wsID) != nil,
-                let group = c.activeGroup(wsID)
+                let c = store.client(for: ws),
+                let group = c.group(holding: termID, in: wsID)
             {
                 tiled(ws, client: c, group: group)
             } else if let ws = workspace(host: host, id: wsID),
@@ -1404,6 +1413,7 @@ struct ContentView: View {
     private func tiled(_ ws: Workspace, client: DaemonClient, group: PaneGroup) -> some View {
         TileView(
             groups: client.layouts[ws.id] ?? [group],
+            showing: group.id,
             workspace: ws,
             changes: changesStore(for: ws, client: client),
             binary: store.client(for: ws)?.cliPath,
@@ -2001,6 +2011,18 @@ struct ContentView: View {
     /// The CLI and an agent can both focus a pane, and when they do the app has
     /// to be looking at it — otherwise `farcooler layout focus` from a script
     /// draws a border around a pane whose keystrokes still go somewhere else.
+    ///
+    /// Within one layout only, and now that is the whole of what it does. The
+    /// last condition — the selected terminal being in the layout that moved —
+    /// is what keeps this from flip-flopping: the app assumes a focus locally
+    /// (`DaemonClient.assumeFocus`) and the runner's confirmation of the
+    /// PREVIOUS focus can still be in flight, so a version that followed across
+    /// layouts would follow that stale answer straight back. The cost is that
+    /// `layout focus` aimed at another layout no longer brings it on screen —
+    /// the app draws the layout holding the SELECTED terminal now, so it stays
+    /// where you left it. Selection and screen agree, which they did not before;
+    /// the runner and the app disagree about which layout is at the front, which
+    /// nothing on screen claims either way.
     private func followLayoutFocus() {
         guard case .terminal(let host, let wsID, let termID) = selection,
             let workspace = workspace(host: host, id: wsID),

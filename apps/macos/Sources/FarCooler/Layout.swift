@@ -85,6 +85,25 @@ struct PaneRect: Decodable, Identifiable, Hashable, Sendable {
     var zoomed: Bool
 }
 
+extension Array where Element == PaneGroup {
+    /// Which layout to draw, given the one somebody asked for.
+    ///
+    /// The id wins over the daemon's `active` flag, and that is the whole point
+    /// of this existing. Selecting a terminal tells the runner to focus it, and
+    /// focusing brings its layout forward — but that is a `farcooler` process, a
+    /// socket and a `tmux select-window` away, and until it answers the runner
+    /// still calls the OLD layout active. Drawing the active one meant drawing
+    /// somebody else's terminal for the length of that round trip: measured at
+    /// 123ms and 269ms on a quiet local runner, and there is no ceiling on it.
+    ///
+    /// Falls back to the active layout — which is right for a workspace with no
+    /// terminal selected — and then to the first, because a workspace with
+    /// layouts always has one to show even if none of them claims to be active.
+    func showing(_ id: String) -> PaneGroup? {
+        first { $0.id == id } ?? first { $0.isActive } ?? first
+    }
+}
+
 struct PaneGroupList: Decodable, Sendable {
     var workspace: String
     var groups: [PaneGroup]

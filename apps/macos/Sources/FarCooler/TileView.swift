@@ -25,9 +25,18 @@ import UniformTypeIdentifiers
 /// The other half of the deal is that tmux has to be laying out for the size of
 /// this view rather than for some default. See `send(viewport:for:)`.
 struct TileView: View {
-    /// Every layout in the workspace, so the bar can offer them. The one drawn is
-    /// whichever is active.
+    /// Every layout in the workspace, so the bar can offer them. Which one is
+    /// drawn is `showing`, below.
     let groups: [PaneGroup]
+    /// Which layout to draw, by tmux window id.
+    ///
+    /// Told rather than derived. This used to be `groups.first { $0.isActive }`,
+    /// and `active` is the RUNNER's answer: selecting a terminal in another
+    /// layout asks the runner to focus it, and until that round trip lands the
+    /// runner still calls the layout you left active. So the pane on screen was
+    /// somebody else's terminal, drawn live and looking exactly like the one you
+    /// asked for. See `Array<PaneGroup>.showing`.
+    let showing: String
     let workspace: Workspace
     /// This worktree's diff, for whichever pane is showing it.
     ///
@@ -83,8 +92,36 @@ struct TileView: View {
     /// See the `.task(id:)` below.
     @State private var lastViewportSize: CGSize = .zero
 
-    private var group: PaneGroup? {
-        groups.first { $0.isActive } ?? groups.first
+    private var group: PaneGroup? { groups.showing(showing) }
+
+    /// The last layout drawn, so a change of layout can be told from a change
+    /// of ARRANGEMENT. See `arrangementMotion`.
+    ///
+    /// Read during a body evaluation and written after it, which is what makes
+    /// the distinction work: the render that first shows a new layout still sees
+    /// the old id here and so runs unanimated, and every render after it is a
+    /// change of shape within that layout.
+    @State private var drawn: String = ""
+
+    /// A layout changing shape animates; one layout REPLACING another does not.
+    ///
+    /// The platform's own spring when it does move, not a hand-rolled curve.
+    /// `Motion.snap` is very nearly critically damped — it settles without
+    /// overshooting, which is what a terminal needs: a pane full of text that
+    /// bounces past its position and comes back reads as a rendering glitch
+    /// rather than as motion. And a spring rather than a curve on a stopwatch,
+    /// because a timed curve runs its full time whatever it is animating, so a
+    /// divider nudged a few points took as long as one thrown across the window.
+    ///
+    /// Panes sliding as a divider moves, or growing in as a split lands, is
+    /// motion that describes what happened. Switching to a different layout is
+    /// not that: the answer is known before the animation starts, and every pane
+    /// of the layout you left spends the spring's whole settling time — measured
+    /// at 410-450ms — fading out over the one you asked for. That is the
+    /// "content stays unchanged for about 0.3 seconds" this file's own focus
+    /// comment already refuses to spend on a keystroke.
+    static func arrangementMotion(from was: String, to now: String) -> Animation? {
+        was == now ? Motion.snap : nil
     }
 
     var body: some View {
@@ -92,7 +129,7 @@ struct TileView: View {
             // Only when there is more than one, so a single arrangement is not
             // labeled for the benefit of a choice nobody has.
             if groups.count > 1 {
-                GroupBar(groups: groups, onSelect: onSelectGroup)
+                GroupBar(groups: groups, showing: group?.id ?? showing, onSelect: onSelectGroup)
             }
             panels
         }
@@ -108,23 +145,9 @@ struct TileView: View {
         .navigationSubtitle(workspace.windowSubtitle)
     }
 
-    /// How the panes move.
-    ///
-    /// The platform's own spring, not a hand-rolled curve. `.smooth` is critically
-    /// damped — it settles without overshooting, which is what a terminal needs: a
-    /// pane full of text that bounces past its position and comes back reads as a
-    /// rendering glitch rather than as motion.
-    /// Spring, not a curve on a stopwatch.
-    ///
-    /// `.smooth(duration:)` runs its full time whatever it is animating, so a
-    /// divider nudged a few points took as long as one thrown across the
-    /// window and the whole app felt slow. A spring settles in proportion to
-    /// the distance it has to cover, which is what "snappy" actually means.
-    private var motion: Animation { Motion.snap }
-
     /// Zoom gets the tiny bit of energy `.smooth` deliberately lacks.
     ///
-    /// Changing the arrangement is a change of layout; zooming is a change of
+    /// Changing the arrangement is a change of shape; zooming is a change of
     /// posture, and a trace of overshoot is what makes it feel like the pane came
     /// forward rather than being swapped. `extraBounce` is kept small — this is one
     /// pane arriving, not a notification.
@@ -172,8 +195,14 @@ struct TileView: View {
                 // arrangement does and never when it does not. Animating against
                 // the pane list instead would miss a divider moving, and animating
                 // against the rectangles would fight the animation it triggered.
-                .animation(motion, value: group.layout)
+                //
+                // Gated on the layout being the same one, though: that string
+                // also changes when a DIFFERENT window is drawn, and animating
+                // that is a different claim entirely. See `arrangementMotion`.
+                .animation(
+                    TileView.arrangementMotion(from: drawn, to: group.id), value: group.layout)
                 .animation(zoomMotion, value: group.zoomed)
+                .onChange(of: group.id, initial: true) { _, now in drawn = now }
                 // Debounced, because a window drag produces one of these per frame
                 // and each is a round trip that re-lays-out every pane.
                 // `.task(id:)` cancels the previous run for us, which is the whole

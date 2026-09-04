@@ -13,6 +13,13 @@ import SwiftUI
 /// which is the moment it starts meaning something.
 struct GroupBar: View {
     let groups: [PaneGroup]
+    /// Which pill is lit, by tmux window id.
+    ///
+    /// The layout on screen, not the one the runner calls active. Those are the
+    /// same a round trip after you pick one and different until then, and a bar
+    /// that lit the runner's answer would spend that round trip pointing at a
+    /// layout you are not looking at. See `TileView.showing`.
+    let showing: String
     let onSelect: (PaneGroup) -> Void
 
     var body: some View {
@@ -25,7 +32,7 @@ struct GroupBar: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
                 ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                    pill(group, position: index + 1)
+                    pill(group, position: index + 1, lit: group.id == showing)
                 }
             }
         }
@@ -36,11 +43,11 @@ struct GroupBar: View {
         // Spring rather than a fixed curve: see `TileView.motion`. A tab
         // strip that takes the same 200ms whether one tab changed or five
         // reads as lag, not as motion.
-        .animation(Motion.snap, value: groups.map(\.isActive))
+        .animation(Motion.snap, value: showing)
     }
 
-    private func pill(_ group: PaneGroup, position: Int) -> some View {
-        let active = group.isActive
+    private func pill(_ group: PaneGroup, position: Int, lit: Bool) -> some View {
+        let active = lit
         return Button {
             onSelect(group)
         } label: {
