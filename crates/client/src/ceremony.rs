@@ -50,7 +50,18 @@ use serde::{Deserialize, Serialize};
 ///
 /// Checked before any other field is read, so a code from a build that knows
 /// more than this one is refused rather than half-understood.
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 2;
+
+/// Which versions this build can act on.
+///
+/// Not `v == VERSION`. A v=1 offer comes from a phone in the field that cannot
+/// be upgraded before it is enrolled, and everything in it is still true — it
+/// simply names no node key, so it can be granted direct runners and nothing
+/// else. A v=3 offer comes from a build that knows more than this one, and
+/// half-understanding it is how a device gets enrolled with a field ignored.
+pub fn accepts(v: u8) -> bool {
+    v == 1 || v == VERSION
+}
 
 /// How long a scan may sit unanswered on the scanner's own clock.
 ///
@@ -95,6 +106,20 @@ pub struct Offer {
     pub channel: String,
     /// 128 random bits as hex. A correlator the reply must echo.
     pub ceremony: String,
+    /// The device's tailcat node public key: 43 characters of unpadded base64.
+    ///
+    /// Empty from a v=1 device, which is not "unknown" — it is a device that
+    /// cannot be granted a tunneled runner, and the join screen says so. Empty
+    /// on a v=2 offer means the same thing: a device that has not joined a
+    /// tunnel yet. The version says what a code can express; this field says
+    /// what the device it came from can be granted.
+    ///
+    /// Public like every other field, and not a secret: a node public key names
+    /// which peer a tunnel will admit, and holding it grants nothing. It is
+    /// filled in by the app that has one, because `offer` is given the keys a
+    /// device holds rather than reaching for them.
+    #[serde(default)]
+    pub node_key: String,
 }
 
 /// One runner in a reply: everything a device needs to reach it and nothing it
@@ -205,6 +230,10 @@ pub fn offer(name: &str, account: &str, key_a: &str, key_b: Option<&str>) -> Off
         account: account.to_string(),
         channel: farcooler_protocol::CHANNEL.as_str().to_string(),
         ceremony: fresh_ceremony_id(),
+        // Empty until a device has joined a tunnel and knows its own node key.
+        // Set by the caller that holds one rather than taken as an argument
+        // here, so that no app has to pass an empty string to say "none".
+        node_key: String::new(),
     }
 }
 
@@ -401,14 +430,21 @@ fn parse(s: &str) -> Result<serde_json::Value, CeremonyError> {
 /// decoding first would report "malformed" for something it simply does not
 /// speak yet — and the app would tell the user to try again instead of to
 /// update.
+///
+/// Both legs come through here, so widening the window widens it for the reply
+/// too — which is right: an older trusted device grants a v=1 manifest, and a
+/// new device that refused one could never be granted anything by the fleet it
+/// is joining.
 fn check_version(value: &serde_json::Value) -> Result<(), CeremonyError> {
     let Some(v) = value.get("v").and_then(|v| v.as_u64()) else {
         return Err(CeremonyError::Malformed("no version".into()));
     };
-    if v != VERSION as u64 {
-        // Saturating rather than truncating: a `v` of 256 must not arrive as 0,
-        // which is a version that reads as older than this one.
-        return Err(CeremonyError::Version(v.min(u8::MAX as u64) as u8));
+    // Saturating rather than truncating, and now load-bearing rather than
+    // tidy: truncation would land a `v` of 257 on 1, and 1 is a version this
+    // build acts on. A number too large for a version is not a version.
+    let v = v.min(u8::MAX as u64) as u8;
+    if !accepts(v) {
+        return Err(CeremonyError::Version(v));
     }
     Ok(())
 }
@@ -431,6 +467,49 @@ mod tests {
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB1iLbeqDzK4CDeUC3t+ffVPDI9Gk+sBwIZqJZW1NfS5 device-a";
     const KEY_B: &str =
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMdwe233CUbxjpEHkissIUGdCxhkTsDE/Zg7f+LB6S+ device-b";
+
+    /// A node key as the fence spells one: 43 characters of unpadded base64.
+    ///
+    /// The same constant the fence and daemon suites use, on purpose — a node
+    /// key that round-trips here and not through `fence::render` is a node key
+    /// that never reaches a line.
+    const NODE_KEY: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    /// An offer carrying a node key.
+    ///
+    /// `offer` itself takes none: which node key a device holds is the app's to
+    /// supply once it has one, and a device that has not joined a tunnel yet
+    /// shows an offer with this field empty.
+    fn build_offer(
+        name: &str,
+        account: &str,
+        key_a: &str,
+        key_b: Option<&str>,
+        node_key: &str,
+    ) -> Offer {
+        Offer { node_key: node_key.to_string(), ..offer(name, account, key_a, key_b) }
+    }
+
+    /// A payload as a build of version `v` would have written it — with no
+    /// `node_key` key at all, which is the thing `#[serde(default)]` has to
+    /// survive. Built as JSON rather than by serializing `Offer`, because
+    /// serializing today's struct cannot reproduce yesterday's shape.
+    fn v_offer_json(v: u64, name: &str, account: &str, key_a: &str) -> String {
+        serde_json::json!({
+            "v": v,
+            "key_a": key_a,
+            "name": name,
+            "account": account,
+            "channel": farcooler_protocol::CHANNEL.as_str(),
+            "ceremony": "0123456789abcdef0123456789abcdef",
+        })
+        .to_string()
+    }
+
+    /// What a phone still on the shipped build shows.
+    fn v1_offer_json(name: &str, account: &str, key_a: &str) -> String {
+        v_offer_json(1, name, account, key_a)
+    }
 
     fn a_runner() -> RunnerEntry {
         a_runner_named("box")
@@ -571,6 +650,86 @@ mod tests {
             accept_offer(r#"{"v":99,"account":"acct_2"}"#, "acct_1"),
             Err(CeremonyError::Version(99))
         ));
+    }
+
+    // MARK: - The node key
+
+    #[test]
+    fn an_offer_carries_a_node_key() {
+        let offer = build_offer("phone", "acct", KEY_A, None, NODE_KEY);
+        let decoded = accept_offer(&encode_offer(&offer), "acct").unwrap();
+        assert_eq!(decoded.node_key, NODE_KEY);
+        assert_eq!(decoded.v, 2);
+    }
+
+    /// Rollout: a phone on the old build shows a v=1 offer with no node key. It
+    /// is accepted, and it can be granted direct runners — which is exactly
+    /// what it can use. Refusing it would strand every device in the field.
+    #[test]
+    fn a_version_one_offer_is_accepted_without_a_node_key() {
+        let old = v1_offer_json("phone", "acct", KEY_A);
+        let decoded = accept_offer(&old, "acct").unwrap();
+        assert_eq!(decoded.v, 1);
+        assert_eq!(decoded.node_key, "");
+    }
+
+    /// An empty node key is a device with no tunnel, not a malformed code.
+    ///
+    /// True on this version too: a phone on the new build that has not joined a
+    /// tunnel yet shows v=2 with the field empty, and nothing downstream may
+    /// read that as damage. The version says what the code can express; the
+    /// node key says what this device can be granted.
+    #[test]
+    fn a_current_offer_without_a_node_key_is_not_malformed() {
+        let decoded = accept_offer(&v_offer_json(VERSION as u64, "phone", "acct", KEY_A), "acct")
+            .expect("a device with no tunnel yet still enrolls");
+        assert_eq!(decoded.v, VERSION);
+        assert_eq!(decoded.node_key, "");
+    }
+
+    #[test]
+    fn an_offer_from_a_future_build_is_refused_rather_than_half_understood() {
+        let future = v_offer_json(3, "phone", "acct", KEY_A);
+        assert!(matches!(accept_offer(&future, "acct"), Err(CeremonyError::Version(3))));
+    }
+
+    /// The account check that already guards the reply leg guards this one too.
+    /// A new field must not become a new way around it.
+    #[test]
+    fn another_accounts_offer_is_still_refused() {
+        let offer = build_offer("phone", "theirs", KEY_A, None, NODE_KEY);
+        assert!(accept_offer(&encode_offer(&offer), "ours").is_err());
+    }
+
+    /// A number too large to be a version is not version 1.
+    ///
+    /// The saturation in `check_version` is load-bearing rather than tidy now
+    /// that more than one version is accepted: `257 as u8` truncates to 1, and
+    /// 1 is a version this build acts on — so a truncating check would read a
+    /// number that means nothing as a code from the field and act on it.
+    #[test]
+    fn a_version_that_overflows_a_byte_is_not_mistaken_for_an_old_one() {
+        for v in [256u64, 257, 258, 513, u64::from(u32::MAX)] {
+            let json = v_offer_json(v, "phone", "acct", KEY_A);
+            assert!(
+                matches!(accept_offer(&json, "acct"), Err(CeremonyError::Version(255))),
+                "v{v} was not refused as a version this build cannot read"
+            );
+        }
+    }
+
+    /// Exactly two versions, and no others.
+    ///
+    /// Spelled out so that widening the window is a deliberate edit to a test
+    /// rather than a side effect of bumping `VERSION`.
+    #[test]
+    fn this_build_acts_on_version_one_and_version_two_and_nothing_else() {
+        assert!(accepts(1), "a device in the field would be stranded");
+        assert!(accepts(2));
+        assert_eq!(VERSION, 2);
+        for v in [0u8, 3, 4, 99, u8::MAX] {
+            assert!(!accepts(v), "v{v} was accepted by a build that cannot read it");
+        }
     }
 
     // MARK: - The reply
