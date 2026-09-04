@@ -1057,6 +1057,7 @@ dependencies = [
 name = "farcooler-tailcat"
 version = "0.1.0"
 dependencies = [
+ "farcooler-protocol",
  "libc",
  "thiserror 2.0.19",
  "tokio",

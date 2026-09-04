@@ -169,6 +169,20 @@ jobs:
       - run: cargo check -p farcooler-tailcat --features linked
       - run: cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl
 
+      # The same gap, for the backend Linux actually ships. `helper` is off by
+      # default too, so `--workspace` never builds it — and unlike `linked`
+      # this one can be TESTED rather than only type-checked, because it links
+      # no Go and needs no toolchain at all: it spawns a program, and a test
+      # can hand it a shell script.
+      #
+      # The daemon test is the one that matters and it is named for what it
+      # asserts: a runner that admits nobody must start no helper PROCESS, not
+      # merely return a refusal. Tailcat reads an empty allowlist as "admit
+      # everyone", so that guard is the one this design is most likely to lose,
+      # and this is the only place in CI where losing it goes red.
+      - run: cargo test -p farcooler-tailcat --features helper
+      - run: cargo test -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel
+
       # A `changes` pane runs THIS CHANNEL'S CLI by name — `changes_host_command`
       # asks `shim_binary`, which looks beside the daemon's own executable and
       # otherwise falls back to the bare name for PATH to resolve. Under `cargo

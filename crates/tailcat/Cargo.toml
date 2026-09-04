@@ -13,6 +13,12 @@ license.workspace = true
 # the archive at the final link.
 default = []
 linked = ["dep:libc"]
+# The Linux serving backend: no archive, no Go at Rust build time at all —
+# `helper.rs` spawns a standalone program the platform script builds
+# separately. `farcooler-protocol` comes with it only for `Channel`, which owns
+# what this channel's helper is called on disk; four channels share one
+# `~/.local/bin` and a canary daemon must not spawn a stable helper.
+helper = ["dep:libc", "dep:farcooler-protocol"]
 
 [dependencies]
 # "net" for `UnixStream`, "rt" for `spawn_blocking` (the `linked` backend
@@ -28,3 +34,7 @@ tracing.workspace = true
 # these differently). Optional so the default, no-Go-toolchain build never
 # needs it at all.
 libc = { workspace = true, optional = true }
+# `helper` only, for `Channel::tunnel_binary_candidates`. Optional so the
+# default build and both Apple platforms never pull protoc's vendored binary
+# into a crate that has nothing to do with the wire format.
+farcooler-protocol = { workspace = true, optional = true }

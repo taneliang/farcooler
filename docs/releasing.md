@@ -227,25 +227,30 @@ machine would quietly share a database.
 ./scripts/build-linux.sh` reaches the build script the same way it does in CI,
 where before it stopped at the container.
 
-## Only a shipping build links the tunnel, and only the Mac's can
+## Only a shipping build carries the tunnel, and the two platforms carry it differently
 
-`farcooler-tailcat` compiles two ways. By default it is `stub.rs`, which fails
-every tunnel with the code `no_tailcat`; that default is what lets `cargo
-build` and `cargo test --workspace` work on a checkout with no Go toolchain,
-and it is not meant to ship. The real backend is a Go archive built by
-`scripts/build-tailcat.sh`, turned on with `--features tailcat` and linked with
-a `-l static=tailcat` **scoped to a single `cargo rustc --bin` invocation** —
-never a global `RUSTFLAGS`, which attaches the archive to every crate rustc
-compiles and once turned a 47.6 MB archive into a 6.4 GB artifact.
+`farcooler-tailcat` compiles three ways, and exactly one of them is the default.
 
-Every platform that *serves* a tunnel has to do that at release time, and for a
-while none of them did: `build-app.sh` built the daemon in the same plain
+- **`stub.rs`** — the default. Every tunnel fails with the code `no_tailcat`.
+  That default is what lets `cargo build` and `cargo test --workspace` work on
+  a checkout with no Go toolchain, and it is not meant to ship.
+- **`linked.rs`** — a Go **c-archive** built by `scripts/build-tailcat.sh`,
+  turned on with `--features tailcat` and linked with a `-l static=tailcat`
+  **scoped to a single `cargo rustc --bin` invocation** — never a global
+  `RUSTFLAGS`, which attaches the archive to every crate rustc compiles and
+  once turned a 47.6 MB archive into a 6.4 GB artifact. **iOS and macOS.**
+- **`helper.rs`** — a standalone Go **program**, built `CGO_ENABLED=0` by
+  `scripts/build-tunnel-helper.sh` and shipped as `farcooler-tunnel` beside the
+  daemon. The daemon spawns it when a tunnel is configured and talks to it over
+  its stdin and stdout. Turned on with `--features tailcat-helper`, which links
+  no Go and needs no Go toolchain at Rust build time. **Linux.**
+
+Every platform that *serves* a tunnel has to pick one at release time, and for
+a while none of them did: `build-app.sh` built the daemon in the same plain
 `cargo build` as the CLI, and `linux-binaries.yml` restated its build inline
 rather than calling `scripts/build-linux.sh`. Both shipped a stub daemon on
 every channel, while iOS — which *dials* a tunnel rather than serving one — was
 wired correctly and made the feature look present.
-
-**The Mac is fixed. Linux is not, and cannot be while its binaries are musl.**
 
 `build-app.sh` now builds `farcoolerd` through its own `cargo rustc` with the
 `darwin-arm64` archive linked, unconditionally, and `ci.yml` runs the bundled
@@ -255,7 +260,7 @@ this went unnoticed for as long as it did, with every job green. It also needs
 `-l framework=Security`, because Go's `crypto/x509` reaches the system roots
 through it on darwin and nothing in the Rust graph links that framework.
 
-### Why Linux still ships the stub
+### Why Linux runs a separate process instead
 
 Not for want of trying, and not a toolchain problem — that part works. A Linux
 daemon built with the archive linked **segfaults before it logs a line**:
@@ -269,7 +274,7 @@ Segmentation fault (core dumped)
 The cause is not this repository's Go code, and not the Rust link. A five-line
 Go program with one exported function, built `-buildmode=c-archive` and linked
 into a C program, crashes identically. Measured on linux/arm64 with a native
-Go 1.25.1, one `main.go` and one `main.c`:
+Go, one `main.go` and one `main.c`:
 
 | archive built with | linked with | result |
 | --- | --- | --- |
@@ -294,40 +299,73 @@ can report anything. The same crash reproduces on x86_64 with an archive built
 natively on a Linux runner, so it is neither architecture-specific nor an
 artifact of cross-compiling the archive from a Mac.
 
-musl is not incidental to this release — it is the reason a self-installed
-daemon runs on Debian, Alpine and a NAS alike, and "GLIBC_2.38 not found" is
-the failure it exists to prevent. So the choice is a real one and has not been
-made: keep musl and leave Linux tunnels unavailable, or move the Linux daemon
-to glibc (the table says static glibc does work with Go) and pay for it in
-NSS — `getaddrinfo` and `getpwnam` in a static glibc binary need the matching
-`libnss_*` at runtime, which is precisely the "works on my distribution" class
-of failure musl was chosen to end.
+**The thread stack was the obvious suspect and it is not the cause.** musl
+gives a new thread roughly 128 KB where glibc gives 8 MB, and musl takes its
+default from the ELF `PT_GNU_STACK` header, so a link flag can raise it. Tried,
+on the same five-line reproducer, on linux/arm64:
 
-Until that is decided, the Linux release keeps the stub deliberately, and a
-tunneled runner on Linux answers `no_tailcat` — one named error, at one call
-site, rather than a daemon that dies on boot.
+| `-Wl,-z,stack-size=` | `PT_GNU_STACK` MemSiz, per `readelf -l` | result |
+| --- | --- | --- |
+| *(none)* | `0x0` | SIGSEGV |
+| 8 MB | `0x800000` | SIGSEGV |
+| 16 MB | `0x1000000` | SIGSEGV |
+| 64 MB | `0x4000000` | SIGSEGV |
+| 256 MB | `0x10000000` | SIGSEGV |
 
-### What a machine needs to build the Mac's daemon
+Each size was confirmed to have taken before the binary was run, which matters:
+`-z stacksize=` — the Solaris spelling, and the one that gets suggested — is
+**ignored by GNU ld** with a warning, and produces a binary indistinguishable
+from the unflagged one. `-z stack-size=` is the spelling that works.
 
-- **Go**, which every workflow that runs `build-app.sh` installs with
-  `actions/setup-go` pinned by `go-version-file: crates/tailcat/go/go.mod`
-  rather than trusting the runner image — an image that drops Go fails with an
-  error that never mentions Go.
-- Nothing else. `darwin-arm64` is host-native: no cross-compiler, no
-  `-isysroot`.
+**So the fix is not to link anything.** A Go program built `CGO_ENABLED=0`
+links no C library at all: it makes raw syscalls, so there is no musl and no
+glibc in it, and one binary runs on Debian, Alpine and a NAS. That is the
+property musl was chosen for in the first place, arrived at more directly —
+and moving to glibc, the other way out, would have reintroduced the NSS
+problem musl exists to end (`getaddrinfo` and `getpwnam` in a static glibc
+binary need the matching `libnss_*` at runtime).
 
-`scripts/build-linux.sh` additionally wants `x86_64-linux-musl-gcc` or
-`aarch64-linux-musl-gcc` — both names load-bearing twice over, since
-`build-tailcat.sh` hands them to cgo as `CC` and `.cargo/config.toml` names the
-same binaries as Rust's linkers — from `brew install
-FiloSottile/musl-cross/musl-cross`. What it produces is the segfaulting binary
-above, so do not ship it.
+`farcooler-tunnel` is that program. The daemon spawns **one** of them when a
+tunnel is configured — not one per connection — and the data path is unchanged:
+bytes go from the helper's netstack straight to sshd on loopback, exactly as
+they did from inside the daemon, which was never in the data path either way.
+On runtime cost it is arguably better than the linked build, since the Go
+runtime is resident only on a runner that actually serves a tunnel.
+
+Two things it deliberately does not do:
+
+- **It is the serving half only.** Dialing hands its caller a file descriptor,
+  and a descriptor cannot cross the helper's pipe as a word, so Linux dialing
+  remains a later task with the fd-passing question still open. Nothing on
+  Linux dials today: `farcooler-cli` does not link tailcat at all.
+- **It changes nothing on iOS or macOS.** Both still link the c-archive. It
+  works there and it ships.
+
+A missing helper is reported as `no_tailcat`, the same word as a stub — which
+is what makes `tunnel-smoke.sh` cover a tarball that forgot to pack one.
+
+### What a machine needs to build each of them
+
+- **Go**, for both. Every workflow that runs `build-app.sh` or
+  `scripts/build-linux.sh` installs it with `actions/setup-go` pinned by
+  `go-version-file: crates/tailcat/go/go.mod` rather than trusting the runner
+  image — an image that drops Go fails with an error that never mentions Go.
+- **The Mac's daemon: nothing else.** `darwin-arm64` is host-native: no
+  cross-compiler, no `-isysroot`.
+- **The Linux helper: nothing else either.** `CGO_ENABLED=0` means `GOOS` and
+  `GOARCH` alone cross-compile it to anywhere from anywhere.
+- **The Linux daemon and CLI:** `x86_64-linux-musl-gcc` or
+  `aarch64-linux-musl-gcc`, as Rust's linker for the musl target
+  (`.cargo/config.toml` names them), from `brew install
+  FiloSottile/musl-cross/musl-cross` on a laptop or a pinned `musl-cross`
+  release in CI. Ubuntu packages neither name, and packages nothing at all for
+  aarch64.
 
 The check that matters is behavioural, and `scripts/tunnel-smoke.sh` is it:
 start the packaged `farcoolerd` against a scratch `FARCOOLER_HOME` and
 `authorized_keys`, and confirm the tunnel it tries to serve comes back as
 anything other than `no_tailcat`. A size or `file` check is only a proxy — and
-the Linux crash is exactly why: that binary passes every proxy there is.
+the crash above is exactly why: that binary passes every proxy there is.
 
 ## Updating a Mac that already has one
 

@@ -29,6 +29,17 @@ path = "src/main.rs"
 [features]
 default = []
 tailcat = ["farcooler-tailcat/linked"]
+# The Linux serving backend: `farcoolerd` spawns a standalone, cgo-free Go
+# program instead of linking a c-archive, because an archive linked into a musl
+# binary segfaults in Go's runtime startup (`crates/tailcat/src/helper.rs`).
+# `scripts/build-linux.sh` passes this; it is the reason that script needs no
+# `cargo rustc`, no `-L`, and no musl cross-compiler for cgo.
+#
+# Also the flag `an_empty_allowlist_starts_no_tunnel.rs`'s helper-process test
+# is gated on, which is why CI runs that file under it: the test asserts that a
+# runner admitting nobody starts no helper, and it needs no Go toolchain to do
+# it — only a build where the helper backend is the one compiled.
+tailcat-helper = ["farcooler-tailcat/helper"]
 
 [dependencies]
 farcooler-agent.workspace = true

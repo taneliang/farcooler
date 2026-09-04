@@ -156,9 +156,15 @@ async fn a_runner_with_no_key_file_starts_no_tunnel() {
 /// The daemon-side counterpart to `crates/client/src/ssh.rs`'s
 /// `a_tunnel_destination_without_an_archive_says_so`. A runner that clears
 /// BOTH guards — real identity, a real admitted device — must still fail by
-/// name, not by accident, when this build carries no archive. `cargo test`
-/// with no `--features tailcat` is exactly that build.
-#[cfg(not(feature = "tailcat"))]
+/// name, not by accident, when this build carries no tunnel at all. A plain
+/// `cargo test` is exactly that build.
+///
+/// Both tunnel features are excluded, not just `tailcat`. Under
+/// `tailcat-helper` this build HAS a tunnel backend — it would reach a helper,
+/// or fail trying, and answer `io` rather than `no_tailcat` — so the premise
+/// is false rather than the assertion being wrong. It would also race the test
+/// below it, which sets `FARCOOLER_TUNNEL_HELPER` for the whole process.
+#[cfg(not(any(feature = "tailcat", feature = "tailcat-helper")))]
 #[tokio::test]
 async fn a_runner_with_no_archive_linked_fails_the_tunnel_by_name() {
     let home = tempfile::tempdir().unwrap();
@@ -171,4 +177,74 @@ async fn a_runner_with_no_archive_linked_fails_the_tunnel_by_name() {
         TunnelOutcome::ServeFailed("no_tailcat"),
         "a runner past both guards did not fail by the stub's own name: {outcome:?}"
     );
+}
+
+/// The same guard, one level lower: a runner that admits nobody must not
+/// START anything either.
+///
+/// On Linux the tunnel is not linked into this daemon — it is a separate
+/// process `farcoolerd` spawns, because a Go c-archive inside a musl binary
+/// segfaults before it can log a word (`crates/tailcat/src/helper.rs`). That
+/// makes "no tunnel" a thing with a visible footprint for the first time: a
+/// process either exists or it does not. The two tests above assert on a
+/// return value, and a return value is what a stub can fake. A process cannot
+/// be faked, which is what makes this the stronger form of the same claim.
+///
+/// It needs no Go toolchain and no helper binary. `FARCOOLER_TUNNEL_HELPER`
+/// points at a shell script that records that it ran, so "was a helper
+/// started" is a file on disk rather than an inference.
+///
+/// Both halves in one test, deliberately: the environment variable is
+/// process-wide, and two tests setting it would race each other under `cargo
+/// test`'s default parallelism. The second half is what stops the first from
+/// being vacuous — a `serve` that never spawned anything under any
+/// circumstances would satisfy the first assertion perfectly.
+#[cfg(feature = "tailcat-helper")]
+#[tokio::test]
+async fn a_runner_that_admits_nobody_starts_no_helper_process() {
+    let home = tempfile::tempdir().unwrap();
+    let marker = home.path().join("the-helper-ran");
+
+    // Answers one command and exits. Enough to be spawned and talked to; the
+    // errno it reports is not the point, only that it was reached at all.
+    let script = home.path().join("fake-tunnel-helper");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ntouch {}\necho 'err 22'\n", marker.display()),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // SAFETY: `cargo test` runs these on a multi-threaded runtime, and
+    // `set_var` is only sound while no other thread reads the environment.
+    // Nothing else in this file touches it, and this is the only test that
+    // sets it — see the note above about why both halves live in one test.
+    unsafe { std::env::set_var("FARCOOLER_TUNNEL_HELPER", &script) };
+
+    let service = test_service(home.path()).await;
+    enroll_without_a_node_key(&service, "c1").await;
+    let outcome = allowlist::start_tunnel(&service).await;
+    assert_eq!(outcome, TunnelOutcome::NobodyAdmitted, "{outcome:?}");
+    assert!(
+        !marker.exists(),
+        "a runner admitting nobody started a tunnel helper anyway"
+    );
+
+    // The other direction, so the assertion above is a fact about the guard
+    // rather than a fact about this fixture never spawning anything.
+    enroll_with_a_node_key(&service, "c2", NODE_KEY).await;
+    let outcome = allowlist::start_tunnel(&service).await;
+    assert!(
+        matches!(outcome, TunnelOutcome::ServeFailed(_)),
+        "a runner with an admitted device did not reach the helper: {outcome:?}"
+    );
+    assert!(
+        marker.exists(),
+        "no helper was started for a runner that admits somebody, so the \
+         assertion above proves nothing"
+    );
+
+    unsafe { std::env::remove_var("FARCOOLER_TUNNEL_HELPER") };
 }

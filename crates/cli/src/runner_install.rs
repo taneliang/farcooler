@@ -41,6 +41,11 @@ pub(crate) fn cli_name() -> &'static str {
     farcooler_protocol::CHANNEL.cli_binary_name()
 }
 
+/// This build's tunnel helper. See `Channel::tunnel_binary_name`.
+pub(crate) fn tunnel_name() -> &'static str {
+    farcooler_protocol::CHANNEL.tunnel_binary_name()
+}
+
 /// The systemd unit file name for this channel.
 ///
 /// Channel-specific for the same reason the binary is: installing a preview
@@ -199,7 +204,33 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
 
     remote_run(target, "mkdir -p ~/.local/bin").await?;
 
-    for (path, name) in [(&daemon, daemon_name()), (&cli, cli_name())] {
+    let mut uploads = vec![(daemon.clone(), daemon_name()), (cli.clone(), cli_name())];
+    // The tunnel helper, on the platforms that have one.
+    //
+    // Linux serves a tunnel from a separate process rather than from a Go
+    // c-archive inside `farcoolerd`, because an archive linked into a musl
+    // binary segfaults in Go's runtime startup —
+    // `crates/tailcat/src/helper.rs` carries the measurement. macOS links the
+    // archive and has no helper to send, which is why this is a lookup rather
+    // than a third required binary: a `dist/<arch>-darwin` legitimately has
+    // two files in it.
+    //
+    // A Linux `dist/` that is missing one is NOT legitimate, and is said out
+    // loud rather than skipped quietly. The runner still installs and still
+    // works by address; what it cannot do is serve a tunnel, and it will
+    // answer `no_tailcat` from a log line nobody reads unless this says so
+    // here.
+    match find_binary(&dir, farcooler_protocol::CHANNEL.tunnel_binary_candidates()) {
+        Some(helper) => uploads.push((helper, tunnel_name())),
+        None if matches!(probe.platform, Platform::Linux | Platform::Wsl) => {
+            println!("    WARNING: no tunnel helper in {}.", dir.display());
+            println!("    This runner will answer `no_tailcat` to every tunnel. Rebuild with");
+            println!("        ./scripts/build-linux.sh {arch}");
+        }
+        None => {}
+    }
+
+    for (path, name) in &uploads {
         println!("==> Installing {name}");
         upload_verified(target, path, name).await?;
     }

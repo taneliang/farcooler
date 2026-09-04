@@ -36,10 +36,15 @@ jobs:
     strategy:
       matrix:
         include:
+          # `target` doubles as the musl toolchain's asset name below — the
+          # release publishes one tarball per Rust triple, named for it.
+          # `musl_sha256` is that tarball's, pinned: see the install step.
           - arch: x86_64
             target: x86_64-unknown-linux-musl
+            musl_sha256: 9752ecb10bafc0fc2ea75b3ed864a78137f3e5ba9b1579f1f16923d444c48096
           - arch: aarch64
             target: aarch64-unknown-linux-musl
+            musl_sha256: 0fc483607d9ed83bdf75e7539bacc66721d7e37ca606377aed6a90cef82e45da
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,18 +61,20 @@ jobs:
       # of those varies across this matrix: both arms read and wrote the single
       # entry `v0-rust-build-Linux-x64-…`.
       #
-      # That is not a near miss, it is a poisoned cache. `target/release/build/`
-      # holds build scripts compiled for the HOST, and under cross the host is
-      # the CONTAINER — a different image per target, carrying a different
-      # glibc. So the x86_64 arm saved libc's `build-script-build` linked
-      # against its image, the aarch64 arm restored it into an older one, and
-      # the build died on "`GLIBC_2.28' not found" before compiling a line of
-      # ours.
+      # While this job used `cross` that was not a near miss but a poisoned
+      # cache. `target/release/build/` holds build scripts compiled for the
+      # HOST, and under cross the host was the CONTAINER — a different image
+      # per target, carrying a different glibc. So the x86_64 arm saved libc's
+      # `build-script-build` linked against its image, the aarch64 arm restored
+      # it into an older one, and the build died on "`GLIBC_2.28' not found"
+      # before compiling a line of ours. It went green exactly once, on a cold
+      # cache, and failed on every run after.
       #
-      # It goes green exactly once, which is what earns this comment: on a cold
-      # cache both arms build everything themselves and pass, and every run
-      # after that fails. ci.yml keys its own matrix on `matrix.os` for the same
-      # reason.
+      # `cross` is gone from this job now — see the Build step — so that
+      # particular poisoning cannot recur. The key stays anyway: two arms
+      # writing one entry is still last-writer-wins over two different
+      # `target/<triple>` trees, which is a cache that mostly misses. ci.yml
+      # keys its own matrix on `matrix.os` for the same reason.
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
@@ -78,26 +85,24 @@ jobs:
       # `crates/protocol/build.rs` stamps the channel by shelling out to
       # `scripts/version.sh`, which derives it from a tag — and canary, the
       # channel this exists for, has none: a commit on main carries no tag, so
-      # nothing inside the container could work it out. It has to be told.
+      # nothing downstream could work it out. It has to be told.
       #
-      # Telling it is what Cross.toml is for. cross forwards CARGO_*, CROSS_*
-      # and RUSTFLAGS and nothing else, so an environment variable set on this
-      # job does not reach the build script unless it is named there. Without
-      # both halves the answer is `local`, silently, and a `local` daemon on a
-      # host writes the Local channel's runtime directory.
+      # This used to have a second half. While the build ran under `cross` the
+      # variable also had to be named in Cross.toml's `passthrough`, because
+      # the container starts with almost none of the host's environment; a
+      # `$GITHUB_ENV` entry alone did not reach the build script and the answer
+      # was `local`, silently, and a `local` daemon on a host writes the Local
+      # channel's runtime directory. The Build step no longer uses `cross`, so
+      # `$GITHUB_ENV` is now the whole mechanism. Cross.toml stays for the
+      # tunnel-less `cross` invocation `scripts/build-linux.sh` still suggests
+      # by hand.
       #
-      # Resolving it out here rather than passing the tag in also removes the
-      # container's git from the answer entirely. git IS present in the cross
-      # images and the bind mount is owned by the container's own uid, so it
-      # would work — but it is one more thing between a tag and a stamp, and
-      # the failure it produces is the same silent `local`.
-      #
-      # One residual sharp edge: version.sh answers `local` for a dirty tree
-      # BEFORE it looks at FARCOOLER_CHANNEL, so anything that dirties the
-      # mounted checkout inside the container — a `cargo build` that rewrites
-      # Cargo.lock because it and Cargo.toml have drifted — overrides all of
-      # this. That is the same trap release.yml's APP_NAME comment describes,
-      # and the same fix applies: keep the lockfile in sync.
+      # One residual sharp edge, unchanged: version.sh answers `local` for a
+      # dirty tree BEFORE it looks at FARCOOLER_CHANNEL, so anything that
+      # dirties the checkout — a `cargo build` that rewrites Cargo.lock because
+      # it and Cargo.toml have drifted — overrides all of this. That is the
+      # same trap release.yml's APP_NAME comment describes, and the same fix
+      # applies: keep the lockfile in sync.
       - name: Resolve this build's channel
         env:
           # Through the environment rather than interpolated into the script:
@@ -116,36 +121,134 @@ jobs:
           echo "channel: $channel"
           echo "FARCOOLER_CHANNEL=$channel" >> "$GITHUB_ENV"
 
-      # musl, statically linked, for the reason scripts/build-linux.sh explains:
-      # a glibc build made on one distribution refuses to start on an older one,
-      # and "GLIBC_2.38 not found" is the most common way a self-installed
-      # daemon fails. One binary has to run on Debian, Alpine, and a NAS.
+      # Go, for the tunnel helper this ships beside the daemon. Without it
+      # `scripts/build-linux.sh` refuses outright, which is the point: every
+      # Linux release before this one shipped a `farcoolerd` on the stub, so
+      # every tunnel it was asked to serve failed with `no_tailcat`.
       #
-      # Swatinem/rust-cache caches `~/.cargo/bin`, so this compiles cross once
-      # per lockfile and restores it after. It is the slowest step here and it
-      # is now paid on every push to main, which is what makes the cache worth
-      # naming.
-      - name: Install cross
-        run: cargo install cross --locked
+      # No C compiler is needed for it. The helper is built `CGO_ENABLED=0`,
+      # which is the whole reason it exists — a Go c-archive linked into a musl
+      # binary segfaults in Go's runtime startup, and a cgo-free program links
+      # no C library at all. `scripts/build-tunnel-helper.sh` carries the
+      # measurement.
+      #
+      # Pinned by `go-version-file` rather than trusted to the image, for the
+      # reason release.yml's iOS job gives at its own copy of this step: an
+      # image bump that drops Go fails with an error that never mentions Go.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
 
-      # `-p`, not `--bin`, so this is the same invocation
-      # `scripts/build-linux.sh` makes — the one a laptop has actually run.
-      # Two spellings of "build these two binaries" is two things that can
-      # diverge, and the one CI used had never executed: release.yml has never
-      # completed a run, so this job's contents were unproven when they were
-      # inline there.
+      # The musl cross-compiler, under the exact name `.cargo/config.toml`
+      # already spells as the Rust linker for this target.
+      #
+      # Ubuntu supplies neither name: `musl-tools` installs x86_64's as
+      # `musl-gcc`, and apt has no aarch64 musl cross-compiler at all. aarch64
+      # is why this step exists; x86_64 alone could have limped.
+      #
+      # A prebuilt toolchain rather than a container image carrying one. An
+      # image means a Dockerfile and a registry to maintain forever, in
+      # exchange for a download measured in seconds.
+      #
+      # Pinned by release tag AND by checksum. This compiler produces the
+      # binaries a runner then executes as a daemon, and a GitHub release asset
+      # can be replaced in place under an unchanged tag.
+      - name: Install the musl cross toolchain
+        env:
+          MUSL_CROSS_TAG: '20260823'
+          TRIPLE: ${{ matrix.target }}
+          MUSL_SHA256: ${{ matrix.musl_sha256 }}
+          CC_NAME: ${{ matrix.arch }}-linux-musl-gcc
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/musl-cross.tar.xz \
+            "https://github.com/musl-cross/musl-cross/releases/download/$MUSL_CROSS_TAG/$TRIPLE.tar.xz"
+          echo "$MUSL_SHA256  /tmp/musl-cross.tar.xz" | sha256sum -c -
+          sudo mkdir -p /opt/musl-cross
+          sudo tar -xJf /tmp/musl-cross.tar.xz -C /opt/musl-cross
+          # The toolchain names its binaries for the Rust triple
+          # (`x86_64-unknown-linux-musl-gcc`); this repository spells the same
+          # compiler the musl way (`x86_64-linux-musl-gcc`), which is what a
+          # `brew install musl-cross` puts on a laptop's PATH. One symlink here
+          # rather than two spellings in four call sites.
+          sudo ln -sf "/opt/musl-cross/$TRIPLE/bin/$TRIPLE-gcc" "/usr/local/bin/$CC_NAME"
+          "$CC_NAME" --version | head -1
+
+      # The script, CALLED — not restated.
+      #
+      # This step used to be an inline `cross build`, under a comment claiming
+      # it was "the same invocation `scripts/build-linux.sh` makes". Somebody
+      # wrote that comment precisely because they foresaw the divergence, and
+      # it silently became false anyway: the script grew a tunnel, this step
+      # did not, and every Linux release shipped a daemon that answered every
+      # tunnel with `no_tailcat`. A comment cannot hold two implementations
+      # together. One implementation can, and this is now a fact rather than a
+      # claim.
+      #
+      # `cross` went with it, and that is not a regression. The script says at
+      # length why it needs a native target: it produces a THREE-binary layout
+      # and a container can produce two of them, so a `cross` build would tar
+      # up a runner that cannot serve a tunnel. The rustup target above and the
+      # musl cross-compiler are what replace it — the same two things a laptop
+      # needs, which is what makes this job's output and a laptop's the same
+      # binaries.
+      #
+      # musl, statically linked, for the reason the script explains: a glibc
+      # build made on one distribution refuses to start on an older one, and
+      # "GLIBC_2.38 not found" is the most common way a self-installed daemon
+      # fails. One binary has to run on Debian, Alpine, and a NAS.
       - name: Build
-        run: cross build --release --target ${{ matrix.target }} -p farcooler-cli -p farcooler-daemon
+        run: scripts/build-linux.sh ${{ matrix.arch }}
+
+      # Before packaging, so a daemon that serves no tunnel never becomes an
+      # artifact somebody installs.
+      #
+      # Two checks, because only one of them is possible on both arms. This
+      # runner is x86_64 Linux, so the x86_64 pair can simply be RUN, and
+      # running them is the only check here that is not a proxy —
+      # `scripts/tunnel-smoke.sh` explains what it sets up and why. It covers
+      # the helper too: a `farcoolerd` that cannot find or start
+      # `farcooler-tunnel` answers `no_tailcat`, which is what that script
+      # fails on.
+      #
+      # The aarch64 pair cannot be executed on this host at all, so it gets the
+      # strongest proxy available: the helper must be present, and it must be
+      # an aarch64 binary rather than a copy of the host's. Said plainly rather
+      # than skipped — aarch64 is the arch whose toolchain Ubuntu does not
+      # provide and therefore the one most likely to quietly fall back.
+      - name: Check the tunnel is there
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          out="dist/$ARCH-linux"
+          test -x "$out/farcooler-tunnel" || {
+            echo "no farcooler-tunnel in $out: this daemon can serve no tunnel" >&2
+            exit 1
+          }
+          file "$out/farcooler-tunnel"
+          case "$ARCH" in
+            x86_64)  want='x86-64' ;;
+            aarch64) want='ARM aarch64' ;;
+          esac
+          file "$out/farcooler-tunnel" | grep -q "$want" || {
+            echo "farcooler-tunnel is not $ARCH; the cross-compile did not take" >&2
+            exit 1
+          }
+          if [ "$ARCH" = x86_64 ]; then
+            scripts/tunnel-smoke.sh "$out/farcoolerd"
+          else
+            echo "aarch64 cannot be executed on an x86_64 runner; the architecture check above is the proof available here"
+          fi
 
       # The same layout `farcooler host install` looks for, so a downloaded
       # tarball unpacks straight into the path the installer already reads.
+      #
+      # No copying out of `target/` any more: `build-linux.sh` already wrote
+      # all three binaries into `dist/<arch>-linux`, which IS that layout. This
+      # step only has to tar it.
       - name: Package
-        run: |
-          out="dist/${{ matrix.arch }}-linux"
-          mkdir -p "$out"
-          cp target/${{ matrix.target }}/release/farcooler "$out/"
-          cp target/${{ matrix.target }}/release/farcoolerd "$out/"
-          tar -czf "farcooler-$(scripts/version.sh)-${{ matrix.arch }}-linux.tar.gz" -C dist "${{ matrix.arch }}-linux"
+        run: tar -czf "farcooler-$(scripts/version.sh)-${{ matrix.arch }}-linux.tar.gz" -C dist "${{ matrix.arch }}-linux"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -8,19 +8,39 @@
 
 use std::path::Path;
 
+// Three backends, and exactly one of them is compiled. `linked` is the Go
+// c-archive, which is what iOS and macOS ship. `helper` is a standalone,
+// cgo-free Go program the daemon spawns, which is what Linux ships — see
+// `helper.rs` for the musl segfault that makes the archive unusable there.
+// Neither is the default: a plain `cargo build` with no Go toolchain anywhere
+// gets `stub`, which fails at the one call site with the one error naming what
+// is missing.
+#[cfg(all(feature = "linked", feature = "helper"))]
+compile_error!(
+    "farcooler-tailcat: `linked` and `helper` are two ways to reach the same \
+     tunnel and a build has to pick one. Linking the archive AND spawning a \
+     helper would put two Go runtimes on one runner, each with its own \
+     allowlist and its own idea of who is admitted."
+);
+
 #[cfg(feature = "linked")]
 mod linked;
 #[cfg(feature = "linked")]
 use linked as backend;
 
-#[cfg(not(feature = "linked"))]
+#[cfg(feature = "helper")]
+mod helper;
+#[cfg(feature = "helper")]
+use helper as backend;
+
+#[cfg(not(any(feature = "linked", feature = "helper")))]
 mod stub;
-#[cfg(not(feature = "linked"))]
+#[cfg(not(any(feature = "linked", feature = "helper")))]
 use stub as backend;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TunnelError {
-    #[error("this build has no tailcat archive linked")]
+    #[error("this build has no tunnel it can reach")]
     NoTailcatLinked,
     #[error("cannot reach the rendezvous service")]
     Derp,
@@ -101,7 +121,7 @@ mod tests {
     /// The default build has no Go archive, and must say so rather than
     /// pretending. A stub that returned Ok, or that panicked, would each be a
     /// worse answer than an error naming the one thing that is missing.
-    #[cfg(not(feature = "linked"))]
+    #[cfg(not(any(feature = "linked", feature = "helper")))]
     #[tokio::test]
     async fn a_build_without_the_archive_says_which_thing_is_missing() {
         let out = dial("tc-anything", "key", 22).await;
@@ -109,7 +129,7 @@ mod tests {
         assert_eq!(TunnelError::NoTailcatLinked.code(), "no_tailcat");
     }
 
-    #[cfg(not(feature = "linked"))]
+    #[cfg(not(any(feature = "linked", feature = "helper")))]
     #[test]
     fn serving_without_the_archive_is_refused_too() {
         let out = serve(std::path::Path::new("/tmp/k"), 22, &["a".to_string()]);

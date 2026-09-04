@@ -104,6 +104,29 @@ impl Channel {
         }
     }
 
+    /// What this channel's tunnel helper is called on disk. Same rule as the
+    /// daemon's.
+    ///
+    /// A Linux runner serves its tunnel from a separate process rather than
+    /// from inside `farcoolerd`, because a Go c-archive linked into a musl
+    /// binary segfaults in Go's runtime startup — see
+    /// `crates/tailcat/go/exports_cgo.go` for the measurement. iOS and macOS
+    /// link the archive and ship no helper at all, so this name only ever
+    /// resolves to a file on Linux.
+    ///
+    /// Named here rather than next to the code that spawns it for the reason
+    /// the daemon's own name is: four channels share one `~/.local/bin`, and a
+    /// canary daemon must find the canary helper rather than whichever one an
+    /// earlier stable install left behind.
+    pub fn tunnel_binary_name(self) -> &'static str {
+        match self {
+            Channel::Stable => "farcooler-tunnel",
+            Channel::Preview => "farcooler-tunnel-preview",
+            Channel::Canary => "farcooler-tunnel-canary",
+            Channel::Local => "farcooler-tunnel-local",
+        }
+    }
+
     /// The names this channel's daemon may go by on disk, most specific first.
     ///
     /// Two names, because two different things produce a Far Cooler binary and
@@ -141,6 +164,17 @@ impl Channel {
             Channel::Preview => &["farcooler-preview", "farcooler"],
             Channel::Canary => &["farcooler-canary", "farcooler"],
             Channel::Local => &["farcooler-local", "farcooler"],
+        }
+    }
+
+    /// The names this channel's tunnel helper may go by on disk. Same rule as
+    /// the daemon's.
+    pub fn tunnel_binary_candidates(self) -> &'static [&'static str] {
+        match self {
+            Channel::Stable => &["farcooler-tunnel"],
+            Channel::Preview => &["farcooler-tunnel-preview", "farcooler-tunnel"],
+            Channel::Canary => &["farcooler-tunnel-canary", "farcooler-tunnel"],
+            Channel::Local => &["farcooler-tunnel-local", "farcooler-tunnel"],
         }
     }
 
@@ -461,6 +495,7 @@ mod tests {
         // and an App Store build cannot be corrected for days.
         assert_eq!(Channel::Stable.daemon_binary_name(), "farcoolerd");
         assert_eq!(Channel::Stable.cli_binary_name(), "farcooler");
+        assert_eq!(Channel::Stable.tunnel_binary_name(), "farcooler-tunnel");
     }
 
     #[test]
@@ -468,6 +503,7 @@ mod tests {
         for names in [
             ALL_CHANNELS.map(Channel::daemon_binary_name),
             ALL_CHANNELS.map(Channel::cli_binary_name),
+            ALL_CHANNELS.map(Channel::tunnel_binary_name),
         ] {
             let unique: std::collections::BTreeSet<_> = names.iter().collect();
             assert_eq!(unique.len(), ALL_CHANNELS.len(), "two channels cannot share one path: {names:?}");
@@ -484,6 +520,7 @@ mod tests {
         for c in ALL_CHANNELS {
             assert_eq!(c.daemon_binary_candidates().first(), Some(&c.daemon_binary_name()));
             assert_eq!(c.cli_binary_candidates().first(), Some(&c.cli_binary_name()));
+            assert_eq!(c.tunnel_binary_candidates().first(), Some(&c.tunnel_binary_name()));
         }
     }
 
@@ -498,6 +535,7 @@ mod tests {
         for c in ALL_CHANNELS {
             assert!(c.daemon_binary_candidates().contains(&"farcoolerd"), "{c:?}");
             assert!(c.cli_binary_candidates().contains(&"farcooler"), "{c:?}");
+            assert!(c.tunnel_binary_candidates().contains(&"farcooler-tunnel"), "{c:?}");
         }
     }
 
@@ -508,5 +546,6 @@ mod tests {
         // every error message list a path twice.
         assert_eq!(Channel::Stable.daemon_binary_candidates(), &["farcoolerd"]);
         assert_eq!(Channel::Stable.cli_binary_candidates(), &["farcooler"]);
+        assert_eq!(Channel::Stable.tunnel_binary_candidates(), &["farcooler-tunnel"]);
     }
 }

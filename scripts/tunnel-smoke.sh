@@ -13,9 +13,18 @@
 #
 # It is not only a linkage check. It RUNS the daemon, so it also catches a
 # binary that linked and then cannot start — which is exactly what a Linux
-# daemon with the archive linked does today (see `docs/releasing.md`): it
-# segfaults before it logs a line, and a check that only looked for a Go build
-# id would have called that a pass and shipped it.
+# daemon with the archive linked used to do (see `docs/releasing.md`): it
+# segfaulted before it logged a line, and a check that only looked for a Go
+# build id would have called that a pass and shipped it. That is why Linux now
+# ships a separate helper process instead.
+#
+# Which is also why this check still earns its place on Linux, in a new way. A
+# `farcoolerd` built with `tailcat-helper` finds `farcooler-tunnel` beside
+# itself and spawns it; a helper that is missing, unexecutable, or built for
+# the wrong architecture makes `serve` answer `no_tailcat` — deliberately, so
+# that the one grep below covers the new failure mode as well as the old one.
+# See `crates/tailcat/src/helper.rs`. A tarball that forgot to pack the helper
+# therefore fails here rather than on somebody's runner.
 #
 # The binary must be one this machine can execute. There is no
 # cross-architecture form of this; a host that builds aarch64 on x86_64 can
@@ -92,9 +101,11 @@ done
 
 if grep -q "no_tailcat" "$LOG"; then
   echo
-  echo "FAILED: this farcoolerd has no tunnel linked — it answered no_tailcat."
-  echo "It was built without the Go archive; see scripts/build-linux.sh and"
-  echo "apps/macos/build-app.sh for how a shipping build links one."
+  echo "FAILED: this farcoolerd has no tunnel — it answered no_tailcat."
+  echo "Either it was built without the tunnel at all, or (on Linux) there is no"
+  echo "\`farcooler-tunnel\` beside it that this machine can execute. See"
+  echo "scripts/build-linux.sh and apps/macos/build-app.sh for what a shipping"
+  echo "build produces."
   echo
   grep -n "tunnel" "$LOG" || true
   exit 1
