@@ -220,6 +220,58 @@ final class ShellPaneScrollTests: XCTestCase {
             "reading a long line turned the page as well as scrolling it")
     }
 
+    /// **And it does not twitch on the way: the shell never moves at all.**
+    ///
+    /// The test above asserts the OUTCOME — the code moved, the tab did not —
+    /// and the outcome was never the complaint. The owner's report is the
+    /// middle of the gesture: *"scrolling horizontally on the diff view on iOS
+    /// is very jarring because it keeps triggering the scroll/pan gestures for
+    /// like a fraction of a second."* A shell that jumps sideways with the
+    /// finger and then eases itself back has, at every instant either of the
+    /// assertions above can be read, held perfectly still.
+    ///
+    /// So this reads the PEAK — `ShellRootView.strayed`, the furthest the
+    /// track got from centre at any frame of the gesture — which is the only
+    /// number that can tell the two apart. Measured at 25 points before the
+    /// claim was seeded at touch-down; the room was not reported until the
+    /// hunk's own scroll view began, which takes UIKit its usual ten points of
+    /// slop plus a frame, and every one of those points reached the shell.
+    ///
+    /// Two points of tolerance rather than zero: `trackX` is written from the
+    /// finger's own arithmetic, and a claim seeded on the frame the touch
+    /// lands still leaves the single frame in which the finger has moved and
+    /// nothing has been asked yet.
+    func testTheShellDoesNotTwitchWhileAHunkIsStillScrolling() throws {
+        let app = launch(["-shell-harness", "-shell-changes"])
+        _ = try state(app)
+        let line = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "retry_after")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 30), "the canned diff never rendered")
+        let before = line.frame.minX
+
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: 0.55))
+        from.press(
+            forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -140, dy: 0)),
+            withVelocity: .slow, thenHoldForDuration: 0.4)
+
+        let after = try state(app)
+        // The negative control, and it has to come first: a shell that never
+        // moves because the drag never reached anything would pass the
+        // assertion below and fail the feature.
+        XCTAssertLessThan(
+            line.frame.minX, before - 20,
+            "the hunk did not scroll, so there was no drag for the shell to hold still through")
+        XCTAssertLessThanOrEqual(
+            after["stray"] ?? -1, 2,
+            """
+            the shell moved \(after["stray"] ?? -1) points sideways during a drag the hunk \
+            was using, and then put itself back. The tab is unchanged and the code scrolled, \
+            so every other assertion in this file passes; what the reader sees is the page \
+            twitching under the line being read.
+            """)
+        XCTAssertEqual(after["tab"], 0, "reading a long line turned the page")
+    }
+
     /// **And a line scrolled to its end hands the page turn back.**
     ///
     /// The owner's refinement, and the half that separates this from a veto:

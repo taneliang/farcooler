@@ -94,33 +94,6 @@ struct ShellPaneSlot {
     var isVisible: Bool
 }
 
-/// How much room a pane's own sideways scroller has left, in points, either
-/// side of what it is showing.
-///
-/// Both directions, because a drag has one and the answer differs: a hunk
-/// scrolled to the end of a long line has nothing left going left and a whole
-/// line's worth going right, and "at the edge" is only ever a fact about a
-/// direction.
-struct ShellSidewaysRoom: Equatable {
-    /// Points available going back — toward the start of the line.
-    var before: CGFloat = 0
-    /// Points available going on — toward the end of it.
-    var after: CGFloat = 0
-
-    /// Nothing under the finger scrolls sideways at all, which is what a
-    /// terminal, a text pane and the ground between a diff's cards all report.
-    static let none = ShellSidewaysRoom()
-
-    /// How much of a drag of `dx` this scroller can still absorb.
-    ///
-    /// Negative `dx` is a finger travelling left, which reveals what is AFTER
-    /// the visible text; positive is the other way. Clamped at zero because a
-    /// scroller past its edge is rubber-banding, and a rubber band is not room.
-    func absorbs(dx: CGFloat) -> CGFloat {
-        dx < 0 ? min(-dx, max(0, after)) : min(dx, max(0, before))
-    }
-}
-
 /// What a pane says about the drag it is in the middle of.
 ///
 /// **One question, asked of whatever is under the finger: is there anything
@@ -177,9 +150,43 @@ struct ShellSidewaysRoom: Equatable {
 /// cannot be. Everything that touches it — a gesture callback and a scroll
 /// callback — is already on the main actor.
 final class ShellDragClaim: @unchecked Sendable {
-    /// What the scroller under the finger has left. Reset by the shell when a
-    /// finger goes down, so it never describes the drag before this one.
+    /// What the scroller under the finger has left. Re-seated by the shell
+    /// when a finger goes down, so it never describes the drag before this
+    /// one.
     var room = ShellSidewaysRoom.none
+
+    /// Every sideways scroller currently laid out, by the identity of the view
+    /// that owns it.
+    ///
+    /// **The standing answer, kept so that `room` can be right on the first
+    /// frame of a drag rather than on the tenth.** See `ShellScroller`, which
+    /// carries the measurement: a hunk that waited to be touched before
+    /// speaking let the shell draw 36 points of page turn and then take them
+    /// back, on every horizontal drag over code.
+    ///
+    /// Keyed by a `UUID` the reporting view holds for its own lifetime rather
+    /// than by anything about the hunk it draws. A hunk's identity is its
+    /// place in a file, and a diff that reloads redraws every hunk at the same
+    /// places — so a key made of those would have two live views claiming one
+    /// entry during the frame the old one is torn down, and the survivor would
+    /// be whichever happened to write last.
+    private var scrollers: [UUID: ShellScroller] = [:]
+
+    /// A scroller says where it is and what it has left.
+    func report(_ id: UUID, _ scroller: ShellScroller) { scrollers[id] = scroller }
+
+    /// And says nothing at all once it has gone.
+    ///
+    /// A leak here would be a rectangle the shell still believes in over a
+    /// pane that has been scrolled away, which reads as a page that will not
+    /// turn in one band of the screen for no reason anybody can see.
+    func forget(_ id: UUID) { scrollers.removeValue(forKey: id) }
+
+    /// What a finger landing at `point` has under it, in the shell's own
+    /// global space.
+    func roomUnder(_ point: CGPoint) -> ShellSidewaysRoom {
+        ShellScroller.room(under: point, of: Array(scrollers.values))
+    }
 }
 
 extension EnvironmentValues {

@@ -462,6 +462,35 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// answer can be acted on. See `ShellDragClaim`.
     @State var dragClaim = ShellDragClaim()
 
+    /// The furthest the shell's own track strayed from centre during the
+    /// gesture now under way, in points, and the highest it reached during the
+    /// last one once that gesture is over.
+    ///
+    /// **A peak rather than a value, because the defect it exists to catch is
+    /// a transient.** A shell that jumps sideways over a diff and then eases
+    /// itself back is, at every moment a test can read `trackX`, a shell that
+    /// has not moved: the drag ends with the track at zero and the tab
+    /// unchanged, which is exactly what "the shell held still" looks like
+    /// from outside. The owner's report is the middle of the gesture — "it
+    /// keeps triggering the scroll/pan gestures for like a fraction of a
+    /// second" — so the only honest measurement is the maximum, kept across
+    /// the frames nobody can sample.
+    ///
+    /// Reset on touch-down and never during a gesture, so a test may read it
+    /// after the finger has come up and still be reading that gesture.
+    @State var strayed: CGFloat = 0
+
+    /// The translation the CONTENT's axis was decided on, once per gesture.
+    ///
+    /// The axis is decided from one sample — the first that clears
+    /// `ShellMetrics.axisLock` — and then never revisited, so which sample
+    /// that is, is the whole of the decision. It is not a number anything on
+    /// screen can be asked about, and a suite that could only see the outcome
+    /// could not tell "the rule chose horizontal" apart from "the rule was
+    /// handed forty points of sideways travel in its first frame". See
+    /// `ShellGesture.contentAxis`.
+    @State var lockedOn: CGSize = .zero
+
     /// Where in this drag the pane under the finger ran out of room.
     ///
     /// Zero for a drag no pane wanted, which is every drag over a terminal and
@@ -1295,7 +1324,15 @@ struct ShellRootView<Pane: View, Actions: View>: View {
                     // be: the defect it exists to pin is a gesture that moved
                     // nothing until the release, and "it dismissed in the end"
                     // is exactly the assertion that passed all along.
-                    + "pull=\(Int((pullOut * 100).rounded()))")
+                    + "pull=\(Int((pullOut * 100).rounded())) "
+                    // The two mid-gesture numbers the arbitration is made of,
+                    // and neither is legible any other way: how far the shell
+                    // moved while a pane was using the same drag, and the one
+                    // sample the content's axis was decided from. See
+                    // `ShellRootView.strayed` and `ShellRootView.lockedOn`.
+                    + "stray=\(Int(strayed.rounded())) "
+                    + "lockx=\(Int(lockedOn.width.rounded())) "
+                    + "locky=\(Int(lockedOn.height.rounded()))")
     }
 }
 

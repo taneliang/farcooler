@@ -344,7 +344,9 @@ extension ShellRootView {
         // the two gestures cannot come to measure different things.
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
-                begin(on: .content, from: value.startLocation.x - pageFrame.minX)
+                begin(
+                    on: .content, from: value.startLocation.x - pageFrame.minX,
+                    at: value.startLocation)
                 noteMovement(value)
                 let dx = value.translation.width
                 decideAxis(dx: dx, up: -value.translation.height)
@@ -367,6 +369,11 @@ extension ShellRootView {
                 trackX = ShellGesture.translation(
                     dx: carried, rubberBanding: rubberBands(carried))
                 crossing = crossProgress(trackX)
+                // The peak, kept because the defect is a transient: a shell
+                // that moves and then puts itself back reads as a shell that
+                // held still at every moment a test can sample. See
+                // `ShellRootView.strayed`.
+                strayed = max(strayed, abs(trackX))
             }
             .onEnded { value in
                 let decided = axis
@@ -421,16 +428,41 @@ extension ShellRootView {
     /// every other per-gesture reset here, with the one fact about the touch
     /// `ShellBarDrag` could not otherwise have: where it landed. See
     /// `ShellBarDrag.startAbove`'s header.
-    private func begin(on which: ShellTrack, from originX: CGFloat, startAbove: CGFloat = 0) {
+    private func begin(
+        on which: ShellTrack, from originX: CGFloat, at point: CGPoint = .zero,
+        startAbove: CGFloat = 0
+    ) {
         guard !gestureActive else { return }
         gestureActive = true
-        // A new finger, so nothing under it has spoken yet. Cleared HERE
-        // rather than at the end of the last gesture: `minimumDistance: 0`
-        // means this runs the moment a finger lands, before anything under it
-        // can have scrolled, which is the only instant at which "no pane has
-        // claimed any of this drag" is true by construction.
-        dragClaim.room = .none
+        // **What is under this finger, asked now rather than waited for.**
+        //
+        // Here rather than at the end of the last gesture for the reason it
+        // always was: `minimumDistance: 0` means this runs the moment a finger
+        // lands, before anything under it can have scrolled, which is the only
+        // instant at which the answer is a fact about the LAYOUT rather than
+        // about a drag already in progress.
+        //
+        // It is a lookup and no longer a clear, and that is the fix for the
+        // owner's report. A hunk used to speak only once its own scroll view
+        // had begun, which costs UIKit its usual slop plus a frame, and the
+        // shell drew a page turn through every point of it and then took it
+        // back — 36 points out and back, measured, on every horizontal drag
+        // over code. `ShellScroller` carries the argument; what changed here
+        // is only which of the two parties asks first.
+        //
+        // `.bar` finds nothing, because it is asked about a point on the bar
+        // and nothing on the bar scrolls sideways — but it is spelled out
+        // rather than left to the geometry: the bar's own gesture has no
+        // handoff at all, and a claim leaking into it would be a workspace
+        // swipe silently absorbed by a diff two panes away.
+        dragClaim.room = which == .content ? dragClaim.roomUnder(point) : .none
         handoff = 0
+        // The two probe channels, cleared with everything else a new finger
+        // invalidates. See `ShellRootView.strayed` and `.lockedOn` — both are
+        // read by the UI suite after the finger has come up, so a gesture owns
+        // them from its own touch-down until the next one.
+        strayed = 0
+        lockedOn = .zero
         // No movement yet, so nothing recent enough to be momentum. A gesture
         // that ends here without ever moving is a tap, and a tap throws
         // nothing.
@@ -465,11 +497,15 @@ extension ShellRootView {
         if absorbed > 0.5 {
             handoff = dx
             // Anything the track had already travelled belongs to the pane
-            // after all — the room is reported a frame behind the finger, so
-            // the first point or two of a drag over a long line can reach the
-            // shell before the hunk has said anything. Put back rather than
-            // left standing: a page parked two points off centre for the rest
-            // of a read is a page nobody asked to move.
+            // after all. This used to be the ordinary case and is now the
+            // exception: the claim is seeded at touch-down — see `begin` —
+            // so a hunk that was laid out before the finger landed is
+            // answering from the first frame and there is nothing to put
+            // back. What is left for this to catch is a scroller that gained
+            // room DURING the drag, which is a real thing a diff does when a
+            // hunk's widest row finishes measuring. Put back rather than left
+            // standing either way: a page parked two points off centre for
+            // the rest of a read is a page nobody asked to move.
             //
             // **The one write in this file that is still animated, and the
             // only remaining use of `Self.tracking`.** Everything else in both
@@ -532,9 +568,19 @@ extension ShellRootView {
     /// `b192f17`, which shipped and was reported off a real phone. The bar
     /// asks `ShellBarDrag` instead, once per frame; `ShellGesture.lean` is
     /// where the difference between the two surfaces is argued.
+    ///
+    /// **Because the answer is final, the question is `contentAxis` and not
+    /// `axis`.** One sample decides where a six-hundred-point scroll ends up,
+    /// and `lockedOn` says which sample: about seven points across against six
+    /// up, measured on a simulator. A bare magnitude comparison at that scale
+    /// is deciding on the roll a thumb makes as it lands.
     private func decideAxis(dx: CGFloat, up: CGFloat) {
         guard axis == nil else { return }
-        axis = ShellGesture.axis(dx: dx, up: up)
+        axis = ShellGesture.contentAxis(dx: dx, up: up)
+        // The sample the decision was made from, kept for the probe. Stored
+        // up-positive, the way `contentAxis` is asked, so `locky` and the rule
+        // agree about which way is up.
+        if axis != nil { lockedOn = CGSize(width: dx, height: up) }
     }
 
     /// The half of a handover that is a transaction rather than a number.

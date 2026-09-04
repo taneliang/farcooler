@@ -1875,9 +1875,23 @@ private struct HunkView: View {
     @State private var room = ShellSidewaysRoom.none
     /// Whether a finger is on this hunk's own sideways scroll right now.
     ///
-    /// The gate on saying anything at all. Every hunk on screen has room, and
-    /// only the one under the thumb is entitled to answer for the drag.
+    /// The gate on OVERWRITING the standing answer mid-drag. Every hunk on
+    /// screen has room, and only the one under the thumb is entitled to
+    /// change what the shell believes once a drag is under way.
     @State private var interacting = false
+
+    /// Where this hunk's scroll view is on the glass, as of its last layout.
+    @State private var frame: CGRect = .zero
+
+    /// This view's own identity in `ShellDragClaim`'s registry, for its own
+    /// lifetime.
+    ///
+    /// A `UUID` and not the hunk's range or the file's name: a diff that
+    /// reloads draws the same hunks at the same places, so an identity made of
+    /// those would have the arriving view and the departing one claiming a
+    /// single entry, and the answer would be whichever wrote last. See
+    /// `ShellDragClaim.report`.
+    @State private var claimID = UUID()
 
     /// What this hunk tells the shell about the drag under way.
     ///
@@ -1886,6 +1900,13 @@ private struct HunkView: View {
     /// scroll inside a horizontal pager, and the answer is the platform's
     /// usual one: the inner scroller goes first and hands over at its edge.
     /// See `ShellDragClaim`.
+    ///
+    /// **Told as a fact about the layout, before any finger arrives.** What
+    /// this used to do was answer only once its own scroll view had begun,
+    /// which is ten points of UIKit slop plus a frame after the touch — and
+    /// the shell drew a page turn through all of it and then eased itself
+    /// back. `ShellScroller` carries the measurement: 36 points out and back
+    /// per drag, over a line somebody was reading.
     @Environment(\.shellDragClaim) private var shellDrag
 
     var body: some View {
@@ -1956,13 +1977,38 @@ private struct HunkView: View {
                         - leading)
             } action: { _, now in
                 room = now
+                announce(frame: frame, room: now)
                 if interacting { shellDrag.room = now }
             }
             .onScrollPhaseChange { _, phase in
                 interacting = phase == .interacting
                 if interacting { shellDrag.room = room }
             }
+            // Where it is, so the shell can ask what is under a finger at the
+            // instant the finger lands. `.global`, which is the space
+            // `ShellDrag.contentGesture` measures its drags in — the two have
+            // to be the same space or the rectangle is a rectangle somewhere
+            // else.
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { now in
+                frame = now
+                announce(frame: now, room: room)
+            }
+            // And says nothing once it has gone. A hunk scrolled off the
+            // screen that was still claiming its old rectangle would be a
+            // band of the pane the page refused to turn in, with nothing
+            // drawn there to explain why.
+            .onDisappear { shellDrag.forget(claimID) }
         }
+    }
+
+    /// Both halves of what this hunk is, into the shell's registry.
+    ///
+    /// Passed in rather than read off the two `@State`s, because one of them
+    /// has just been written in the closure that is calling this and whether a
+    /// getter returns a value set in the same closure is not a thing to depend
+    /// on for the frame a diff lays out in.
+    private func announce(frame: CGRect, room: ShellSidewaysRoom) {
+        shellDrag.report(claimID, ShellScroller(frame: frame, room: room))
     }
 
     /// Where in the file this is, and the way to say something about it.

@@ -178,9 +178,17 @@ enum ShellMetrics {
     /// leaving it should look like a decision. A fixed margin would be the
     /// same 6 points in both places and would be wrong in both.
     ///
-    /// The bar only. The content keeps a true lock, because vertical there is
-    /// the terminal's scrollback and there is a second party to yield it to —
-    /// see `ShellGesture.axis`.
+    /// **The bar REDIRECTS with it; the content LOCKS with it, once.** One
+    /// angle, and the same sentence on both surfaces: a gesture leaves
+    /// vertical only when the finger is within 35.5° of horizontal. The
+    /// difference is what it is leaving and how often it is asked. On the bar
+    /// there is an incumbent to leave, it can be either axis, and the
+    /// question is put every frame — that is the redirection, and it stays
+    /// the bar's. On the CONTENT vertical is the standing answer from the
+    /// first frame, because the pane under the finger owns vertical before
+    /// the shell has any claim on it at all, and the question is put once.
+    /// See `ShellGesture.contentAxis`, which is `lean` handed that incumbent
+    /// and nothing else.
     static let redirect: CGFloat = 1.4
 
     /// What a drag is multiplied by when there is nothing to bring in.
@@ -672,14 +680,21 @@ enum ShellAxis: Hashable {
 enum ShellGesture {
     /// Which axis this gesture is, or nil while it is still too small to say.
     ///
-    /// **The FIRST answer, and on the content the only one.** The content
-    /// stores the first non-nil answer and asks nothing further for the rest
-    /// of the gesture, because vertical there is the terminal's scrollback
-    /// and an axis that could be re-decided per frame is the shell reaching
-    /// into a gesture another party already owns — the failure class of the
-    /// sign error two paragraphs down, arrived at from the other direction.
-    /// The bar asks `lean` instead, which starts here and then keeps asking;
-    /// its header is where that difference is argued.
+    /// **The neutral first answer, and the BAR's.** Nothing here leans either
+    /// way past an exact tie: whichever component is the larger wins outright,
+    /// which is the right rule for a surface where no other party is listening
+    /// to either axis. The bar asks `lean` instead, which starts here and then
+    /// keeps asking; its header is where that difference is argued.
+    ///
+    /// **The content does NOT use this**, and that is the thing about it most
+    /// worth knowing. It did, and a bare magnitude comparison on a surface
+    /// with a scroller under it gives the whole gesture away on the first
+    /// sample past `ShellMetrics.axisLock` — measured on a simulator, a
+    /// content drag decides its axis from about SEVEN points across against
+    /// SIX up, and that one nine-point sample is final for the six hundred
+    /// points that follow. A thumb scrolling a terminal arcs, so it wins that
+    /// sample often, and the gesture ends on a different terminal. See
+    /// `contentAxis`, which is what the content asks now.
     ///
     /// `dy` is measured UP-positive — `startY - y` — and the comparison is
     /// against its MAGNITUDE. It was `abs(dx) > dy`, verbatim from the
@@ -739,6 +754,12 @@ enum ShellGesture {
     /// thing for the bar"*. It is right that the bar has a rule. It was not
     /// right that the rule was a LOCK.
     ///
+    /// **The content calls this exactly once, with `.vertical` handed in.**
+    /// That is not redirection and cannot become it: one call changes nobody's
+    /// mind. What it borrows is the ANGLE — see `contentAxis`, and
+    /// `ShellMetrics.redirect`, where the one sentence the two surfaces share
+    /// is written down.
+    ///
     /// **The first answer is `axis`, unchanged**, so a gesture that never
     /// redirects means exactly what it meant before — every straight-line
     /// drag anybody can perform, including every one this suite drives.
@@ -782,6 +803,57 @@ enum ShellGesture {
         case .vertical:
             return across > along * ShellMetrics.redirect ? .horizontal : .vertical
         }
+    }
+
+    /// Which axis a CONTENT gesture is, decided once and never asked again.
+    ///
+    /// **`lean` with vertical as the standing answer, because on the content
+    /// vertical IS the standing answer.** The pane under the finger owns it —
+    /// a terminal's scrollback, a diff's length — before the shell has any
+    /// claim on the touch at all, so the shell is never CHOOSING between two
+    /// axes here the way the bar is. It is taking one, from somebody, and a
+    /// rule for taking should read like one.
+    ///
+    /// **What it replaces is `axis`, and the bare comparison there was wrong
+    /// by one point.** The content decides from the first sample that clears
+    /// `ShellMetrics.axisLock` and then stores it for the rest of the
+    /// gesture, which measured on a simulator is a sample of about seven
+    /// points across against six up. At that scale the sideways component is
+    /// mostly the roll a thumb makes as it lands, so `abs(dx) > abs(dy)` is a
+    /// coin toss the shell wins about half the time — and winning it hands
+    /// the whole scroll to a page turn with no way back, because redirection
+    /// is the bar's and deliberately not the content's. That is the owner's
+    /// *"when scrolling vertically on a terminal, I often accidentally
+    /// trigger the horizontal pan gesture and end up swiping to a different
+    /// terminal."*
+    ///
+    /// **The two mistakes are not the same size, which is what makes an
+    /// asymmetric rule the honest one rather than a thumb on the scale.**
+    /// Calling a scroll horizontal takes a gesture the shell had no claim on
+    /// and lands you on another pane — a wrong destination, unrecoverable
+    /// inside the gesture. Calling a swipe vertical costs a page turn that
+    /// did not happen: the pane scrolls a little, you lift, you swipe again.
+    /// `ShellPaneScrollTests`' own header says the same thing from the other
+    /// end — *"if arbitration has to favour one of them it favours the
+    /// scroll"* — and this is that preference written as an angle instead of
+    /// as a hope.
+    ///
+    /// **The angle is `ShellMetrics.redirect` and not a second number**, for
+    /// the reason its header now gives: it is the same question. Within 35.5°
+    /// of horizontal the shell may take the drag; outside it the pane keeps
+    /// it. The band that changes hands is therefore 35.5° to 45° off
+    /// horizontal, measured on that one early sample — a deliberate sideways
+    /// swipe that begins that steep now scrolls instead of turning the page,
+    /// and it is the only thing this costs.
+    /// `theContentTakesOnlyAPlainlySidewaysDrag` pins both edges of that band,
+    /// and `aScrollThatLeansSidewaysStaysWithThePane` in the UI suite drives
+    /// the losing side of it at 40° over a pane that really scrolls.
+    ///
+    /// The lock is unchanged and is still asked first, so nothing under six
+    /// points has an axis and a tap is still a tap.
+    static func contentAxis(dx: CGFloat, up dy: CGFloat) -> ShellAxis? {
+        guard max(abs(dx), abs(dy)) > ShellMetrics.axisLock else { return nil }
+        return lean(dx: dx, up: dy, from: .vertical)
     }
 
     /// How far the track actually moves for a drag of `dx`.
@@ -1185,6 +1257,92 @@ enum ShellGesture {
         let full = columnFull(tabCount: tabCount)
         guard full > 0 else { return 1 }
         return min(1, max(0, up / full))
+    }
+}
+
+// MARK: - What a pane has left
+
+/// How much room a pane's own sideways scroller has left, in points, either
+/// side of what it is showing.
+///
+/// Both directions, because a drag has one and the answer differs: a hunk
+/// scrolled to the end of a long line has nothing left going left and a whole
+/// line's worth going right, and "at the edge" is only ever a fact about a
+/// direction.
+///
+/// In AgentKit rather than beside the view that fills it in, for the reason
+/// this file's header gives: the arithmetic that decides who owns a drag is
+/// exactly the kind of rule a screenshot cannot check and `swift test` can.
+/// `ShellDragClaim` in `ShellPaneTrack.swift` is the mutable half — one object
+/// in the environment, written by whatever is under the finger — and it holds
+/// nothing but these.
+struct ShellSidewaysRoom: Equatable {
+    /// Points available going back — toward the start of the line.
+    var before: CGFloat = 0
+    /// Points available going on — toward the end of it.
+    var after: CGFloat = 0
+
+    /// Nothing under the finger scrolls sideways at all, which is what a
+    /// terminal, a text pane and the ground between a diff's cards all report.
+    static let none = ShellSidewaysRoom()
+
+    /// How much of a drag of `dx` this scroller can still absorb.
+    ///
+    /// Negative `dx` is a finger travelling left, which reveals what is AFTER
+    /// the visible text; positive is the other way. Clamped at zero because a
+    /// scroller past its edge is rubber-banding, and a rubber band is not room.
+    func absorbs(dx: CGFloat) -> CGFloat {
+        dx < 0 ? min(-dx, max(0, after)) : min(dx, max(0, before))
+    }
+}
+
+/// One sideways scroller the shell has been told about: where it is on the
+/// glass, and what it had left when it last said.
+///
+/// **The answer has to exist BEFORE the touch, which is the whole reason this
+/// type does.** A hunk used to speak only once its own scroll view began —
+/// `onScrollPhaseChange`, `.interacting` — and a `UIScrollView`'s pan takes
+/// its usual slop before it begins. Every point of that slop reached the
+/// shell, which drew a page turn with it and then eased itself back when the
+/// hunk finally answered: measured on a simulator, **36 points** of travel
+/// out and back, per drag, over a line somebody was reading. That is the
+/// owner's *"scrolling horizontally on the diff view is very jarring because
+/// it keeps triggering the scroll/pan gestures for like a fraction of a
+/// second"*, and nothing about it is visible in an assertion made after the
+/// finger has come up: the tab is unchanged and the track is back at zero.
+///
+/// So a scroller reports where it is and what it has as a fact about the
+/// LAYOUT, whenever either changes, and the shell asks the question at
+/// touch-down instead of waiting to be told. A finger that lands on a hunk
+/// with room finds the shell already standing down on its first frame.
+///
+/// A rectangle rather than a registration of "there is a diff here", because
+/// the question is per-finger: a diff has a hunk under one thumb and bare
+/// ground under another, and a pane that answered for its whole surface would
+/// stop the page turning anywhere on it — the state this started in.
+struct ShellScroller: Equatable {
+    /// Where it is, in the same space the shell measures its drags in.
+    var frame: CGRect
+    /// What it had left when it last reported.
+    var room: ShellSidewaysRoom
+
+    /// What a finger landing at `point` has under it, or nothing.
+    ///
+    /// **The INNERMOST**, by area, which is the platform's own rule for nested
+    /// scrollers and the only one that stays right when a scroller is added
+    /// inside another. Today a diff's hunks never overlap, so every candidate
+    /// list has at most one entry and the tie-break is unreachable — it is
+    /// written down anyway because the alternative is a `first(where:)` over a
+    /// dictionary's values, which is an answer that depends on hashing.
+    ///
+    /// Scrollers the shell has been told about but that are off screen — a
+    /// neighbouring pane's hunks, which the track mounts and holds — are
+    /// excluded by the rectangle itself rather than by a rule about panes.
+    static func room(under point: CGPoint, of scrollers: [ShellScroller]) -> ShellSidewaysRoom {
+        scrollers
+            .filter { $0.frame.contains(point) }
+            .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }?
+            .room ?? .none
     }
 }
 

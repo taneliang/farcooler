@@ -356,6 +356,177 @@ struct ShellNavigationTests {
         #expect(ShellGesture.axis(dx: 120, up: 40) == .horizontal)
     }
 
+    /// **The content takes a drag only when it is plainly sideways, and
+    /// "plainly" is 35.5°.**
+    ///
+    /// The rule `ShellGesture.contentAxis` applies, stated as its two edges
+    /// so the band it moved can be argued with rather than guessed at. Under
+    /// `axis` — the bare magnitude comparison the content used to ask — the
+    /// edge was 45° and one point of sideways lead took the whole gesture.
+    ///
+    /// Measured, and this is the number the change rests on: on a simulator a
+    /// content drag decides its axis from about SEVEN points across against
+    /// SIX up, one sample, final for the six hundred points after it. At that
+    /// scale the sideways component is mostly the roll a thumb makes as it
+    /// lands.
+    ///
+    /// Both edges, both signs, and the two neighbours of the boundary — 139
+    /// and 141 against 100 — are the same pair the bar's own
+    /// `theDiagonalKeepsWhateverTheGestureAlreadyIs` uses, because it is the
+    /// same 1.4.
+    @Test func theContentTakesOnlyAPlainlySidewaysDrag() {
+        // Inside 35.5° of horizontal: the shell's.
+        #expect(ShellGesture.contentAxis(dx: 141, up: 100) == .horizontal)
+        #expect(ShellGesture.contentAxis(dx: -141, up: 100) == .horizontal)
+        #expect(ShellGesture.contentAxis(dx: 141, up: -100) == .horizontal)
+        // Outside it: the pane's, and this is the whole band that changed
+        // hands. Every one of these was `.horizontal` under `axis`.
+        #expect(ShellGesture.contentAxis(dx: 139, up: 100) == .vertical)
+        #expect(ShellGesture.contentAxis(dx: -139, up: 100) == .vertical)
+        #expect(ShellGesture.contentAxis(dx: 139, up: -100) == .vertical)
+        #expect(ShellGesture.axis(dx: 139, up: 100) == .horizontal)
+
+        // The owner's report, at the scale it is actually decided at: the
+        // sample the simulator was measured handing this rule. One point of
+        // lead used to be the whole answer.
+        #expect(ShellGesture.contentAxis(dx: 7, up: -6) == .vertical)
+        #expect(ShellGesture.contentAxis(dx: -8, up: -7) == .vertical)
+        #expect(ShellGesture.axis(dx: 7, up: -6) == .horizontal)
+
+        // And the lock is untouched, so a tap is still a tap and the content
+        // still begins exactly where the bar begins.
+        #expect(ShellGesture.contentAxis(dx: 5.9, up: 0) == nil)
+        #expect(ShellGesture.contentAxis(dx: 0, up: 5.9) == nil)
+        #expect(ShellGesture.contentAxis(dx: -5.9, up: -5.9) == nil)
+        #expect(ShellGesture.contentAxis(dx: 6.1, up: 0) == .horizontal)
+        #expect(ShellGesture.contentAxis(dx: 0, up: 6.1) == .vertical)
+    }
+
+    // MARK: - What is under the finger
+
+    /// **A scroller answers for its own rectangle and for nothing else.**
+    ///
+    /// The rule the shell asks at touch-down, and the reason it can ask at all
+    /// — see `ShellScroller`. What it separates is the two ways of getting
+    /// this wrong, and both of them shipped once in some form: a pane that
+    /// answers for its whole surface stops the page turning anywhere on it,
+    /// and a pane that answers only once it has been touched lets the shell
+    /// draw a page turn through UIKit's slop and then take it back.
+    ///
+    /// The off-screen entry is not decoration. The pane track mounts the
+    /// NEIGHBOURING workspaces' panes and holds them, so a diff two panes away
+    /// is laid out and reporting the whole time — and if its rectangle were
+    /// not what excluded it, every drag anywhere would find its hunks.
+    @Test func onlyTheScrollerUnderTheFingerAnswers() {
+        let hunk = ShellScroller(
+            frame: CGRect(x: 0, y: 200, width: 393, height: 120),
+            room: ShellSidewaysRoom(before: 0, after: 400))
+        // The same diff, one pane to the left: mounted, laid out, reporting,
+        // and nowhere near the finger.
+        let neighbour = ShellScroller(
+            frame: CGRect(x: -393, y: 200, width: 393, height: 120),
+            room: ShellSidewaysRoom(before: 40, after: 900))
+        let all = [neighbour, hunk]
+
+        #expect(ShellScroller.room(under: CGPoint(x: 100, y: 260), of: all) == hunk.room)
+        // The ground between two hunks, which is where a page turn over a diff
+        // has to keep working.
+        #expect(ShellScroller.room(under: CGPoint(x: 100, y: 360), of: all) == .none)
+        #expect(ShellScroller.room(under: CGPoint(x: 100, y: 260), of: []) == .none)
+
+        // The innermost by area, and the outer one has the room that would be
+        // wrong to use: a shell that took the outer answer would stand down
+        // for four hundred points over a line that has none.
+        let outer = ShellScroller(
+            frame: CGRect(x: 0, y: 0, width: 393, height: 800),
+            room: ShellSidewaysRoom(before: 0, after: 400))
+        let inner = ShellScroller(
+            frame: CGRect(x: 0, y: 200, width: 393, height: 120), room: .none)
+        #expect(
+            ShellScroller.room(under: CGPoint(x: 100, y: 260), of: [outer, inner]) == .none)
+        #expect(
+            ShellScroller.room(under: CGPoint(x: 100, y: 100), of: [outer, inner]) == outer.room)
+    }
+
+    /// A scroller at its edge has nothing to give in that direction and
+    /// everything in the other.
+    ///
+    /// `absorbs` moved into AgentKit with `ShellSidewaysRoom` and had no test
+    /// anywhere: it lived in the iOS target, which has no unit bundle at all.
+    /// It is the subtraction the whole handoff is, and its sign convention is
+    /// the kind that is wrong silently — negative `dx` is a finger travelling
+    /// LEFT, which reveals what comes AFTER the visible text.
+    @Test func aScrollerAbsorbsOnlyWhatItHasRoomFor() {
+        let atTheEnd = ShellSidewaysRoom(before: 300, after: 0)
+        #expect(atTheEnd.absorbs(dx: -60) == 0, "a line at its end still swallowed the drag")
+        #expect(atTheEnd.absorbs(dx: 60) == 60, "scrolling back was refused")
+        let plenty = ShellSidewaysRoom(before: 10, after: 400)
+        #expect(plenty.absorbs(dx: -60) == 60)
+        #expect(plenty.absorbs(dx: 60) == 10, "a scroller gave more than it had")
+        #expect(ShellSidewaysRoom.none.absorbs(dx: -60) == 0)
+        // Past its edge and rubber-banding, which is not room.
+        #expect(ShellSidewaysRoom(before: 0, after: -20).absorbs(dx: -60) == 0)
+    }
+
+    /// **A scroll that starts crooked is still a scroll**, and this drives the
+    /// path rather than asserting on an endpoint.
+    ///
+    /// The onset is the whole of the defect. A content gesture decides its
+    /// axis from the first sample past `ShellMetrics.axisLock` — measured on a
+    /// simulator, about nine points of travel — and then stores it for the
+    /// six hundred that follow. So the thing to drive is a scroll whose FIRST
+    /// ten points lean and which then goes straight down the screen, which is
+    /// what a thumb does: it rolls as it lands and then sweeps.
+    ///
+    /// Every onset out to 54° off vertical, and each of these paths ends 600
+    /// points down against about 14 across — a scroll by any reading, and one
+    /// nobody would describe as a swipe.
+    ///
+    /// **The counter-example is counted rather than asserted about**, the way
+    /// `theDiagonalKeepsWhateverTheGestureAlreadyIs` counts the memoryless
+    /// rule's flips: the bare comparison the content used to ask gives away
+    /// every onset past 45°, and if it ever stops doing so this test has
+    /// stopped driving anything crooked.
+    @Test func aScrollThatStartsCrookedIsStillAScroll() {
+        var wouldHaveBeenLost = 0
+        for degrees in stride(from: 0, through: 54, by: 2) {
+            let leaning = tan(CGFloat(degrees) * .pi / 180)
+            var decided: ShellAxis?
+            var bare: ShellAxis?
+            var sample: (dx: CGFloat, up: CGFloat) = (0, 0)
+            var end: (dx: CGFloat, up: CGFloat) = (0, 0)
+            for frame in 1...120 {
+                // Five points of descent per frame, up-positive, so a scroll
+                // DOWN the screen is negative — the sign the prototype had
+                // backwards and the reason `axis` reads magnitudes at all.
+                let up = -5 * CGFloat(frame)
+                // The roll: spent over the first ten frames and constant
+                // after them, which is a finger that lands crooked and then
+                // straightens out.
+                let dx = -5 * CGFloat(min(frame, 10)) * leaning
+                end = (dx, up)
+                guard decided == nil else { continue }
+                decided = ShellGesture.contentAxis(dx: dx, up: up)
+                if decided != nil {
+                    sample = (dx, up)
+                    bare = ShellGesture.axis(dx: dx, up: up)
+                }
+            }
+            if bare == .horizontal { wouldHaveBeenLost += 1 }
+            #expect(
+                decided == .vertical,
+                """
+                a scroll that began \(degrees)° off vertical and then ran \
+                \(Int(-end.up)) points down against \(Int(-end.dx)) across was called \
+                \(String(describing: decided)), from \(sample.dx) across against \
+                \(sample.up) up
+                """)
+        }
+        #expect(
+            wouldHaveBeenLost > 0,
+            "not one of these onsets was crooked enough for the old rule to lose")
+    }
+
     /// The other half of the old test, which was the part worth keeping: a
     /// downward flick on the bar costs nothing. It reaches that as an
     /// `.abandon` now rather than as a `.springBack`, and the two are the same

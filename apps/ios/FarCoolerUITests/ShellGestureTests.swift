@@ -679,6 +679,104 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(try state(app)["tab"], 0, "a drag up the content turned the page")
     }
 
+    /// **A scroll that leans sideways is still the pane's, not the shell's.**
+    ///
+    /// The rule this pins is `ShellGesture.contentAxis`, and the report it
+    /// comes from is the owner's: *"when scrolling vertically on a terminal, I
+    /// often accidentally trigger the horizontal pan gesture and end up
+    /// swiping to a different terminal."* The content decides its axis ONCE,
+    /// from the first sample past `ShellMetrics.axisLock`, and that sample is
+    /// six to a few dozen points long — which is short enough that the roll a
+    /// thumb makes as it lands is most of it. A bare `abs(dx) > abs(dy)` gives
+    /// the whole gesture away on that sample the instant the sideways half
+    /// wins by one point, and there is no way back: redirection is the bar's
+    /// and deliberately not the content's.
+    ///
+    /// **Forty degrees off horizontal, which is fifty off vertical.** Under
+    /// the bare comparison this drag is horizontal — 200 across beats 168 up —
+    /// and 200 points is nearly three times the seventy that commits, so it
+    /// turned the page. It has to be a `-shell-scroll` pane rather than the
+    /// default one because both halves are being asserted: the shell stood
+    /// down, AND somebody else took the gesture. A shell that merely refused
+    /// everything would pass the first half and be a worse bug.
+    ///
+    /// The straight-line control is `testADiagonalDragOnTheContentStillTurns`
+    /// below, and it is what stops this becoming "the page never turns".
+    func testAScrollThatLeansSidewaysStaysWithThePane() throws {
+        let app = launch(["-shell-scroll"])
+        XCTAssertEqual(try state(app)["tab"], 0)
+        let before = try XCTUnwrap(paneOffset(app), "the pane never reported a scroll offset")
+
+        // 200 across, 168 up: `tan 40°`, measured in points rather than in
+        // normalized offsets so the angle is the angle whatever the device is.
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.72))
+        from.press(
+            forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -200, dy: -168)),
+            withVelocity: .slow, thenHoldForDuration: 0.4)
+
+        let after = try state(app)
+        XCTAssertEqual(
+            after["tab"], 0,
+            """
+            a drag 40° off horizontal turned the page. The axis was decided from \
+            \(after["lockx"] ?? 0) across against \(after["locky"] ?? 0) up — one sample, \
+            and final.
+            """)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(paneOffset(app)), before,
+            "the shell stood down but nothing else took the drag: the pane never scrolled")
+    }
+
+    /// **And a swipe that means it still turns the page.**
+    ///
+    /// The other wall, and the cost of the one above stated as a test: the
+    /// content is called horizontal only within 35.5° of horizontal, so what
+    /// this fixture has to show is that a real sideways swipe clears it with
+    /// room. Twenty degrees off horizontal — 240 across against 87 up — which
+    /// is a swipe nobody would describe as a scroll.
+    ///
+    /// Both of these run over `-shell-scroll`, so between them they say the
+    /// arbitration moved a boundary rather than picking a side.
+    func testADiagonalDragOnTheContentStillTurns() throws {
+        let app = launch(["-shell-scroll"])
+        let start = try state(app)
+        XCTAssertEqual(start["tab"], 0)
+        XCTAssertGreaterThan(start["tabs"] ?? 0, 1, "this workspace has nowhere to turn to")
+
+        // 240 across, 87 up: `tan 20°`.
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.80, dy: 0.60))
+        from.press(
+            forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -240, dy: -87)),
+            withVelocity: .slow, thenHoldForDuration: 0.4)
+
+        let after = try state(app)
+        XCTAssertEqual(
+            after["tab"], 1,
+            """
+            a swipe 20° off horizontal did not turn the page. The axis was decided from \
+            \(after["lockx"] ?? 0) across against \(after["locky"] ?? 0) up.
+            """)
+    }
+
+    /// Where the visible pane's own scroll view has got to.
+    ///
+    /// `ShellPaneScrollTests.paneOffset`, which reads the same probe for the
+    /// same reason: a scroll offset is a number with nothing on screen that
+    /// says it, and "the shell ate the scroll" and "there was nothing to
+    /// scroll" are indistinguishable in a screenshot.
+    private func paneOffset(_ app: XCUIApplication) -> Int? {
+        let probes = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "shell-pane-"))
+        for i in 0..<probes.count {
+            let value = (probes.element(boundBy: i).value as? String) ?? ""
+            guard value.contains("visible=1") else { continue }
+            return value.split(separator: " ")
+                .first { $0.hasPrefix("offset=") }
+                .flatMap { Int($0.split(separator: "=")[1]) }
+        }
+        return nil
+    }
+
     /// **Scrolling the grid back to its top does not close it.**
     ///
     /// The pull-down that dismisses the overview read `atTop` at the moment
