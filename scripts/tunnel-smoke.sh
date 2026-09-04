@@ -52,7 +52,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# 0700 on both, explicitly, and not left to the umask.
+#
+# `farcooler-fence` applies sshd's own `StrictModes` rule to the directory
+# `authorized_keys` lives in and refuses a group- or world-writable one — a
+# directory somebody else can write is a directory in which they can replace
+# that file. Ubuntu's default umask is 0002, which makes `mkdir -p` produce
+# 0775 and the fence refuse it; macOS's 0022 does not, which is exactly how
+# this went unnoticed until the check was first run on Linux. The daemon then
+# answers `FenceUnreadable` and never reaches the tunnel at all, and this
+# script would have been asserting nothing.
 mkdir -p "$ROOT/home/.ssh"
+chmod 700 "$ROOT/home" "$ROOT/home/.ssh"
 
 # Its existence is the whole feature flag — `Service::tailcat_key`. The contents
 # are not asserted on here: whatever the Go side makes of them, the outcome it
@@ -85,17 +96,21 @@ echo "==> Starting $DAEMON against $ROOT"
 HOME="$ROOT/home" FARCOOLER_HOME="$ROOT" RUST_LOG=info "$DAEMON" > "$LOG" 2>&1 &
 PID=$!
 
-# `start_tunnel` is spawned before the daemon binds its socket and can block for
-# 30-45 seconds on DERP region picking. The stub, by contrast, refuses
-# instantly: `farcooler_tailcat::serve` returns `Err(NoTailcatLinked)` without
-# touching the network. So the window below does not need to be long enough for
-# a real tunnel to come up — it only needs to be long enough for a stub to have
-# failed, which is what makes this check reliable rather than dependent on CI
-# having working UDP to a DERP relay.
-ALIVE=1
-for _ in $(seq 1 20); do
-  grep -q "no_tailcat" "$LOG" && break
-  kill -0 "$PID" 2>/dev/null || { ALIVE=0; break; }
+# What this waits for is a line saying what happened to the tunnel — any of
+# them, including the refusals. The identity above is deliberately not a usable
+# key, so `serve` fails at the file rather than on the network: the answer
+# arrives in milliseconds and this never depends on CI having working UDP to a
+# DERP relay.
+#
+# REACHED is every outcome that proves the tunnel code ran. REFUSED is every
+# outcome that proves it did not — a broken fixture, not a broken daemon, and
+# each one is a way this script can assert nothing while looking like a pass.
+REACHED="the tunnel did not start|serving the tunnel|the tunnel is serving"
+REFUSED="serves no tunnel"
+
+for _ in $(seq 1 30); do
+  grep -qE "no_tailcat|$REACHED|$REFUSED" "$LOG" && break
+  kill -0 "$PID" 2>/dev/null || break
   sleep 1
 done
 
@@ -111,26 +126,30 @@ if grep -q "no_tailcat" "$LOG"; then
   exit 1
 fi
 
-# Absence of `no_tailcat` is only half an answer: a daemon that died before
-# `start_tunnel` ran would also have failed to say it, and this check would
-# have proved nothing at all. So one of three things must be true, and each is
-# something a stub cannot produce:
-#
-#   - it reported a tunnel outcome that is not `no_tailcat`, or
-#   - it is still running after the window, which means the Go side is still
-#     inside `serve` — the stub returns from `serve` without touching the
-#     network, in microseconds.
-#
-# Anything else is a daemon that fell over, and this script says so rather than
-# reporting a pass it did not earn.
-if grep -qE "the tunnel did not start|serving the tunnel|the tunnel is serving" "$LOG"; then
-  echo "    reached the Go side and reported an outcome that is not no_tailcat:"
+# Absence of `no_tailcat` is only half an answer: a daemon that never reached
+# the tunnel would also have failed to say it. So a positive line is required,
+# and "the daemon is still running" is deliberately NOT one of the things that
+# can produce a pass — a daemon stays running whatever happens to its tunnel,
+# which made that branch a check incapable of failing. It reported one on
+# Linux for a daemon that answered `FenceUnreadable` and never called `serve`
+# at all.
+if grep -qE "$REFUSED" "$LOG"; then
+  echo
+  echo "FAILED: the daemon refused before it reached the tunnel, so this check"
+  echo "proved nothing. That is this script's own fixture being wrong, not the"
+  echo "daemon: it means the scratch identity or authorized_keys below was not"
+  echo "accepted. Its whole log follows."
+  echo
+  cat "$LOG"
+  exit 1
+fi
+
+if grep -qE "$REACHED" "$LOG"; then
+  echo "    reached the tunnel and reported an outcome that is not no_tailcat:"
   grep -nE "tunnel" "$LOG"
-elif [ "$ALIVE" = 1 ]; then
-  echo "    still inside serve() after the window, which a stub never is"
 else
   echo
-  echo "FAILED: the daemon exited before it said anything about a tunnel, so"
+  echo "FAILED: the daemon said nothing about a tunnel within the window, so"
   echo "this check proved nothing. Its whole log follows."
   echo
   cat "$LOG"
