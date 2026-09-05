@@ -172,9 +172,13 @@ guessed at.
 ## Security posture
 
 SSH is the only control-plane transport and the only authentication mechanism.
-Far Cooler does not run a certificate authority, issue client certificates, pin
-its own identity key, or operate a pairing flow. OpenSSH already authenticates
-both directions, and the asset being protected is a shell that SSH gates anyway.
+Far Cooler does not run a certificate authority, issue client certificates, or
+pin its own identity key. OpenSSH already authenticates both directions, and the
+asset being protected is a shell that SSH gates anyway. The QR ceremony that
+enrolls a device is a pairing flow — earlier drafts of this page said there was
+none — but what it puts on a runner is an ordinary SSH public key on a fenced
+`authorized_keys` line, so there is still no Far Cooler credential to issue,
+rotate, expire, or recover.
 
 A remote client is granted `host_admin`, the same as a local one, because it has
 already proved it is the Unix user who owns that runner's database and worktrees —
@@ -218,4 +222,15 @@ subtracted from a running tunnel, and the only withdrawal is starting a fresh
 one — which drops every other device's live tunnel with it. Today that happens
 when the runner's daemon next starts, so a revoked device keeps a path to an
 sshd that now refuses it until then. If you want the path gone as well as the
-login, restart the daemon: `ssh you@box 'systemctl --user restart farcooler'`.
+login, restart that runner's daemon — and the command is the supervisor's, not
+Far Cooler's:
+
+```bash
+# Linux, stable channel. A preview or canary runner names its own unit:
+# farcooler-preview.service, farcooler-canary.service, farcooler-local.service.
+ssh you@box 'systemctl --user restart farcooler'
+
+# macOS, stable channel. Same channel rule: com.farcooler.daemon.remote.preview,
+# and so on.
+ssh you@box 'launchctl kickstart -k gui/$(id -u)/com.farcooler.daemon.remote'
+```

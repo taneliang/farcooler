@@ -75,8 +75,8 @@ async fn enroll_without_a_node_key(service: &Service, client_id: &str) {
     write_line(service, client_id, None).await;
 }
 
-/// Enroll a device carrying a node key, as a QR ceremony that knows about the
-/// tunnel would leave it.
+/// Enroll a device carrying a node key, as a ceremony that could offer one
+/// would leave it. None can: see `write_line`.
 async fn enroll_with_a_node_key(service: &Service, client_id: &str, node_key: &str) {
     write_line(service, client_id, Some(node_key)).await;
 }
@@ -84,10 +84,12 @@ async fn enroll_with_a_node_key(service: &Service, client_id: &str, node_key: &s
 /// Render one Far Cooler line and place it inside the fence.
 ///
 /// Not `enrollment::enroll`: that RPC layer function always renders with no
-/// node key today (Task 9's ceremony is what will pass one), so it cannot
-/// produce the fixture `enroll_with_a_node_key` needs. This goes straight to
-/// `farcooler_fence`, which is already a direct dependency of this crate and
-/// is the same primitive `enrollment::enroll` itself calls.
+/// node key — `ClientEnroll` has no field for one, and while the ceremony offer
+/// gained a `node_key` at v=2, nothing populates it, so no enrollment path
+/// passes one either — and it therefore cannot produce the fixture
+/// `enroll_with_a_node_key` needs. This goes straight to `farcooler_fence`,
+/// which is already a direct dependency of this crate and is the same
+/// primitive `enrollment::enroll` itself calls.
 async fn write_line(service: &Service, client_id: &str, node_key: Option<&str>) {
     let line = farcooler_fence::render(
         DEVICE_KEY,

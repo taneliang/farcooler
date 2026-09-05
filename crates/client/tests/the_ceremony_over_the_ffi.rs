@@ -217,7 +217,10 @@ fn each_refusal_has_the_code_the_apps_switch_on() {
 ///
 /// This is the half that makes a QR enrollment able to produce a tunnel at all:
 /// before it, a granted runner had an address and nothing else, so the ceremony
-/// could only ever hand back a direct one.
+/// could only ever hand back a direct one. Able to, and not yet doing so — the
+/// other half, a device holding a node key of its own to offer, does not exist,
+/// so a real ceremony still grants `Direct` every time. The fixture below
+/// supplies by hand what nothing yet supplies in the app.
 #[test]
 fn a_tunneled_runner_crosses_the_boundary() {
     let mine = an_offer_with_a_node_key("iPhone", "acct_1", KEY_A);

@@ -4,8 +4,10 @@
 //! `ssh you@box farcoolerd --stdio` and speaks the exact framing it speaks over
 //! a local socket, because sshd has already authenticated both directions and
 //! the caller is the same Unix user who owns the database there. Far Cooler adds
-//! no certificate authority, no pairing flow, and no second set of credentials
-//! to lose.
+//! no certificate authority and no second set of credentials to lose. It does
+//! run a pairing flow — the QR ceremony enrolls a device — but what that flow
+//! produces is a line in `authorized_keys`, not a credential of Far Cooler's
+//! own.
 //!
 //! Two consequences worth stating, because they shape everything here:
 //!

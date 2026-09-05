@@ -456,8 +456,14 @@ impl Service {
     /// `FARCOOLER_HOME`.
     ///
     /// Its existence IS the feature flag. No file, no server, no DERP
-    /// connection, and rule 1 stays literally and practically true for every
-    /// runner that was never enrolled through a QR ceremony.
+    /// connection, and "binds no port" is the whole of rule 1 for that runner.
+    ///
+    /// No enrollment path creates this file, and a ceremony does not either:
+    /// `allowlist::tunnel_plan` answers `NoIdentity` on a missing one before
+    /// `farcooler_tailcat::serve` — the only function that would mint an
+    /// identity here — is ever reached. A runner serves a tunnel where somebody
+    /// put a file here, and nowhere else; today the only thing that does is
+    /// `scripts/tunnel-smoke.sh`.
     pub fn tailcat_key(&self) -> PathBuf {
         self.root.join("tailcat.key")
     }

@@ -129,17 +129,19 @@ impl Handler for Verifier {
     }
 }
 
-/// How to reach a runner, and the one thing that decides it is what the runner
-/// handed back when this device was enrolled on it: a connection token gives a
-/// tunnel, an address gives an address.
+/// How to reach a runner: an address, or a connection token that dials the
+/// tunnel that runner holds open. Which one this device has is decided when the
+/// runner is set up, not per connection.
 ///
-/// **`Tailcat` is unreachable from the ceremony today**, and saying otherwise
-/// here would be the comment lying: nothing yet mints a node key for a phone,
-/// so an offer carries none, a granting runner writes none, and every entry a
-/// ceremony produces is `Direct`. The only path that reaches this variant is a
-/// device that already holds a session calling `client.set_node_key` and
-/// keeping the `conn_blob` it answers with. Where a phone's node key comes from
-/// is an open decision, not an oversight in this enum.
+/// **A token comes from `client.set_node_key` and from nowhere else, so
+/// `Tailcat` is unreachable from the ceremony today.** Enrollment answers with
+/// no token — `ClientEnrollResult` has no such field — and nothing yet mints a
+/// node key for a phone, so an offer carries none, a granting runner writes
+/// none, and every entry a ceremony produces is `Direct`. The one path that
+/// reaches this variant is a device that already holds a session, calling
+/// `client.set_node_key` and keeping the `conn_blob` it answers with. Where a
+/// phone's node key would come from is an open decision, not an oversight in
+/// this enum — and saying otherwise here would be the comment lying.
 ///
 /// One reach per runner, and no fallback. A `Direct` runner never quietly
 /// tries the tunnel and a `Tailcat` runner never quietly tries an address —

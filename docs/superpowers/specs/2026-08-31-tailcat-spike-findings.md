@@ -116,6 +116,17 @@ Downstream:
   operation that already closes every session it revokes, but it is a fact the
   documentation owes the reader rather than one they discover.
 
+**What shipped, recorded 2026-09-05 by Task 13.** Three of those four hold.
+The second does not: `enrollment::revoke` writes `authorized_keys` and closes
+the revoked device's sessions, and never names tailcat. `serve` has one call
+site — `allowlist::start_tunnel`, spawned once from `main.rs` at boot — so a
+revocation reaches the allowlist immediately and reaches the running server at
+the next daemon start, dropping every device's tunnel when it does. The
+consequence this finding predicted is real and the moment it happens is later
+than "on revoke". `docs/runners.md` says so in those terms, and so do
+`enrollment::revoke`, `enrollment::set_node_key` and the `allowlist` module
+header. Wiring `serve` into `revoke` is unclaimed by any task in the plan.
+
 ## 2. iOS linking
 
 **Holds, on both counts. It links, and it returns 42 on the phone.**

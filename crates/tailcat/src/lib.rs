@@ -12,9 +12,14 @@
 use std::path::Path;
 
 // Three backends, and exactly one of them is compiled. `linked` is the Go
-// c-archive, which is what iOS and macOS ship. `helper` is a standalone,
-// cgo-free Go program the daemon spawns, which is what Linux ships — see
-// `helper.rs` for the musl segfault that makes the archive unusable there.
+// build linked into this process, which is what iOS, macOS and Android ship:
+// a static `c-archive` on the two Apple platforms, and a `c-shared`
+// `libtailcat.so` on Android, because `go build -buildmode=c-archive` refuses
+// GOOS=android outright. Both come from `go/exports_cgo.go` and export the
+// same symbols, so `linked.rs` declares one set for both. `helper` is a
+// standalone, cgo-free Go program the daemon spawns, which is what Linux
+// ships — see `helper.rs` for the musl segfault that makes the archive
+// unusable there.
 // Neither is the default: a plain `cargo build` with no Go toolchain anywhere
 // gets `stub`, which fails at the one call site with the one error naming what
 // is missing.
