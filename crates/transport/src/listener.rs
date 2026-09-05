@@ -1,6 +1,8 @@
-//! Rule 1: the daemon opens no network listener. This is the only
-//! network-adjacent entry point it has, and it is a filesystem-permissioned
-//! Unix socket, never a TCP port.
+//! Rule 1: the daemon binds no port on any interface. This is the one entry
+//! point it accepts on directly, and it is a filesystem-permissioned Unix
+//! socket, never a TCP port. The other two arrive through sshd — a stdio child
+//! sshd launches, and the outbound tunnel that carries a dialing device to that
+//! same sshd on loopback. See `lib.rs` for all three.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

@@ -9,9 +9,17 @@
 //!
 //! Two consequences worth stating, because they shape everything here:
 //!
-//! - **No port is opened anywhere.** A runner that is reachable by SSH is
-//!   reachable by Far Cooler, and one that is not, is not. Tailscale or a
-//!   bastion is the answer to reachability, not something Far Cooler reimplements.
+//! - **The daemon binds no port, and there are two ways to reach one anyway.**
+//!   This module is the first and the older one: SSH, where a runner reachable
+//!   by SSH is reachable by Far Cooler and one that is not, is not — Tailscale,
+//!   a bastion, or an `~/.ssh/config` alias is the answer to addressing, and
+//!   not something Far Cooler reimplements. The second is the tunnel
+//!   (`crates/tailcat`): an OUTBOUND connection a runner holds open, which an
+//!   enrolled device dials to reach that runner's own sshd on loopback. It
+//!   carries the same SSH, so nothing about authentication changes — but a
+//!   tunneled runner needs no address and no inbound path, which is the half
+//!   the sentence above no longer covers. That route is dialed in
+//!   `crates/client`, which the apps embed; nothing in this module reaches it.
 //! - **Live terminal bytes do not go through this.** Streaming runs the remote
 //!   `farcooler` CLI over its own ssh session, which is a byte pipe already.
 //!   Wrapping a multi-hour stream inside a request/response conversation would

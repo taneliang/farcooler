@@ -2198,9 +2198,26 @@ message ClientRevoke { string client_id = 1; }
 //
 // The runner writes onto the CALLER's line, identified by the connection's own
 // client id, and ignores any device named here. That is what makes this safe
-// without a ceremony: a device cannot register a key for another device, and
-// registering one for itself grants nothing — it adds a route to access the
-// caller is already using to make this call.
+// without a ceremony as far as LINES go: a device cannot put a key on another
+// device's line, cannot widen its own scope, and cannot alter the forced
+// command or the `restrict` that gate it.
+//
+// **What the runner cannot check is that the caller holds the private half of
+// the key it sends.** The allowlist is a union over lines and tailcat admits by
+// node key rather than by line, so an enrolled device may send a key belonging
+// to a machine that is not enrolled at all: the runner writes it, `allow_add`
+// admits it to the live server, and that third machine can then dial the tunnel
+// and open a TCP connection to `127.0.0.1:<sshPort>`. sshd still authenticates
+// it, so what is extended is network reachability rather than a login — but
+// network reachability is exactly what the tunnel exists to gate.
+//
+// A proof of possession is not the fix, and should not be proposed as one. The
+// risk is delegation rather than impersonation: a device that wants to admit a
+// machine controls that machine, and can produce whatever proof is asked for.
+// There is a mechanical block as well — a node key is a Tailscale
+// `key.NodePublic`, a clamped X25519 ECDH key, which nothing can sign with.
+// What bounds this is revocation, which takes the line and its node key out of
+// the allowlist in one write.
 //
 // This is the migration path. A fleet enrolled before the tunnel existed has
 // lines with no node key, and `crates/daemon/src/allowlist.rs` reads such a

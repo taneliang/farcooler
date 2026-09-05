@@ -1,9 +1,13 @@
 //! `farcoolerd` — the runner daemon.
 //!
-//! It opens no network listener. The only entry point is a mode-0600 Unix
-//! socket under a user-only directory; reaching a runner from elsewhere means
-//! going through sshd, which already authenticates both directions. That is the
-//! whole of Far Cooler's attack surface, and it is deliberately this small.
+//! It binds no port on any interface. The only entry point it accepts on
+//! directly is a mode-0600 Unix socket under a user-only directory; reaching a
+//! runner from elsewhere means going through sshd, which already authenticates
+//! both directions. That holds for the tunnel this process may also hold open
+//! (`allowlist::start_tunnel`): it is an OUTBOUND connection, and what arrives
+//! down it is delivered to this host's own sshd on loopback rather than to the
+//! daemon. That is the whole of Far Cooler's attack surface, and it is
+//! deliberately this small.
 //!
 //! The daemon owns the SQLite database. Nothing else may open it — two writers
 //! would contend for the same file lock and, worse, two processes would each

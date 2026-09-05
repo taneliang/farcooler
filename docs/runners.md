@@ -10,17 +10,33 @@ document is about, and it is why the word is *runner* rather than *host*: a host
 is the box, and there can be more than one runner on it.
 
 Far Cooler drives runners over SSH. There is no Far Cooler network protocol, no
-port to open, no pairing flow, and no second set of credentials.
+port to open on the runner, and no second set of credentials.
 `farcooler --runner you@box workspace list` runs `ssh you@box farcoolerd --stdio`
 and speaks the same protocol it speaks over a local Unix socket. (`--host` still
 works: it lives in shell history and in scripts, and a vocabulary change is not a
 reason to break either.)
 
-Two consequences worth understanding before anything else:
+Three consequences worth understanding before anything else:
 
-- **A runner reachable by SSH is reachable by Far Cooler, and one that is not, is
-  not.** If you need to reach a host behind NAT, use Tailscale, a bastion, or an
-  SSH config alias. Far Cooler does not reimplement any of that.
+- **A runner reachable by SSH is reachable by `--runner`, and one that is not, is
+  not.** If you need to reach a host behind NAT from the command line, use
+  Tailscale, a bastion, or an SSH config alias. Far Cooler does not reimplement
+  any of that.
+
+  A runner can also serve a **tunnel**: a connection it makes outward and holds
+  open, which a device that runner admits dials to reach that runner's own sshd.
+  Nothing is opened on the runner and no address is needed, so a box behind NAT
+  is reachable without any of the three above. It carries ordinary SSH inside, so
+  it changes how a device arrives and nothing about who is let in — and it has
+  its own consequences, in [Security posture](#security-posture).
+
+  A runner serves a tunnel only once a device enrolled on it has registered a
+  node key with it, and **no client does that yet** — every device Far Cooler
+  can enroll today reaches its runners by address. The runner half is built and
+  the route is real; what is not built is the step where a device obtains a node
+  key of its own. It is described here rather than when that lands, because what
+  it costs is worth reading before somebody turns it on. Either way, `--runner`
+  is SSH: this is the apps' route, not the command line's.
 - **Everything installs into your home directory.** No root, no package manager,
   no system service. A user who can SSH in can install Far Cooler; a user who
   cannot, cannot. This is also why runners are per-user rather than per-host.
@@ -164,3 +180,42 @@ A remote client is granted `host_admin`, the same as a local one, because it has
 already proved it is the Unix user who owns that runner's database and worktrees —
 someone who could read them directly regardless. The daemon runs as that user
 and never as root.
+
+The tunnel does not change any of that: what arrives down it is handed to the
+sshd already on the host, which authenticates it exactly as it authenticates a
+connection from the open internet. What the tunnel changes is who can *reach*
+that sshd, and the three paragraphs below are what that costs.
+
+**One tunnel entrance per box, not per runner.** A runner's tunnel forwards to
+the sshd on its host, and a host may carry several runners. So one runner's
+token plus one admitted node key opens a TCP connection to the sshd that fronts
+every runner there. Nothing is granted by this: each user's `authorized_keys`
+still gates their own account, and a device holding no key on your account gets
+an authentication failure exactly as it would from the open internet. But "three
+engineers on one box is three runners sharing nothing" now has one shared thing,
+and it is this.
+
+**A runner cannot check that a device owns the node key it registers.** A device
+tells its runner which key to admit, and the runner writes that key onto the
+device's own line — which is what stops a device putting a key on somebody
+else's line or widening its own access. It is not what stops a device sending a
+key it does not hold the private half of: the tunnel admits by key, so an
+enrolled device can extend tunnel reachability to a machine that is not enrolled
+at all. That machine gets a TCP connection to your host's sshd and nothing more:
+holding no key on any account there, it fails authentication exactly as it would
+from the open internet. Asking devices to prove possession
+would not close it — a device that wants to admit a machine controls that
+machine, and could prove whatever was asked — so what bounds it is revoking the
+device, which removes its line and its node key in the same write. Read it as
+one more reason enrollment is a decision about a device rather than about a
+scope.
+
+**Revoking one device drops every device's tunnel, when it takes effect.** The
+line goes immediately, so the revoked device cannot log in from that moment, and
+the sessions it was holding are closed. Its tunnel *route* outlives that: the
+tunnel is handed the list of admitted keys when it starts, one key cannot be
+subtracted from a running tunnel, and the only withdrawal is starting a fresh
+one — which drops every other device's live tunnel with it. Today that happens
+when the runner's daemon next starts, so a revoked device keeps a path to an
+sshd that now refuses it until then. If you want the path gone as well as the
+login, restart the daemon: `ssh you@box 'systemctl --user restart farcooler'`.

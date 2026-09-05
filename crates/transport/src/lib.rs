@@ -1,10 +1,18 @@
 //! Transport adapters over the wire framing in `farcooler-protocol`.
 //!
-//! Rule 1: the daemon opens no network listener. The only entry points are a
-//! mode-0600 Unix socket (`listener.rs`) and a process launched by sshd
-//! speaking the identical framing over stdio (`stdio.rs`). Both sit on the
-//! same `codec.rs` and `connection.rs`, so the wire behavior cannot drift
-//! between them.
+//! Rule 1: the daemon accepts no unauthenticated connection, and binds no port
+//! on any interface. There are three entry points and they share one codec: a
+//! mode-0600 Unix socket (`listener.rs`), a process launched by sshd speaking
+//! the identical framing over stdio (`stdio.rs`), and — on a runner where an
+//! enrolled device carries a node key — an OUTBOUND tunnel (`crates/tailcat`)
+//! that carries a dialing device to this runner's own sshd on loopback, which
+//! then launches that same stdio process. So the third entry point is the
+//! second one with a different wire in front of it, and nothing skips sshd.
+//!
+//! The first two sit on the same `codec.rs` and `connection.rs`, so the wire
+//! behavior cannot drift between them, and the third inherits both by being
+//! the second. See
+//! `docs/superpowers/specs/2026-08-31-tailcat-transport-design.md`.
 
 pub mod client;
 pub mod codec;

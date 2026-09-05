@@ -290,16 +290,23 @@ only a fingerprint stands between a stranger and them:
 **3. The confirmation sheet**, then enrollment on each chosen runner.
 
 **4. The trusted device shows a QR code back**, carrying the manifest: for each
-runner granted, its address, user, port, host key fingerprint and alias. A
-runner is about 120 bytes, so **one static code with a cap**, and no animated
-sequence, no reassembly, no partial-set handling. The cap is whatever the encoder
-reports as fitting at the chosen error-correction level after the header below,
-measured rather than assumed. Roughly **nine** runners at a 1,800-byte budget:
-a record carrying a Tailscale address serializes to about 190 bytes, not the 120
-an earlier draft guessed, so "fifteen" was optimistic. That the number moved is
-the argument for the mechanism — a stated byte budget
-is the mechanism and a runner count is the consequence. Past the cap, grant the
-rest by running the ceremony again.
+runner granted, how to reach it, plus user, host key fingerprint and alias.
+**One static code with a cap**, and no animated sequence, no reassembly, no
+partial-set handling. The cap is whatever the encoder reports as fitting at the
+chosen error-correction level after the header below, measured rather than
+assumed. At a 1,800-byte budget, with a 166-byte envelope, the measurement is
+**seven** runners reached by address (232 bytes each) or **four** reached by
+tunnel (386 each, the extra being a 184-byte connection token), from
+`166 + 386n <= 1800` — see
+`the_ceiling_for_tunneled_runners_is_measured` in `crates/client/src/ceremony.rs`.
+Both are floors: every field is variable-width, and a long alias costs what it
+costs. The number has moved twice — "fifteen at 120 bytes" and then "nine at
+190" were both guesses, and the 120-byte record never existed, since a UUID is
+36 bytes and a `SHA256:` fingerprint 50 before anything else is counted. That it
+kept moving is the argument for the mechanism: a stated byte budget is the
+mechanism and a runner count is the consequence. Past the cap the whole manifest
+is refused rather than trimmed, and the rest are granted by running the ceremony
+again.
 
 The reply repeats `ceremony`, `account`, `channel` and the **fingerprint of the
 Key A it is answering**, so it can be consumed only by the device that asked, for

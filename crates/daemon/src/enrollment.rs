@@ -149,14 +149,34 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
 
 /// Admit a device's node key to the tunnel, on the line it already holds.
 ///
-/// **The whole safety argument for skipping the ceremony.** The line written is
-/// the one this runner's own `authorized_keys` gave the CONNECTION — never the
-/// device the request names, which is ignored and kept only so a log shows what
-/// the caller believed. A device therefore cannot register a key for another
-/// device. And registering one for itself grants nothing: it adds a route to
-/// access the caller is demonstrably already holding, because it is using that
-/// access to make this call. That is why this sits at `read` rather than
-/// `host_admin` — see `rpc::required_scope`.
+/// **The safety argument for skipping the ceremony, and where it stops.** The
+/// line written is the one this runner's own `authorized_keys` gave the
+/// CONNECTION — never the device the request names, which is ignored and kept
+/// only so a log shows what the caller believed. A device therefore cannot put a
+/// key on another device's line, cannot widen its own scope, and cannot touch
+/// the forced command or the `restrict` that gate it. Registering its own key
+/// grants it nothing either: that adds a route to access it is demonstrably
+/// already holding, because it is using that access to make this call. That is
+/// why this sits at `read` rather than `host_admin` — see
+/// `rpc::required_scope`.
+///
+/// **What is NOT checked is that the caller holds the private half of the key
+/// it sends.** `allowlist::from_entries` is a union over lines and tailcat
+/// admits by node key rather than by line, so an enrolled device may send a key
+/// belonging to a machine that is not enrolled at all: this function writes it,
+/// `allow_add` below admits it to the live server, and that third machine can
+/// then dial the tunnel and open a TCP connection to this host's sshd on
+/// loopback. sshd still authenticates it, so what an enrolled device can extend
+/// is network reachability rather than a login — but network reachability is
+/// what the tunnel exists to gate, and this is the one thing here that a reader
+/// of the paragraph above would otherwise assume was covered.
+///
+/// A proof of possession would not close it and must not be built as though it
+/// would: the risk is delegation, not impersonation — a device that wants to
+/// admit a machine controls that machine and can produce any proof asked for —
+/// and a node key is a clamped X25519 ECDH key, which nothing can sign with.
+/// Revocation is what bounds it, taking the line and its node key out of the
+/// allowlist in one write.
 ///
 /// **What it is for.** A fleet enrolled before the tunnel existed has lines
 /// with no node key at all, which `allowlist::from_entries` reads as a runner
@@ -166,11 +186,15 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
 ///
 /// **Adding is not revoking, and the two use different mechanisms on purpose.**
 /// This admits the key to the LIVE server through `allow_add`, which mutates
-/// the running server's allowed set. Withdrawing a key cannot work that way —
-/// tailcat copies the allowlist at `Start` and consults it only when a client
-/// first registers, so a revoked device that is already peered would keep its
-/// route — which is why revocation rebuilds the server and drops every live
-/// tunnel with it. Adding must not pay that price: the caller is holding a
+/// the running server's allowed set. Withdrawing a key cannot work that way:
+/// there is no `allow_remove` at tailcat v0.4.0, and tailcat copies the
+/// allowlist at `Start` and consults it only when a client first registers, so
+/// a revoked device that is already peered keeps its route regardless. The only
+/// withdrawal is a fresh `serve`, which REPLACES the server and so drops every
+/// live tunnel, not only the revoked device's. Today `serve` is called once,
+/// from `allowlist::start_tunnel` at boot — so `revoke` removes the key from
+/// the file and from the next server, and the running one keeps it until the
+/// daemon restarts. Adding must not pay that price: the caller is holding a
 /// session on this runner right now, and every other device is holding one too.
 ///
 /// Nothing here touches `allowlist::tunnel_plan` or `start_tunnel`. Those
@@ -312,6 +336,15 @@ fn rerender_with_node_key(
 /// any other. When the daemon closes one, the relay's copy loop reaches EOF and
 /// the `farcoolerd --stdio` process that sshd launched exits with it, which ends
 /// the ssh session too.
+///
+/// **And not the tunnel route, until the daemon restarts.** The allowlist is a
+/// projection of the file, so the key is gone from it the moment this write
+/// lands — but tailcat copies the allowlist at `Start`, there is no
+/// `allow_remove`, and `serve` is called once at boot. A revoked device that
+/// already peered can therefore still open a TCP connection to this host's sshd
+/// until then, where its deleted line means it authenticates as nobody. See
+/// `set_node_key` for why the withdrawal is a whole-server replacement rather
+/// than a subtraction, and what that costs every other device when it happens.
 ///
 /// **What it does not:** anything this daemon is not serving. A daemon in
 /// another `FARCOOLER_HOME` has its own registry, and a multiplexed ssh master

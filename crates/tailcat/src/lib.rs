@@ -1,10 +1,13 @@
 //! The tunnel, and the one place that knows whether this build has one.
 //!
-//! Rule 1 in `farcooler-transport` says the daemon opens no network listener.
-//! That stays literally true here — nothing in this crate calls `bind` on an
-//! interface — but its meaning changed when this crate arrived: a runner now
-//! holds an OUTBOUND DERP connection through which enrolled devices reach
-//! sshd. See `docs/superpowers/specs/2026-08-31-tailcat-transport-design.md`.
+//! Rule 1 in `farcooler-transport` says the daemon accepts no unauthenticated
+//! connection and binds no port on any interface. Nothing in this crate calls
+//! `bind` on an interface, so the second half is untouched — but this crate is
+//! why the rule had to be written that way rather than as "opens no network
+//! listener": a runner now holds an OUTBOUND DERP connection through which
+//! admitted devices reach sshd, and a rule phrased around `bind` alone would
+//! have gone on reading as "unreachable" while that was no longer the case.
+//! See `docs/superpowers/specs/2026-08-31-tailcat-transport-design.md`.
 
 use std::path::Path;
 

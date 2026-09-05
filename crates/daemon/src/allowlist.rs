@@ -6,6 +6,11 @@
 //! truth can be wrong, and the way it would be wrong is that `client.revoke`
 //! removes a device's key and forgets its node key — leaving a revoked device
 //! with a route to sshd. There is nothing here to forget to update.
+//!
+//! What this does NOT make instant is the RUNNING server, which holds the copy
+//! of the allowlist it was handed at `Start`. A revocation lands here at once
+//! and reaches the tunnel at the next `serve` — today, the next boot. See
+//! `enrollment::revoke`.
 
 use std::path::Path;
 

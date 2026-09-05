@@ -57,9 +57,9 @@ struct Cli {
 
     /// Operate on another runner, as `user@host` or an ssh config alias.
     ///
-    /// Runs the same protocol over ssh. There is no Far Cooler network
-    /// listener: a runner reachable by ssh is reachable by Far Cooler, and one
-    /// that is not, is not.
+    /// Runs the same protocol over ssh, so this flag reaches a runner exactly
+    /// as your own ssh does: one ssh can't reach, this can't either. A runner's
+    /// tunnel is the apps' route into it, and is not what this flag uses.
     //
     // The alias is a plain comment, not a doc comment: `--host` is accepted
     // and hidden rather than removed — it lives in shell history and in
