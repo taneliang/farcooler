@@ -367,43 +367,6 @@ struct WorkspaceSection: View {
         .onHover { hovering = $0 }
         // On the ROW, not on the counts, and that is the whole of it.
         //
-        // The counts fade to zero the instant a pointer arrives — the buttons
-        // above them take that space — so a `.help` on the counts could only
-        // ever describe a number that had already gone invisible, and it would
-        // be unreachable by construction rather than by bad luck. The row is
-        // the one thing under the pointer at the moment a tooltip could fire,
-        // so it carries the explanation and says the two numbers again, which
-        // is also how the reader gets them back after hovering hid them.
-        .help(ifAny: changesHelp)
-    }
-
-    /// What the trailing `+N -M` counts, in words, with the numbers repeated.
-    ///
-    /// The sidebar's number and the Changes pane's Branch header answer
-    /// different questions and are not being made to agree: this one is "is
-    /// this worth opening at all", so it spans everything in the workspace,
-    /// while Branch is "what lands when this merges" and counts commits only.
-    /// See `ChangesStore.files` for where the two diverge on the wire.
-    ///
-    /// Nil rather than an empty string when there is nothing to say: an empty
-    /// tooltip is not the same thing as no tooltip, and every clean workspace in
-    /// the fleet would be tracking one.
-    private var changesHelp: String? {
-        guard let changes, changes.hasDiff else { return nil }
-        let counts = DiffCounts.pair(
-            insertions: changes.insertions, deletions: changes.deletions)
-        // Said only in the gray state, which is the one that needs explaining.
-        // A worktree nobody has marked read is every worktree until somebody
-        // starts marking them, and a sentence on every row in the fleet saying
-        // so would be the tooltip telling you the default.
-        let read =
-            changes.changedSinceReviewed
-            ? ""
-            : " You’ve marked this reviewed, and nothing has changed since."
-        return "\(counts) in this "
-            + "workspace — committed work, uncommitted edits, and untracked files, together. "
-            + "The Changes pane splits them: Branch is what’s committed, Uncommitted is what isn’t."
-            + read
     }
 
     /// The pair, in color while there is something new here and gray once it
