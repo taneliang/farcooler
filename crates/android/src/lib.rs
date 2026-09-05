@@ -432,9 +432,48 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
             pointer(&account),
             pointer(&key_a),
             pointer(&key_b),
+            // No node key, deliberately, and not yet a Kotlin argument. This
+            // phone cannot mint one: Android is on `farcooler-tailcat`'s stub
+            // until `libtailcat.so` lands, and `farcooler_client_mint_node_key`
+            // answers `no_tailcat` here. NULL is the honest offer for that —
+            // the `v=1` shape, which grants direct runners and no tunneled
+            // ones — and it is what a failed mint must degrade to anyway.
+            // Widening this JNI signature is the app lane's change, alongside
+            // the Kotlin `external fun` and somewhere to keep the private half;
+            // doing it here alone would leave a native method Kotlin no longer
+            // matches, which is an `UnsatisfiedLinkError` at run time rather
+            // than a build failure.
+            std::ptr::null(),
             out,
             capacity,
         )
+    })
+}
+
+/// This device's tailcat node key pair, minted fresh.
+///
+/// `{"private_key":"…","public_key":"…"}`, or `{"error":"no_tailcat"}` — which
+/// is what this build answers today, and will until `libtailcat.so` lands.
+/// Kotlin's answer to that error is an offer carrying no node key, never a
+/// blocked enrolment: a phone that cannot mint still enrols as a direct
+/// runner, exactly as it did before this existed.
+///
+/// No path argument, deliberately. The pair comes back by value so the private
+/// half can go wherever Android keeps secrets rather than into a file — the
+/// same decision iOS's Keychain use records, and the reason the Go functions'
+/// path-based form stayed on the runner.
+///
+/// Nothing in Kotlin declares this yet. An exported native method with no
+/// `external fun` is inert, while the reverse — a Kotlin declaration with no
+/// symbol — is an `UnsatisfiedLinkError` at run time, so this half lands
+/// first.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeMintNodeKey(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    ceremony_json(&mut env, |out, capacity| unsafe {
+        client::farcooler_client_mint_node_key(out, capacity)
     })
 }
 

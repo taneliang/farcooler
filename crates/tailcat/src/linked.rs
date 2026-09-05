@@ -25,6 +25,7 @@ unsafe extern "C" {
     fn fc_tailcat_conn_blob(buf: *mut c_char, len: usize) -> i32;
     fn fc_tailcat_allow_add(node_key: *const c_char) -> i32;
     fn fc_tailcat_set_derp_map_url(url: *const c_char) -> i32;
+    fn fc_tailcat_mint_node_key(buf: *mut c_char, len: usize) -> i32;
 }
 
 /// A string that cannot cross the FFI (it holds an embedded NUL) is a local,
@@ -202,6 +203,64 @@ pub fn allow_add(node_key: &str) -> Result<(), TunnelError> {
         return Err(TunnelError::Io(std::io::Error::from_raw_os_error(-rc)));
     }
     Ok(())
+}
+
+/// Mint this device's node key pair. See `super::mint_node_key` for why this
+/// returns a pair rather than taking a path.
+///
+/// The Go side writes two NUL-terminated lines into the buffer, private half
+/// first — the same buffer contract `conn_blob` uses, and for the same reason:
+/// an export that allocated would need a second one to free it.
+///
+/// The shape of what comes back is CHECKED, not trusted. Two encoders and two
+/// decoders spell a node key across this boundary — `encodeNodeKey` in Go,
+/// `fence::usable_node_key` in Rust — and the failure a drift would cause is
+/// the quietest one available: a public half that is 42 characters, or that
+/// carries a `+`, produces a ceremony offer that looks filled in and a runner
+/// that admits nobody, and tailcat refuses an unrecognized client SILENTLY.
+/// The alphabet itself is the fence's to define, so this checks only that two
+/// non-empty lines arrived; `farcooler_client`'s FFI, which has the fence on
+/// hand, refuses a public half the fence would.
+pub fn mint_node_key() -> Result<super::NodeKeyPair, TunnelError> {
+    // Two 43-character halves, a newline and a NUL is 88 bytes. The slack is
+    // for a future encoding, not for this one — the Go side answers ERANGE
+    // rather than truncating, so a buffer that is merely generous costs a
+    // stack allocation and a buffer that is exactly right costs a release.
+    let mut buf = vec![0u8; 256];
+    let rc = unsafe { fc_tailcat_mint_node_key(buf.as_mut_ptr().cast::<c_char>(), buf.len()) };
+    if rc < 0 {
+        // EINVAL (a buffer this passed that Go would not take) or ERANGE (too
+        // small). Neither is a statement about the relay or a silent runner,
+        // so neither borrows `Derp`'s or `NoAnswer`'s words. There is no new
+        // failure here and therefore no fifth word: minting reaches no
+        // network at all.
+        return Err(TunnelError::Io(std::io::Error::from_raw_os_error(-rc)));
+    }
+    buf.truncate(rc as usize);
+    let text = String::from_utf8(buf).map_err(|_| {
+        TunnelError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the minted node key was not valid UTF-8",
+        ))
+    })?;
+    let malformed = || {
+        TunnelError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the minted node key was not two lines",
+        ))
+    };
+    let (private_key, public_key) = text.split_once('\n').ok_or_else(malformed)?;
+    // An empty half is the one answer that must never come back as `Ok`. It
+    // is what a stub would produce if this ever grew one by accident, and an
+    // offer carrying an empty node key is a device that can be granted no
+    // tunnel while looking like one that can.
+    if private_key.is_empty() || public_key.is_empty() {
+        return Err(malformed());
+    }
+    Ok(super::NodeKeyPair {
+        private_key: private_key.to_string(),
+        public_key: public_key.to_string(),
+    })
 }
 
 pub fn set_derp_map_url(url: &str) {

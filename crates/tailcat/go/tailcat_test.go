@@ -256,6 +256,90 @@ func TestParseNodePrivateAcceptsTailscalesOwnForm(t *testing.T) {
 	}
 }
 
+// The pair a device mints for itself is the pair the rest of the product can
+// read: the public half in the exact 43-character spelling the fence accepts,
+// and the private half in a form dial's parseNodePrivate takes back.
+//
+// Round-tripped rather than eyeballed, because the two halves are encoded by
+// this file and decoded by the fence and by dial — three places that agreeing
+// today is not the same as agreeing after an edit. A public half that is not
+// what the private half derives is the worst outcome available here: the
+// offer looks valid, the runner admits a key nobody holds, and an
+// unrecognized client gets no refusal, only a timeout.
+func TestMintingReturnsAPairTheRestOfTheProductCanRead(t *testing.T) {
+	buf := make([]byte, 128)
+	rc := mintNodeKey(buf)
+	if rc != nodeKeyLen*2+1 {
+		t.Fatalf("mintNodeKey: rc=%d, want %d", rc, nodeKeyLen*2+1)
+	}
+	if buf[rc] != 0 {
+		t.Fatalf("the minted pair was not NUL-terminated: %q", buf[:rc+1])
+	}
+	half := strings.Split(string(buf[:rc]), "\n")
+	if len(half) != 2 {
+		t.Fatalf("mintNodeKey wrote %d lines, want 2: %q", len(half), buf[:rc])
+	}
+	private, public := half[0], half[1]
+
+	priv, err := parseNodePrivate(private)
+	if err != nil {
+		t.Fatalf("the minted private half is not one dial could use: %v", err)
+	}
+	pub, err := parseNodePublic(public)
+	if err != nil {
+		t.Fatalf("the minted public half is not one the fence spells: %v", err)
+	}
+	if priv.Public() != pub {
+		t.Fatal("the minted public half is not the one the private half derives")
+	}
+	// The alphabet the fence enforces, checked here rather than trusted:
+	// fence::usable_node_key refuses anything else, and a key it refuses is a
+	// key no allowlist will ever contain.
+	for _, s := range []string{private, public} {
+		if len(s) != nodeKeyLen {
+			t.Fatalf("%q is %d characters, want %d", s, len(s), nodeKeyLen)
+		}
+		for _, r := range s {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+				t.Fatalf("%q holds %q, which the fence would refuse", s, r)
+			}
+		}
+	}
+}
+
+// Each device gets its own identity. A mint that returned a constant would
+// give every phone in a fleet the same route, and every one of them would
+// look enrolled.
+func TestMintingTwiceMintsTwoDifferentKeys(t *testing.T) {
+	first, second := make([]byte, 128), make([]byte, 128)
+	if rc := mintNodeKey(first); rc < 0 {
+		t.Fatalf("mintNodeKey: rc=%d", rc)
+	}
+	if rc := mintNodeKey(second); rc < 0 {
+		t.Fatalf("mintNodeKey: rc=%d", rc)
+	}
+	if string(first) == string(second) {
+		t.Fatal("two mints produced one key")
+	}
+}
+
+// A buffer that cannot hold the pair AND its terminator is ERANGE, and
+// nothing is written. A truncated node key is not a shorter node key: it is
+// another device's, or nobody's.
+func TestMintingIntoABufferThatIsTooSmallWritesNothing(t *testing.T) {
+	for _, size := range []int{0, 1, nodeKeyLen, nodeKeyLen*2 + 1} {
+		buf := make([]byte, size)
+		if rc := mintNodeKey(buf); rc != -int(syscall.ERANGE) {
+			t.Fatalf("mintNodeKey into %d bytes: rc=%d, want %d", size, rc, -int(syscall.ERANGE))
+		}
+		for i, b := range buf {
+			if b != 0 {
+				t.Fatalf("mintNodeKey wrote byte %d of a %d-byte buffer", i, size)
+			}
+		}
+	}
+}
+
 func TestTheIdentityFileIsCreatedUnreadableByAnybodyElse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "node.key")
 	first, err := loadOrCreateIdentity(path)

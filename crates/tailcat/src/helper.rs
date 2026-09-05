@@ -285,6 +285,22 @@ pub fn allow_add(node_key: &str) -> Result<(), TunnelError> {
     parse(&reply).map(|_| ())
 }
 
+/// Not something this backend does, for the same reason `dial` is not: there
+/// is nobody on Linux to mint for.
+///
+/// Unlike `dial`, this one COULD cross the helper's pipe — a key pair is two
+/// words, not a file descriptor — so the refusal is a scope decision rather
+/// than a mechanical limit, and it is written here rather than left to be
+/// rediscovered. This backend is what a Linux RUNNER uses, and a runner's own
+/// identity is the path-based one `serve` already creates; minting by value
+/// is a device's call, and `scripts/build-linux.sh` records that
+/// `farcooler-cli` does not link tailcat at all. Whoever gives Linux a
+/// tunneled CLIENT adds a `mint` command to `main_helper.go`'s line protocol
+/// and implements this — which is a smaller job than `dial`'s, and a real one.
+pub fn mint_node_key() -> Result<super::NodeKeyPair, TunnelError> {
+    Err(TunnelError::NoTailcatLinked)
+}
+
 fn not_serving() -> TunnelError {
     TunnelError::Io(std::io::Error::from_raw_os_error(libc::ENOTCONN))
 }
@@ -438,6 +454,15 @@ mod tests {
         // a revocation revoke: the allowlist is read at Start and never again.
         *helper().lock().expect("the tunnel helper lock") = None;
         unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
+    /// Minting is refused rather than answered with an empty pair, the same
+    /// way the stub refuses it: an offer carrying a node key nobody holds
+    /// admits nobody, silently.
+    #[test]
+    fn minting_is_not_something_this_backend_does_either() {
+        let out = mint_node_key();
+        assert!(matches!(out, Err(TunnelError::NoTailcatLinked)), "{out:?}");
     }
 
     /// Nothing on Linux dials a tunnel yet, and this backend cannot grow the

@@ -103,6 +103,49 @@ pub fn allow_add(node_key: &str) -> Result<(), TunnelError> {
     backend::allow_add(node_key)
 }
 
+/// A node key pair, both halves in memory and neither of them on disk.
+///
+/// The shape exists because this is the one thing in the crate that is a
+/// DEVICE's rather than a runner's, and the difference is the whole point:
+/// `serve` is handed a path and the runner's private half lives in a 0600
+/// file it owns, while this is handed nothing and returns both halves by
+/// value for its caller to put wherever that platform keeps secrets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeKeyPair {
+    /// This device's node PRIVATE key, and the only secret in this crate that
+    /// crosses a function boundary. 43 characters of unpadded base64-URL,
+    /// which is what `dial`'s `client_key` argument takes.
+    pub private_key: String,
+    /// The public half, in the exact spelling `farcooler_fence::usable_node_key`
+    /// accepts: 43 characters of unpadded base64-URL. This is what goes in a
+    /// ceremony offer and, from there, into a runner's allowlist.
+    ///
+    /// Not a secret. A node public key names which peer a tunnel will admit,
+    /// and holding it grants nothing.
+    pub public_key: String,
+}
+
+/// Mint this device's tunnel identity: a fresh node key pair, returned.
+///
+/// **It takes no path, and that is a decision rather than an omission.** The
+/// Go functions underneath are path-based — a runner has a home directory and
+/// writes `tailcat.key` at 0600 — but iOS keeps private keys in the Keychain
+/// on purpose, "not in UserDefaults and not in a file"
+/// (`apps/ios/FarCooler/Store.swift:7-8`), because the Keychain is the only
+/// iOS store that survives a backup restore. A path argument here would put a
+/// node private key in a file and quietly reverse that. Returning by value is
+/// also what the rest of this crate already expects: `dial` takes the client
+/// key as a string.
+///
+/// Once per DEVICE, not once per runner. The node key is the device's
+/// identity — `RunnerStore` (`crates/cli/src/runner_pipe.rs`) already holds it
+/// that way for the desktop, once rather than inside each `Reach::Tailcat`.
+///
+/// Minting is not serving: this touches no server and needs none running.
+pub fn mint_node_key() -> Result<NodeKeyPair, TunnelError> {
+    backend::mint_node_key()
+}
+
 /// Point this process at a different DERP map.
 ///
 /// Process-wide rather than a parameter on every call, because it is
@@ -134,6 +177,23 @@ mod tests {
     async fn a_build_without_the_archive_says_which_thing_is_missing() {
         let out = dial("tc-anything", "key", 22).await;
         assert!(matches!(out, Err(TunnelError::NoTailcatLinked)));
+        assert_eq!(TunnelError::NoTailcatLinked.code(), "no_tailcat");
+    }
+
+    /// The one that would be quiet if it were got wrong. A stub that answered
+    /// `Ok(NodeKeyPair::default())` — or anything with an empty public half —
+    /// would put a device into a ceremony offer carrying a node key that
+    /// looks like a field somebody filled in, and the runner would then admit
+    /// nobody. Tailcat ignores an unrecognized client silently, so the
+    /// symptom is a tunnel that times out for no stated reason, which is the
+    /// exact failure minting exists to fix.
+    #[cfg(not(any(feature = "linked", feature = "helper")))]
+    #[test]
+    fn minting_without_the_archive_refuses_rather_than_returning_an_empty_key() {
+        let out = mint_node_key();
+        let Err(TunnelError::NoTailcatLinked) = out else {
+            panic!("a build with no archive minted something: {out:?}");
+        };
         assert_eq!(TunnelError::NoTailcatLinked.code(), "no_tailcat");
     }
 

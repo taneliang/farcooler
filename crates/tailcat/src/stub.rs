@@ -23,6 +23,23 @@ pub fn allow_add(_: &str) -> Result<(), TunnelError> {
     Err(TunnelError::NoTailcatLinked)
 }
 
+/// Refused, loudly, and never an empty pair.
+///
+/// The one entry point here where a quiet answer would be worse than an
+/// error rather than merely different. Every other stub returns a failure the
+/// caller cannot mistake for work done; a mint that answered with empty
+/// strings would hand back something an app would store, offer, and believe —
+/// producing a ceremony offer that looks valid and admits nobody. Tailcat
+/// ignores an unrecognized client silently, so the symptom on the far side is
+/// a tunnel that times out saying nothing, which is the failure minting was
+/// built to end. Android is on this arm today, until its `.so` lands, and a
+/// failed mint there is meant to degrade to an offer carrying NO node key —
+/// which is the tested `v=1` path — rather than to an offer carrying a
+/// worthless one.
+pub fn mint_node_key() -> Result<super::NodeKeyPair, TunnelError> {
+    Err(TunnelError::NoTailcatLinked)
+}
+
 /// The one entry point that does not error, because it claims nothing.
 /// Recording configuration is not reporting work done; every call that would
 /// actually open a tunnel still fails above.

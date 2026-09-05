@@ -545,6 +545,75 @@ pub unsafe extern "C" fn farcooler_client_generate_key(
     })
 }
 
+/// Mint this device's tailcat node key pair.
+///
+/// `{"private_key":"…","public_key":"…"}`, each half 43 characters of unpadded
+/// base64-URL, or `{"error":"<word>"}` — one of `farcooler_tailcat`'s four
+/// stable words, never a Rust error string. Same buffer contract as
+/// `farcooler_client_generate_key`.
+///
+/// **It takes no path, and that is the decision this entry point exists to
+/// hold.** The Go functions underneath are path-based, because a runner has a
+/// home directory and writes `tailcat.key` at 0600. A phone does not: iOS
+/// keeps private keys in the Keychain, "not in UserDefaults and not in a file"
+/// (`apps/ios/FarCooler/Store.swift:7-8`), because the Keychain is the only
+/// iOS store that survives a backup restore. A path argument here would put a
+/// node private key on disk and quietly reverse that. The caller stores the
+/// private half where its platform keeps secrets and passes the public half to
+/// `farcooler_client_ceremony_offer`.
+///
+/// **Once per DEVICE, not once per runner.** The node key is the device's
+/// identity, and `RunnerStore` (`crates/cli/src/runner_pipe.rs`) already holds
+/// it that way for the desktop — once, rather than inside each
+/// `Reach::Tailcat`. A second enrolment offers the same key.
+///
+/// A build with no Go archive answers `{"error":"no_tailcat"}` and never an
+/// empty pair. Android is on that arm today. The caller's answer to it is an
+/// offer carrying NO node key — the `v=1` path, which is tested — and never a
+/// blocked enrolment: a phone whose mint fails still enrols as a direct
+/// runner, which is what it could have done before this existed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_mint_node_key(out: *mut u8, capacity: usize) -> usize {
+    guarded(0, || spill(&minted(farcooler_tailcat::mint_node_key()), out, capacity))
+}
+
+/// What a mint becomes on the wire, and the check that it is usable.
+///
+/// Its own function so it is testable in a build with no Go archive, which is
+/// every build of this crate's tests and Android's real state today: the `Ok`
+/// arm can be handed a pair by hand.
+///
+/// The predicate is `farcooler_fence`'s own and not a second spelling of it. A
+/// public half the fence refuses is one `fence::render` would refuse to write,
+/// so no runner's allowlist could ever contain it — and an offer carrying it
+/// would look filled in while granting a tunnel that admits nobody. Tailcat
+/// ignores an unrecognized client silently, so the symptom of letting one
+/// through is a connection that times out saying nothing. That is the failure
+/// this whole feature exists to end, so it is refused here rather than
+/// forwarded.
+///
+/// The word for it is `io`, not a fifth one: `no_tailcat` means this build has
+/// no tunnel, which is a different and recoverable thing, and inventing a word
+/// for "the two encoders disagree" would put a dialect in three apps for a bug
+/// that must be fixed rather than displayed.
+fn minted(outcome: Result<farcooler_tailcat::NodeKeyPair, farcooler_tailcat::TunnelError>) -> String {
+    let pair = match outcome {
+        Ok(pair) => pair,
+        Err(error) => return json!({ "error": error.code() }).to_string(),
+    };
+    if !farcooler_fence::usable_node_key(&pair.public_key) || pair.private_key.is_empty() {
+        // Logged, not returned: the detail belongs to whoever is debugging and
+        // to nobody reading a screen, the same split `refusal` makes.
+        tracing::error!("a minted node key is not one the fence would write; refusing it");
+        let drift = farcooler_tailcat::TunnelError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the minted node key is not one the fence would write",
+        ));
+        return json!({ "error": drift.code() }).to_string();
+    }
+    json!({ "private_key": pair.private_key, "public_key": pair.public_key }).to_string()
+}
+
 /// Start streaming a terminal's output. Chunks arrive through `poll`.
 ///
 /// Each chunk is `{"stream": "<terminal>", "chunk": "<base64>"}` — no ticket,
@@ -790,6 +859,21 @@ pub unsafe extern "C" fn farcooler_client_client_id(
 /// caller's: a device that could be told which channel it is could be told
 /// wrong, and a ceremony id a caller chose is a ceremony id a caller can repeat.
 ///
+/// `node_key` is this device's tailcat node PUBLIC key — the public half of
+/// what `farcooler_client_mint_node_key` returns — and it may be NULL. NULL
+/// and the empty string mean the same thing and are the same offer: a device
+/// that has not minted one, which can be granted direct runners and no
+/// tunneled ones. That is the `v=1` shape, and it is what a build on the stub
+/// must send rather than a key nobody holds.
+///
+/// It is an argument rather than something this crate reaches for because
+/// this crate does not hold it: the private half lives in the Keychain, or in
+/// Android's equivalent, and only the app can get it out. Passed through as
+/// given rather than filtered — a key the fence would refuse produces an
+/// offer that grants no tunnel (`ceremony::can_be_granted_a_tunnel`), which is
+/// a refusal on the side that would act on it, where dropping it here would be
+/// a silent one on the side that cannot.
+///
 /// Writes the offer as JSON. **That string is both what goes in the QR code and
 /// what the device keeps** to pass back as `expecting` when the reply arrives,
 /// so what it shows and what it remembers cannot drift apart.
@@ -799,6 +883,7 @@ pub unsafe extern "C" fn farcooler_client_ceremony_offer(
     account: *const c_char,
     key_a: *const c_char,
     key_b: *const c_char,
+    node_key: *const c_char,
     out: *mut u8,
     capacity: usize,
 ) -> usize {
@@ -809,8 +894,16 @@ pub unsafe extern "C" fn farcooler_client_ceremony_offer(
             return spill(&refusal(&crate::ceremony::CeremonyError::Malformed("no key".into())), out, capacity);
         };
         let key_b = unsafe { read_str(key_b) };
+        let node_key = unsafe { read_str(node_key) }.unwrap_or_default();
 
-        let offer = crate::ceremony::offer(&name, &account, &key_a, key_b.as_deref());
+        // Set on the record rather than taken by `ceremony::offer`, which
+        // says why in as many words: no app should have to pass an empty
+        // string to say "none", and most of this crate's own callers have
+        // none to pass.
+        let offer = crate::ceremony::Offer {
+            node_key,
+            ..crate::ceremony::offer(&name, &account, &key_a, key_b.as_deref())
+        };
         spill(&crate::ceremony::encode_offer(&offer), out, capacity)
     })
 }
@@ -2163,6 +2256,58 @@ unsafe fn read_str(pointer: *const c_char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pair whose public half the fence would refuse never reaches an app.
+    ///
+    /// The `Ok` arm cannot be exercised through the entry point in a build
+    /// with no Go archive, which is every build of these tests — so it is
+    /// exercised here, where a pair can be handed in by value. The failure
+    /// this guards against is the quietest one in the feature: two encoders
+    /// spell a node key across the Go boundary, and a public half that drifts
+    /// to 42 characters, or grows a `+`, would produce an offer that looks
+    /// filled in and a runner that admits nobody — silently, because tailcat
+    /// ignores an unrecognized client without a word.
+    #[test]
+    fn a_minted_pair_the_fence_would_refuse_is_refused_here() {
+        use farcooler_tailcat::NodeKeyPair;
+
+        let good = NodeKeyPair {
+            private_key: "b".repeat(43),
+            public_key: "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+        };
+        let json: serde_json::Value = serde_json::from_str(&minted(Ok(good.clone()))).unwrap();
+        assert_eq!(json["public_key"], good.public_key);
+        assert_eq!(json["private_key"], good.private_key);
+
+        for bad in [
+            // Too short, too long, and the two base64 characters the fence
+            // forbids because an authorized_keys line cannot carry them.
+            "a".repeat(42),
+            "a".repeat(44),
+            format!("{}+", "a".repeat(42)),
+            format!("{}/", "a".repeat(42)),
+            String::new(),
+        ] {
+            let pair = NodeKeyPair { public_key: bad.clone(), ..good.clone() };
+            let json: serde_json::Value = serde_json::from_str(&minted(Ok(pair))).unwrap();
+            assert_eq!(json["error"], "io", "{bad:?} was handed to an app");
+            assert!(json["public_key"].is_null(), "{bad:?} was handed to an app");
+        }
+
+        // An empty PRIVATE half is refused too. It would pass the fence's
+        // predicate, which has nothing to say about the half it never sees,
+        // and it is a device that could offer a key and then never dial.
+        let no_secret = NodeKeyPair { private_key: String::new(), ..good.clone() };
+        let json: serde_json::Value = serde_json::from_str(&minted(Ok(no_secret))).unwrap();
+        assert_eq!(json["error"], "io", "{json}");
+
+        // And every refusal from below crosses as its own stable word, never
+        // as a Rust error string.
+        let json: serde_json::Value =
+            serde_json::from_str(&minted(Err(farcooler_tailcat::TunnelError::NoTailcatLinked)))
+                .unwrap();
+        assert_eq!(json["error"], "no_tailcat");
+    }
 
     /// A panic under the boundary must come back as a value, not a signal.
     ///

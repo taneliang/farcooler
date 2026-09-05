@@ -12,6 +12,7 @@ use std::ffi::CString;
 use farcooler_client::ffi::{
     farcooler_client_ceremony_accept, farcooler_client_ceremony_offer,
     farcooler_client_ceremony_reply, farcooler_client_ceremony_scan, farcooler_client_fingerprint,
+    farcooler_client_mint_node_key,
 };
 use serde_json::Value;
 
@@ -60,6 +61,7 @@ fn an_offer(name: &str, account: &str, key_a: &str) -> String {
             account.as_ptr(),
             key.as_ptr(),
             std::ptr::null(),
+            std::ptr::null(),
             out,
             capacity,
         )
@@ -78,15 +80,28 @@ fn a_reply_granting(offer_json: &str, runners_json: &str) -> String {
     })
 }
 
-/// An offer from a device that HAS joined a tunnel.
+/// An offer from a device that HAS minted a node key.
 ///
-/// The FFI's `offer` entry point mints one with no node key, because nothing on
-/// a phone holds one yet; a device that does simply sets the field. Editing the
-/// JSON here is that, done the shortest way a test can.
+/// Built through the entry point rather than by editing its JSON afterwards,
+/// which is what this file did while `farcooler_client_ceremony_offer` had no
+/// way to carry one. That fixture supplied by hand what nothing in an app
+/// could supply; passing the argument is the thing an app now does.
 fn an_offer_with_a_node_key(name: &str, account: &str, key_a: &str) -> String {
-    let mut offer: Value = serde_json::from_str(&an_offer(name, account, key_a)).expect("json");
-    offer["node_key"] = Value::String(NODE_KEY.into());
-    offer.to_string()
+    let name = CString::new(name).unwrap();
+    let account = CString::new(account).unwrap();
+    let key = CString::new(key_a).unwrap();
+    let node_key = CString::new(NODE_KEY).unwrap();
+    text(|out, capacity| unsafe {
+        farcooler_client_ceremony_offer(
+            name.as_ptr(),
+            account.as_ptr(),
+            key.as_ptr(),
+            std::ptr::null(),
+            node_key.as_ptr(),
+            out,
+            capacity,
+        )
+    })
 }
 
 /// Scan an offer the way the trusted device does: on behalf of the account
@@ -217,10 +232,10 @@ fn each_refusal_has_the_code_the_apps_switch_on() {
 ///
 /// This is the half that makes a QR enrollment able to produce a tunnel at all:
 /// before it, a granted runner had an address and nothing else, so the ceremony
-/// could only ever hand back a direct one. Able to, and not yet doing so — the
-/// other half, a device holding a node key of its own to offer, does not exist,
-/// so a real ceremony still grants `Direct` every time. The fixture below
-/// supplies by hand what nothing yet supplies in the app.
+/// could only ever hand back a direct one. The other half — a device holding a
+/// node key of its own to offer — is `farcooler_client_mint_node_key` and this
+/// entry point's `node_key` argument, and the offer below now goes through
+/// both rather than being edited into shape afterwards.
 #[test]
 fn a_tunneled_runner_crosses_the_boundary() {
     let mine = an_offer_with_a_node_key("iPhone", "acct_1", KEY_A);
@@ -330,6 +345,7 @@ fn a_short_buffer_reports_the_size_and_writes_nothing() {
             account.as_ptr(),
             key.as_ptr(),
             std::ptr::null(),
+            std::ptr::null(),
             tiny.as_mut_ptr(),
             tiny.len(),
         )
@@ -343,6 +359,7 @@ fn a_short_buffer_reports_the_size_and_writes_nothing() {
             name.as_ptr(),
             account.as_ptr(),
             key.as_ptr(),
+            std::ptr::null(),
             std::ptr::null(),
             std::ptr::null_mut(),
             0,
@@ -364,11 +381,99 @@ fn a_mac_offers_its_shell_key_too() {
             account.as_ptr(),
             key_a.as_ptr(),
             key_b.as_ptr(),
+            std::ptr::null(),
             out,
             capacity,
         )
     });
     assert_eq!(offer["key_b"], KEY_B);
+}
+
+/// The argument that carries a minted key, and the difference it makes.
+///
+/// Both halves in one test on purpose: the field arriving in the JSON proves
+/// only that a string crossed, while the grant proves it is the field the
+/// granting side reads. Task 10 left this argument off because no caller could
+/// have passed anything but `""`; the assertion that matters is that passing
+/// something now changes what a ceremony can hand back.
+#[test]
+fn a_minted_node_key_rides_in_the_offer_and_unlocks_a_tunneled_runner() {
+    let with_key = an_offer_with_a_node_key("iPhone", "acct_1", KEY_A);
+    let decoded: Value = serde_json::from_str(&with_key).expect("json");
+    assert_eq!(decoded["node_key"], NODE_KEY);
+
+    let granted = accept(&a_reply_granting(&with_key, TUNNELED_RUNNERS), &with_key, false, 0);
+    assert_eq!(granted["runners"][0]["reach"]["kind"], "tailcat", "{granted}");
+
+    // And the same device without one is refused the same runner — which is
+    // what says the node key did the work, rather than something else about
+    // this offer.
+    let without = an_offer("iPhone", "acct_1", KEY_A);
+    let plain: Value = serde_json::from_str(&without).expect("json");
+    assert_eq!(plain["node_key"], "", "an offer invented a node key: {plain}");
+    let refused = accept(&a_reply_granting(&without, TUNNELED_RUNNERS), &without, false, 0);
+    assert_eq!(refused["error"], "no_tunnel", "{refused}");
+}
+
+/// NULL and "" are one offer, and neither invents a key.
+///
+/// The path a build on the stub takes: minting answered `no_tailcat`, so the
+/// app passes nothing. It must produce the `v=1` shape — an offer that can be
+/// granted direct runners and no tunneled ones — rather than an offer carrying
+/// a placeholder that would look filled in and admit nobody.
+#[test]
+fn a_device_that_could_not_mint_offers_no_node_key_at_all() {
+    let name = CString::new("Pixel").unwrap();
+    let account = CString::new("acct_1").unwrap();
+    let key = CString::new(KEY_A).unwrap();
+    let empty = CString::new("").unwrap();
+
+    for node_key in [std::ptr::null(), empty.as_ptr()] {
+        let offer = json(|out, capacity| unsafe {
+            farcooler_client_ceremony_offer(
+                name.as_ptr(),
+                account.as_ptr(),
+                key.as_ptr(),
+                std::ptr::null(),
+                node_key,
+                out,
+                capacity,
+            )
+        });
+        assert_eq!(offer["node_key"], "", "{offer}");
+        assert_eq!(offer["key_a"], KEY_A, "{offer}");
+    }
+}
+
+/// A build with no Go archive must REFUSE to mint, never answer with an empty
+/// pair.
+///
+/// This test is the one that runs everywhere: `cargo test -p farcooler-client`
+/// links no tunnel, which is exactly Android's state today. An empty
+/// `public_key` here would be stored by an app, offered in a ceremony, written
+/// into an allowlist and then ignored by tailcat in silence — a runner that
+/// admits nobody, reached by a connection that times out saying nothing. That
+/// is the failure minting exists to end, so the stub says `no_tailcat` and the
+/// app's answer to it is an offer with no node key at all.
+#[test]
+#[cfg(not(feature = "tailcat"))]
+fn minting_without_a_linked_tunnel_refuses_rather_than_returning_an_empty_pair() {
+    let minted = json(|out, capacity| unsafe { farcooler_client_mint_node_key(out, capacity) });
+    assert_eq!(minted["error"], "no_tailcat", "{minted}");
+    assert!(minted["private_key"].is_null(), "a stub minted a private key: {minted}");
+    assert!(minted["public_key"].is_null(), "a stub minted a public key: {minted}");
+}
+
+/// The buffer contract, on the newest entry point too.
+#[test]
+fn minting_reports_the_size_before_it_writes() {
+    let asked = unsafe { farcooler_client_mint_node_key(std::ptr::null_mut(), 0) };
+    assert!(asked > 0);
+
+    let mut tiny = [0u8; 4];
+    let needed = unsafe { farcooler_client_mint_node_key(tiny.as_mut_ptr(), tiny.len()) };
+    assert_eq!(needed, asked);
+    assert_eq!(tiny, [0; 4], "a truncated key pair is worse than none");
 }
 
 /// The fingerprint on the confirmation screen is the one the reply is addressed
@@ -428,6 +533,7 @@ fn null_arguments_are_survivable() {
     unsafe {
         // No key: a refusal, not a crash and not an offer for nothing.
         let n = farcooler_client_ceremony_offer(
+            std::ptr::null(),
             std::ptr::null(),
             std::ptr::null(),
             std::ptr::null(),

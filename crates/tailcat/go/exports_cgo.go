@@ -51,6 +51,19 @@ func fc_tailcat_conn_blob(buf *C.char, length C.size_t) C.int {
 	return C.int(connBlob(unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(length))))
 }
 
+// The one export that is a DEVICE's, not a runner's: it mints a node key pair
+// and hands both halves back by value. It deliberately takes no path — see
+// `mintIdentity` in `tailcat.go` for why a phone must not be handed one — and
+// it needs no server, because minting is not serving.
+//
+//export fc_tailcat_mint_node_key
+func fc_tailcat_mint_node_key(buf *C.char, length C.size_t) C.int {
+	if buf == nil || length == 0 {
+		return C.int(-int(syscall.EINVAL))
+	}
+	return C.int(mintNodeKey(unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(length))))
+}
+
 //export fc_tailcat_allow_add
 func fc_tailcat_allow_add(nodeKey *C.char) C.int {
 	return C.int(allowAdd(C.GoString(nodeKey)))

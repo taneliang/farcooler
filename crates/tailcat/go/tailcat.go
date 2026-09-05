@@ -277,6 +277,21 @@ func decodeNodeKey(s string) ([]byte, error) {
 	return raw, nil
 }
 
+// encodeNodeKey renders 32 raw key bytes the way this product writes a node
+// key, and is decodeNodeKey's exact inverse: unpadded base64-URL, nodeKeyLen
+// characters.
+//
+// The direction that had no encoder until a device minted its own key. Every
+// node key this package had ever seen arrived from the fence already in this
+// spelling; mintNodeKey is the first thing here that has to produce one. It
+// must be this spelling and not tailscale's "nodekey:<hex>", because the
+// string travels straight into a ceremony offer and from there into an
+// authorized_keys line, and fence::usable_node_key accepts exactly 43
+// characters of base64-URL and nothing else.
+func encodeNodeKey(raw [32]byte) string {
+	return base64.RawURLEncoding.EncodeToString(raw[:])
+}
+
 // parseAllowed turns the newline-separated node keys the daemon derived from
 // authorized_keys into tailcat's form.
 //
@@ -402,11 +417,26 @@ func readPrivateFile(path string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(file, 4096))
 }
 
+// mintIdentity returns a fresh tunnel identity and writes it nowhere.
+//
+// Split out of createIdentity so that a runner creating its key file and a
+// device minting a key for itself generate one in the same place, with the
+// same call. Where the private half then lives is the caller's business, and
+// the two callers disagree deliberately: a runner has a home directory and
+// writes tailcat.key at 0600, while a phone keeps its private keys in the
+// Keychain — "not in UserDefaults and not in a file"
+// (apps/ios/FarCooler/Store.swift:7-8), because that is the only iOS store
+// that survives a backup restore. Handing a phone a path would quietly
+// reverse that, which is why fc_tailcat_mint_node_key takes none.
+func mintIdentity() identity {
+	return identity{priv: key.NewNode()}
+}
+
 // createIdentity writes a fresh key, and fails rather than overwriting one
 // that appeared between the read above and this call. It carries no region:
 // which relay this runner listens on is not known until Start has picked one.
 func createIdentity(path string) (identity, error) {
-	id := identity{priv: key.NewNode()}
+	id := mintIdentity()
 	text, err := renderIdentity(id)
 	if err != nil {
 		return identity{}, err
@@ -759,6 +789,40 @@ func connBlob(buf []byte) (rc int) {
 	copy(buf, blob)
 	buf[len(blob)] = 0
 	return len(blob)
+}
+
+// mintNodeKey mints a node key pair for a DEVICE and copies both halves into
+// buf, NUL-terminated, returning the length of the text itself. Same buffer
+// contract as connBlob, because a Go export that allocated would need a
+// second one to free it.
+//
+// Two lines, private first:
+//
+//	<43 characters>\n<43 characters>
+//
+// Both halves in this product's own encoding rather than tailscale's
+// "privkey:<hex>" text form. The public half has no choice — it goes into a
+// ceremony offer and then into an authorized_keys line, where the fence
+// accepts nothing else — and spelling the two halves of one payload
+// differently is a way to hand the wrong one to the wrong place. dial's
+// parseNodePrivate already reads the private half back in this form; that is
+// asserted by the tests rather than assumed.
+//
+// It touches no server and takes no lock: minting is not serving. A device
+// that will never run a tunnel mints this, and the process it runs in has no
+// identity file, no home directory and nothing to pin a region to. The pair
+// is returned and stored nowhere — see mintIdentity for why the path-shaped
+// form is the runner's alone.
+func mintNodeKey(buf []byte) (rc int) {
+	defer recoverToErrno(&rc)
+	id := mintIdentity()
+	text := encodeNodeKey(id.priv.Raw32()) + "\n" + encodeNodeKey(id.priv.Public().Raw32())
+	if len(buf) < len(text)+1 {
+		return -int(syscall.ERANGE)
+	}
+	copy(buf, text)
+	buf[len(text)] = 0
+	return len(text)
 }
 
 // relayReachable reports whether the DERP node a token names will accept a TCP

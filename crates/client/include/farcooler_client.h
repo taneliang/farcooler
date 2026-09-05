@@ -276,6 +276,39 @@ bool farcooler_client_connected(void *handle);
 size_t farcooler_client_generate_key(const char *comment, uint8_t *out, size_t capacity);
 
 /**
+ * Mint this device's tailcat node key pair — the identity a tunneled runner
+ * admits, and the one thing that lets a phone be granted one at all.
+ *
+ * Writes JSON:
+ *
+ *     {"private_key": "<43 chars>", "public_key": "<43 chars>"}
+ *
+ * Both halves are unpadded base64-URL. The public half is what goes into
+ * farcooler_client_ceremony_offer's `node_key`; the private half is what
+ * `Reach.tailcat`'s client key needs when this device dials.
+ *
+ * IT TAKES NO PATH, AND THAT IS DELIBERATE. The pair comes back by value so
+ * the caller can put the private half where its platform keeps secrets — the
+ * Keychain on iOS, "not in UserDefaults and not in a file", because that is
+ * the only iOS store that survives a backup restore. A path argument would
+ * have put a private key on disk and reversed that decision quietly.
+ *
+ * ONCE PER DEVICE, not once per runner. The node key is this device's
+ * identity; enrolling a second runner offers the same key. Mint on first need,
+ * keep it, and read it back afterwards.
+ *
+ * A build with no tunnel linked answers {"error":"no_tailcat"} and never an
+ * empty pair. Android is that build today. The answer to it is an offer
+ * carrying NO node key — pass NULL — and never a blocked enrolment: a device
+ * that cannot mint still enrols as a direct runner, exactly as it did before
+ * this existed.
+ *
+ * Buffer contract as farcooler_client_generate_key: bytes needed returned,
+ * nothing written when short, NULL asks the size. 256 is ample.
+ */
+size_t farcooler_client_mint_node_key(uint8_t *out, size_t capacity);
+
+/**
  * The public key belonging to a private key, as one OpenSSH line.
  *
  * Derived rather than stored: a device has one identity, and keeping the public
@@ -369,12 +402,22 @@ size_t farcooler_client_client_id(const char *public_key, uint8_t *out, size_t c
  * phone. The channel and the ceremony id are the library's to set: a device
  * that could be told which channel it is could be told wrong.
  *
+ * `node_key` is this device's tailcat node PUBLIC key — the `public_key` half
+ * of what farcooler_client_mint_node_key returns — and may be NULL. NULL and
+ * "" are the same offer: a device that has not minted one, which can be
+ * granted direct runners and no tunneled ones. That is the v=1 shape, and it
+ * is what to send when minting failed. Never send a placeholder: a node key
+ * nobody holds produces an offer that looks filled in and a tunnel that admits
+ * nobody, and tailcat ignores an unrecognized client silently, so the symptom
+ * is a connection that times out saying nothing.
+ *
  * The returned string is BOTH what goes in the QR code and what the device
  * keeps, to pass back as `expecting_json` when the reply arrives.
  */
 size_t farcooler_client_ceremony_offer(const char *name, const char *account,
                                        const char *key_a, const char *key_b,
-                                       uint8_t *out, size_t capacity);
+                                       const char *node_key, uint8_t *out,
+                                       size_t capacity);
 
 /*
  * Leg one, the scanning side: read a scanned offer.
