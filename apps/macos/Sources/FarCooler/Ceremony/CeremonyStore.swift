@@ -271,7 +271,15 @@ enum CeremonyFFI {
             account.withCString { account in
                 keyA.withCString { keyA in
                     withOptionalCString(keyB) { keyB in
-                        spill { farcooler_client_ceremony_offer(name, account, keyA, keyB, $0, $1) }
+                        // No node key. A Mac being added to a fleet reaches its
+                        // runners by address — it has `ssh`, and the tunnel
+                        // exists for devices that do not. NULL is the `v=1`
+                        // offer: direct runners granted, tunneled ones refused
+                        // by the core rather than half-accepted here.
+                        spill {
+                            farcooler_client_ceremony_offer(
+                                name, account, keyA, keyB, nil, $0, $1)
+                        }
                     }
                 }
             }

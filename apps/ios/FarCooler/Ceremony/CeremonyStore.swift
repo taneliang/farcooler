@@ -234,7 +234,8 @@ enum CeremonyCore {
                 keyA.withCString { keyA in
                     withOptionalCString(keyB) { keyB in
                         answer {
-                            farcooler_client_ceremony_offer(name, account, keyA, keyB, $0, $1)
+                            farcooler_client_ceremony_offer(
+                                name, account, keyA, keyB, nil, $0, $1)
                         }
                     }
                 }
