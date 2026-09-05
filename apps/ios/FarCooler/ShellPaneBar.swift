@@ -157,12 +157,32 @@ struct ShellPaneChromeModifier: ViewModifier {
     let changes: ChangesStore?
     /// Whether this pane is the one on screen. See `dismissEverything`.
     let isVisible: Bool
+    /// A terminal this bar just made, handed up so the shell can land on it.
+    ///
+    /// The pane cannot move the shell itself — nothing inside a pane knows
+    /// where it sits on the track — so `ShellScreen` owns the arrival. See
+    /// `newTerminalItem` for why landing on it is part of the action rather
+    /// than a nicety on top of it.
+    let onCreated: (String) -> Void
 
     @State private var showPhotoPicker = false
     @State private var pickedImage: PhotosPickerItem?
     @State private var removeCandidate: Workspace?
     @State private var confirmingRemove = false
     @State private var needsTypedConfirmation: Workspace?
+    @State private var newTerminalFailure: NewTerminalFailure?
+
+    /// Which sentence a refused New Terminal shows.
+    ///
+    /// The app's OWN two, chosen from `Connection.NewTerminalResult` — never a
+    /// string from the runner. `Identifiable` so `.alert`'s `presenting:` form
+    /// can carry it, which is what keeps the title and the body from being
+    /// derived twice out of the same optional.
+    private enum NewTerminalFailure: String, Identifiable {
+        case disconnected
+        case refused
+        var id: String { rawValue }
+    }
 
     func body(content: Content) -> some View {
         content
@@ -250,6 +270,42 @@ struct ShellPaneChromeModifier: ViewModifier {
                     await connection.removeWorktree(ws, confirm: typed)
                 }
             }
+            // Far Cooler's own two sentences, and nothing the runner wrote.
+            //
+            // An alert rather than the `SheetFailureSection` the remove flow
+            // uses, because there is no sheet: a menu item acts immediately,
+            // so the only surface a refusal has is one the platform puts up
+            // over the pane. What that costs is the `DetailBox` the sheet has
+            // for a transcript, and nothing is lost by it — see
+            // `Connection.NewTerminalResult`, which never carries one.
+            //
+            // The disconnected sentence does NOT claim nothing was made.
+            // `WatchLinkHost.reason` is careful about exactly this and it is
+            // the same situation: losing the link is losing the ANSWER, not
+            // stopping the call, and a create that landed a moment later into
+            // a dropped connection is a real tab that this side would be
+            // telling somebody does not exist.
+            .alert(
+                newTerminalFailure == .disconnected
+                    ? "Far Cooler lost this runner"
+                    : "That runner wouldn’t open a terminal",
+                isPresented: Binding(
+                    get: { newTerminalFailure != nil },
+                    set: { if !$0 { newTerminalFailure = nil } }),
+                presenting: newTerminalFailure
+            ) { _ in
+                Button("OK", role: .cancel) {}
+            } message: { failure in
+                switch failure {
+                case .disconnected:
+                    Text(
+                        "The connection dropped before it answered, so the terminal may or "
+                            + "may not have been made. Its tabs will say which, once the "
+                            + "runner’s back.")
+                case .refused:
+                    Text("It answered, and the answer was no. Nothing was created.")
+                }
+            }
             .onChange(of: isVisible) { _, visible in
                 if !visible { dismissEverything() }
             }
@@ -272,6 +328,7 @@ struct ShellPaneChromeModifier: ViewModifier {
         confirmingRemove = false
         needsTypedConfirmation = nil
         removeCandidate = nil
+        newTerminalFailure = nil
     }
 
     /// An image, sent by typing its path into the tty.
@@ -310,7 +367,12 @@ struct ShellPaneChromeModifier: ViewModifier {
 
     /// Whether the overflow has anything in it. A `Menu` that opens onto
     /// nothing is worse than one that is not there.
-    private var hasOverflow: Bool { canSwitchMode || canRemove }
+    private var hasOverflow: Bool { canCreateTerminal || canSwitchMode || canRemove }
+
+    /// Every workspace can take another terminal — including this one when the
+    /// pane in front of you is the Diff, which has no terminal behind it and is
+    /// a perfectly ordinary place to decide you want one.
+    private var canCreateTerminal: Bool { workspace != nil }
 
     private var canSwitchMode: Bool {
         guard let live else { return false }
@@ -333,6 +395,7 @@ struct ShellPaneChromeModifier: ViewModifier {
 
     private var overflowMenu: some View {
         Menu {
+            if canCreateTerminal, let workspace { newTerminalItem(workspace) }
             if canSwitchMode, let live { paneModeItem(live) }
             if canRemove, let workspace {
                 Divider()
@@ -347,6 +410,71 @@ struct ShellPaneChromeModifier: ViewModifier {
             Image(systemName: "ellipsis")
         }
         .accessibilityLabel("Pane options")
+    }
+
+    /// Another terminal in this worktree.
+    ///
+    /// **The capability existed everywhere except here.** `terminal.create` has
+    /// been a wire method since the protocol had one (`proto/farcooler.proto`,
+    /// tag 24); the CLI, the Mac (⌘T, the sidebar, the palette, ⌃B c) and
+    /// Android all call it, and `Connection.createTerminal` was already written
+    /// on this side — with no caller. So a workspace on the phone could show
+    /// its terminals, switch between them, scroll them and type into them, and
+    /// the one thing you want first in a fresh worktree was the one thing there
+    /// was no way to ask for. Nothing new crosses the wire for this; it is a
+    /// door on a room that was already built.
+    ///
+    /// ## Why here and not in the column you drag up
+    ///
+    /// The obvious home looks like `ShellColumn`: it already lists this
+    /// workspace's terminals and it is the surface you are on at the moment you
+    /// realise you want another one. Three things in that column's own design
+    /// say no, and each is load-bearing rather than a taste:
+    ///
+    /// - **A row there is chosen by RELEASING a finger.** `ShellRootView`'s bar
+    ///   gesture maps the finger's height to a row every frame and
+    ///   `ShellFleet.barRelease` commits whatever it is over — that is a
+    ///   selection mechanism, and hanging a create off it means an overshot
+    ///   drag makes a tmux window. Selections are free to be wrong; this is not.
+    /// - **`tabCount` is the column's arithmetic, not a list length.**
+    ///   `ShellGesture.columnFull`, `pageRise` and `overviewProgress` are all
+    ///   written against it, so a synthetic row moves the point where the
+    ///   overview begins by a whole `rowHeight` and re-tunes a gesture
+    ///   `ShellNavigationTests` and `ShellGestureTests` pin between them.
+    /// - **One dot per tab, in two places.** The ribbon and the column share
+    ///   marks through a `matchedGeometryEffect` keyed on `tab.id`; a row with
+    ///   no tab behind it has no dot to fly, and inventing one would put a mark
+    ///   in the ribbon for a terminal that does not exist. The column already
+    ///   refuses a non-tab row on the same grounds — see its note on why there
+    ///   is deliberately no workspace row in it.
+    ///
+    /// This bar is where the file header says a pane's capabilities go, and the
+    /// bottom bar is the one surface nothing may be added to. A menu item is
+    /// also simply the right shape: it is tapped on purpose, it can be titled,
+    /// and it can put an alert up when the runner says no.
+    ///
+    /// ## Landing on it is part of the action
+    ///
+    /// `onCreated` hands the id up so the shell moves to the new tab, which is
+    /// the Mac's own argument in `openTerminalInNewLayout`: you made a terminal
+    /// because you want to type in it, and leaving the selection where it was
+    /// means going and finding it. On a phone that is a drag and a release into
+    /// a column, which is most of the cost of the thing you just did.
+    private func newTerminalItem(_ workspace: Workspace) -> some View {
+        Button {
+            Task {
+                switch await connection.createTerminal(in: workspace) {
+                case .created(let id): onCreated(id)
+                case .disconnected: newTerminalFailure = .disconnected
+                case .refused: newTerminalFailure = .refused
+                }
+            }
+        } label: {
+            // "plus", the symbol the Mac's own New terminal carries in the
+            // sidebar and in the palette. Two clients drawing one action with
+            // two glyphs is the drift `ShellMarkView`'s header describes.
+            Label("New Terminal", systemImage: "plus")
+        }
     }
 
     /// Terminal or chat, on the pane that can be either.

@@ -317,6 +317,10 @@ struct ShellPaneRealView: View {
     /// What GitHub says about this worktree's branch, resolved ABOVE this view
     /// and handed down as a plain value. See `ShellScreen.readPullRequest`.
     let pullRequest: BranchPullRequest?
+    /// A terminal this pane's bar just made. Carried straight through to
+    /// `ShellPaneChromeModifier` — a pane has no idea where it sits on the
+    /// track, so the arrival is `ShellScreen`'s to ask for.
+    let onCreated: (String) -> Void
 
     @State private var terminal: Terminal?
 
@@ -336,13 +340,15 @@ struct ShellPaneRealView: View {
 
     init(
         slot: ShellPaneSlot, ref: ShellPaneRef, connection: Connection,
-        pastes: ImagePasteQueue, pullRequest: BranchPullRequest?
+        pastes: ImagePasteQueue, pullRequest: BranchPullRequest?,
+        onCreated: @escaping (String) -> Void
     ) {
         self.slot = slot
         self.ref = ref
         self.connection = connection
         self.pastes = pastes
         self.pullRequest = pullRequest
+        self.onCreated = onCreated
         // Latched in `init`, not in `onAppear`, and the difference is a whole
         // extra mount. An `onAppear` latch means the first frame has no
         // terminal, so the pane draws a placeholder and then STRUCTURALLY
@@ -496,7 +502,8 @@ struct ShellPaneRealView: View {
             live: live,
             changes: terminal == nil
                 ? connection.changesStores.store(for: ref.workspace) : nil,
-            isVisible: slot.isVisible)
+            isVisible: slot.isVisible,
+            onCreated: onCreated)
     }
 
     @ViewBuilder
@@ -607,6 +614,23 @@ struct ShellScreen: View {
     /// rest either way, and only skipped when that rest is the one the link
     /// asked for.
     @State private var linkedTab: String?
+
+    /// A terminal a pane's bar just made, until the shell has landed on it.
+    ///
+    /// The same two-phase dance as `pendingTerminal` and resolved through the
+    /// same `requestedTab`: the id is known the moment the runner answers, and
+    /// the tab it becomes does not exist until a poll has brought the fleet
+    /// back. Held HERE rather than in the pane that asked, because a pane is
+    /// destroyed and rebuilt by nothing more than a change of runner, and this
+    /// has to outlive the refresh it is waiting for.
+    ///
+    /// Its own property and not a second writer of `pendingTerminal`, and that
+    /// is the whole reason it exists: a deep link is not a choice and must not
+    /// be written down as one (see `linkedTab`), while a terminal somebody just
+    /// MADE is the plainest choice in the app. Sharing the binding would have
+    /// the workspace forget, on the next visit, the very tab it was just told
+    /// to open.
+    @State private var createdTerminal: String?
 
     /// Describe it, or fill in the form. Both were `WorkspaceListView`'s
     /// toolbar and are the overview's now — see `overviewActions`.
@@ -741,11 +765,17 @@ struct ShellScreen: View {
             request: Binding(
                 get: { requestedTab(in: map) },
                 set: { taken in
-                    guard taken == nil, pendingTerminal != nil else { return }
-                    // Whatever rest this produces is not a choice, so it must
-                    // not be written down as one. See `linkedTab`.
-                    linkedTab = requestedTab(in: map)
-                    pendingTerminal = nil
+                    guard taken == nil else { return }
+                    // Only the LINK arms `linkedTab`. Whatever rest a deep link
+                    // produces is not a choice and must not be written down as
+                    // one; a terminal this app was just asked to make is one,
+                    // and the workspace should remember it. See `linkedTab` and
+                    // `createdTerminal`.
+                    if pendingTerminal != nil {
+                        linkedTab = requestedTab(in: map)
+                        pendingTerminal = nil
+                    }
+                    createdTerminal = nil
                 }),
             // The single writer. `ShellRootView` calls this when `position`
             // changes and on first appearance, which is exactly "a pane came
@@ -771,7 +801,8 @@ struct ShellScreen: View {
                     // Only the workspace at rest gets an answer. A neighbour's
                     // diff header can wait until you land on it; asking for
                     // three is three GitHub round trips per swipe.
-                    pullRequest: ref.workspace == restingRef?.workspace ? pullRequest : nil)
+                    pullRequest: ref.workspace == restingRef?.workspace ? pullRequest : nil,
+                    onCreated: { createdTerminal = $0 })
             }
         }
         // Over the panes, above the key row, and gone the moment the path is
@@ -906,8 +937,13 @@ struct ShellScreen: View {
     /// this produces and the tab ids the shell is being drawn from are the same
     /// numbering. Rebuilding the map here would be a second read of a fleet
     /// that a poll may have replaced between the two.
+    ///
+    /// Two askers now, resolved the one way. `createdTerminal` is the same
+    /// shape of request from inside the app — an id that is real before the tab
+    /// is — and giving it a second resolver would be a second place for "the
+    /// shell does not actually have that tab" to be got wrong.
     private func requestedTab(in map: ShellFleetMap) -> String? {
-        guard let id = pendingTerminal else { return nil }
+        guard let id = pendingTerminal ?? createdTerminal else { return nil }
         for workspace in connection.fleet.workspaces {
             guard let terminal = workspace.terminals.first(where: { $0.id == id }) else {
                 continue

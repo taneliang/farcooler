@@ -394,6 +394,10 @@ UI_TEST_SOURCES = [
     # the scroller of. See its header.
     "ShellPaneScrollTests.swift",
     "TerminalScrollTests.swift",
+    # The phone creating a terminal, end to end against a real runner. Needs
+    # one, like TerminalScrollTests: the capability being tested is a wire call,
+    # and a fixture cannot refuse it or make a tmux window.
+    "NewTerminalTests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
