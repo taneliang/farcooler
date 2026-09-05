@@ -63,6 +63,13 @@ final class Connection: ObservableObject {
         case daemonMissing
         /// This device has no usable key, so no host will ever accept it.
         case noIdentity
+        /// This runner is reached through the tunnel and this device holds no
+        /// node key. Its own kind rather than ``noIdentity``, because the
+        /// remedy is different: an SSH key this app can generate for itself,
+        /// and a node key it cannot — the public half is a line in a runner's
+        /// allowlist, written by the device that granted the runner, so the
+        /// way to a working one is the ceremony again.
+        case noNodeKey
         /// The user was shown a fingerprint and did not say yes. Not a fault at
         /// all — a decision that has been deferred — and the way back is the
         /// same screen again, not a retry that pretends something broke.
@@ -79,6 +86,7 @@ final class Connection: ObservableObject {
             } else if message.contains("cannot reach") { self = .unreachable }
             else if message.contains("did not answer") { self = .daemonMissing }
             else if message.contains("no SSH key") { self = .noIdentity }
+            else if message.contains("no tunnel key") { self = .noNodeKey }
             else if message.contains("has not been trusted") { self = .keyNotTrusted }
             else if message.contains("Stopped waiting") { self = .stopped }
             else { self = .other }
@@ -91,7 +99,8 @@ final class Connection: ObservableObject {
             switch self {
             case .keyRejected: return true
             case .hostKeyChanged, .keyNotTrusted: return false
-            case .unreachable, .daemonMissing, .noIdentity, .stopped, .other: return false
+            case .unreachable, .daemonMissing, .noIdentity, .noNodeKey, .stopped, .other:
+                return false
             }
         }
     }
@@ -333,8 +342,14 @@ final class Connection: ObservableObject {
             return
         }
 
+        let nodeKey = NodeIdentity.storedPrivateKey
+        if case .tailcat = host.reach, nodeKey == nil {
+            if mine == attempt { phase = .failed(Self.noNodeKey) }
+            return
+        }
+
         do {
-            _ = try await core.connect(config: host.config(privateKey: key))
+            _ = try await core.connect(config: host.config(privateKey: key, nodeKey: nodeKey))
         } catch {
             if mine == attempt { phase = classify(error) }
             return
@@ -434,6 +449,18 @@ final class Connection: ObservableObject {
     /// later should be noticed without relaunching the app.
     private static let slowRetrySeconds: Double = 300
 
+    /// What a tunneled runner with no node key to dial it with is told.
+    ///
+    /// **The dial does not mint one.** A tunneled runner was granted against
+    /// ONE public half, which is now a line in that runner's allowlist; minting
+    /// a fresh pair here would produce a key nobody has authorized, and tailcat
+    /// ignores a client it does not recognize without answering — so the
+    /// symptom would be a spinner, then a timeout, and nothing anywhere saying
+    /// why. `Failure` matches on "no tunnel key".
+    static let noNodeKey =
+        "This runner is reached through the tunnel, and this device has no tunnel key. "
+        + "Add this device again to get one."
+
     /// A call came back saying the link is gone.
     ///
     /// Detected in `refresh()` alone. Every other call site swallows its
@@ -496,8 +523,14 @@ final class Connection: ObservableObject {
             return
         }
 
+        let nodeKey = NodeIdentity.storedPrivateKey
+        if case .tailcat = host.reach, nodeKey == nil {
+            phase = .failed(Self.noNodeKey)
+            return
+        }
+
         do {
-            _ = try await core.connect(config: host.config(privateKey: key))
+            _ = try await core.connect(config: host.config(privateKey: key, nodeKey: nodeKey))
         } catch {
             // A `start` or a second `reconnectNow` landed while this attempt
             // was crossing the network. Its answer is the current one; this
@@ -539,7 +572,7 @@ final class Connection: ObservableObject {
         }
 
         switch Failure(message: message) {
-        case .keyRejected, .hostKeyChanged, .noIdentity, .keyNotTrusted:
+        case .keyRejected, .hostKeyChanged, .noIdentity, .noNodeKey, .keyNotTrusted:
             phase = next
         case .daemonMissing:
             // Kept at the same rung: `attempt` drives the fast schedule, means

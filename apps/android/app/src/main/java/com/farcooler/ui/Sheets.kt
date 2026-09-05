@@ -39,6 +39,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.data.Reach
 import com.farcooler.data.Runner
 import com.farcooler.model.BranchRef
 import com.farcooler.model.QuickAgents
@@ -68,13 +69,28 @@ fun RunnerEditorSheet(
     onDismiss: () -> Unit,
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val existingReach = existing?.reach
+    /**
+     * A tunneled runner has no address to correct.
+     *
+     * It is reached by a token the ceremony granted, and typing over an empty
+     * Address field would silently turn it into a direct runner pointed at
+     * nothing. So the two address rows are not shown, [valid] stops asking for
+     * them, and Save keeps the reach it arrived with. The name and the user are
+     * still worth editing: both are just words on this device.
+     */
+    val tunneled = existingReach is Reach.Tailcat
     var label by remember { mutableStateOf(existing?.label.orEmpty()) }
-    var address by remember { mutableStateOf(existing?.address.orEmpty()) }
+    var address by remember {
+        mutableStateOf((existingReach as? Reach.Direct)?.host.orEmpty())
+    }
     var user by remember { mutableStateOf(existing?.user.orEmpty()) }
-    var port by remember { mutableStateOf((existing?.port ?: 22).toString()) }
+    var port by remember {
+        mutableStateOf(((existingReach as? Reach.Direct)?.port ?: 22).toString())
+    }
     var confirmingRemove by remember { mutableStateOf(false) }
 
-    val valid = address.isNotBlank() && user.isNotBlank()
+    val valid = (tunneled || address.isNotBlank()) && user.isNotBlank()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
         Column(
@@ -102,14 +118,25 @@ fun RunnerEditorSheet(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
-                value = address,
-                onValueChange = { address = it },
-                label = { Text("Address") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (tunneled) {
+                // Stated rather than left out, so the row that would have held
+                // an address says what stands in its place. Not a field: there
+                // is nothing here anybody can type.
+                Text(
+                    "This runner is reached through the tunnel.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Address") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             OutlinedTextField(
                 value = user,
                 onValueChange = { user = it },
@@ -117,14 +144,16 @@ fun RunnerEditorSheet(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
-                value = port,
-                onValueChange = { port = it.filter(Char::isDigit) },
-                label = { Text("Port") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (!tunneled) {
+                OutlinedTextField(
+                    value = port,
+                    onValueChange = { port = it.filter(Char::isDigit) },
+                    label = { Text("Port") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
 
             Text(
                 "Far Cooler connects over SSH. This device must be authorized on the " +
@@ -137,12 +166,25 @@ fun RunnerEditorSheet(
                 Button(
                     onClick = {
                         val trimmed = address.trim()
+                        // The reach it arrived with when there is nothing on
+                        // this sheet that could change it. Rebuilding a Direct
+                        // out of the fields would take a tunneled runner's
+                        // token away and leave an empty address in its place —
+                        // a runner that cannot be reached and cannot be
+                        // repaired.
+                        val reach =
+                            if (tunneled && existingReach != null) existingReach
+                            else Reach.Direct(trimmed, port.toIntOrNull() ?: 22)
+                        // An emptied name falls back to the address, which is
+                        // what a direct runner is called when nobody named it.
+                        // A tunneled one has no address to fall back to, so it
+                        // keeps the name it came with.
+                        val fallback = if (tunneled) existing?.label.orEmpty() else trimmed
                         onSave(
                             Runner(
                                 id = existing?.id ?: java.util.UUID.randomUUID().toString(),
-                                label = label.trim().ifBlank { trimmed },
-                                address = trimmed,
-                                port = port.toIntOrNull() ?: 22,
+                                label = label.trim().ifBlank { fallback },
+                                reach = reach,
                                 user = user.trim(),
                                 fingerprint = existing?.fingerprint,
                             )

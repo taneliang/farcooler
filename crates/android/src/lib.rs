@@ -411,6 +411,18 @@ fn ceremony_json(env: &mut JNIEnv, call: impl Fn(*mut u8, usize) -> usize) -> js
 }
 
 /// The code a new device shows. `keyB` may be null — a phone has one key.
+///
+/// `nodeKey` is this device's tailcat node PUBLIC key, from
+/// `nativeMintNodeKey` below, and may be null. Null and `""` are the same
+/// offer: the `v=1` shape, which can be granted direct runners and no tunneled
+/// ones. **Null is what a failed mint sends**, and never a placeholder — a node
+/// key nobody holds produces an offer that looks filled in and a tunnel that
+/// admits nobody, and tailcat ignores an unrecognized client in silence.
+///
+/// This argument and Kotlin's `external fun` were widened in the same commit.
+/// JNI binds by name and never compares an argument list, so widening one alone
+/// is an `UnsatisfiedLinkError` at the first call rather than a build failure —
+/// there is no compiler on either side of this line that can see both.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
     mut env: JNIEnv,
@@ -419,11 +431,13 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
     account: JString,
     key_a: JString,
     key_b: JString,
+    node_key: JString,
 ) -> jstring {
     let name = c_string(&mut env, &name);
     let account = c_string(&mut env, &account);
     let key_a = c_string(&mut env, &key_a);
     let key_b = c_string(&mut env, &key_b);
+    let node_key = c_string(&mut env, &node_key);
     let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
     ceremony_json(&mut env, |out, capacity| unsafe {
@@ -432,18 +446,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
             pointer(&account),
             pointer(&key_a),
             pointer(&key_b),
-            // No node key, deliberately, and not yet a Kotlin argument. This
-            // phone cannot mint one: Android is on `farcooler-tailcat`'s stub
-            // until `libtailcat.so` lands, and `farcooler_client_mint_node_key`
-            // answers `no_tailcat` here. NULL is the honest offer for that —
-            // the `v=1` shape, which grants direct runners and no tunneled
-            // ones — and it is what a failed mint must degrade to anyway.
-            // Widening this JNI signature is the app lane's change, alongside
-            // the Kotlin `external fun` and somewhere to keep the private half;
-            // doing it here alone would leave a native method Kotlin no longer
-            // matches, which is an `UnsatisfiedLinkError` at run time rather
-            // than a build failure.
-            std::ptr::null(),
+            pointer(&node_key),
             out,
             capacity,
         )
@@ -452,21 +455,19 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
 
 /// This device's tailcat node key pair, minted fresh.
 ///
-/// `{"private_key":"…","public_key":"…"}`, or `{"error":"no_tailcat"}` — which
-/// is what this build answers today, and will until `libtailcat.so` lands.
-/// Kotlin's answer to that error is an offer carrying no node key, never a
-/// blocked enrolment: a phone that cannot mint still enrols as a direct
-/// runner, exactly as it did before this existed.
+/// `{"private_key":"…","public_key":"…"}`, or `{"error":"no_tailcat"}` on a
+/// build with no tunnel archive linked. Kotlin's answer to that error is an
+/// offer carrying no node key, never a blocked enrolment: a phone that cannot
+/// mint still enrols as a direct runner, exactly as it did before this existed.
 ///
 /// No path argument, deliberately. The pair comes back by value so the private
 /// half can go wherever Android keeps secrets rather than into a file — the
 /// same decision iOS's Keychain use records, and the reason the Go functions'
 /// path-based form stayed on the runner.
 ///
-/// Nothing in Kotlin declares this yet. An exported native method with no
-/// `external fun` is inert, while the reverse — a Kotlin declaration with no
-/// symbol — is an `UnsatisfiedLinkError` at run time, so this half lands
-/// first.
+/// `NativeClient.nativeMintNodeKey` is the Kotlin half, and `NodeIdentity` is
+/// what keeps the answer: the private half goes behind the Keystore, and only
+/// the public half is ever offered.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeMintNodeKey(
     mut env: JNIEnv,

@@ -133,12 +133,44 @@ internal object NativeClient {
     // `scripts/build-android-libs.sh`; a stale `libfarcooler_jni.so` in
     // `app/src/main/jniLibs` will not do.
 
-    /** The code a new device shows. [keyB] is null on a phone: no Zed, no key B. */
+    /**
+     * This device's tailcat node key pair, minted fresh:
+     * `{"private_key":"<43>","public_key":"<43>"}`, or `{"error":"no_tailcat"}`
+     * on a build with no tunnel archive linked.
+     *
+     * No path argument, deliberately. The pair comes back BY VALUE so the
+     * private half can go behind the Keystore rather than into a file — see
+     * [com.farcooler.data.NodeIdentity]. The Go functions underneath are
+     * path-based because a runner has a home directory and writes `tailcat.key`
+     * at 0600; a device does not, and a path here would have quietly put a
+     * private key on disk.
+     *
+     * Store the `private_key`, offer the `public_key`. Both are 43 characters
+     * of unpadded base64-URL and they are trivial to confuse.
+     */
+    external fun nativeMintNodeKey(): String?
+
+    /**
+     * The code a new device shows. [keyB] is null on a phone: no Zed, no key B.
+     *
+     * [nodeKey] is this device's node PUBLIC key, or null. Null and `""` are
+     * the same offer — the `v=1` shape, which grants direct runners and no
+     * tunneled ones — and null is what a failed mint sends. Never a
+     * placeholder: a node key nobody holds produces an offer that looks filled
+     * in and a tunnel that admits nobody, and tailcat ignores an unrecognized
+     * client in silence, so the symptom is a connection that times out saying
+     * nothing.
+     *
+     * This declaration and the Rust shim were widened in the same commit, for
+     * the reason stated above these declarations: JNI compares no argument
+     * lists, so widening one alone crashes at the first call.
+     */
     external fun nativeCeremonyOffer(
         name: String,
         account: String,
         keyA: String,
         keyB: String?,
+        nodeKey: String?,
     ): String?
 
     /**

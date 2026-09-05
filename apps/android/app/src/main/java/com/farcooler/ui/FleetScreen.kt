@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.data.Reach
 import com.farcooler.model.AgentActivity
 import com.farcooler.model.GlanceMarkSize
 import com.farcooler.model.StateKind
@@ -581,6 +582,12 @@ internal fun RunnerStatusRow(
                         Connection.Failure.KEY_NOT_TRUSTED ->
                             TextButton(onClick = onReviewKey) { Text("Show the key again") }
 
+                        // No "Try again": the dial would use the key that is
+                        // missing, so the button could only fail, every time,
+                        // forever. The sentence above names the one thing that
+                        // works, which is this device asking to be added again.
+                        Connection.Failure.NO_NODE_KEY -> Unit
+
                         else -> TextButton(onClick = onRetry) { Text("Try again") }
                     }
                     TextButton(onClick = onEdit) { Text("Edit") }
@@ -596,9 +603,10 @@ internal fun RunnerStatusRow(
 private fun failureHeadline(kind: Connection.Failure, connection: Connection): String = when (kind) {
     Connection.Failure.KEY_REJECTED -> "Not authorized yet"
     Connection.Failure.HOST_KEY_CHANGED -> "This host’s key changed"
-    Connection.Failure.UNREACHABLE -> "Can’t reach ${connection.host.address}"
+    Connection.Failure.UNREACHABLE -> "Can’t reach ${connection.host.named}"
     Connection.Failure.DAEMON_MISSING -> "Far Cooler isn’t installed"
     Connection.Failure.NO_IDENTITY -> "This device has no key"
+    Connection.Failure.NO_NODE_KEY -> "This device has no tunnel key"
     Connection.Failure.KEY_NOT_TRUSTED -> "Key not trusted"
     Connection.Failure.STOPPED -> "Stopped waiting"
     Connection.Failure.OTHER -> "Can’t connect"
@@ -623,11 +631,19 @@ private fun failureDetail(
     message: String,
 ): String = when (kind) {
     Connection.Failure.KEY_REJECTED ->
-        "${connection.host.user}@${connection.host.address} hasn’t been given this device’s key."
+        connection.host.reach.detail(connection.host.user) +
+            " hasn’t been given this device’s key."
 
-    Connection.Failure.UNREACHABLE ->
-        "Nothing answered on port ${connection.host.port}. The runner may be asleep, " +
-            "or the address may be wrong."
+    // No port to name and no address to have got wrong for a tunneled runner:
+    // it is reached by token, so the two things a person could check are whether
+    // the runner is awake and whether it is on the tunnel.
+    Connection.Failure.UNREACHABLE -> when (val reach = connection.host.reach) {
+        is Reach.Direct ->
+            "Nothing answered on port ${reach.port}. The runner may be asleep, " +
+                "or the address may be wrong."
+        is Reach.Tailcat ->
+            "The tunnel didn’t reach it. The runner may be asleep, or off the tunnel."
+    }
 
     Connection.Failure.DAEMON_MISSING ->
         "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."

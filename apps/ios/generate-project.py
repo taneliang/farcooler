@@ -384,6 +384,11 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
 
 UI_TEST_SOURCES = [
     "ChangesPullRequestTests.swift",
+    # A runner saved before `Runner.reach` existed still loads. Needs no runner
+    # and no daemon: it seeds the old shape through the argument domain and
+    # reads the screen the app puts up before any connection resolves, so it
+    # cannot skip itself green when the demo host is down.
+    "RunnerReachTests.swift",
     "KeyboardTabStripTests.swift",
     "ShellGestureTests.swift",
     # Photographs the terminal renderer's own fixture and compares cells. Needs

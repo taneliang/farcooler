@@ -132,6 +132,10 @@ class AppModel(
 
     init {
         Identity.initialize(application)
+        // Beside [Identity] and not lazily: both read the same preference file,
+        // and a store initialized on first use is a store that throws the first
+        // time somebody opens the ceremony screen.
+        com.farcooler.data.NodeIdentity.initialize(application)
         com.farcooler.data.Themes.initialize(application)
         notifier.createChannels()
 

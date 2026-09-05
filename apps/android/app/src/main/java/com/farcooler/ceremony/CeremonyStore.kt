@@ -7,6 +7,8 @@ import android.os.CancellationSignal
 import android.os.SystemClock
 import com.farcooler.core.NativeClient
 import com.farcooler.core.NativeLibrary
+import com.farcooler.data.NodeIdentity
+import com.farcooler.data.Reach
 import com.farcooler.data.Runner
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,7 +76,7 @@ data class CeremonyRunner(
     val alias: String,
     val user: String,
     @SerialName("host_key") val hostKey: String,
-    val reach: CeremonyReach,
+    val reach: Reach,
     /**
      * This runner has not taken the key yet. Asleep, unreachable, or a client
      * core that cannot ask — either way access follows when a trusted device
@@ -83,113 +85,28 @@ data class CeremonyRunner(
     val pending: Boolean,
 ) {
     /**
-     * This runner as something this app can connect to, or null when this app
-     * has nowhere to put it.
+     * This runner as something this app can connect to.
      *
-     * Null for a tunneled runner, and the caller says so on screen rather than
-     * dropping it quietly: [Runner] records an address and a port, and a tunnel
-     * has neither. Nothing can produce that reply yet — the core refuses a
-     * tunneled runner granted to a device that named no node key, and this app
-     * holds none — so this is the shape of the gap rather than a path anybody
-     * is walking today.
-     */
-    fun asRunner(): Runner? {
-        val direct = reach as? CeremonyReach.Direct ?: return null
-        return Runner(
-            label = label,
-            address = direct.host,
-            port = direct.port,
-            user = user,
-            // A host key that came across empty stays null, which is what makes
-            // the first connection report the fingerprint instead of trusting it.
-            fingerprint = hostKey.ifEmpty { null },
-        )
-    }
-
-    /** Whether this app can add this runner to its own list at all. */
-    val isStorable: Boolean get() = reach is CeremonyReach.Direct
-}
-
-/**
- * How a granted runner is reached: an address, or the tunnel.
- *
- * One or the other and never both — two nullable fields would admit "both set"
- * and "neither set", and then something here would have to pick a winner. The
- * wire is tagged on `kind` so a third kind is additive, and an unrecognized one
- * fails the decode rather than defaulting: the core has already accepted the
- * manifest by the time this runs, so a tag this build does not know is the app
- * failing, and [Refusal.Unknown] is what says so.
- */
-@Serializable(with = CeremonyReachSerializer::class)
-sealed interface CeremonyReach {
-    data class Direct(val host: String, val port: Int) : CeremonyReach
-
-    data class Tailcat(val token: String) : CeremonyReach
-
-    /**
-     * The second line under a runner's name.
+     * **Not nullable any more, and that is the third gap closed.** It used to
+     * answer null for anything that was not [Reach.Direct], because [Runner] was
+     * an address and a port and a tunnel has neither — so a phone could be
+     * GRANTED a tunneled runner and still not keep one, which is most of why no
+     * ceremony had ever produced one. [Runner] carries the reach now, so the
+     * reach travels across whole rather than being taken apart into fields that
+     * only fit one of its two shapes.
      *
-     * Never the token: it is long, it is meaningless to a person, and it is the
-     * one field here worth stealing. The user still appears, because which
-     * account you log in as is the other half of what the line is for.
+     * A tunneled runner here always has a node key to dial with: the core
+     * refuses the whole reply with `no_tunnel` when this device named none, so a
+     * reply this app has accepted cannot contain one it could not use.
      */
-    fun detail(user: String): String = when (this) {
-        is Direct -> "$user@$host"
-        is Tailcat -> "$user, through the tunnel"
-    }
-
-    /** A name for a sentence, when the granting device sent no label. */
-    fun name(user: String): String = when (this) {
-        is Direct -> "$user@$host"
-        is Tailcat -> "a tunneled runner"
-    }
-}
-
-/**
- * The wire shape of a [CeremonyReach], written by hand.
- *
- * By hand rather than through `@JsonClassDiscriminator`, which is an
- * experimental API, and through a surrogate rather than raw [kotlinx.serialization.json.JsonElement],
- * so the field names live in one declaration that the compiler checks. iOS and
- * the Mac hand-write the same two functions for the same reason: three
- * platforms agreeing about a payload by inspection is three chances to
- * disagree, so each one is written out where it can be read.
- */
-object CeremonyReachSerializer : KSerializer<CeremonyReach> {
-    @Serializable
-    private data class Wire(
-        val kind: String,
-        val host: String? = null,
-        val port: Int? = null,
-        val token: String? = null,
+    fun asRunner(): Runner = Runner(
+        label = label,
+        reach = reach,
+        user = user,
+        // A host key that came across empty stays null, which is what makes
+        // the first connection report the fingerprint instead of trusting it.
+        fingerprint = hostKey.ifEmpty { null },
     )
-
-    override val descriptor: SerialDescriptor = Wire.serializer().descriptor
-
-    override fun serialize(encoder: Encoder, value: CeremonyReach) {
-        val wire = when (value) {
-            is CeremonyReach.Direct -> Wire("direct", host = value.host, port = value.port)
-            is CeremonyReach.Tailcat -> Wire("tailcat", token = value.token)
-        }
-        encoder.encodeSerializableValue(Wire.serializer(), wire)
-    }
-
-    override fun deserialize(decoder: Decoder): CeremonyReach {
-        val wire = decoder.decodeSerializableValue(Wire.serializer())
-        return when (wire.kind) {
-            "direct" -> CeremonyReach.Direct(
-                wire.host ?: throw SerializationException("a direct reach with no host"),
-                wire.port ?: throw SerializationException("a direct reach with no port"),
-            )
-            "tailcat" -> CeremonyReach.Tailcat(
-                wire.token ?: throw SerializationException("a tunneled reach with no token"),
-            )
-            // The core has already accepted the manifest by the time this runs,
-            // so a kind this build does not know is the app failing rather than
-            // a code being refused.
-            else -> throw SerializationException("unknown reach ${wire.kind}")
-        }
-    }
 }
 
 /** The reply: the runners a trusted device granted, addressed to one ceremony. */
@@ -341,9 +258,15 @@ object CeremonyCore {
     /**
      * Leg one, the displaying side. `keyB` is null on a phone: there is no Zed
      * on a phone, so there is no second key.
+     *
+     * [nodeKey] is this device's node PUBLIC key — the half a runner writes into
+     * its allowlist, never the half this device keeps. Null is a device that has
+     * not minted one, which is the `v=1` shape the core has always accepted: it
+     * can be granted direct runners and no tunneled ones. **Null is also what a
+     * failed mint sends**, and never a placeholder.
      */
-    fun offer(name: String, account: String, keyA: String): Answer =
-        answer { NativeClient.nativeCeremonyOffer(name, account, keyA, null) }
+    fun offer(name: String, account: String, keyA: String, nodeKey: String?): Answer =
+        answer { NativeClient.nativeCeremonyOffer(name, account, keyA, null, nodeKey) }
 
     /**
      * Leg one, the scanning side.
@@ -585,7 +508,7 @@ data class RunnerRow(val runner: Runner, val picked: Boolean) {
      * something this device records, so what is shown is what it does know:
      * where the runner is and who it logs in as.
      */
-    val detail: String get() = "${runner.user}@${runner.address}"
+    val detail: String get() = runner.reach.detail(user = runner.user)
 }
 
 /**
@@ -702,7 +625,23 @@ class CeremonyStore(
 
     // MARK: The device being added
 
-    /** Build and show this device's code. */
+    /**
+     * Build and show this device's code.
+     *
+     * The node key is minted HERE, at the moment a device asks to be added,
+     * because that is the only moment its public half has anywhere to go: the
+     * offer carries it, the granting device writes it into a runner's allowlist,
+     * and a tunneled runner can be granted back. Minted once and kept — showing
+     * a second code, or enrolling a second runner, offers the same key, because
+     * the node key is this DEVICE's identity rather than anything about a
+     * runner.
+     *
+     * **A mint that fails does not stop an enrolment.** [NodeIdentity] answers
+     * null on any build with no tunnel linked, and null here is the `v=1` offer,
+     * which grants direct runners exactly as it always has. The missing SSH key
+     * above is the only thing that refuses, because without one there is nothing
+     * to enroll at all.
+     */
     fun showOffer(publicKey: String?) {
         if (publicKey.isNullOrEmpty()) {
             _phase.value = Phase.Refused(Refusal.Unknown)
@@ -710,7 +649,10 @@ class CeremonyStore(
         }
         alreadyTaken = false
         _someRunnersPending.value = false
-        when (val answer = CeremonyCore.offer(deviceName, account, publicKey)) {
+        val answer = CeremonyCore.offer(
+            deviceName, account, publicKey, NodeIdentity.offeredPublicKey,
+        )
+        when (answer) {
             is CeremonyCore.Answer.Refused -> _phase.value = Phase.Refused(answer.refusal)
             is CeremonyCore.Answer.Payload -> {
                 showing = answer.json
@@ -919,12 +861,14 @@ class CeremonyStore(
             // first-contact screen and a person looks at a fingerprint, rather
             // than being handed a pin nobody verified.
             hostKey = row.runner.fingerprint.orEmpty(),
-            // Direct, because that is what every runner in this app's own list
-            // is: a phone reaches a runner by address, and a tunneled one would
-            // need a token this device does not hold. Granting one is what a
-            // runner's own daemon answers with — see `client.set_node_key` —
-            // and it is not wired to this screen.
-            reach = CeremonyReach.Direct(row.runner.address, row.runner.port),
+            // Carried across as it stands rather than rebuilt from an address,
+            // because this app's own list can now hold a tunneled runner and
+            // rebuilding one would have granted a Direct with an empty host —
+            // an entry that looks filled in and reaches nothing. Whether the
+            // device on the other side may HAVE it is the core's decision, not
+            // this screen's: it refuses the whole reply with `no_tunnel` when
+            // that device named no node key.
+            reach = row.runner.reach,
             // Corrected once the enrollment above has answered.
             pending = true,
         )

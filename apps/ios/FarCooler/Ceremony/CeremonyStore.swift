@@ -29,72 +29,11 @@ struct CeremonyOffer: Decodable, Equatable {
     let ceremony: String
 }
 
-/// How a granted runner is reached: an address, or the tunnel.
-///
-/// One or the other and never both — two optional fields would admit "both set"
-/// and "neither set", and then something here would have to pick a winner. The
-/// wire is tagged on `kind` so a third kind is additive, and an unrecognized one
-/// throws rather than decoding to a default: the core has already accepted the
-/// manifest by the time this runs, so a tag this does not know is the app
-/// failing, and ``Refusal/unknown`` is what says so.
-enum CeremonyReach: Codable, Equatable {
-    case direct(host: String, port: Int)
-    case tailcat(token: String)
-
-    private enum Field: String, CodingKey {
-        case kind, host, port, token
-    }
-
-    init(from decoder: Decoder) throws {
-        let wire = try decoder.container(keyedBy: Field.self)
-        switch try wire.decode(String.self, forKey: .kind) {
-        case "direct":
-            self = .direct(
-                host: try wire.decode(String.self, forKey: .host),
-                port: try wire.decode(Int.self, forKey: .port))
-        case "tailcat":
-            self = .tailcat(token: try wire.decode(String.self, forKey: .token))
-        case let other:
-            throw DecodingError.dataCorruptedError(
-                forKey: .kind, in: wire, debugDescription: "unknown reach \(other)")
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var wire = encoder.container(keyedBy: Field.self)
-        switch self {
-        case .direct(let host, let port):
-            try wire.encode("direct", forKey: .kind)
-            try wire.encode(host, forKey: .host)
-            try wire.encode(port, forKey: .port)
-        case .tailcat(let token):
-            try wire.encode("tailcat", forKey: .kind)
-            try wire.encode(token, forKey: .token)
-        }
-    }
-
-    /// The second line under a runner's name.
-    ///
-    /// A tunnel has no address to show and its token is the one field here worth
-    /// stealing — long, meaningless to a person, and a thing to keep off a
-    /// screen — so what a person gets is the fact: this one goes through the
-    /// tunnel. The user still appears, because which account you log in as is
-    /// the other half of what the line is for.
-    func detail(user: String) -> String {
-        switch self {
-        case .direct(let host, _): return "\(user)@\(host)"
-        case .tailcat: return "\(user), through the tunnel"
-        }
-    }
-
-    /// A name for a sentence, when the granting device sent no label.
-    func name(user: String) -> String {
-        switch self {
-        case .direct(let host, _): return "\(user)@\(host)"
-        case .tailcat: return "a tunneled runner"
-        }
-    }
-}
+// ``Reach`` — an address or the tunnel — lives in `Store.swift`, beside
+// ``Runner``, because it is a property of a runner rather than of the ceremony.
+// ONE type serves both the wire and what this app persists: they are the same
+// fact, and translating between two spellings of it is how a token ends up in a
+// field meant for a hostname.
 
 /// One runner in a reply: everything a device needs to reach it, and nothing it
 /// needs to trust it with. The field names are the wire's, because this is
@@ -105,7 +44,7 @@ struct CeremonyRunner: Codable, Equatable, Identifiable {
     let alias: String
     let user: String
     let host_key: String  // swiftlint:disable:this identifier_name
-    let reach: CeremonyReach
+    let reach: Reach
     let pending: Bool
 }
 
@@ -228,14 +167,28 @@ enum CeremonyCore {
 
     /// Leg one, the displaying side. `keyB` is nil on a phone: there is no Zed
     /// on a phone, so there is no second key.
-    static func offer(name: String, account: String, keyA: String, keyB: String? = nil) -> Answer {
+    ///
+    /// `nodeKey` is this device's tailcat node PUBLIC key — the half a runner
+    /// writes into its allowlist, never the half this device keeps. Nil is a
+    /// device that has not minted one, which is the `v=1` shape the core has
+    /// always accepted: it can be granted direct runners and no tunneled ones.
+    /// **Nil is also what a failed mint sends**, and never a placeholder — a
+    /// node key nobody holds produces an offer that looks filled in and a
+    /// tunnel that admits nobody, and tailcat ignores an unrecognized client in
+    /// silence, so the symptom would be a connection that times out saying
+    /// nothing.
+    static func offer(
+        name: String, account: String, keyA: String, keyB: String? = nil, nodeKey: String?
+    ) -> Answer {
         name.withCString { name in
             account.withCString { account in
                 keyA.withCString { keyA in
                     withOptionalCString(keyB) { keyB in
-                        answer {
-                            farcooler_client_ceremony_offer(
-                                name, account, keyA, keyB, nil, $0, $1)
+                        withOptionalCString(nodeKey) { nodeKey in
+                            answer {
+                                farcooler_client_ceremony_offer(
+                                    name, account, keyA, keyB, nodeKey, $0, $1)
+                            }
                         }
                     }
                 }
@@ -544,6 +497,20 @@ final class CeremonyStore: ObservableObject {
     // MARK: The device being added
 
     /// Build and show this device's code.
+    ///
+    /// The node key is minted HERE, at the moment a device asks to be added,
+    /// because that is the only moment its public half has anywhere to go: the
+    /// offer carries it, the granting device writes it into a runner's
+    /// allowlist, and a tunneled runner can be granted back. Minted once and
+    /// kept — showing a second code, or enrolling a second runner, offers the
+    /// same key, because the node key is this DEVICE's identity rather than
+    /// anything about a runner.
+    ///
+    /// **A mint that fails does not stop an enrolment.** ``NodeIdentity``
+    /// answers nil on any build with no tunnel linked, and nil here is the
+    /// `v=1` offer, which grants direct runners exactly as it always has. The
+    /// missing SSH key above is the only thing that refuses, because without
+    /// one there is nothing to enroll at all.
     func showOffer(publicKey: String?) {
         guard let publicKey, !publicKey.isEmpty else {
             phase = .refused(.unknown)
@@ -551,7 +518,8 @@ final class CeremonyStore: ObservableObject {
         }
         alreadyTaken = false
         switch CeremonyCore.offer(
-            name: deviceName, account: account, keyA: publicKey, keyB: nil)
+            name: deviceName, account: account, keyA: publicKey, keyB: nil,
+            nodeKey: NodeIdentity.offeredPublicKey)
         {
         case .refused(let refusal):
             phase = .refused(refusal)
@@ -830,12 +798,14 @@ final class CeremonyStore: ObservableObject {
                 // fingerprint, rather than being handed a pin nobody verified.
                 host_key: row.runner.fingerprint == "accept-any"
                     ? "" : (row.runner.fingerprint ?? ""),
-                // Direct, because that is what every runner in this app's own
-                // list is: a phone reaches a runner by address, and a tunneled
-                // one would need a token this device does not hold. Granting one
-                // is what a runner's own daemon answers with — see
-                // `client.set_node_key` — and it is not wired to this screen.
-                reach: .direct(host: row.runner.address, port: row.runner.port),
+                // Carried across as it stands rather than rebuilt from an
+                // address, because this app's own list can now hold a tunneled
+                // runner and rebuilding one would have granted `.direct` with
+                // an empty host — an entry that looks filled in and reaches
+                // nothing. Whether the device on the other side may HAVE it is
+                // the core's decision, not this screen's: it refuses the whole
+                // reply with `no_tunnel` when that device named no node key.
+                reach: row.runner.reach,
                 // Corrected in `confirm()`, once the enrollment has answered.
                 pending: true)
         }
@@ -868,29 +838,28 @@ final class CeremonyStore: ObservableObject {
 }
 
 extension CeremonyRunner {
-    /// This runner as something the app can connect to, or nil when this app
-    /// has nowhere to put it.
+    /// This runner as something the app can connect to.
     ///
     /// A host key that came across empty stays nil, which is what makes the
     /// first connection report the fingerprint instead of trusting it.
     ///
-    /// Nil for a tunneled runner, and the caller says so on screen rather than
-    /// dropping it quietly: ``Runner`` records an address and a port, and a
-    /// tunnel has neither. Nothing can produce that reply yet — the core refuses
-    /// a tunneled runner granted to a device that named no node key, and this
-    /// app holds none — so this is the shape of the gap rather than a path
-    /// somebody is walking today.
-    var asRunner: Runner? {
-        guard case .direct(let host, let port) = reach else { return nil }
-        return Runner(
+    /// **Not optional any more, and that is the third gap closed.** It used to
+    /// answer nil for anything that was not `.direct`, because ``Runner`` was
+    /// an address and a port and a tunnel has neither — so a phone could be
+    /// GRANTED a tunneled runner and still not keep one, which is most of why
+    /// no ceremony had ever produced one. ``Runner`` carries the reach now, so
+    /// the reach travels across whole rather than being taken apart into fields
+    /// that only fit one of its two shapes.
+    ///
+    /// A tunneled runner here always has a node key to dial with: the core
+    /// refuses the whole reply with `no_tunnel` when this device named none, so
+    /// a reply this app has accepted cannot contain one it could not use.
+    var asRunner: Runner {
+        Runner(
             id: UUID(uuidString: id) ?? UUID(),
             label: label,
-            address: host,
-            port: port,
+            reach: reach,
             user: user,
             fingerprint: host_key.isEmpty ? nil : host_key)
     }
-
-    /// Whether this app can add this runner to its own list at all.
-    var isStorable: Bool { asRunner != nil }
 }

@@ -213,26 +213,6 @@ private fun AddedScreen(
                 )
             }
         }
-        // A granted runner this app cannot record is stated, never dropped
-        // silently. The alternative to reading it here is meeting it later as a
-        // runner that is simply absent from the list, with nothing on any
-        // screen having said so.
-        val unstorable = granted.filterNot { it.isStorable }
-        if (unstorable.isNotEmpty()) {
-            val names = unstorable.joinToString(", ") {
-                it.label.ifEmpty { it.reach.name(it.user) }
-            }
-            Text(
-                if (unstorable.size == 1) {
-                    "$names is reachable only through a tunnel, which this device can’t use yet."
-                } else {
-                    "$names are reachable only through a tunnel, which this device can’t " +
-                        "use yet."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
-        }
         if (somePending) {
             Text(
                 "The ones marked “not yet” hadn’t taken this device’s key when it was granted. " +
@@ -253,16 +233,17 @@ private fun AddedScreen(
  * manifest: two devices generate their own ids for the same runner, so adopting
  * by id would leave someone with the same box listed twice.
  *
- * A tunneled runner is not written in at all: [com.farcooler.data.Runner]
- * records an address and a port, and a tunnel has neither. `AddedScreen` names
- * it, so nobody has to notice a runner that quietly did not arrive.
+ * **A tunneled runner is written in like any other now.** It used to be skipped
+ * because [com.farcooler.data.Runner] was an address and a port; it carries a
+ * reach instead, so the whole reach is compared as one value. That is stricter
+ * than the three fields it replaces, not looser: two tokens for one box are two
+ * grants, and nothing here can tell they land in the same place.
  */
 private fun adopt(model: AppModel, granted: List<CeremonyRunner>) {
     for (entry in granted) {
-        val arriving = entry.asRunner() ?: continue
+        val arriving = entry.asRunner()
         val existing = model.hosts.hosts.value.firstOrNull {
-            it.address == arriving.address && it.user == arriving.user &&
-                it.port == arriving.port
+            it.reach == arriving.reach && it.user == arriving.user
         }
         if (existing == null) {
             model.hosts.add(arriving)

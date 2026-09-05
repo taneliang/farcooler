@@ -264,7 +264,7 @@ struct FleetView: View {
     private var connecting: some View {
         VStack(spacing: 12) {
             ProgressView()
-            Text("Connecting to \(host.address)…")
+            Text("Connecting to \(host.named)…")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -381,7 +381,7 @@ struct FleetView: View {
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 8)
 
-            Text("\(host.address) presented a key this device hasn’t seen before.")
+            Text("\(host.named) presented a key this device hasn’t seen before.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -566,6 +566,20 @@ struct FleetView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
+        case .noNodeKey:
+            // The same screen `.keyRejected` links to, because the remedy is
+            // the same road: this device asks to be added again, and the offer
+            // it shows carries a node key a runner can admit. Deliberately not
+            // "Try Again" — the dial would use the key that is missing, so the
+            // button could only fail, every time, forever.
+            NavigationLink {
+                AuthorizeView(runners: store)
+            } label: {
+                Text("Add This Device Again").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
         case .unreachable, .daemonMissing, .noIdentity, .stopped, .other:
             Button {
                 Task { await connect(host) }
@@ -579,7 +593,7 @@ struct FleetView: View {
 
     private func symbol(_ kind: Connection.Failure) -> String {
         switch kind {
-        case .keyRejected, .noIdentity: return "key.slash"
+        case .keyRejected, .noIdentity, .noNodeKey: return "key.slash"
         case .hostKeyChanged: return "exclamationmark.shield"
         case .keyNotTrusted: return "key"
         case .unreachable: return "network.slash"
@@ -605,18 +619,28 @@ struct FleetView: View {
     private func detail(_ kind: Connection.Failure, _ message: String) -> String {
         switch kind {
         case .keyRejected:
-            return "\(host.user)@\(host.address) hasn’t been given this device’s key."
+            return "\(host.reach.detail(user: host.user)) hasn’t been given this device’s key."
         case .unreachable:
-            return
-                "Nothing answered on port \(host.port). The runner may be asleep, "
-                + "or the address may be wrong."
+            switch host.reach {
+            case .direct(_, let port):
+                return
+                    "Nothing answered on port \(port). The runner may be asleep, "
+                    + "or the address may be wrong."
+            // No port to name and no address to have got wrong: a tunnel is
+            // reached by token, so the two things a person could check are
+            // whether the runner is awake and whether it is on the tunnel.
+            case .tailcat:
+                return
+                    "The tunnel didn’t reach it. The runner may be asleep, "
+                    + "or off the tunnel."
+            }
         case .daemonMissing:
             return "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
         // Sentences somebody wrote, each naming both what happened and what to
         // do about it — three of them in `Connection`, `hostKeyChanged` in
         // `crates/client/src/ssh.rs`. They are the core's words only in the
         // sense that the core is where they are stored.
-        case .hostKeyChanged, .noIdentity, .keyNotTrusted, .stopped:
+        case .hostKeyChanged, .noIdentity, .noNodeKey, .keyNotTrusted, .stopped:
             return message
         // The undiagnosed arm, and the only one where `message` is whatever
         // came back rather than something written to be read. Those words go
@@ -637,9 +661,10 @@ struct FleetView: View {
         switch kind {
         case .keyRejected: return "Not Authorized Yet"
         case .hostKeyChanged: return "This Host’s Key Changed"
-        case .unreachable: return "Can’t Reach \(host.address)"
+        case .unreachable: return "Can’t Reach \(host.named)"
         case .daemonMissing: return "Far Cooler Isn’t Installed"
         case .noIdentity: return "This Device Has No Key"
+        case .noNodeKey: return "This Device Has No Tunnel Key"
         case .keyNotTrusted: return "Key Not Trusted"
         case .stopped: return "Stopped Waiting"
         case .other: return "Can’t Connect"

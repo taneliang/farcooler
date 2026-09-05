@@ -87,10 +87,14 @@ fn a_reply_granting(offer_json: &str, runners_json: &str) -> String {
 /// way to carry one. That fixture supplied by hand what nothing in an app
 /// could supply; passing the argument is the thing an app now does.
 fn an_offer_with_a_node_key(name: &str, account: &str, key_a: &str) -> String {
+    an_offer_carrying(name, account, key_a, NODE_KEY)
+}
+
+fn an_offer_carrying(name: &str, account: &str, key_a: &str, node_key: &str) -> String {
     let name = CString::new(name).unwrap();
     let account = CString::new(account).unwrap();
     let key = CString::new(key_a).unwrap();
-    let node_key = CString::new(NODE_KEY).unwrap();
+    let node_key = CString::new(node_key).unwrap();
     text(|out, capacity| unsafe {
         farcooler_client_ceremony_offer(
             name.as_ptr(),
@@ -462,6 +466,68 @@ fn minting_without_a_linked_tunnel_refuses_rather_than_returning_an_empty_pair()
     assert_eq!(minted["error"], "no_tailcat", "{minted}");
     assert!(minted["private_key"].is_null(), "a stub minted a private key: {minted}");
     assert!(minted["public_key"].is_null(), "a stub minted a public key: {minted}");
+}
+
+/// **The first execution of the `linked` backend, anywhere.**
+///
+/// Everything else about minting is checked on one side of the C boundary or
+/// the other: Go round-trips `encodeNodeKey` through `parseNodePrivate` in its
+/// own package, and `linked::mint_node_key`'s two-line shape check is unit
+/// tested against a fixture. Neither says the two encoders AGREE, because
+/// neither has ever run in the same process. This does: the archive is linked,
+/// Go mints, Rust reads what Go wrote, `ffi.rs` puts the public half through
+/// `farcooler_fence::usable_node_key` — the same predicate an `authorized_keys`
+/// line is checked with — and the ceremony then grants a tunneled runner
+/// against it.
+///
+/// Run with the archive attached to this test target alone:
+///
+/// ```text
+/// ./scripts/build-tailcat.sh darwin-arm64
+/// cargo rustc -p farcooler-client --test the_ceremony_over_the_ffi \
+///     --features tailcat -- -L "$PWD/dist/tailcat/darwin-arm64" -l static=tailcat
+/// ```
+///
+/// `cargo rustc`, not a global `RUSTFLAGS`: `-l static=` bundles the archive
+/// into whichever crate it is attached to, and applied to every crate in the
+/// graph it produces gigabytes of duplicated objects. See
+/// `scripts/build-ios-frameworks.sh`, where that was found by measuring one.
+#[test]
+#[cfg(feature = "tailcat")]
+fn a_linked_build_mints_a_pair_the_fence_and_the_ceremony_both_accept() {
+    let minted = json(|out, capacity| unsafe { farcooler_client_mint_node_key(out, capacity) });
+    assert!(minted["error"].is_null(), "a linked build refused to mint: {minted}");
+
+    let private = minted["private_key"].as_str().expect("a private half");
+    let public = minted["public_key"].as_str().expect("a public half");
+
+    // 43 characters of unpadded base64-URL, both of them. The public half has
+    // no choice — it rides in an offer and then into an allowlist, where the
+    // fence accepts nothing else — and spelling the two halves of one payload
+    // differently is a way to hand the wrong one to the wrong place.
+    for (which, half) in [("private", private), ("public", public)] {
+        assert_eq!(half.len(), 43, "the {which} half is not 43 characters: {half:?}");
+        assert!(
+            half.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+            "the {which} half is not unpadded base64-URL: {half:?}"
+        );
+    }
+    assert_ne!(private, public, "one half was handed back twice: {minted}");
+
+    // The whole way through: into an offer, and out again as a granted
+    // tunneled runner. Reaching this at all means the fence accepted what Go's
+    // `encodeNodeKey` produced — `ffi.rs` answers `{"error":"io"}` when it does
+    // not — and this says the granting side reads the same field.
+    let offer = an_offer_carrying("iPhone", "acct_1", KEY_A, public);
+    let decoded: Value = serde_json::from_str(&offer).expect("json");
+    assert_eq!(decoded["node_key"], public, "the minted key did not reach the offer: {decoded}");
+
+    let granted = accept(&a_reply_granting(&offer, TUNNELED_RUNNERS), &offer, false, 0);
+    assert_eq!(granted["runners"][0]["reach"]["kind"], "tailcat", "{granted}");
+
+    // A node key is an identity, so two mints are two devices.
+    let again = json(|out, capacity| unsafe { farcooler_client_mint_node_key(out, capacity) });
+    assert_ne!(again["private_key"], minted["private_key"], "two mints produced one key");
 }
 
 /// The buffer contract, on the newest entry point too.

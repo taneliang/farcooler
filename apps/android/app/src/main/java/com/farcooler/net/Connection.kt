@@ -1,8 +1,10 @@
 package com.farcooler.net
 
 import com.farcooler.core.ClientCore
-import com.farcooler.data.Runner
 import com.farcooler.data.Identity
+import com.farcooler.data.NodeIdentity
+import com.farcooler.data.Reach
+import com.farcooler.data.Runner
 import com.farcooler.data.Theme
 import com.farcooler.model.AdapterInfo
 import com.farcooler.model.AdapterTestOutcome
@@ -165,6 +167,16 @@ class Connection(
         NO_IDENTITY,
 
         /**
+         * This runner is reached through the tunnel and this device holds no
+         * node key. Its own kind rather than [NO_IDENTITY], because the remedy
+         * differs: an SSH key this app can generate for itself, and a node key
+         * it cannot — the public half is a line in a runner's allowlist,
+         * written by the device that granted the runner, so the way to a
+         * working one is the ceremony again.
+         */
+        NO_NODE_KEY,
+
+        /**
          * The user was shown a fingerprint and did not say yes. Not a fault at
          * all — a decision that has been deferred — and the way back is the
          * same screen again, not a retry that pretends something broke.
@@ -190,6 +202,7 @@ class Connection(
                 message.contains("cannot reach") -> UNREACHABLE
                 message.contains("did not answer") -> DAEMON_MISSING
                 message.contains("no SSH key") -> NO_IDENTITY
+                message.contains("no tunnel key") -> NO_NODE_KEY
                 message.contains("has not been trusted") -> KEY_NOT_TRUSTED
                 message.contains("Stopped waiting") -> STOPPED
                 else -> OTHER
@@ -381,8 +394,14 @@ class Connection(
             return
         }
 
+        val nodeKey = NodeIdentity.storedPrivateKey
+        if (withHost.reach is Reach.Tailcat && nodeKey == null) {
+            if (mine == attempt) _phase.value = Phase.Failed(NO_NODE_KEY_SENTENCE, Failure.NO_NODE_KEY)
+            return
+        }
+
         try {
-            core.connect(withHost.config(key))
+            core.connect(withHost.config(key, nodeKey))
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             if (mine == attempt) _phase.value = classify(e.message.orEmpty())
@@ -467,8 +486,14 @@ class Connection(
             return
         }
 
+        val nodeKey = NodeIdentity.storedPrivateKey
+        if (current.reach is Reach.Tailcat && nodeKey == null) {
+            _phase.value = Phase.Failed(NO_NODE_KEY_SENTENCE, Failure.NO_NODE_KEY)
+            return
+        }
+
         try {
-            core.connect(current.config(key))
+            core.connect(current.config(key, nodeKey))
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             // A start, or a second reconnectNow, landed while this attempt was
@@ -522,6 +547,7 @@ class Connection(
             Failure.KEY_REJECTED,
             Failure.HOST_KEY_CHANGED,
             Failure.NO_IDENTITY,
+            Failure.NO_NODE_KEY,
             Failure.KEY_NOT_TRUSTED,
             -> _phase.value = next
 
@@ -544,7 +570,7 @@ class Connection(
      * about to succeed.
      */
     fun giveUp() {
-        abandon("Stopped waiting for ${host.address}. It may be asleep or off the network.")
+        abandon("Stopped waiting for ${host.named}. It may be asleep or off the network.")
     }
 
     /**
@@ -556,7 +582,7 @@ class Connection(
      */
     fun declineHostKey() {
         abandon(
-            "The key ${host.address} presented has not been trusted on this device. " +
+            "The key ${host.named} presented has not been trusted on this device. " +
                 "Far Cooler won’t connect until it is."
         )
     }
@@ -1537,6 +1563,20 @@ class Connection(
          * every other client talking to the same runner.
          */
         const val DEFAULT_BRANCH_PREFIX = "feat/"
+
+        /**
+         * What a tunneled runner with no node key to dial it with is told.
+         *
+         * **The dial does not mint one.** A tunneled runner was granted against
+         * ONE public half, which is now a line in that runner's allowlist;
+         * minting a fresh pair here would produce a key nobody has authorized,
+         * and tailcat ignores a client it does not recognize without answering
+         * — so the symptom would be a spinner, then a timeout, and nothing
+         * anywhere saying why. [Failure.of] matches on "no tunnel key".
+         */
+        const val NO_NODE_KEY_SENTENCE =
+            "This runner is reached through the tunnel, and this device has no tunnel key. " +
+                "Add this device again to get one."
 
         private const val POLL_INTERVAL_MS = 3_000L
 

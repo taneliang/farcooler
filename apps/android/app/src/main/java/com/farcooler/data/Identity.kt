@@ -183,3 +183,159 @@ object Identity {
         return generator.generateKey()
     }
 }
+
+/**
+ * This device's tailcat node key pair — the identity a tunneled runner admits.
+ *
+ * A node key is not an SSH key and does not replace one. [Identity] above is how
+ * a runner decides this device may log in; this is how the TUNNEL decides this
+ * device may reach the runner at all. A runner with no address on any network
+ * this phone can see is unreachable without one, which is why nothing could ever
+ * grant a phone a tunneled runner before this existed.
+ *
+ * **Minted here and never received.** The pair comes out of
+ * [ClientCore.mintNodeKey] by value, not out of a file and not off the wire: a
+ * private key that exists in two places is not an identity, and the runner only
+ * ever learns the public half. The native entry point deliberately takes no path
+ * so that this decision cannot be reversed quietly.
+ *
+ * **Once per device, not once per runner.** Ten tunneled runners are ten tokens
+ * and one node key. `RunnerStore` in `crates/cli/src/runner_pipe.rs` holds it the
+ * same way for the desktop, and for the same reason: it is a fact about this
+ * device, not about any runner.
+ *
+ * **Both halves are stored, as one value.** [Identity.publicKey] derives its
+ * public half every time and stores nothing, because storing it separately made
+ * two facts that diverge. There is no entry point that derives a node public key
+ * from a node private key, so the pair is kept together, under one preference
+ * key, encrypted with one Keystore key, with one lifetime. Two facts that cannot
+ * outlive each other cannot disagree.
+ *
+ * The storage split is [Identity]'s exactly: ciphertext in ordinary preferences,
+ * the key that opens it in the Keystore where the app can use it but never read
+ * it. A preferences file lifted off a rooted device, or out of a backup, is bytes
+ * nobody can decrypt.
+ */
+object NodeIdentity {
+    private const val PREFS = "farcooler.identity"
+    private const val CIPHERTEXT = "nodeKey.ciphertext"
+    private const val IV = "nodeKey.iv"
+    private const val KEY_ALIAS = "farcooler.device.node"
+    private const val TRANSFORMATION = "AES/GCM/NoPadding"
+    private const val TAG_BITS = 128
+
+    /**
+     * One mint at a time, for the reason [Identity]'s lock exists: two callers
+     * finding nothing and both minting would leave the device offering one
+     * public half while holding the other's private one, and a tunnel ignores a
+     * client it does not recognize in silence.
+     */
+    private val lock = Any()
+
+    private lateinit var preferences: SharedPreferences
+
+    fun initialize(context: Context) {
+        preferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    }
+
+    /**
+     * The pair this device offers, minting one the first time it is needed.
+     *
+     * Null when this build cannot mint — an APK with no `libtailcat.so`, or a
+     * core that answered `no_tailcat`. **That is not a failure to report.** The
+     * answer to it is an offer carrying no node key, which is the `v=1` shape
+     * the core has always accepted.
+     */
+    fun mintIfNeeded(): Pair<String, String>? = synchronized(lock) {
+        // Re-read inside the lock: whoever held it may have just minted one.
+        read()?.let { return it }
+        val pair = ClientCore.mintNodeKey() ?: return null
+        if (!write(pair)) return null
+        pair
+    }
+
+    /** The public half to put in an offer, or null when this device has none. */
+    val offeredPublicKey: String? get() = mintIfNeeded()?.second
+
+    /**
+     * The private half a dial needs — read, never minted.
+     *
+     * Dialing must not mint. A tunneled runner was granted against ONE public
+     * half, which is now a line in that runner's allowlist; minting a second
+     * pair here would produce a key nobody has authorized, and tailcat ignores
+     * an unrecognized client without answering, so the symptom would be a
+     * connection that hangs and then times out. Null is the honest answer and
+     * `Connection` turns it into a sentence.
+     */
+    val storedPrivateKey: String? get() = synchronized(lock) { read()?.first }
+
+    private fun read(): Pair<String, String>? {
+        val ciphertext = preferences.getString(CIPHERTEXT, null) ?: return null
+        val iv = preferences.getString(IV, null) ?: return null
+        val plain = runCatching {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                secretKey(),
+                GCMParameterSpec(TAG_BITS, Base64.decode(iv, Base64.NO_WRAP)),
+            )
+            String(cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP)), Charsets.UTF_8)
+        }.getOrElse {
+            // A ciphertext the Keystore can no longer open — the same recovery
+            // [Identity] takes, and for the same reason. Forgetting it does NOT
+            // silently mint a replacement: the next dial to a tunneled runner
+            // says so, because a fresh pair would be a key that runner's
+            // allowlist has never heard of.
+            preferences.edit().remove(CIPHERTEXT).remove(IV).apply()
+            return null
+        }
+        return split(plain)
+    }
+
+    private fun write(pair: Pair<String, String>): Boolean = runCatching {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+        val ciphertext = cipher.doFinal("${pair.first}\n${pair.second}".toByteArray(Charsets.UTF_8))
+        preferences.edit()
+            .putString(CIPHERTEXT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+            .putString(IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+            .commit()
+    }.getOrElse { false } == true
+
+    /**
+     * Private first, public second — the order `mintNodeKey` writes them in and
+     * the order `fc_tailcat_mint_node_key` writes them in underneath that.
+     *
+     * Refuses a half-written value rather than returning one: a blank public
+     * half would be offered and admit nobody, and a blank private half would
+     * dial as a client the tunnel has never heard of. Both fail silently, which
+     * is the failure this whole mechanism exists to end.
+     */
+    internal fun split(stored: String): Pair<String, String>? {
+        val lines = stored.split("\n")
+        if (lines.size != 2) return null
+        if (lines[0].isEmpty() || lines[1].isEmpty()) return null
+        return lines[0] to lines[1]
+    }
+
+    private fun secretKey(): SecretKey {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        val spec = KeyGenParameterSpec.Builder(
+            KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            // Usable while the screen is locked, so a push about a blocked
+            // agent can be acted on without unlocking first — the same choice
+            // [Identity] makes, and the same reason.
+            .setUserAuthenticationRequired(false)
+            .setRandomizedEncryptionRequired(true)
+            .build()
+        generator.init(spec)
+        return generator.generateKey()
+    }
+}

@@ -403,8 +403,20 @@ struct HostEditorView: View {
 
     private var isEditing: Bool { existing != nil }
 
+    /// A tunneled runner has no address to correct.
+    ///
+    /// It is reached by a token the ceremony granted, and typing over an empty
+    /// Address field would silently turn it into a direct runner pointed at
+    /// nothing. So the two address rows are not shown, ``isValid`` stops asking
+    /// for them, and ``edited()`` keeps the reach it arrived with. The name and
+    /// the user are still worth editing: both are just words on this device.
+    private var isTunneled: Bool {
+        if case .tailcat = existing?.reach { return true }
+        return false
+    }
+
     private var isValid: Bool {
-        !address.trimmingCharacters(in: .whitespaces).isEmpty
+        (isTunneled || !address.trimmingCharacters(in: .whitespaces).isEmpty)
             && !user.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
@@ -422,15 +434,28 @@ struct HostEditorView: View {
                 // legible without emptying a field to find out what it was.
                 Section("Runner") {
                     field("Name", text: $label, hint: "Optional")
-                    field("Address", text: $address, hint: "Required")
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
+                    if isTunneled {
+                        // Stated rather than left out, so the row that would
+                        // have held an address says what stands in its place.
+                        // Not a field: there is nothing here anybody can type.
+                        HStack {
+                            Text("Address")
+                            Spacer(minLength: 16)
+                            Text("Through the tunnel").foregroundStyle(.secondary)
+                        }
+                    } else {
+                        field("Address", text: $address, hint: "Required")
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                    }
                     field("User", text: $user, hint: "Required")
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    field("Port", text: $port, hint: "22")
-                        .keyboardType(.numberPad)
+                    if !isTunneled {
+                        field("Port", text: $port, hint: "22")
+                            .keyboardType(.numberPad)
+                    }
                 }
 
                 Section {
@@ -508,11 +533,21 @@ struct HostEditorView: View {
     /// host in place rather than adding a second one alongside it.
     private func edited() -> Runner {
         let trimmed = address.trimmingCharacters(in: .whitespaces)
+        let named = label.trimmingCharacters(in: .whitespaces)
+        // The reach it arrived with when there is nothing on this screen that
+        // could change it. Rebuilding a `.direct` out of the fields would take
+        // a tunneled runner's token away and leave an empty address in its
+        // place — a runner that cannot be reached and cannot be repaired.
+        var reach = Reach.direct(host: trimmed, port: Int(port) ?? 22)
+        if isTunneled, let existing { reach = existing.reach }
+        // An emptied name falls back to the address, which is what a direct
+        // runner is called when nobody named it. A tunneled one has no address
+        // to fall back to, so it keeps the name it came with.
+        let fallback = isTunneled ? (existing?.label ?? "") : trimmed
         return Runner(
             id: existing?.id ?? UUID(),
-            label: label.trimmingCharacters(in: .whitespaces).isEmpty ? trimmed : label,
-            address: trimmed,
-            port: Int(port) ?? 22,
+            label: named.isEmpty ? fallback : named,
+            reach: reach,
             user: user.trimmingCharacters(in: .whitespaces),
             fingerprint: existing?.fingerprint)
     }

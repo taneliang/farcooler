@@ -188,15 +188,17 @@ struct JoinView: View {
     /// earlier ceremony wrote, and dropping a runner the person is already
     /// using would be a second wrong answer rather than a correction.
     ///
-    /// A tunneled runner is not written in either, and for a different reason:
-    /// ``Runner`` records an address and a port. ``Joined/note`` names it, so
-    /// nobody has to notice a runner that quietly did not arrive.
+    /// **A tunneled runner is written in like any other now.** It used to be
+    /// skipped here because ``Runner`` was an address and a port; it carries a
+    /// reach instead, so the whole reach is compared as one value. That is
+    /// stricter than the three fields it replaces, not looser: two tokens for
+    /// one box are two grants, and nothing here can tell they land in the same
+    /// place.
     private func adopt() {
         for entry in store.granted {
-            guard let arriving = entry.asRunner else { continue }
+            let arriving = entry.asRunner
             let existing = runners.hosts.first {
-                $0.address == arriving.address && $0.user == arriving.user
-                    && $0.port == arriving.port
+                $0.reach == arriving.reach && $0.user == arriving.user
             }
             if let existing {
                 // Already known. The pin is the one thing worth taking from the
@@ -256,17 +258,15 @@ struct Joined {
     let reachable: [CeremonyRunner]
     /// The runners that do not have the key.
     let pending: [CeremonyRunner]
-    /// The runners this app cannot record at all, whatever the key says: a
-    /// tunneled runner has no address, and ``Runner`` is an address and a port.
-    /// Separate from ``pending`` because the two have different remedies and
-    /// neither is the other's fault.
-    let unstorable: [CeremonyRunner]
 
+    /// Two lists, where there used to be three. The third was the runners this
+    /// app could not record at all — every tunneled one, because ``Runner`` was
+    /// an address and a port. It carries a reach now, so a tunneled runner is
+    /// recorded like any other and the sentence apologizing for dropping it has
+    /// nothing left to describe.
     init(_ runners: [CeremonyRunner]) {
-        unstorable = runners.filter { !$0.isStorable }
-        let storable = runners.filter(\.isStorable)
-        reachable = storable.filter { !$0.pending }
-        pending = storable.filter(\.pending)
+        reachable = runners.filter { !$0.pending }
+        pending = runners.filter(\.pending)
     }
 
     static let ready = "This device is ready"
@@ -298,10 +298,7 @@ struct Joined {
     ///
     /// It promises nothing later, either. Nothing retries, so "yet" is as far as
     /// this goes, and the sentence after it is an instruction rather than a wait.
-    var note: String? {
-        let parts = [tunnelNote, pendingNote].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
-    }
+    var note: String? { pendingNote }
 
     private var pendingNote: String? {
         guard !pending.isEmpty else { return nil }
@@ -311,18 +308,6 @@ struct Joined {
                 + "from one that can reach it."
             : "\(names) don’t have this device’s key yet. To use them, add this device again "
                 + "from one that can reach them."
-    }
-
-    /// A granted runner this app cannot record is stated, never dropped
-    /// silently. It is the same rule as ``pendingNote``: the alternative to
-    /// reading it here is meeting it later as a runner that is simply absent
-    /// from the list, with nothing on any screen having said so.
-    private var tunnelNote: String? {
-        guard !unstorable.isEmpty else { return nil }
-        let names = ListFormatter.localizedString(byJoining: unstorable.map(name(of:)))
-        return unstorable.count == 1
-            ? "\(names) is reachable only through a tunnel, which this device can’t use yet."
-            : "\(names) are reachable only through a tunnel, which this device can’t use yet."
     }
 
     /// A label comes from the granting device and is what somebody ticked there,

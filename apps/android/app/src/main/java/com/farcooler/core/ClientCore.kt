@@ -350,6 +350,35 @@ class ClientCore {
         }
 
         /**
+         * This device's tailcat node key pair — `private to public`.
+         *
+         * Null when this build cannot mint, which is `{"error":"no_tailcat"}`
+         * and any APK packaged without `libtailcat.so`. **That is not a failure
+         * to report.** The answer to it is a ceremony offer carrying no node
+         * key, which is the `v=1` shape the core has always accepted, and an
+         * enrolment that produces direct runners exactly as it did before this
+         * existed. A failed mint must never block one that would have
+         * succeeded.
+         *
+         * On the core rather than in Kotlin for the same reason [generateKey]
+         * is: there is one place in this project that makes keys, and it is a
+         * library maintained by people who do this for a living.
+         */
+        fun mintNodeKey(): Pair<String, String>? {
+            if (!NativeLibrary.loaded) return null
+            val payload = NativeClient.nativeMintNodeKey() ?: return null
+            val parsed = runCatching {
+                Json.parseToJsonElement(payload).jsonObject
+            }.getOrNull() ?: return null
+            // `{"error":"no_tailcat"}` carries neither half, so one guard
+            // covers both shapes this can answer with.
+            val private = parsed["private_key"]?.jsonPrimitive?.contentOrNull ?: return null
+            val public = parsed["public_key"]?.jsonPrimitive?.contentOrNull ?: return null
+            if (private.isEmpty() || public.isEmpty()) return null
+            return private to public
+        }
+
+        /**
          * The public key belonging to a private key.
          *
          * Derived rather than stored: a device has one identity, and keeping
