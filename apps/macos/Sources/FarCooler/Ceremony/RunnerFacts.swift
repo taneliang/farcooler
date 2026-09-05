@@ -41,10 +41,12 @@ enum RunnerFacts {
             // Filled in by `SshConfig.aliases`, which is the only thing that can
             // choose it: the answer depends on what is already in the file.
             alias: "",
-            address: address,
             user: user,
-            port: port,
             host_key: await hostKey(for: address) ?? "",
+            // Direct, because `ssh -G` is what answered: this Mac reaches the
+            // runner at an address, so that is what it can grant. A tunneled
+            // reach comes from the runner's own daemon, not from an ssh config.
+            reach: .direct(host: address, port: port),
             // True here, and true of every record this file makes: `pending`
             // means "this runner does not have the new device's key", and at
             // the moment a runner is resolved nothing has been written to it.
@@ -80,10 +82,9 @@ enum RunnerFacts {
             id: "",
             label: thisMacName,
             alias: "",
-            address: ProcessInfo.processInfo.hostName,
             user: NSUserName(),
-            port: 22,
             host_key: localHostKey() ?? "",
+            reach: .direct(host: ProcessInfo.processInfo.hostName, port: 22),
             pending: true)
     }
 
@@ -237,7 +238,7 @@ extension RunnerFacts {
     /// Whether an address is one the other device can still use tomorrow, in a
     /// different building.
     ///
-    /// The `address` in a ``CeremonyRunner`` is written into the new device
+    /// A direct ``CeremonyReach``'s address is written into the new device
     /// once and never resolved again: there is no re-discovery on either side,
     /// and the repair is a person retyping it into a phone. A Mac granted over
     /// the LAN hands out `cosmo.local`, or `192.168.1.180` if the phone asked
@@ -388,9 +389,16 @@ extension RunnerFacts {
     /// the loop; nil there means no Tailscale, which is not an error and not
     /// unusual.
     static func addressing(of runner: CeremonyRunner, in tailnet: Tailnet?) -> Addressing {
-        let reach = reach(of: runner.address)
+        // A tunneled runner has no address to judge, and nothing to improve: a
+        // tunnel is what this whole judgement exists to reach for. Saying
+        // `.anywhere` here is a statement about the reach rather than about a
+        // string, which is the one case where that is true by construction.
+        guard let address = runner.reach.host else {
+            return Addressing(address: "", reach: .anywhere, betterAddress: nil)
+        }
+        let reach = reach(of: address)
         guard reach != .anywhere else {
-            return Addressing(address: runner.address, reach: reach, betterAddress: nil)
+            return Addressing(address: address, reach: reach, betterAddress: nil)
         }
         // The empty id is this Mac, the same convention ``thisMac()`` is built
         // on. It matters here because Self and a peer are separate objects in
@@ -398,17 +406,17 @@ extension RunnerFacts {
         let candidate =
             runner.id.isEmpty
             ? tailnet?.selfAddress
-            : tailnet?.address(forHostName: hostName(in: runner.id), orAddress: runner.address)
+            : tailnet?.address(forHostName: hostName(in: runner.id), orAddress: address)
         // Offered only when it is genuinely an improvement. A tailnet whose
         // MagicDNS is off answers with a 100.x literal, and a runner already
         // addressed by its MagicDNS name would otherwise be told to replace an
         // address with itself.
-        guard let candidate, candidate != runner.address,
+        guard let candidate, candidate != address,
             RunnerFacts.reach(of: candidate) == .anywhere
         else {
-            return Addressing(address: runner.address, reach: reach, betterAddress: nil)
+            return Addressing(address: address, reach: reach, betterAddress: nil)
         }
-        return Addressing(address: runner.address, reach: reach, betterAddress: candidate)
+        return Addressing(address: address, reach: reach, betterAddress: candidate)
     }
 
     /// `you@box` → `box`; `box` → `box`.

@@ -206,11 +206,32 @@ private fun AddedScreen(
             Column {
                 Text(runner.label, style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "${runner.user}@${runner.address}" + if (runner.pending) " · not yet" else "",
+                    runner.reach.detail(runner.user) +
+                        if (runner.pending) " · not yet" else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+        // A granted runner this app cannot record is stated, never dropped
+        // silently. The alternative to reading it here is meeting it later as a
+        // runner that is simply absent from the list, with nothing on any
+        // screen having said so.
+        val unstorable = granted.filterNot { it.isStorable }
+        if (unstorable.isNotEmpty()) {
+            val names = unstorable.joinToString(", ") {
+                it.label.ifEmpty { it.reach.name(it.user) }
+            }
+            Text(
+                if (unstorable.size == 1) {
+                    "$names is reachable only through a tunnel, which this device can’t use yet."
+                } else {
+                    "$names are reachable only through a tunnel, which this device can’t " +
+                        "use yet."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
         }
         if (somePending) {
             Text(
@@ -228,17 +249,23 @@ private fun AddedScreen(
 /**
  * Write the granted runners into this device's own list.
  *
- * Matched by address, user and port rather than by the id in the manifest: two
- * devices generate their own ids for the same runner, so adopting by id would
- * leave someone with the same box listed twice.
+ * Matched by where they are reached and as whom, rather than by the id in the
+ * manifest: two devices generate their own ids for the same runner, so adopting
+ * by id would leave someone with the same box listed twice.
+ *
+ * A tunneled runner is not written in at all: [com.farcooler.data.Runner]
+ * records an address and a port, and a tunnel has neither. `AddedScreen` names
+ * it, so nobody has to notice a runner that quietly did not arrive.
  */
 private fun adopt(model: AppModel, granted: List<CeremonyRunner>) {
     for (entry in granted) {
+        val arriving = entry.asRunner() ?: continue
         val existing = model.hosts.hosts.value.firstOrNull {
-            it.address == entry.address && it.user == entry.user && it.port == entry.port
+            it.address == arriving.address && it.user == arriving.user &&
+                it.port == arriving.port
         }
         if (existing == null) {
-            model.hosts.add(entry.asRunner())
+            model.hosts.add(arriving)
             continue
         }
         // Already known. The pin is the one thing worth taking from the

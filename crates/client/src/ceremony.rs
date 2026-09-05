@@ -16,12 +16,20 @@
 //! token, so whoever films it derives exactly what the scanner derives.
 //!
 //! So the first code carries public keys, a name, an opaque account id, a
-//! channel and a random ceremony id; the reply carries addresses. A photograph
-//! of the first is worth nothing on its own: enrolling those keys grants access
-//! to a device the photographer does not hold. A photograph of the reply is
-//! worth your fleet topology, which is why it is stated in the threat model
-//! rather than waved away. `the_offer_carries_no_secret` exists so a future
-//! field cannot add one quietly.
+//! channel and a random ceremony id; the reply carries addresses and tunnel
+//! tokens. A photograph of the first is worth nothing on its own: enrolling
+//! those keys grants access to a device the photographer does not hold. A
+//! photograph of the reply is worth your fleet topology, which is why it is
+//! stated in the threat model rather than waved away.
+//!
+//! A tunnel token is part of that topology and not a credential on top of it: it
+//! names a runner's rendezvous point, and the runner admits only the node keys
+//! in its allowlist, so whoever films one still cannot open a connection. The
+//! private half of a tunnel — a device's own node key — is the thing that would
+//! be draft three's mistake again, and it structurally cannot travel here:
+//! `Reach::Tailcat::client_key` is `#[serde(skip)]`.
+//! `the_offer_carries_no_secret` and `the_manifest_carries_no_private_key` exist
+//! so a future field cannot undo either statement quietly.
 //!
 //! ## The ceremony id is a correlator, not a secret
 //!
@@ -45,6 +53,13 @@ use std::time::Duration;
 use rand::RngExt;
 use russh::keys::ssh_key;
 use serde::{Deserialize, Serialize};
+
+/// How a granted runner is reached, re-exported rather than redefined.
+///
+/// One enum, because a reply writes it and [`crate::ssh::Destination`] reads
+/// it: two definitions that agree today are two definitions that disagree after
+/// the next variant.
+pub use crate::ssh::Reach;
 
 /// The payload version both codes carry.
 ///
@@ -76,13 +91,44 @@ pub const FRESHNESS: Duration = Duration::from_secs(120);
 /// The byte budget for one manifest, before QR encoding and error correction.
 ///
 /// A stated budget is the mechanism and a runner count is the consequence.
-/// Fifteen records at roughly 120 bytes is already about 1800 before versioning,
-/// the account, the target key and the encoder's own overhead — so a design that
-/// caps by counting runners has picked the number that is not the constraint.
-///
 /// Conservative on purpose: a version-40 code at medium error correction holds
 /// 2331 binary bytes, and the app is still expected to ask its own encoder
 /// whether what it built fits. This is the floor, not a promise.
+///
+/// ## What the consequence actually is
+///
+/// The estimate this constant was written against — "fifteen records at roughly
+/// 120 bytes" — was wrong about both halves, and the measurement is
+/// `the_ceiling_for_tunneled_runners_is_measured`:
+///
+/// | record | bytes | fits in 1800 |
+/// | --- | --- | --- |
+/// | direct, a 36-byte id and a pinned host key | 232 | **7** |
+/// | tunneled, the same plus a 184-byte token | 386 | **4** |
+///
+/// The 120-byte record never existed: a UUID id is 36 bytes and a `SHA256:`
+/// fingerprint 50 before anything else is counted. A production tailcat
+/// `ConnBlob` measures 184 bytes — see
+/// `TestAProductionTokenIsMeasuredAndDoesNotMoveAcrossARestart` in
+/// `crates/tailcat/go` — and adds 154 to a record once its `kind` tag and field
+/// name are counted. With a 166-byte envelope that is `166 + 386n <= 1800`, so
+/// n = 4.
+///
+/// Four is a real limit on a real screen and it is stated here rather than
+/// discovered: a fleet of a dozen tunneled runners takes three ceremonies. Both
+/// numbers are floors — every field is variable-width, and a long label or an
+/// alias costs what it costs — which is why the test measures rather than
+/// restating them.
+///
+/// ## What happens at the ceiling
+///
+/// The whole manifest is refused, with [`CeremonyError::TooLarge`], and nothing
+/// is trimmed. A manifest that silently dropped its last runner would hand
+/// somebody a QR code that looks like the grant they made and is not: the
+/// missing runner would surface days later as a box that is simply absent from
+/// a phone, with nothing on either screen having said so. Refusing is louder and
+/// the remedy is one the granting screen can state — grant fewer, then run the
+/// ceremony again for the rest.
 pub const BUDGET: usize = 1_800;
 
 /// The first code: what a new device shows.
@@ -131,13 +177,18 @@ pub struct RunnerEntry {
     /// The `~/.ssh/config` alias, which is per runner rather than per host —
     /// two runners on one box would both want `Host box`.
     pub alias: String,
-    pub address: String,
     pub user: String,
-    pub port: u16,
     /// The host key to pin, as a `SHA256:` fingerprint. It travels with the
-    /// address it belongs to, which is what stops the unknown-host prompt from
+    /// reach it belongs to, which is what stops the unknown-host prompt from
     /// ever appearing and what makes an interception a refusal.
+    ///
+    /// Pinned on a tunneled runner too. WireGuard proves which NODE answered;
+    /// the host key proves which SSHD did, and those are the same question only
+    /// on a box carrying exactly one runner.
     pub host_key: String,
+    /// An address and a port, or a tunnel token. One or the other and never
+    /// both: see [`Reach`].
+    pub reach: Reach,
     /// This runner does NOT have the new device's key.
     ///
     /// A write that failed, a runner that could not be reached, and one never
@@ -194,6 +245,10 @@ pub enum CeremonyError {
     AlreadyTaken,
     #[error("this manifest is larger than the byte budget")]
     TooLarge,
+    /// A reply granted a runner reachable only through the tunnel, to a device
+    /// that named no node key a tunnel could admit.
+    #[error("this reply grants a runner this device cannot reach")]
+    NoTunnel,
 }
 
 impl CeremonyError {
@@ -212,6 +267,7 @@ impl CeremonyError {
             CeremonyError::Stale => "stale",
             CeremonyError::AlreadyTaken => "already_taken",
             CeremonyError::TooLarge => "too_large",
+            CeremonyError::NoTunnel => "no_tunnel",
         }
     }
 }
@@ -373,7 +429,35 @@ pub fn accept_manifest(
         return Err(CeremonyError::WrongTarget);
     }
 
+    // Last, because it is the only rule here that is about capability rather
+    // than about who a reply belongs to: a tunneled runner granted to a device
+    // with no node key is a bug on the GRANTING side, and it must not be
+    // reported as a reply meant for somebody else.
+    if !can_be_granted_a_tunnel(expecting) && has_a_tunneled_runner(&manifest) {
+        return Err(CeremonyError::NoTunnel);
+    }
+
     Ok(manifest)
+}
+
+/// Whether this device could ever be admitted to a tunnel.
+///
+/// Keyed on the NODE KEY and deliberately not on the version. A v=2 offer with
+/// an empty node key is a real device that has not joined a tunnel yet, and it
+/// can no more reach one than a v=1 device can — so a rule that read the version
+/// would grant a tunneled runner to a device that will never connect, and refuse
+/// a v=1 device the day one learns to carry a key. The version says what a code
+/// can express; the node key says what the device it came from can be granted.
+///
+/// The predicate is `farcooler_fence`'s own, not a second spelling of it: a key
+/// this refuses is a key `fence::render` would refuse to write, so it could
+/// never appear in the allowlist the runner's tunnel admits.
+fn can_be_granted_a_tunnel(offer: &Offer) -> bool {
+    farcooler_fence::usable_node_key(&offer.node_key)
+}
+
+fn has_a_tunneled_runner(manifest: &Manifest) -> bool {
+    manifest.runners.iter().any(|r| matches!(r.reach, Reach::Tailcat { .. }))
 }
 
 /// The SHA256 fingerprint of an OpenSSH public key, in the form a person reads
@@ -516,16 +600,42 @@ mod tests {
     }
 
     fn a_runner_named(label: &str) -> RunnerEntry {
+        a_runner_reached(
+            label,
+            Reach::Direct { host: format!("{label}.tail-1234.ts.net"), port: 22 },
+        )
+    }
+
+    fn a_runner_reached(label: &str, reach: Reach) -> RunnerEntry {
         RunnerEntry {
             id: "0198f0c3-0000-7000-8000-00000000000a".into(),
             label: label.into(),
             alias: label.into(),
-            address: format!("{label}.tail-1234.ts.net"),
             user: "you".into(),
-            port: 22,
             host_key: "SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4".into(),
+            reach,
             pending: false,
         }
+    }
+
+    /// A token the size of a real one, so anything measured against it is
+    /// measured against what a device would actually carry.
+    ///
+    /// 184 bytes, which is what `crates/tailcat/go` prints for a production
+    /// `ConnBlob` when its live test is run. The content is not a real blob and
+    /// nothing here parses it; the LENGTH is the fact being held onto.
+    const TOKEN: &str = concat!(
+        "tc-",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "00000000000000000000000000000000000000000000000000000",
+    );
+
+    fn a_tunneled_runner_named(label: &str) -> RunnerEntry {
+        a_runner_reached(
+            label,
+            Reach::Tailcat { token: TOKEN.into(), client_key: String::new() },
+        )
     }
 
     // MARK: - The first code
@@ -546,15 +656,43 @@ mod tests {
         }
     }
 
-    /// And neither does the reply. The reply is worth filming — it is a fleet
-    /// topology — but filming it must not be the same as holding a key.
+    /// And neither does the reply carry a KEY. The reply is worth filming — it
+    /// is a fleet topology — but filming it must not be the same as holding one.
+    ///
+    /// `token` left the forbidden list when a runner gained a tunnel, and that
+    /// is a change of fact rather than a relaxed guard: a tunnel token names a
+    /// runner's rendezvous point, and the runner admits only the node keys in
+    /// its allowlist, so whoever films one still cannot open a connection. What
+    /// would be a secret is the private half — a device's own node key — and
+    /// `the_manifest_carries_no_private_key` below is the guard on that,
+    /// enforced by the type rather than by this list.
     #[test]
     fn the_manifest_carries_no_secret() {
         let o = offer("iPhone 17", "acct_1", KEY_A, None);
         let json = encode_manifest(&manifest(&o, vec![a_runner()]));
-        for forbidden in ["secret", "token", "password", "seed", "jwt", "private"] {
+        for forbidden in ["secret", "password", "seed", "jwt", "private"] {
             assert!(!json.contains(forbidden), "{forbidden} in a manifest: {json}");
         }
+    }
+
+    /// The private half of a tunnel cannot be written into a reply.
+    ///
+    /// Structural, not conventional: `Reach::Tailcat::client_key` is
+    /// `#[serde(skip)]`, so a granting device that somehow held a device's node
+    /// private key still could not put it on a screen. A reply therefore decodes
+    /// with the field empty, and whoever dials fills in the key it already
+    /// holds — the key is per device, not per runner.
+    #[test]
+    fn the_manifest_carries_no_private_key() {
+        let o = offer("iPhone 17", "acct_1", KEY_A, None);
+        let leaked = a_runner_reached(
+            "box",
+            Reach::Tailcat { token: TOKEN.into(), client_key: "the-private-half".into() },
+        );
+        let json = encode_manifest(&manifest(&o, vec![leaked]));
+        assert!(json.contains(TOKEN), "the token a device needs did not travel: {json}");
+        assert!(!json.contains("the-private-half"), "a node private key travelled: {json}");
+        assert!(!json.contains("client_key"), "a slot for one travelled: {json}");
     }
 
     /// A ceremony id is a correlator, and two are never the same.
@@ -847,9 +985,9 @@ mod tests {
 
     /// The cap is measured bytes, never an assumed runner count.
     ///
-    /// Fifteen records at 120 bytes is already about 1800 before versioning,
-    /// the account, the target key, encoding and error correction. A count is
-    /// a consequence; the budget is the mechanism.
+    /// A count is a consequence; the budget is the mechanism. What the count
+    /// works out to now that a record can carry a 184-byte token is
+    /// `the_ceiling_for_tunneled_runners_is_measured`.
     #[test]
     fn the_manifest_is_capped_by_measured_bytes() {
         let mine = offer("iPhone", "acct_1", KEY_A, None);
@@ -867,8 +1005,8 @@ mod tests {
     fn the_budget_measures_this_manifest_rather_than_a_count() {
         let mine = offer("iPhone", "acct_1", KEY_A, None);
         let short = manifest(&mine, vec![a_runner(), a_runner()]);
-        let mut wordy = a_runner();
-        wordy.address = "a".repeat(1_600);
+        let wordy =
+            a_runner_reached("box", Reach::Direct { host: "a".repeat(1_600), port: 22 });
         let long = manifest(&mine, vec![wordy, a_runner()]);
         assert_eq!(short.runners.len(), long.runners.len());
         assert!(manifest_fits(&short, BUDGET));
@@ -895,7 +1033,179 @@ mod tests {
         let back = accept_manifest(&encode_manifest(&m), &mine, false).expect("accept");
         assert_eq!(back.runners.len(), 2);
         assert!(back.runners[1].pending);
-        assert_eq!(back.runners[1].port, 22);
+        assert!(matches!(&back.runners[1].reach, Reach::Direct { port: 22, .. }));
+    }
+
+    // MARK: - How a granted runner is reached
+
+    /// A reply carries either kind, and each survives the round trip whole.
+    #[test]
+    fn a_manifest_round_trips_both_kinds_of_reach() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let m = manifest(
+            &mine,
+            vec![a_runner_named("direct"), a_tunneled_runner_named("tunneled")],
+        );
+        let back = accept_manifest(&encode_manifest(&m), &mine, false).expect("accept");
+        assert!(matches!(
+            &back.runners[0].reach,
+            Reach::Direct { host, port } if host == "direct.tail-1234.ts.net" && *port == 22
+        ));
+        assert!(matches!(
+            &back.runners[1].reach,
+            Reach::Tailcat { token, .. } if token == TOKEN
+        ));
+    }
+
+    /// The wire shape is tagged, so a third kind of reach is additive rather
+    /// than a field two decoders disagree about.
+    #[test]
+    fn a_reach_is_tagged_on_the_wire() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let json = encode_manifest(&manifest(&mine, vec![a_runner()]));
+        assert!(json.contains(r#""kind":"direct""#), "{json}");
+        let tunneled =
+            encode_manifest(&manifest(&mine, vec![a_tunneled_runner_named("box")]));
+        assert!(tunneled.contains(r#""kind":"tailcat""#), "{tunneled}");
+    }
+
+    /// A device that named no node key cannot be admitted to any tunnel, so a
+    /// tunneled runner in a reply addressed to one is a bug on the granting
+    /// side. Refuse the whole reply rather than hand somebody a runner that can
+    /// only ever fail to connect.
+    ///
+    /// A v=1 device is the case that will actually happen: it is a phone in the
+    /// field that cannot be upgraded before it is enrolled.
+    #[test]
+    fn a_tunneled_runner_is_refused_when_the_device_named_no_node_key() {
+        let old = decode_offer(&v1_offer_json("phone", "acct_1", KEY_A)).expect("a v1 offer");
+        let m = manifest(&old, vec![a_tunneled_runner_named("box")]);
+        assert!(matches!(
+            accept_manifest(&encode_manifest(&m), &old, false),
+            Err(CeremonyError::NoTunnel)
+        ));
+    }
+
+    /// And the rule is keyed on the node key, not on the version.
+    ///
+    /// A v=2 device with an empty node key is a real device that has not joined
+    /// a tunnel yet. A check that read the version would grant it a runner it
+    /// can never reach — which is the whole failure this rule exists to stop —
+    /// and would refuse a v=1 device the day one learns to carry a key.
+    #[test]
+    fn a_current_device_with_no_node_key_is_refused_a_tunneled_runner_too() {
+        let no_tunnel_yet = offer("iPhone", "acct_1", KEY_A, None);
+        assert_eq!(no_tunnel_yet.v, VERSION, "the version is not what is being tested");
+        assert_eq!(no_tunnel_yet.node_key, "");
+        let m = manifest(&no_tunnel_yet, vec![a_tunneled_runner_named("box")]);
+        assert!(matches!(
+            accept_manifest(&encode_manifest(&m), &no_tunnel_yet, false),
+            Err(CeremonyError::NoTunnel)
+        ));
+    }
+
+    /// A node key `fence::render` would refuse is a node key no allowlist can
+    /// ever contain, so it grants no tunnel here either. One predicate, asked
+    /// in both places.
+    #[test]
+    fn a_node_key_the_fence_would_refuse_grants_no_tunnel() {
+        for unusable in ["short", &"k".repeat(44), &format!("{}\"", &NODE_KEY[1..])] {
+            let device = build_offer("iPhone", "acct_1", KEY_A, None, unusable);
+            let m = manifest(&device, vec![a_tunneled_runner_named("box")]);
+            assert!(
+                matches!(
+                    accept_manifest(&encode_manifest(&m), &device, false),
+                    Err(CeremonyError::NoTunnel)
+                ),
+                "a tunnel was granted on the strength of {unusable:?}"
+            );
+        }
+    }
+
+    /// The refusal is about the tunnel and nothing else: a device with no node
+    /// key is still granted every direct runner it was given. Refusing those
+    /// would strand every phone in the field.
+    #[test]
+    fn a_device_with_no_node_key_is_still_granted_direct_runners() {
+        let old = decode_offer(&v1_offer_json("phone", "acct_1", KEY_A)).expect("a v1 offer");
+        let m = manifest(&old, vec![a_runner(), a_runner_named("build-vm")]);
+        let back = accept_manifest(&encode_manifest(&m), &old, false).expect("accept");
+        assert_eq!(back.runners.len(), 2);
+    }
+
+    /// A tunnel does not replace the pin. WireGuard proves which NODE answered;
+    /// the host key proves which SSHD did, and those are the same question only
+    /// on a box carrying exactly one runner.
+    #[test]
+    fn a_host_key_is_still_pinned_on_a_tunneled_runner() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let m = manifest(&mine, vec![a_tunneled_runner_named("box")]);
+        let back = accept_manifest(&encode_manifest(&m), &mine, false).expect("accept");
+        assert!(
+            back.runners[0].host_key.starts_with("SHA256:"),
+            "a tunneled runner lost its host key"
+        );
+    }
+
+    // MARK: - The ceiling
+
+    /// What the budget works out to in runners, measured rather than assumed.
+    ///
+    /// This is the number a person feels, and it is smaller than `BUDGET`'s
+    /// first comment claimed: a record with a 184-byte token is 386 bytes to a
+    /// direct record's 232, and `166 + 386n <= 1800` gives four.
+    ///
+    /// Asserted exactly rather than as a range. A range wide enough to survive
+    /// a new field is a range that would not have caught this one — the estimate
+    /// this replaces was out by a factor of nearly four and nothing failed. A
+    /// field that moves the ceiling should fail here, be measured again, and be
+    /// written into `BUDGET`'s table, because it is a limit somebody meets while
+    /// ticking boxes on a screen.
+    #[test]
+    fn the_ceiling_for_tunneled_runners_is_measured() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let fits = |n: usize, tunneled: bool| {
+            let runners: Vec<_> = (0..n)
+                .map(|i| {
+                    let label = format!("r{i}");
+                    if tunneled {
+                        a_tunneled_runner_named(&label)
+                    } else {
+                        a_runner_named(&label)
+                    }
+                })
+                .collect();
+            manifest_fits(&manifest(&mine, runners), BUDGET)
+        };
+        let ceiling = |tunneled| (1..=40).take_while(|n| fits(*n, tunneled)).count();
+
+        assert_eq!(
+            ceiling(true),
+            4,
+            "the tunneled ceiling moved; measure it again and update BUDGET's table"
+        );
+        assert_eq!(
+            ceiling(false),
+            7,
+            "the direct ceiling moved; measure it again and update BUDGET's table"
+        );
+    }
+
+    /// At the ceiling the whole reply is refused, and nothing is trimmed.
+    ///
+    /// A manifest that silently dropped its last runner would hand somebody a
+    /// code that looks like the grant they made and is not — the missing runner
+    /// surfaces days later as a box that is simply absent from a phone, with
+    /// nothing on either screen having said so. `manifest` keeps every runner it
+    /// was given; `manifest_fits` is what says no.
+    #[test]
+    fn a_manifest_over_budget_is_refused_rather_than_trimmed() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let granted: Vec<_> =
+            (0..20).map(|i| a_tunneled_runner_named(&format!("r{i}"))).collect();
+        let m = manifest(&mine, granted.clone());
+        assert_eq!(m.runners.len(), granted.len(), "the builder dropped a runner");
+        assert!(!manifest_fits(&m, BUDGET), "20 tunneled runners claimed to fit");
     }
 
     // MARK: - Freshness
@@ -945,6 +1255,7 @@ mod tests {
             CeremonyError::Stale,
             CeremonyError::AlreadyTaken,
             CeremonyError::TooLarge,
+            CeremonyError::NoTunnel,
         ];
         let mut codes: Vec<&str> = all.iter().map(CeremonyError::code).collect();
         codes.sort_unstable();

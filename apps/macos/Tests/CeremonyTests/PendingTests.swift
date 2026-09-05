@@ -169,9 +169,10 @@ struct PendingTests {
     /// nothing has been written to it yet.
     private func runner(_ id: String) -> CeremonyRunner {
         CeremonyRunner(
-            id: id, label: id.isEmpty ? "This Mac" : id, alias: "",
-            address: id.isEmpty ? "cosmo.local" : "\(id).example", user: "e-liang", port: 22,
-            host_key: "SHA256:whatever", pending: true)
+            id: id, label: id.isEmpty ? "This Mac" : id, alias: "", user: "e-liang",
+            host_key: "SHA256:whatever",
+            reach: .direct(host: id.isEmpty ? "cosmo.local" : "\(id).example", port: 22),
+            pending: true)
     }
 
     /// A stand-in for `farcooler client enroll`, answering per runner and per

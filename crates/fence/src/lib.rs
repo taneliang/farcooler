@@ -680,7 +680,13 @@ fn usable_client_id(client_id: &str) -> bool {
 /// cannot end the quoted command it is interpolated into, and a decoder that
 /// accepts whitespace or padding would let it. An X25519 public key is 32
 /// bytes, so the length is a constant rather than a range.
-fn usable_node_key(node_key: &str) -> bool {
+///
+/// `pub` because the enrollment ceremony asks the same question of the node key
+/// in an offer — "is this a key a tunnel could ever admit" — and a second
+/// spelling of the predicate is a second answer. A device whose node key this
+/// refuses is a device `render` would refuse to write a line for, so granting it
+/// a tunneled runner would grant something no allowlist will ever contain.
+pub fn usable_node_key(node_key: &str) -> bool {
     node_key.len() == 43
         && node_key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }

@@ -39,11 +39,96 @@ struct CeremonyRunner: Codable, Equatable, Identifiable {
     var id: String
     var label: String
     var alias: String
-    var address: String
     var user: String
-    var port: Int
     var host_key: String
+    var reach: CeremonyReach
     var pending: Bool
+}
+
+/// How a granted runner is reached: an address, or the tunnel.
+///
+/// One or the other and never both — two optional fields would admit "both set"
+/// and "neither set", and then something here would have to pick a winner. The
+/// wire is tagged on `kind` so a third kind is additive, and an unrecognized one
+/// throws rather than decoding to a default: the core has already accepted the
+/// manifest by the time this runs, so a tag this does not know is this app
+/// failing, and ``Refusal/unreadable`` is what says so.
+enum CeremonyReach: Codable, Equatable {
+    case direct(host: String, port: Int)
+    case tailcat(token: String)
+
+    private enum Field: String, CodingKey {
+        case kind, host, port, token
+    }
+
+    init(from decoder: Decoder) throws {
+        let wire = try decoder.container(keyedBy: Field.self)
+        switch try wire.decode(String.self, forKey: .kind) {
+        case "direct":
+            self = .direct(
+                host: try wire.decode(String.self, forKey: .host),
+                port: try wire.decode(Int.self, forKey: .port))
+        case "tailcat":
+            self = .tailcat(token: try wire.decode(String.self, forKey: .token))
+        case let other:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind, in: wire, debugDescription: "unknown reach \(other)")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var wire = encoder.container(keyedBy: Field.self)
+        switch self {
+        case .direct(let host, let port):
+            try wire.encode("direct", forKey: .kind)
+            try wire.encode(host, forKey: .host)
+            try wire.encode(port, forKey: .port)
+        case .tailcat(let token):
+            try wire.encode("tailcat", forKey: .kind)
+            try wire.encode(token, forKey: .token)
+        }
+    }
+
+    /// The address, for the things that are genuinely about one — judging how
+    /// far it travels, writing a `HostName`. Nil for a tunnel, which has none,
+    /// so a caller has to say what it does about that rather than inherit an
+    /// empty string.
+    var host: String? {
+        if case .direct(let host, _) = self { return host }
+        return nil
+    }
+
+    var port: Int? {
+        if case .direct(_, let port) = self { return port }
+        return nil
+    }
+
+    /// The same reach at a different address. Used where this Mac finds a name
+    /// for the same runner that survives leaving the building; a tunnel already
+    /// does, so it comes back unchanged.
+    func replacingHost(_ host: String) -> CeremonyReach {
+        guard case .direct(_, let port) = self else { return self }
+        return .direct(host: host, port: port)
+    }
+
+    /// What a person sees where an address would go.
+    ///
+    /// Never the token: it is long, it is meaningless to read, and it is the one
+    /// field here worth stealing.
+    var display: String {
+        switch self {
+        case .direct(let host, _): return host
+        case .tailcat: return "Through the tunnel"
+        }
+    }
+
+    /// A name for a sentence, when the granting side sent no label or alias.
+    func name(user: String) -> String {
+        switch self {
+        case .direct(let host, _): return "\(user)@\(host)"
+        case .tailcat: return "a tunneled runner"
+        }
+    }
 }
 
 /// The reply: the runners a trusted device granted, addressed to one ceremony.
@@ -75,6 +160,10 @@ enum Refusal: Equatable {
     case stale
     case alreadyTaken
     case tooLarge
+    /// The reply granted a runner reachable only through the tunnel, and this
+    /// device named no node key a tunnel would admit. The granting side's bug,
+    /// refused whole rather than handed on as a runner that can only fail.
+    case noTunnel
     /// The code decoded, and it belongs to another account. Decided here rather
     /// than in Rust because `farcooler_client_ceremony_scan` takes no account
     /// to compare against — see the note on `CeremonyStore.scan`.
@@ -95,6 +184,7 @@ enum Refusal: Equatable {
         case .stale: return "This code expired"
         case .alreadyTaken: return "This code was already used"
         case .tooLarge: return "Too many runners selected"
+        case .noTunnel: return "This Mac can’t reach one of those runners"
         case .otherAccount: return "This device uses a different account"
         case .unreadable: return "Couldn’t read this code"
         }
@@ -122,6 +212,9 @@ enum Refusal: Equatable {
             return "Show a new code, then try again."
         case .tooLarge:
             return "Select fewer runners. You can add the others later."
+        case .noTunnel:
+            return "One of them is reachable only through a tunnel, and this Mac isn’t on "
+                + "one. Try again, choosing runners it can reach."
         case .otherAccount(let email):
             return "Sign in to \(email) on the new device, then show its code again."
         case .unreadable:
@@ -155,6 +248,7 @@ enum Refusal: Equatable {
         case "stale": return .stale
         case "already_taken": return .alreadyTaken
         case "too_large": return .tooLarge
+        case "no_tunnel": return .noTunnel
         // A word this build does not have. It is still a refusal — reporting it
         // as a successful scan would be the one wrong answer.
         default: return .unreadable

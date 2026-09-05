@@ -865,12 +865,20 @@ pub unsafe extern "C" fn farcooler_client_ceremony_scan(
 /// decoded again rather than trusted: a reply must not be built for a code this
 /// build would have refused.
 ///
-/// `runners_json` is a JSON array of runner records — id, label, alias, address,
-/// user, port, host_key, pending. `budget_bytes` is what the app's own QR
-/// encoder reports as fitting at the error-correction level it chose; 0 means
-/// the conservative default. Over budget is `{"error":"too_large"}`, and the
-/// answer is to grant the rest by running the ceremony again — never a second
-/// code to reassemble.
+/// `runners_json` is a JSON array of runner records — id, label, alias, user,
+/// host_key, pending, and a `reach` naming how to get there:
+/// `{"kind":"direct","host":"box","port":22}` or
+/// `{"kind":"tailcat","token":"..."}`. One or the other and never both, so
+/// nothing downstream has to pick a winner.
+///
+/// `budget_bytes` is what the app's own QR encoder reports as fitting at the
+/// error-correction level it chose; 0 means the conservative default. Over
+/// budget is `{"error":"too_large"}` for the WHOLE reply — nothing is trimmed,
+/// because a code that silently dropped a runner would look exactly like the
+/// grant somebody made — and the answer is to grant the rest by running the
+/// ceremony again, never a second code to reassemble. A tunnel token is 184
+/// bytes, so the default budget holds four tunneled runners where it holds
+/// seven direct ones — both measured, in `ceremony::BUDGET`'s table.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_ceremony_reply(
     offer_json: *const c_char,
@@ -2067,14 +2075,22 @@ fn parse_destination(config: &str) -> Result<Destination, String> {
         None => HostKeyPolicy::RequireApproval,
     };
 
-    Ok(Destination {
-        // Every runner a phone or Mac configures today is reached by
-        // address; the tunnel ceremony that produces a `Reach::Tailcat`
-        // config is a later task's to wire.
-        reach: Reach::Direct {
-            host: text("host").ok_or("config needs a host")?,
+    // A token or a host, and the token decides: a runner granted through the
+    // ceremony's tunnel reach has no address to name, and a config carrying
+    // both would leave two paths to one runner with nothing choosing between
+    // them. `node_key` is this DEVICE's own tailcat node private key, which is
+    // per device rather than per runner and never travelled in the manifest —
+    // whoever dials supplies the key it already holds.
+    let reach = match text("token") {
+        Some(token) => Reach::Tailcat { token, client_key: text("node_key").unwrap_or_default() },
+        None => Reach::Direct {
+            host: text("host").ok_or("config needs a host or a token")?,
             port: value.get("port").and_then(|v| v.as_u64()).unwrap_or(22) as u16,
         },
+    };
+
+    Ok(Destination {
+        reach,
         user: text("user").ok_or("config needs a user")?,
         private_key: text("private_key").ok_or("config needs a private_key")?,
         passphrase: text("passphrase"),

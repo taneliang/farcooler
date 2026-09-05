@@ -16,9 +16,16 @@ struct SshConfigTests {
     private func runner(
         id: String, label: String, user: String = "you", address: String = "box.tail-1234.ts.net"
     ) -> CeremonyRunner {
+        runner(id: id, label: label, user: user, reach: .direct(host: address, port: 22))
+    }
+
+    private func runner(
+        id: String, label: String, user: String = "you", reach: CeremonyReach
+    ) -> CeremonyRunner {
         CeremonyRunner(
-            id: id, label: label, alias: "", address: address, user: user, port: 22,
-            host_key: "SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4", pending: false)
+            id: id, label: label, alias: "", user: user,
+            host_key: "SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4",
+            reach: reach, pending: false)
     }
 
     /// `alice@box` and `bob@box` are two runners on one machine, and both want
@@ -135,8 +142,8 @@ struct SshConfigTests {
         #expect(lines == [
             "Host box",
             "  HostName box.tail-1234.ts.net",
-            "  User you",
             "  Port 22",
+            "  User you",
             "  IdentityFile ~/.ssh/farcooler-macbook-air",
             "  IdentitiesOnly yes",
         ])
@@ -144,6 +151,33 @@ struct SshConfigTests {
         // its read-back check counts non-empty lines. A blank separator here
         // would make the file fail to read back as what was written.
         for line in lines {
+            #expect(!line.contains("\n") && !line.trimmingCharacters(in: .whitespaces).isEmpty)
+            try SshConfig.assertNotKeyA(line)
+        }
+    }
+
+    /// A tunneled runner has no address, so `HostName` has nothing true to say
+    /// and OpenSSH is given a command it can execute instead.
+    ///
+    /// **The token never lands in this file.** It is read by every editor and
+    /// tool on the machine, and the id is enough — the CLI resolves the token
+    /// from its own runner store.
+    @Test func aTunneledRunnerGetsAProxyCommandAndNoHostName() throws {
+        let identity = ShellKey.directory.appendingPathComponent("farcooler-macbook-air")
+        let lines = SshConfig.block(
+            for: runner(id: "r1", label: "box", reach: .tailcat(token: "tc-secret")),
+            alias: "box",
+            identity: identity)
+
+        #expect(lines == [
+            "Host box",
+            "  ProxyCommand farcooler runner pipe r1",
+            "  User you",
+            "  IdentityFile ~/.ssh/farcooler-macbook-air",
+            "  IdentitiesOnly yes",
+        ])
+        for line in lines {
+            #expect(!line.contains("tc-secret"), "the token landed in ssh config: \(line)")
             #expect(!line.contains("\n") && !line.trimmingCharacters(in: .whitespaces).isEmpty)
             try SshConfig.assertNotKeyA(line)
         }

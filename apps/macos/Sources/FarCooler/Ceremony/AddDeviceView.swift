@@ -338,7 +338,7 @@ struct AddDeviceView: View {
     private func reachNote(for row: CeremonyStore.RunnerRow) -> some View {
         let verdict = addressing[row.runner.id]
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(row.runner.address)
+            Text(row.runner.reach.display)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
             switch verdict?.reach {
@@ -425,7 +425,7 @@ struct AddDeviceView: View {
                 judged[row.runner.id] = verdict
                 guard let better = verdict.betterAddress else { continue }
                 var swapped = row.runner
-                swapped.address = better
+                swapped.reach = swapped.reach.replacingHost(better)
                 rows[index] = .init(runner: swapped, granted: row.granted, note: row.note)
             }
             return (rows, judged)

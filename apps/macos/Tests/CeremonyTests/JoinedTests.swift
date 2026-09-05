@@ -118,7 +118,8 @@ struct JoinedTests {
 
     private func runner(_ label: String, pending: Bool = false) -> CeremonyRunner {
         CeremonyRunner(
-            id: label, label: label, alias: "", address: "\(label).example", user: "e-liang",
-            port: 22, host_key: "SHA256:whatever", pending: pending)
+            id: label, label: label, alias: "", user: "e-liang",
+            host_key: "SHA256:whatever",
+            reach: .direct(host: "\(label).example", port: 22), pending: pending)
     }
 }

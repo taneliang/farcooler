@@ -271,7 +271,7 @@ struct JoinView: View {
     }
 
     private func target(for runner: CeremonyRunner) -> String {
-        runner.alias.isEmpty ? "\(runner.user)@\(runner.address)" : runner.alias
+        runner.alias.isEmpty ? runner.reach.name(user: runner.user) : runner.alias
     }
 
     private func writeConfig(_ granted: [CeremonyRunner]) {
@@ -415,9 +415,10 @@ struct Joined {
     }
 
     /// A label comes from the granting device and is what somebody ticked there,
-    /// so it is the name to use. `user@address` is the fallback for a reply that
-    /// carried none, because a sentence with a blank in it names nothing.
+    /// so it is the name to use. How the runner is reached is the fallback for a
+    /// reply that carried none, because a sentence with a blank in it names
+    /// nothing.
     private func name(of runner: CeremonyRunner) -> String {
-        runner.label.isEmpty ? "\(runner.user)@\(runner.address)" : runner.label
+        runner.label.isEmpty ? runner.reach.name(user: runner.user) : runner.label
     }
 }

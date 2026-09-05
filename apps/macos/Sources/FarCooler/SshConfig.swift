@@ -49,11 +49,14 @@ enum SshConfig {
     /// ```
     /// Host box
     ///   HostName box.tail-1234.ts.net
-    ///   User you
     ///   Port 22
+    ///   User you
     ///   IdentityFile ~/.ssh/farcooler-macbook-air
     ///   IdentitiesOnly yes
     /// ```
+    ///
+    /// A tunneled runner gets a `ProxyCommand` in place of `HostName` and
+    /// `Port` — see ``reachLines(for:)``.
     ///
     /// `HostName` is always explicit, so the alias is never resolved as a
     /// hostname — shadowing an existing pattern is the only risk the alias
@@ -65,16 +68,38 @@ enum SshConfig {
     /// the file fail to read back as what was written.
     static func block(for runner: CeremonyRunner, alias: String, identity: URL) -> [String] {
         [
-            "Host \(alias)",
-            "  HostName \(runner.address)",
-            "  User \(runner.user)",
-            "  Port \(runner.port)",
-            "  IdentityFile \(tildeCollapsed(identity))",
-            // Bounds ssh to the identities named in the configuration and on
-            // the command line, so an agent holding a dozen keys does not
-            // exhaust MaxAuthTries before it offers this one.
-            "  IdentitiesOnly yes",
-        ]
+            ["Host \(alias)"],
+            reachLines(for: runner),
+            [
+                "  User \(runner.user)",
+                "  IdentityFile \(tildeCollapsed(identity))",
+                // Bounds ssh to the identities named in the configuration and
+                // on the command line, so an agent holding a dozen keys does
+                // not exhaust MaxAuthTries before it offers this one.
+                "  IdentitiesOnly yes",
+            ],
+        ].flatMap { $0 }
+    }
+
+    /// How ssh gets to the runner: an address, or a command that is one.
+    ///
+    /// A tunnel has no address, so `HostName` has nothing true to say and
+    /// `ProxyCommand` is what OpenSSH can execute instead. **The token is
+    /// deliberately not written here**: this file is read by every editor and
+    /// tool on the machine, and the id is enough — the CLI resolves the token
+    /// from its own runner store.
+    ///
+    /// `farcooler runner pipe` is not implemented yet; it is the next task's.
+    /// Nothing in this app can grant a tunneled runner today either — every
+    /// record ``RunnerFacts`` builds is direct — so this branch is the shape of
+    /// the answer rather than a path anybody is walking.
+    private static func reachLines(for runner: CeremonyRunner) -> [String] {
+        switch runner.reach {
+        case .direct(let host, let port):
+            return ["  HostName \(host)", "  Port \(port)"]
+        case .tailcat:
+            return ["  ProxyCommand farcooler runner pipe \(runner.id)"]
+        }
     }
 
     /// `~/.ssh/farcooler-macbook-air`, not `/Users/you/.ssh/…`.
@@ -109,7 +134,10 @@ enum SshConfig {
         var renamed: [String] = []
 
         for runner in runners {
-            let wanted = slug(runner.label.isEmpty ? runner.address : runner.label)
+            // A tunnel has no address to fall back on, so a runner that
+            // carried no label falls back to `runner`, which
+            // ``slug(_:)``'s own empty case already produces.
+            let wanted = slug(runner.label.isEmpty ? (runner.reach.host ?? "") : runner.label)
             var alias = wanted
             if used.contains(alias) {
                 // The user first: two runners on one machine differ by user,

@@ -65,6 +65,10 @@ void farcooler_client_free(void *handle);
  *      "passphrase":null,
  *      "host_fingerprint":"SHA256:..."}
  *
+ * A runner reached through the tunnel names `"token"` and this device's own
+ * `"node_key"` in place of `"host"` and `"port"`. A token or an address, never
+ * both: two paths to one runner would leave nothing choosing between them.
+ *
  * `host_fingerprint` decides how the host's identity is treated:
  *
  *   - present     the key must match exactly, or the call fails naming both
@@ -349,6 +353,8 @@ size_t farcooler_client_client_id(const char *public_key, uint8_t *out, size_t c
  *     stale           scanned too long ago, by THIS device's clock
  *     already_taken   this ceremony has answered once already
  *     too_large       more runners than one code can carry
+ *     no_tunnel       the reply grants a runner reachable only through the
+ *                     tunnel, to a device that named no node key
  *
  * Every one of these takes the buffer contract farcooler_client_generate_key
  * uses: JSON into `out`, returning the bytes NEEDED, writing nothing when that
@@ -399,15 +405,27 @@ size_t farcooler_client_ceremony_scan(const char *encoded, const char *expecting
  * `offer_json` is what farcooler_client_ceremony_scan returned. `runners_json`
  * is an array of runner records:
  *
- *     [{"id": "...", "label": "box", "alias": "box",
- *       "address": "box.tail-1234.ts.net", "user": "you", "port": 22,
- *       "host_key": "SHA256:...", "pending": false}]
+ *     [{"id": "...", "label": "box", "alias": "box", "user": "you",
+ *       "host_key": "SHA256:...", "pending": false,
+ *       "reach": {"kind": "direct", "host": "box.tail-1234.ts.net", "port": 22}}]
+ *
+ * `reach` is how the runner is reached, and it is one of two shapes:
+ *
+ *     {"kind": "direct",  "host": "box.tail-1234.ts.net", "port": 22}
+ *     {"kind": "tailcat", "token": "..."}
+ *
+ * One or the other and never both, so nothing downstream picks a winner. A
+ * tailcat token names a runner's rendezvous point; the device's own node key is
+ * NOT part of it and never travels in a code.
  *
  * `budget_bytes` is what YOUR QR encoder reports as fitting at the
  * error-correction level you chose; 0 takes the library's conservative default.
  * The cap is measured bytes and never an assumed runner count. Over budget
- * answers {"error":"too_large"}, and the remedy is to grant the rest by running
- * the ceremony again — there is no second code to reassemble.
+ * answers {"error":"too_large"} for the WHOLE reply — nothing is trimmed, so a
+ * code never quietly grants fewer runners than you picked — and the remedy is to
+ * grant the rest by running the ceremony again. There is no second code to
+ * reassemble. A token is 184 bytes, so the default budget holds four tunneled
+ * runners where it holds seven direct ones.
  */
 size_t farcooler_client_ceremony_reply(const char *offer_json, const char *runners_json,
                                        size_t budget_bytes, uint8_t *out, size_t capacity);

@@ -12,9 +12,14 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -67,10 +72,9 @@ data class CeremonyRunner(
      * than per host, because two runners on one box would both want `Host box`.
      */
     val alias: String,
-    val address: String,
     val user: String,
-    val port: Int,
     @SerialName("host_key") val hostKey: String,
+    val reach: CeremonyReach,
     /**
      * This runner has not taken the key yet. Asleep, unreachable, or a client
      * core that cannot ask — either way access follows when a trusted device
@@ -78,16 +82,114 @@ data class CeremonyRunner(
      */
     val pending: Boolean,
 ) {
-    /** This runner as something this app can connect to. */
-    fun asRunner(): Runner = Runner(
-        label = label,
-        address = address,
-        port = port,
-        user = user,
-        // A host key that came across empty stays null, which is what makes the
-        // first connection report the fingerprint instead of trusting it.
-        fingerprint = hostKey.ifEmpty { null },
+    /**
+     * This runner as something this app can connect to, or null when this app
+     * has nowhere to put it.
+     *
+     * Null for a tunneled runner, and the caller says so on screen rather than
+     * dropping it quietly: [Runner] records an address and a port, and a tunnel
+     * has neither. Nothing can produce that reply yet — the core refuses a
+     * tunneled runner granted to a device that named no node key, and this app
+     * holds none — so this is the shape of the gap rather than a path anybody
+     * is walking today.
+     */
+    fun asRunner(): Runner? {
+        val direct = reach as? CeremonyReach.Direct ?: return null
+        return Runner(
+            label = label,
+            address = direct.host,
+            port = direct.port,
+            user = user,
+            // A host key that came across empty stays null, which is what makes
+            // the first connection report the fingerprint instead of trusting it.
+            fingerprint = hostKey.ifEmpty { null },
+        )
+    }
+
+    /** Whether this app can add this runner to its own list at all. */
+    val isStorable: Boolean get() = reach is CeremonyReach.Direct
+}
+
+/**
+ * How a granted runner is reached: an address, or the tunnel.
+ *
+ * One or the other and never both — two nullable fields would admit "both set"
+ * and "neither set", and then something here would have to pick a winner. The
+ * wire is tagged on `kind` so a third kind is additive, and an unrecognized one
+ * fails the decode rather than defaulting: the core has already accepted the
+ * manifest by the time this runs, so a tag this build does not know is the app
+ * failing, and [Refusal.Unknown] is what says so.
+ */
+@Serializable(with = CeremonyReachSerializer::class)
+sealed interface CeremonyReach {
+    data class Direct(val host: String, val port: Int) : CeremonyReach
+
+    data class Tailcat(val token: String) : CeremonyReach
+
+    /**
+     * The second line under a runner's name.
+     *
+     * Never the token: it is long, it is meaningless to a person, and it is the
+     * one field here worth stealing. The user still appears, because which
+     * account you log in as is the other half of what the line is for.
+     */
+    fun detail(user: String): String = when (this) {
+        is Direct -> "$user@$host"
+        is Tailcat -> "$user, through the tunnel"
+    }
+
+    /** A name for a sentence, when the granting device sent no label. */
+    fun name(user: String): String = when (this) {
+        is Direct -> "$user@$host"
+        is Tailcat -> "a tunneled runner"
+    }
+}
+
+/**
+ * The wire shape of a [CeremonyReach], written by hand.
+ *
+ * By hand rather than through `@JsonClassDiscriminator`, which is an
+ * experimental API, and through a surrogate rather than raw [kotlinx.serialization.json.JsonElement],
+ * so the field names live in one declaration that the compiler checks. iOS and
+ * the Mac hand-write the same two functions for the same reason: three
+ * platforms agreeing about a payload by inspection is three chances to
+ * disagree, so each one is written out where it can be read.
+ */
+object CeremonyReachSerializer : KSerializer<CeremonyReach> {
+    @Serializable
+    private data class Wire(
+        val kind: String,
+        val host: String? = null,
+        val port: Int? = null,
+        val token: String? = null,
     )
+
+    override val descriptor: SerialDescriptor = Wire.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: CeremonyReach) {
+        val wire = when (value) {
+            is CeremonyReach.Direct -> Wire("direct", host = value.host, port = value.port)
+            is CeremonyReach.Tailcat -> Wire("tailcat", token = value.token)
+        }
+        encoder.encodeSerializableValue(Wire.serializer(), wire)
+    }
+
+    override fun deserialize(decoder: Decoder): CeremonyReach {
+        val wire = decoder.decodeSerializableValue(Wire.serializer())
+        return when (wire.kind) {
+            "direct" -> CeremonyReach.Direct(
+                wire.host ?: throw SerializationException("a direct reach with no host"),
+                wire.port ?: throw SerializationException("a direct reach with no port"),
+            )
+            "tailcat" -> CeremonyReach.Tailcat(
+                wire.token ?: throw SerializationException("a tunneled reach with no token"),
+            )
+            // The core has already accepted the manifest by the time this runs,
+            // so a kind this build does not know is the app failing rather than
+            // a code being refused.
+            else -> throw SerializationException("unknown reach ${wire.kind}")
+        }
+    }
 }
 
 /** The reply: the runners a trusted device granted, addressed to one ceremony. */
@@ -140,6 +242,14 @@ sealed interface Refusal {
     data object TooLarge : Refusal
 
     /**
+     * The reply granted a runner reachable only through the tunnel, and this
+     * device named no node key a tunnel would admit. The granting side's bug,
+     * and the core refuses the whole reply rather than hand this device a
+     * runner it could only fail to connect to.
+     */
+    data object NoTunnel : Refusal
+
+    /**
      * The core answered nothing readable at all. Not one of its words: this is
      * the app failing, and it says so without saying how.
      */
@@ -158,6 +268,7 @@ sealed interface Refusal {
             Stale -> "This code expired"
             AlreadyTaken -> "This code was already used"
             TooLarge -> "Too many runners selected"
+            NoTunnel -> "This device can’t reach one of those runners"
             Unknown -> "Couldn’t add this device"
         }
 
@@ -181,6 +292,9 @@ sealed interface Refusal {
             Stale -> "Show a new code, then scan it within two minutes."
             AlreadyTaken -> "Show a new code, then try again."
             TooLarge -> "Select fewer runners. You can add the others later."
+            NoTunnel ->
+                "One of them is reachable only through a tunnel, and this device isn’t on " +
+                    "one. Try again, choosing runners it can reach."
             Unknown -> "Try again."
         }
 
@@ -196,6 +310,7 @@ sealed interface Refusal {
             "stale" -> Stale
             "already_taken" -> AlreadyTaken
             "too_large" -> TooLarge
+            "no_tunnel" -> NoTunnel
             else -> Unknown
         }
     }
@@ -798,14 +913,18 @@ class CeremonyStore(
             // The `~/.ssh/config` alias, which the Mac writes. Derived from the
             // label here; the Rust writer owns collisions and suffixes.
             alias = alias(row.runner.displayLabel),
-            address = row.runner.address,
             user = row.runner.user,
-            port = row.runner.port,
             // The host key this device pinned, or nothing when it never has.
             // Empty travels honestly: the new device then meets the ordinary
             // first-contact screen and a person looks at a fingerprint, rather
             // than being handed a pin nobody verified.
             hostKey = row.runner.fingerprint.orEmpty(),
+            // Direct, because that is what every runner in this app's own list
+            // is: a phone reaches a runner by address, and a tunneled one would
+            // need a token this device does not hold. Granting one is what a
+            // runner's own daemon answers with — see `client.set_node_key` —
+            // and it is not wired to this screen.
+            reach = CeremonyReach.Direct(row.runner.address, row.runner.port),
             // Corrected once the enrollment above has answered.
             pending = true,
         )

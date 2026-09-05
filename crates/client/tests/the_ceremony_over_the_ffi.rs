@@ -21,8 +21,21 @@ const KEY_B: &str =
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMdwe233CUbxjpEHkissIUGdCxhkTsDE/Zg7f+LB6S+ device-b";
 
 const RUNNERS: &str = r#"[{"id":"0198f0c3-0000-7000-8000-00000000000a","label":"box",
-    "alias":"box","address":"box.tail-1234.ts.net","user":"you","port":22,
-    "host_key":"SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4","pending":false}]"#;
+    "alias":"box","user":"you",
+    "host_key":"SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4","pending":false,
+    "reach":{"kind":"direct","host":"box.tail-1234.ts.net","port":22}}]"#;
+
+/// The same runner, reached through the tunnel instead. Written out as the
+/// literal JSON an app hands across, because the point of this file is the
+/// shape Swift and Kotlin have to produce — a struct serialized on this side
+/// would agree with itself no matter what the apps send.
+const TUNNELED_RUNNERS: &str = r#"[{"id":"0198f0c3-0000-7000-8000-00000000000a","label":"box",
+    "alias":"box","user":"you",
+    "host_key":"SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4","pending":false,
+    "reach":{"kind":"tailcat","token":"tc-not-a-real-blob"}}]"#;
+
+/// A node key as the fence spells one: 43 characters of unpadded base64.
+const NODE_KEY: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 /// Call one of the entry points the way an app does: size a buffer, call, and
 /// read back what landed in it.
@@ -54,11 +67,26 @@ fn an_offer(name: &str, account: &str, key_a: &str) -> String {
 }
 
 fn a_reply(offer_json: &str) -> String {
+    a_reply_granting(offer_json, RUNNERS)
+}
+
+fn a_reply_granting(offer_json: &str, runners_json: &str) -> String {
     let offer = CString::new(offer_json).unwrap();
-    let runners = CString::new(RUNNERS).unwrap();
+    let runners = CString::new(runners_json).unwrap();
     text(|out, capacity| unsafe {
         farcooler_client_ceremony_reply(offer.as_ptr(), runners.as_ptr(), 0, out, capacity)
     })
+}
+
+/// An offer from a device that HAS joined a tunnel.
+///
+/// The FFI's `offer` entry point mints one with no node key, because nothing on
+/// a phone holds one yet; a device that does simply sets the field. Editing the
+/// JSON here is that, done the shortest way a test can.
+fn an_offer_with_a_node_key(name: &str, account: &str, key_a: &str) -> String {
+    let mut offer: Value = serde_json::from_str(&an_offer(name, account, key_a)).expect("json");
+    offer["node_key"] = Value::String(NODE_KEY.into());
+    offer.to_string()
 }
 
 /// Scan an offer the way the trusted device does: on behalf of the account
@@ -110,7 +138,9 @@ fn both_legs_round_trip_through_the_c_boundary() {
     let reply = a_reply(&offer);
     let taken = accept(&reply, &offer, false, 1_000);
     assert_eq!(taken["ceremony"], shown["ceremony"]);
-    assert_eq!(taken["runners"][0]["address"], "box.tail-1234.ts.net");
+    assert_eq!(taken["runners"][0]["reach"]["kind"], "direct");
+    assert_eq!(taken["runners"][0]["reach"]["host"], "box.tail-1234.ts.net");
+    assert_eq!(taken["runners"][0]["reach"]["port"], 22);
     assert_eq!(taken["runners"][0]["host_key"].as_str().unwrap()[..7], *"SHA256:");
     // The reply is addressed to the key that asked, by fingerprint.
     assert!(taken["target"].as_str().unwrap().starts_with("SHA256:"));
@@ -173,8 +203,38 @@ fn each_refusal_has_the_code_the_apps_switch_on() {
     assert_eq!(refused["error"], "version");
     assert_eq!(refused["version"], 99);
 
+    // A tunneled runner granted to a device that named no node key. The
+    // granting side's bug, refused rather than handed on as a runner this
+    // device can only fail to connect to.
+    let tunneled = a_reply_granting(&mine, TUNNELED_RUNNERS);
+    assert_eq!(accept(&tunneled, &mine, false, 0)["error"], "no_tunnel");
+
     // Something that is not a Far Cooler code at all.
     assert_eq!(accept("https://example.com", &mine, false, 0)["error"], "malformed");
+}
+
+/// A tunneled runner crosses the boundary whole, in the shape the apps parse.
+///
+/// This is the half that makes a QR enrollment able to produce a tunnel at all:
+/// before it, a granted runner had an address and nothing else, so the ceremony
+/// could only ever hand back a direct one.
+#[test]
+fn a_tunneled_runner_crosses_the_boundary() {
+    let mine = an_offer_with_a_node_key("iPhone", "acct_1", KEY_A);
+    let reply = a_reply_granting(&mine, TUNNELED_RUNNERS);
+    let taken = accept(&reply, &mine, false, 1_000);
+
+    assert_eq!(taken["runners"][0]["reach"]["kind"], "tailcat");
+    assert_eq!(taken["runners"][0]["reach"]["token"], "tc-not-a-real-blob");
+    assert!(taken["runners"][0]["reach"]["host"].is_null(), "a tunnel gained an address");
+    // The pin survives the tunnel: WireGuard proves which node answered, the
+    // host key proves which sshd did.
+    assert_eq!(
+        taken["runners"][0]["host_key"],
+        "SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4"
+    );
+    // And the private half of a tunnel is not in a QR code, on either leg.
+    assert!(!reply.contains("client_key"), "a slot for a node private key: {reply}");
 }
 
 /// A stale scan is refused on the first leg too, before any runner is on

@@ -297,8 +297,8 @@ struct TailnetTests {
 struct RunnerAddressingTests {
     private func runner(id: String, address: String) -> CeremonyRunner {
         CeremonyRunner(
-            id: id, label: id, alias: "", address: address, user: "e-liang", port: 22,
-            host_key: "SHA256:x", pending: false)
+            id: id, label: id, alias: "", user: "e-liang", host_key: "SHA256:x",
+            reach: .direct(host: address, port: 22), pending: false)
     }
 
     /// The bug this exists for: a Mac granted over the LAN, whose own name is

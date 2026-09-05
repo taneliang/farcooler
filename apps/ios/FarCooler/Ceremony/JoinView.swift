@@ -145,7 +145,7 @@ struct JoinView: View {
             ForEach(joined.reachable) { runner in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(runner.label)
-                    Text("\(runner.user)@\(runner.address)")
+                    Text(runner.reach.detail(user: runner.user))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -179,18 +179,24 @@ struct JoinView: View {
 
     /// Write the granted runners into this device's own list.
     ///
-    /// Matched by address, user and port rather than by the id in the manifest:
-    /// two devices generate their own ids for the same runner, so adopting by
-    /// id would leave someone with the same box listed twice.
+    /// Matched by where they are reached and as whom, rather than by the id in
+    /// the manifest: two devices generate their own ids for the same runner, so
+    /// adopting by id would leave someone with the same box listed twice.
     ///
     /// A pending runner is not written into it at all — see ``Joined``. It is
     /// also not taken back OUT of it: this reply says nothing about a key some
     /// earlier ceremony wrote, and dropping a runner the person is already
     /// using would be a second wrong answer rather than a correction.
+    ///
+    /// A tunneled runner is not written in either, and for a different reason:
+    /// ``Runner`` records an address and a port. ``Joined/note`` names it, so
+    /// nobody has to notice a runner that quietly did not arrive.
     private func adopt() {
         for entry in store.granted {
+            guard let arriving = entry.asRunner else { continue }
             let existing = runners.hosts.first {
-                $0.address == entry.address && $0.user == entry.user && $0.port == entry.port
+                $0.address == arriving.address && $0.user == arriving.user
+                    && $0.port == arriving.port
             }
             if let existing {
                 // Already known. The pin is the one thing worth taking from the
@@ -204,7 +210,7 @@ struct JoinView: View {
                     runners.update(updated)
                 }
             } else if !entry.pending {
-                runners.add(entry.asRunner)
+                runners.add(arriving)
             }
         }
     }
@@ -245,14 +251,22 @@ struct JoinView: View {
 /// counts them in a sentence — and in the one extra thing a Mac writes for a
 /// runner it can reach, which is the `~/.ssh/config` block.
 struct Joined {
-    /// The runners whose `authorized_keys` has this device's key.
+    /// The runners whose `authorized_keys` has this device's key, and that this
+    /// app can record.
     let reachable: [CeremonyRunner]
-    /// The runners that do not.
+    /// The runners that do not have the key.
     let pending: [CeremonyRunner]
+    /// The runners this app cannot record at all, whatever the key says: a
+    /// tunneled runner has no address, and ``Runner`` is an address and a port.
+    /// Separate from ``pending`` because the two have different remedies and
+    /// neither is the other's fault.
+    let unstorable: [CeremonyRunner]
 
     init(_ runners: [CeremonyRunner]) {
-        reachable = runners.filter { !$0.pending }
-        pending = runners.filter(\.pending)
+        unstorable = runners.filter { !$0.isStorable }
+        let storable = runners.filter(\.isStorable)
+        reachable = storable.filter { !$0.pending }
+        pending = storable.filter(\.pending)
     }
 
     static let ready = "This device is ready"
@@ -285,6 +299,11 @@ struct Joined {
     /// It promises nothing later, either. Nothing retries, so "yet" is as far as
     /// this goes, and the sentence after it is an instruction rather than a wait.
     var note: String? {
+        let parts = [tunnelNote, pendingNote].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
+    private var pendingNote: String? {
         guard !pending.isEmpty else { return nil }
         let names = ListFormatter.localizedString(byJoining: pending.map(name(of:)))
         return pending.count == 1
@@ -294,10 +313,23 @@ struct Joined {
                 + "from one that can reach them."
     }
 
+    /// A granted runner this app cannot record is stated, never dropped
+    /// silently. It is the same rule as ``pendingNote``: the alternative to
+    /// reading it here is meeting it later as a runner that is simply absent
+    /// from the list, with nothing on any screen having said so.
+    private var tunnelNote: String? {
+        guard !unstorable.isEmpty else { return nil }
+        let names = ListFormatter.localizedString(byJoining: unstorable.map(name(of:)))
+        return unstorable.count == 1
+            ? "\(names) is reachable only through a tunnel, which this device can’t use yet."
+            : "\(names) are reachable only through a tunnel, which this device can’t use yet."
+    }
+
     /// A label comes from the granting device and is what somebody ticked there,
-    /// so it is the name to use. `user@address` is the fallback for a reply that
-    /// carried none, because a sentence with a blank in it names nothing.
+    /// so it is the name to use. How the runner is reached is the fallback for a
+    /// reply that carried none, because a sentence with a blank in it names
+    /// nothing.
     private func name(of runner: CeremonyRunner) -> String {
-        runner.label.isEmpty ? "\(runner.user)@\(runner.address)" : runner.label
+        runner.label.isEmpty ? runner.reach.name(user: runner.user) : runner.label
     }
 }

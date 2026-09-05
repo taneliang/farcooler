@@ -137,12 +137,34 @@ impl Handler for Verifier {
 /// tries the tunnel and a `Tailcat` runner never quietly tries an address —
 /// because a transport that races two paths reports the wrong failure, and the
 /// failure message is most of what this product is.
-#[derive(Debug, Clone)]
+/// Serialized because a ceremony reply carries one per runner: this is the
+/// enum `crates/client/src/ceremony.rs` re-exports rather than redefining, so
+/// the shape a manifest writes is the shape a `Destination` reads.
+///
+/// Internally tagged on `kind` so a third variant is additive on the wire —
+/// two optional fields would admit "both set" and "neither set", and then
+/// something downstream picks a winner.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reach {
     /// You exchanged a key yourself and you know where the box is.
     Direct { host: String, port: u16 },
     /// The runner told you its token and you told it your node key.
-    Tailcat { token: String, client_key: String },
+    Tailcat {
+        token: String,
+        /// This device's OWN tailcat node private key, and the one field here
+        /// that is a secret.
+        ///
+        /// `skip` rather than a convention that callers blank it: a manifest
+        /// is photographable — the design says so in as many words — and a
+        /// private key in one would be draft three's mistake with a new
+        /// name. Nothing else needs it on a wire either, because the key is
+        /// per DEVICE and not per runner: whoever dials fills in the key it
+        /// already holds. A reply therefore decodes with this empty, which is
+        /// not "unknown" — it is "yours, and you have it".
+        #[serde(skip)]
+        client_key: String,
+    },
 }
 
 impl Reach {
