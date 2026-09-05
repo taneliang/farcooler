@@ -9,6 +9,19 @@ license.workspace = true
 name = "farcooler"
 path = "src/main.rs"
 
+[features]
+# Off by default, exactly as it is for `farcooler-client` and
+# `farcooler-daemon`: a plain `cargo build` links no Go archive, so
+# `farcooler runner pipe` answers with the one error that names what is
+# missing rather than pretending. The shipped CLI is built without it today —
+# `apps/macos/build-app.sh` builds the CLI plain and links the archive only
+# into `farcoolerd`, and `scripts/build-linux.sh` does the same — because
+# nothing in this build can grant a tunneled runner for the CLI to dial, and
+# the archive is 47.6 MB. Turning this on is the change to make on the day
+# something can.
+default = []
+tailcat = ["farcooler-tailcat/linked"]
+
 [dependencies]
 farcooler-agent.workspace = true
 farcooler-agent-core.workspace = true
@@ -21,6 +34,9 @@ farcooler-fence.workspace = true
 farcooler-protocol.workspace = true
 farcooler-daemon.workspace = true
 farcooler-transport.workspace = true
+# The tunnel, for `runner pipe`. Stubbed by default — see the `tailcat`
+# feature above.
+farcooler-tailcat.workspace = true
 bytes.workspace = true
 libc.workspace = true
 tokio.workspace = true
@@ -28,7 +44,9 @@ clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

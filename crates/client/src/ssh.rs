@@ -328,7 +328,12 @@ fn translate(other: russh::Error, destination: &Destination, verdict: &KeyVerdic
 /// reached before this special case (should the errno ever differ across
 /// platforms) and `EMFILE` alike, so the word is deliberately generic and the
 /// apps own the sentence.
-fn tunnel_error(error: TunnelError) -> SshError {
+///
+/// Public because the CLI dials the same tunnel for `farcooler runner pipe`
+/// and has to render the same two outcomes. A second copy of "connection
+/// refused means the tunnel worked and sshd did not" is a second dialect, and
+/// the one that drifts is whichever copy is not the one being read.
+pub fn tunnel_error(error: TunnelError) -> SshError {
     match error {
         TunnelError::Io(source) if source.kind() == std::io::ErrorKind::ConnectionRefused => {
             SshError::TunnelPortClosed { source }

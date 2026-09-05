@@ -21,6 +21,7 @@ mod agent_host;
 mod daemon_link;
 mod remote;
 mod runner_install;
+mod runner_pipe;
 
 use std::path::PathBuf;
 
@@ -332,6 +333,22 @@ enum RunnerCmd {
     /// tmux is there, what would keep the daemon alive, and what is already
     /// installed.
     Probe { target: String },
+    /// Carry one SSH session to a tunneled runner over stdin and stdout.
+    ///
+    /// Not a command a user types. It is what `~/.ssh/config` names in
+    /// `ProxyCommand` for a runner that has a tunnel token rather than an
+    /// address, so Zed, git and plain `ssh` reach it with no address anywhere.
+    /// The Mac app already writes that line — `SshConfig.swift` — so the
+    /// spelling of these three words is a contract with a file on somebody's
+    /// disk. See `runner_pipe.rs`.
+    ///
+    /// Takes an id and never a token: an argument list is visible to every
+    /// process on the machine, and `~/.ssh/config` is readable by every tool
+    /// on it.
+    Pipe {
+        /// The runner id from the ProxyCommand line.
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -794,6 +811,7 @@ async fn run() -> Fallible {
             runner_install::install(&target, from.as_deref()).await
         }
         Command::RunnerCmd(RunnerCmd::Status { target }) => runner_install::status(&target).await,
+        Command::RunnerCmd(RunnerCmd::Pipe { id }) => runner_pipe::run(&id).await,
         Command::RunnerCmd(RunnerCmd::Probe { target }) => {
             let probe = runner_install::probe(&target).await?;
             if cli.json {

@@ -89,10 +89,15 @@ enum SshConfig {
     /// tool on the machine, and the id is enough — the CLI resolves the token
     /// from its own runner store.
     ///
-    /// `farcooler runner pipe` is not implemented yet; it is the next task's.
-    /// Nothing in this app can grant a tunneled runner today either — every
-    /// record ``RunnerFacts`` builds is direct — so this branch is the shape of
-    /// the answer rather than a path anybody is walking.
+    /// `farcooler runner pipe` is `crates/cli/src/runner_pipe.rs`, and these
+    /// three words are a contract with it: a rename on either side does not
+    /// rewrite the `~/.ssh/config` files already written, it only stops them
+    /// from working. `crates/cli/tests/a_tunneled_runner_gets_a_proxy_command.rs`
+    /// guards the binary's half.
+    ///
+    /// Nothing in this app can grant a tunneled runner today — every record
+    /// ``RunnerFacts`` builds is direct — so this branch is the shape of the
+    /// answer rather than a path anybody is walking.
     private static func reachLines(for runner: CeremonyRunner) -> [String] {
         switch runner.reach {
         case .direct(let host, let port):

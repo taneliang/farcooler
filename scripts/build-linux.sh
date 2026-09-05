@@ -86,11 +86,17 @@ echo "==> Building $TARGET"
 
 # Plain `cargo`, never `cross` — see the comment above the toolchain check.
 
-# `farcooler-cli` does not depend on `farcooler-tailcat` yet — dialing the
-# tunnel from the CLI is a later task, and the helper does not solve it either
-# (`crates/tailcat/src/helper.rs` says why: a dialed tunnel is a file
-# descriptor, and a descriptor cannot cross the helper's pipe as a word) — so
-# it builds plain.
+# The CLI builds plain, with no tunnel feature, and on Linux that is not a
+# choice being deferred. `farcooler runner pipe` dials, and the helper backend
+# this platform uses cannot dial at all — `crates/tailcat/src/helper.rs` says
+# why: a dialed tunnel is a file descriptor, and a descriptor cannot cross the
+# helper's pipe as a word. Its `dial` returns `NoTailcatLinked` outright. The
+# other backend, `linked`, would need the Go archive and cgo here, which is
+# what the musl segfault in that same file rules out.
+#
+# So a Linux runner SERVES a tunnel and does not dial one. `farcooler runner
+# pipe` on this binary says "this build of farcooler has no tunnel it can
+# dial", which is the truth about it.
 cargo build --release --target "$TARGET" -p farcooler-cli
 
 # `--features tailcat-helper` is the whole difference between a daemon that
