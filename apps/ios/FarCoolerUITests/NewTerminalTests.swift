@@ -82,11 +82,11 @@ final class NewTerminalTests: XCTestCase {
     ///
     /// By FRAME and not `firstMatch`, for the reason
     /// `TerminalScrollTests.visibleSurface` gives: `ShellPaneTrack` keeps the
-    /// neighbouring panes mounted, so every one of them contributes a
+    /// neighboring panes mounted, so every one of them contributes a
     /// navigation bar with this button on it, and `firstMatch` returns whichever
     /// the accessibility tree happens to list first. Tapping an off-screen
     /// pane's menu would open a menu for a workspace nobody is looking at — and
-    /// on a demo fleet the neighbour is a different workspace, so the terminal
+    /// on a demo fleet the neighbor is a different workspace, so the terminal
     /// would be created in the wrong worktree and this test would go green on
     /// exactly the bug it would have caused.
     private func visibleOverflow(_ app: XCUIApplication) -> XCUIElement? {
