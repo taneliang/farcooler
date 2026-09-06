@@ -34,10 +34,37 @@ pub struct DaemonChild {
 impl Drop for DaemonChild {
     fn drop(&mut self) {
         let _ = self.child.start_kill();
+        TmuxReaper::reap(&self.home);
+    }
+}
+
+/// The tmux half of `DaemonChild`, for a test that has no daemon child to
+/// hold.
+///
+/// A session sshd starts from a forced command is a `farcoolerd` this test
+/// never spawned and cannot hold a handle to, and it starts a tmux server just
+/// the same. Without this the leak is identical to the one `DaemonChild`
+/// documents: one orphaned tmux server per test run, on a socket nothing can
+/// name once the runtime directory is deleted.
+///
+/// One copy of the rule, shared by both, because "how an install id becomes a
+/// socket name" is the daemon's rule and a second copy is one to get quietly
+/// wrong.
+pub struct TmuxReaper {
+    home: std::path::PathBuf,
+}
+
+impl TmuxReaper {
+    pub fn new(home: &std::path::Path) -> Self {
+        Self { home: home.to_path_buf() }
+    }
+
+    /// Kill the tmux server belonging to this runtime directory, if it has one.
+    fn reap(home: &std::path::Path) {
         // Read rather than recomputed: how an install id becomes a socket name
         // is the daemon's rule, and a second copy of it here would be one to
         // get quietly wrong.
-        let Ok(install) = std::fs::read_to_string(self.home.join("install-id")) else { return };
+        let Ok(install) = std::fs::read_to_string(home.join("install-id")) else { return };
         let socket = format!("farcooler-{}", install.trim());
         let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
         let _ = std::process::Command::new(tmux)
@@ -45,6 +72,12 @@ impl Drop for DaemonChild {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+    }
+}
+
+impl Drop for TmuxReaper {
+    fn drop(&mut self) {
+        Self::reap(&self.home);
     }
 }
 
