@@ -189,6 +189,12 @@ impl TmuxServer {
     /// Kill exactly the window whose fresh tags match this terminal.
     ///
     /// Never `kill-session`, and never a name or index match.
+    ///
+    /// Not the way to stop or restart ONE terminal: a window is a layout, so
+    /// this takes every other terminal arranged in it. `restart_terminal`
+    /// called it and destroyed the siblings of every pane it restarted. Reach
+    /// for `kill_pane` or `respawn_pane` instead; this stays for the case
+    /// where the whole layout is genuinely the subject.
     pub async fn kill_terminal_window(&self, terminal_id: Uuid) -> Result<bool> {
         let panes = self.list_tagged_panes().await?;
         let Some(p) = panes

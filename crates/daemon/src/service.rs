@@ -1709,8 +1709,6 @@ impl Service {
         let term = self.store.get_terminal(id)?;
         let ws = self.store.get_workspace(term.workspace_id)?;
 
-        let _ = self.tmux.kill_terminal_window(id).await;
-
         // A restarted claude or codex reattaches to the conversation it
         // already had rather than starting a new one the record does not know
         // about.
@@ -1738,9 +1736,41 @@ impl Service {
             &ws.worktree_path,
             term.agent_session_id.as_deref().unwrap_or_default(),
         );
-        self.tmux
-            .create_terminal_window(term.workspace_id, id, &term.title, &ws.worktree_path, &command)
-            .await?;
+        // The PANE, not the window. This line used to be
+        // `kill_terminal_window` followed by `create_terminal_window`, which
+        // was safe only while every window held a single terminal. A window is
+        // a layout now, and `kill_pane` states the rule this broke: "a window
+        // is a layout and killing it would take every terminal arranged in
+        // it." Restarting one lost tile of four killed the other three and
+        // everything running in them, silently, with nothing on screen saying
+        // why.
+        //
+        // Respawned in place rather than killed and remade, for the same
+        // reason `set_pane_mode` respawns: the terminal keeps its pane id, its
+        // tag and its rectangle, so a restart does not rearrange the layout
+        // around it. `respawn-pane -k` kills whatever is in the pane first, so
+        // this is still a restart of a live pane and not only of a dead one —
+        // and `remain-on-exit` means an EXITED terminal still has a pane here
+        // to respawn.
+        //
+        // A new window is built only when no pane claims this terminal at all,
+        // which is what a genuinely lost terminal is: there is no rectangle
+        // left to put the program back into.
+        let existing = self.inventory.refresh().await.claimants(id).into_iter().next().cloned();
+        match existing {
+            Some(pane) => self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?,
+            None => {
+                self.tmux
+                    .create_terminal_window(
+                        term.workspace_id,
+                        id,
+                        &term.title,
+                        &ws.worktree_path,
+                        &command,
+                    )
+                    .await?;
+            }
+        }
 
         self.inventory.refresh().await;
 
@@ -2935,6 +2965,51 @@ mod restart_wiring_tests {
         );
         let command = pane_start_command(&svc, term.id).await;
         assert!(!command.contains("agent-host"), "a restart puts back a TUI, not the shim: {command}");
+    }
+
+    /// The window a pane sits in, as tmux reports it.
+    async fn window_of(svc: &Service, terminal: Uuid) -> Option<String> {
+        let snapshot = svc.inventory.refresh().await;
+        snapshot.claimants(terminal).into_iter().next().map(|p| p.window_id.clone())
+    }
+
+    #[tokio::test]
+    async fn restarting_one_tile_leaves_the_rest_of_the_layout_standing() {
+        // The most destructive thing in this file, and it was silent. Restart
+        // used to run `kill_terminal_window`, which takes the WINDOW — and a
+        // window is a layout now, so restarting one lost pane in a four-tile
+        // arrangement killed the other three and everything running in them.
+        // `kill_pane` states the rule for exactly this reason: "a window is a
+        // layout and killing it would take every terminal arranged in it."
+        //
+        // Two panes is enough to prove it. With the old wiring the sibling has
+        // no pane at all after the restart, because its window is gone.
+        let (_dir, svc, ws) = a_workspace().await;
+        let first = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane");
+        let second = svc
+            .split_terminal(
+                ws.id,
+                first.id,
+                farcooler_protocol::v1::SplitSide::Right,
+                "two",
+                "shell",
+            )
+            .await
+            .expect("split");
+        let layout = window_of(&svc, second.id).await.expect("the split made a pane");
+
+        svc.restart_terminal(first.id).await.expect("restart");
+
+        assert_eq!(
+            window_of(&svc, second.id).await.as_deref(),
+            Some(layout.as_str()),
+            "restarting a sibling must not take this pane's window with it"
+        );
+        assert_eq!(
+            window_of(&svc, first.id).await.as_deref(),
+            Some(layout.as_str()),
+            "and the restarted pane stays in the layout it was arranged into"
+        );
     }
 }
 
