@@ -20,6 +20,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0006_worktrees_are_managed,
     migration_0007_review,
     migration_0008_drop_task_name,
+    migration_0009_workspace_order,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -322,6 +323,73 @@ fn migration_0008_drop_task_name(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch("ALTER TABLE workspaces DROP COLUMN task_name;")
 }
 
+/// Where a workspace sits in the list, decided once and then only by the user.
+///
+/// Until this column there was nothing to order by. `list_workspaces_for_
+/// repository` had no `ORDER BY` at all, so SQLite handed back whatever the
+/// query plan yielded and that changes as rows are updated — a sidebar that
+/// rearranged itself while you read it. Adding an `ORDER BY` would not have
+/// fixed it, because the table had no column worth ordering by: no
+/// `created_at`, and `id` is a blob.
+///
+/// A stored rank rather than a sort key computed from the row. The rule this
+/// exists to serve is that a card NEVER moves on its own — not for activity,
+/// not for attention, not for recency — because a position that stays put is
+/// what makes reaching for one without looking possible. Anything derived from
+/// the work would move.
+///
+/// One rank across the runner, not one per repository. A client may draw the
+/// fleet flat or grouped, and a per-repository rank is only an order once you
+/// also have an order for repositories — which nothing here has. Reordering
+/// inside one group still works: `Store::reorder_workspaces` permutes rows
+/// among the positions they already hold, so a group's cards never leave the
+/// slots the group occupies.
+///
+/// **Existing rows are ranked main checkout first, then by `worktree_path`.**
+///
+/// Creation order is the rule going forward and is simply not recoverable for
+/// rows written before this: no column ever recorded it, and `id` is only a
+/// proxy — a `Uuid::now_v7` for rows this version wrote, but every worktree the
+/// reconciler adopts when it first sees a repository is minted in one batch, so
+/// for those it records the order `git worktree list` happened to print rather
+/// than anything the user did.
+///
+/// `worktree_path` is the one column that is stable, effectively unique (there
+/// is already a unique index on it per repository), and predictable to a person
+/// without being told the rule: it reads alphabetically. `is_main_checkout`
+/// comes first because that is where the repository's own checkout already sits
+/// in the Mac's sidebar, which partitioned it to the top of every project group
+/// — so nobody's list moves on upgrade. Both together are a TOTAL order once
+/// `id` breaks the tie that cannot normally happen, and every card lands
+/// somewhere a person can explain without being shown the code.
+fn migration_0009_workspace_order(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE workspaces ADD COLUMN ordinal INTEGER NOT NULL DEFAULT 0;
+
+        -- How many rows sort before this one, which IS its rank. Main
+        -- checkouts first (1 before 0, hence the descending comparison), then
+        -- by path, then by `id` to break a tie that cannot normally happen —
+        -- the unique index is per repository, and two repositories cannot share
+        -- a worktree directory. Three keys so the backfill is a TOTAL order
+        -- rather than one with two rows left arbitrary.
+        --
+        -- A correlated count rather than a window function: it is the same
+        -- answer, it reads as what it means, and the row counts here are tens.
+        UPDATE workspaces SET ordinal = (
+            SELECT COUNT(*) FROM workspaces AS earlier
+            WHERE earlier.is_main_checkout > workspaces.is_main_checkout
+               OR (earlier.is_main_checkout = workspaces.is_main_checkout
+                   AND (earlier.worktree_path < workspaces.worktree_path
+                        OR (earlier.worktree_path = workspaces.worktree_path
+                            AND earlier.id < workspaces.id)))
+        );
+
+        CREATE INDEX workspaces_by_ordinal ON workspaces (ordinal);
+        "#,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,6 +534,59 @@ mod tests {
         assert!(named.is_err(), "the column is gone, not merely ignored");
     }
 
+    /// A database written before 0009 opens, and its workspaces come back in a
+    /// fixed order rather than the query plan's.
+    ///
+    /// Against a hand-built v8 schema for the reason `archived_rows_become_hidden`
+    /// gives: the thing under test is that the backfill ranks rows, and a fixture
+    /// would only prove the fixture was written correctly.
+    ///
+    /// The rows go in deliberately scrambled and with the main checkout LAST, so
+    /// a migration that merely added the column and left every row at the
+    /// default 0 fails here — as does one that ranked by insertion order.
+    #[test]
+    fn existing_workspaces_are_ranked_main_checkout_first_then_by_path() {
+        let mut conn = open();
+        for m in &MIGRATIONS[..8] {
+            let tx = conn.transaction().unwrap();
+            m(&tx).unwrap();
+            tx.commit().unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1);
+             INSERT INTO workspaces
+                 VALUES (x'11', x'03', 'feat/zebra', '/r/wt/zebra', 0, 0, 1, 0, 0);
+             INSERT INTO workspaces
+                 VALUES (x'12', x'03', 'feat/apple', '/r/wt/apple', 0, 0, 1, 0, 0);
+             INSERT INTO workspaces
+                 VALUES (x'13', x'03', 'main', '/r', 0, 0, 1, 1, 0);
+             INSERT INTO workspaces
+                 VALUES (x'14', x'03', 'feat/mango', '/r/wt/mango', 0, 0, 1, 0, 0);",
+        )
+        .unwrap();
+
+        migrate(&mut conn, 8).unwrap();
+
+        let mut stmt = conn
+            .prepare("SELECT branch FROM workspaces ORDER BY ordinal, worktree_path")
+            .unwrap();
+        let order: Vec<String> =
+            stmt.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(
+            order,
+            vec!["main", "feat/apple", "feat/mango", "feat/zebra"],
+            "the repository's own checkout first, then alphabetically by worktree path"
+        );
+
+        // Dense and distinct, so the next create can take MAX + 1 and land
+        // after everything rather than on top of something.
+        let mut stmt = conn.prepare("SELECT ordinal FROM workspaces ORDER BY ordinal").unwrap();
+        let ranks: Vec<i64> =
+            stmt.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(ranks, vec![0, 1, 2, 3], "every row gets its own rank, not the default 0");
+    }
+
     /// One path, one row. The reconciler and `create_workspace` can race, and
     /// the index is what turns that into an error instead of a duplicate.
     #[test]
@@ -475,12 +596,12 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
              INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1);
-             INSERT INTO workspaces VALUES (x'04', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0);",
+             INSERT INTO workspaces VALUES (x'04', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0, 0);",
         )
         .unwrap();
 
         let second = conn.execute_batch(
-            "INSERT INTO workspaces VALUES (x'05', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0);",
+            "INSERT INTO workspaces VALUES (x'05', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0, 0);",
         );
         assert!(second.is_err(), "a second row for the same path is refused");
     }

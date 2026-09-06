@@ -271,7 +271,16 @@ impl Store {
     /// a silent field swap rather than a compile error.
     const WORKSPACE_COLUMNS: &'static str = "id, repository_id, branch, \
          worktree_path, hidden, creation_failed, resource_version, is_main_checkout, \
-         worktree_missing";
+         worktree_missing, ordinal";
+
+    /// How every listing of workspaces is ordered, in one place.
+    ///
+    /// `ordinal` is the user's rank and `worktree_path` is only a tie-break, so
+    /// that even a database whose ordinals somehow collided still comes back in
+    /// the same order twice running. Nothing here reads activity, attention or
+    /// recency, and nothing here ever may: a card that moves on its own is a
+    /// card you cannot reach for without looking.
+    const WORKSPACE_ORDER: &'static str = "ORDER BY ordinal, worktree_path";
 
     pub fn create_workspace(
         &self,
@@ -283,10 +292,19 @@ impl Store {
         let id = Uuid::now_v7();
         self.conn()
             .execute(
+                // A new workspace goes at the END, which is one more than the
+                // highest rank anything currently holds. `MAX` over an empty
+                // table is NULL, so the first row on a runner lands at 0.
+                //
+                // Computed in the INSERT rather than read first and written
+                // second: two creates racing through a read-then-write would
+                // both see the same maximum and land on the same rank.
                 "INSERT INTO workspaces
                  (id, repository_id, branch, worktree_path, hidden,
-                  creation_failed, resource_version, is_main_checkout, worktree_missing)
-                 VALUES (?1, ?2, ?3, ?4, 0, 0, 1, ?5, 0)",
+                  creation_failed, resource_version, is_main_checkout, worktree_missing,
+                  ordinal)
+                 VALUES (?1, ?2, ?3, ?4, 0, 0, 1, ?5, 0,
+                         (SELECT COALESCE(MAX(ordinal), -1) + 1 FROM workspaces))",
                 params![
                     uuid_blob(id),
                     uuid_blob(repository_id),
@@ -296,17 +314,11 @@ impl Store {
                 ],
             )
             .map_err(map_err)?;
-        Ok(Workspace {
-            id,
-            repository_id,
-            branch: branch.to_string(),
-            worktree_path: worktree_path.to_string(),
-            hidden: false,
-            creation_failed: false,
-            is_main_checkout,
-            worktree_missing: false,
-            resource_version: 1,
-        })
+        // Read back rather than assembled here: the rank was decided by the
+        // INSERT's own subquery, so this is the only place that knows it, and
+        // a caller handed a struct claiming ordinal 0 would draw the new card
+        // at the top for as long as it held that copy.
+        self.get_workspace(id)
     }
 
     pub fn get_workspace(&self, id: Uuid) -> Result<Workspace> {
@@ -328,11 +340,13 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
-                // By path, which is by name: the name is the last component of
-                // it. Ordering by the column that no longer exists was the only
-                // thing the old title was load-bearing for here.
-                "SELECT {} FROM workspaces WHERE hidden = 0 ORDER BY worktree_path",
-                Self::WORKSPACE_COLUMNS
+                // By the user's rank. This used to order by path, which was
+                // stable but was not anybody's decision; `ordinal` starts out
+                // as exactly that path order (see migration 0009) and then only
+                // ever moves because somebody dragged a card.
+                "SELECT {} FROM workspaces WHERE hidden = 0 {}",
+                Self::WORKSPACE_COLUMNS,
+                Self::WORKSPACE_ORDER
             ))
             .map_err(map_err)?;
         let rows = stmt.query_map([], row_to_workspace).map_err(map_err)?;
@@ -343,13 +357,113 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {} FROM workspaces WHERE repository_id = ?1",
-                Self::WORKSPACE_COLUMNS
+                "SELECT {} FROM workspaces WHERE repository_id = ?1 {}",
+                Self::WORKSPACE_COLUMNS,
+                Self::WORKSPACE_ORDER
             ))
             .map_err(map_err)?;
         let rows =
             stmt.query_map(params![uuid_blob(repository_id)], row_to_workspace).map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    /// Every workspace whose repository is still registered, in fleet order.
+    ///
+    /// One query rather than a loop over repositories, because a loop is not an
+    /// order: `list_repositories` has no `ORDER BY` of its own, so concatenating
+    /// each repository's list would have made the fleet's order depend on the
+    /// order the repositories happened to come back in. `ordinal` is ranked
+    /// across the whole runner precisely so that this can be one statement.
+    ///
+    /// `EXISTS` rather than a join so the column list stays unqualified —
+    /// `workspaces` and `repositories` share `id`, `host_id` and
+    /// `resource_version`, and a join would make `WORKSPACE_COLUMNS` ambiguous.
+    pub fn list_workspaces_in_order(&self) -> Result<Vec<Workspace>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {} FROM workspaces
+                 WHERE EXISTS (
+                     SELECT 1 FROM repositories WHERE repositories.id = workspaces.repository_id
+                 ) {}",
+                Self::WORKSPACE_COLUMNS,
+                Self::WORKSPACE_ORDER
+            ))
+            .map_err(map_err)?;
+        let rows = stmt.query_map([], row_to_workspace).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    /// Put these workspaces in this order.
+    ///
+    /// A permutation of the positions the named rows ALREADY hold, not a
+    /// renumbering of the list from zero. The caller is a client that dragged a
+    /// card, and what it can see is rarely the whole table: hidden worktrees are
+    /// filtered out of every sidebar, a grouped view sends one repository's
+    /// cards, and a workspace created a second ago is in neither. Renumbering
+    /// from zero would move every row the client could not see — silently, and
+    /// to the end.
+    ///
+    /// So: collect the ranks these rows occupy, sort them, and deal them back
+    /// out in the order asked for. Rows not named keep the exact rank they had,
+    /// which means they keep their position relative to everything, and a
+    /// reorder of one group leaves every other group where it was.
+    ///
+    /// Every id must exist, and no id may appear twice — both are a client
+    /// sending nonsense rather than a race, and answering them with a partial
+    /// reorder would leave a layout nobody chose.
+    pub fn reorder_workspaces(&self, ordered: &[Uuid]) -> Result<()> {
+        if ordered.is_empty() {
+            return Ok(());
+        }
+        let unique: std::collections::BTreeSet<_> = ordered.iter().collect();
+        if unique.len() != ordered.len() {
+            return Err(DomainError::InvalidArgument { what: "workspace_ids" });
+        }
+
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+
+        // (rank, path, version) for each id, in the order the client asked for.
+        let mut held = Vec::with_capacity(ordered.len());
+        for id in ordered {
+            let row: Option<(i64, String, i64)> = tx
+                .query_row(
+                    "SELECT ordinal, worktree_path, resource_version FROM workspaces WHERE id = ?1",
+                    params![uuid_blob(*id)],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()
+                .map_err(map_err)?;
+            held.push(row.ok_or(DomainError::NotFound)?);
+        }
+
+        // The slots, in the order a listing would draw them — by rank, then by
+        // path, which is `WORKSPACE_ORDER`. Sorting the ranks alone would be
+        // enough while they are distinct; taking the tie-break from the same
+        // place the query does is what keeps this true if they ever are not.
+        let mut slots: Vec<(i64, &str)> =
+            held.iter().map(|(ordinal, path, _)| (*ordinal, path.as_str())).collect();
+        slots.sort();
+
+        for (i, id) in ordered.iter().enumerate() {
+            let (was, _, version) = &held[i];
+            let now = slots[i].0;
+            if *was == now {
+                continue;
+            }
+            // `resource_version` is bumped because this is a mutation and every
+            // mutation here bumps it — a client holding a stale copy of the row
+            // is holding a stale POSITION, which is the whole point of the call.
+            tx.execute(
+                "UPDATE workspaces SET ordinal = ?1, resource_version = ?2 WHERE id = ?3",
+                params![now, version + 1, uuid_blob(*id)],
+            )
+            .map_err(map_err)?;
+        }
+
+        tx.commit().map_err(map_err)?;
+        Ok(())
     }
 
     pub fn update_workspace(
@@ -820,6 +934,148 @@ mod tests {
             s.update_workspace(ws.id, 1, "feature/x", "/wt/workspace", true, false).unwrap();
         assert!(updated.hidden);
         assert_eq!(updated.resource_version, 2);
+    }
+
+    // ---- ordering ----
+    //
+    // The rule these guard is the whole reason `ordinal` exists: a card's
+    // position is decided at creation and then only by the user. Nothing here
+    // may ever come to depend on activity, attention, or when a pane last said
+    // something — a list that rearranges itself is a list you cannot reach into
+    // without reading it first.
+
+    /// Three repositories, one runner, and everything the store hands back is
+    /// in the order the rows were created.
+    fn ordered_names(s: &Store, repo: Uuid) -> Vec<String> {
+        s.list_workspaces_for_repository(repo).unwrap().iter().map(|w| w.name()).collect()
+    }
+
+    #[test]
+    fn a_new_workspace_lands_at_the_end() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
+
+        // Created out of alphabetical order on purpose: if anything fell back
+        // to sorting by name or path, this would come back sorted.
+        let zebra = s.create_workspace(repo.id, "feat/z", "/wt/zebra", false).unwrap();
+        let apple = s.create_workspace(repo.id, "feat/a", "/wt/apple", false).unwrap();
+        let mango = s.create_workspace(repo.id, "feat/m", "/wt/mango", false).unwrap();
+
+        assert_eq!((zebra.ordinal, apple.ordinal, mango.ordinal), (0, 1, 2));
+        assert_eq!(ordered_names(&s, repo.id), vec!["zebra", "apple", "mango"]);
+    }
+
+    /// The rank is across the runner, not restarted per repository, so two
+    /// projects' cards never collide on one number.
+    #[test]
+    fn the_rank_counts_across_every_repository_on_the_runner() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos", 1_000).unwrap();
+        let one = s.create_repository(host, root.id, "one", "/one/.git", "").unwrap();
+        let two = s.create_repository(host, root.id, "two", "/two/.git", "").unwrap();
+
+        let a = s.create_workspace(one.id, "b", "/wt/a", false).unwrap();
+        let b = s.create_workspace(two.id, "b", "/wt/b", false).unwrap();
+        let c = s.create_workspace(one.id, "b", "/wt/c", false).unwrap();
+
+        assert_eq!((a.ordinal, b.ordinal, c.ordinal), (0, 1, 2));
+        assert_eq!(
+            s.list_workspaces_in_order().unwrap().iter().map(|w| w.name()).collect::<Vec<_>>(),
+            vec!["a", "b", "c"],
+            "one list across the runner, in one order"
+        );
+    }
+
+    /// Reordering is a permutation of the slots the named rows already hold.
+    #[test]
+    fn reordering_moves_the_cards_and_survives_a_reopen() {
+        let dir = std::env::temp_dir().join(format!("farcooler-order-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("store.db");
+
+        let (repo, a, b, c) = {
+            let s = Store::open(&path).unwrap();
+            let host = Uuid::now_v7();
+            let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+            let repo = s.create_repository(host, root.id, "name", "/gitdir", "").unwrap();
+            let a = s.create_workspace(repo.id, "b", "/wt/a", false).unwrap();
+            let b = s.create_workspace(repo.id, "b", "/wt/b", false).unwrap();
+            let c = s.create_workspace(repo.id, "b", "/wt/c", false).unwrap();
+            assert_eq!(ordered_names(&s, repo.id), vec!["a", "b", "c"]);
+
+            s.reorder_workspaces(&[c.id, a.id, b.id]).unwrap();
+            assert_eq!(ordered_names(&s, repo.id), vec!["c", "a", "b"]);
+            (repo.id, a.id, b.id, c.id)
+        };
+
+        // A daemon restart is a reopen of this file. An order held in memory
+        // would be gone here, and an order derived from the work would be
+        // whatever the work looked like now.
+        let s = Store::open(&path).unwrap();
+        assert_eq!(ordered_names(&s, repo), vec!["c", "a", "b"]);
+
+        // And the version moved, so a client holding the old row knows its copy
+        // of the position is stale.
+        assert!(s.get_workspace(a).unwrap().resource_version > 1);
+
+        // Asking for the order it is already in changes nothing.
+        s.reorder_workspaces(&[c, a, b]).unwrap();
+        assert_eq!(ordered_names(&s, repo), vec!["c", "a", "b"]);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A client sends the cards it can SEE. Everything else must stay exactly
+    /// where it was — this is what stops a reorder in one project's group from
+    /// throwing another project's cards, or every hidden worktree, to the end.
+    #[test]
+    fn reordering_a_subset_leaves_every_other_card_where_it_was() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos", 1_000).unwrap();
+        let one = s.create_repository(host, root.id, "one", "/one/.git", "").unwrap();
+        let two = s.create_repository(host, root.id, "two", "/two/.git", "").unwrap();
+
+        // Interleaved: one's cards sit at ranks 0 and 2, two's at 1 and 3.
+        let a = s.create_workspace(one.id, "b", "/wt/a", false).unwrap();
+        let x = s.create_workspace(two.id, "b", "/wt/x", false).unwrap();
+        let c = s.create_workspace(one.id, "b", "/wt/c", false).unwrap();
+        let y = s.create_workspace(two.id, "b", "/wt/y", false).unwrap();
+
+        s.reorder_workspaces(&[c.id, a.id]).unwrap();
+
+        assert_eq!(ordered_names(&s, one.id), vec!["c", "a"], "the group that moved");
+        assert_eq!(ordered_names(&s, two.id), vec!["x", "y"], "the group that did not");
+        assert_eq!(
+            (s.get_workspace(x.id).unwrap().ordinal, s.get_workspace(y.id).unwrap().ordinal),
+            (1, 3),
+            "an untouched card keeps its exact rank, not merely its relative one"
+        );
+    }
+
+    /// Nonsense is refused whole rather than applied halfway, because half a
+    /// reorder is a layout nobody chose.
+    #[test]
+    fn a_reorder_naming_the_same_card_twice_or_a_stranger_is_refused() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "name", "/gitdir", "").unwrap();
+        let a = s.create_workspace(repo.id, "b", "/wt/a", false).unwrap();
+        let b = s.create_workspace(repo.id, "b", "/wt/b", false).unwrap();
+
+        assert!(matches!(
+            s.reorder_workspaces(&[a.id, a.id]),
+            Err(DomainError::InvalidArgument { .. })
+        ));
+        assert!(matches!(
+            s.reorder_workspaces(&[b.id, a.id, Uuid::now_v7()]),
+            Err(DomainError::NotFound)
+        ));
+        assert_eq!(ordered_names(&s, repo.id), vec!["a", "b"], "nothing moved");
     }
 
     #[test]

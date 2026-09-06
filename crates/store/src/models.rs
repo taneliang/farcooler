@@ -84,6 +84,14 @@ pub struct Workspace {
     /// git no longer lists this worktree, but the row carries terminals worth
     /// keeping. Set by the reconciler; cleared if the worktree comes back.
     pub worktree_missing: bool,
+    /// Where this workspace sits in the list, across the whole runner.
+    ///
+    /// The user's, and nothing else's. It is set once when the row is created —
+    /// after every row that already exists — and after that only a reorder ever
+    /// moves it. Deliberately not derived from anything about the work: a rank
+    /// that answered to activity or attention would rearrange the layout under
+    /// someone who is reading it, which is the one thing this must never do.
+    pub ordinal: u32,
     pub resource_version: u64,
 }
 
@@ -110,6 +118,7 @@ pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
         resource_version: row.get::<_, i64>(6)? as u64,
         is_main_checkout: row.get(7)?,
         worktree_missing: row.get(8)?,
+        ordinal: row.get::<_, i64>(9)? as u32,
     })
 }
 

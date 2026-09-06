@@ -949,12 +949,19 @@ impl Service {
         }
     }
 
+    /// Every workspace on this runner, in the order the user put them in.
+    ///
+    /// One query rather than a loop over repositories. The loop was not an
+    /// order: `list_repositories` has no `ORDER BY` either, so the fleet came
+    /// back grouped by whatever sequence the repositories happened to arrive
+    /// in, and within each group in whatever sequence SQLite's query plan
+    /// yielded — which shifts as rows are updated. That is the "basically
+    /// random" the sidebar showed.
+    ///
+    /// It still lists only workspaces whose repository is registered, which is
+    /// what the loop was really enforcing.
     pub fn list_workspaces(&self) -> Result<Vec<models::Workspace>> {
-        let mut all = Vec::new();
-        for repo in self.list_repositories()? {
-            all.extend(self.store.list_workspaces_for_repository(repo.id)?);
-        }
-        Ok(all)
+        self.store.list_workspaces_in_order()
     }
 
     /// Take a workspace out of the main list. Never changes git data.
