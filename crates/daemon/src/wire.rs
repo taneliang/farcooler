@@ -271,6 +271,11 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // sampling loop holds a file offset into. `false` here is "nothing has
         // claimed this turn went badly", not "the turn went well".
         turn_failed: false,
+        // The supervisor's, for the same reason as `agent_mode`: only the
+        // process holding the daemon link hears a shim say it could not start.
+        // `None` is "nothing has said this pane failed", which is also what a
+        // pane still starting up looks like.
+        agent_failure: None,
     }
 }
 
@@ -287,6 +292,11 @@ pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) 
     let id = view.terminal.id;
     message.agent_mode = agents.agent_mode(id);
     message.available_agent_modes = agents.available_modes(id);
+    // The word, and only the word — the app owns the sentence. Without this
+    // line the three ways an adapter can fail to start are indistinguishable
+    // from one that has not finished starting, which is the spinner the owner
+    // reported.
+    message.agent_failure = agents.failure(id).map(|f| f.code().to_string());
     // The conversation's own name, when it has one.
     //
     // A terminal's stored title is what it was created as — usually the task,
@@ -568,6 +578,120 @@ pub fn pane_group(view: &crate::layout::LayoutView) -> farcooler_protocol::v1::P
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The failure word reaches the wire, on the one converter that carries
+    /// agent state.
+    ///
+    /// The supervisor knowing a pane failed is worth nothing on its own —
+    /// `ShimMessage::Failed` has been handled by the daemon for as long as it
+    /// has existed, and all the handler did was write a warning to a log no
+    /// app can read. This is the hop that turns it into something a client can
+    /// draw instead of a spinner.
+    ///
+    /// Driven through a real socket and the real listener rather than by
+    /// poking the supervisor's state, because the decode is part of what is
+    /// being asserted: the word on the JSON line and the word on the wire have
+    /// to be one word.
+    ///
+    /// `terminal_with_agent_state`, deliberately, because that is the only
+    /// converter `Rpc::with_activity` and the watcher's broadcast use. The
+    /// bare `terminal()` beside it must keep saying nothing, for the same
+    /// reason it says nothing about `agent_mode`: it is built with no
+    /// supervisor at hand, and a converter that guessed would be wrong.
+    #[tokio::test]
+    async fn a_pane_that_could_not_start_its_agent_says_so_on_the_wire() {
+        use farcooler_agent::link::{AgentFailure, ShimMessage, encode_line};
+        use tokio::io::AsyncWriteExt;
+
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        crate::reconcile::repository(&svc, repo).await.unwrap();
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("reconcile adopted the main checkout");
+        let term = svc
+            .store
+            .create_terminal(
+                ws.id,
+                "agent",
+                "claude",
+                farcooler_protocol::v1::TerminalIntent::Running,
+                80,
+                24,
+            )
+            .unwrap();
+
+        let one = |svc: std::sync::Arc<crate::service::Service>, ws: models::Workspace| async move {
+            svc.workspace_view(&ws)
+                .await
+                .unwrap()
+                .terminals
+                .into_iter()
+                .find(|v| v.terminal.id == term.id)
+                .expect("the terminal is in its workspace")
+        };
+
+        let before = one(svc.clone(), ws.clone()).await;
+        assert_eq!(
+            terminal_with_agent_state(&before, svc.agents()).agent_failure,
+            None,
+            "a pane nobody has reported on must not claim to have failed"
+        );
+
+        // The shim's half, as bytes on the socket the daemon binds.
+        let runtime = tempfile::tempdir().expect("a runtime directory");
+        let supervisor = AgentSupervisor::new();
+        {
+            let supervisor = supervisor.clone();
+            let root = runtime.path().to_path_buf();
+            let id = term.id;
+            tokio::spawn(async move {
+                let _ = supervisor.listen(&root, id, |_, _| {}).await;
+            });
+        }
+        let socket = crate::agent_supervisor::socket_path(runtime.path(), term.id);
+        for _ in 0..200 {
+            if socket.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        let mut stream =
+            tokio::net::UnixStream::connect(&socket).await.expect("the daemon bound its socket");
+        stream
+            .write_all(
+                encode_line(&ShimMessage::Failed { failure: AgentFailure::NotAuthenticated })
+                    .expect("encodes")
+                    .as_bytes(),
+            )
+            .await
+            .expect("the shim can always report");
+
+        let mut carried = None;
+        for _ in 0..200 {
+            let view = one(svc.clone(), ws.clone()).await;
+            carried = terminal_with_agent_state(&view, &supervisor).agent_failure;
+            if carried.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert_eq!(
+            carried.as_deref(),
+            Some("not-authenticated"),
+            "the word crosses the wire, and it is the word the apps have sentences for"
+        );
+
+        let view = one(svc.clone(), ws.clone()).await;
+        assert_eq!(
+            terminal(&view).agent_failure,
+            None,
+            "the supervisor-free converter still has nothing to say about it"
+        );
+    }
 
     fn root() -> models::RepositoryRoot {
         models::RepositoryRoot {

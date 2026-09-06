@@ -2914,6 +2914,11 @@ fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_j
         "agentSessionId": t.agent_session_id,
         "agentMode": t.agent_mode,
         "availableAgentModes": t.available_agent_modes,
+        // A stable machine word, never a sentence — the app owns the words a
+        // person reads. Without it a chat that could not start its agent is
+        // indistinguishable from one that has not finished starting, which is
+        // the endless spinner this whole path exists to end.
+        "agentFailure": t.agent_failure,
     })
 }
 
@@ -3005,6 +3010,11 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         "agentSessionId": t.agent_session_id,
         "agentMode": t.agent_mode,
         "availableAgentModes": t.available_agent_modes,
+        // A stable machine word, never a sentence — the app owns the words a
+        // person reads. Without it a chat that could not start its agent is
+        // indistinguishable from one that has not finished starting, which is
+        // the endless spinner this whole path exists to end.
+        "agentFailure": t.agent_failure,
     })
 }
 
@@ -3313,6 +3323,7 @@ mod tests {
             "planDone",
             "planTotal",
             "turnFailed",
+            "agentFailure",
         ] {
             assert!(event.contains(field), "{field} is in neither projection");
         }

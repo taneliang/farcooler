@@ -98,6 +98,15 @@ pub enum BackendError {
     /// anything more useful than the agent already did.
     #[error("the agent refused: {0}")]
     Refused(String),
+    /// The agent has no credentials, and the fix is not in Far Cooler.
+    ///
+    /// Its own variant because it is the one failure a user can act on without
+    /// touching a config file: they run the agent's login command on the
+    /// runner. Folded into `Closed` — which is where it used to land — it
+    /// reached the screen as "the ACP adapter closed its connection", which
+    /// sends whoever reads it looking at the wrong thing entirely.
+    #[error("the agent needs you to sign in: {0}")]
+    NotAuthenticated(String),
     /// The installed CLI speaks a protocol these generated types do not cover.
     ///
     /// Both versions, because a user reading this has to be able to tell which
@@ -105,6 +114,84 @@ pub enum BackendError {
     /// Cooler" in one direction and "update the agent" in the other.
     #[error("this agent speaks protocol {found}, but this build was generated against {expected}")]
     Incompatible { found: String, expected: String },
+}
+
+/// Why a pane in agent mode has no agent in it.
+///
+/// **A stable machine word, and never a sentence.** It leaves the shim on the
+/// daemon link, crosses the protocol on `Terminal.agent_failure`, and each app
+/// owns the words a person reads — the same rule `TunnelError::code` states
+/// for the tunnel. A Rust error string must never reach a screen, which is
+/// exactly what happened while the only report of a failed adapter was a line
+/// printed to a pane's stdout that the transcript view then covered up.
+///
+/// Four words rather than one, because the advice differs for each and a
+/// single "it broke" is the state the spinner already communicated. Adding a
+/// variant means adding a sentence in every app, which is the cost that keeps
+/// this list short.
+///
+/// Serialized in kebab-case so the JSON on the daemon link is the same word
+/// `code` returns; `the_wire_word_and_the_ffi_word_are_one_word` holds the two
+/// together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentFailure {
+    /// No adapter is configured for this pane's preset. The fix is config.
+    NoAdapter,
+    /// The adapter refused for want of credentials. The fix is a login, on
+    /// the runner, in the agent's own CLI.
+    NotAuthenticated,
+    /// It started and then said nothing at all, until the shim gave up. The
+    /// fix is usually environmental, and there is nothing to read anywhere.
+    AdapterSilent,
+    /// Everything else: it would not spawn, it closed, it spoke a protocol
+    /// this build does not, or it refused for a reason of its own.
+    AdapterFailed,
+}
+
+impl AgentFailure {
+    /// The word that crosses to the daemon and then to the apps.
+    ///
+    /// Hyphenated to match the words named in the ruling this was built
+    /// against. A rename is a breaking change for a shipped app, not a
+    /// tidy-up.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NoAdapter => "no-adapter",
+            Self::NotAuthenticated => "not-authenticated",
+            Self::AdapterSilent => "adapter-silent",
+            Self::AdapterFailed => "adapter-failed",
+        }
+    }
+
+    /// The word back, for the daemon reading a shim's report.
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "no-adapter" => Some(Self::NoAdapter),
+            "not-authenticated" => Some(Self::NotAuthenticated),
+            "adapter-silent" => Some(Self::AdapterSilent),
+            "adapter-failed" => Some(Self::AdapterFailed),
+            _ => None,
+        }
+    }
+}
+
+impl From<&BackendError> for AgentFailure {
+    /// Every backend failure becomes exactly one word.
+    ///
+    /// Spelled out rather than defaulted, so a new `BackendError` variant is a
+    /// compile error here and somebody has to decide which sentence a user
+    /// should read — instead of it silently joining `adapter-failed`.
+    fn from(e: &BackendError) -> Self {
+        match e {
+            BackendError::NotAuthenticated(_) => Self::NotAuthenticated,
+            BackendError::Silent => Self::AdapterSilent,
+            BackendError::Spawn
+            | BackendError::Closed
+            | BackendError::Refused(_)
+            | BackendError::Incompatible { .. } => Self::AdapterFailed,
+        }
+    }
 }
 
 /// One live agent conversation, whatever protocol carries it.
@@ -201,5 +288,58 @@ mod tests {
         // The agent asks US to write files. Every path it names is untrusted
         // until confine() has agreed it is inside the worktree.
         assert!(Capabilities::acp().client_side_fs);
+    }
+
+    /// The word on the daemon link and the word crossing to an app are the
+    /// same word.
+    ///
+    /// Two derivations of one string — serde's `rename_all` and `code` — and
+    /// nothing but this holds them together. If they drift, a shim reports
+    /// `not-authenticated` and the daemon hands an app something it has no
+    /// sentence for, so the pane says nothing at all: the exact silence this
+    /// whole path exists to end.
+    #[test]
+    fn the_wire_word_and_the_ffi_word_are_one_word() {
+        for failure in [
+            AgentFailure::NoAdapter,
+            AgentFailure::NotAuthenticated,
+            AgentFailure::AdapterSilent,
+            AgentFailure::AdapterFailed,
+        ] {
+            let json = serde_json::to_string(&failure).expect("encodes");
+            assert_eq!(json, format!("\"{}\"", failure.code()));
+            assert_eq!(AgentFailure::from_code(failure.code()), Some(failure));
+        }
+    }
+
+    /// The words themselves, written out.
+    ///
+    /// A rename is a breaking change for an app in the field — it renders a
+    /// sentence per word and has no fallback for one it does not know — so
+    /// the strings are pinned here rather than only being derived.
+    #[test]
+    fn every_failure_has_a_stable_word() {
+        assert_eq!(AgentFailure::NoAdapter.code(), "no-adapter");
+        assert_eq!(AgentFailure::NotAuthenticated.code(), "not-authenticated");
+        assert_eq!(AgentFailure::AdapterSilent.code(), "adapter-silent");
+        assert_eq!(AgentFailure::AdapterFailed.code(), "adapter-failed");
+        assert_eq!(AgentFailure::from_code("nonsense"), None);
+    }
+
+    /// An adapter that will not authenticate does not read as one that hung
+    /// up.
+    ///
+    /// This is the flattening the whole change is about, at its last hop:
+    /// `BackendError::Closed` and `BackendError::NotAuthenticated` must not
+    /// arrive at an app as the same word, because their fixes have nothing in
+    /// common — one is a login on the runner, the other is anybody's guess.
+    #[test]
+    fn a_refusal_to_authenticate_keeps_its_own_word() {
+        assert_eq!(
+            AgentFailure::from(&BackendError::NotAuthenticated("Not authenticated".into())),
+            AgentFailure::NotAuthenticated
+        );
+        assert_eq!(AgentFailure::from(&BackendError::Closed), AgentFailure::AdapterFailed);
+        assert_eq!(AgentFailure::from(&BackendError::Silent), AgentFailure::AdapterSilent);
     }
 }

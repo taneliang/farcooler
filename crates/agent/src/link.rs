@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::event::{Seq, Sequenced};
 
+pub use farcooler_agent_core::backend::AgentFailure;
+
 /// Shim to daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -20,8 +22,18 @@ pub enum ShimMessage {
     Trimmed { resumed_at: Seq, dropped: u64, events: Vec<Sequenced> },
     /// The session is established and this is its id, for durable intent.
     Established { session_id: String, available_modes: Vec<String> },
-    /// The adapter could not be started. Terminal-mode fallback remains.
-    Failed { reason: String },
+    /// The pane is in agent mode and has no agent in it.
+    ///
+    /// A stable machine word — see `AgentFailure` — not a sentence and never a
+    /// Rust error string. This used to be a free `String` and was constructed
+    /// nowhere at all: the shim printed its explanation to the pane's stdout
+    /// and then hung on `pending()`, so the daemon never learned, and the
+    /// transcript view drew an empty chat over the one line that said why.
+    ///
+    /// The pane STAYS in agent mode. A client renders this as a first-class
+    /// state and offers the switch back to terminal mode as something the user
+    /// chooses — an automatic fallback races whatever they were typing.
+    Failed { failure: AgentFailure },
 }
 
 /// Daemon to shim.

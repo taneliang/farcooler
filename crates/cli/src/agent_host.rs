@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use farcooler_agent::acp::conn::AcpConnection;
-use farcooler_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
+use farcooler_agent::link::{AgentFailure, DaemonMessage, ShimMessage, decode_line, encode_line};
 use farcooler_agent::ring::{AgentReplay, AgentRing};
 use farcooler_agent::chat::ChatSession;
 use farcooler_agent::session::AgentSession;
@@ -152,9 +152,13 @@ async fn start_backend(
             let conn = AcpConnection::spawn(&launch, worktree)
                 .await
                 .map_err(|_| BackendError::Spawn)?;
-            let (agent, prelude) = AgentSession::start(conn, session)
-                .await
-                .map_err(|_| BackendError::Closed)?;
+            // `?` alone, through `impl From<SessionError> for BackendError`.
+            // This used to be `.map_err(|_| BackendError::Closed)`, which
+            // threw away the entire `SessionError` — so an adapter refusing
+            // with "Not authenticated" reached the user as "the ACP adapter
+            // closed its connection", and the one fact naming the fix was
+            // discarded one function above the screen.
+            let (agent, prelude) = AgentSession::start(conn, session).await?;
             let session_id = agent.session_id.clone();
             let modes = agent.available_modes.clone();
             let can_load = agent.can_load;
@@ -252,6 +256,56 @@ pub fn claude_executable() -> Option<String> {
     candidate.exists().then(|| candidate.display().to_string())
 }
 
+/// Tell the daemon this pane has no agent in it, for as long as the pane lives.
+///
+/// **This function never returns**, and that is the same decision the
+/// `pending()` calls it replaced were making: a shim that exits here derives as
+/// an exit nobody caused, and the explanation printed above it scrolls away
+/// with the pane. What it adds is the half that was missing — the daemon
+/// finding out.
+///
+/// Before this existed, all three ways of failing to start an adapter printed
+/// a line to the pane's stdout and then hung forever, **never dialling the
+/// daemon socket at all**. So the daemon never learned, the record still said
+/// `PaneMode::Agent`, and every app drew an empty transcript — "Starting the
+/// agent…", indefinitely — directly over the one message that explained the
+/// failure. The spinner was the only possible outcome of three different
+/// failures, and the owner reported it as a pane that "spins and tries to
+/// connect for quite a long time".
+///
+/// A reconnecting loop rather than one dial made before the verdict, because
+/// one dial is not actually a channel: the daemon restarts, and a socket
+/// opened early and dropped leaves the pane exactly as mute as before. Every
+/// connection re-announces the failure, which is also what makes a daemon that
+/// was not running when the adapter failed still able to learn about it.
+///
+/// The word, and only the word. The sentence a person reads belongs to the app
+/// — see `AgentFailure`.
+async fn report_failure(terminal: Uuid, socket: &std::path::Path, failure: AgentFailure) -> ! {
+    let line = encode_line(&ShimMessage::Failed { failure })
+        .unwrap_or_else(|_| "\n".to_string());
+    loop {
+        if let Ok(mut stream) = UnixStream::connect(socket).await {
+            if stream.write_all(line.as_bytes()).await.is_ok() {
+                tracing::warn!(
+                    terminal = %terminal,
+                    failure = failure.code(),
+                    "reported to the daemon that this pane has no agent in it"
+                );
+                // Held open, not dropped. The daemon treats a closed link as
+                // the shim going away, and a pane that reports a failure and
+                // then vanishes is indistinguishable from one that never
+                // dialled. Reading is how this notices the daemon hanging up;
+                // whatever it sends has nowhere to go while there is no
+                // session, so it is read and dropped.
+                let mut lines = BufReader::new(stream).lines();
+                while let Ok(Some(_)) = lines.next_line().await {}
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 pub async fn run(
     terminal: Uuid,
     socket: PathBuf,
@@ -270,8 +324,7 @@ pub async fn run(
              Switch this terminal back to terminal mode — it needs no adapter \
              and is unaffected."
         );
-        std::future::pending::<()>().await;
-        unreachable!()
+        report_failure(terminal, &socket, AgentFailure::NoAdapter).await;
     };
     let (program, args) = (spec.program.clone(), spec.args.clone());
 
@@ -325,6 +378,7 @@ pub async fn run(
         // steering — for a protocol they did not choose, which is the class of
         // thing this product refuses everywhere else.
         Ok(Err(reason)) => {
+            let failure = AgentFailure::from(&reason);
             println!(
                 "{}",
                 status_line(&Status::BackendFailed {
@@ -334,8 +388,7 @@ pub async fn run(
                     backend,
                 })
             );
-            std::future::pending::<()>().await;
-            unreachable!()
+            report_failure(terminal, &socket, failure).await;
         }
         Err(_) => {
             println!(
@@ -345,11 +398,7 @@ pub async fn run(
                     command
                 })
             );
-            // Alive on purpose, exactly as `AdapterMissing` is: a pane that
-            // exits here derives as an exit nobody caused, and the message the
-            // user needs to read goes with it.
-            std::future::pending::<()>().await;
-            unreachable!()
+            report_failure(terminal, &socket, AgentFailure::AdapterSilent).await;
         }
     };
     println!("{}", status_line(&Status::Connected { session_id: session_id.clone() }));
@@ -607,6 +656,106 @@ async fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Poll until `f` answers, or give up. Real sockets and real tasks, so
+    /// there is nothing to synchronize on but the result.
+    async fn eventually<T>(mut f: impl FnMut() -> Option<T>) -> Option<T> {
+        for _ in 0..200 {
+            if let Some(v) = f() {
+                return Some(v);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        None
+    }
+
+    /// An adapter that will not start reaches the daemon, over the socket.
+    ///
+    /// **This is the guard for the whole reported bug.** All three ways of
+    /// failing to start an adapter used to print a line to the pane's stdout
+    /// and then hang on `std::future::pending()` — never dialling the daemon
+    /// socket at all. So the daemon never learned, the record still said
+    /// `PaneMode::Agent`, and every app drew "Starting the agent…" over the
+    /// one message that explained the failure. The owner reported that as a
+    /// pane that "spins and tries to connect for quite a long time".
+    ///
+    /// Driven against the REAL `AgentSupervisor::listen` on a real Unix
+    /// socket, because the two halves being in separate crates is exactly how
+    /// they came to disagree: `ShimMessage::Failed` was declared, handled by
+    /// the daemon, and constructed nowhere. A test of either half alone would
+    /// have stayed green through all of it.
+    #[tokio::test]
+    async fn an_adapter_that_cannot_start_tells_the_daemon_rather_than_hanging() {
+        use farcooler_daemon::agent_supervisor::{AgentSupervisor, socket_path};
+
+        let dir = tempfile::tempdir().expect("a runtime directory");
+        let terminal = Uuid::now_v7();
+        let supervisor = AgentSupervisor::new();
+        {
+            let supervisor = supervisor.clone();
+            let root = dir.path().to_path_buf();
+            tokio::spawn(async move {
+                let _ = supervisor.listen(&root, terminal, |_, _| {}).await;
+            });
+        }
+        let socket = socket_path(dir.path(), terminal);
+        eventually(|| socket.exists().then_some(())).await.expect("the daemon bound its socket");
+
+        // The shim's side, exactly as `run` calls it. It never returns — that
+        // is the point, a pane that exits here derives as an exit nobody
+        // caused — so it is spawned and left running.
+        {
+            let socket = socket.clone();
+            tokio::spawn(async move {
+                report_failure(terminal, &socket, AgentFailure::NotAuthenticated).await
+            });
+        }
+
+        assert_eq!(
+            eventually(|| supervisor.failure(terminal)).await,
+            Some(AgentFailure::NotAuthenticated),
+            "the daemon has to learn that this pane has no agent in it"
+        );
+    }
+
+    /// The word survives a daemon that was not listening yet.
+    ///
+    /// A daemon restart, or simply a daemon that has not bound the socket at
+    /// the moment the adapter gives up. One dial made before the verdict — the
+    /// literal shape first proposed — would be spent by then and the pane
+    /// would be as mute as it was before. Every reconnect re-announces.
+    #[tokio::test]
+    async fn the_failure_is_announced_again_to_a_daemon_that_arrives_late() {
+        use farcooler_daemon::agent_supervisor::{AgentSupervisor, socket_path};
+
+        let dir = tempfile::tempdir().expect("a runtime directory");
+        let terminal = Uuid::now_v7();
+        let socket = socket_path(dir.path(), terminal);
+
+        // The shim fails FIRST, with nothing on the other end of the socket.
+        {
+            let socket = socket.clone();
+            tokio::spawn(async move {
+                report_failure(terminal, &socket, AgentFailure::AdapterSilent).await
+            });
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let supervisor = AgentSupervisor::new();
+        {
+            let supervisor = supervisor.clone();
+            let root = dir.path().to_path_buf();
+            tokio::spawn(async move {
+                let _ = supervisor.listen(&root, terminal, |_, _| {}).await;
+            });
+        }
+
+        assert_eq!(
+            eventually(|| supervisor.failure(terminal)).await,
+            Some(AgentFailure::AdapterSilent),
+            "a daemon that came up after the adapter gave up still has to hear about it"
+        );
+    }
 
     /// The whole ring, exactly once — not once because it was pushed and again
     /// because it was asked for.

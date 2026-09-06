@@ -111,6 +111,14 @@ impl From<AcpError> for BackendError {
             // branch on a distinction with no different action behind it.
             AcpError::Malformed => BackendError::Closed,
             AcpError::Refused(message) => BackendError::Refused(message),
+            // NOT folded into `Refused`, and this is the distinction the whole
+            // failure path turns on. An unauthenticated adapter is the one
+            // refusal whose fix is not in Far Cooler at all — the user runs
+            // the agent's own login command on the runner — and it is the
+            // case that used to reach a screen as "the ACP adapter closed its
+            // connection", because `agent_host` flattened every `SessionError`
+            // into `Closed` one function above it.
+            AcpError::AuthRequired(message) => BackendError::NotAuthenticated(message),
         }
     }
 }

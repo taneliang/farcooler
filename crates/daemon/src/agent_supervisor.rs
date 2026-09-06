@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use farcooler_agent::event::{AgentEvent, AgentGapReason, Seq, Sequenced};
-use farcooler_agent::link::{DaemonMessage, ShimMessage, decode_line, encode_line};
+use farcooler_agent::link::{AgentFailure, DaemonMessage, ShimMessage, decode_line, encode_line};
 use farcooler_agent::activity_source;
 use farcooler_core::activity;
 use farcooler_protocol::v1::AgentActivity;
@@ -137,6 +137,13 @@ struct SessionState {
     /// tells a user nothing about which is which.
     title: Option<String>,
     available_modes: Vec<String>,
+    /// Why this pane has no agent in it, when it has none.
+    ///
+    /// A stable word from the shim, held so every client that asks gets the
+    /// same answer. `None` is "nothing has said this pane failed" — which for
+    /// a pane that is starting normally is also what it looks like, so a
+    /// client draws the spinner until this is set or the transcript arrives.
+    failure: Option<AgentFailure>,
     /// Which run of the shim this transcript belongs to.
     ///
     /// The same idea as a terminal's `epoch`, and for the same reason. A shim
@@ -188,6 +195,11 @@ impl AgentSupervisor {
 
     pub fn agent_mode(&self, terminal: Uuid) -> Option<String> {
         self.sessions.lock().ok().and_then(|s| s.get(&terminal).and_then(|st| st.agent_mode.clone()))
+    }
+
+    /// Why this pane has no agent in it, as a stable word, when it has none.
+    pub fn failure(&self, terminal: Uuid) -> Option<AgentFailure> {
+        self.sessions.lock().ok().and_then(|s| s.get(&terminal).and_then(|st| st.failure))
     }
 
     pub fn available_modes(&self, terminal: Uuid) -> Vec<String> {
@@ -399,6 +411,11 @@ impl AgentSupervisor {
                     entry.session_id = Some(session_id);
                     entry.available_modes = available_modes;
                     entry.cursor = 0;
+                    // A session that established is not a session that failed.
+                    // A pane that failed, was toggled back to a terminal and
+                    // toggled in again would otherwise keep reporting the old
+                    // failure over a chat that is working.
+                    entry.failure = None;
                     // A new shim is a new stream. Readers holding a cursor into
                     // the old one are told by the change, rather than being
                     // left to work it out from numbers that silently mean
@@ -407,8 +424,31 @@ impl AgentSupervisor {
                 }
                 return;
             }
-            ShimMessage::Failed { reason } => {
-                tracing::warn!(terminal = %terminal, %reason, "agent adapter failed to start");
+            ShimMessage::Failed { failure } => {
+                // Recorded, not merely logged. This handler was dead code —
+                // nothing anywhere constructed `Failed` — and a warning in a
+                // log is not a state a client can render, so the pane showed a
+                // spinner forever whatever the daemon knew.
+                //
+                // The pane STAYS in agent mode. Flipping it back to
+                // `PaneMode::Terminal` from here would respawn the pane under
+                // whatever the user was typing into it; a client renders this
+                // word as a failure row and offers the switch as an action the
+                // user chooses.
+                tracing::warn!(
+                    terminal = %terminal,
+                    failure = failure.code(),
+                    "this pane is in agent mode with no agent in it"
+                );
+                if let Ok(mut sessions) = self.sessions.lock() {
+                    let entry = sessions.entry(terminal).or_default();
+                    entry.failure = Some(failure);
+                    // An agent that never started is not working, and the
+                    // activity left over from the pane's last life would
+                    // otherwise refuse the toggle that gets the user out of
+                    // here — see `guard_toggle`.
+                    entry.activity = AgentActivity::Unspecified;
+                }
                 return;
             }
         };
@@ -563,6 +603,71 @@ mod tests {
         ));
         assert!(guard_toggle(AgentActivity::Working, true).is_ok());
         assert!(guard_toggle(AgentActivity::Idle, false).is_ok());
+    }
+
+    #[test]
+    fn a_pane_that_failed_can_still_be_switched_back_to_a_terminal() {
+        // The way OUT of a failed chat is the toggle to terminal mode, and
+        // `guard_toggle` refuses that while activity says `Working`. Activity
+        // is written in one place and cleared nowhere, so a pane whose agent
+        // died mid-turn and came back unable to start would report `Working`
+        // for an agent that does not exist — and refuse the one action that
+        // fixes it, with a message about a turn in flight that is not.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        supervisor.apply(
+            terminal,
+            ShimMessage::Events {
+                events: vec![Sequenced {
+                    seq: 0,
+                    event: AgentEvent::Message {
+                        role: Role::Agent,
+                        text: "working on it".into(),
+                        parent: None,
+                    },
+                }],
+            },
+            &|_, _| {},
+        );
+        assert_eq!(
+            supervisor.activity(terminal),
+            AgentActivity::Working,
+            "the fixture must start from a turn in flight"
+        );
+
+        supervisor.apply(
+            terminal,
+            ShimMessage::Failed { failure: AgentFailure::AdapterSilent },
+            &|_, _| {},
+        );
+
+        assert_eq!(supervisor.failure(terminal), Some(AgentFailure::AdapterSilent));
+        assert!(
+            guard_toggle(supervisor.activity(terminal), false).is_ok(),
+            "a pane with no agent in it must not refuse the switch that gets the user out"
+        );
+    }
+
+    #[test]
+    fn a_session_that_establishes_stops_reporting_the_failure_before_it() {
+        // A pane that failed, was switched back to a terminal and switched in
+        // again would otherwise keep drawing a failure row over a chat that is
+        // working perfectly.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        supervisor.apply(
+            terminal,
+            ShimMessage::Failed { failure: AgentFailure::NoAdapter },
+            &|_, _| {},
+        );
+        assert_eq!(supervisor.failure(terminal), Some(AgentFailure::NoAdapter));
+
+        supervisor.apply(
+            terminal,
+            ShimMessage::Established { session_id: "s".into(), available_modes: Vec::new() },
+            &|_, _| {},
+        );
+        assert_eq!(supervisor.failure(terminal), None);
     }
 
     #[test]

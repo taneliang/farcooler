@@ -768,6 +768,11 @@ impl Session {
                             "agentSessionId": t.agent_session_id.clone(),
                             "agentMode": t.agent_mode.clone(),
                             "availableAgentModes": t.available_agent_modes.clone(),
+                            // Same reason as `chatCapable` above: a field the
+                            // runner never sends is a state the phone can
+                            // never draw, so a chat whose agent refused to
+                            // start would spin on the phone forever.
+                            "agentFailure": t.agent_failure.clone(),
                         }))
                         .collect::<Vec<_>>(),
                 })

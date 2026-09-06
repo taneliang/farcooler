@@ -1022,6 +1022,30 @@ message Terminal {
   //  — which is the true statement, since a commit belongs to the worktree and
   //  not to a pane. A repository with reflogs disabled shows none.
   bytes activity_trace = 35;
+
+  // Why this pane is in agent mode with no agent in it.
+  //
+  // A STABLE MACHINE WORD, never a sentence: `no-adapter`,
+  // `not-authenticated`, `adapter-silent`, `adapter-failed`. THE APP OWNS THE
+  // SENTENCE — a client renders one of its own per word, and a raw Rust error
+  // string must never reach a screen. See `AgentFailure` in
+  // `farcooler-agent-core`, which is where the list is defined and where a new
+  // word costs a new sentence in every app.
+  //
+  // Absent means nothing has said this pane failed, which for a pane still
+  // starting up looks the same — so a client draws its spinner until either
+  // this arrives or the transcript does.
+  //
+  // **The pane stays in AGENT pane mode.** This does not flip `pane_mode`, and
+  // a client must not flip it either: an automatic fallback to a terminal
+  // respawns the pane under whatever the user was in the middle of typing. The
+  // switch back is offered as an action they choose.
+  //
+  // Empty for a client reading an older daemon, which is the same as a pane
+  // that has not failed — and the state before this field existed, where the
+  // three ways an adapter can fail to start were all rendered as an endless
+  // spinner.
+  optional string agent_failure = 36;
 }
 
 // What a pane is hosting.

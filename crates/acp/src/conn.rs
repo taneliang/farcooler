@@ -30,7 +30,24 @@ pub enum AcpError {
     /// say anything more useful than the agent already did.
     #[error("the ACP adapter refused: {0}")]
     Refused(String),
+    /// The adapter refused because nobody is signed in to it.
+    ///
+    /// Separate from `Refused` because it is the one refusal whose fix is not
+    /// in Far Cooler at all: the user runs the agent's own login command on
+    /// the runner. Told apart by the JSON-RPC CODE rather than by reading the
+    /// message — the message is the adapter's prose, in whatever language and
+    /// wording it likes, and matching on prose is how a rename becomes an
+    /// outage.
+    #[error("the ACP adapter needs you to sign in: {0}")]
+    AuthRequired(String),
 }
+
+/// ACP's error code for "you are not signed in".
+///
+/// The protocol's own `auth_required`, which is what an adapter answers
+/// `session/new` with when the agent behind it has no credentials. The code is
+/// the durable half of that answer; `message` beside it is prose.
+pub const AUTH_REQUIRED: i64 = -32000;
 
 /// A frame from the adapter that the caller has to deal with.
 ///
@@ -268,7 +285,17 @@ impl AcpConnection {
                     // failure to attribute. Seen for real: `session/load`
                     // answering "Session not found" for an id whose transcript
                     // does not exist yet.
-                    return Err(AcpError::Refused(error_detail(&error)));
+                    let detail = error_detail(&error);
+                    // Sorted here rather than by the caller, because this is
+                    // the last place the JSON-RPC code exists. Above this
+                    // line a refusal is a code and a message; below it, it is
+                    // a sentence — and an unauthenticated adapter reaching a
+                    // user as "the ACP adapter closed its connection" is
+                    // exactly what happens when the distinction is dropped.
+                    if error["code"].as_i64() == Some(AUTH_REQUIRED) {
+                        return Err(AcpError::AuthRequired(detail));
+                    }
+                    return Err(AcpError::Refused(detail));
                 }
                 if rpc.result.is_some() {
                     return Ok(rpc.result.unwrap_or(serde_json::Value::Null));
@@ -631,6 +658,63 @@ mod tests {
             Err(AcpError::Refused(message)) => assert!(message.contains("Session not found")),
             other => panic!("expected the adapter's own refusal, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn an_adapter_nobody_is_signed_in_to_is_told_apart_from_every_other_refusal() {
+        // The failure the whole reporting path was built for, at its source.
+        // Folded into `Refused`, it travelled up as `BackendError::Refused`,
+        // was flattened by `agent_host` into `BackendError::Closed`, and
+        // reached the user as "the ACP adapter closed its connection" — which
+        // sends whoever reads it looking at a network problem instead of at a
+        // login they have not done.
+        //
+        // Sorted by the JSON-RPC CODE, not by the message: `message` is the
+        // adapter's prose and matching on prose is how a reword becomes an
+        // outage.
+        let refusal = |code: i32| Launch {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".to_string(),
+                format!(
+                    r#"read line; printf '{{"jsonrpc":"2.0","id":1,"error":{{"code":{code},"message":"Not authenticated"}}}}\n'"#
+                ),
+            ],
+            env: Default::default(),
+        };
+
+        let mut conn =
+            AcpConnection::spawn(&refusal(AUTH_REQUIRED as i32), std::env::temp_dir())
+                .await
+                .expect("spawn");
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            conn.request("session/new", serde_json::json!({})),
+        )
+        .await
+        .expect("must not hang");
+        match outcome {
+            Err(AcpError::AuthRequired(message)) => {
+                assert!(message.contains("Not authenticated"), "{message}")
+            }
+            other => panic!("expected an auth refusal, got {other:?}"),
+        }
+
+        // And the same words under a different code are still an ordinary
+        // refusal — the code is what decides, so this is the half that proves
+        // the test is not reading the prose either.
+        let mut conn =
+            AcpConnection::spawn(&refusal(-32603), std::env::temp_dir()).await.expect("spawn");
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            conn.request("session/new", serde_json::json!({})),
+        )
+        .await
+        .expect("must not hang");
+        assert!(
+            matches!(outcome, Err(AcpError::Refused(_))),
+            "only the auth code means auth, got {outcome:?}"
+        );
     }
 
     #[tokio::test]
