@@ -256,6 +256,14 @@ async fn open(runner: &Runner, device: &Device) -> Result<Session, SshError> {
         private_key: device.ssh_private.clone(),
         passphrase: None,
         host_key: HostKeyPolicy::Pinned(runner.host_fingerprint.clone()),
+        // The relay this whole test agrees on, supplied the way a phone
+        // supplies it: in the destination, so `Session::open`'s caller sets
+        // the rendezvous on the way in rather than the test setting it out of
+        // band. `Runner::start` has already set the same URL process-wide
+        // because the runner's own `serve` needed it before any device
+        // existed — this is the DEVICE half of the same setting, and it is
+        // the one a phone actually exercises.
+        derp_map: runner.derp_map.clone(),
     })
     .await
 }
@@ -338,6 +346,9 @@ struct Runner {
     token: String,
     /// The scratch sshd's host key, in the form `Destination::host_key` pins.
     host_fingerprint: String,
+    /// The DERP map naming this test's own relay, so a device can be handed it
+    /// in its `Destination` the way a phone hands over its own setting.
+    derp_map: String,
     ssh_port: u16,
     tailcat_key: PathBuf,
     authorized_keys: PathBuf,
@@ -398,6 +409,7 @@ impl Runner {
             _sshd: sshd,
             token: String::new(),
             host_fingerprint,
+            derp_map: relay.map_url.clone(),
             ssh_port,
             tailcat_key,
             authorized_keys,

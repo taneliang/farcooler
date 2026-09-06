@@ -204,6 +204,25 @@ pub struct Destination {
     /// plain SSH end to end, so the host key it presents is the runner's own,
     /// not the tunnel's.
     pub host_key: HostKeyPolicy,
+    /// Which DERP map to reach a tunneled runner through, or empty for the
+    /// library's own.
+    ///
+    /// **It is here rather than inside `Reach::Tailcat` on purpose.** `Reach`
+    /// is serialized into a ceremony manifest, and a rendezvous that travelled
+    /// in a manifest would be a rendezvous the granting device chose for the
+    /// receiving one — while this is the receiving device's own setting, read
+    /// from where it keeps the relay URL. Keeping it out of `Reach` also keeps
+    /// the manifest's shape unchanged.
+    ///
+    /// **And it is on the destination rather than a setter an app calls,**
+    /// because every app's connect already passes through here: a setter is a
+    /// call somebody forgets, and the day it is forgotten is the day the
+    /// default map was revoked.
+    ///
+    /// It takes effect PROCESS-WIDE when the connect applies it — the tunnel
+    /// library holds one — so in practice every destination an app builds
+    /// carries the same string. See `Session::connect_ssh`.
+    pub derp_map: String,
 }
 
 /// A live SSH session.
@@ -612,6 +631,7 @@ mod tests {
             private_key: test_key(),
             passphrase: None,
             host_key: HostKeyPolicy::RequireApproval,
+            derp_map: String::new(),
         };
         let error = open_err(&destination).await;
         assert!(matches!(error, SshError::Connect { .. }), "{error:?}");
@@ -630,6 +650,7 @@ mod tests {
             private_key: test_key(),
             passphrase: None,
             host_key: HostKeyPolicy::RequireApproval,
+            derp_map: String::new(),
         };
         let error = open_err(&destination).await;
         assert!(matches!(error, SshError::Tunnel { code: "no_tailcat" }), "{error:?}");

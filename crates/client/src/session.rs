@@ -246,6 +246,22 @@ fn daemon_binary() -> &'static str {
 impl Session {
     /// Connect over SSH and start a daemon session on the far side.
     pub async fn connect_ssh(destination: &ssh::Destination) -> Result<Self, SessionError> {
+        // The rendezvous, applied before the dial that needs it. tailcat's
+        // default DERP map is documented as best-effort and revocable at any
+        // time, and DERP is where every tunneled connection meets rather than
+        // a fallback for the ones that could not go direct — so this is the
+        // line that makes recovering from a revocation a setting instead of
+        // three app releases.
+        //
+        // Empty is left alone rather than sent. Empty already means "the
+        // library default" to `set_derp_map_url`, so sending it would be a
+        // no-op for an app that configured nothing and a CLEARING for any
+        // process that was configured another way — a `farcoolerd` that read
+        // `FARCOOLER_DERP_MAP` and then opened a client session of its own
+        // would move itself off its own rendezvous on the way past.
+        if !destination.derp_map.is_empty() {
+            farcooler_tailcat::set_derp_map_url(&destination.derp_map);
+        }
         let mut transport = ssh::Session::open(destination).await?;
         // Named by tilde, not bare: a non-login ssh exec's PATH often lacks
         // ~/.local/bin, where `runner install` puts the binary.
@@ -1947,6 +1963,69 @@ fn terminal_label(s: TerminalState) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serializes the tests that move the tunnel library's process-wide DERP
+    /// map. `cargo test` runs this crate's tests on many threads in one
+    /// process.
+    static DERP_MAP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A destination this connect cannot possibly complete.
+    ///
+    /// The private key is not a key, so `ssh::Session::open` refuses before it
+    /// reaches a network — which is what makes the tests below fast, offline,
+    /// and about only the one thing they assert.
+    fn unreachable(derp_map: &str) -> ssh::Destination {
+        ssh::Destination {
+            reach: ssh::Reach::Direct { host: "127.0.0.1".into(), port: 1 },
+            user: "u".into(),
+            private_key: "not a key".into(),
+            passphrase: None,
+            host_key: ssh::HostKeyPolicy::Accept,
+            derp_map: derp_map.to_string(),
+        }
+    }
+
+    /// A configured DERP map reaches the tunnel library on the way into a
+    /// connect, not after it.
+    ///
+    /// Asserted through `connect_ssh` — the function both phone apps' connect
+    /// actually calls — and read back out of the tunnel library rather than
+    /// off the struct this test just filled in. The connect fails, and it has
+    /// to: the rendezvous is set on the way past, so the only question left
+    /// is whether that happened before the dial or not at all.
+    #[tokio::test]
+    async fn a_configured_derp_map_is_applied_on_the_way_into_a_connect() {
+        let _serial = DERP_MAP.lock().unwrap_or_else(|e| e.into_inner());
+        farcooler_tailcat::set_derp_map_url("");
+        let _ = Session::connect_ssh(&unreachable("https://derp.example/derpmap.json")).await;
+        assert_eq!(
+            farcooler_tailcat::derp_map_url(),
+            "https://derp.example/derpmap.json",
+            "the configured DERP map never reached the tunnel"
+        );
+        farcooler_tailcat::set_derp_map_url("");
+    }
+
+    /// An app that configured nothing does not CLEAR what something else
+    /// configured.
+    ///
+    /// Empty already means "the library's own default" one layer down, so
+    /// sending it would be a no-op for a phone and a quiet unsetting for any
+    /// process that reads `FARCOOLER_DERP_MAP` and then opens a client
+    /// session of its own — which would move that process off its own
+    /// rendezvous on the way past, at the moment it was dialing.
+    #[tokio::test]
+    async fn an_unset_derp_map_clears_nothing() {
+        let _serial = DERP_MAP.lock().unwrap_or_else(|e| e.into_inner());
+        farcooler_tailcat::set_derp_map_url("https://derp.example/already-set.json");
+        let _ = Session::connect_ssh(&unreachable("")).await;
+        assert_eq!(
+            farcooler_tailcat::derp_map_url(),
+            "https://derp.example/already-set.json",
+            "a connect that configured nothing unset the rendezvous anyway"
+        );
+        farcooler_tailcat::set_derp_map_url("");
+    }
 
     #[test]
     fn short_ids_use_the_random_tail_not_the_timestamp_head() {

@@ -257,6 +257,8 @@ fn destination(runner: &Runner, key: &Path) -> Destination {
         // A throwaway host key on a throwaway port. Pinning it would mean
         // reading it back out of a directory this test is about to delete.
         host_key: HostKeyPolicy::Accept,
+        // A direct runner reaches no rendezvous at all.
+        derp_map: String::new(),
     }
 }
 

@@ -2222,6 +2222,13 @@ fn parse_destination(config: &str) -> Result<Destination, String> {
         private_key: text("private_key").ok_or("config needs a private_key")?,
         passphrase: text("passphrase"),
         host_key,
+        // Absent and empty are the same answer, and the answer is the empty
+        // string: empty means the tunnel library's own default map, which is
+        // what every app ships with and what every app must keep using until
+        // somebody deliberately types a different one. A config that omits
+        // the field must land on exactly the same rendezvous as one that
+        // sends it blank.
+        derp_map: text("derp_map").unwrap_or_default(),
     })
 }
 
@@ -2501,6 +2508,33 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(destination.host_key, HostKeyPolicy::Accept));
+    }
+
+    /// A configured DERP map crosses from an app's settings into the
+    /// destination that will be dialed.
+    #[test]
+    fn a_configured_derp_map_crosses_the_ffi() {
+        let destination = parse_destination(
+            r#"{"token":"tc-x","node_key":"k","user":"me","private_key":"k","derp_map":"https://derp.example/derpmap.json"}"#,
+        )
+        .unwrap();
+        assert_eq!(destination.derp_map, "https://derp.example/derpmap.json");
+    }
+
+    /// Nobody has configured one, and nobody should have to. An absent field
+    /// and a blank one are the same answer, and that answer must be the empty
+    /// string rather than a URL — empty is what the tunnel library reads as
+    /// "use your own default map", and it is what every app in the field
+    /// sends today by simply not knowing about the field at all.
+    #[test]
+    fn an_unset_derp_map_stays_unset_across_the_ffi() {
+        for config in [
+            r#"{"token":"tc-x","node_key":"k","user":"me","private_key":"k"}"#,
+            r#"{"token":"tc-x","node_key":"k","user":"me","private_key":"k","derp_map":""}"#,
+        ] {
+            let destination = parse_destination(config).unwrap();
+            assert_eq!(destination.derp_map, "", "an unset DERP map became a URL: {config}");
+        }
     }
 
     #[test]
