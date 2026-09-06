@@ -50,6 +50,10 @@ struct AgentActivityWidget: Widget {
             // is. Both are App Group file reads on a render path, and both are
             // wanted by two presentations that must not disagree.
             let ask = LeaderAsk.current(for: context.state)
+            // Which of the two cards this is. See `LockScreenCard`, which is
+            // where the choice is argued: rows when the relay sent any and
+            // there is nothing to answer, the headline otherwise.
+            let layout = ask.isPresent ? nil : AgentCardLayout(state: context.state)
             LockScreenCard(
                 state: context.state,
                 // The fleet line steps aside while there is an answer on offer.
@@ -60,10 +64,16 @@ struct AgentActivityWidget: Widget {
                 // bottom of it. The tail says how many others are running; the
                 // buttons are the only thing on this surface that cannot be got
                 // anywhere else.
-                tail: ask.isPresent
+                //
+                // The rows card does not read it at all — every figure on it
+                // came off the push — so the App Group file is not opened on
+                // that path. It is one small JSON on a render thread, but it is
+                // also the last thing this card needed a local file for.
+                tail: ask.isPresent || layout != nil
                     ? FleetTail.unknown
                     : FleetTail.current(for: context.state),
-                ask: ask)
+                ask: ask,
+                layout: layout)
                 // The card's own background. Left to the system's material
                 // rather than a color of ours: the lock screen wallpaper is
                 // behind it and a flat fill sits on top of the photo like a
@@ -81,7 +91,16 @@ struct AgentActivityWidget: Widget {
                 // Off the CONTENT STATE now rather than the attributes, which is
                 // what makes it follow a change of leader: the card is rendered
                 // again on every push, so the URL is rebuilt with it.
-                .widgetURL(terminalURL(context.state.terminal))
+                //
+                // **The card's TOP ROW, when it is drawing rows**, and that is a
+                // correction rather than a refinement. The headline is the agent
+                // the notice was about and the rows are the fleet in tier order;
+                // they usually coincide and need not, and a card whose first
+                // line reads `auth-refactor` opening `docs-sweep` is
+                // indistinguishable from a card that ignored the tap. The
+                // Island keeps the headline below, because the headline is what
+                // the Island draws.
+                .widgetURL(terminalURL(layout?.rows.first?.terminal ?? context.state.terminal))
         } dynamicIsland: { context in
             let status = AgentStatus(context.state.status)
             let ask = LeaderAsk.current(for: context.state)
@@ -673,25 +692,242 @@ private struct OptionButton: View {
     }
 }
 
-/// The lock screen presentation: the leader, then everyone else in one line.
+/// The lock screen presentation, which is TWO drawings behind one name.
+///
+/// **The rows card is what the design asks for**: a header counting the fleet,
+/// a line each for two agents with their own trace and their own figures, and a
+/// tail for everybody else. It needs a `rows` array on the push, so it is what
+/// this build draws against this relay.
+///
+/// **The headline card is the other two cases**, and neither is a fallback in
+/// the apologetic sense:
+///
+///   - **A relay too old to send rows.** An app updated ahead of its relay is
+///     the ordinary case here, not a corner: `AgentCardLayout.init?` returns nil
+///     and this draws exactly what it drew before rows existed.
+///   - **An answer on offer.** A blocked agent whose options this phone has read
+///     off the stream gets buttons, and the buttons win the card. That is the
+///     rule this surface already had — the turn clock, the trace and the fleet
+///     line all step aside for an answer — stated once more with more to stand
+///     aside: a question outranks everything that is merely true, and two rows
+///     of history are the most merely-true thing on the card. The design draws
+///     no buttons because the design is drawing the other case.
+///
+/// One `View` and one choice rather than two widgets, so there is exactly one
+/// place that decides and it is written down.
 private struct LockScreenCard: View {
     let state: AgentActivityAttributes.ContentState
     let tail: FleetTail
     let ask: LeaderAsk
+    /// The rows card, or nil for the headline card. Built in the widget's own
+    /// body so the choice and the tap target are made from one value.
+    let layout: AgentCardLayout?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            LeaderRow(state: state, ask: ask, trace: tail.leaderTrace)
-            if let rest = tail.line {
-                Divider()
-                Text(rest)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .opacity(tail.qualified ? 0.6 : 1)
+        if let layout {
+            FleetCard(layout: layout)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                LeaderRow(state: state, ask: ask, trace: tail.leaderTrace)
+                if let rest = tail.line {
+                    Divider()
+                    Text(rest)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .opacity(tail.qualified ? 0.6 : 1)
+                        .lineLimit(1)
+                }
+            }
+            .padding(16)
+        }
+    }
+}
+
+/// The card the design draws: header, two rows, tail.
+///
+/// **Every word and every figure on it is composed in `AgentCardLayout`**, which
+/// is in AgentKit and has a test suite. Nothing below decides what to say; it
+/// decides where things go. That split is the only way any of this is checkable
+/// without a device — the iOS UI suite is compiled in CI and never executed —
+/// and it is the same arrangement `GlanceTraceLayout` has with the trace it
+/// draws.
+///
+/// **The geometry is the design's, quoted.** 12/14 padding, a 9pt gap
+/// everywhere, columns of 11 / flex / 52 / 64, and a body whose rows divide
+/// whatever height the system gives the presentation. The two rules are two
+/// weights on purpose: the heavier one separates the card's three parts and the
+/// lighter one separates two agents, and drawn at one weight the card reads as a
+/// list of five things.
+///
+/// **Forced dark.** A Live Activity is drawn over the lock screen's wallpaper
+/// on a dark material whatever the phone's appearance is set to, which is the
+/// same fact `AgentStatus.tint` already states in as many words: §01's light
+/// palette answers "what does this look like on a pale backdrop", and there is
+/// no pale backdrop here. The card's own background stays the system's material
+/// — `.activityBackgroundTint(nil)` — because a flat fill of ours sits on top of
+/// somebody's photograph like a sticker.
+private struct FleetCard: View {
+    let layout: AgentCardLayout
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.bottom, 9)
+            hairline(GlancePalette.rule)
+            // `flex: 1` — the rows take whatever is left of the card, which is
+            // the only figure in the design that is not a number: the
+            // presentation's height belongs to the system.
+            VStack(spacing: 0) {
+                ForEach(Array(layout.rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { hairline(GlancePalette.rowRule) }
+                    CardRow(row: row)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(maxHeight: .infinity)
+            hairline(GlancePalette.rule)
+            tail
+                .padding(.top, 8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .environment(\.colorScheme, .dark)
+    }
+
+    private var header: some View {
+        HStack(spacing: 9) {
+            // §03's header diameter, and the one place on this card where the
+            // ring is about the whole fleet rather than one agent.
+            GlanceMarkView(layout.mark, size: .header)
+            Text(layout.title)
+                .glanceType(.cardHeader)
+                .foregroundStyle(GlancePalette.ink1(.dark))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if let counts = layout.counts {
+                // Mono, because these are figures a machine counted. §02's test
+                // is exactly that: if it came off a machine it is mono.
+                Text(counts)
+                    .glanceType(.monoFigures)
+                    .foregroundStyle(GlancePalette.ink2(.dark))
                     .lineLimit(1)
             }
         }
-        .padding(16)
+    }
+
+    private var tail: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(Array(layout.rings.enumerated()), id: \.offset) { _, mark in
+                    GlanceMarkView(mark, size: .ribbon, decorative: true)
+                }
+            }
+            // Decorative as a group and not only one ring at a time: twelve
+            // marks each announcing "Nothing wanted" is a screen reader reading
+            // a texture aloud, and the header above says the same three numbers
+            // in words that were written to be heard.
+            .accessibilityHidden(true)
+            Spacer(minLength: 4)
+            if let line = layout.line {
+                Text(line)
+                    .glanceType(.monoFigures)
+                    .foregroundStyle(GlancePalette.ink2(.dark))
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    /// One of the card's two rules, at the width it was given.
+    ///
+    /// A `Rectangle` and not a `Divider`: the two weights are the design's and
+    /// `Divider` draws the system's separator, which is one weight and a colour
+    /// nobody chose.
+    private func hairline(_ ink: GlanceInk) -> some View {
+        Rectangle()
+            .fill(ink.darkColor)
+            .frame(height: 1)
+    }
+}
+
+/// One agent's line: ring, name and detail, its own thirteen buckets, its
+/// figures.
+///
+/// **The columns are fixed widths and that is what makes the traces line up.**
+/// §07 gives the row 11 / flex / 52 / 64, so every trace on the card starts at
+/// the same x and is the same width — which is the design's second rule, one
+/// shared time axis down the card, and the reason a simultaneous stop is
+/// readable at all. A trace sized to its row's content would put thirteen
+/// buckets under thirteen other buckets that meant a different thirteen
+/// minutes.
+///
+/// **A row with no trace still holds the column open.** `ActivityTrace` refuses
+/// to build from an absent field — a terminal with nothing to show sends no
+/// bytes, deliberately, and that is not the same as thirteen quiet buckets — so
+/// this draws nothing in a box of exactly the same size rather than letting the
+/// figures beside it slide left. The row that HAS a trace and has touched no
+/// files is the other case, and it draws itself: an empty upper half against a
+/// visible centre rule, absence drawn rather than omitted.
+private struct CardRow: View {
+    let row: AgentCardLayout.Row
+
+    var body: some View {
+        HStack(spacing: 9) {
+            // §07's first column. The ring is where state lives on this card;
+            // the trace two columns along never carries amber or blue, because
+            // history is not urgent.
+            GlanceMarkView(row.mark, size: .row)
+                .frame(width: 11)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(row.name)
+                    .glanceType(.rowName)
+                    .foregroundStyle(GlancePalette.ink1(.dark))
+                    .lineLimit(1)
+                if !row.detail.isEmpty {
+                    Text(row.detail)
+                        .glanceType(.secondary)
+                        .foregroundStyle(GlancePalette.ink2(.dark))
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            trace
+            VStack(alignment: .trailing, spacing: 0) {
+                if let diff = row.diff {
+                    Text(diff)
+                        .glanceType(.monoFigures)
+                        .foregroundStyle(GlancePalette.ink1(.dark))
+                        .lineLimit(1)
+                }
+                if let footnote = row.footnote {
+                    Text(footnote)
+                        .glanceType(.monoFigures)
+                        .foregroundStyle(GlancePalette.ink2(.dark))
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: 64, alignment: .trailing)
+        }
+    }
+
+    @ViewBuilder private var trace: some View {
+        // Off the PUSH, which is what changed. The trace used to be read out of
+        // the App Group snapshot because the push had never carried one; the
+        // relay sends 66 bytes of base64 per row now, so the history on the card
+        // is as fresh as everything else on it and does not depend on this phone
+        // having run the app today.
+        //
+        // The two drawn rows can disagree about their SPAN — a trace snaps to
+        // the shortest of three windows containing its own activity — and
+        // nothing here can align them, because the buckets were closed on the
+        // runner. See this task's report.
+        if let read = ActivityTrace(row.trace) {
+            GlanceTraceView(read, size: .cardRow)
+        } else {
+            Color.clear
+                .frame(
+                    width: GlanceTraceSize.cardRow.width,
+                    height: GlanceTraceSize.cardRow.height)
+        }
     }
 }
 

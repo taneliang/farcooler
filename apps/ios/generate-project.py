@@ -175,6 +175,11 @@ AGENTKIT_SOURCES = [
     # binaries, one file. See `activity_build_ids` for why that needs a second
     # set of build ids rather than reusing these.
     "AgentActivityAttributes.swift",
+    # The rows on that card and the arithmetic that lays them out. In this list
+    # AND in `activity_build_ids` below for `AgentActivityAttributes.swift`'s
+    # reason exactly: the state decodes into these types, so the extension that
+    # draws the card has to compile them too.
+    "AgentCardRows.swift",
     "AgentEvent.swift",
     # What the Test button in an adapter editor says. Shared because the type
     # and its words were declared three times — here, on the Mac and on
@@ -555,6 +560,7 @@ activity_build_ids = {
     for name in ACTIVITY_SOURCES
     + [
         "AgentActivityAttributes.swift",
+        "AgentCardRows.swift",
         "FleetSnapshot.swift",
         "SnapshotStore.swift",
         # The card's buttons. `AnswerPermissionIntent` is what a button is wired
