@@ -27,8 +27,9 @@ struct CeremonyOffer: Decodable, Equatable {
     let account: String
     let channel: String
     let ceremony: String
-    /// This device's tailcat node public key: 43 characters of unpadded
-    /// base64-URL, or empty from a device that has none.
+    /// The OFFERING device's tailcat node public key: 43 characters of
+    /// unpadded base64-URL, or empty from a device that has none — the device
+    /// this one is being asked to add, never this one.
     ///
     /// **Optional here, not on the wire.** `crates/client/src/ceremony.rs`
     /// always serializes it, so a code this build scanned always carries the
