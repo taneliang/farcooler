@@ -104,6 +104,21 @@ final class TerminalSession: ObservableObject {
     /// last one cannot outlive the pane.
     private var historyRefresh: Task<Void, Never>?
 
+    /// Where the reader was when this pane was last put away, waiting for the
+    /// screen that will give it somewhere to be. Zero the rest of the time.
+    ///
+    /// Recorded in `stop` and nowhere later, because by "later" it is gone:
+    /// `prime` builds an empty emulator and installs it the moment nothing else
+    /// is painting — which is every return visit, since a pane that was
+    /// scrolled back has already cancelled its poll loop. Reading the offset in
+    /// `consume`, off the core `prime` had just replaced, is a measurement of
+    /// the wrong emulator and reads zero every time; it was tried.
+    ///
+    /// Spent by whichever painter arrives first — `consume` for a stream,
+    /// `render` for a poll — and cleared as it is spent, so it can never move
+    /// a screen the reader is already looking at.
+    private var placeToRestore = 0
+
     /// The last wheel-event write, so the next one can wait for it.
     ///
     /// Only the alternate screen ever produces these — see `scroll`. They are
@@ -533,6 +548,9 @@ final class TerminalSession: ObservableObject {
     func relink() {
         guard started else { return }
         teardown()
+        // A relink rebuilds the pane from nothing on purpose, so there is no
+        // place to come back to.
+        placeToRestore = 0
         vt = nil
         grid = nil
         lastScreen = nil
@@ -654,6 +672,9 @@ final class TerminalSession: ObservableObject {
     /// view has no business holding an ssh channel open, or spending this
     /// phone's battery on a screen nobody is reading.
     func stop() {
+        // Before `teardown`, and before `prime` gets a chance to replace the
+        // emulator this reads. See `placeToRestore`.
+        placeToRestore = vt?.scrollPosition.offset ?? 0
         teardown()
         started = false
         let id = terminalID
@@ -1195,22 +1216,27 @@ final class TerminalSession: ObservableObject {
             poller = nil
             // Where the reader was, carried across the swap.
             //
-            // `render` has done this for the poll path since scrollback
-            // existed, and the stream path never did — so the two painters
-            // disagreed about the same gesture. Swiping to the next tab and
-            // back put a POLLED pane where you left it and a STREAMED one at
-            // the bottom, and every pane on a modern runner is streamed.
+            // Two sources, and the second is the one that matters. The live
+            // emulator's own offset covers a stream arriving over a poll that
+            // is already painting; `placeToRestore` covers a RETURN visit,
+            // where by this point `prime` has already installed an empty core
+            // and the live offset reads zero. The first version of this fix
+            // read only the live offset and changed nothing at all — same
+            // failure, same numbers — which is what `placeToRestore` was
+            // written to explain.
             //
-            // Measured: `testCrossingRunnersThrowsAwayPanesThatAWorkspaceSwipeKeeps`
-            // scrolls 28 lines back, swipes away and returns, and read 0. Its
-            // own doc calls that half the CONTROL — "the pane keeps the
-            // scrollback position it was left on" — so the test that reported
-            // it was describing behavior the app had stopped having.
+            // `render` has kept the reader's place across every emulator it
+            // rebuilds since scrollback existed, and the stream path never did,
+            // so the two painters disagreed about the same gesture: swiping to
+            // the next tab and back put a POLLED pane where you left it and a
+            // STREAMED one at the bottom. Every pane on a runner new enough to
+            // advertise `terminal_stream` is the forgetful one.
             //
             // Applied after the feed below rather than here, because a fresh
             // emulator has nothing above its screen yet: the replay's own
             // history is what makes an offset mean anything.
-            wasScrolledBackTo = vt?.scrollPosition.offset ?? 0
+            wasScrolledBackTo = max(vt?.scrollPosition.offset ?? 0, placeToRestore)
+            placeToRestore = 0
             vt = streamCore.emulator
             paneSize = (streamCore.columns, streamCore.rows)
             self.streamCore = nil
@@ -1484,7 +1510,11 @@ final class TerminalSession: ObservableObject {
         // this a swipe would move the screen and the next poll would move it
         // straight back. Reapplied after the feed below, once there is history
         // to apply it to.
-        let wasScrolledBackTo = vt?.scrollPosition.offset ?? 0
+        // `placeToRestore` for the first paint after a return visit, when the
+        // emulator this would read is the empty one `prime` just built. See
+        // `stop`.
+        let wasScrolledBackTo = max(vt?.scrollPosition.offset ?? 0, placeToRestore)
+        placeToRestore = 0
 
         let emulator = VTCore(columns: response.columns, rows: response.rows)
         // A fresh core starts on the VT crate's own default palette, not the
