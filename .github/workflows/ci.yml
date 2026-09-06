@@ -182,6 +182,13 @@ jobs:
       # and this is the only place in CI where losing it goes red.
       - run: cargo test -p farcooler-tailcat --features helper
       - run: cargo test -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel
+      # Revocation's guards live or die by this line. A default `cargo test`
+      # links no tunnel, so `serve` refuses every call for any input and "was
+      # the tunnel rebuilt" is unobservable -- every assertion in that file
+      # would pass vacuously. Under the helper backend the tunnel is a process
+      # a fake helper records commands for, which is the only shape in which
+      # revoking the LAST tunneled device can be seen to stop a running server.
+      - run: cargo test -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked
 
       # A `changes` pane runs THIS CHANNEL'S CLI by name — `changes_host_command`
       # asks `shim_binary`, which looks beside the daemon's own executable and
