@@ -1380,6 +1380,24 @@ final class DaemonClient: ObservableObject {
         await refresh()
     }
 
+    /// Put these worktrees in this order on the runner, first one first.
+    ///
+    /// The whole visible order rather than "move this one up". The sidebar draws
+    /// one project at a time and leaves hidden worktrees out, so an index means
+    /// nothing without saying what it is an index among — the runner permutes
+    /// exactly the cards it is named among the ranks they already hold and
+    /// leaves everything else where it was.
+    ///
+    /// Followed by a refresh, like every other mutation here. The local list is
+    /// never rearranged optimistically: the runner is the one that decides, and
+    /// a card that moved on screen and not on disk is the failure this whole
+    /// feature exists to remove.
+    func reorderWorkspaces(_ workspaces: [String]) async {
+        guard workspaces.count > 1 else { return }
+        _ = await run(["workspace", "reorder"] + workspaces)
+        await refresh()
+    }
+
     /// What asking the daemon to remove a worktree came back with.
     enum RemoveWorktreeResult {
         case ok

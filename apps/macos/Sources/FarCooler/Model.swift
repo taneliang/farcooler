@@ -70,6 +70,17 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// disambiguates.
     var host: String?
     var worktree: String
+    /// Where this card sits on its runner, as the runner has it stored.
+    ///
+    /// Not read to sort with. The list already arrives in this order and the
+    /// app renders what it is handed — the same thin-client rule as every other
+    /// derived value here. What this IS for is the drag: a row needs to know
+    /// its runner has an order at all, and a runner too old to store one sends
+    /// nothing, which is `nil` here rather than a plausible 0.
+    ///
+    /// Optional by the rule stated above: a missing key would fail the decode
+    /// of the entire fleet against an older daemon.
+    var ordinal: Int?
 
     /// Whether this workspace IS the repository's own checkout.
     ///

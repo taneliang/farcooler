@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -59,6 +60,13 @@ extension View {
 /// It expands on its own when something inside wants the user, because a
 /// collapsed row that hides the agent asking a question defeats the point.
 struct WorkspaceSection: View {
+    /// The one drag in flight anywhere in the sidebar. An `@ObservedObject` on
+    /// the shared instance rather than a parameter: `workspaceRow` already
+    /// passes eighteen arguments and its own comment records that a nineteenth
+    /// pushed the enclosing expression past the type checker's budget.
+    @ObservedObject private var drag = WorkspaceDrag.shared
+    /// This header's measured height, for deciding above-or-below.
+    @State private var headerHeight: CGFloat = 0
     let workspace: Workspace
     let isExpanded: Bool
     @Binding var selection: ContentView.Selection?
@@ -367,6 +375,52 @@ struct WorkspaceSection: View {
         .onHover { hovering = $0 }
         // On the ROW, not on the counts, and that is the whole of it.
         //
+        // Its own height, because above-or-below is decided at the midpoint of
+        // this row and only this row knows what that is. A background reader
+        // rather than a fixed number: the row grows a second line when a branch
+        // wraps, and a hardcoded midpoint would then be in the wrong place for
+        // exactly the rows that are hardest to aim at.
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { headerHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, new in headerHeight = new }
+            }
+        )
+        // The header alone is the grab handle and the drop target, not the whole
+        // section. A worktree's terminal rows are already a drag source and a
+        // drop target of their own — that gesture tiles two panes together — and
+        // two overlapping targets accepting the same type is how a drop lands on
+        // whichever one happened to win the hit test.
+        .onDrag {
+            guard usable else { return NSItemProvider() }
+            MainActor.assumeIsolated { WorkspaceDrag.shared.begin(workspace.id) }
+            // Carries the id only so the system will start a drag at all; the
+            // payload that is actually read is in `WorkspaceDrag`. See its docs.
+            return NSItemProvider(object: workspace.id as NSString)
+        }
+        .onDrop(
+            of: [.text],
+            delegate: WorkspaceDropTarget(workspace: workspace.id, height: headerHeight))
+        // Where it would land, drawn on the edge the drop would insert at. An
+        // insertion line rather than highlighting the row: the question is which
+        // GAP the card goes in, and a lit row says "on top of this one", which
+        // is a thing this gesture cannot do.
+        .overlay(alignment: dropEdge == .above ? .top : .bottom) {
+            if dropEdge != nil {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(height: 2)
+                    .padding(.horizontal, SidebarGrid.highlightInset)
+            }
+        }
+        .animation(Motion.snap, value: dropEdge)
+    }
+
+    /// The edge an insertion line goes on, or nil when this row is not where
+    /// the drag would land.
+    private var dropEdge: WorkspaceOrder.Edge? {
+        drag.landing(on: workspace.id)
     }
 
     /// The pair, in color while there is something new here and gray once it

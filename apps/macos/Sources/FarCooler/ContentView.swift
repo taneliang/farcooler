@@ -582,11 +582,16 @@ struct ContentView: View {
             let host = String(parts[0])
             let project = String(parts.count > 1 ? parts[1] : "")
             let all = byKey[key] ?? []
-            // Main checkout first, then the daemon's order. A stable partition,
-            // not a sort: sorted(by:) is not guaranteed stable and rows would
-            // reshuffle on every fleet event.
-            let shown = all.filter { !$0.isHidden && $0.isMainCheckout }
-                + all.filter { !$0.isHidden && !$0.isMainCheckout }
+            // The runner's order, and nothing else. This used to partition the
+            // main checkout to the top, which was stable and was still the app
+            // deciding: with rows draggable, a rule here silently outranks the
+            // one the person dragging just expressed, and the card they moved
+            // springs back with nothing to explain why.
+            //
+            // Nobody's list moves because of this. The runner's rank starts out
+            // as exactly what this partition produced — main checkout first,
+            // then by worktree path — see migration 0009.
+            let shown = all.filter { !$0.isHidden }
             return ProjectGroup(host: host, project: project, shown: shown, hidden: all.filter(\.isHidden))
         }
 
@@ -697,6 +702,28 @@ struct ContentView: View {
     /// pointing at the ternary itself. A named function sidesteps it.
     private func startMainTerminal(host: String, project: String) {
         Task { await newMainTerminal(host: host, project: project) }
+    }
+
+    /// A drop that landed: work out the new order and tell the runner.
+    ///
+    /// Here rather than in the row because only this level can see a whole
+    /// project group. The group is also what bounds the reorder: every card in
+    /// one is on one runner and in one project, which is what makes a single
+    /// call to a single client the whole of it.
+    ///
+    /// The runner is sent the group's WHOLE order, not "move this one" — see
+    /// `WorkspaceReorder` in the proto for why an index alone would be
+    /// meaningless against a list this has already filtered.
+    private func reorder(_ done: WorkspaceDrag.Completion) {
+        guard let group = groups.first(where: { g in g.shown.contains { $0.id == done.dragged } })
+        else { return }
+        let ids = group.shown.map(\.id)
+        let next = WorkspaceOrder.moved(ids, dragging: done.dragged, to: done.target, done.edge)
+        // A drop that changes nothing costs no round trip. It is not free: a
+        // reorder makes every other connected client re-read the fleet.
+        guard next != ids, let anchor = group.shown.first else { return }
+        let order = next.compactMap { id in group.shown.first { $0.id == id }?.short }
+        Task { await act(on: anchor) { client in await client.reorderWorkspaces(order) } }
     }
 
     /// One project's worktrees, plus its hidden section.
@@ -812,6 +839,10 @@ struct ContentView: View {
             statusBar
         }
         .background(WorkspaceStyle.sidebar)
+        // A finished drag, published by the row that took the drop. The row
+        // says only that a card landed on another card's top or bottom edge;
+        // what that MEANS needs the whole project group, which is here.
+        .onReceive(WorkspaceDrag.shared.$completion.compactMap { $0 }) { reorder($0) }
         // Declared in exactly one place. A second declaration on the
         // `NavigationSplitView`'s sidebar closure made which width the column
         // settled on nondeterministic, and the window drifted with it.
