@@ -1876,7 +1876,22 @@ impl Service {
                     Path::new(&ws.worktree_path),
                     std::time::SystemTime::UNIX_EPOCH,
                 ) {
-                    Ok(found) if !claimed.contains(&found) => Some(found),
+                    Ok(found) if !claimed.contains(&found) => {
+                        // The success path was the silent one. A refusal said
+                        // so; an ADOPTION -- the case where this pane is about
+                        // to render somebody's conversation -- recorded
+                        // nothing at all, so "which session did it pick, and
+                        // what else was on the table" had no answer after the
+                        // fact.
+                        tracing::info!(
+                            terminal = %id,
+                            worktree = %ws.worktree_path,
+                            session = %found,
+                            claimed = ?claimed,
+                            "adopting the conversation found in this pane"
+                        );
+                        Some(found)
+                    }
                     Ok(found) => {
                         tracing::info!(
                             session = %found,
@@ -1905,6 +1920,32 @@ impl Service {
         // the one on screen, and switching in again failed to load it and
         // opened a third. Every toggle lost the thread and drew a gap saying
         // so.
+        // The one comparison that can catch a wrong attach.
+        //
+        // Two facts exist here and were never checked against each other: what
+        // this pane was AIMED at (the record, or what adoption just chose) and
+        // what the shim actually ENDED UP in (`Established`). They differ
+        // whenever `session/load` failed and the adapter opened a fresh
+        // conversation instead. That substitution is invisible by
+        // construction -- a transcript belonging to a different conversation
+        // still looks like a transcript -- so a pane can render, and later
+        // `--resume`, a thread the user never asked for with nothing anywhere
+        // saying it happened.
+        //
+        // Warned rather than corrected: the shim's id is the true one and
+        // preferring it is right. What was missing is that the disagreement
+        // left no trace, which is exactly the case the owner asked to be able
+        // to read out of a log.
+        if let (Some(live), Some(wanted)) = (self.agents.session_id(id), session_id.as_ref()) {
+            if &live != wanted {
+                tracing::warn!(
+                    terminal = %id,
+                    wanted = %wanted,
+                    got = %live,
+                    "this pane is in a different conversation from the one it asked for"
+                );
+            }
+        }
         let session_id = self.agents.session_id(id).or(session_id);
 
         // Named after the agent it is hosting, before the pane stops being able

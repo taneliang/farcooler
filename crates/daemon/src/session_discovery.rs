@@ -17,7 +17,13 @@ use std::time::SystemTime;
 pub enum DiscoveryError {
     #[error("no session for this worktree")]
     NotFound,
-    #[error("more than one session could be the one in this pane")]
+    // The candidates are IN the message, not merely in the struct. This
+    // module's header promises that an ambiguous lookup "refuses and names
+    // what it found", and `Ambiguous` has carried a `candidates` list since it
+    // was written -- but the only caller logs `%e`, so the names never reached
+    // a log and the one refusal the whole design rests on was the single event
+    // nobody could audit after the fact.
+    #[error("more than one session could be the one in this pane: {}", candidates.join(", "))]
     Ambiguous { candidates: Vec<String> },
 }
 
@@ -151,6 +157,18 @@ pub fn discover_claude_session(
     }
 
     candidates.sort_by_key(|c| std::cmp::Reverse(c.1));
+    // Every fact the decision was made from, in the one place that has them
+    // all. Attaching a chat to the wrong conversation is silent and
+    // undetectable from the outside -- the transcript simply looks like
+    // somebody else's -- so the candidate set and the ranking are the only
+    // way a reader of a log can ever tell what happened here.
+    tracing::debug!(
+        dir = %dir.display(),
+        candidates = candidates.len(),
+        ranked = ?candidates.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+        started_after = ?started_after,
+        "looking for the conversation running in this pane"
+    );
     match candidates.as_slice() {
         [] => Err(DiscoveryError::NotFound),
         [(only, _)] => Ok(only.clone()),
@@ -236,6 +254,29 @@ mod tests {
         let err = discover_claude_session(&home, worktree, SystemTime::UNIX_EPOCH).unwrap_err();
         let DiscoveryError::Ambiguous { candidates } = err else { panic!("expected refusal") };
         assert_eq!(candidates.len(), 2);
+    }
+
+    /// The refusal has to SAY what it found.
+    ///
+    /// This module's header promises that an ambiguous lookup "refuses and
+    /// names what it found", and the names have always been on the error --
+    /// but the caller logs the `Display` form and nothing else, so for as long
+    /// as the message omitted them, the load-bearing refusal was the one event
+    /// in this path that could not be audited after the fact. A candidate list
+    /// that reaches a struct field nobody prints is not a diagnostic.
+    #[test]
+    fn the_refusal_names_the_conversations_it_could_not_choose_between() {
+        let home = scratch("tie-message");
+        let worktree = Path::new("/Users/e/Dev/proj-tie-message");
+        let dir = home.join(".claude/projects").join(project_dir_name(worktree));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sess-a.jsonl"), "{}").unwrap();
+        std::fs::write(dir.join("sess-b.jsonl"), "{}").unwrap();
+
+        let err = discover_claude_session(&home, worktree, SystemTime::UNIX_EPOCH).unwrap_err();
+        let shown = err.to_string();
+        assert!(shown.contains("sess-a"), "{shown}");
+        assert!(shown.contains("sess-b"), "{shown}");
     }
 
     #[test]
