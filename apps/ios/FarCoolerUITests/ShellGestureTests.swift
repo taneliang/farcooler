@@ -935,11 +935,29 @@ final class ShellGestureTests: XCTestCase {
     /// none at all, which is why nobody noticed: the tap always worked. The
     /// only thing that can go red is a comparison of what is on screen.
     ///
-    /// The screenshot is taken from another queue while the press is still
+    /// The screenshots are taken from another queue while the press is still
     /// being synthesized on this one, because there is no XCTest call that
-    /// puts a finger down and returns. Half way into the hold: far enough past
-    /// touch-down that the 0.08-second highlight has finished, and far enough
-    /// from the release that nothing is easing back out.
+    /// puts a finger down and returns.
+    ///
+    /// **The whole press is sampled and the BRIGHTEST frame kept**, where this
+    /// used to take one picture half way in. Two things forced that and they
+    /// pull in opposite directions. The delay before a synthesized touch
+    /// actually lands is not something this side can know — a shot 0.18
+    /// seconds in caught the card before the finger had arrived, byte for byte
+    /// identical to the one at rest. And the card carries a `.contextMenu` now
+    /// (Hide, and Remove Worktree… — see `ShellOverviewCard.menu`), so from
+    /// touch-down there is only about half a second before the menu takes the
+    /// screen: the old shot at one second photographed the MENU's own
+    /// presentation, the card lifted into a preview over a dimmed screen, and
+    /// reported 81.6 against 84.6 at rest. That reading was right about the
+    /// picture and wrong about the app.
+    ///
+    /// No single instant is inside both windows. Sampling is, and it is the
+    /// honest form of the claim anyway: a card that fades under a finger is
+    /// never brighter at any moment of the press, and one that lights up is
+    /// brighter at some of them. The menu's own frames are DARKER than rest —
+    /// which is what the failure above measured — so they cannot be the
+    /// maximum and cannot carry this assertion.
     func testACardLightsUpUnderAThumb() throws {
         let app = launch(["-shell-overview", "-shell-4"])
         let card = try firstCard(app)
@@ -953,14 +971,28 @@ final class ShellGestureTests: XCTestCase {
         let rest = XCUIScreen.main.screenshot().image
 
         var shot: XCUIScreenshot?
+        var brightest = -Double.infinity
         let taken = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + pressHold / 2) {
-            shot = XCUIScreen.main.screenshot()
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            // Back to back for the whole press. A screenshot costs about a
+            // tenth of a second on this simulator, so the press is covered by
+            // roughly twenty frames — enough that the highlighted stretch
+            // between the finger landing and the menu opening cannot be
+            // stepped over.
+            let deadline = Date().addingTimeInterval(pressHold)
+            while Date() < deadline {
+                let frame = XCUIScreen.main.screenshot()
+                guard let value = try? meanBrightness(frame.image, in: rect) else { continue }
+                if value > brightest {
+                    brightest = value
+                    shot = frame
+                }
+            }
             taken.signal()
         }
         card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: pressHold)
-        XCTAssertEqual(taken.wait(timeout: .now() + 10), .success, "no screenshot was taken")
+        XCTAssertEqual(taken.wait(timeout: .now() + 30), .success, "no screenshot was taken")
         let pressed = try XCTUnwrap(shot).image
 
         XCTAssertNotEqual(
@@ -1044,6 +1076,7 @@ final class ShellGestureTests: XCTestCase {
     /// How long a finger stays down, and how long the control waits. One
     /// number, because the two only mean anything as a pair.
     private let pressHold: TimeInterval = 2.0
+
 
     /// The card's pixels once the screen has stopped changing.
     ///
