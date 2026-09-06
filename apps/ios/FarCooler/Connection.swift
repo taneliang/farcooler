@@ -1375,7 +1375,24 @@ final class Connection: ObservableObject {
     /// FFI reads its absence as false, which is the restricted Key A line, and
     /// the absence of a way to ask for more from a phone is the guard rail. A
     /// phone granting to another phone is the `control` case, always.
-    func enroll(publicKey: String, label: String, clientId: String) async -> Enrollment {
+    ///
+    /// `nodeKey` is the NEW device's tailcat node public key, exactly as its
+    /// ceremony offer carried it, and empty for a device that has none. This is
+    /// the only route by which that key reaches the runner's line — the daemon
+    /// writes it into the forced command, and nothing else in the tree writes a
+    /// node key onto another device's line — and a tunnel admits nobody whose
+    /// key is not on one. A pairing that left it out produced a phone holding a
+    /// tunneled runner it would never be let into, and the symptom was ten
+    /// seconds of silence.
+    ///
+    /// Empty and absent are one thing to the FFI: "this device asked for no
+    /// tunnel". An unusable key is a different thing, and the daemon refuses
+    /// that rather than quietly ignoring it — so a phone whose mint produced
+    /// something malformed hears about it instead of pairing without a tunnel
+    /// and never knowing why.
+    func enroll(publicKey: String, label: String, clientId: String, nodeKey: String) async
+        -> Enrollment
+    {
         guard phase == .connected else { return .couldNotWrite }
 
         // Asked BEFORE the call, the order `crates/cli/src/clients.rs` asks in
@@ -1411,6 +1428,13 @@ final class Connection: ObservableObject {
                     "label": label,
                     "clientId": clientId,
                     "scope": "control",
+                    // Sent even when empty, which the FFI reads as absent.
+                    // Spelling it out beats omitting the key: the three
+                    // required fields above are checked for PRESENCE by name,
+                    // and a reader comparing this dictionary against
+                    // `ClientEnroll` should be able to see every field it can
+                    // carry from here.
+                    "nodeKey": nodeKey,
                 ])) != nil
         else { return .couldNotWrite }
         return .written

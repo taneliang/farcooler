@@ -27,6 +27,21 @@ struct CeremonyOffer: Decodable, Equatable {
     let account: String
     let channel: String
     let ceremony: String
+    /// This device's tailcat node public key: 43 characters of unpadded
+    /// base64-URL, or empty from a device that has none.
+    ///
+    /// **Optional here, not on the wire.** `crates/client/src/ceremony.rs`
+    /// always serializes it, so a code this build scanned always carries the
+    /// key. Decoding it as optional anyway costs one `?? ""` and buys the one
+    /// thing that matters: a missing field turns into an empty node key rather
+    /// than into a refusal of the whole ceremony over a field that only decides
+    /// whether a tunnel is offered.
+    ///
+    /// Empty is not "unknown". It is a device that cannot be admitted to a
+    /// tunnel — a v=1 offer, or a phone whose own mint failed — and it enrolls
+    /// as direct, which is what `can_be_granted_a_tunnel` reads the same field
+    /// to decide on the other side of the exchange.
+    let node_key: String?  // swiftlint:disable:this identifier_name
 }
 
 // ``Reach`` — an address or the tunnel — lives in `Store.swift`, beside
@@ -389,7 +404,8 @@ enum ConfirmingTap {
 /// see `CeremonyStore.throughTheLiveConnection`. Both of those become `pending`
 /// in the reply, because both mean the same thing about the file.
 typealias Enroller = @MainActor (
-    _ publicKey: String, _ label: String, _ clientId: String, _ runners: [CeremonyRunner]
+    _ publicKey: String, _ label: String, _ clientId: String, _ nodeKey: String,
+    _ runners: [CeremonyRunner]
 ) async -> [String: Connection.Enrollment]
 
 // MARK: - The state machine
@@ -686,7 +702,13 @@ final class CeremonyStore: ObservableObject {
         // runner travels pending — which is a true statement about the file.
         let outcomes: [String: Connection.Enrollment]
         if let clientId = Self.clientId(of: rescanned) {
-            outcomes = await enroller(offer.key_a, offer.name, clientId, wanted)
+            // The new device's node key, straight off its offer. Empty for a
+            // v=1 device and for a phone whose own mint failed, both of which
+            // enroll exactly as they always have — and the ONLY route by which
+            // that key reaches the runner's `authorized_keys` line, which is
+            // what a tunnel checks before it admits anybody.
+            outcomes = await enroller(
+                offer.key_a, offer.name, clientId, offer.node_key ?? "", wanted)
         } else {
             outcomes = [:]
         }
@@ -732,7 +754,8 @@ final class CeremonyStore: ObservableObject {
     /// in the manifest IS the id of the connection that reaches it.
     @MainActor
     private static func throughTheLiveConnection(
-        publicKey: String, label: String, clientId: String, runners: [CeremonyRunner]
+        publicKey: String, label: String, clientId: String, nodeKey: String,
+        runners: [CeremonyRunner]
     ) async -> [String: Connection.Enrollment] {
         guard let connection = Connection.current,
             let reachable = connection.hostId?.uuidString,
@@ -740,7 +763,7 @@ final class CeremonyStore: ObservableObject {
         else { return [:] }
         return [
             reachable: await connection.enroll(
-                publicKey: publicKey, label: label, clientId: clientId)
+                publicKey: publicKey, label: label, clientId: clientId, nodeKey: nodeKey)
         ]
     }
 
@@ -805,6 +828,31 @@ final class CeremonyStore: ObservableObject {
                 // nothing. Whether the device on the other side may HAVE it is
                 // the core's decision, not this screen's: it refuses the whole
                 // reply with `no_tunnel` when that device named no node key.
+                //
+                // **And a phone never trades a direct reach for a tunnel**,
+                // even though the `client.enroll` it just made can answer with
+                // a token. The Mac has to judge, because `ssh -G` hands it an
+                // address it has never dialled from where the new device will
+                // be standing — see `Enrollment.reach(granting:token:
+                // addressing:)`. A phone has no such gap to bridge: the reach
+                // copied here is the one that just carried this ceremony's own
+                // enrollment to that runner, so it is a route with evidence
+                // behind it rather than a string to be judged. Replacing it
+                // with a tunnel would swap a proven route for an unproven one,
+                // and there is no fallback to come back through.
+                //
+                // Nor is a fresh token needed for the tunneled case: a token is
+                // the RUNNER's, not the device's, so a phone granting a
+                // `.tailcat` runner is already holding the same string
+                // `connBlob` would have answered with.
+                //
+                // This app has no `RunnerFacts` and wants none. Granting is a
+                // Mac-and-CLI capability by design — `client.enroll` is served
+                // at `Scope::HostAdmin` and a phone is enrolled at `control`,
+                // so most of what a phone asks for here is refused at the
+                // daemon and lands on `.couldNotWrite`. Porting an address
+                // judgement onto that path would be building a decision on top
+                // of a call that usually does not happen.
                 reach: row.runner.reach,
                 // Corrected in `confirm()`, once the enrollment has answered.
                 pending: true)
