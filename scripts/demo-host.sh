@@ -334,6 +334,30 @@ done
 }
 echo "daemon: pid $DAEMON_PID, FARCOOLER_HOME=$FC_HOME"
 
+# The forced command's program, made to resolve BEFORE anything that can fail.
+#
+# `authorized_keys` names `~/.local/bin/farcoolerd-<channel>`, and the symlink
+# that makes that name resolve is written near the END of this script — after
+# the iOS build, which has its own several ways to fail. That ordering cost a
+# whole afternoon of shared-fixture time: a lane deleted the worktree whose
+# `target/release` the link pointed into, every later run of this script died at
+# `building the iOS app…` before reaching the `ln`, and the link stayed dangling
+# across three of them. sshd then accepted the key, ran a forced command naming
+# a file that was not there, and the phone was left with a runner that answers
+# nothing at all — while the script's last words were "the iOS app did not
+# build", which is true and is not that.
+#
+# So the runner half of the fixture is finished here, where nothing between it
+# and the daemon can fail. The authoritative write is still the `ln -sfn` far
+# below, which knows what the renderer actually asked for; this only repairs a
+# link that is already there and no longer points at anything.
+for link in "$SESSION_HOME"/.local/bin/farcoolerd*; do
+    [ -L "$link" ] || continue
+    [ -x "$link" ] && continue
+    ln -sfn "$TARGET/farcoolerd" "$link"
+    echo "repaired: $(basename "$link") pointed at a binary that is gone"
+done
+
 # Every CLI call below reaches THAT daemon, and no other. Both variables are set
 # inside the function rather than in front of it, because assignments in front of
 # a shell function can outlive the call.
@@ -609,6 +633,17 @@ case "$PROGRAM" in
 esac
 mkdir -p "$(dirname "$DAEMON_AT")"
 ln -sfn "$TARGET/farcoolerd" "$DAEMON_AT"
+# And it has to RESOLVE, which is a different question from existing. A symlink
+# to a deleted binary passes every test a shell has for a file being there
+# except this one, and the failure it produces is invisible from this side: sshd
+# accepts the key, starts the forced command, and the client is told nothing —
+# not a refusal, not an error, just a session that says nothing and closes.
+[ -x "$DAEMON_AT" ] || {
+    echo "the forced command names $PROGRAM, which resolves to nothing runnable:"
+    echo "  $DAEMON_AT -> $(readlink "$DAEMON_AT" 2>/dev/null || echo "(not a symlink)")"
+    echo "Build the workspace in THIS checkout and run this script again."
+    exit 1
+}
 
 # Keep it in step with whatever key the app is actually using.
 #
