@@ -186,7 +186,13 @@ fn terminal_mode_command(preset: &str, session_id: &str, resumable: bool) -> Str
         } else {
             // Nothing to continue: start claude clean rather than fail into
             // an error message the user cannot act on.
-            preset_command("claude", None)
+            //
+            // `preset`, not the bare agent name: a `claude:opus` pane that
+            // starts clean must still start on opus. The resume branch above
+            // cannot say the same — `--model` alongside `--resume` has not
+            // been checked end to end here, and this file does not invent
+            // flags it has not seen work.
+            preset_command(preset, None)
         }
     } else if preset.starts_with("codex") {
         if resumable {
@@ -196,11 +202,74 @@ fn terminal_mode_command(preset: &str, session_id: &str, resumable: bool) -> Str
             // session with no completed turn wrote no rollout, and `codex
             // resume` on an id with nothing behind it fails with an error the
             // user cannot act on.
-            preset_command("codex", None)
+            //
+            // `preset` rather than the bare name, for the same reason as
+            // claude's branch above: the model a pane was launched with
+            // survives a clean start.
+            preset_command(preset, None)
         }
     } else {
         preset_command(preset, None)
     }
+}
+
+/// The command that puts a TUI back in a pane — for BOTH ways a pane gets one.
+///
+/// Two callers, and until now only one of them was right. `set_pane_mode`
+/// switching a chat back to a terminal went through `terminal_mode_command`
+/// and resumed the conversation; `restart_terminal` went through
+/// `preset_command` and did not. `preset_command` is the LAUNCH builder — its
+/// claude arm declares `--session-id`, which NAMES A NEW conversation rather
+/// than reopening the old one, its codex arm ignores the session entirely, and
+/// its fallback for a preset it does not recognize is a bare login shell. So
+/// restarting a lost claude or codex pane handed back an agent with no memory,
+/// or no agent at all: "claude/codexes often revert back to just shell", as it
+/// was reported.
+///
+/// Having one function both callers go through is the fix, not a tidy-up. The
+/// two paths are the same question — this preset, this session, is there
+/// anything on disk to reopen — and while they were two pieces of code only
+/// one of them could be, and was, kept correct.
+///
+/// `home` is threaded in rather than read here so this is testable without a
+/// process-global `$HOME`: the resumability check reads real files under
+/// `~/.claude/projects` and `~/.codex/sessions`, and a test that had to move
+/// the real home directory to see it work would be a test nobody dares run.
+/// `None` means the home directory could not be determined at all, which is
+/// the same answer as "nothing to resume": start clean.
+///
+/// A session id that is not a plain uuid is not resumable either. It ends up
+/// inside a `-ilc` string, and `terminal_mode_command` interpolates it
+/// unquoted — the parse is what makes that safe, so it has to happen before
+/// the flag is chosen and not merely alongside it.
+fn respawn_command(home: Option<&Path>, preset: &str, worktree: &str, session_id: &str) -> String {
+    let resumable = Uuid::parse_str(session_id).is_ok()
+        && home.is_some_and(|home| {
+            // Claude Code writes a transcript when a turn happens, not when a
+            // session is created — so a chat opened and closed without a word
+            // has a perfectly real session id and no file. `--resume` answers
+            // "No conversation found with session ID" for those, which is what
+            // a user got every time they looked at a chat and switched
+            // straight back. Codex writes its rollout under the identical
+            // rule, verified end to end on this machine, so it gets the same
+            // guard rather than a silent conversation loss.
+            if preset.starts_with("codex") {
+                session_discovery::codex_rollout_exists(home, session_id)
+            } else {
+                session_discovery::transcript_exists(home, Path::new(worktree), session_id)
+            }
+        });
+    terminal_mode_command(preset, session_id, resumable)
+}
+
+/// This user's home directory, or `None` when there is no answer.
+///
+/// A named function rather than `directories::UserDirs::new()` spelled out at
+/// each call site, so that both respawn paths ask the same question of the
+/// same source — the shape the bug above came from was two call sites that
+/// had drifted apart.
+fn user_home() -> Option<PathBuf> {
+    directories::UserDirs::new().map(|d| d.home_dir().to_path_buf())
 }
 
 /// A plain identifier: letters, digits, dot, dash, underscore.
@@ -1576,18 +1645,33 @@ impl Service {
 
         let _ = self.tmux.kill_terminal_window(id).await;
 
-        // A restarted claude reattaches to the conversation it already had
-        // rather than starting a new one the record does not know about.
+        // A restarted claude or codex reattaches to the conversation it
+        // already had rather than starting a new one the record does not know
+        // about.
         //
-        // A TUI, though — not the ACP shim. `preset_command` knows how to start
-        // an agent in a terminal and nothing about `agent-host`, so a lost pane
-        // that was in AGENT mode comes back as a plain `claude` TUI. The record
-        // has to come back with it: left saying `Agent`, SQLite would claim a
-        // chat while the pane held a terminal, no shim would ever dial the
-        // socket, and the pane's activity would sit frozen at whatever it last
-        // reported. That is precisely the silent disagreement between record
-        // and runtime this whole design exists to prevent.
-        let command = preset_command(&term.command_preset, term.agent_session_id.as_deref());
+        // Through `respawn_command`, which is the builder a pane switching out
+        // of chat mode has always used, and NOT `preset_command`, which this
+        // line used to call. `preset_command` builds a LAUNCH: its claude arm
+        // declares `--session-id`, naming a brand new conversation instead of
+        // reopening the one that was lost; its codex arm drops the session on
+        // the floor; and its fallback for anything it does not recognize is a
+        // bare login shell. That last one is the shape the bug was reported
+        // in — a restarted agent pane coming back as "just shell".
+        //
+        // A TUI, though — not the ACP shim. `respawn_command` knows how to
+        // start an agent in a terminal and nothing about `agent-host`, so a
+        // lost pane that was in AGENT mode comes back as a plain TUI. The
+        // record has to come back with it: left saying `Agent`, SQLite would
+        // claim a chat while the pane held a terminal, no shim would ever dial
+        // the socket, and the pane's activity would sit frozen at whatever it
+        // last reported. That is precisely the silent disagreement between
+        // record and runtime this whole design exists to prevent.
+        let command = respawn_command(
+            user_home().as_deref(),
+            &term.command_preset,
+            &ws.worktree_path,
+            term.agent_session_id.as_deref().unwrap_or_default(),
+        );
         self.tmux
             .create_terminal_window(term.workspace_id, id, &term.title, &ws.worktree_path, &command)
             .await?;
@@ -1789,32 +1873,16 @@ impl Service {
                 });
             }
             models::PaneMode::Terminal => {
+                // The same builder `restart_terminal` uses, which is the
+                // point: a pane going back to a TUI is one question with one
+                // answer, however it got there. See `respawn_command`.
                 let sid = session_id.clone().unwrap_or_default();
-                // Resumable only if there is something on disk to resume.
-                //
-                // Claude Code writes a transcript when a turn happens, not
-                // when a session is created — so a chat opened and closed
-                // without a word has a perfectly real session id and no file.
-                // `--resume` answers "No conversation found with session ID"
-                // for those, which is what a user got every time they looked
-                // at a chat and switched straight back. Codex writes its
-                // rollout under the identical rule, verified end to end on
-                // this machine, so it gets the same guard rather than the
-                // silent-conversation-loss `preset_command(preset, None)`
-                // fallback that every other preset still gets.
-                let resumable = Uuid::parse_str(&sid).is_ok()
-                    && directories::UserDirs::new().is_some_and(|dirs| {
-                        if term.command_preset.starts_with("codex") {
-                            session_discovery::codex_rollout_exists(dirs.home_dir(), &sid)
-                        } else {
-                            session_discovery::transcript_exists(
-                                dirs.home_dir(),
-                                Path::new(&ws.worktree_path),
-                                &sid,
-                            )
-                        }
-                    });
-                terminal_mode_command(&term.command_preset, &sid, resumable)
+                respawn_command(
+                    user_home().as_deref(),
+                    &term.command_preset,
+                    &ws.worktree_path,
+                    &sid,
+                )
             }
             models::PaneMode::Agent => {
                 let binary = shim_binary(std::env::current_exe().ok().as_deref());
@@ -2582,6 +2650,272 @@ mod preset_tests {
 /// falling back to the raw string keeps it comparable with itself.
 pub fn canonical_or_raw(path: &str) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path))
+}
+
+#[cfg(test)]
+mod restart_wiring_tests {
+    use super::*;
+
+    /// What tmux was actually told to run in this terminal's pane.
+    ///
+    /// `pane_start_command`, not `pane_current_command`: the second is a
+    /// process NAME, so every one of these panes reads back as the login
+    /// shell and the flags — the entire subject of this test — are invisible.
+    /// The first is the string tmux was handed, which is exactly the thing
+    /// `restart_terminal` builds.
+    async fn pane_start_command(svc: &Service, terminal: Uuid) -> String {
+        let snapshot = svc.inventory.refresh().await;
+        let pane = snapshot
+            .claimants(terminal)
+            .into_iter()
+            .next()
+            .expect("the restart made a pane")
+            .clone();
+        let out = svc
+            .tmux
+            .run(&["display-message", "-p", "-t", &pane.pane_id, "#{pane_start_command}"])
+            .await
+            .expect("tmux answered");
+        out.stdout.trim().to_string()
+    }
+
+    /// A workspace on a real directory, on the fixture's private tmux server.
+    async fn a_workspace() -> (crate::test_support::ScratchDir, Arc<Service>, models::Workspace) {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        crate::reconcile::repository(&svc, repo).await.unwrap();
+        let ws = svc
+            .store
+            .list_workspaces_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("reconcile adopted the main checkout");
+        (dir, svc, ws)
+    }
+
+    #[tokio::test]
+    async fn restarting_a_claude_pane_does_not_name_a_brand_new_conversation() {
+        // The wiring, not the builder. `respawn_tests` proves the command is
+        // right; nothing there notices which builder `restart_terminal` calls,
+        // and calling the wrong one is the entire bug. So this drives the real
+        // method against a real tmux server and reads back the string the pane
+        // was launched with.
+        //
+        // `--session-id` is the tell, and it is a tell only this path has:
+        // it appears in `preset_command`'s claude arm and nowhere else, it
+        // names a NEW session rather than resuming one, and restoring
+        // `restart_terminal` to `preset_command(&term.command_preset,
+        // term.agent_session_id.as_deref())` puts it straight back.
+        //
+        // There is deliberately no transcript planted for this session, so the
+        // command lands on the clean-start branch. Planting one would mean
+        // writing into the developer's REAL `~/.claude/projects` — the check
+        // reads the actual home directory — and a test that has to move
+        // somebody's home directory to mean anything is a test nobody runs.
+        let (_dir, svc, ws) = a_workspace().await;
+        let sid = Uuid::now_v7().to_string();
+        let term = svc
+            .store
+            .create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        let term = svc
+            .store
+            .set_pane_mode(term.id, term.resource_version, models::PaneMode::Terminal, Some(sid.clone()))
+            .unwrap();
+
+        svc.restart_terminal(term.id).await.expect("restart");
+        let command = pane_start_command(&svc, term.id).await;
+
+        assert!(
+            !command.contains("--session-id"),
+            "a restart must reopen the conversation, not name a new one: {command}"
+        );
+        assert!(!command.contains(&sid), "the id belongs to a resume or to nothing: {command}");
+        assert!(command.contains("claude"), "and it is still claude in the pane: {command}");
+    }
+
+    #[tokio::test]
+    async fn restarting_a_shell_still_gives_back_a_shell() {
+        // The other half of "keep the stored mode and the actual pane in
+        // agreement": routing restart through the respawn builder must not
+        // change what a plain terminal comes back as.
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc
+            .store
+            .create_terminal(ws.id, "shell", "shell", TerminalIntent::Running, 80, 24)
+            .unwrap();
+
+        svc.restart_terminal(term.id).await.expect("restart");
+        let command = pane_start_command(&svc, term.id).await;
+
+        assert!(command.contains("-il"), "{command}");
+        assert!(!command.contains("-ilc"), "a shell runs nothing but itself: {command}");
+    }
+
+    #[tokio::test]
+    async fn a_restarted_agent_pane_says_terminal_and_holds_a_terminal() {
+        // The record has to come back with the pane. A restart puts a TUI in
+        // the rectangle, so a row left saying `Agent` would have SQLite
+        // claiming a chat while the pane held a terminal — no shim dials the
+        // socket and the pane's activity freezes at whatever it last reported.
+        let (_dir, svc, ws) = a_workspace().await;
+        let sid = Uuid::now_v7().to_string();
+        let term = svc
+            .store
+            .create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        let term = svc
+            .store
+            .set_pane_mode(term.id, term.resource_version, models::PaneMode::Agent, Some(sid.clone()))
+            .unwrap();
+        assert_eq!(term.pane_mode, models::PaneMode::Agent, "the fixture must start as a chat");
+
+        let restarted = svc.restart_terminal(term.id).await.expect("restart");
+
+        assert_eq!(restarted.pane_mode, models::PaneMode::Terminal, "the record follows the pane");
+        assert_eq!(
+            restarted.agent_session_id.as_deref(),
+            Some(sid.as_str()),
+            "and the conversation is still named, so switching back can reopen it"
+        );
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(!command.contains("agent-host"), "a restart puts back a TUI, not the shim: {command}");
+    }
+}
+
+#[cfg(test)]
+mod respawn_tests {
+    use super::*;
+
+    /// A private home and a private worktree, both real directories on disk:
+    /// `transcript_exists` canonicalizes what it is given and Claude Code's
+    /// project-directory name is built from the RESOLVED path, so a
+    /// hand-written path string would look up a directory that never matches.
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("farcooler-respawn-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A transcript on disk for `session_id`, where claude keeps them.
+    fn a_claude_transcript(home: &Path, worktree: &Path, session_id: &str) {
+        let resolved = std::fs::canonicalize(worktree).unwrap();
+        let dir = home
+            .join(".claude/projects")
+            .join(session_discovery::project_dir_name(&resolved));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{session_id}.jsonl")), "{}").unwrap();
+    }
+
+    #[test]
+    fn a_claude_pane_with_a_conversation_reopens_it_rather_than_naming_a_new_one() {
+        // The reported bug, at the level the fix lives: restart used to build
+        // its command with `preset_command`, whose claude arm declares
+        // `--session-id`. That flag NAMES A NEW conversation — it does not
+        // reopen one — so a restarted pane came back with no memory of what
+        // was in it. Asserting the absence of `--session-id` as well as the
+        // presence of `--resume` is the point: a test that only checked for
+        // "claude" passed against the broken builder too.
+        let home = scratch("claude-resume-home");
+        let worktree = scratch("claude-resume-tree");
+        let sid = Uuid::now_v7().to_string();
+        a_claude_transcript(&home, &worktree, &sid);
+
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid);
+        assert!(cmd.contains(&format!("claude --resume {sid}")), "must reopen it: {cmd}");
+        assert!(!cmd.contains("--session-id"), "--session-id names a NEW conversation: {cmd}");
+    }
+
+    #[test]
+    fn a_claude_pane_with_nothing_written_yet_starts_clean_and_still_names_no_session() {
+        // A session id is declared at launch; the transcript appears only once
+        // a turn happens. `--resume` on one with no file answers "No
+        // conversation found with session ID", so this has to start clean —
+        // but clean means CLEAN, not `--session-id <the id claude already
+        // owns>`, which is what the old builder produced.
+        let home = scratch("claude-clean-home");
+        let worktree = scratch("claude-clean-tree");
+        let sid = Uuid::now_v7().to_string();
+
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid);
+        assert!(cmd.contains("claude"), "{cmd}");
+        assert!(!cmd.contains("--resume"), "nothing on disk to resume: {cmd}");
+        assert!(!cmd.contains("--session-id"), "{cmd}");
+    }
+
+    #[test]
+    fn a_codex_pane_with_a_rollout_resumes_it_where_the_launch_builder_dropped_it() {
+        // `preset_command`'s codex arm ignores the session id entirely, so a
+        // restarted codex pane could never come back to its conversation no
+        // matter what the record held. This is the same rollout shape
+        // `session_discovery` verified on a real machine.
+        let home = scratch("codex-home");
+        let worktree = scratch("codex-tree");
+        let sid = Uuid::now_v7().to_string();
+        let dir = home.join(".codex/sessions/2026/08/03");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("rollout-2026-08-03T10-33-15-{sid}.jsonl")), "{}").unwrap();
+
+        let cmd = respawn_command(Some(&home), "codex", worktree.to_str().unwrap(), &sid);
+        assert!(cmd.contains(&format!("codex resume {sid}")), "{cmd}");
+    }
+
+    #[test]
+    fn a_session_id_that_is_not_a_uuid_is_never_interpolated_into_a_resume() {
+        // `terminal_mode_command` interpolates the id unquoted inside a `-ilc`
+        // string. The uuid parse is what makes that safe, so it has to gate
+        // the flag rather than sit beside it — and a transcript file can be
+        // named anything at all, including this.
+        let home = scratch("injection-home");
+        let worktree = scratch("injection-tree");
+        let sid = "not-a-uuid'; echo pwned; '";
+        a_claude_transcript(&home, &worktree, sid);
+
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), sid);
+        assert!(!cmd.contains("--resume"), "{cmd}");
+        assert!(!cmd.contains("pwned"), "{cmd}");
+    }
+
+    #[test]
+    fn no_home_directory_at_all_starts_clean_rather_than_resuming_blind() {
+        let worktree = scratch("nohome-tree");
+        let sid = Uuid::now_v7().to_string();
+        let cmd = respawn_command(None, "claude", worktree.to_str().unwrap(), &sid);
+        assert!(!cmd.contains("--resume"), "{cmd}");
+        assert!(cmd.contains("claude"), "{cmd}");
+    }
+
+    #[test]
+    fn a_clean_start_keeps_the_model_the_pane_was_launched_with() {
+        // A `claude:opus` pane that restarts with nothing to resume must come
+        // back on opus. Restart used to keep the model because
+        // `preset_command` was handed the whole preset; routing it through
+        // this builder must not quietly cost it.
+        let home = scratch("model-home");
+        let worktree = scratch("model-tree");
+        let cmd = respawn_command(Some(&home), "claude:opus", worktree.to_str().unwrap(), "");
+        assert!(cmd.contains("claude --model opus"), "{cmd}");
+        let cmd = respawn_command(Some(&home), "codex:gpt-5.6-sol", worktree.to_str().unwrap(), "");
+        assert!(cmd.contains("codex --model gpt-5.6-sol"), "{cmd}");
+    }
+
+    #[test]
+    fn an_agent_pane_never_comes_back_as_a_bare_login_shell() {
+        // "claude/codexes often revert back to just shell" is the report this
+        // whole change answers. `preset_command`'s last arm is `{shell} -il`,
+        // and it is reached by any preset it does not recognize — so what has
+        // to be true is that a preset naming an agent lands on that agent,
+        // with or without anything to resume.
+        let home = scratch("shell-fallback-home");
+        let worktree = scratch("shell-fallback-tree");
+        let shell = farcooler_core::shell::login_shell();
+        for preset in ["claude", "codex", "cursor", "opencode", "claude:opus"] {
+            let cmd = respawn_command(Some(&home), preset, worktree.to_str().unwrap(), "");
+            assert_ne!(cmd, format!("{shell} -il"), "{preset} came back as a shell: {cmd}");
+            assert!(cmd.contains("-ilc"), "{preset} must run something: {cmd}");
+        }
+    }
 }
 
 #[cfg(test)]
