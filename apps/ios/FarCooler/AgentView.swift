@@ -3305,6 +3305,32 @@ struct AgentLayoutHarness: View {
     /// the update that is reading it.
     private func stand() {
         AgentView.fixture = Self.fixture
+        // The composer starts empty, because that is part of the fixture.
+        //
+        // `PaneDraftStore` is keyed by terminal id and this pane's is the
+        // constant `harness`, so without this every launch of this harness
+        // inherits whatever the previous one typed — and `UserDefaults`
+        // outlives the process, so "the previous one" is the test before this
+        // one in the same simulator. That is not a small untidiness: a
+        // composer restored two lines tall makes `bar` a different number
+        // before a test has typed a character, which is exactly what
+        // `AgentTranscriptScrollTests.testTypingAMultiLineMessageMakesRoomForIt`
+        // measures against.
+        //
+        // Here rather than in `AgentComposer`, which must not know a harness
+        // exists, and rather than in the tests, which would have to remember
+        // to do it one by one. A fixture that inherits state from the last
+        // launch is not a fixture.
+        //
+        // `-keep-drafts` is the one exception, and it exists because the rule
+        // above would otherwise make the feature untestable: what
+        // `AgentDraftTests` has to watch is a message typed into one launch
+        // coming back in the next, and a harness that forgets on the way in
+        // forgets exactly the thing under test. Opt-IN rather than opt-out, so
+        // every other test keeps the empty composer it was written against.
+        if !CommandLine.arguments.contains("-keep-drafts") {
+            PaneDraftStore.clear(pane: Self.agentPane.id)
+        }
         connection.standIn(
             on: Fleet(runtimeHealthy: true, livePanes: 2, workspaces: [Self.workspace]))
         open = Self.agentPane.id

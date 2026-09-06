@@ -412,6 +412,10 @@ UI_TEST_SOURCES = [
     # cannot skip itself green when the demo host is down.
     "RunnerReachTests.swift",
     "KeyboardTabStripTests.swift",
+    # A half-written message outliving the process. Needs no runner — it stands
+    # on `-agent-layout-harness`, whose fixture is built in the app — so it
+    # cannot skip itself green when the demo daemon is down.
+    "AgentDraftTests.swift",
     "ShellGestureTests.swift",
     # Photographs the terminal renderer's own fixture and compares cells. Needs
     # no runner: the grid it draws is built in the app, so this one cannot skip
