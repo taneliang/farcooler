@@ -1650,15 +1650,6 @@ class Connection(
         }
 
         /**
-         * A JSON object from string pairs, which is every call this makes.
-         *
-         * `ULong` is spelled out rather than falling through to `toString`,
-         * because the difference is a quoted string versus a number and the
-         * host reads these with `as_u64()` — which answers `None` for a string
-         * and silently defaults. See [ScreenResponse.revision] for the value
-         * that needs the full unsigned range.
-         */
-        /**
          * What one `client.enroll` sends.
          *
          * Split out so the one thing in it that can be wrong is testable
@@ -1691,6 +1682,15 @@ class Connection(
             "nodeKey" to nodeKey,
         )
 
+        /**
+         * A JSON object from string pairs, which is every call this makes.
+         *
+         * `ULong` is spelled out rather than falling through to `toString`,
+         * because the difference is a quoted string versus a number and the
+         * host reads these with `as_u64()` — which answers `None` for a string
+         * and silently defaults. See [ScreenResponse.revision] for the value
+         * that needs the full unsigned range.
+         */
         @OptIn(ExperimentalSerializationApi::class)
         fun args(vararg pairs: Pair<String, Any>): JsonObject = JsonObject(
             pairs.associate { (key, value) ->
