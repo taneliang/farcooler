@@ -373,6 +373,28 @@ extension RunnerFacts {
         /// does not and one was found. Nil is the ordinary answer: most people
         /// have no Tailscale, and this is the case that must cost nothing.
         let betterAddress: String?
+
+        /// Whether the new device can still use this runner's address in a
+        /// different building.
+        ///
+        /// **After the swap, not before it.** ``betterAddress`` being present
+        /// means `AddDeviceView.prepare` has already put a travelling tailnet
+        /// address on the record, so the runner the ceremony is about to grant
+        /// travels even though ``reach`` still describes the address it started
+        /// with. Reading ``reach`` alone here would call a runner LAN-only when
+        /// this Mac had already fixed it.
+        ///
+        /// False covers both `.thisNetwork` with nothing better — the
+        /// `cosmo.local` case — and `.unknown`, which is `0.0.0.0` or something
+        /// that is not an address at all. Neither reaches the new device
+        /// tomorrow, and `.unknown` refusing to guess about WHY does not make
+        /// it a working address.
+        ///
+        /// It is what ``Enrollment/reach(granting:token:addressing:)`` decides
+        /// on, which is why it is a property here rather than a comparison
+        /// spelled out at that call site: the row copy in ``AddDeviceView`` and
+        /// the reach in the reply have to be answering the same question.
+        var travels: Bool { reach == .anywhere || betterAddress != nil }
     }
 
     /// What is true about the address a runner is about to be granted under.

@@ -432,6 +432,15 @@ final class CeremonyStore: ObservableObject {
     /// actually did — see ``Enrollment/note(about:outcome:)``. Nil when every
     /// selected runner took the key, which is the ordinary case.
     @Published private(set) var note: String?
+    /// The sentence about runners the reply granted through the tunnel, or nil
+    /// when it granted none that way — which is every ordinary pairing.
+    ///
+    /// Its own property rather than a second value in ``note`` because it is not
+    /// a warning: ``note`` is drawn in orange and says something went wrong,
+    /// while this says the ceremony routed around a runner's dead address. Both
+    /// can be true at once, on different runners, so neither may replace the
+    /// other.
+    @Published private(set) var tunnelNote: String?
 
     private var alreadyTaken = false
 
@@ -568,6 +577,7 @@ final class CeremonyStore: ObservableObject {
         let granted = outcome.granting(wanted)
         transcript = outcome.transcript
         note = Enrollment.note(about: granted, outcome: outcome)
+        tunnelNote = outcome.tunneled.isEmpty ? nil : Enrollment.reachedThroughTheTunnel
 
         guard
             let answer = CeremonyFFI.reply(
@@ -592,6 +602,7 @@ final class CeremonyStore: ObservableObject {
     func scanAgain() {
         transcript = nil
         note = nil
+        tunnelNote = nil
         phase = .scanning
     }
 

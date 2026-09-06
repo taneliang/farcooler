@@ -299,6 +299,17 @@ struct AddDeviceView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // Under the warning and above the transcript, in the ordinary
+            // secondary color: nothing went wrong here. It is the answer to a
+            // paragraph the previous screen drew — "Only on this network,
+            // install Tailscale" — which stopped being true the moment a runner
+            // was granted through the tunnel instead.
+            if let tunnelNote = store.tunnelNote {
+                Text(tunnelNote)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let transcript = store.transcript {
                 DetailBox(text: transcript)
             }
@@ -467,6 +478,11 @@ struct AddDeviceView: View {
         // `store.confirm` moves to `.enrolling` before it calls back, so a
         // closure that went looking for the offer then would find none.
         let nodeKey = confirmation.offer.node_key ?? ""
+        // What this screen already judged about each runner's address, handed on
+        // so the reach in the reply and the sentence under the row are answering
+        // the same question. Read here for the same reason the keys are: it is
+        // `@State` on a view, and the closure below runs after the phase moved.
+        let judged = addressing
         // ONE id for both keys, and it is what the forced command will carry —
         // so it is what closing this device's sessions later will name, and what
         // makes `client revoke` take both of a Mac's lines in one write.
@@ -516,7 +532,7 @@ struct AddDeviceView: View {
                     // passed from here, because a plain line cannot be held to a
                     // scope at all — `Enrollment` owns that, so no screen can
                     // accidentally ask for a shell at `read`.
-                    scope: "control", nodeKey: nodeKey, on: granted)
+                    scope: "control", nodeKey: nodeKey, on: granted, addressing: judged)
             }
         }
     }
