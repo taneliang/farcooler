@@ -1039,20 +1039,34 @@ mod tests {
         let one = s.create_repository(host, root.id, "one", "/one/.git", "").unwrap();
         let two = s.create_repository(host, root.id, "two", "/two/.git", "").unwrap();
 
-        // Interleaved: one's cards sit at ranks 0 and 2, two's at 1 and 3.
-        let a = s.create_workspace(one.id, "b", "/wt/a", false).unwrap();
+        // The group that will be dragged sits at ranks 2 and 3, NOT at 0 and 1.
+        // That is the whole point of the fixture: a reorder that renumbered the
+        // cards it was handed from zero would land them on top of `x` and `y`
+        // and pass every assertion about relative order inside one group.
         let x = s.create_workspace(two.id, "b", "/wt/x", false).unwrap();
-        let c = s.create_workspace(one.id, "b", "/wt/c", false).unwrap();
         let y = s.create_workspace(two.id, "b", "/wt/y", false).unwrap();
+        let a = s.create_workspace(one.id, "b", "/wt/a", false).unwrap();
+        let c = s.create_workspace(one.id, "b", "/wt/c", false).unwrap();
+        assert_eq!((x.ordinal, y.ordinal, a.ordinal, c.ordinal), (0, 1, 2, 3));
 
         s.reorder_workspaces(&[c.id, a.id]).unwrap();
 
         assert_eq!(ordered_names(&s, one.id), vec!["c", "a"], "the group that moved");
         assert_eq!(ordered_names(&s, two.id), vec!["x", "y"], "the group that did not");
         assert_eq!(
+            (s.get_workspace(c.id).unwrap().ordinal, s.get_workspace(a.id).unwrap().ordinal),
+            (2, 3),
+            "the two cards swapped the slots they held; they did not move to the front"
+        );
+        assert_eq!(
             (s.get_workspace(x.id).unwrap().ordinal, s.get_workspace(y.id).unwrap().ordinal),
-            (1, 3),
+            (0, 1),
             "an untouched card keeps its exact rank, not merely its relative one"
+        );
+        assert_eq!(
+            s.list_workspaces_in_order().unwrap().iter().map(|w| w.name()).collect::<Vec<_>>(),
+            vec!["x", "y", "c", "a"],
+            "and the whole runner's list is what a client would draw"
         );
     }
 
