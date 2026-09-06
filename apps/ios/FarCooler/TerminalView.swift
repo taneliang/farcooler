@@ -1227,8 +1227,8 @@ struct TerminalView: View {
                     // person is looking at used to be done by frame — "the
                     // surface under the middle of the screen" — and that is
                     // ambiguous the moment a second WORKSPACE is mounted: its
-                    // panes are not offset sideways the way a neighbouring TAB
-                    // is, so two surfaces contain the centre and the query
+                    // panes are not offset sideways the way a neighboring TAB
+                    // is, so two surfaces contain the middle and the query
                     // returns whichever the tree lists first. Measured on the
                     // demo fleet: the pane in front reported 1986 lines of
                     // scrollback while `TerminalScrollTests` read `history=2`

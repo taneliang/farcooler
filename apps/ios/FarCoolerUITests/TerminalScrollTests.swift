@@ -122,10 +122,10 @@ final class TerminalScrollTests: XCTestCase {
     ///
     /// **It asks the pane, and falls back to the frame.** This used to be the
     /// frame alone — "the surface under the middle of the screen" — which is
-    /// right for a neighbouring TAB, laid out beside this one, and wrong for a
-    /// neighbouring WORKSPACE, which is mounted at the same rect. The moment
+    /// right for a neighboring TAB, laid out beside this one, and wrong for a
+    /// neighboring WORKSPACE, which is mounted at the same rect. The moment
     /// the demo fleet grew a second workspace with a terminal in it, two
-    /// surfaces contained the centre and this returned whichever the
+    /// surfaces contained the middle and this returned whichever the
     /// accessibility tree listed first.
     ///
     /// It cost a day and it is worth writing down. On the fixture
@@ -140,22 +140,26 @@ final class TerminalScrollTests: XCTestCase {
     ///
     /// `visible=1` is the shell's own answer — `ShellPaneSlot.isVisible`, "the
     /// pane at rest, and there is exactly one in the whole track" — published
-    /// on the surface for exactly this. The frame test is kept underneath it so
-    /// an app too old to publish the field behaves as it always did rather than
-    /// finding no pane at all.
+    /// on the surface for exactly this.
+    ///
+    /// The frame test stays underneath it so this never returns nothing, which
+    /// several polling loops here rely on. It is a fallback and not a second
+    /// answer: `openATerminalInTheShell` asserts the field is there before any
+    /// test reads a number off a pane, because falling back silently is how the
+    /// suite spent a day measuring a workspace nobody was looking at.
     private func visibleSurface(_ app: XCUIApplication) -> XCUIElement? {
-        let centre = CGPoint(x: app.frame.midX, y: app.frame.midY)
+        let middle = CGPoint(x: app.frame.midX, y: app.frame.midY)
         let all = app.otherElements.matching(identifier: "terminal-surface")
-        var underTheCentre: XCUIElement?
+        var underTheMiddle: XCUIElement?
         for i in 0..<all.count {
             let element = all.element(boundBy: i)
             guard element.exists else { continue }
             if let value = element.value as? String, Self.field(value, "visible") == "1" {
                 return element
             }
-            if underTheCentre == nil, element.frame.contains(centre) { underTheCentre = element }
+            if underTheMiddle == nil, element.frame.contains(middle) { underTheMiddle = element }
         }
-        return underTheCentre
+        return underTheMiddle
     }
 
     private func surfaceValue(_ app: XCUIApplication) -> String? {
@@ -324,20 +328,12 @@ final class TerminalScrollTests: XCTestCase {
 
     func testASwipeScrollsIntoTheScrollback() throws {
         let app = launch()
-        try openATerminal(app)
-
         // The pane must HAVE history, or this test proves nothing — a swipe
-        // that does not move on a pane with nothing above it is correct.
-        guard waitForHistory(app) else {
-            let seen = position(app).map { "offset=\($0.offset) history=\($0.history)" } ?? "nothing"
-            XCTFail(
-                """
-                The pane reported no scrollback (\(seen)), so a swipe has nowhere to go. \
-                That IS the bug this test exists for: the poll path asked for no history.
-                """
-            )
-            return
-        }
+        // that does not move on a pane with nothing above it is correct, and a
+        // swipe that moves two lines on a bare prompt is this assertion passing
+        // while measuring nothing. `openAPaneWithScrollback` walks past both
+        // and fails, loudly, if the whole fleet is like that.
+        try openAPaneWithScrollback(app)
 
         let before = try XCTUnwrap(position(app))
         XCTAssertEqual(before.offset, 0, "a pane opens at the live screen")
@@ -1106,7 +1102,29 @@ final class TerminalScrollTests: XCTestCase {
                     + "./scripts/demo-host.sh first, then ./scripts/ios-ui-tests.sh.")
         }
         for _ in 0..<6 {
-            if let surface = waitForVisibleSurface(app, timeout: 3) { return surface }
+            if let surface = waitForVisibleSurface(app, timeout: 3) {
+                // The pane has to say which one it is, or nothing below this is
+                // a measurement.
+                //
+                // `visibleSurface` falls back to the frame when no surface
+                // publishes `visible=`, and the frame is ambiguous the moment a
+                // second workspace is mounted — which is the whole defect this
+                // field was added for. The fallback is there so the helper
+                // never returns nothing; it is NOT a state this suite may run
+                // in, because the app it reads is the app `xcodebuild test`
+                // just built from this checkout. Silence here would put the
+                // suite back to reading a pane in another workspace and
+                // reporting green about it.
+                XCTAssertNotNil(
+                    Self.field(surface.value as? String ?? "", "visible"),
+                    """
+                    `terminal-surface` published no `visible=` field, so which pane is in \
+                    front is a guess from frames — see `visibleSurface`. Restore it in \
+                    TerminalView's accessibilityValue; every number this suite reads \
+                    depends on it.
+                    """)
+                return surface
+            }
             let y = 0.42
             let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y))
             let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y))
