@@ -103,6 +103,34 @@ pub fn update_to_events(update: &SessionUpdate) -> Vec<AgentEvent> {
             // all — see `agent_core::markup`. Only the USER's own words are
             // rewritten: the agent's arrive a delta at a time, where a tag can
             // straddle two chunks and half of one would survive the rewrite.
+            //
+            // Both halves of that were MEASURED against a live adapter
+            // (@agentclientprotocol/claude-agent-acp 0.75.1), not reasoned
+            // about, because the asymmetry is not obvious from the wire format
+            // — every one of these is called a "chunk":
+            //
+            // * Live, one reply came back as `"The"` then `" CLI writes
+            //   <system-reminder>…"`. The split lands wherever the model's
+            //   stream happens to break, so a tag straddling two chunks is a
+            //   real shape and not a hypothetical one.
+            // * On `session/load` the SAME reply arrived as one whole chunk,
+            //   and so did the user record. Replay does not stream; it reads
+            //   finished records off disk. So a whole message DOES exist on
+            //   that path — but nothing in this function can tell which path it
+            //   is on, because `session/update` carries no marker for it. That
+            //   is the thing to fix first if agent-side stripping is ever
+            //   wanted, and it is why this arm cannot simply be widened.
+            //
+            // There is also no evidence that widening it would HELP. Across
+            // 981 real transcripts on the owner's machine, harness markup in an
+            // assistant text block appears 21 times and every single one is an
+            // agent QUOTING the tags — including the report of this very bug
+            // ("`<local-command-caveat>` appears nowhere in our code"). Not one
+            // is the CLI's own bookkeeping. Stripping the agent's text would
+            // have destroyed the answer in all 21 and fixed nothing. The
+            // bookkeeping lives in `user` records (254 of them) and in tool
+            // results, which is exactly where `markup.rs` already draws its
+            // line.
             vec![AgentEvent::Message {
                 role: Role::User,
                 text: farcooler_agent_core::markup::without_harness_markup(&content.text),
