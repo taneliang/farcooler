@@ -545,13 +545,48 @@ final class TerminalScrollTests: XCTestCase {
         let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
         try XCTSkipUnless(cell >= 8, "a row of \(cell) points has no room to be between")
 
-        dragAndStop(surface, fromY: 0.30, toY: 0.68)
+        // Named, because the `band` sentence below has to be able to say how
+        // many rows this gesture is worth. Written down once and used by both
+        // the drag and the message, so the two cannot come to disagree.
+        let fromY: CGFloat = 0.30
+        let toY: CGFloat = 0.68
+        let travel = surface.frame.height * (toY - fromY)
+        let rowsNeeded = Int((travel / CGFloat(cell)).rounded(.up))
+        let depth = position(app)?.history ?? -1
+
+        dragAndStop(surface, fromY: fromY, toY: toY)
 
         let band = try XCTUnwrap(metric(app, "band"))
+        // **The sentence names the pane, because the pane is usually the
+        // reason, and the old one blamed the tracking.**
+        //
+        // The assertion is unchanged and deliberately so: a drag that
+        // rubberbands has not measured tracking, and `grain` read after one is
+        // a number about the wrong thing. What was wrong was the report. "This
+        // drag ran over an end of the scrollback" is true of a broken clamp and
+        // equally true of a pane that simply has nothing above it, and only the
+        // first is a defect in the app — so the failure read as a terminal bug
+        // and was, twice, a fleet whose first workspace held a bare prompt.
+        //
+        // `openATerminalInTheShell` stops at the FIRST terminal in the flat
+        // sequence, whatever that pane happens to hold. `scripts/demo-host.sh`
+        // puts 400 lines into `scrolling`'s panes and nothing into anybody
+        // else's, and the app grows bare panes on its own: NewTerminalTests
+        // creates one in the workspace the app opens on and iOS has no Close
+        // Terminal to undo it with, so a suite run leaves one behind for the
+        // next run to walk into. Printing both numbers is what tells the two
+        // apart without another run.
         XCTAssertEqual(
             band, 0,
-            "this drag ran over an end of the scrollback, so `grain` would be measuring "
-                + "the rubberband rather than the tracking")
+            """
+            this drag ran over an end of the scrollback (band=\(band)), so `grain` would be \
+            measuring the rubberband rather than the tracking. The drag is \(Int(travel)) \
+            points, which is \(rowsNeeded) rows of \(cell), and this pane reported \(depth) \
+            rows of history before it: if that is the smaller number then the pane is too \
+            shallow for this gesture and the tracking has not been measured at all. \
+            `scripts/demo-host.sh` puts 400 lines in `scrolling`; a bare prompt standing \
+            in front of it in the fleet is the usual reason this pane is not that one.
+            """)
         let grain = try XCTUnwrap(metric(app, "grain"))
         XCTAssertGreaterThan(
             grain, cell / 4,
