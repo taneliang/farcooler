@@ -49,6 +49,7 @@ struct FleetDecodeTests {
           "worktree": "/Users/e/src/overnight-widen",
           "state": "worktree_missing",
           "isMainCheckout": true,
+          "ordinal": 3,
           "terminals": [
             {
               "id": "aab3238922bcc25a6f606eb525ffdc56",
@@ -133,6 +134,17 @@ struct FleetDecodeTests {
         let workspace = try #require(Self.decodeFleet().workspaces.first)
         #expect(workspace.isMainCheckout == true)
         #expect(workspace.isPrimaryCheckout)
+    }
+
+    /// Where the card sits, which is what makes a drag possible at all.
+    ///
+    /// Spelled `ordinal` because that is the key `Session::fleet` sends. Absent
+    /// from a runner too old to keep an order — the case below — which is how a
+    /// client knows not to offer a drag that would spring back on the next
+    /// refresh.
+    @Test func theRunnersOwnOrderReachesThePhone() throws {
+        let workspace = try #require(Self.decodeFleet().workspaces.first)
+        #expect(workspace.ordinal == 3)
     }
 
     @Test func everyTerminalFieldOnTheWireLandsOnTheModel() throws {
@@ -220,6 +232,10 @@ struct FleetDecodeTests {
         #expect(workspace.repository == nil)
         #expect(workspace.worktree == nil)
         #expect(workspace.isMainCheckout == nil)
+        // A runner too old to keep an order says nothing rather than 0, which is
+        // what lets a client offer no drag instead of one that silently springs
+        // back on the next refresh.
+        #expect(workspace.ordinal == nil)
         // Absent reads as "not the primary checkout", which is the direction
         // that OFFERS the removal — safe only because the daemon refuses it
         // independently. See `isPrimaryCheckout`.

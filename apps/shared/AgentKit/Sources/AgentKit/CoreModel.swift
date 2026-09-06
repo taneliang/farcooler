@@ -133,6 +133,20 @@ struct Workspace: Decodable, Identifiable, Hashable {
     /// not fail the entire fleet over one absent field.
     var isMainCheckout: Bool?
 
+    /// Where this card sits on its runner, as the runner has it stored.
+    ///
+    /// Not read to sort with: the list already arrives in this order and this
+    /// app renders what it is handed, the same as every other derived value
+    /// here. What it IS for is the drag — a card needs to know its runner keeps
+    /// an order at all, and a runner too old to store one sends nothing, which
+    /// is nil here rather than a plausible 0.
+    ///
+    /// Named for the wire key exactly, like every other property on this type,
+    /// and for the reason `isMainCheckout` gives at length above: the decoder
+    /// matches on the property NAME, and this app reads `Session::fleet`, not
+    /// the CLI.
+    var ordinal: Int?
+
     /// The decided answer, for the two screens that draw it.
     ///
     /// Absent reads as false, which is the direction that OFFERS the removal —
