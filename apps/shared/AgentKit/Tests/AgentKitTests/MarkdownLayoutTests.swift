@@ -182,7 +182,11 @@ private func oldParagraphStack(_ paragraphs: [String], secondary: Bool) -> some 
 }
 
 @MainActor
-private func renderedHeight<Content: View>(_ content: Content, width: CGFloat) -> CGFloat {
+// Not `private`: `RenderMemoTests` renders real views through this same
+// harness to prove the parse cache is actually reached from `MarkdownText.body`,
+// and a second copy of an offscreen-rendering helper is a second thing that can
+// measure differently from this one.
+func renderedHeight<Content: View>(_ content: Content, width: CGFloat) -> CGFloat {
     let renderer = ImageRenderer(content: content.frame(width: width))
     renderer.proposedSize = ProposedViewSize(width: width, height: nil)
     renderer.scale = 1

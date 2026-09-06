@@ -219,6 +219,26 @@ public enum Markdown {
         return runs
     }
 
+    /// `runs(blocks(text))`, computed once per distinct message.
+    ///
+    /// The entry point every renderer should use. `blocks` is a full line scan
+    /// of the message and each prose run then goes through
+    /// `AttributedString(markdown:)`; a SwiftUI `body` runs many times for one
+    /// row, so doing this in the body made the cost proportional to scrolling
+    /// rather than to the transcript. See `RenderMemo` for why the memo lives
+    /// outside the view.
+    ///
+    /// The limit is a scroll's worth of rows, not a session's: enough that
+    /// paging back and forth over the same screenful never re-parses, small
+    /// enough that a long transcript does not pin every message it ever showed.
+    @MainActor
+    public static let runCache = RenderMemo<String, [Run]>(limit: 60)
+
+    @MainActor
+    public static func cachedRuns(_ text: String) -> [Run] {
+        runCache.value(for: text) { runs(blocks($0)) }
+    }
+
     /// Inline syntax only — bold, italic, code spans, links.
     ///
     /// Text that cannot be parsed is returned as itself rather than dropped: a
@@ -253,7 +273,7 @@ public struct MarkdownText: View {
     }
 
     public var body: some View {
-        let runs = Markdown.runs(Markdown.blocks(text))
+        let runs = Markdown.cachedRuns(text)
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
                 view(for: run)

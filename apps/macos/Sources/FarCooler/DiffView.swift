@@ -19,8 +19,11 @@ struct DiffView: View {
 
     @State private var expanded = false
 
+    /// Cached, because `body` reads this even when the diff is COLLAPSED --
+    /// the header and the "Show N lines" label both need the count -- and a
+    /// row's body runs again every time it is realized while scrolling.
     private var lines: [DiffComputation.Line] {
-        DiffComputation.compute(old: diff.oldText ?? "", new: diff.newText)
+        DiffComputation.cachedCompute(old: diff.oldText ?? "", new: diff.newText)
     }
 
     var body: some View {

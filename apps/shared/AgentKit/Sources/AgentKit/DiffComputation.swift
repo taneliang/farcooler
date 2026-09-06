@@ -31,6 +31,39 @@ public enum DiffComputation {
         }
     }
 
+    /// `compute(old:new:)`, computed once per distinct pair of texts.
+    ///
+    /// The entry point a VIEW should use. `DiffView`'s `lines` was a computed
+    /// property called from `body`, and `body` needs the line count for the
+    /// header and for the "Show N lines" label — so the LCS ran on every body
+    /// evaluation of every realized diff row, including the collapsed ones
+    /// whose lines are never drawn. That is up to the 160,000-cell cutoff of
+    /// main-thread work per row per scroll pass.
+    ///
+    /// Keyed on the two texts rather than on a path or an id: the same file
+    /// edited twice is two different diffs, and a key that could not tell them
+    /// apart would show the first edit's lines under the second edit's header.
+    ///
+    /// A smaller limit than the markdown memo's because each entry is a whole
+    /// `[Line]` for a file rather than one message's runs.
+    @MainActor
+    public static let lineCache = RenderMemo<Pair, [Line]>(limit: 24)
+
+    /// The two texts a diff is computed from, as one hashable key.
+    public struct Pair: Hashable {
+        public let old: String
+        public let new: String
+        public init(old: String, new: String) {
+            self.old = old
+            self.new = new
+        }
+    }
+
+    @MainActor
+    public static func cachedCompute(old: String, new: String) -> [Line] {
+        lineCache.value(for: Pair(old: old, new: new)) { compute(old: $0.old, new: $0.new) }
+    }
+
     /// Line-based diff of two whole file texts.
     ///
     /// A real Myers diff is O(n·d) and would be the right tool against two

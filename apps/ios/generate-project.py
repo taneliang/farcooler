@@ -243,6 +243,11 @@ AGENTKIT_SOURCES = [
     # pipes and a heading as a line beginning with a hash. Same conversation,
     # unreadable on one of the two clients.
     "MarkdownView.swift",
+    # Both `MarkdownView.swift` above and `DiffComputation.swift` reference it,
+    # so the phone does not build without it. Not optional the way a view is:
+    # this is the memo that keeps a transcript row's body from re-parsing its
+    # message and re-diffing its edit every time the row is realised.
+    "RenderMemo.swift",
     # The half of push registration that is not platform-specific. Both apps
     # had it verbatim; only the device label differs.
     "PushRegistration.swift",
