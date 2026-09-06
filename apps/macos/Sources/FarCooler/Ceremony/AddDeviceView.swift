@@ -459,6 +459,14 @@ struct AddDeviceView: View {
         // from `confirmation.shell`, which is what the screen shows about the
         // choice; this is the key material the runner will be handed.
         let keyB = confirmation.offer.key_b
+        // The new device's tailcat node public key, read out of the offer it
+        // showed. Empty for a Mac, for a v=1 device and for a phone whose own
+        // mint failed — all of which enroll exactly as they always have.
+        //
+        // Read HERE with `keyA` and `keyB`, for the same reason they are:
+        // `store.confirm` moves to `.enrolling` before it calls back, so a
+        // closure that went looking for the offer then would find none.
+        let nodeKey = confirmation.offer.node_key ?? ""
         // ONE id for both keys, and it is what the forced command will carry —
         // so it is what closing this device's sessions later will name, and what
         // makes `client revoke` take both of a Mac's lines in one write.
@@ -508,7 +516,7 @@ struct AddDeviceView: View {
                     // passed from here, because a plain line cannot be held to a
                     // scope at all — `Enrollment` owns that, so no screen can
                     // accidentally ask for a shell at `read`.
-                    scope: "control", on: granted)
+                    scope: "control", nodeKey: nodeKey, on: granted)
             }
         }
     }

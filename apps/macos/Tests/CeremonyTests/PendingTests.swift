@@ -18,7 +18,8 @@ import Testing
 /// nothing on either screen explaining why, which is the one failure in this
 /// flow a person cannot diagnose.
 ///
-/// These tests drive ``Enrollment/enroll(keyA:keyB:label:clientID:scope:on:using:)``
+/// These tests drive
+/// ``Enrollment/enroll(keyA:keyB:label:clientID:scope:nodeKey:on:using:)``
 /// with a stand-in for the CLI, because the decision being tested is made from
 /// what each `client enroll` answered and nothing else.
 struct PendingTests {
@@ -31,7 +32,7 @@ struct PendingTests {
 
         let outcome = await Enrollment.enroll(
             keyA: Self.keyA, keyB: nil, label: "iPhone 17", clientID: "farcooler-1",
-            scope: "control", on: runners,
+            scope: "control", nodeKey: "", on: runners,
             using: answering { target, _ in target != "e-liang@box" })
 
         let granting = outcome.granting(runners)
@@ -47,7 +48,7 @@ struct PendingTests {
 
         let outcome = await Enrollment.enroll(
             keyA: Self.keyA, keyB: nil, label: "iPhone 17", clientID: "farcooler-1",
-            scope: "control", on: runners,
+            scope: "control", nodeKey: "", on: runners,
             using: answering { target, _ in target != "e-liang@box" })
 
         let granting = outcome.granting(runners)
@@ -61,7 +62,7 @@ struct PendingTests {
 
         let outcome = await Enrollment.enroll(
             keyA: Self.keyA, keyB: nil, label: "iPhone 17", clientID: "farcooler-1",
-            scope: "control", on: runners, using: answering { _, _ in true })
+            scope: "control", nodeKey: "", on: runners, using: answering { _, _ in true })
 
         let granting = outcome.granting(runners)
         #expect(granting.allSatisfy { !$0.pending })
@@ -110,13 +111,13 @@ struct PendingTests {
 
         let landed = await Enrollment.enroll(
             keyA: Self.keyA, keyB: nil, label: "iPhone 17", clientID: "farcooler-1",
-            scope: "control", on: runners,
+            scope: "control", nodeKey: "", on: runners,
             using: answering { target, _ in target.isEmpty })
         #expect(landed.granting(runners).allSatisfy { !$0.pending })
 
         let refused = await Enrollment.enroll(
             keyA: Self.keyA, keyB: nil, label: "iPhone 17", clientID: "farcooler-1",
-            scope: "control", on: runners, using: answering { _, _ in false })
+            scope: "control", nodeKey: "", on: runners, using: answering { _, _ in false })
         #expect(refused.granting(runners).allSatisfy { $0.pending })
     }
 
@@ -133,7 +134,7 @@ struct PendingTests {
 
         let outcome = await Enrollment.enroll(
             keyA: Self.keyA, keyB: Self.keyB, label: "MacBook Air", clientID: "farcooler-1",
-            scope: "control", on: runners, using: answering { _, shell in !shell })
+            scope: "control", nodeKey: "", on: runners, using: answering { _, shell in !shell })
 
         let granting = outcome.granting(runners)
         #expect(granting.allSatisfy { !$0.pending })
@@ -152,7 +153,7 @@ struct PendingTests {
 
         let outcome = await Enrollment.enroll(
             keyA: Self.keyA, keyB: Self.keyB, label: "MacBook Air", clientID: "farcooler-1",
-            scope: "control", on: runners, using: answering { _, _ in false })
+            scope: "control", nodeKey: "", on: runners, using: answering { _, _ in false })
 
         let granting = outcome.granting(runners)
         #expect(granting.allSatisfy { $0.pending })

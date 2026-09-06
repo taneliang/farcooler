@@ -22,7 +22,7 @@ import Foundation
 ///
 /// ```
 /// farcooler --json --runner you@box client enroll --key <public key> \
-///     --label "iPhone 17" --client-id <uuid> --scope control
+///     --label "iPhone 17" --client-id <uuid> --scope control --node-key <43 chars>
 /// farcooler --json --runner you@box client enroll --key <public key> \
 ///     --label "MacBook Air" --client-id <uuid> --scope host_admin --shell-access
 /// ```
@@ -131,19 +131,27 @@ enum Enrollment {
     /// `keyB` is a Mac's shell key and nil for everything else — there is no Zed
     /// on a phone. Its scope is not a parameter because it cannot vary.
     ///
+    /// `nodeKey` is the new device's tailcat node public key, exactly as its
+    /// offer carried it, and empty for a device that has none. It goes on Key
+    /// A's call and never on Key B's — see
+    /// ``arguments(key:label:clientID:scope:shell:nodeKey:runner:)``. An empty
+    /// one changes nothing about this enrollment: no runner is asked to join a
+    /// tunnel, and the pairing is the direct one it has always been.
+    ///
     /// One runner at a time rather than concurrently: these are writes to the
     /// same kind of file on different machines, and a transcript that interleaves
     /// is a transcript nobody can read. The list is short.
     static func enroll(
         keyA: String, keyB: String?, label: String, clientID: String, scope: String,
-        on runners: [CeremonyRunner], using run: @escaping Writer = { await CLI.run($0) }
+        nodeKey: String, on runners: [CeremonyRunner],
+        using run: @escaping Writer = { await CLI.run($0) }
     ) async -> Outcome {
         var outcome = Outcome()
         var failures: [String] = []
         for runner in runners {
             let a = await write(
                 key: keyA, label: label, clientID: clientID, scope: scope, shell: false,
-                to: runner, using: run)
+                nodeKey: nodeKey, to: runner, using: run)
             if !a.ok {
                 // Key B is skipped when Key A did not land, and only then. Not a
                 // rollback — the two lines are independent and one without the
@@ -167,9 +175,13 @@ enum Enrollment {
             // the write, and `rpc_over_socket.rs`'s
             // `a_macs_two_enrollments_may_land_at_the_same_moment` fires exactly
             // this pair concurrently and asserts both lines survive.
+            // No node key on this one, and the empty string says so rather than
+            // the argument being absent: a plain line has no forced command to
+            // carry one, the daemon refuses the pair, and one device's node key
+            // belongs on one line anyway.
             let b = await write(
                 key: keyB, label: label, clientID: clientID, scope: "host_admin", shell: true,
-                to: runner, using: run)
+                nodeKey: "", to: runner, using: run)
             if !b.ok {
                 outcome.shellRefused.insert(runner.id)
                 // Named, because a runner that took Key A and refused Key B is a
@@ -189,13 +201,13 @@ enum Enrollment {
     /// no value rather than `--shell-access true` so that its absence is the
     /// restricted line, which is what every existing caller means.
     private static func write(
-        key: String, label: String, clientID: String, scope: String, shell: Bool,
+        key: String, label: String, clientID: String, scope: String, shell: Bool, nodeKey: String,
         to runner: CeremonyRunner, using run: Writer
     ) async -> (ok: Bool, output: String) {
         await run(
             arguments(
                 key: key, label: label, clientID: clientID, scope: scope, shell: shell,
-                runner: runner.id))
+                nodeKey: nodeKey, runner: runner.id))
     }
 
     /// The command line for one enrollment.
@@ -213,8 +225,35 @@ enum Enrollment {
     /// destination and failed with "Could not reach  over ssh." — the double
     /// space being the whole of the runner's name, and the phone's key never
     /// reaching the Mac it was being added to.
+    ///
+    /// ## `--node-key`, and why it is on one of a Mac's two calls
+    ///
+    /// The new device's tailcat node public key, straight off its offer: 43
+    /// characters of unpadded base64-URL, or empty from a device that has none.
+    /// Handing it to the daemon is the ONLY way it reaches the runner's line —
+    /// `enrollment::enroll` passes it to `fence::render`, and nothing else in
+    /// the tree writes a node key onto a line somebody else's key is on. A
+    /// pairing that omitted it wrote a perfectly good `authorized_keys` line
+    /// that the runner's tunnel then refused to admit, and the symptom was ten
+    /// seconds of silence and `no_answer` on the phone.
+    ///
+    /// **Only on the restricted line.** The key is written INTO the forced
+    /// command, and Key B's line has no forced command to write it into — so
+    /// the daemon refuses `--node-key` beside `--shell-access` rather than
+    /// dropping it, and a caller told "written" about a key that went nowhere
+    /// would wait forever for a tunnel that admits it. The `!shell` guard here
+    /// is not a second copy of that rule: it is this Mac never asking for the
+    /// pair in the first place, so the refusal stays a bug report rather than a
+    /// thing people meet.
+    ///
+    /// **Empty means "this device asked for no tunnel", and the flag is left
+    /// off entirely.** Not `--node-key ""`: the daemon reads absence and an
+    /// unusable key differently, and `fence::render` refuses the empty string
+    /// as unusable — so passing it would refuse a v=1 device, or a phone whose
+    /// own mint failed, an enrollment it is entitled to.
     static func arguments(
-        key: String, label: String, clientID: String, scope: String, shell: Bool, runner: String
+        key: String, label: String, clientID: String, scope: String, shell: Bool,
+        nodeKey: String, runner: String
     ) -> [String] {
         var arguments = ["--json"]
         if !runner.isEmpty { arguments += ["--runner", runner] }
@@ -223,6 +262,7 @@ enum Enrollment {
             "--key", key, "--label", label, "--client-id", clientID, "--scope", scope,
         ]
         if shell { arguments.append("--shell-access") }
+        if !shell, !nodeKey.isEmpty { arguments += ["--node-key", nodeKey] }
         return arguments
     }
 

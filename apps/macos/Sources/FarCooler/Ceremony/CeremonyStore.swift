@@ -19,6 +19,21 @@ struct CeremonyOffer: Codable, Equatable {
     var account: String
     var channel: String
     var ceremony: String
+    /// The device's tailcat node public key: 43 characters of unpadded
+    /// base64-URL, or empty from a device that has none.
+    ///
+    /// **Optional here, not on the wire.** `crates/client/src/ceremony.rs`
+    /// always serializes it, so a code this build scanned always carries the
+    /// key. Decoding it as optional anyway costs one `?? ""` and buys the one
+    /// thing that matters: a missing field turns into an empty node key rather
+    /// than into `.unreadable`, which would refuse the whole ceremony over a
+    /// field that only ever decides whether a tunnel is offered.
+    ///
+    /// Empty is not "unknown". It is a device that cannot be admitted to a
+    /// tunnel — a v=1 offer, or a phone whose own mint failed — and the reply
+    /// grants it addresses only. `ceremony::can_be_granted_a_tunnel` reads the
+    /// same field for the same reason on the other side of the exchange.
+    var node_key: String?
 
     /// `SHA256:t7Xq…9Vd`, for the person holding both devices to compare.
     ///
