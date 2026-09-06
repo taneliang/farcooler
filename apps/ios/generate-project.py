@@ -81,6 +81,9 @@ SOURCES = [
     # terminals in the slots.
     "ShellScreen.swift",
     "ShellHarness.swift",
+    # The tunnel ceremony under a launch argument, for a real device. DEBUG
+    # only, and the one step it stands in for is the camera.
+    "TunnelE2EHarness.swift",
     "DockedBar.swift",
     "ImagePaste.swift",
     "AgentStream.swift",

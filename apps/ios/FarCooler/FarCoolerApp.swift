@@ -49,6 +49,10 @@ struct FarCoolerApp: App {
             AgentLayoutHarness()
         } else if ChangesLayoutHarness.isRequested {
             ChangesLayoutHarness()
+        } else if TunnelE2EHarness.isRequested {
+            // The tunnel ceremony, on a real device, with the camera leg
+            // supplied as a launch argument. Nothing but a test reaches it.
+            TunnelE2EHarness()
         } else if ShellHarness.isRequested {
             // The navigation shell, over a canned fleet. A branch here and
             // nothing else: the shell does not replace this app's navigation
