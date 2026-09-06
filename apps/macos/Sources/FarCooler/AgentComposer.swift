@@ -188,6 +188,40 @@ struct AgentComposer: View {
             cursor = text.count
             appendix = nil
         }
+        // The draft, read on the way in and written as it is typed.
+        //
+        // `PaneDraftStore` (AgentKit) is the one store, keyed per pane rather
+        // than shared — a shared key would show every pane the last thing
+        // typed anywhere — and pruned by age and count rather than by the
+        // fleet, since a runner that is merely asleep reports no terminals and
+        // a fleet-shaped prune would erase every draft on it. See
+        // `PaneDraft`'s own doc comment. iOS adopted the same store in
+        // `AgentView.swift`; this mirrors it rather than growing a second
+        // implementation.
+        //
+        // `.task(id:)` rather than `.onAppear`, so a composer given a new
+        // `terminal.id` — a pane switch reuses this type's `AgentSurface`
+        // rather than mounting a fresh one when only the mode string in
+        // `TerminalPane`'s `.id()` is unchanged — reads that pane's own draft
+        // instead of keeping the previous pane's words in the field.
+        .task(id: terminal.id) {
+            guard let saved = restoredDraft(intoText: text, forPane: terminal.id) else { return }
+            text = saved
+            cursor = saved.count
+        }
+        // Every keystroke, and deliberately not on a timer: what this has to
+        // survive is the app quitting with no warning, which a debounce could
+        // lose the race against. `UserDefaults` writes to an in-memory store
+        // and flushes on its own schedule, so the cost of saying it every time
+        // is an encode of a small dictionary, not a disk write per character.
+        //
+        // Sending empties `text` above, and `PaneDraftStore.record` treats an
+        // empty string as "forget this pane's draft" rather than as a draft of
+        // its own — so a sent message clears itself out through this same
+        // path, with no separate clear call needed here.
+        .onChange(of: text) { _, latest in
+            PaneDraftStore.record(latest, forPane: terminal.id)
+        }
         // Debounced by `.task(id:)` itself: a token that changes on every
         // keystroke cancels its predecessor for free, which is the whole
         // debounce — see `TileView.panels` for the same trick against a
@@ -710,6 +744,22 @@ struct AgentComposer: View {
         suggestions = []
         Task { await stream.send(body, images: images) }
     }
+}
+
+/// What should land in an empty composer for `pane`, or nil to leave the field
+/// alone.
+///
+/// Pulled out of the `.task(id:)` above so `ComposerDraftTests` can break the
+/// one rule that matters here without standing up a window: restoring must
+/// happen ONLY into an empty field. A restore that overwrote what somebody is
+/// currently typing — the pane's `terminal.id` changing under a composer that
+/// still has unsent text in it — would be the loss `PaneDraftStore` exists to
+/// prevent, wearing the other hat.
+func restoredDraft(
+    intoText current: String, forPane pane: String, from defaults: UserDefaults = .standard
+) -> String? {
+    guard current.isEmpty else { return nil }
+    return PaneDraftStore.draft(forPane: pane, from: defaults)
 }
 
 /// An attached picture, as it goes to the agent.
