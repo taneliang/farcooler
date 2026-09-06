@@ -2809,7 +2809,7 @@ mod restart_wiring_tests {
     /// shell and the flags — the entire subject of this test — are invisible.
     /// The first is the string tmux was handed, which is exactly the thing
     /// `restart_terminal` builds.
-    async fn pane_start_command(svc: &Service, terminal: Uuid) -> String {
+    pub(super) async fn pane_start_command(svc: &Service, terminal: Uuid) -> String {
         let snapshot = svc.inventory.refresh().await;
         let pane = snapshot
             .claimants(terminal)
@@ -2826,7 +2826,8 @@ mod restart_wiring_tests {
     }
 
     /// A workspace on a real directory, on the fixture's private tmux server.
-    async fn a_workspace() -> (crate::test_support::ScratchDir, Arc<Service>, models::Workspace) {
+    pub(super) async fn a_workspace()
+    -> (crate::test_support::ScratchDir, Arc<Service>, models::Workspace) {
         let (dir, svc, repo) = crate::test_support::fixture().await;
         crate::reconcile::repository(&svc, repo).await.unwrap();
         let ws = svc
@@ -3010,6 +3011,161 @@ mod restart_wiring_tests {
             Some(layout.as_str()),
             "and the restarted pane stays in the layout it was arranged into"
         );
+    }
+}
+
+#[cfg(test)]
+mod agent_mode_wiring_tests {
+    //! The entry into agent pane mode, driven end to end.
+    //!
+    //! **Nothing anywhere called `Service::set_pane_mode` with
+    //! `PaneMode::Agent`.** The service tests called `store.set_pane_mode`
+    //! directly, which bypasses the whole function, and the RPC test said so
+    //! outright. So adoption, the harness identification, the chat-capability
+    //! refusals, the preset rewrite, the socket bind and the respawn had no
+    //! integration coverage at all, and every suite stayed green through all
+    //! of it — the same shape as a test that pinned a command builder while
+    //! the value feeding it was flattened one function upstream.
+    //!
+    //! `restart_wiring_tests` next door shows the way and this borrows its two
+    //! fixtures: a real tmux server, and `#{pane_start_command}` read back off
+    //! the pane.
+
+    use super::restart_wiring_tests::{a_workspace, pane_start_command};
+    use super::*;
+
+    /// A pane that `Registry::identify` accepts as Claude Code.
+    ///
+    /// By its SCREEN, not by its process name, and that is the honest case
+    /// rather than a convenient one: Claude Code renames itself to its version
+    /// number, so tmux reports `2.1.237` and no name matching will ever find
+    /// it. Screen matching is what catches that, and `? for shortcuts` is one
+    /// of the four identity markers the built-in registry carries for exactly
+    /// this. Nothing here needs claude installed, which is the other half of
+    /// why it is done this way — a test that only runs on a machine with an
+    /// agent on it is a test CI never runs.
+    async fn a_pane_that_looks_like_claude(
+        svc: &Service,
+        ws: &models::Workspace,
+        title: &str,
+    ) -> models::Terminal {
+        let term = svc.create_terminal(ws.id, title, "shell").await.expect("a pane");
+        let pane = svc.pane_of(term.id).await.expect("the terminal has a pane");
+        svc.tmux
+            .respawn_pane(
+                &pane.pane_id,
+                &ws.worktree_path,
+                "printf '? for shortcuts\n'; sleep 600",
+            )
+            .await
+            .expect("respawn");
+
+        for _ in 0..200 {
+            svc.inventory.refresh().await;
+            if svc
+                .screen(term.id)
+                .await
+                .map(|(text, _, _)| text.contains("? for shortcuts"))
+                .unwrap_or(false)
+            {
+                return term;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        panic!("the pane never drew the marker that identifies claude");
+    }
+
+    #[tokio::test]
+    async fn switching_a_claude_pane_into_agent_mode_runs_the_shim() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
+        let before = svc.pane_of(term.id).await.expect("a pane").pane_id;
+
+        let updated = svc
+            .set_pane_mode(term.id, models::PaneMode::Agent, false)
+            .await
+            .expect("a claude pane can be opened as a chat");
+
+        assert_eq!(updated.pane_mode, models::PaneMode::Agent, "the record says what the pane is");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains("agent-host"), "the pane has to be running the shim: {command}");
+        assert!(
+            command.contains(&format!("--terminal {}", term.id)),
+            "and hosting THIS terminal: {command}"
+        );
+        // Handed explicitly rather than guessed at. Without it the shim knows
+        // exactly one adapter, so a codex pane switched to chat started a
+        // brand new claude session and drew that instead.
+        assert!(
+            command.contains("--preset 'claude'"),
+            "the shim is told which agent it is hosting: {command}"
+        );
+
+        // The rectangle, which is the reason this respawns rather than
+        // replaces: a chat opening in one tile of four must not rearrange the
+        // other three.
+        assert_eq!(
+            svc.pane_of(term.id).await.expect("a pane").pane_id,
+            before,
+            "the pane keeps its id, its tag and its place in the layout"
+        );
+
+        // `listen` was once written, tested and never called: the socket was
+        // never bound, every shim retried `connect` forever, and a client
+        // polling a session that was running perfectly got an empty batch.
+        // Nothing but this notices that happening again.
+        let socket = agent_supervisor::socket_path(&svc.root, term.id);
+        assert!(
+            socket.exists(),
+            "the daemon has to be listening before the shim dials: {}",
+            socket.display()
+        );
+
+        // What the pane turned out to be running, written down, so leaving
+        // agent mode respawns THAT agent rather than the login shell this
+        // terminal was created as.
+        assert_eq!(
+            svc.store.get_terminal(term.id).unwrap().command_preset,
+            "claude",
+            "the record learns which agent the pane actually held"
+        );
+
+        // Nothing is left running an adapter after the assertions.
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    #[tokio::test]
+    async fn a_pane_with_nothing_in_it_is_refused_a_chat() {
+        // A shell pane used to be ALLOWED into agent mode, and
+        // `pane_can_adopt_a_claude_session` would then go looking for a
+        // session to adopt — so switching a plain shell into chat showed
+        // whatever conversation happened to be lying around in that worktree,
+        // usually one belonging to a different pane. The refusal is the fix,
+        // and until now nothing exercised it through `Service::set_pane_mode`
+        // at all.
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "shell", "shell").await.expect("a pane");
+
+        let refused = svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await;
+
+        assert!(
+            matches!(refused, Err(DomainError::InvalidArgument { .. })),
+            "a pane with no agent in it must be refused, got {refused:?}"
+        );
+        assert_eq!(
+            svc.store.get_terminal(term.id).unwrap().pane_mode,
+            models::PaneMode::Terminal,
+            "and the record must not have moved"
+        );
+        // A refused switch must not bind a socket or spawn a listener for a
+        // shim that will never dial.
+        assert!(
+            !agent_supervisor::socket_path(&svc.root, term.id).exists(),
+            "a refused switch must leave no listener behind"
+        );
+
+        let _ = svc.stop_terminal(term.id).await;
     }
 }
 
