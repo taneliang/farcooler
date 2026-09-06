@@ -97,12 +97,13 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
      * reported as pending rather than as a failure.
      */
     val enroller = remember(model) {
-        Enroller { publicKey, label, clientId, granted ->
+        Enroller { publicKey, label, clientId, nodeKey, granted ->
             granted.filterNot { entry ->
                 // Matched by id because these rows came from this device's own
                 // runner list a moment ago, so the id in the manifest IS the id
                 // of the connection that reaches it.
-                model.fleet.connection(entry.id)?.enroll(publicKey, label, clientId) == true
+                model.fleet.connection(entry.id)
+                    ?.enroll(publicKey, label, clientId, nodeKey) == true
             }.map { it.id }.toSet()
         }
     }

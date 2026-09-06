@@ -59,6 +59,18 @@ data class CeremonyOffer(
     val account: String = "",
     val channel: String = "",
     val ceremony: String = "",
+    /**
+     * That device's tailcat node public key: 43 characters of unpadded
+     * base64-URL, or empty from a device that has none.
+     *
+     * Empty is not "unknown". It is a device that cannot be admitted to a
+     * tunnel — a v=1 offer, or a phone whose own mint failed — and it enrolls as
+     * direct, which is what `can_be_granted_a_tunnel` reads the same field to
+     * decide on the other side of the exchange. The default covers a code with
+     * no such field at all rather than failing the whole ceremony over one that
+     * only decides whether a tunnel is offered.
+     */
+    @SerialName("node_key") val nodeKey: String = "",
 )
 
 /**
@@ -488,11 +500,16 @@ fun interface Enroller {
      *
      * Those are not a failure of the ceremony: a runner that was asleep is an
      * ordinary outcome the manifest already carries, as `pending`.
+     *
+     * [nodeKey] is the new device's node public key, off its offer, and it is
+     * what lets the runner's tunnel admit that device later. It goes to every
+     * runner in [runners], because each of them writes its own line.
      */
     suspend fun enroll(
         publicKey: String,
         label: String,
         clientId: String,
+        nodeKey: String,
         runners: List<CeremonyRunner>,
     ): Set<String>
 }
@@ -832,6 +849,12 @@ class CeremonyStore(
                 publicKey = asking.keyA,
                 label = asking.name,
                 clientId = clientId,
+                // Straight off the offer. Empty for a v=1 device and for one
+                // whose own mint failed, both of which enroll exactly as they
+                // always have — and the ONLY route by which that key reaches
+                // the runner's `authorized_keys` line, which is what a tunnel
+                // checks before it admits anybody.
+                nodeKey = asking.nodeKey,
                 runners = wanted,
             )
         }
@@ -868,6 +891,23 @@ class CeremonyStore(
             // device on the other side may HAVE it is the core's decision, not
             // this screen's: it refuses the whole reply with `no_tunnel` when
             // that device named no node key.
+            //
+            // **And a phone never trades a direct reach for a tunnel**, even
+            // though the `client.enroll` it just made can answer with a token.
+            // The Mac has to judge, because `ssh -G` hands it an address it has
+            // never dialled from where the new device will be standing — see
+            // `Enrollment.reach(granting:token:addressing:)` in the Mac app. A
+            // phone has no such gap: the reach copied here is the one that just
+            // carried this ceremony's own enrollment to that runner, so it is a
+            // route with evidence behind it rather than a string to be judged.
+            // Replacing it with a tunnel would swap a proven route for an
+            // unproven one, and a runner is Direct or Tailcat with no fallback
+            // between them.
+            //
+            // Nor is a fresh token needed for the tunneled case: a token is the
+            // RUNNER's, not the device's, so a phone granting a Tailcat runner
+            // already holds the same string `connBlob` would have answered
+            // with.
             reach = row.runner.reach,
             // Corrected once the enrollment above has answered.
             pending = true,

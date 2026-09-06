@@ -945,26 +945,36 @@ class Connection(
      * the forced command: `ClientEnroll` has no field for either, and the absence
      * of a way to ask for an unrestricted line is the guard rail.
      *
+     * [nodeKey] is the NEW device's tailcat node public key, exactly as its
+     * ceremony offer carried it, and empty for a device that has none. This is
+     * the only route by which that key reaches the runner's line — the daemon
+     * writes it into the forced command, and nothing else in the tree writes a
+     * node key onto another device's line — and a tunnel admits nobody whose key
+     * is not on one. A pairing that left it out produced a device holding a
+     * tunneled runner it would never be let into, and the symptom was ten
+     * seconds of silence.
+     *
+     * Empty and absent are one thing to the client core: "this device asked for
+     * no tunnel". An unusable key is a different thing, and the daemon refuses
+     * that rather than quietly ignoring it.
+     *
      * False means the line is not there, and this says nothing about why: from
      * here a runner asleep, a daemon not installed, a damaged fence and a client
      * core with no arm for this method all look identical, and a caller that
      * guessed would be guessing.
      */
-    suspend fun enroll(publicKey: String, label: String, clientId: String): Boolean {
+    suspend fun enroll(
+        publicKey: String,
+        label: String,
+        clientId: String,
+        nodeKey: String,
+    ): Boolean {
         // Answered at all is answered yes. `already_enrolled` comes back in that
         // result and is not a failure: it is the ordinary outcome of granting a
         // runner the device can already reach, and the key is in the file either
         // way, which is what was asked.
         return attempt {
-            core.call(
-                "client.enroll",
-                args(
-                    "publicKey" to publicKey,
-                    "label" to label,
-                    "clientId" to clientId,
-                    "scope" to "control",
-                ),
-            )
+            core.call("client.enroll", enrollArgs(publicKey, label, clientId, nodeKey))
         }.isSuccess
     }
 
@@ -1648,6 +1658,39 @@ class Connection(
          * and silently defaults. See [ScreenResponse.revision] for the value
          * that needs the full unsigned range.
          */
+        /**
+         * What one `client.enroll` sends.
+         *
+         * Split out so the one thing in it that can be wrong is testable
+         * without a runner to write to, the way the Mac's
+         * `Enrollment.arguments` is: `nodeKey` reaching the daemon is the whole
+         * of what lets that runner's tunnel admit the new device later, and a
+         * dropped field here fails ten seconds after somebody has already
+         * scanned a code.
+         *
+         * `scope` is `control` and is not a parameter: `read` is a narrowing
+         * done afterwards in Settings › Devices, and `host_admin` is a shell,
+         * which no phone asks for. `shellAccess` is absent, which the client
+         * core reads as false — the restricted line — and its absence being the
+         * only shape available from here is the guard rail.
+         *
+         * The node key is sent even when empty, which the core reads as absent:
+         * "this device asked for no tunnel". Not sending the key at all would
+         * mean the same thing and say less.
+         */
+        fun enrollArgs(
+            publicKey: String,
+            label: String,
+            clientId: String,
+            nodeKey: String,
+        ): JsonObject = args(
+            "publicKey" to publicKey,
+            "label" to label,
+            "clientId" to clientId,
+            "scope" to "control",
+            "nodeKey" to nodeKey,
+        )
+
         @OptIn(ExperimentalSerializationApi::class)
         fun args(vararg pairs: Pair<String, Any>): JsonObject = JsonObject(
             pairs.associate { (key, value) ->
