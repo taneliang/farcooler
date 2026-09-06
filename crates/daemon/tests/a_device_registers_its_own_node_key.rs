@@ -32,6 +32,12 @@ use tokio::io::AsyncWriteExt;
 /// use, for the same reason: obviously not a real key, and the right shape.
 const NODE_KEY: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+/// A second one, so a test can tell "registered again" from "registered
+/// something else". 43 base64 characters carry 258 bits, so the last
+/// character's low two bits are padding — "…AAA" through "…AAD" all decode to
+/// the same 32 bytes — and only "…AAE" moves a bit that is really there.
+const ANOTHER_NODE_KEY: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE";
+
 /// Distinct ed25519 public keys, one per device.
 ///
 /// Two devices have to be two KEYS: `enroll` refuses a second line for a
@@ -160,6 +166,66 @@ async fn a_device_registers_a_node_key_on_its_own_line() {
     assert_eq!(key_a(&entries, "c1").fingerprint, was_fingerprinted);
     assert_eq!(key_a(&entries, "c1").label, was_labelled);
     assert_eq!(key_a(&entries, "c2").line, c2_line, "the other device's line was rewritten");
+}
+
+/// The same key registered twice writes nothing the second time, and the
+/// BACKUP is how that is visible.
+///
+/// `fence::update` keeps one copy of the file from before the last real change.
+/// A rewrite that changes no byte overwrites it — leaving somebody a backup
+/// identical to the file it is a backup of, which is the one moment a backup
+/// has to be different — and spends two `fsync`s and a rename doing it.
+/// `enroll` has always answered `Change::Leave` for a device that is already
+/// enrolled; this call did not, and the asymmetry was the bug.
+///
+/// It matters more now than it did. Enrollment writes node keys of its own, so
+/// the paths that touch `authorized_keys` run far more often, and re-running a
+/// migration with an unchanged key is an ordinary event rather than a rarity.
+///
+/// **The second half is what stops this being vacuous.** A `set_node_key` that
+/// never wrote at all would satisfy the idempotence assertion perfectly, so the
+/// test goes on to register a DIFFERENT key and requires that one to land — in
+/// the file and in the backup.
+#[tokio::test]
+async fn registering_the_same_key_twice_writes_only_once() {
+    let (service, _home) = runner_with_devices(&["c1"]).await;
+    // `fence` names it after the file it protects — see `suffixed`.
+    let backup = service.authorized_keys().with_extension("farcooler-backup");
+    assert!(!backup.exists(), "the fixture already spent the backup");
+
+    enrollment::set_node_key(&service, &peer(Some("c1")), &registering(NODE_KEY))
+        .await
+        .expect("c1 registers its key");
+    let first = std::fs::read_to_string(&backup).expect("the first registration took a backup");
+    assert!(
+        !first.contains(NODE_KEY),
+        "the backup is meant to be the file from BEFORE the key was written: {first:?}"
+    );
+
+    // Again, with the same key. Nothing about the file should move.
+    enrollment::set_node_key(&service, &peer(Some("c1")), &registering(NODE_KEY))
+        .await
+        .expect("registering the same key twice is not an error");
+    let second = std::fs::read_to_string(&backup).expect("the backup is still there");
+    assert_eq!(
+        first, second,
+        "a second registration of the same key overwrote the backup with the file it \
+         is a backup of"
+    );
+    // And the answer is still true: the line carries the key it asked about.
+    assert_eq!(key_a(&entries(&service).await, "c1").node_key, NODE_KEY);
+
+    // A DIFFERENT key still writes. Without this the assertions above would be
+    // satisfied by a call that had stopped writing altogether.
+    enrollment::set_node_key(&service, &peer(Some("c1")), &registering(ANOTHER_NODE_KEY))
+        .await
+        .expect("c1 replaces its key");
+    assert_eq!(key_a(&entries(&service).await, "c1").node_key, ANOTHER_NODE_KEY);
+    let third = std::fs::read_to_string(&backup).expect("the backup is still there");
+    assert!(
+        third.contains(NODE_KEY) && !third.contains(ANOTHER_NODE_KEY),
+        "a real change did not take a fresh backup of the file it replaced: {third:?}"
+    );
 }
 
 #[tokio::test]

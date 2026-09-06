@@ -440,6 +440,22 @@ pub async fn set_node_key(
 /// cannot happen over SSH, where the client id came from the very line being
 /// looked for, but answering "registered" to a caller whose key was revoked a
 /// microsecond ago would be telling a device it has a route it does not have.
+///
+/// **A line that is already right is `Change::Leave`, the same answer `enroll`
+/// gives a device that is already enrolled — and for the same reason.**
+/// `fence::update`'s backup is ONE copy of the file from before the last real
+/// change, so a rewrite that changes no byte spends it on nothing and leaves a
+/// person with a copy of a file identical to the one they have. It also costs
+/// two `fsync`s and a rename on a file that needed none. Registering the same
+/// key twice is not a rarity: it is what a device does when it re-runs the
+/// migration, and it became ordinary the day `enroll` started writing node keys
+/// of its own.
+///
+/// The comparison is on the rendered LINE and not on `entry.node_key`, because
+/// the question is exactly "would this write change anything" and only the line
+/// can answer it: a build whose `key_a_line` spells the options field
+/// differently from the one that wrote the file would produce a line worth
+/// writing while the node key field matched.
 fn rerender_with_node_key(
     entries: &[Entry],
     client_id: &str,
@@ -456,6 +472,12 @@ fn rerender_with_node_key(
     // swallowed: a device told its key was registered when it was not would
     // wait forever for a tunnel that never admits it.
     let rewritten = fence::with_node_key(&entries[at], node_key).map_err(|r| Refusal(refused(r)))?;
+    // Byte for byte, so this is "nothing to do" rather than "close enough".
+    // The caller still hears success and still gets the token: the route it
+    // asked for is open, which is what it asked about.
+    if rewritten == entries[at].line {
+        return Ok(fence::Change::Leave);
+    }
 
     let mut ours: Vec<String> = Vec::new();
     let mut foreign: Vec<String> = Vec::new();
