@@ -629,13 +629,20 @@ mod tests {
     /// against the string this test just set, which would prove only that
     /// `std::env` works.
     ///
+    /// **Spelled out rather than written as `DERP_MAP_ENV`.** The name is the
+    /// interface: it is what somebody's unit file, launchd plist or
+    /// `runner install` invocation already says, so a rename here is a
+    /// breaking change for every runner in the field and not a tidy-up. A test
+    /// that referred to the constant would go on passing through exactly that
+    /// rename, which is the shape of a check that cannot fail.
+    ///
     /// SAFETY for the `set_var`s: every test that touches this variable holds
     /// `DERP_MAP_ENV_LOCK`, and nothing else in this binary reads the
     /// environment while they run.
     #[test]
     fn a_runner_installed_with_a_derp_map_uses_it() {
         let _serial = DERP_MAP_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var(DERP_MAP_ENV, "https://derp.example/derpmap.json") };
+        unsafe { std::env::set_var("FARCOOLER_DERP_MAP", "https://derp.example/derpmap.json") };
         let configured = configured_derp_map();
         assert_eq!(configured.as_deref(), Some("https://derp.example/derpmap.json"));
         farcooler_tailcat::set_derp_map_url(configured.as_deref().unwrap_or(""));
@@ -645,7 +652,7 @@ mod tests {
             "the runner's DERP map never reached the tunnel"
         );
         farcooler_tailcat::set_derp_map_url("");
-        unsafe { std::env::remove_var(DERP_MAP_ENV) };
+        unsafe { std::env::remove_var("FARCOOLER_DERP_MAP") };
     }
 
     /// A runner nobody configured is left on the library's own default, and
@@ -656,11 +663,11 @@ mod tests {
     #[test]
     fn an_unconfigured_runner_is_left_on_the_library_default() {
         let _serial = DERP_MAP_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::remove_var(DERP_MAP_ENV) };
+        unsafe { std::env::remove_var("FARCOOLER_DERP_MAP") };
         assert_eq!(configured_derp_map(), None, "an unset variable named a DERP map");
-        unsafe { std::env::set_var(DERP_MAP_ENV, "") };
+        unsafe { std::env::set_var("FARCOOLER_DERP_MAP", "") };
         assert_eq!(configured_derp_map(), None, "an empty variable became a URL");
-        unsafe { std::env::remove_var(DERP_MAP_ENV) };
+        unsafe { std::env::remove_var("FARCOOLER_DERP_MAP") };
     }
 
     /// The two directions have to agree, or a relayed session is granted one
