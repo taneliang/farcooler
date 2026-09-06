@@ -84,8 +84,8 @@ final class TerminalSession: ObservableObject {
 
     /// The pane's scrollback, as bytes ready to feed straight into an
     /// emulator: CRLF-repaired, colour-reset and terminated by the host, with
-    /// the alternate-screen case already decided there. See `historyLines` for
-    /// why this is held rather than re-fetched, and `render` for where it goes.
+    /// the alternate-screen case already decided there. See `TerminalScreenAsk`
+    /// for how much of it is asked for, and `render` for where it goes.
     ///
     /// Empty is the honest default and the common case — a pane that has
     /// printed less than a screenful has no history, and neither does one on
@@ -232,17 +232,23 @@ final class TerminalSession: ObservableObject {
     /// the guard in `streamSaidNothing` therefore lets it through, and was
     /// handed to the poll loop while its stream was still perfectly healthy.
     ///
-    /// That handover is not the cheap downgrade it reads as. A poll carries
-    /// `capture-pane -e -p` — the visible screen and NO history
-    /// (`crates/tmux/src/windows.rs:250`) — into a `VTCore` that `render`
-    /// rebuilds from scratch on every changed capture. So a pane on the poll
-    /// path has nothing for `scroll` to move through and could not hold a
-    /// scrolled-back view for longer than one interval even if it had: a swipe
-    /// on any program that has not claimed the mouse does nothing whatsoever,
-    /// silently, forever. The daemon says the same thing from its own side of
-    /// the wire, about the same missing scrollback, in
-    /// `crates/daemon/src/runtime.rs:161` — "That is the bug, and it looked
-    /// like a scroll bug."
+    /// That handover WAS not the cheap downgrade it reads as, and the tense
+    /// matters: a poll's own capture is `capture-pane -e -p`, the visible
+    /// screen and NO history (`crates/tmux/src/windows.rs:250`), fed into a
+    /// `VTCore` that `render` rebuilds from scratch on every changed capture.
+    /// A pane in that state had nothing for `scroll` to move through and could
+    /// not hold a scrolled-back view for longer than one interval even if it
+    /// had, so a swipe on any program that had not claimed the mouse did
+    /// nothing whatsoever, silently, forever.
+    ///
+    /// **That is fixed, and reading this paragraph as current costs a day.**
+    /// The poll path asks for the scrollback itself — see the note beside the
+    /// poll intervals — so a polled pane carries the same history a streamed
+    /// one does and `render` restores the reader's offset across every rebuild.
+    /// `source=poll` on `terminal-surface` therefore says which painter is
+    /// feeding the pane and NOTHING about whether it can scroll; a pane
+    /// reporting two lines of history has two lines of history on the runner.
+    /// The daemon's own side of this is `crates/daemon/src/runtime.rs:161`.
     ///
     /// So the deadline is generous rather than eager, and deliberately so. It
     /// exists for a channel that is wedged, and a wedged channel is still wedged
@@ -350,31 +356,31 @@ final class TerminalSession: ObservableObject {
     /// to speed up.
     private static let backoffFactor: Double = 1.6
 
-    /// How much scrollback a polled pane asks the host for.
-    ///
-    /// A poll carries `capture-pane -e -p` — the visible screen and no history
-    /// (`crates/tmux/src/windows.rs:251`, against `capture_scrollback` at
-    /// `:365`, which only the stream path calls). Fed into a fresh emulator
-    /// that is exactly as tall as the screen, that leaves `history_size` at
-    /// zero, and a core with no history is a core whose `scroll` moves
-    /// nothing. Measured against the real `farcooler-vt`: a 24-line capture
-    /// into an 80x24 terminal reports `history_size == 0`, and `scroll(5)`
-    /// leaves `display_offset` at 0. That is the whole of "swiping the
-    /// terminal does nothing".
-    ///
-    /// So the poll path asks for history explicitly. Not on every poll —
-    /// history costs a second `capture-pane` on the runner and it is the same
-    /// lines every time — but once when the pane opens, so the first swipe
-    /// moves immediately rather than after a round trip, and again whenever
-    /// the reader actually enters scrollback, so what they are reading is
-    /// current rather than however stale the pane has grown since it opened.
-    ///
-    /// Two thousand rather than the emulator's full `SCROLLBACK_LINES` of
-    /// 10,000: this crosses a phone's link base64'd, and at roughly 200 bytes
-    /// a line the full history is a couple of megabytes to answer a swipe.
-    /// Two thousand lines is far more than a thumb travels in one session and
-    /// costs a few hundred kilobytes once per pane.
-    private static let historyLines = 2_000
+    // When a polled pane asks the host for its scrollback.
+    //
+    // A poll's own capture is `capture-pane -e -p` — the visible screen and no
+    // history (`crates/tmux/src/windows.rs:251`, against `capture_scrollback`
+    // at `:365`, which only the stream path calls). Fed into a fresh emulator
+    // exactly as tall as the screen, that would leave `history_size` at zero,
+    // and a core with no history is a core whose `scroll` moves nothing.
+    // Measured against the real `farcooler-vt`: a 24-line capture into an
+    // 80x24 terminal reports `history_size == 0`, and `scroll(5)` leaves
+    // `display_offset` at 0.
+    //
+    // So the poll path asks for history explicitly, and this is the WHEN of
+    // it. Not on every poll — history costs a second `capture-pane` on the
+    // runner and it is the same lines every time — but once when the pane
+    // opens, so the first swipe moves immediately rather than after a round
+    // trip, and again whenever the reader actually returns to the live screen,
+    // so what they read next is current rather than however stale the pane has
+    // grown since it opened. See `prime` and `refreshHistory`.
+    //
+    // HOW MUCH is `TerminalScreenAsk` in AgentKit, and it lives there because
+    // nothing in this file can be tested: it is compiled into the app target
+    // and the only suite that exercises it is `FarCoolerUITests`, which CI
+    // builds and never runs. Losing that ask does not turn one scroll test
+    // red — it turns every one of them into a skip — so it is guarded by a
+    // unit test in a package `swift test` runs on every commit.
 
     private var interval: Double = TerminalSession.fastInterval
 
@@ -1039,10 +1045,10 @@ final class TerminalSession: ObservableObject {
         do {
             // History is asked for HERE and not in `poll`, which is the whole
             // cost discipline: once per pane rather than ten times a second.
-            // See `historyLines`.
+            // See the scrollback note beside the poll intervals, and
+            // `TerminalScreenAsk`.
             let data = try await core.call(
-                "terminal.screen",
-                ["terminal": terminalID, "historyLines": Self.historyLines])
+                "terminal.screen", TerminalScreenAsk.arguments(terminal: terminalID))
             let response = try JSONDecoder().decode(ScreenResponse.self, from: data)
             revision = response.revision
             history = Self.decodedHistory(response)
@@ -1217,11 +1223,15 @@ final class TerminalSession: ObservableObject {
     /// before they re-acquire, so they cannot accumulate.
     ///
     /// What the cliff cost outlived what it bought. A pane on the polling path
-    /// has no scrollback whatsoever — a poll carries `capture-pane -e -p`, the
-    /// visible screen and no history — so swiping it does nothing at all,
-    /// silently, on a pane that repaints every second and looks perfectly
+    /// had no scrollback whatsoever back then — a poll carries `capture-pane
+    /// -e -p`, the visible screen and no history — so swiping it did nothing at
+    /// all, silently, on a pane that repaints every second and looks perfectly
     /// alive. Three unlucky seconds put a pane in that state until somebody
-    /// happened to switch tabs and back.
+    /// happened to switch tabs and back. The poll path asks for the history
+    /// separately now, so the cliff is no longer the difference between a pane
+    /// that scrolls and one that does not — it is only the difference between
+    /// live bytes and a picture every second, which is reason enough to keep
+    /// retrying and not reason enough to fear a fallback.
     ///
     /// The error the stream ended with is deliberately not shown. It was worth
     /// showing at the cliff, as the last thing that pane would ever say about
@@ -1845,8 +1855,7 @@ final class TerminalSession: ObservableObject {
     private func refreshHistory() async {
         guard
             let data = try? await core.call(
-                "terminal.screen",
-                ["terminal": terminalID, "historyLines": Self.historyLines]),
+                "terminal.screen", TerminalScreenAsk.arguments(terminal: terminalID)),
             let response = try? JSONDecoder().decode(ScreenResponse.self, from: data),
             !Task.isCancelled
         else { return }
@@ -1913,8 +1922,8 @@ private struct ScreenResponse: Decodable, Equatable {
     /// program is in. See `applyModes`.
     var modes: String?
     /// The pane's scrollback, base64, ready to feed. Present only when it was
-    /// asked for — see `historyLines` — and empty for a pane that has none or
-    /// is on the alternate screen, which has no history of its own.
+    /// asked for — see `TerminalScreenAsk` — and empty for a pane that has none
+    /// or is on the alternate screen, which has no history of its own.
     var history: String?
 }
 
