@@ -9,6 +9,7 @@
 // `.serialized` on the suites that touch a SHARED memo: those assert on
 // process-wide state, and Swift Testing runs tests in parallel by default.
 #if os(macOS) || os(iOS)
+import Foundation
 import SwiftUI
 import Testing
 
@@ -173,6 +174,85 @@ import Testing
             #expect(a.oldNumber == b.oldNumber)
             #expect(a.newNumber == b.newNumber)
         }
+    }
+}
+
+/// The phone's `DiffView`, guarded by reading it.
+///
+/// Every other test in this file is about a memo, and a memo is exactly the
+/// kind of thing that keeps returning the right answer after it stops being
+/// used — so the call site is the half that needs a guard, and the Mac's is
+/// rendered for real by `RenderWiringTests` in `apps/macos`. The phone has no
+/// equivalent: `apps/ios` has a UI suite, CI COMPILES it and never runs it, so
+/// nothing load-bearing can live there. Its copy of the one line that reaches
+/// this memo — `DiffView.lines` in `AgentView.swift` — had nothing at all
+/// holding it.
+///
+/// Reading the source is the second-best mechanism and it is chosen knowing
+/// that: it pins a spelling rather than a behavior, and a determined revert
+/// through a local alias would slip past it. What it does catch is the revert
+/// that would actually happen — somebody deleting the word `cached` while
+/// cleaning up — which is the failure this is written against.
+///
+/// `GeneratedFilesTest` on the Android side sets the precedent, including the
+/// deliberate half of its trade: it fails loudly rather than skipping when the
+/// file cannot be found, because a test that quietly passes when it checked
+/// nothing is the same as no test.
+@Suite struct PhoneDiffWiringTests {
+    @Test func thePhonesDiffRowGoesThroughTheMemo() throws {
+        let source = try #require(
+            phoneAgentView(),
+            """
+            Could not find apps/ios/FarCooler/AgentView.swift by walking up from \
+            this test. It is the only thing holding the phone's DiffView to the \
+            diff memo; if the Swift has moved, point this at where it went rather \
+            than deleting the check.
+            """)
+        let body = try #require(
+            linesProperty(in: source),
+            """
+            DiffView.lines is no longer a `private var lines: [DiffComputation.Line]` \
+            in AgentView.swift. If the shape changed, re-point this parse.
+            """)
+
+        #expect(
+            body.contains("DiffComputation.cachedCompute"),
+            """
+            The phone's DiffView.lines does not go through \
+            DiffComputation.cachedCompute. `body` reads `lines` even for a \
+            COLLAPSED diff — the header and the "Show N lines" label both need the \
+            count — so an uncached call is a 160,000-cell LCS on the main thread \
+            for every diff row a reader scrolls past.
+            """)
+        #expect(
+            !body.contains("DiffComputation.compute("),
+            "The phone's DiffView.lines calls the uncached DiffComputation.compute.")
+    }
+
+    /// The phone's transcript view, found by walking up from this file.
+    private func phoneAgentView() -> String? {
+        var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while directory.path != "/" {
+            let candidate = directory.appendingPathComponent("apps/ios/FarCooler/AgentView.swift")
+            if let text = try? String(contentsOf: candidate, encoding: .utf8) { return text }
+            directory = directory.deletingLastPathComponent()
+        }
+        return nil
+    }
+
+    /// The body of `DiffView`'s `lines`, and nobody else's.
+    ///
+    /// `AgentView.swift` is three thousand lines and the word `compute` could
+    /// legitimately appear anywhere in it, so this narrows to the one
+    /// declaration before it looks at anything.
+    private func linesProperty(in source: String) -> String? {
+        guard let view = source.range(of: "struct DiffView: View {") else { return nil }
+        let rest = source[view.upperBound...]
+        guard let declaration = rest.range(of: "private var lines: [DiffComputation.Line] {")
+        else { return nil }
+        let body = rest[declaration.upperBound...]
+        guard let close = body.firstIndex(of: "}") else { return nil }
+        return String(body[..<close])
     }
 }
 #endif

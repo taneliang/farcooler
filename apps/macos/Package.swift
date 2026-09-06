@@ -139,5 +139,20 @@ let package = Package(
             dependencies: ["Far Cooler"],
             path: "Tests/TilingTests"
         ),
+        // That a view reaches the cache it is supposed to reach.
+        //
+        // The fifth target, and it earns one for a reason none of the others
+        // covers: a memoization is the one kind of change that keeps returning
+        // the right answer after it stops being used. AgentKit proves its memos
+        // work; nothing proved that this app's `DiffView` calls one, so the
+        // line that does could be reverted and every suite stayed green. This
+        // target renders the real view offscreen and asserts on the memo's miss
+        // count, which is the only number that can tell a reached cache from an
+        // unreached one.
+        .testTarget(
+            name: "RenderWiringTests",
+            dependencies: ["Far Cooler"],
+            path: "Tests/RenderWiringTests"
+        ),
     ]
 )
