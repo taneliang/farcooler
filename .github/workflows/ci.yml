@@ -374,6 +374,30 @@ jobs:
       - name: Test AgentKit
         run: swift test --package-path apps/shared/AgentKit
 
+      # The Mac app's own four test targets, which had never run here.
+      #
+      # `swift test --package-path apps/shared/AgentKit` above is the only Swift
+      # test line this workflow has ever had, so `CeremonyTests`, `GlanceTests`,
+      # `TilingTests` and `RenderBenchTests` — 196 tests across 33 suites —
+      # executed nowhere but the machine that wrote them. That covers the
+      # `~/.ssh/config` writer, whose failure modes its own Package.swift
+      # comment names as "a runner taking over `github.com` for every push on
+      # this Mac", and the glance vocabulary, which rasterises a mark and reads
+      # the ink back out because "a view asked what it is will happily answer
+      # correctly while rendering something else". Both are things that CANNOT
+      # be caught by looking, which is the reason those targets exist at all.
+      #
+      # Last in the job, and it has to stay last. `swift test` can rewrite
+      # `Package.resolved`, and a dirty tree makes `scripts/version.sh channel`
+      # answer `local` — every step above that asks it must have asked already.
+      #
+      # It needs the same `target/release` static libraries `build-app.sh`
+      # already built at the top of this job, so it costs a Swift compile and
+      # nothing else. RenderBenchTests asserts nothing and stays silent unless
+      # `FARCOOLER_RENDER_BENCH` is set, so this is not the slow benchmark.
+      - name: Test the Mac app
+        run: swift test --package-path apps/macos
+
   ios:
     name: iOS
     runs-on: macos-latest
