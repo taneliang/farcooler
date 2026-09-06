@@ -18,8 +18,15 @@ import Foundation
 /// the associated type, and a typealias satisfies that exactly as a nested
 /// struct did. Nothing about the payload moved.
 
-/// The card's whole content: which agent it is leading with, and what
-/// that agent is doing.
+/// The card's whole content: a line per agent, the fleet's counts, and the one
+/// agent the notice that composed this push was about.
+///
+/// **The rows are the card and the headline is the notice**, which is worth
+/// keeping straight because they are not the same choice made twice. The
+/// headline is whatever just happened, and it is what the Dynamic Island
+/// presents and what a card from a relay too old to send rows draws. The rows
+/// are the fleet in the order it is urgent in, sorted by the one thing that has
+/// seen every runner. See `rows`.
 ///
 /// Every field here was on the ATTRIBUTES until the card became
 /// per-install. That move is the substance of this type's change and it
@@ -389,10 +396,11 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     /// below follows from. It used to be one card per terminal, which put four
     /// stacked cards on the lock screen for four running agents while the
     /// Dynamic Island — which can present exactly one — picked whichever it
-    /// liked. So the card now LEADS with one agent and counts the rest, and
-    /// because the leader changes over the card's life as different agents block
-    /// and finish, the leader is part of the CONTENT STATE. The attributes are
-    /// what is fixed for the install's card, which is very nearly nothing.
+    /// liked. So the card now draws a line each for the top of the fleet and
+    /// counts the rest, and because both of those change over the card's life as
+    /// agents block and finish, both are part of the CONTENT STATE. The
+    /// attributes are what is fixed for the install's card, which is very nearly
+    /// nothing.
     ///
     /// Guarded because AgentKit is also the Mac app's package. `os(iOS)` and not
     /// `canImport(ActivityKit)`, which is the guard that looks right and is not:

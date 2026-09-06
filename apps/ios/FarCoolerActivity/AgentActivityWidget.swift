@@ -14,28 +14,33 @@ import WidgetKit
 /// **One card, however many agents there are.** It used to be one card per
 /// terminal, which put four stacked cards on a lock screen for four running
 /// agents and left the Dynamic Island — which presents exactly one activity —
-/// picking between them with no rule anybody wrote. So the card LEADS with one
-/// agent, chosen by the relay on the same precedence the rest of this product
-/// uses (blocked first), and COUNTS the others.
+/// picking between them with no rule anybody wrote.
 ///
-/// **Both halves come off the push now**, and the second one only recently:
+/// **So the card draws a LINE EACH for two agents and counts the rest**, which
+/// is `FleetCard` below and what the design asks for. It leads with the top of
+/// the relay's own ordering — blocked first, then to-review, then working, the
+/// precedence the rest of this product uses — and the tail says how many agents
+/// have no line and what the whole fleet has changed.
 ///
-///   - **the leader** is `context.state`, which arrives by push and is therefore
-///     always as fresh as the last thing that happened;
-///   - **the tail** was the fleet snapshot in the App Group, because nothing on
-///     the push side could honestly count a fleet — the relay stored none, and a
-///     daemon knows only its own runner. The relay keeps a row per agent now,
-///     accumulated from the notices every runner on an account already sends it,
-///     so the counts arrive with the leader and are as fresh as it is.
+/// **Every figure on that card comes off the push**, and the last of them only
+/// now:
 ///
-/// The snapshot is still the fallback, and still the source of the traces. A
-/// relay too old to have a roster says nothing about the fleet, `knowsFleet` is
-/// false, and `FleetTail` falls back to reading the file and to the hedged
-/// wording that goes with it — `FleetSnapshot.complete` and
+///   - **the rows** are `context.state.rows`, a line per agent accumulated by
+///     the relay from the notices every runner on an account already sends it;
+///   - **the counts** are the three tier totals beside them, over the whole
+///     fleet rather than over what fits;
+///   - **the traces** are 66 bytes of base64 on each row. They used to be read
+///     out of the App Group snapshot, because the push had never carried one —
+///     which meant the history on the card was as old as the last time this
+///     phone ran the app.
+///
+/// The snapshot is what the OTHER card falls back to. A relay too old to have a
+/// roster says nothing about the fleet, `knowsFleet` is false, and `FleetTail`
+/// reads the file and hedges its wording — `FleetSnapshot.complete` and
 /// `confidence(in:at:)`, the same rule every other surface outside the app
 /// follows. That hedge exists because a snapshot is assembled from what this
 /// phone happens to have been told, which on a phone in a pocket that has not
-/// run the app today is not much; the pushed counts do not need it.
+/// run the app today is not much; the pushed rows do not need it.
 ///
 /// Nothing here reaches into the app. The extension has no network, no daemon
 /// connection, and no way to ask about the fleet beyond that one file.
@@ -283,14 +288,14 @@ enum AppScheme {
     }
 }
 
-/// Everyone the card is NOT leading with, counted rather than listed.
+/// Everyone the HEADLINE card is not leading with, counted rather than listed.
 ///
-/// A count and not a list because of two hard limits pulling the same way.
-/// ActivityKit caps a content state at 4KB and the Dynamic Island's expanded
-/// presentation is a few lines tall, so a card that grew a row per agent would
-/// be a card that stops rendering on the fleet that most needs it. And a count
-/// is what the surface is for: the lock screen answers "does this need me", and
-/// the app is one tap away for the rest.
+/// **Two surfaces still want this and the lock screen card is no longer one of
+/// them.** The Dynamic Island's expanded presentation is a few lines tall and
+/// presents one agent, and a card from a relay too old to send rows has one
+/// agent to present — both of those are "lead with one and count the rest",
+/// which is what this answers. `AgentCardLayout` is the other shape, where the
+/// count is `more` off the push and there is nothing to hedge.
 ///
 /// **Read from the snapshot, not from the push.** The relay stores no fleet and
 /// a daemon knows only its own runner, so neither can count this honestly; the
@@ -320,12 +325,14 @@ struct FleetTail {
     let qualified: Bool
     /// The leader's own thirteen buckets, as the wire's bytes.
     ///
-    /// **Off the snapshot and not off the push**, which is not a preference:
-    /// ActivityKit caps a content state at 4KB and the trace is 66 bytes per
-    /// agent, but the deciding fact is that the push is assembled by the relay
-    /// from one notification and has never held a trace at all. The snapshot in
-    /// the App Group is the only thing on this phone that has one, and this
-    /// function is already reading it.
+    /// **Off the snapshot, for the two presentations that have no row to read
+    /// one from.** The push carries a trace per ROW now — 66 bytes of base64,
+    /// see `AgentCardRow.trace` — so the rows card gets its history from the
+    /// same place it gets everything else. The Island draws the headline rather
+    /// than a row, and a card from a relay too old to send rows has no rows at
+    /// all; for both of those the App Group file is still the only thing on this
+    /// phone that has ever held a trace, and this function is already reading
+    /// it.
     var leaderTrace: Data? = nil
     /// The whole fleet's buckets, summed on the runner. §07's compact Island:
     /// "Count leading, fleet trace trailing, thirteen buckets like every other."
@@ -372,11 +379,12 @@ struct FleetTail {
             //
             // Counted here rather than taken from the relay's own `more`, which
             // is the fleet minus the ROWS it sent. That is the right number for
-            // a card that draws a line each and the wrong one for this card,
+            // a card that draws a line each and the wrong one for this one,
             // which draws the headline and counts the rest: four rows sent
             // against six agents would put "+3 more" under a card naming one of
-            // them. When this card grows rows, `more` is the field to read and
-            // this arithmetic is the thing to delete.
+            // them. `AgentCardLayout.hidden` is where `more` is read, by the
+            // card that has the rows to subtract — this arithmetic stays for
+            // the presentations that do not.
             //
             // `review` is left out, exactly as the snapshot branch below leaves
             // out `done`: a finished run is not "more working", and counting it
@@ -393,10 +401,10 @@ struct FleetTail {
                 // Counted by the one thing that sees every runner. Nothing to
                 // qualify.
                 qualified: false,
-                // The traces are still the snapshot's: the push carries a trace
-                // per row and this card draws one, the leader's, and reads it
-                // from the file it is already opening. Wiring the pushed trace
-                // through is the next card's work, not this line's.
+                // The traces are still the snapshot's here, because the
+                // presentations this branch serves draw the headline rather
+                // than a row and the pushed traces belong to rows. See
+                // `leaderTrace`.
                 leaderTrace: snapshot?.agents.first { $0.id == state.terminal }?.trace,
                 fleetTrace: snapshot?.fleetTrace,
                 insertions: state.insertions,
