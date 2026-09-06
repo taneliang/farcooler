@@ -635,6 +635,14 @@ final class RunnerStore: ObservableObject {
     func remove(_ host: Runner) {
         hosts.removeAll { $0.id == host.id }
         if selected?.id == host.id { selected = hosts.first }
+        // Nothing should still be waiting to reconnect a runner nobody has any
+        // more. `Reachability`'s subscribers are keyed by runner id and a
+        // removed runner's entry would otherwise sit there for the life of the
+        // process, firing a closure whose connection is gone. Here for the same
+        // reason `RootView` forgets a removed runner's cached worktrees here
+        // rather than somewhere further in: this is the one place that sees a
+        // runner stop existing.
+        Reachability.shared.stopWatching(host.id.uuidString)
         save()
     }
 

@@ -193,6 +193,12 @@ AGENTKIT_SOURCES = [
     "AnswerPermissionIntent.swift",
     "GlancePermissions.swift",
     "Composer.swift",
+    # Several things waiting to be told about one event. Here rather than
+    # beside `Reachability`, which is the only caller, because what the phone
+    # adds is an `NWPathMonitor` and what this holds is the rule a slot could
+    # not keep — and only one of those two can be tested without a radio. See
+    # `KeyedCallbackTests`.
+    "KeyedCallbacks.swift",
     # What is typed into a pane and not sent yet, kept across the pane going
     # away. In AgentKit rather than beside `AgentView` for `ShellNavigation`'s
     # reason — the iOS target has no unit tests, only UI tests, and both bounds

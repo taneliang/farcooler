@@ -330,10 +330,20 @@ final class Connection: ObservableObject {
         let mine = attempt
         phase = .connecting
 
-        // Claimed here rather than in `init`, so switching runners hands the
-        // slot to the connection that is now on screen. The old one's closure
-        // captures `self` weakly and no-ops once it is gone.
-        Reachability.shared.onShouldRetry = { [weak self] in self?.reconnectNow() }
+        // Subscribed here rather than in `init`, because the runner this
+        // connection is for is an argument to `start` and is what the
+        // subscription is keyed by. Re-subscribing under the same key
+        // replaces, so reconnecting does not accumulate a second one.
+        //
+        // It used to ASSIGN a single slot, and the comment here said switching
+        // runners hands it "to the connection that is now on screen" — which
+        // was true of an app that had one. `FleetStore` holds one connection
+        // per runner and every one of them has to be woken by a phone that has
+        // just found a network, so `Reachability` keeps a list; the store's
+        // teardown is what removes an entry. See `Reachability`.
+        Reachability.shared.onShouldRetry(host.id.uuidString) { [weak self] in
+            self?.reconnectNow()
+        }
 
         guard let key = Identity.privateKey() else {
             if mine == attempt {
