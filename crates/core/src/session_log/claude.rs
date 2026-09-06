@@ -600,6 +600,25 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, TurnEvent::Ended { .. })), "Ended must survive alongside BackgroundAgents");
     }
 
+    /// The same pair, off a real line rather than a written one.
+    ///
+    /// The test above says no captured fixture happens to carry the key. That
+    /// was true of the fixtures and never of the world: 261 of the 371
+    /// `turn_duration` records in one live session on this machine carry it,
+    /// because dispatching background agents and then waiting for them is what
+    /// a session with a fleet in it spends its time doing. This is one of them
+    /// verbatim, which is what makes the field order, the neighbours it sits
+    /// among, and the `sessionKind: "bg"` beside it evidence rather than
+    /// assumption.
+    #[test]
+    fn a_real_turn_end_states_the_agents_it_left_running() {
+        let real = r#"{"parentUuid":"002cd323-9793-4f53-b311-cad0576931b8","isSidechain":false,"type":"system","subtype":"turn_duration","durationMs":157369,"messageCount":2590,"pendingBackgroundAgentCount":3,"timestamp":"2026-08-31T05:23:12.315Z","uuid":"5ee8aa2d-1a3d-4121-b2e1-08968971d5f3","isMeta":false,"sessionKind":"bg","userType":"external","entrypoint":"cli","cwd":"/Users/e-liang/Dev/overnight","sessionId":"76e86926-2ff8-4d8c-8aaa-96e76c62afb4","version":"2.1.251","gitBranch":"main","slug":"moonlit-chasing-pudding"}"#;
+        match parse_line(real).as_slice() {
+            [TurnEvent::Ended { duration_ms: Some(157_369), .. }, TurnEvent::BackgroundAgents(3)] => {}
+            other => panic!("expected [Ended, BackgroundAgents(3)]: {other:?}"),
+        }
+    }
+
     #[test]
     fn pending_background_agents_is_absent_not_zero() {
         // The real fixture line has no `pendingBackgroundAgentCount` key at

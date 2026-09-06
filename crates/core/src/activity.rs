@@ -254,7 +254,65 @@ impl Registry {
                         // rather than `Tab to amend`.
                         "↑/↓ to navigate",
                     ]),
-                    working: s(&["esc to interrupt", "Thinking…"]),
+                    working: s(&[
+                        "esc to interrupt",
+                        "Thinking…",
+                        // Work the MAIN loop is not doing. Neither string above
+                        // is on the screen when claude has dispatched
+                        // background agents or background shells and is sitting
+                        // waiting for them, so a pane with three subagents an
+                        // hour deep read `idle` — the state it is in is spelled
+                        // out one line too high to see, as
+                        // `Waiting for 3 background agents to finish` at depth
+                        // 11 (`captures/claude-background-agents-main-idle.txt`).
+                        //
+                        // Two signatures because neither survives what the
+                        // other does, measured across four captures:
+                        //
+                        // * `· ↓ to manage` is the background tray's hint on
+                        //   the mode line, drawn for shells as well as agents
+                        //   (`captures/claude-background-shell-main-idle-80col.txt`
+                        //   has one shell and no subagent at all, so `◯` is
+                        //   absent from it), and gone the moment the last one
+                        //   finishes. Written with its separator because the
+                        //   bare phrase is also transcript: claude spells the
+                        //   result of backgrounding an agent
+                        //   `⎿ Backgrounded agent (↓ to manage · ctrl+o to
+                        //   expand)`, where a bracket precedes it and the mode
+                        //   line's own hint is always preceded by `· ` — the
+                        //   permission mode is always first on that line. The
+                        //   window is still what does the work, as it does for
+                        //   `esc to interrupt`: across the five captures the
+                        //   deciding hint sits at depth 6 and the nearest of
+                        //   those transcript twins at 16.
+                        // * `◯ ` is the subagent row itself, one per running
+                        //   agent, left-aligned on its own line. It is what
+                        //   survives a narrow pane: at 40 columns the mode line
+                        //   truncates mid-word to `· ← 3 age…` and takes the
+                        //   tray hint with it, while the row is still there
+                        //   (`captures/claude-background-agent-main-idle-40col.txt`).
+                        //   The same crowding that cost opencode `ctrl+p
+                        //   commands`.
+                        //
+                        // What was measured and NOT taken. `N shells` is a
+                        // count whose words a person can type into the prompt
+                        // box, which unlike the transcript IS inside the
+                        // window — see
+                        // `a_pane_where_someone_typed_five_shells_is_idle`.
+                        // `⏺ main` is the tree's root row and does track
+                        // subagents exactly, absent from every idle capture,
+                        // but it says nothing `◯` does not while `⏺` is the
+                        // glyph claude prefixes every tool call in the
+                        // transcript with. And `/tasks to see subagents`,
+                        // which looks like the same furniture and is not: it
+                        // was seen on the mode line of a pane whose subagents
+                        // had all FINISHED, twice, minutes apart, while it was
+                        // being driven — it comes and goes on its own and no
+                        // capture here holds it, so it is written down as a
+                        // hazard rather than offered as evidence.
+                        "· ↓ to manage",
+                        "◯ ",
+                    ]),
                     footer_lines: DEFAULT_FOOTER_LINES,
                     adapter: npx("@agentclientprotocol/claude-agent-acp"),
                 },
@@ -673,8 +731,16 @@ fn nameless(command: &str) -> bool {
 ///
 /// Measured, not chosen. Across claude, codex and cursor every signature that
 /// decides a state sits at depth 6 or less, and the nearest transcript false
-/// positive is at 18 — see `captures/` and the design document. Eight leaves
-/// ten lines of margin without reaching into anything anyone said.
+/// positive is at 16 — see `captures/` and the design document. Eight leaves
+/// eight lines of margin without reaching into anything anyone said.
+///
+/// The margin was 18 until claude grew a background-work tray, whose hint
+/// `↓ to manage` it also writes into the transcript line that backgrounds an
+/// agent. Sixteen is that line, on a pane deliberately driven to put it as
+/// close to the bottom as it will go (`captures/claude-idle-after-background-
+/// agents.txt`). Anything that narrows this further is a reason to re-measure
+/// rather than to widen: the window is the only thing standing between a
+/// signature and the conversation quoting it.
 pub const DEFAULT_FOOTER_LINES: usize = 8;
 
 /// The bottom `lines` lines of a pane, as separate lines.
@@ -1363,6 +1429,13 @@ Do you want to allow this command?
             ("claude", include_str!("../captures/claude-working.txt")),
             ("claude", include_str!("../captures/claude-blocked.txt")),
             ("claude", include_str!("../captures/claude-idle-fresh.txt")),
+            // The one this rule was re-earned on: `· ↓ to manage` and `◯ ` are
+            // both real transcript text — claude writes the first into the
+            // result that backgrounds an agent, and the second into any
+            // summary of its own agent tree — so the pane that has finished
+            // its background work must stay finished with both pasted above
+            // it.
+            ("claude", include_str!("../captures/claude-idle-nothing-running.txt")),
             ("codex", include_str!("../captures/codex-working.txt")),
             ("codex", include_str!("../captures/codex-blocked.txt")),
         ] {
@@ -1459,6 +1532,112 @@ Do you want to allow this command?
             r.classify("claude", include_str!("../captures/claude-trust-gate.txt")),
             AgentActivity::Blocked
         );
+    }
+
+    /// A pane whose main loop is idle and whose background work is not.
+    ///
+    /// The reported bug, frozen: a fleet row read `idle` while the pane it was
+    /// about said `Waiting for 3 background agents to finish`, one of them two
+    /// and a half hours old. Neither `esc to interrupt` nor `Thinking…` is on
+    /// any of these three screens — the main loop really is between turns —
+    /// and the sentence that says so sits at depth 11, outside the window on
+    /// purpose.
+    ///
+    /// Three captures because they fail differently, and each one is the only
+    /// evidence for one of the two signatures:
+    ///
+    /// * the 120-column one is the live session, with three subagents. Both
+    ///   signatures are on it, AND its transcript quotes `esc to interrupt`
+    ///   and `◯` above the footer — the window is what keeps that from
+    ///   deciding anything, which is the case
+    ///   `nothing_above_the_footer_can_change_a_verdict` covers for all of
+    ///   them.
+    /// * the 80-column one is a background SHELL and no subagent, so it holds
+    ///   no `◯` at all: it is what `· ↓ to manage` alone catches.
+    /// * the 40-column one is a subagent on a pane narrow enough that the mode
+    ///   line truncates and takes the tray hint with it: it is what `◯ ` alone
+    ///   catches.
+    #[test]
+    fn background_work_is_working_even_when_the_main_loop_is_idle() {
+        let r = Registry::built_in();
+        for capture in [
+            include_str!("../captures/claude-background-agents-main-idle.txt"),
+            include_str!("../captures/claude-background-shell-main-idle-80col.txt"),
+            include_str!("../captures/claude-background-agent-main-idle-40col.txt"),
+        ] {
+            assert!(
+                !footer_text(capture, DEFAULT_FOOTER_LINES).contains("esc to interrupt")
+                    && !footer_text(capture, DEFAULT_FOOTER_LINES).contains("Thinking…"),
+                "the fixture really is a screen where the main loop is between turns"
+            );
+            assert_eq!(r.classify("claude", capture), AgentActivity::Working);
+        }
+    }
+
+    /// The same claude, same version, with nothing running.
+    ///
+    /// The regression this fix could most easily cause, and the only screen
+    /// that can prove the two new signatures are furniture rather than
+    /// decoration: it was captured off the pane that took
+    /// `claude-background-agent-main-idle-40col.txt`, minutes apart, once its
+    /// subagent and its shell had both finished. The mode line loses the tray
+    /// hint and the agent rows vanish with it.
+    ///
+    /// Its transcript still holds `↓ to manage`, in the tool result that
+    /// backgrounded the agent — which is why the signature carries its
+    /// separator.
+    #[test]
+    fn a_claude_with_nothing_left_running_is_idle() {
+        let r = Registry::built_in();
+        let screen = include_str!("../captures/claude-idle-nothing-running.txt");
+        assert!(screen.contains("↓ to manage"), "the transcript really does quote the hint");
+        assert_eq!(r.classify("claude", screen), AgentActivity::Idle);
+    }
+
+    /// The screen after the background work, which still says all of it.
+    ///
+    /// A pane with nothing running whose transcript is nothing but the
+    /// evidence that something was: `Backgrounded agent (↓ to manage · ctrl+o
+    /// to expand)` at depth 16, and `Waiting for 1 background agent to finish`
+    /// at depth 12 — both true when they were written and both false now.
+    ///
+    /// It is the tightest such screen that could be produced on purpose. The
+    /// agent was asked to dispatch one short subagent and then say NOTHING,
+    /// and it still wrote `Dispatched.`, the finish notice, and a summary —
+    /// three entries and their blank lines, which is what puts the nearest
+    /// twin of a live signature eight lines further out than the window
+    /// reaches. That number is the measurement `DEFAULT_FOOTER_LINES` rests
+    /// on, so this fixture is what re-measures it when claude's transcript
+    /// gets terser.
+    #[test]
+    fn a_claude_that_has_finished_its_background_agents_is_idle() {
+        let r = Registry::built_in();
+        let screen = include_str!("../captures/claude-idle-after-background-agents.txt");
+        assert!(
+            screen.contains("↓ to manage") && screen.contains("background agent to finish"),
+            "the fixture really does quote its own finished work"
+        );
+        assert!(
+            !footer_text(screen, DEFAULT_FOOTER_LINES).contains("↓ to manage"),
+            "the transcript twin reached the window: re-measure DEFAULT_FOOTER_LINES"
+        );
+        assert_eq!(r.classify("claude", screen), AgentActivity::Idle);
+    }
+
+    /// The count that is not a signature, and why.
+    ///
+    /// `5 shells` is drawn on the mode line beside the tray hint, and it is
+    /// also two ordinary words a person can type — into the prompt box, which
+    /// unlike the transcript IS inside the footer window. So the count says
+    /// nothing here; the hint drawn next to it does.
+    #[test]
+    fn a_pane_where_someone_typed_five_shells_is_idle() {
+        let r = Registry::built_in();
+        let screen = "\
+❯ why does the footer say 5 shells
+────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents";
+        assert_eq!(r.classify("claude", screen), Idle);
     }
 
     /// The screen that reported "shell finished" while claude sat waiting.

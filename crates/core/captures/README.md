@@ -51,3 +51,73 @@ means — because that is what it was asked.
 Matching the whole screen classifies this pane as `Working`, forever. It never
 reaches `Done`, so no notification ever fires, and its timer counts from whenever
 that text first appeared. That is the bug, frozen.
+
+## The ones where the main loop is idle and the work is not
+
+Captured 2026-09-06 against claude **2.1.263**, the version the report came
+from. Five files, and the version matters more here than usual: the agent-tree
+footer these turn on — a `⏺ main` row with a `◯ <agent-type>` row under it per
+running subagent, and a `· N shells · ↓ to manage` tray hint on the mode line —
+does not exist on 2.1.233, which is why `claude-idle-fresh.txt` shows none of
+it.
+
+| file | pane | what is running |
+| --- | --- | --- |
+| `claude-background-agents-main-idle.txt` | 112x61 | three subagents, five shells |
+| `claude-background-shell-main-idle-80col.txt` | 80x30 | one shell, no subagent |
+| `claude-background-agent-main-idle-40col.txt` | 40x24 | one subagent, one shell |
+| `claude-idle-nothing-running.txt` | 120x40 | nothing |
+| `claude-idle-after-background-agents.txt` | 120x40 | nothing, twice over |
+
+The bug they freeze: on all three of the first ones the main loop is BETWEEN
+turns, so neither `esc to interrupt` nor `Thinking…` is anywhere on the screen,
+and the pane classified as idle while an agent it had spawned was two and a
+half hours into its work. What the screen actually says is
+`Waiting for 3 background agents to finish` — at depth 11, three lines outside
+the footer window, which is where it stays.
+
+Two signatures came out of them and each is the only evidence for itself:
+
+* **`· ↓ to manage`** is the tray hint. It is the only one of the two that
+  appears for background SHELLS, which is half the report —
+  `claude-background-shell-main-idle-80col.txt` holds a running shell and no
+  subagent at all, so it carries no `◯`.
+* **`◯ `** is the subagent row. It is the only one of the two that survives a
+  narrow pane: at 40 columns the mode line truncates mid-word to `· ← 3 age…`
+  and takes the tray hint with it, while the row is still there. The same
+  crowding that costs opencode `ctrl+p commands` below 120 columns.
+
+The separator in front of `· ↓ to manage` is load-bearing, and
+`claude-idle-nothing-running.txt` is why. It was taken off the same pane the
+narrow captures came from, at 120 columns, once its first subagent and its
+shell had both finished — the pane was then resized down for those — and its
+transcript still holds `⎿ Backgrounded agent (↓ to manage · ctrl+o to expand)`
+— the tool result that started the work. On the mode line the hint always has a
+separator in front of it, because the permission mode is always first; in that
+transcript line it has a bracket. A pane that has finished must read finished
+even with its own history above it, so the signature takes the form only the
+mode line draws.
+
+`N shells` is on the mode line beside the hint and is NOT a signature: it is two
+ordinary words a person can type into the prompt box, and the prompt box, unlike
+the transcript, is inside the footer window. `⏺ main` tracks subagents exactly —
+it is absent from every idle capture — but says nothing `◯` does not, and `⏺` is
+the glyph claude prefixes every tool call in the transcript with. `/tasks to see
+subagents` is the trap of the three: it was seen on the mode line of a pane
+whose subagents had all finished, twice, minutes apart, and it comes and goes on
+its own — no capture here holds it, so it is written down and not relied on.
+
+A fifth file, `claude-idle-after-background-agents.txt`, is that pane once the
+work was done: a screen whose whole transcript is the evidence that something
+WAS running — `Backgrounded agent (↓ to manage · ctrl+o to expand)` at depth 16,
+`Waiting for 1 background agent to finish` at depth 12 — and which must read
+idle anyway. It is the tightest such screen that could be produced deliberately:
+the agent was asked to dispatch one short subagent and then say nothing, and
+still wrote three more entries. Depth 16 is where `DEFAULT_FOOTER_LINES` gets
+its margin from now, down from 18, and this is the file to re-measure against.
+
+The screen is the second answer to this question, not the first. The pane's
+session log states the same fact as a number, on the record that ends the turn
+(`pendingBackgroundAgentCount`), and the daemon believes that over any footer —
+see `resolved_activity` in `crates/daemon/src/watch.rs`. These signatures are
+what stage 1 needs so that it stops contradicting it.

@@ -1,0 +1,30 @@
+
+✻ Crunched for 3m 42s · done 12:27 AM · 1 shell still running
+
+⏺ Background command "Sleep 300 seconds in background" completed (exit code 0)
+
+⏺ Background shell bldh34a6b (sleep 300) completed with exit code 0.
+
+  Both tasks are now done:
+  - Subagent: reported done after its 200-second sleep (run as a background
+    command since a guard blocked the standalone foreground sleep)
+  - Background shell: sleep 300, exit 0
+
+  Nothing else pending.
+
+✻ Cogitated for 2s · done 12:28 AM · 1 shell still running
+
+❯ Start a background shell running: sleep 240. Then stop and wait, do nothing 
+  else. Do not dispatch any subagent.
+
+  Ran 1 shell command 
+
+⏺ Background shell b2ya2wvry started (sleep 240). No subagent dispatched.
+  Waiting.
+
+✻ Brewed for 3s · done 12:30 AM · 1 shell still running
+
+────────────────────────────────────────────────────────────────────────────────
+❯ Now dispatch one subagent that runs sleep 180 and reports done
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on · 1 shell · ← 3 agents · ↓ to manage                     /rc

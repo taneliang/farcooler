@@ -1,0 +1,40 @@
+
+⏺ Agent(Sleep 200 then report)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+⏺ Both are running:
+
+  - Background shell bldh34a6b — sleep 300
+  - One general-purpose subagent — running sleep 200, then reporting done
+
+  Waiting now; I'll report when the notifications arrive.
+
+✻ Waiting for 1 background agent to finish
+
+⏺ Agent "Sleep 200 then report" finished · 3m 32s
+
+⏺ Subagent finished: done — it reported that the literal foreground sleep 200 was blocked by an environment guard on
+  standalone sleeps, so it ran the sleep as a background command and blocked on it until exit (code 0), meaning the full
+  200 seconds elapsed.
+
+  The background shell bldh34a6b (sleep 300) is still running. Still waiting on it.
+
+✻ Crunched for 3m 42s · done 12:27 AM
+
+⏺ Background command "Sleep 300 seconds in background" completed (exit code 0)
+
+⏺ Background shell bldh34a6b (sleep 300) completed with exit code 0.
+
+  Both tasks are now done:
+  - Subagent: reported done after its 200-second sleep (run as a background command since a guard blocked the standalone
+    foreground sleep)
+  - Background shell: sleep 300, exit 0
+
+  Nothing else pending.
+
+✻ Cogitated for 2s · done 12:28 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ wait for the background shell to finish
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents                                                                /rc

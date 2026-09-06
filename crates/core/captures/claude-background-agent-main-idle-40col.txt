@@ -1,0 +1,24 @@
+
+❯ Dispatch exactly one general-purpose 
+  subagent whose only task is to run: 
+  sleep 200, then report done. Then 
+  stop and wait, do nothing else.
+
+⏺ Agent(Sleep 200 then report)
+  ⎿  Backgrounded agent (↓ to 
+
+⏺ One general-purpose subagent
+  dispatched to run sleep 200 and report
+  done. Waiting for its completion
+  notification.
+
+✻ Waiting for 1 background agent to 
+  finish
+
+────────────────────────────────────────
+❯ Start a background shell running: sle…
+────────────────────────────────────────
+  ⏵⏵ auto mode on · 1 shell · ← 3 age…
+
+  ⏺ main
+  ◯ general-purpose 55s · ↓ 31.0k tokens

@@ -1,0 +1,61 @@
+  running subagent with a 2h 24m elapsed timer.
+
+  And critically, that furniture is inside the 8-line footer window — the subagent line is the last line on
+  screen. So it's detectable.
+
+  Ran 1 shell command 
+
+❯ please feel free to sequence work sequentially, but I expect you to parallelize where possible and to execute
+  to completion or with a decision in needs-planning. Do not stop and just idle if you have things to do
+
+⏺ That capture is contaminated — it now shows esc to interrupt because I'm mid-turn while running the command.
+  The genuine idle-but-busy footer, captured two minutes ago when I wasn't generating, had no such line.
+  Removing it rather than shipping a mislabelled capture:
+
+  Ran 1 shell command 
+
+⏺ Agent(Idle detection misses subagents) Opus 5 (1M context)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+⏺ Agent(Relay remembers the fleet) Opus 5 (1M context)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+⏺ Understood — parallelising rather than queueing. Three lanes now running, on non-overlapping files:
+
+  1. Revocation reaches the tunnel — crates/daemon/{allowlist,enrollment}.rs
+  2. Idle misses background agents — crates/core/src/activity.rs
+  3. The relay remembers the fleet — services/relay/, AgentKit, crates/daemon/src/push.rs
+
+  Your idle bug reproduced live, and I have the evidence. workspace list showed this session as running idle
+  while a subagent had been going for over two hours. The footer said:
+
+  ⏵⏵ auto mode on · 5 shells
+  ⏺ main
+  ◯ general-purpose  Reverting start_tunnel arm in allowlist.rs   2h 24m 7s · ↓ 176.7k tokens
+
+  Neither esc to interrupt nor Thinking… is present — and since activity.rs deliberately has no idle list
+  (identified + not blocked + not working is idle), it falls straight through. The ◯ subagent row was the last
+  line on screen, so it's well inside the 8-line footer window and perfectly detectable.
+
+  One thing I hit that's worth knowing: I couldn't capture the idle state from inside my own session — running
+  the capture command made me active, so esc to interrupt appeared and I got a working screen instead. I deleted
+  that contaminated capture rather than ship a mislabelled one. The repo's standard is explicit that every
+  signature was read off a real screen, and there's already a capture named
+  claude-idle-transcript-says-esc-to-interrupt.txt from a previous false-positive. So that lane has to sample
+  another session from outside.
+
+  Two decisions still sit with you and neither blocks work: the silent-start conflict (a fleet card may dissolve
+  it — "2 need you · 3 in flight" is a real event where "an agent started working" wasn't), and the keyboard 
+  one from 31 August.
+
+✻ Waiting for 3 background agents to finish
+                                                                                         0% until auto-compact
+───────────────────────────────────────────────────────────────────── User test issues and onboarding flow (2) ─
+❯ keep going
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on · 5 shells · ← 3 agents · ↓ to manage                                                    /rc
+
+  ⏺ main
+  ◯ general-purpose  Reverting start_tunnel arm in allowlist.rs                    2h 27m 0s · ↓ 176.7k tokens
+  ◯ general-purpose  Capturing idle footer from 5a7573bd                               1m 29s · ↓ 50.0k tokens
+  ◯ general-purpose  Reading push.ts payload contract                                     50s · ↓ 42.1k tokens

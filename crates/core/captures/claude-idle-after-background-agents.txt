@@ -1,0 +1,40 @@
+
+
+❯ Dispatch exactly one general-purpose subagent whose only task is to run: sleep 200, then report done. Then stop and 
+  wait, do nothing else.
+
+⏺ Agent(Sleep 200 then report)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+⏺ One general-purpose subagent dispatched to run sleep 200 and report done. Waiting for its completion notification.
+
+✻ Waiting for 1 background agent to finish
+
+⏺ Agent "Sleep 200 then report" finished · 3m 28s
+
+⏺ The subagent finished and reported: done.
+
+  Nothing else pending.
+
+✻ Crunched for 3m 35s · done 12:45 AM
+
+❯ Dispatch exactly one general-purpose subagent whose only task is to run: sleep 5, then report done. After the 
+  dispatch returns, output NOTHING AT ALL - no words, no summary, end your turn immediately and silently.
+
+⏺ Agent(Sleep 5 then report)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+⏺ Dispatched.
+
+✻ Waiting for 1 background agent to finish
+
+⏺ Agent "Sleep 5 then report" finished · 7s
+
+⏺ The subagent finished and reported: done.
+
+✻ Brewed for 14s · done 12:58 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents                                                                /rc
