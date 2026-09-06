@@ -303,6 +303,36 @@ fn identifies_claude(
         .is_some_and(|rules| rules.preset == "claude")
 }
 
+/// The `command_preset` to store once a pane is known to be hosting `harness`,
+/// or `None` when the record already says so.
+///
+/// `set_pane_mode` records what a pane turned out to be running, so that
+/// leaving agent mode respawns THAT agent rather than a guess. What it has to
+/// write with is `Registry::identify`, and identify answers with an agent's
+/// NAME — `claude`, never `claude:opus`. A preset may carry a model after a
+/// colon, so writing identify's answer over the record unconditionally cost a
+/// `claude:opus` pane its model the first time it was ever opened as a chat,
+/// permanently: the column is the only record of it, and every later clean
+/// start reads the column.
+///
+/// That was invisible because the model is preserved one layer DOWN, in
+/// `terminal_mode_command`'s clean-start branches and in `preset_command`,
+/// each of which goes to the trouble of passing the whole preset rather than
+/// the bare agent name — and `respawn_tests` pins exactly that. Those tests
+/// call the builder directly, so they kept passing while the value reaching
+/// the builder had already been flattened here, one function upstream of
+/// everything they cover.
+///
+/// So: compare on the agent alone, and keep the record when it already names
+/// that agent. A pane that genuinely turns out to host a DIFFERENT agent than
+/// the record claims is still rewritten — there is no model to preserve for an
+/// agent nobody recorded, and naming the wrong agent is the failure this write
+/// exists to prevent.
+fn preset_after_adopting(recorded: &str, harness: &str) -> Option<String> {
+    let agent = recorded.split_once(':').map(|(a, _)| a).unwrap_or(recorded);
+    (agent != harness).then(|| harness.to_string())
+}
+
 /// Directories the `@`-mention picker never walks.
 ///
 /// Build output and caches, which nobody mentions and which dwarf the tree they
@@ -2002,10 +2032,19 @@ impl Service {
         let Some(harness) = harness.filter(|_| pane_mode == models::PaneMode::Agent) else {
             return Ok(updated);
         };
+        let Some(preset) = preset_after_adopting(&updated.command_preset, &harness) else {
+            return Ok(updated);
+        };
+        tracing::info!(
+            terminal = %id,
+            from = %updated.command_preset,
+            to = %preset,
+            "the pane hosts a different agent than its record named"
+        );
         self.store.update_terminal(
             id,
             updated.resource_version,
-            terminal_update(&updated, |u| u.command_preset = harness),
+            terminal_update(&updated, |u| u.command_preset = preset),
         )
     }
 
@@ -2959,6 +2998,42 @@ mod respawn_tests {
         let cmd = respawn_command(None, "claude", worktree.to_str().unwrap(), &sid);
         assert!(!cmd.contains("--resume"), "{cmd}");
         assert!(cmd.contains("claude"), "{cmd}");
+    }
+
+    /// The upstream half of `a_clean_start_keeps_the_model_the_pane_was_launched_with`.
+    ///
+    /// That test hands `respawn_command` a `claude:opus` preset and checks the
+    /// model survives. It passed while production never gave the builder a
+    /// `claude:opus` to begin with: switching a pane into agent mode wrote
+    /// `Registry::identify`'s answer — the bare agent name — straight over the
+    /// column, so by the time any clean start ran, the model was already gone
+    /// from the only place it was recorded. A builder test cannot see that,
+    /// which is exactly why this one asserts on the value the builder is
+    /// handed rather than on the builder.
+    #[test]
+    fn opening_a_pane_as_a_chat_does_not_cost_it_its_model() {
+        // Nothing to write: the record already names this agent, and it names
+        // it with more detail than `identify` can supply.
+        assert_eq!(preset_after_adopting("claude:opus", "claude"), None);
+        assert_eq!(preset_after_adopting("codex:gpt-5.6-sol", "codex"), None);
+        assert_eq!(preset_after_adopting("claude", "claude"), None);
+
+        // A pane that turns out to host something else IS rewritten. There is
+        // no model to keep for an agent nobody recorded, and a record naming
+        // the wrong agent is what this write exists to prevent: it is what
+        // `terminal_mode_command` reads to decide what to respawn.
+        assert_eq!(preset_after_adopting("shell", "claude"), Some("claude".into()));
+        assert_eq!(preset_after_adopting("claude:opus", "codex"), Some("codex".into()));
+        assert_eq!(preset_after_adopting("", "claude"), Some("claude".into()));
+
+        // The whole point, stated as the thing a reader cares about: the
+        // preset that survives a chat still builds an opus command.
+        let home = scratch("adopt-home");
+        let worktree = scratch("adopt-tree");
+        let kept = preset_after_adopting("claude:opus", "claude")
+            .unwrap_or_else(|| "claude:opus".to_string());
+        let cmd = respawn_command(Some(&home), &kept, worktree.to_str().unwrap(), "");
+        assert!(cmd.contains("claude --model opus"), "{cmd}");
     }
 
     #[test]
