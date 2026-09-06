@@ -1640,6 +1640,47 @@ Do you want to allow this command?
         assert_eq!(r.classify("claude", screen), AgentActivity::Idle);
     }
 
+    /// The twin brought INSIDE the window, so the separator has to earn its
+    /// place.
+    ///
+    /// Written by hand rather than captured, and that is the point. Every real
+    /// capture puts `Backgrounded agent (↓ to manage · ctrl+o to expand)` at
+    /// depth 12 or more, so the window alone acquits them and
+    /// `a_claude_that_has_finished_its_background_agents_is_idle` above
+    /// measures exactly that. Which means nothing in the suite could tell
+    /// whether `· ↓ to manage` needs its separator: drop it to the bare
+    /// phrase and every test still passed.
+    ///
+    /// So this screen is the case the separator was reasoned about and never
+    /// tested against — the tool result sitting six lines from the bottom,
+    /// where a terser transcript or a taller pane would eventually put it. The
+    /// line is quoted verbatim from `claude-idle-nothing-running.txt`; only
+    /// its depth is contrived.
+    ///
+    /// In the transcript the phrase is preceded by `(`. On the mode line it is
+    /// always preceded by `· `, because the permission mode is always first
+    /// there. That asymmetry is the whole guard, and this is the test that
+    /// fails when it goes.
+    #[test]
+    fn the_backgrounded_notice_is_not_the_tray_hint_even_inside_the_window() {
+        let r = Registry::built_in();
+        let screen = "\
+> summarize the tree
+
+⏺ Task(Explore the tree)
+  ⎿ Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+╭──────────────────────────────────────────╮
+│ >                                        │
+╰──────────────────────────────────────────╯
+  ⏵⏵ auto mode on";
+        assert!(
+            footer_text(screen, DEFAULT_FOOTER_LINES).contains("↓ to manage"),
+            "this fixture is pointless unless the twin is inside the window"
+        );
+        assert_eq!(r.classify("claude", screen), AgentActivity::Idle);
+    }
+
     /// The count that is not a signature, and why.
     ///
     /// `5 shells` is drawn on the mode line beside the tray hint, and it is
