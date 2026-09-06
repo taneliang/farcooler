@@ -19,7 +19,7 @@ import Testing
 /// flow a person cannot diagnose.
 ///
 /// These tests drive
-/// ``Enrollment/enroll(keyA:keyB:label:clientID:scope:nodeKey:on:using:)``
+/// ``Enrollment/enroll(keyA:keyB:label:clientID:scope:nodeKey:on:addressing:using:)``
 /// with a stand-in for the CLI, because the decision being tested is made from
 /// what each `client enroll` answered and nothing else.
 struct PendingTests {

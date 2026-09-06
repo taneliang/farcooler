@@ -142,7 +142,7 @@ enum Enrollment {
 
     /// One `client enroll`, as the thing that runs it.
     ///
-    /// Injected so that ``enroll(keyA:keyB:label:clientID:scope:on:using:)`` —
+    /// Injected so that ``enroll(keyA:keyB:label:clientID:scope:nodeKey:on:addressing:using:)`` —
     /// which is where every decision about what got written is made — can be
     /// tested without a runner to write to. The default is the real CLI, and no
     /// caller in the app passes anything else.

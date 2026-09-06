@@ -73,7 +73,7 @@ enum RunnerFacts {
     /// `~/.ssh/authorized_keys` on this Mac — that write is a `client enroll`
     /// with no `--runner`, and it fails whenever the daemon is not installed,
     /// not running, or refuses. That failure is not hypothetical: the bug
-    /// ``Enrollment/arguments(key:label:clientID:scope:shell:runner:)``
+    /// ``Enrollment/arguments(key:label:clientID:scope:shell:nodeKey:runner:)``
     /// documents was exactly this write failing, and a hardcoded `pending:
     /// false` here is what let the phone be told its key had landed on the very
     /// Mac it was being added from.
