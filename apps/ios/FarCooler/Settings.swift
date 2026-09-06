@@ -286,6 +286,12 @@ struct SettingsView: View {
             // build actually talking to", which is the question you have when
             // notifications are not arriving.
             RelaySection()
+
+            // Under the relay, because the two answer the same shape of
+            // question and the second one is the rarer: this one is for the
+            // day the tunnel's rendezvous service stops answering, which is
+            // the only day anybody should open it.
+            RendezvousSection()
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)

@@ -272,6 +272,10 @@ struct SettingsView: View {
                     // this build talks to is the answer to "why is nothing
                     // notifying me", and that question starts here.
                     RelaySection()
+                    // And under that, the tunnel's own rendezvous. Same shape
+                    // of question, rarer day: this is the one for when the
+                    // service tunneled runners meet at stops answering.
+                    RendezvousSection()
                 }
                 .formStyle(.grouped)
                 AccountDevicesView()

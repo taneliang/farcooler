@@ -469,7 +469,14 @@ struct Runner: Codable, Identifiable, Hashable {
     /// address, and `parse_destination` refuses to hold both. `nodeKey` is
     /// per device rather than per runner and never travelled in the manifest —
     /// whoever dials supplies the key it already holds.
-    func config(privateKey: String, nodeKey: String?) -> [String: Any] {
+    ///
+    /// `derpMap` is this DEVICE's rendezvous setting, and it has no default
+    /// here on purpose: a parameter somebody can forget is a rendezvous that
+    /// is silently the old one on the day the old one stopped answering. Empty
+    /// is the normal value and means the rendezvous the app ships with; it is
+    /// sent even then, because absent and blank must land on the same place.
+    /// See ``Account/derpMap``.
+    func config(privateKey: String, nodeKey: String?, derpMap: String) -> [String: Any] {
         var config: [String: Any] = [
             "user": user,
             "private_key": privateKey,
@@ -487,6 +494,7 @@ struct Runner: Codable, Identifiable, Hashable {
             config["node_key"] = nodeKey ?? ""
         }
         if let fingerprint { config["host_fingerprint"] = fingerprint }
+        config["derp_map"] = derpMap
         return config
     }
 

@@ -359,7 +359,8 @@ final class Connection: ObservableObject {
         }
 
         do {
-            _ = try await core.connect(config: host.config(privateKey: key, nodeKey: nodeKey))
+            _ = try await core.connect(config: host.config(
+                    privateKey: key, nodeKey: nodeKey, derpMap: Account.shared.derpMap))
         } catch {
             if mine == attempt { phase = classify(error) }
             return
@@ -540,7 +541,8 @@ final class Connection: ObservableObject {
         }
 
         do {
-            _ = try await core.connect(config: host.config(privateKey: key, nodeKey: nodeKey))
+            _ = try await core.connect(config: host.config(
+                    privateKey: key, nodeKey: nodeKey, derpMap: Account.shared.derpMap))
         } catch {
             // A `start` or a second `reconnectNow` landed while this attempt
             // was crossing the network. Its answer is the current one; this

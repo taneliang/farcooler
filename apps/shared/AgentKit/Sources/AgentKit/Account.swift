@@ -45,6 +45,57 @@ public final class Account: NSObject, ObservableObject {
         set { defaults.set(newValue, forKey: "account.relay") }
     }
 
+    /// Where tunneled runners and this device meet, or empty for the one the
+    /// app ships with.
+    ///
+    /// A tunneled runner is not reachable by address — a device and a runner
+    /// find each other through a rendezvous service, and every tunneled
+    /// connection goes through it rather than only the ones that could not go
+    /// direct. The service the app ships with is documented as best-effort and
+    /// revocable at any time, so this field exists for one day: the day it
+    /// stops answering. Without it, that day costs an App Store review, a Mac
+    /// release, a Play release and a visit to every runner in the fleet. With
+    /// it, it costs a setting.
+    ///
+    /// **Empty is the answer, for almost everybody, forever.** Nothing here
+    /// says anyone should run their own, and the screen that shows it says so.
+    ///
+    /// Normalized on the way in AND on the way out — see ``derpMapSetting``.
+    /// A value that got in some other way, from an older build or a restored
+    /// backup, still cannot become a rendezvous nobody chose.
+    public var derpMap: String {
+        get { Account.derpMapSetting(defaults.string(forKey: "account.derpMap") ?? "") }
+        set { defaults.set(Account.derpMapSetting(newValue), forKey: "account.derpMap") }
+    }
+
+    /// The DERP map worth using, out of whatever somebody typed.
+    ///
+    /// Anything that is not an `https` URL comes back empty, and empty means
+    /// the app's own default. Refused rather than repaired: a rendezvous is
+    /// where a device and a runner agree to meet, and a value this could not
+    /// read is a value nobody deliberately chose.
+    ///
+    /// `https` and not merely on principle. A map fetched over cleartext is a
+    /// map anybody on the path can rewrite, and rewriting it moves both ends
+    /// of a tunnel onto a rendezvous of the attacker's choosing — which is
+    /// the one thing this whole setting must not make possible.
+    ///
+    /// Whitespace is refused rather than trimmed away from the middle: the
+    /// tunnel library refuses a URL carrying a space, because one backend
+    /// sends it over a line protocol whose fields are separated by spaces, and
+    /// a setting that saved and then silently did nothing is worse than one
+    /// that would not save.
+    public static func derpMapSetting(_ typed: String) -> String {
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+            !trimmed.contains(where: \.isWhitespace),
+            let url = URL(string: trimmed),
+            url.scheme == "https",
+            let host = url.host, !host.isEmpty
+        else { return "" }
+        return trimmed
+    }
+
     /// The relay this build's channel talks to.
     ///
     /// One relay per channel, the same partition the bundle identifier follows.

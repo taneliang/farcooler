@@ -229,7 +229,8 @@ struct TunnelE2EHarness: View {
         do {
             let core = ClientCore()
             let data = try await core.connect(
-                config: target.config(privateKey: sshKey, nodeKey: nodeKey))
+                config: target.config(
+                    privateKey: sshKey, nodeKey: nodeKey, derpMap: Account.shared.derpMap))
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             say("connected ms=\(ms) bytes=\(data.count)")
             say("connected-head \(String(decoding: data.prefix(400), as: UTF8.self))")

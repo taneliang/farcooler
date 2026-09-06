@@ -264,6 +264,11 @@ AGENTKIT_SOURCES = [
     # had it verbatim; only the device label differs.
     "PushRegistration.swift",
     "RelaySection.swift",
+    # Beside `RelaySection.swift` because it is the same screen and the same
+    # shape of setting: which rendezvous tunneled runners and this phone meet
+    # at. Only in THIS list — the watch speaks HTTPS to the relay and never
+    # dials a tunnel, so it has no rendezvous to choose.
+    "RendezvousSection.swift",
     # The review comment queue, which the phone wrote and the Mac's diff pane
     # now shares. Only in THIS list: it holds unsent notes keyed by workspace,
     # and the watch and the two extensions neither review a diff nor have a
