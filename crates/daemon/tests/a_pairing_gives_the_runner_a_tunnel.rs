@@ -56,7 +56,7 @@ const NODE_B: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE";
 /// The token the fake helper answers `blob` with.
 const TOKEN: &str = "tc-fake-token";
 
-/// Serialises the tests in this binary.
+/// Serializes the tests in this binary.
 ///
 /// Two pieces of process-wide state are in play: `FARCOOLER_TUNNEL_HELPER`,
 /// which says which script a helper is, and `farcooler_tailcat`'s own
@@ -171,7 +171,7 @@ fn pairing(public_key: &str, client_id: &str, node_key: &str) -> ClientEnroll {
 /// One test rather than three because the state under it is process-wide and
 /// each step is only meaningful after the one before: there is no "second
 /// pairing does not replace the tunnel" without a first pairing that started
-/// one. The steps are labelled so a failure says which one broke.
+/// one. The steps are labeled so a failure says which one broke.
 #[tokio::test]
 async fn a_first_pairing_starts_the_tunnel_and_a_second_never_replaces_it() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
