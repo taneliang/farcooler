@@ -27,17 +27,41 @@ struct AgentFailureTests {
         #expect(AgentFailure(rawValue: "adapter-failed") == .adapterFailed)
     }
 
-    /// A word this build does not know reads as no failure, never as a blank
-    /// row.
+    /// A word this build does not know still reports a failure, as the generic
+    /// one.
     ///
-    /// A newer runner inventing a fifth word must leave this app drawing what
-    /// it drew before rather than an empty amber box with nothing in it.
-    @Test func aWordFromTheFutureIsNotAFailureThisAppCanDraw() {
+    /// **This reverses what this test asserted before.** It read a fifth word
+    /// as no failure, defending against "an empty amber box with nothing in
+    /// it" — but that was never the alternative. The alternative is
+    /// `adapterFailed`, whose sentence is exactly "it would not start and
+    /// nobody here knows why", carrying the offer of the terminal with it.
+    ///
+    /// The runner sends this field for one reason: to say a pane gave up. A
+    /// word we cannot read still says that. Answering `nil` restores the
+    /// endless spinner the field exists to end, on the one runner new enough
+    /// to be telling us something. Both phones decided the same way, and three
+    /// platforms disagreeing about a wire word is its own bug.
+    @Test func aWordFromTheFutureIsStillAFailure() {
         #expect(AgentFailure(rawValue: "from-the-future") == nil)
 
         let json = """
             {"id":"t1","short":"t1","title":"Terminal 1","preset":"claude","state":"running",
              "epoch":1,"paneMode":"agent","agentFailure":"from-the-future"}
+            """
+        let terminal = try! JSONDecoder().decode(Terminal.self, from: Data(json.utf8))
+        #expect(terminal.chatFailure == .adapterFailed)
+        #expect(terminal.chatFailure?.sentence == "The agent could not start")
+    }
+
+    /// An empty word is silence, not a failure.
+    ///
+    /// A proto3 string with nothing in it arrives as "" rather than absent, so
+    /// the emptiness has to be read here or every pane on a daemon that sets
+    /// the field unconditionally would draw as failed.
+    @Test func anEmptyWordIsNotAFailure() {
+        let json = """
+            {"id":"t1","short":"t1","title":"Terminal 1","preset":"claude","state":"running",
+             "epoch":1,"paneMode":"agent","agentFailure":""}
             """
         let terminal = try! JSONDecoder().decode(Terminal.self, from: Data(json.utf8))
         #expect(terminal.chatFailure == nil)

@@ -360,10 +360,25 @@ struct Terminal: Decodable, Identifiable, Hashable {
 
     /// Why this chat has no agent in it, if it has none.
     ///
-    /// A word this app does not recognize reads as no failure at all rather
-    /// than as an unexplained one: a newer runner inventing a fifth word must
-    /// leave this app drawing the spinner it drew before, not a blank row.
-    var chatFailure: AgentFailure? { agentFailure.flatMap(AgentFailure.init(rawValue:)) }
+    /// **A word this app does not recognize reads as `adapterFailed`, not as
+    /// silence.** The runner sends this field for one reason — to say a pane
+    /// gave up — so a fifth word still means it gave up; only the reason is
+    /// unknown, and `adapterFailed` is exactly "it would not start and nobody
+    /// here knows why". Reading it as no failure would restore the endless
+    /// spinner this field exists to end, on the one runner new enough to be
+    /// telling us something.
+    ///
+    /// This reverses an earlier reading which argued a fifth word must leave
+    /// the spinner rather than draw "a blank row". The alternative was never a
+    /// blank row: it is the generic sentence, which is honest and carries the
+    /// offer of the terminal. Both phones decided the same way.
+    ///
+    /// Absent — and empty, which is what a proto3 string with nothing in it
+    /// arrives as — still means nothing has said this pane failed.
+    var chatFailure: AgentFailure? {
+        guard let word = agentFailure, !word.isEmpty else { return nil }
+        return AgentFailure(rawValue: word) ?? .adapterFailed
+    }
 
     /// Whether this pane is this worktree's diff.
     ///
