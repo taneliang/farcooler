@@ -193,6 +193,12 @@ AGENTKIT_SOURCES = [
     "AnswerPermissionIntent.swift",
     "GlancePermissions.swift",
     "Composer.swift",
+    # What is typed into a pane and not sent yet, kept across the pane going
+    # away. In AgentKit rather than beside `AgentView` for `ShellNavigation`'s
+    # reason — the iOS target has no unit tests, only UI tests, and both bounds
+    # on this file's growth are rules with no screen in them. Not in the watch
+    # or extension lists: none of them has a composer. See `PaneDraftTests`.
+    "PaneDrafts.swift",
     # The shapes the FFI sends, which this app used to call `Model.swift` and
     # keep in `SOURCES`. Only in THIS list, and that is the point of the move
     # rather than a detail of it: everything in the file is `internal`, so the

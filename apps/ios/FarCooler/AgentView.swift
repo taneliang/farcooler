@@ -597,6 +597,7 @@ struct AgentView: View {
                     hasAgent: hasAgent,
                     availableCommands: transcript.availableCommands,
                     workspaceID: workspaceID,
+                    paneID: terminalID,
                     core: connection.core,
                     onSend: { text, images in
                         Task { await stream.send(text, images: images) }
@@ -2194,6 +2195,12 @@ private struct AgentComposer: View {
     let hasAgent: Bool
     let availableCommands: [AgentChoice]
     let workspaceID: String?
+    /// Which pane this composer is for, so what is typed into it can be
+    /// written down under that pane and read back by the same one.
+    ///
+    /// The terminal's id, which is the same key `PaneDraftStore` is keyed by
+    /// and the same one `AgentStream` subscribes with. See `PaneDraft`.
+    let paneID: String
     let core: ClientCore
     let onSend: (String, [(mime: String, data: Data)]) -> Void
     let onSetMode: (String) -> Void
@@ -2382,6 +2389,32 @@ private struct AgentComposer: View {
         .padding(.bottom, PaneMetrics.step)
         .onChange(of: text) { _, _ in scheduleMentionSearch() }
         .onChange(of: cursor) { _, _ in scheduleMentionSearch() }
+        // The draft, read on the way in and written as it is typed.
+        //
+        // `.task(id:)` rather than `.onAppear`, so a composer whose pane
+        // changes underneath it — the hosting controller in `DockedBar` keeps
+        // ONE SwiftUI graph and re-assigns its root view, so this is a live
+        // possibility rather than a theoretical one — reads the new pane's
+        // draft instead of keeping the old pane's words in the field.
+        //
+        // Only into an EMPTY field. A restore that overwrote what somebody is
+        // currently typing would be the loss this exists to prevent, wearing
+        // the other hat.
+        .task(id: paneID) {
+            guard text.isEmpty, let saved = PaneDraftStore.draft(forPane: paneID) else { return }
+            text = saved
+            cursor = saved.count
+        }
+        // Every keystroke, and deliberately not on a timer.
+        //
+        // What this has to survive is the app being suspended and killed while
+        // it is in the background, which arrives with no warning a debounce
+        // could beat. `UserDefaults` writes to an in-memory store and flushes
+        // on its own schedule, so the cost of saying it every time is an
+        // encode of a small dictionary, not a disk write per character.
+        .onChange(of: text) { _, latest in
+            PaneDraftStore.record(latest, forPane: paneID)
+        }
     }
 
     // MARK: Field
