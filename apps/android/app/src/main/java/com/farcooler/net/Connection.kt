@@ -1170,6 +1170,32 @@ class Connection(
     }
 
     /**
+     * Put this runner's workspaces in this order, first on screen first.
+     *
+     * The whole visible order rather than "move this one up". The fleet list has
+     * already dropped every hidden worktree, so an index means nothing without
+     * saying what it is an index among — the runner permutes exactly the cards
+     * named here through the ranks they already hold and leaves everything else
+     * where it was.
+     *
+     * Built by hand rather than through `args`, which turns a list into its
+     * `toString()` — `[a, b]` as one string, which the runner reads as one
+     * malformed id rather than as two.
+     *
+     * Followed by a refresh, like every other mutation here: the local list is
+     * never rearranged optimistically. The runner decides, and a card that moved
+     * on screen and not on disk is the failure this whole feature removes.
+     */
+    suspend fun reorderWorkspaces(ordered: List<String>) {
+        if (ordered.size < 2) return
+        val payload = JsonObject(
+            mapOf("workspaces" to JsonArray(ordered.map { JsonPrimitive(it) }))
+        )
+        attempt { core.call("workspace.reorder", payload) }
+        refresh()
+    }
+
+    /**
      * What asking to remove a worktree came back with.
      *
      * The same three-way distinction the Mac's `RemoveWorktreeResult` and iOS's

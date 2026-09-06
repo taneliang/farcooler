@@ -1,6 +1,8 @@
 package com.farcooler.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -49,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,6 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Reach
 import com.farcooler.model.AgentActivity
 import com.farcooler.model.GlanceMarkSize
+import com.farcooler.model.WorkspaceOrder
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
@@ -212,7 +217,51 @@ private fun FleetBody(
     val visible = entries.filter { showHidden || !it.workspace.isHidden }
     val hiddenCount = entries.count { it.workspace.isHidden }
 
-    LazyColumn(modifier = modifier, contentPadding = contentPadding) {
+    // The list's own state, because a drag has to ask where things ARE. Nothing
+    // else on this screen needed it — `rememberLazyListState` saves the scroll
+    // position either way.
+    val listState = rememberLazyListState()
+    // The card being held, by list key, and where letting go would put it.
+    // Deliberately not `rememberSaveable`: a drag interrupted by a process death
+    // is a drag that did not happen.
+    var lifted by remember { mutableStateOf<String?>(null) }
+    var landing by remember { mutableStateOf<WorkspaceOrder.Landing?>(null) }
+
+    fun keyOf(entry: FleetEntry) = "${entry.host.id}/${entry.workspace.id}"
+
+    // Only cards on the SAME runner take part in a drag. Each runner keeps its
+    // own order in its own database, so a card cannot move into another
+    // runner's stretch of this list — and a finger that wanders into one must
+    // not be read as asking for that. Clamping to this runner's own cards is
+    // what turns such a wander into "the end of my own stretch", which is
+    // almost always what was meant.
+    fun spans(hostId: String): List<WorkspaceOrder.Card> {
+        val mine = visible.filter { it.host.id == hostId }.map(::keyOf).toSet()
+        val laid = listState.layoutInfo.visibleItemsInfo.map {
+            WorkspaceOrder.Laid(it.key.toString(), it.offset, it.size)
+        }
+        return WorkspaceOrder.cards(laid, mine)
+    }
+
+    // Let go: work out the runner's new order and send it, or send nothing.
+    fun commitDrag() {
+        val dragged = lifted
+        val landed = landing
+        lifted = null
+        landing = null
+        if (dragged == null || landed == null) return
+        val entry = visible.firstOrNull { keyOf(it) == dragged } ?: return
+        val group = visible.filter { it.host.id == entry.host.id }
+        val order = group.map(::keyOf)
+        val next = WorkspaceOrder.moved(order, dragged, landed.target, landed.edge)
+        // A drop that changes nothing costs no round trip. It is not free: a
+        // reorder makes every other client of that runner re-read the fleet.
+        if (next == order) return
+        val ids = next.mapNotNull { key -> group.firstOrNull { keyOf(it) == key }?.workspace?.id }
+        scope.launch { entry.connection.reorderWorkspaces(ids) }
+    }
+
+    LazyColumn(state = listState, modifier = modifier, contentPadding = contentPadding) {
         item {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -277,6 +326,37 @@ private fun FleetBody(
                 WorkspaceHeader(
                     entry = entry,
                     showRunner = namesRunners,
+                    drag = HeaderDrag(
+                        key = keyOf(entry),
+                        // Offered only where the runner keeps an order. A daemon
+                        // that predates `workspace.reorder` sends no `ordinal`,
+                        // and a drag against one would rearrange the screen and
+                        // put it all back on the next refresh with nothing
+                        // failing anywhere.
+                        enabled = entry.workspace.ordinal != null,
+                        lifted = lifted == keyOf(entry),
+                        edge = landing?.takeIf { it.target == keyOf(entry) }?.edge,
+                        onStart = {
+                            lifted = keyOf(entry)
+                            landing = null
+                        },
+                        // The finger's position arrives relative to this card;
+                        // where the cards are is in the list's coordinates. This
+                        // card's own laid-out offset is what joins the two.
+                        onMove = { y ->
+                            val me = listState.layoutInfo.visibleItemsInfo
+                                .firstOrNull { it.key == keyOf(entry) }
+                            if (me != null) {
+                                landing = WorkspaceOrder.landing(
+                                    spans(entry.host.id), me.offset + y.toInt())
+                            }
+                        },
+                        onEnd = { commitDrag() },
+                        onCancel = {
+                            lifted = null
+                            landing = null
+                        },
+                    ),
                     onHide = { hidden ->
                         scope.launch { entry.connection.setHidden(entry.workspace, hidden) }
                     },
@@ -663,16 +743,66 @@ private fun failureDetail(
     else -> message
 }
 
+/**
+ * Everything a workspace header needs to be draggable, in one argument.
+ *
+ * One parameter rather than seven, because this header already carries five and
+ * a call site with a dozen positional lambdas is where the wrong one gets passed
+ * without the compiler noticing — every one of these is `() -> Unit`.
+ */
+private class HeaderDrag(
+    val key: String,
+    val enabled: Boolean,
+    val lifted: Boolean,
+    /** The edge to draw an insertion line on, or null if this is not the target. */
+    val edge: WorkspaceOrder.Edge?,
+    val onStart: () -> Unit,
+    /** The finger, in this card's own coordinates. */
+    val onMove: (Float) -> Unit,
+    val onEnd: () -> Unit,
+    val onCancel: () -> Unit,
+)
+
 @Composable
 private fun WorkspaceHeader(
     entry: FleetEntry,
     showRunner: Boolean,
+    drag: HeaderDrag,
     onHide: (Boolean) -> Unit,
     onNewTerminal: () -> Unit,
     onStack: () -> Unit,
     onRemove: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            // After a long press, not on touch. A short drag on this list is a
+            // scroll, and it has to stay one: taking the gesture immediately
+            // would make a fleet of twenty worktrees unscrollable from the one
+            // place a thumb naturally lands.
+            .then(
+                if (!drag.enabled) Modifier
+                else Modifier.pointerInput(drag.key) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { drag.onStart() },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            drag.onMove(change.position.y)
+                        },
+                        onDragEnd = { drag.onEnd() },
+                        onDragCancel = { drag.onCancel() },
+                    )
+                }
+            )
+            // Held. The card being dragged has to be visible as the one that
+            // moved, or a list where two rows look alike gives no feedback at
+            // all about what is in the air.
+            .background(
+                if (drag.lifted) MaterialTheme.colorScheme.surfaceVariant
+                else androidx.compose.ui.graphics.Color.Transparent
+            )
+    ) {
     Row(
         Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -752,6 +882,28 @@ private fun WorkspaceHeader(
                     )
                 }
             }
+        }
+    }
+
+        // Where letting go would put the card, drawn on the edge it would
+        // insert at. A line rather than a highlighted card: the question is
+        // which GAP the card goes into, and a lit card says "on top of this
+        // one", which is a thing this gesture cannot do.
+        //
+        // An overlay rather than a sibling above or below the row, so appearing
+        // does not change the card's height — a list that resizes under a finger
+        // moves the very targets being aimed at.
+        if (drag.edge != null) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .align(
+                        if (drag.edge == WorkspaceOrder.Edge.ABOVE) Alignment.TopCenter
+                        else Alignment.BottomCenter
+                    )
+                    .background(MaterialTheme.colorScheme.primary)
+            )
         }
     }
 }

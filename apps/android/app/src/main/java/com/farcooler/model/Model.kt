@@ -55,6 +55,19 @@ data class Workspace(
      * rather than fixed, because iOS is not this agent's to edit.
      */
     val isMainCheckout: Boolean = false,
+    /**
+     * Where this card sits on its runner, as the runner has it stored.
+     *
+     * Not read to sort with. The list already arrives in this order and this app
+     * renders what it is handed, the same as every other derived value here.
+     * What it IS for is the drag: a card needs to know its runner keeps an order
+     * at all, and a runner too old to store one sends nothing — which is null
+     * here rather than a plausible 0.
+     *
+     * Nullable and defaulted, by the rule this file states above: one missing
+     * field must never fail the decode of the whole fleet.
+     */
+    val ordinal: Int? = null,
     val terminals: List<Terminal> = emptyList(),
 ) {
     /**

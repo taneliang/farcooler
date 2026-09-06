@@ -43,6 +43,7 @@ class FleetDecodeTest {
               "worktree": "/Users/e/src/overnight-widen",
               "state": "worktree_missing",
               "isMainCheckout": true,
+              "ordinal": 3,
               "terminals": [
                 {
                   "id": "aab3238922bcc25a6f606eb525ffdc56",
@@ -127,6 +128,10 @@ class FleetDecodeTest {
         // matches the CLI; iOS took the Mac's property name onto this payload
         // and decodes nothing.
         assertTrue(w.isMainCheckout)
+        // Where this card sits on its runner. Absent from a daemon too old to
+        // store an order, which is why it is nullable — and why the drag is
+        // only offered when the runner says it keeps one.
+        assertEquals(3, w.ordinal)
         assertTrue(w.worktreeMissing)
         assertFalse(w.isHidden)
     }
@@ -142,8 +147,12 @@ class FleetDecodeTest {
                "terminals":[{"id":"t1","short":"t1","title":"","preset":"zsh",
                              "state":"running","epoch":1}]}]}
         """.trimIndent()
-        val t = json.decodeFromString(Fleet.serializer(), old)
-            .workspaces.first().terminals.first()
+        val w = json.decodeFromString(Fleet.serializer(), old).workspaces.first()
+        // A runner too old to keep an order says nothing rather than 0, which is
+        // what lets the fleet screen offer no drag instead of offering one that
+        // silently springs back on the next refresh.
+        assertNull(w.ordinal)
+        val t = w.terminals.first()
         assertNull(t.rank)
         assertNull(t.feed)
         assertNull(t.said)
