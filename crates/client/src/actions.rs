@@ -83,6 +83,36 @@ where
     call(client, "workspace.unhide", workspace, None).await.map(|_| ())
 }
 
+/// Put the workspaces in this order, first on screen first.
+///
+/// No target resource id, unlike every other workspace action here: the subject
+/// is a LIST rather than one row, and naming one of them as the target would
+/// make the request look like it was about that card.
+///
+/// Guarded by `capability::WORKSPACE_ORDER` at the call site rather than here.
+/// A runner too old to store a rank refuses this with
+/// `CAPABILITY_UNSUPPORTED`, which is a refusal a client can act on — but the
+/// client should not have offered the drag in the first place.
+pub async fn reorder_workspaces<R, W>(
+    client: &mut Client<R, W>,
+    ordered: &[Uuid],
+) -> Result<(), ClientError>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    let payload = request::Payload::WorkspaceReorder(farcooler_protocol::v1::WorkspaceReorder {
+        workspace_ids: ordered
+            .iter()
+            .map(|id| bytes::Bytes::copy_from_slice(id.as_bytes()))
+            .collect(),
+    });
+    let mut request = farcooler_transport::request("workspace.reorder");
+    request.payload = Some(payload);
+    client.call(request).await?;
+    Ok(())
+}
+
 /// Remove a worktree. `confirm` must be the workspace's exact task name,
 /// unless the worktree is clean, in which case it may be empty.
 ///

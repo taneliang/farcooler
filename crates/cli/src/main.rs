@@ -495,6 +495,19 @@ enum WorkspaceCmd {
     Branches {
         repo: String,
     },
+    /// Put the worktrees in this order: every workspace the list you are
+    /// looking at shows, the first one first.
+    ///
+    /// The whole visible order rather than "move this one up". A list is
+    /// usually filtered — hidden worktrees are out, and the Mac's sidebar
+    /// draws one project at a time — so a position only means something
+    /// alongside what it is a position among. Anything not named keeps the
+    /// place it had.
+    Reorder {
+        /// Workspace ids or short ids, in the order you want them.
+        #[arg(required = true)]
+        workspaces: Vec<String>,
+    },
     /// Take a worktree out of the main list. Never changes git data.
     Hide { workspace: String },
     /// Bring a hidden worktree back.
@@ -1614,6 +1627,17 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
                             "worktree": w.worktree_path,
                             "state": workspace_label(w.state()),
                             "is_main_checkout": w.is_main_checkout,
+                            // Where this card sits on its runner. The list is
+                            // already in this order, so a client that draws
+                            // what it is handed needs nothing here; a client
+                            // that MERGES several runners into one fleet needs
+                            // it to keep each runner's stretch in order, and
+                            // every client needs it to send an order back.
+                            //
+                            // 0 for every workspace against a runner too old to
+                            // store a rank, so a client tie-breaks rather than
+                            // trusting it alone.
+                            "ordinal": w.ordinal,
                             "terminals": terminals.iter()
                                 .filter(|t| t.workspace_id == w.id)
                                 .map(workspace_list_terminal_json)
@@ -1727,6 +1751,24 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
             println!("adopted {}  {}", short_bytes(&ws.id), ws.branch);
             if let Some(path) = &ws.worktree_path {
                 println!("  worktree {path}");
+            }
+        }
+
+        WorkspaceCmd::Reorder { workspaces } => {
+            let all = list_workspaces(&mut link).await?;
+            // Resolved to full ids here rather than sent as typed, so a short
+            // id that matches nothing fails naming the argument the user got
+            // wrong instead of arriving at the daemon as a bad uuid.
+            let mut ordered = Vec::with_capacity(workspaces.len());
+            for name in &workspaces {
+                let ws = resolve(&all, name, |w| &w.id, "workspace")?;
+                ordered.push(uuid_of(&ws.id));
+            }
+            farcooler_client::actions::reorder_workspaces(link.client_mut(), &ordered).await?;
+            if json {
+                println!("{}", serde_json::json!({ "ok": true }));
+            } else {
+                println!("reordered {} worktrees", ordered.len());
             }
         }
 

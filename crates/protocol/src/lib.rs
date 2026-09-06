@@ -283,6 +283,20 @@ pub mod capability {
     /// Absent means the runner has no tunnel to be admitted to, so the client
     /// keeps reaching it by address exactly as it always did.
     pub const TUNNEL: &str = "tunnel";
+    /// Dragging workspaces into an order and having the runner keep it:
+    /// `workspace.reorder`, and the `Workspace.ordinal` that comes back.
+    ///
+    /// Its own capability rather than part of `WORKSPACES`, for the reason
+    /// `WATCHING`, `TERMINAL_STREAM` and `TUNNEL` above are their own — and
+    /// here the silence it prevents is the quietest of the four. `workspaces`
+    /// is the floor: every daemon that has ever existed advertises it, and none
+    /// before this one stores a rank. A client that folded this in would draw
+    /// drag handles against an older runner, let somebody rearrange their
+    /// sidebar, and put it all back on the next refresh with no error anywhere.
+    ///
+    /// Absent means the runner has no order to keep, so a client leaves the
+    /// list where the daemon put it and offers no handles.
+    pub const WORKSPACE_ORDER: &str = "workspace_order";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -291,7 +305,7 @@ pub mod capability {
     pub const ALL: &[&str] =
         &[
             WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
-            ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL,
+            ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKSPACE_ORDER,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -351,6 +365,7 @@ pub mod capability {
             "theme.list" | "theme.upsert" | "theme.delete" | "settings.set_branch_prefix" => THEMES,
             "client.list" | "client.enroll" | "client.revoke" => ENROLLMENT,
             "client.set_node_key" => TUNNEL,
+            "workspace.reorder" => WORKSPACE_ORDER,
             "terminal.watching" => WATCHING,
             "terminal.attach" => TERMINAL_STREAM,
             _ => return None,
@@ -458,6 +473,7 @@ mod tests {
             "client.enroll",
             "client.set_node_key",
             "terminal.attach",
+            "workspace.reorder",
         ] {
             let cap = capability::for_method(method).expect("a known method");
             assert!(capability::ALL.contains(&cap), "{method} names {cap}, which is not advertised");

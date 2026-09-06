@@ -94,6 +94,7 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   workspace.create       {repository, task, branch, base?}
  *   workspace.hide         {workspace}
  *   workspace.unhide       {workspace}
+ *   workspace.reorder      {workspaces: ["<uuid>", ...]}
  *   workspace.remove_worktree  {workspace, confirm}
  *                          -> {"ok": true} | {"confirmationRequired": true}
  *   repository_root.list   {}

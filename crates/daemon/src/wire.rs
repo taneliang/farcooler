@@ -175,6 +175,10 @@ pub fn workspace(view: &WorkspaceView, scope: Scope) -> wire::Workspace {
         worktree_path: admin(scope).then(|| ws.worktree_path.clone()),
         state: view.state as i32,
         is_main_checkout: ws.is_main_checkout,
+        // The list already comes back in this order. Sent anyway, because a
+        // client applying `workspace_changed` as a delta holds one workspace
+        // and no list to infer a position from.
+        ordinal: ws.ordinal,
     }
 }
 

@@ -1720,6 +1720,27 @@ async fn dispatch(
             Ok(json!({}))
         }
 
+        // The whole visible order, not "move this one to index N". The client
+        // sends the sequence of cards it is drawing; the runner permutes them
+        // among the ranks they already hold and leaves everything the client
+        // could not see exactly where it was.
+        //
+        // An id that is not a uuid fails the call rather than being dropped.
+        // Dropping one would send a SHORTER list than the screen shows, and the
+        // runner would faithfully reorder the rest around a card the client
+        // still believes it moved.
+        "workspace.reorder" => {
+            let raw = strings("workspaces");
+            let mut ordered = Vec::with_capacity(raw.len());
+            for s in &raw {
+                ordered.push(s.parse::<uuid::Uuid>().map_err(|_| {
+                    SessionError::Protocol(format!("{method} was given something that is not a workspace id"))
+                })?);
+            }
+            session.reorder_workspaces(&ordered).await?;
+            Ok(json!({}))
+        }
+
         "workspace.remove_worktree" => {
             use crate::actions::RemoveWorktreeOutcome;
             match session

@@ -287,6 +287,10 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "workspace.create"
         | "workspace.hide"
         | "workspace.unhide"
+        // Dragging a card is a preference about a list, the same weight as
+        // hiding one. It writes no git data and reveals no path, so it sits
+        // where hide and unhide sit rather than behind `host_admin`.
+        | "workspace.reorder"
         | "terminal.create"
         | "terminal.resize"
         | "terminal.stop"
@@ -1153,6 +1157,31 @@ impl Rpc {
                 self.watcher.announce_fleet_changed();
                 let view = svc.workspace_view(&ws).await?;
                 Ok(result::Value::Workspace(wire::workspace(&view, scope)))
+            }
+
+            "workspace.reorder" => {
+                let Some(request::Payload::WorkspaceReorder(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let mut ids = Vec::with_capacity(p.workspace_ids.len());
+                for raw in &p.workspace_ids {
+                    // A client that sent something that is not a uuid is
+                    // refused whole. Skipping the bad one would silently
+                    // reorder around it and hand back a layout nobody asked
+                    // for, which is worse than an error a client can retry.
+                    ids.push(wire::parse_id(raw).ok_or(DomainError::InvalidArgument {
+                        what: "workspace_ids",
+                    })?);
+                }
+                svc.reorder_workspaces(&ids).await?;
+                // Reordering never touches git, so the reconciler's mtime gate
+                // never sees it — the same reasoning `workspace.hide` gives.
+                // Without this announce, every OTHER connected client keeps
+                // drawing the old order until the next backstop pass, which is
+                // five minutes of a phone and a Mac disagreeing about where a
+                // card is.
+                self.watcher.announce_fleet_changed();
+                Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
             }
 
             "workspace.unhide" => {
@@ -2095,6 +2124,7 @@ mod tests {
             "workspace.create",
             "workspace.hide",
             "workspace.unhide",
+            "workspace.reorder",
             "terminal.seen",
             "terminal.watching",
             "terminal.remove",

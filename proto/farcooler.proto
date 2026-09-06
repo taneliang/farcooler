@@ -162,6 +162,7 @@ message Request {
     ClientRevoke client_revoke = 67;
     TerminalsWatched terminals_watched = 68;
     ClientSetNodeKey client_set_node_key = 69;
+    WorkspaceReorder workspace_reorder = 70;
   }
 }
 
@@ -698,6 +699,22 @@ message Workspace {
   // linked worktree in a directory called `main` would defeat — and what
   // it guards is whether a client offers to delete the directory you work in.
   bool is_main_checkout = 9;
+  // Where this workspace sits in the list, ranked across the whole runner.
+  //
+  // The list already arrives in this order, so a client that renders what it
+  // is given needs nothing here. It is on the wire for the client that does
+  // not: `workspace_changed` carries one workspace, and applying that as a
+  // delta means knowing where the row goes without re-reading the fleet.
+  //
+  // Decided at creation — a new workspace takes the end — and after that only
+  // by `workspace.reorder`. Never by activity, attention or recency: a card
+  // that moves on its own is a card nobody can reach for without reading the
+  // whole list again.
+  //
+  // A daemon that predates this sends nothing, which decodes as 0 for every
+  // workspace. That is why a client must tie-break rather than trust it alone,
+  // and why `workspace_order` is a capability it can ask about first.
+  uint32 ordinal = 10;
 }
 
 message WorkspaceList { repeated Workspace items = 1; }
@@ -1217,6 +1234,24 @@ message RepositoryRootAdd {
 }
 
 message RepositoryRegister { string relative_path = 1; }
+
+// The order somebody dragged these workspaces into.
+//
+// The whole visible order, not a "move this one to index N". A client draws a
+// list it has already filtered — hidden worktrees are out, and a grouped
+// sidebar sends one group — so an index means nothing without saying what it
+// is an index into. Sending the sequence says exactly what is on screen, and
+// the runner permutes those cards among the ranks they already hold; anything
+// not named keeps the rank it had.
+//
+// Idempotent: sending the order a runner is already in changes nothing, which
+// is what makes a retry after a dropped connection safe.
+message WorkspaceReorder {
+  // Every workspace in the list being reordered, first on screen first. Ids
+  // rather than ordinals, because the client is naming cards it can see and
+  // has no business inventing rank numbers.
+  repeated bytes workspace_ids = 1;
+}
 
 message WorkspaceCreate {
   string task_name = 1;

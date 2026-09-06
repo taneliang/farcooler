@@ -202,6 +202,15 @@ async fn terminals(
     list.items
 }
 
+/// Every workspace the daemon knows about, in the order it lists them.
+async fn workspaces(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+) -> Vec<farcooler_protocol::v1::Workspace> {
+    let result = client.call(request("workspace.list")).await.expect("workspace.list");
+    let Some(result::Value::WorkspaceList(list)) = result.value else { panic!("wrong result") };
+    list.items
+}
+
 /// Create a workspace, asking for `preset` in its opening terminal.
 async fn create_workspace(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
@@ -224,6 +233,113 @@ async fn create_workspace(
     let result = client.call(create).await.expect("workspace.create");
     let Some(result::Value::Workspace(ws)) = result.value else { panic!("wrong result") };
     ws
+}
+
+/// The order the daemon lists workspaces in is the order the user put them in,
+/// it comes back over the wire, and it does not move on its own.
+///
+/// Over the socket rather than against the store, because what is being
+/// guarded is the whole path: the query, the `ordinal` on the wire message, the
+/// dispatch arm, and the announce that tells everybody else. Any one of those
+/// missing leaves a drag that works until the next refresh.
+#[tokio::test]
+async fn workspaces_come_back_in_the_order_somebody_dragged_them_into() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository) = registered_repository(&mut client).await;
+
+    // Created out of alphabetical order on purpose. Anything that fell back to
+    // sorting by name — or to whatever the query plan yielded — would not
+    // produce this sequence.
+    let zebra =
+        create_workspace(&mut client, repository.clone(), "zebra", "feat/zebra", "").await;
+    let apple =
+        create_workspace(&mut client, repository.clone(), "apple", "feat/apple", "").await;
+    let mango = create_workspace(&mut client, repository, "mango", "feat/mango", "").await;
+
+    let items = workspaces(&mut client).await;
+    // The repository's own checkout is adopted by registration, so it is here
+    // too; the three created after it follow in creation order.
+    let names: Vec<_> = items.iter().map(|w| w.task_name.clone()).collect();
+    let created: Vec<_> =
+        names.iter().filter(|n| ["zebra", "apple", "mango"].contains(&n.as_str())).collect();
+    assert_eq!(created, ["zebra", "apple", "mango"], "a new workspace lands at the end");
+
+    // Ranks are on the wire, distinct, and ascending down the list.
+    let ranks: Vec<u32> = items.iter().map(|w| w.ordinal).collect();
+    assert!(
+        ranks.windows(2).all(|w| w[0] < w[1]),
+        "every card has its own rank and the list is in it: {ranks:?}"
+    );
+
+    // Drag: mango to the front of the three, zebra to the back.
+    let mut reorder = request("workspace.reorder");
+    reorder.payload = Some(request::Payload::WorkspaceReorder(
+        farcooler_protocol::v1::WorkspaceReorder {
+            workspace_ids: vec![mango.id.clone(), apple.id.clone(), zebra.id.clone()],
+        },
+    ));
+    let mut events = h.watcher.subscribe();
+    client.call(reorder).await.expect("workspace.reorder");
+
+    let names: Vec<_> = workspaces(&mut client)
+        .await
+        .into_iter()
+        .map(|w| w.task_name)
+        .filter(|n| ["zebra", "apple", "mango"].contains(&n.as_str()))
+        .collect();
+    assert_eq!(names, ["mango", "apple", "zebra"], "the runner kept the order it was given");
+
+    // And said so, which is the half a client cannot see in its own reply:
+    // without this every OTHER connected client draws the old order until the
+    // reconciler's next backstop pass, five minutes later.
+    let announced = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let event = events.recv().await.expect("the watcher is alive");
+            if matches!(
+                event.payload,
+                Some(farcooler_protocol::v1::event::Payload::FleetChanged(_))
+            ) {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(announced.is_ok(), "a reorder nobody is told about is a reorder only one client has");
+}
+
+/// Nonsense is refused with a code a client can act on, and nothing moves.
+#[tokio::test]
+async fn a_reorder_naming_something_that_is_not_a_workspace_is_refused_whole() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository) = registered_repository(&mut client).await;
+
+    let one = create_workspace(&mut client, repository.clone(), "one", "feat/one", "").await;
+    let two = create_workspace(&mut client, repository, "two", "feat/two", "").await;
+
+    let mut reorder = request("workspace.reorder");
+    reorder.payload = Some(request::Payload::WorkspaceReorder(
+        farcooler_protocol::v1::WorkspaceReorder {
+            workspace_ids: vec![
+                two.id.clone(),
+                one.id.clone(),
+                bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
+            ],
+        },
+    ));
+    match client.call(reorder).await {
+        Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::NotFound as i32),
+        other => panic!("expected NOT_FOUND, got {other:?}"),
+    }
+
+    let names: Vec<_> = workspaces(&mut client)
+        .await
+        .into_iter()
+        .map(|w| w.task_name)
+        .filter(|n| ["one", "two"].contains(&n.as_str()))
+        .collect();
+    assert_eq!(names, ["one", "two"], "half a reorder is a layout nobody chose");
 }
 
 #[tokio::test]

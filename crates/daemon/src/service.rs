@@ -964,6 +964,21 @@ impl Service {
         self.store.list_workspaces_in_order()
     }
 
+    /// Put these workspaces in this order, and keep it.
+    ///
+    /// The client sends the list it is drawing, first on screen first, and the
+    /// store permutes those cards among the ranks they already hold. Nothing
+    /// derived from the work is consulted here or anywhere below: the position
+    /// of a card is the user's answer and only the user's, which is what makes
+    /// reaching for one without reading the list possible.
+    ///
+    /// Not serialized per repository the way creation is. A reorder writes only
+    /// this table, in one transaction, and it never runs git — so there is no
+    /// worktree operation for it to race.
+    pub async fn reorder_workspaces(&self, ordered: &[Uuid]) -> Result<()> {
+        self.store.reorder_workspaces(ordered)
+    }
+
     /// Take a workspace out of the main list. Never changes git data.
     ///
     /// Deliberately unconditional. Its predecessor refused while a managed

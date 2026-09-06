@@ -663,6 +663,17 @@ impl Session {
                     // entirely rather than relying only on the daemon's own
                     // refusal, same reasoning macOS's sidebar already uses.
                     "isMainCheckout": w.is_main_checkout,
+                    // Where this card sits, so a client can put a workspace it
+                    // learned about from an event in the right place without
+                    // re-reading the whole fleet, and can send the order back
+                    // when somebody drags one.
+                    //
+                    // A runner too old to have a rank sends none, and prost
+                    // decodes that as 0 for every workspace — so a client must
+                    // tie-break on something of its own rather than trust this
+                    // alone. `workspace_order` in `daemon.version` is how it
+                    // tells the two apart.
+                    "ordinal": w.ordinal,
                     "terminals": terminals.iter()
                         .filter(|t| t.workspace_id == w.id)
                         .map(|t| json!({
@@ -891,6 +902,11 @@ impl Session {
 
     pub async fn unhide_workspace(&mut self, workspace: Uuid) -> Result<(), SessionError> {
         Ok(crate::actions::unhide_workspace(&mut self.client, workspace).await?)
+    }
+
+    /// Put the workspaces in this order, first on screen first.
+    pub async fn reorder_workspaces(&mut self, ordered: &[Uuid]) -> Result<(), SessionError> {
+        Ok(crate::actions::reorder_workspaces(&mut self.client, ordered).await?)
     }
 
     /// Remove a worktree, or find out it needs the task name typed first —

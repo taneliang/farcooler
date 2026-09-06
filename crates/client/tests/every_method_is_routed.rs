@@ -20,9 +20,32 @@ const FFI: &str = include_str!("../src/ffi.rs");
 /// only that an app can ask.
 const ENROLLMENT: [&str; 3] = ["client.list", "client.enroll", "client.revoke"];
 
+/// The workspace methods, for the same reason. `workspace.reorder` is the one
+/// this list was extended for: it is the ONLY way a phone can save an order
+/// somebody dragged, and an unrouted arm would leave the drag working on screen
+/// and forgotten on the next refresh — no error, nothing in a log, and the
+/// runner perfectly capable of storing it the whole time.
+const WORKSPACES: [&str; 5] = [
+    "workspace.create",
+    "workspace.hide",
+    "workspace.unhide",
+    "workspace.reorder",
+    "workspace.remove_worktree",
+];
+
 #[test]
 fn every_enrollment_method_the_daemon_serves_can_be_called() {
     for method in ENROLLMENT {
+        assert!(
+            FFI.contains(&format!("\"{method}\" =>")),
+            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
+        );
+    }
+}
+
+#[test]
+fn every_workspace_method_the_daemon_serves_can_be_called() {
+    for method in WORKSPACES {
         assert!(
             FFI.contains(&format!("\"{method}\" =>")),
             "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
@@ -36,7 +59,7 @@ fn every_enrollment_method_the_daemon_serves_can_be_called() {
 #[test]
 fn the_header_tells_an_app_developer_these_exist() {
     const HEADER: &str = include_str!("../include/farcooler_client.h");
-    for method in ENROLLMENT {
+    for method in ENROLLMENT.iter().chain(WORKSPACES.iter()).copied() {
         assert!(
             HEADER.contains(method),
             "{method} is routed but undocumented: nobody will find it"
