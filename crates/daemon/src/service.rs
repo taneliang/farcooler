@@ -1566,6 +1566,27 @@ impl Service {
         )?;
         let term = self.mark_changes_pane(term, command_preset)?;
 
+        // The same declaration `create_terminal` makes a few hundred lines up,
+        // and for the same reason — a claude pane made by splitting is a
+        // claude pane. This line was simply missing: `term` comes straight
+        // from `store.create_terminal`, so `agent_session_id` was always
+        // `None` here and the `--session-id` this reads was never once
+        // written. A pane created that way had no conversation of its own on
+        // record, so a restart had nothing to reopen and switching it to a
+        // chat had to fall back to guessing from disk. Splitting is how a pane
+        // joins a layout, which is how most panes on a runner are made.
+        let declared = command_preset.starts_with("claude").then(|| Uuid::now_v7().to_string());
+        let term = if let Some(ref sid) = declared {
+            self.store.set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Terminal,
+                Some(sid.clone()),
+            )?
+        } else {
+            term
+        };
+
         let command = preset_command(command_preset, term.agent_session_id.as_deref());
         let created = self
             .tmux
@@ -2747,6 +2768,45 @@ mod restart_wiring_tests {
         );
         assert!(!command.contains(&sid), "the id belongs to a resume or to nothing: {command}");
         assert!(command.contains("claude"), "and it is still claude in the pane: {command}");
+    }
+
+    #[tokio::test]
+    async fn a_claude_pane_made_by_splitting_has_a_conversation_of_its_own() {
+        // Splitting is how a pane joins a layout, which is how most panes on a
+        // runner are made — and `split_terminal` read `agent_session_id` off a
+        // record `store.create_terminal` had just handed back, where it is
+        // always `None`. So the id was never written, and every claude pane
+        // made this way had nothing for a restart to reopen and nothing for a
+        // chat to load, no matter how correct the respawn builder is.
+        let (_dir, svc, ws) = a_workspace().await;
+        let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
+
+        let split = svc
+            .split_terminal(
+                ws.id,
+                target.id,
+                farcooler_protocol::v1::SplitSide::Right,
+                "two",
+                "claude",
+            )
+            .await
+            .expect("split");
+
+        let sid = split
+            .agent_session_id
+            .clone()
+            .expect("a claude pane names its conversation at launch");
+        assert_eq!(
+            svc.store.get_terminal(split.id).unwrap().agent_session_id.as_deref(),
+            Some(sid.as_str()),
+            "and it is on the record, not merely in the returned copy"
+        );
+
+        let command = pane_start_command(&svc, split.id).await;
+        assert!(
+            command.contains(&format!("--session-id {sid}")),
+            "the launch declares the id the record holds: {command}"
+        );
     }
 
     #[tokio::test]
