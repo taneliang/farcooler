@@ -17,14 +17,14 @@ import Foundation
 /// `UserDefaults` and not the App Group container, for `RunnerDirectoryStore`'s
 /// reason: nothing outside the app reads this. A widget has no composer, and a
 /// notification extension has no keyboard.
-struct PaneDraft: Codable, Sendable, Equatable {
-    var text: String
+public struct PaneDraft: Codable, Sendable, Equatable {
+    public var text: String
     /// When it was last typed into, which is what both bounds below are
     /// measured against. Part of the value rather than derived, because
     /// `UserDefaults` has no modification time per key.
-    var savedAt: Date
+    public var savedAt: Date
 
-    init(text: String, savedAt: Date) {
+    public init(text: String, savedAt: Date) {
         self.text = text
         self.savedAt = savedAt
     }
@@ -42,7 +42,7 @@ struct PaneDraft: Codable, Sendable, Equatable {
 /// One key holding one dictionary, written whole — `RunnerDirectoryStore`'s
 /// shape, for its reason: a key per pane cannot be enumerated without already
 /// knowing every pane id, which is exactly what pruning needs to ask.
-enum PaneDraftStore {
+public enum PaneDraftStore {
     /// Spelled out, because it names a slot on disk that installs already have.
     private static let key = "paneDrafts"
 
@@ -53,16 +53,16 @@ enum PaneDraftStore {
     /// measured in days rather than minutes. Shorter would throw away the
     /// thing it was built to keep; unbounded would be a preferences file that
     /// only ever grows.
-    static let keepFor: TimeInterval = 60 * 60 * 24 * 30
+    public static let keepFor: TimeInterval = 60 * 60 * 24 * 30
 
     /// How many drafts are kept at once, newest first.
     ///
     /// A second bound rather than a redundant one: age bounds a fleet that is
     /// mostly quiet, and this bounds a fleet that is not. Two hundred is far
     /// more panes than anyone has open and still a file measured in kilobytes.
-    static let keepAtMost = 200
+    public static let keepAtMost = 200
 
-    static func read(from defaults: UserDefaults = .standard) -> [String: PaneDraft] {
+    public static func read(from defaults: UserDefaults = .standard) -> [String: PaneDraft] {
         guard let data = defaults.data(forKey: key),
             let decoded = try? decoder.decode([String: PaneDraft].self, from: data)
         else { return [:] }
@@ -77,7 +77,7 @@ enum PaneDraftStore {
     /// would otherwise hand back a draft this store has already promised to
     /// forget. `now` is an argument so that promise is a pure function of its
     /// inputs.
-    static func draft(
+    public static func draft(
         forPane pane: String, from defaults: UserDefaults = .standard, now: Date = Date()
     ) -> String? {
         guard let draft = read(from: defaults)[pane] else { return nil }
@@ -92,7 +92,7 @@ enum PaneDraftStore {
     /// sent from would be the unbounded file the two bounds above exist to
     /// prevent — while also making "nothing typed" and "typed and then erased"
     /// two states that read the same and cost differently.
-    static func record(
+    public static func record(
         _ text: String, forPane pane: String, in defaults: UserDefaults = .standard,
         now: Date = Date()
     ) {
@@ -107,7 +107,7 @@ enum PaneDraftStore {
 
     /// Forget one pane's draft — the pane went away for good, or its message
     /// was sent.
-    static func clear(pane: String, in defaults: UserDefaults = .standard) {
+    public static func clear(pane: String, in defaults: UserDefaults = .standard) {
         var all = read(from: defaults)
         guard all.removeValue(forKey: pane) != nil else { return }
         write(all, to: defaults)
