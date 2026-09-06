@@ -476,6 +476,42 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# A THIRD workspace, which exists for exactly one test.
+# ---------------------------------------------------------------------------
+#
+# `testAVisitedRunnersWorktreesAppearInTheGridAndCanBeCrossedTo` taps a card
+# belonging to a runner the app is not connected to and asks whether the
+# crossing LANDED on that worktree. For that tap to mean anything the card has
+# to name a worktree which is neither the one the other runner opens on when
+# nothing carries it, nor the one already on screen behind the grid — a card
+# naming either of those is satisfied by a crossing that carried nothing at
+# all, which is the bug the test exists for. The test says so itself and then
+# skips: "Give the demo host a third workspace."
+#
+# Two is what this fixture had. The repository's own checkout is one workspace
+# and `scrolling` is the other, both runners point at this one daemon, so the
+# two names the test must exclude were the only two names there were. The skip
+# was therefore permanent — the test could not run on any machine, and a test
+# that cannot run is indistinguishable from one that passes.
+#
+# `crossing` is that third name and it does nothing else. Nothing is sent into
+# the pane the daemon launches with the worktree, and nothing needs to be: the
+# assertion is read off the shell BAR, which names the workspace a crossing
+# landed on, and this workspace is a NAME the grid can offer rather than a
+# place any test looks at. The 400 lines belong to `scrolling`, which is where
+# every scrollback assertion in the suite is made.
+if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=="crossing") | .id) // empty')" ]; then
+    fc workspace create "$REPO_ID" crossing --branch demo/crossing >/dev/null
+fi
+CROSSING=$(fc --json workspace list \
+    | jq -r 'first(.workspaces[] | select(.task=="crossing") | .id) // empty')
+if [ -n "$CROSSING" ]; then
+    echo "        and a third workspace 'crossing', so the cross-runner grid test can run"
+else
+    echo "        (no 'crossing' workspace: the cross-runner grid test will skip)"
+fi
+
+# ---------------------------------------------------------------------------
 # The app, built here and installed, so it is what the checkout says.
 # ---------------------------------------------------------------------------
 #
