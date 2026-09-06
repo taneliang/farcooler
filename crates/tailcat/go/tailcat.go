@@ -930,6 +930,31 @@ func relayReachable(ci tailcat.ConnInfo) bool {
 // dials sshd, so an sshd that is refusing gives a connect that SUCCEEDS and
 // then an immediate EOF. ECONNREFUSED here means the TCP connect through the
 // tunnel failed, not that SSH said no.
+// newClient builds this device's dialing client, and is the client-side half
+// of the DERP map setting.
+//
+// Split out of dial for the same reason newServer is split out of serve: it
+// gives the setting a constructor a test can call. Without one, the only way
+// to ask "does a configured map actually reach the thing that dials" is to
+// dial, and a dial needs a relay — so the assertion would live in the one test
+// that cannot run in CI. The runner half is newServer; a map that reached only
+// one of them would leave a fleet half-moved off a revoked rendezvous.
+//
+// An empty DERPMapURL is upstream's "use the default map", so an unset setting
+// is passed through as the empty string rather than being helpfully filled in
+// with a URL — the whole point of the setting is that no URL is hardcoded
+// anywhere this side of the library.
+func newClient(token string, priv key.NodePrivate) *tailcat.Client {
+	mu.Lock()
+	defer mu.Unlock()
+	return &tailcat.Client{
+		Server:     tailcat.ConnBlob(token),
+		Key:        priv,
+		Logf:       tailcatLogf,
+		DERPMapURL: derpMapURL,
+	}
+}
+
 func dial(token, clientKey string, port uint16) (rc int) {
 	defer recoverToErrno(&rc)
 	if token == "" {
@@ -951,15 +976,7 @@ func dial(token, clientKey string, port uint16) (rc int) {
 		// refusal loadOrCreateIdentity and allowAdd already make.
 		return -int(syscall.EINVAL)
 	}
-	mu.Lock()
-	mapURL := derpMapURL
-	mu.Unlock()
-	client := &tailcat.Client{
-		Server:     tailcat.ConnBlob(token),
-		Key:        priv,
-		Logf:       tailcatLogf,
-		DERPMapURL: mapURL,
-	}
+	client := newClient(token, priv)
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
 	if _, err := client.Ping(ctx); err != nil {

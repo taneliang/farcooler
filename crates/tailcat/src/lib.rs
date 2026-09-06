@@ -189,13 +189,107 @@ pub fn ensure_identity(key_path: &Path) -> Result<(), TunnelError> {
 ///
 /// Not a promise that anyone runs their own. It is one field, taken now
 /// because taking it later costs a release.
+///
+/// A URL with whitespace in it is refused here rather than in each backend,
+/// because it is not a URL on any of them and because one of them would be
+/// actively harmed by it: `helper.rs` sends this to a subprocess over a
+/// line protocol whose fields are separated by spaces, so a second field
+/// would arrive as a command the helper never meant to be given. Refused, not
+/// trimmed — a value somebody typed wrong should stay unset rather than
+/// become a different URL nobody chose.
 pub fn set_derp_map_url(url: &str) {
+    if url.split_whitespace().count() > 1 {
+        tracing::warn!("tailcat: the DERP map URL has whitespace in it; ignoring it");
+        return;
+    }
+    *recorded_derp_map_url().lock().expect("the DERP map URL lock") = url.to_string();
     backend::set_derp_map_url(url)
+}
+
+/// What this process was last told to use, or empty for the library default.
+///
+/// **It answers what was recorded, not what a tunnel is currently using**, and
+/// the difference is worth stating because a reader who assumed otherwise
+/// would be reading a weaker guarantee than they thought. The value is read
+/// when a `Server` or a `Client` is built, so a `set_derp_map_url` after a
+/// `serve` changes the next one and not the running one. Three separate
+/// things prove the value actually lands rather than merely being remembered:
+/// `helper.rs` builds the helper's `derpmap` command out of this same record
+/// (`the_configured_derp_map_reaches_a_helper_before_it_serves`), the Go
+/// side's `TestServerTakesTheConfiguredDERPMap` and
+/// `TestTheDialingClientTakesTheConfiguredDERPMap` assert it reaches both
+/// constructors, and `a_real_tunnel_carries_the_scope.rs` carries a real
+/// connection over a `derper` that only a non-default map names.
+pub fn derp_map_url() -> String {
+    recorded_derp_map_url().lock().expect("the DERP map URL lock").clone()
+}
+
+/// Serializes every test in this crate that moves the process-wide DERP map
+/// setting.
+///
+/// Above `mod tests` rather than inside it because `helper.rs`'s tests move
+/// the same static: `cargo test` runs one crate's tests on many threads in one
+/// process, and two modules each serializing only against themselves would
+/// still take turns failing for a reason neither test is about. Helper tests
+/// take `helper::tests::SERIAL` first and then this, always in that order.
+#[cfg(test)]
+pub(crate) static DERP_MAP_SETTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The DERP map this process was configured with.
+///
+/// Here rather than in a backend because every backend needs it and one of
+/// them cannot answer for itself: `helper.rs` has to remember the URL for a
+/// helper that does not exist yet when the setting is made, and `stub.rs` has
+/// no Go to ask. Keeping one record above the seam also means the apps and the
+/// daemon read the same string back whichever build they are.
+fn recorded_derp_map_url() -> &'static std::sync::Mutex<String> {
+    static URL: std::sync::OnceLock<std::sync::Mutex<String>> = std::sync::OnceLock::new();
+    URL.get_or_init(Default::default)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Empty is the default and empty means the LIBRARY's default.
+    ///
+    /// The bug this exists to catch is a helpful one: something filling in
+    /// tailcat.dev's URL when the setting is unset. That reads as a
+    /// convenience and is the opposite — it hardcodes the exact map the
+    /// setting exists to move off, in the place nobody would look, and it
+    /// keeps working right up until the day it matters.
+    #[test]
+    fn an_unset_derp_map_leaves_the_library_default_alone() {
+        let _serial = super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        set_derp_map_url("");
+        assert_eq!(derp_map_url(), "", "an empty setting must not become a URL");
+    }
+
+    #[test]
+    fn a_derp_map_setting_is_remembered() {
+        let _serial = super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        set_derp_map_url("https://derp.example/derpmap.json");
+        assert_eq!(derp_map_url(), "https://derp.example/derpmap.json");
+        set_derp_map_url("");
+    }
+
+    /// A URL with a space in it is two fields, and one of the backends sends
+    /// this over a line protocol that splits on spaces — so the second field
+    /// would reach a helper as a command nobody typed. Refused rather than
+    /// trimmed, and the PREVIOUS value is what survives: a setting somebody
+    /// typed wrong must not silently become a different rendezvous.
+    #[test]
+    fn a_derp_map_url_with_whitespace_in_it_is_refused() {
+        let _serial = super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        set_derp_map_url("https://derp.example/derpmap.json");
+        set_derp_map_url("https://derp.example/map.json allow_add cccc");
+        assert_eq!(
+            derp_map_url(),
+            "https://derp.example/derpmap.json",
+            "a DERP map URL carrying a second field was taken"
+        );
+        set_derp_map_url("");
+    }
 
     /// The default build has no Go archive, and must say so rather than
     /// pretending. A stub that returned Ok, or that panicked, would each be a

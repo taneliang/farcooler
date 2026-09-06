@@ -69,16 +69,6 @@ fn helper() -> &'static Mutex<Option<Helper>> {
     HELPER.get_or_init(|| Mutex::new(None))
 }
 
-/// The DERP map URL to hand the next helper this process starts.
-///
-/// Recorded here as well as sent, because `set_derp_map_url` is deployment
-/// configuration that may be set before anything serves — and the helper that
-/// would receive it does not exist yet at that point.
-fn derp_map_url() -> &'static Mutex<String> {
-    static URL: OnceLock<Mutex<String>> = OnceLock::new();
-    URL.get_or_init(|| Mutex::new(String::new()))
-}
-
 struct Helper {
     child: Child,
     stdin: ChildStdin,
@@ -202,7 +192,13 @@ fn spawn(key_path: &Path) -> Result<Helper, TunnelError> {
     let stdout = BufReader::new(child.stdout.take().expect("stdout was piped"));
     let mut helper = Helper { child, stdin, stdout };
 
-    let url = derp_map_url().lock().expect("the DERP map URL lock").clone();
+    // The crate's own record rather than a copy kept here, because the
+    // setting is normally made long before anything serves — the helper that
+    // would have received it does not exist yet at that point — and because
+    // one record is the only way `super::derp_map_url()` can be read as
+    // "what a helper started now would be told" rather than as a mirror that
+    // happens to agree.
+    let url = super::derp_map_url();
     if !url.is_empty() {
         // A helper that cannot be told this is a helper that cannot be
         // trusted to serve either, so the failure is not swallowed.
@@ -336,12 +332,10 @@ fn not_serving() -> TunnelError {
     TunnelError::Io(std::io::Error::from_raw_os_error(libc::ENOTCONN))
 }
 
+/// Tells a helper that is ALREADY running. The record a helper started later
+/// reads is the crate's own — `super::set_derp_map_url` writes it before
+/// calling this — so nothing is stored here.
 pub fn set_derp_map_url(url: &str) {
-    if url.split_whitespace().count() > 1 {
-        tracing::warn!("tailcat: the DERP map URL has whitespace in it; ignoring it");
-        return;
-    }
-    *derp_map_url().lock().expect("the DERP map URL lock") = url.to_string();
     // A helper already running gets it now as well as at its next start.
     // Nothing rebuilds a live server for it — the URL is read when the server
     // is built — so this only matters for a `serve` that follows.
@@ -574,6 +568,79 @@ mod tests {
         assert_eq!(
             lines[0].0, lines[1].0,
             "a second helper process was started beside the serving one: {lines:?}"
+        );
+
+        *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
+    /// A configured DERP map reaches a helper BEFORE that helper is told to
+    /// serve.
+    ///
+    /// The order is the assertion. A helper reads the URL when it builds its
+    /// server, so a `derpmap` that arrived after `serve` would be recorded,
+    /// would read back correctly from every getter, and would have had no
+    /// effect on the tunnel that is now running — a runner sitting on a
+    /// revoked rendezvous while its setting says otherwise, which is the exact
+    /// failure this setting exists to end.
+    ///
+    /// The setting is made here BEFORE anything is spawned, which is the real
+    /// sequence: `FARCOOLER_DERP_MAP` is read at daemon startup and `serve`
+    /// happens later, so the helper that receives it does not exist at the
+    /// moment the value is set. That is why the crate keeps the record and
+    /// this backend reads it at spawn rather than holding one of its own.
+    #[test]
+    fn the_configured_derp_map_reaches_a_helper_before_it_serves() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let _setting = super::super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("commands");
+        fake_helper(dir.path(), &log);
+
+        super::super::set_derp_map_url("https://derp.example/derpmap.json");
+        let key = dir.path().join("tailcat.key");
+        serve(&key, 22, &["a".repeat(43)]).expect("the fake helper accepted serve");
+
+        assert_eq!(
+            commands(&log),
+            [
+                "derpmap https://derp.example/derpmap.json".to_string(),
+                format!("serve 22 {}", "a".repeat(43)),
+            ],
+            "the DERP map did not reach the helper before it was told to serve"
+        );
+
+        super::super::set_derp_map_url("");
+        *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
+    /// An unset DERP map sends NO command at all, rather than one naming the
+    /// empty string.
+    ///
+    /// `derpmap ` with nothing after it is a command the helper's parser
+    /// refuses — it wants a URL — so sending one would put a refusal in the
+    /// log of every runner that never configured anything, which is every
+    /// runner. Empty means the library default, and the way to say that is to
+    /// say nothing.
+    #[test]
+    fn an_unset_derp_map_sends_a_helper_no_command_at_all() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let _setting = super::super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("commands");
+        fake_helper(dir.path(), &log);
+
+        super::super::set_derp_map_url("");
+        let key = dir.path().join("tailcat.key");
+        serve(&key, 22, &["a".repeat(43)]).expect("the fake helper accepted serve");
+
+        assert_eq!(
+            commands(&log),
+            [format!("serve 22 {}", "a".repeat(43))],
+            "an unset DERP map was sent to a helper anyway"
         );
 
         *helper().lock().expect("the tunnel helper lock") = None;

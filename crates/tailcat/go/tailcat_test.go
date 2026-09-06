@@ -1140,3 +1140,72 @@ func TestTheWithdrawnRegionPathIsTwoPicksAndOnlyOneIsOurs(t *testing.T) {
 		t.Fatalf("two netchecks account for only %s of a %s path; the time is going somewhere unnamed", accounted, total)
 	}
 }
+
+// notAToken stands in for a runner's ConnBlob. newClient does not parse one —
+// dial does that before it gets here — so what matters for these tests is only
+// that a token was supplied.
+const notAToken = "tc-not-a-real-token"
+
+// newServerForTest builds a runner's server the way serve does, with a real
+// identity and a real allowlist, so that what is asserted about it is what a
+// runner would actually get.
+func newServerForTest(t *testing.T) *tailcat.Server {
+	t.Helper()
+	id, err := loadOrCreateIdentity(pinnedIdentity(t, 900))
+	if err != nil {
+		t.Fatalf("loadOrCreateIdentity: %v", err)
+	}
+	allowed, err := parseAllowed(keyA)
+	if err != nil {
+		t.Fatalf("parseAllowed: %v", err)
+	}
+	// serve holds mu across newServer and nothing here is driven
+	// concurrently, so it is called bare — the same convention
+	// TestARegionStillInTheMapKeepsThePin uses for recoverFromAPinThatWillNotStart.
+	return newServer(id, 22, allowed)
+}
+
+// The DERP map a runner was configured with is the one its server uses.
+//
+// tailcat.dev's map is documented as best-effort and revocable at any time,
+// and DERP is the rendezvous for every tunneled connection rather than a
+// fallback for the ones that could not go direct. So the day that map is
+// revoked, a fleet that cannot be pointed at another one is a fleet that needs
+// three app releases and a visit to every runner. This is the line that makes
+// it a setting instead, and it is the runner half of it.
+func TestServerTakesTheConfiguredDERPMap(t *testing.T) {
+	pointAtDERPMap(t, "https://derp.example/derpmap.json")
+	if got := newServerForTest(t).DERPMapURL; got != "https://derp.example/derpmap.json" {
+		t.Fatalf("the configured DERP map did not reach the server: %q", got)
+	}
+}
+
+// The client half of the same setting. A map that reached the runner and not
+// the device would leave the two ends looking for each other on different
+// rendezvous, which is the failure the setting exists to end rather than to
+// halve.
+func TestTheDialingClientTakesTheConfiguredDERPMap(t *testing.T) {
+	pointAtDERPMap(t, "https://derp.example/derpmap.json")
+	priv := key.NewNode()
+	if got := newClient(notAToken, priv).DERPMapURL; got != "https://derp.example/derpmap.json" {
+		t.Fatalf("the configured DERP map did not reach the client: %q", got)
+	}
+}
+
+// Empty is the default, and empty means the LIBRARY's default.
+//
+// The tempting bug is a constructor that fills in tailcat.dev's URL itself
+// when the setting is unset, which reads as harmless and is the opposite: it
+// hardcodes the exact map this setting exists to move off, in the place
+// nobody would look, and it survives every upgrade of the library that would
+// otherwise have changed the default. Nothing in this package may spell a
+// DERP map URL.
+func TestAnEmptyDERPMapIsNotPassedThrough(t *testing.T) {
+	pointAtDERPMap(t, "")
+	if got := newServerForTest(t).DERPMapURL; got != "" {
+		t.Fatalf("an empty setting became %q on the server", got)
+	}
+	if got := newClient(notAToken, key.NewNode()).DERPMapURL; got != "" {
+		t.Fatalf("an empty setting became %q on the client", got)
+	}
+}
