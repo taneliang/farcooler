@@ -202,26 +202,36 @@ async function sendApns(
 /// on whatever it last showed, which looks exactly like the relay never sent
 /// anything.
 ///
-/// **This is the card's LEADER**, and it used to be the card's identity. There
-/// is one card per app install now rather than one per terminal, and the agent
-/// it leads with changes over the card's life as different agents block and
-/// finish — so `terminal`, `label`, `machine` and `startedAt` all moved here
-/// from `ActivityAttributes` below. They had to: attributes are fixed for an
-/// activity's whole life and APNs rejects a push that repeats them, so a leader
-/// living there could only ever be changed by ending the card and starting
-/// another, which is two cards on the lock screen for the moment in between.
+/// **The first six fields are the card's HEADLINE**, and they used to be the
+/// card's identity. There is one card per app install rather than one per
+/// terminal, and the agent it headlines changes over the card's life as
+/// different agents block and finish — so `terminal`, `label`, `machine` and
+/// `startedAt` all moved here from `ActivityAttributes` below. They had to:
+/// attributes are fixed for an activity's whole life and APNs rejects a push
+/// that repeats them, so a headline living there could only ever be changed by
+/// ending the card and starting another, which is two cards on the lock screen
+/// for the moment in between.
 ///
-/// Nothing here says how many OTHER agents there are, and that is deliberate.
-/// The relay stores no fleet and a daemon knows only its own runner, so neither
-/// end of this contract can count one honestly; the card reads its own tail from
-/// the fleet snapshot in the phone's App Group, which is the only thing that has
-/// ever seen every runner. A count field here would be a number nothing writes,
-/// which this contract has been burned by once already — see the note on
-/// `detail` in `AgentActivityAttributes.swift`.
+/// **`rows` is new, and it retires the paragraph that used to be here.** That
+/// paragraph said there were no fleet counts on this contract because nothing
+/// could write one honestly: the relay stored no fleet, a daemon knows only its
+/// own runner, and a count nothing writes is the `line` failure in a shape that
+/// is harder to notice. Two of those three facts are unchanged. The one that
+/// moved is the relay's — it now accumulates a row per agent from the notices
+/// every runner on an account already sends it, which is a thing only it can
+/// see. So these numbers have a writer, they are derived from the rows on every
+/// push rather than stored anywhere, and the objection they answer is recorded
+/// above rather than deleted.
+///
+/// **Nothing here is required.** An app built before this reads `rows` as a key
+/// it has no `CodingKey` for and ignores it, and draws the headline exactly as
+/// it did — which is why growing this contract needs no coordination with a
+/// build in the App Store. See `AgentActivityAttributes.ContentState`, which
+/// decodes every field with `decodeIfPresent` and a default for the same reason.
 export interface ActivityState {
-  /// The leading agent's terminal, so a tap on the card opens the pane it is
+  /// The headlining agent's terminal, so a tap on the card opens the pane it is
   /// about. Rebuilt into the card's `widgetURL` on every render, which is what
-  /// lets the tap target follow a change of leader.
+  /// lets the tap target follow a change of headline.
   terminal: string
   /// The leading agent's name, and the runner it is on. Both plain strings
   /// rather than ids: the widget extension has no connection to look anything
@@ -255,6 +265,89 @@ export interface ActivityState {
   /// card whose turn clock could not be read should show no timer rather than
   /// a wrong one.
   startedAt?: number
+
+  /// How many agents are in each tier, for the header: `2 need you / 3 to
+  /// review · 3 in flight`.
+  ///
+  /// Three numbers rather than the sentence, because the card composes the
+  /// sentence and the Dynamic Island composes a shorter one out of the same
+  /// three. A rendered string here would be one surface's wording imposed on
+  /// every other, and this contract has already been burned by shipping a
+  /// second copy of something — see the note on `detail` in
+  /// `AgentActivityAttributes.swift`.
+  ///
+  /// Over EVERY row the relay holds for the account, not over the rows below. A
+  /// header that counted only what fits on the card would say "2 need you"
+  /// while three agents were waiting, which is the specific lie `+N more`
+  /// exists to prevent.
+  blocked?: number
+  review?: number
+  working?: number
+  /// Agents the card has no line for: `rows.length` subtracted from the fleet.
+  /// Drawn as `+6 more`, beside the totals below.
+  more?: number
+  /// The fleet's totals, summed over every row: `+391 −112`.
+  ///
+  /// Summed here rather than on the phone because the phone does not have every
+  /// row — that is the whole reason these exist — and derived on every push
+  /// rather than stored, because a stored copy is a second source two writers
+  /// can disagree about.
+  ///
+  /// A row that has measured nothing contributes nothing, which is not the same
+  /// as contributing zero: absent counts stay absent all the way down. See
+  /// `Notification.insertions` in `index.ts`.
+  insertions?: number
+  deletions?: number
+  commits?: number
+
+  /// One row per agent the card has room to draw, in the order it draws them.
+  ///
+  /// Blocked first, then to-review, then working; within a tier the
+  /// longest-waiting first, so the agent that needs a person never falls off
+  /// the bottom. The first row is the headline above, repeated — the card draws
+  /// it once, and an app too old to know about `rows` still has it.
+  ///
+  /// **Bounded by bytes, not only by count.** ActivityKit caps a content state
+  /// at 4KB and APNs caps the payload the same way, and a card that exceeds
+  /// either is not truncated — it is refused, which looks from every side like a
+  /// relay that sent nothing. `ROWS_SHOWN` is the card's own limit and
+  /// `STATE_BUDGET` is the one that cannot be argued with; see both in
+  /// `index.ts`.
+  rows?: ActivityRow[]
+}
+
+/// One agent's line on the card.
+///
+/// `auth-refactor  force-push?  +142 −37  4 commits`, and the thirteen buckets
+/// under it. Every field is what the relay stored from that agent's own last
+/// notice — see migration 0008 — so a row is one runner's word about one agent,
+/// carried rather than composed.
+export interface ActivityRow {
+  /// This row's terminal, so a tap on the row opens the pane it names rather
+  /// than the one the card happens to be headlining.
+  terminal: string
+  label: string
+  machine: string
+  status: string
+  detail: string
+  /// The numbers to the right of the name. Absent where the runner has measured
+  /// nothing — a worktree it has not probed, or one with no base to compare
+  /// against — and a row with no numbers draws none rather than drawing `+0 −0`
+  /// over a measurement nobody made.
+  insertions?: number
+  deletions?: number
+  commits?: number
+  /// When this agent's turn began, in Unix milliseconds. Read as a timer, the
+  /// same way the headline's is.
+  startedAt?: number
+  /// When this agent last said anything, in Unix milliseconds. The card draws
+  /// `as of 12m` from it for a row that has gone quiet.
+  updatedAt?: number
+  /// Thirteen buckets, base64 of the wire's 66 bytes — the same encoding
+  /// `FleetSnapshot.trace` already carries and `AgentKit.ActivityTrace` already
+  /// reads. Absent for an agent with no history the trace can see, which is
+  /// deliberately not the same as thirteen quiet buckets.
+  trace?: string
 }
 
 /// What is fixed for the life of an install's card, which is now almost nothing.
@@ -266,19 +359,26 @@ export interface ActivityAttributes {
   /// Which SHAPE the card was started in, and the only thing left here.
   ///
   /// `1` is a card started before the per-install restructure: terminal-scoped,
-  /// with its leader in the attributes. `2` is this one. The app uses it to
-  /// decide which card survives when both are in flight after an upgrade — see
-  /// `LiveActivities.precedence` — and it has to be TOLD rather than inferred,
-  /// because both shapes are the same ActivityKit type under the same
-  /// `attributes-type` string and the app decodes an old card's state leniently.
+  /// with its leader in the attributes. `2` is per-install, headlining one agent
+  /// and counting the rest off the phone's own snapshot. `3` is this one, which
+  /// carries a row per agent. The app uses it to decide which card survives when
+  /// two are in flight after an upgrade — see `LiveActivities.precedence` — and
+  /// it has to be TOLD rather than inferred, because every shape is the same
+  /// ActivityKit type under the same `attributes-type` string and the app
+  /// decodes an old card's state leniently.
   ///
-  /// Must equal `AgentActivityAttributes.fleetVersion` in
+  /// It is a RANK and not a flag, which is what lets a third shape join without
+  /// a second field: higher is a card this build understands better. A v2 card
+  /// still renders correctly under a v3 build — `rows` is simply absent — so the
+  /// version decides only which one to keep, never whether to draw.
+  ///
+  /// Must equal `AgentActivityAttributes.rowsVersion` in
   /// `apps/shared/AgentKit/Sources/AgentKit/AgentActivityAttributes.swift`.
   version: number
 }
 
 /// The shape this relay starts cards in. See `ActivityAttributes.version`.
-export const ACTIVITY_VERSION = 2
+export const ACTIVITY_VERSION = 3
 
 interface ActivityBase {
   state: ActivityState
@@ -291,6 +391,19 @@ interface ActivityBase {
   /// — a banner every ten seconds for an agent that is merely busy is the thing
   /// people switch notifications off over, which then costs them the one push
   /// this product exists to deliver.
+  ///
+  /// **A `start` is the exception, and it is not a preference: iOS discards a
+  /// push-to-start activity that carries no alert.** Silently, at HTTP 200, with
+  /// nothing anywhere to say so — which is why a card people were meant to see
+  /// on every run turned up two or three times in total. `sendLiveActivity`
+  /// refuses to send a start without one rather than leaving that to a caller,
+  /// because the failure it prevents is invisible from every side.
+  ///
+  /// What makes that alert legitimate rather than a buzz about one agent
+  /// beginning work is WHEN a card starts and WHAT the alert says. A card starts
+  /// on `blocked` and the alert is the fleet's own header — "2 need you · 3 in
+  /// flight" — which is news about the fleet, and is the case this product
+  /// exists to deliver. See `pushActivity` in `index.ts`.
   alert?: { title: string; body: string }
 }
 
@@ -377,6 +490,15 @@ export async function sendLiveActivity(
   // Present only when there is something to interrupt for. See `ActivityBase`.
   if (activity.alert) aps.alert = activity.alert
   if (activity.event === 'start') {
+    // Refused here rather than trusted to the caller. iOS discards a start with
+    // no alert dictionary, silently, after APNs has already answered 200 — so a
+    // caller that forgot one would look from every side like a phone that never
+    // got the push, which is exactly the bug this check closes. Better to fail
+    // where a log can say why.
+    if (!activity.alert) {
+      console.error('a Live Activity start with no alert is discarded by iOS; not sending it')
+      return false
+    }
     aps['attributes-type'] = 'AgentActivityAttributes'
     aps.attributes = activity.attributes
     aps['stale-date'] = now + STALE_AFTER_S
@@ -401,7 +523,16 @@ export async function sendLiveActivity(
       // budget it consumes is the one the ALERT depends on. Routine progress
       // therefore goes out at 5: delivered when convenient, which is the right
       // urgency for a line that will change again in ten seconds.
-      'apns-priority': activity.state.status === 'working' ? '5' : '10',
+      //
+      // **A start is never routine, whatever its status.** It was going out at 5
+      // whenever it happened to carry `working`, and a priority-5 push is one
+      // APNs may throttle or hold — so the one push that has to arrive for the
+      // card to exist at all was the one being sent at the lower urgency. A card
+      // only starts on `blocked` now, so this is belt as well as braces, and it
+      // is written as the event rather than the status because that is the fact
+      // that makes it true.
+      'apns-priority':
+        activity.event === 'start' || activity.state.status !== 'working' ? '10' : '5',
     },
     body: JSON.stringify({ aps }),
   })
