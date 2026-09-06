@@ -895,7 +895,7 @@ class CeremonyStore(
             // **And a phone never trades a direct reach for a tunnel**, even
             // though the `client.enroll` it just made can answer with a token.
             // The Mac has to judge, because `ssh -G` hands it an address it has
-            // never dialled from where the new device will be standing — see
+            // never dialed from where the new device will be standing — see
             // `Enrollment.reach(granting:token:addressing:)` in the Mac app. A
             // phone has no such gap: the reach copied here is the one that just
             // carried this ceremony's own enrollment to that runner, so it is a

@@ -348,8 +348,8 @@ enum Enrollment {
     /// ``RunnerFacts/reach(of:)`` already answers exactly that, at the only
     /// moment it can be asked — the moment the code is on screen, when this Mac,
     /// the tailnet and the person are all present at once — and
-    /// `AddDeviceView.prepare` has already swapped in a travelling tailnet
-    /// address wherever one existed. What is left after that swap is a runner
+    /// `AddDeviceView.prepare` has already swapped in a tailnet address that
+    /// does travel wherever one existed. What is left after that swap is a runner
     /// addressed `cosmo.local`, or `192.168.1.180`, with nothing better
     /// anywhere: right in the room the code was scanned in and dead in every
     /// other room. That runner is the one the tunnel exists for, and until now

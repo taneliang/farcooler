@@ -832,7 +832,7 @@ final class CeremonyStore: ObservableObject {
                 // **And a phone never trades a direct reach for a tunnel**,
                 // even though the `client.enroll` it just made can answer with
                 // a token. The Mac has to judge, because `ssh -G` hands it an
-                // address it has never dialled from where the new device will
+                // address it has never dialed from where the new device will
                 // be standing — see `Enrollment.reach(granting:token:
                 // addressing:)`. A phone has no such gap to bridge: the reach
                 // copied here is the one that just carried this ceremony's own

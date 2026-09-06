@@ -378,8 +378,8 @@ extension RunnerFacts {
         /// different building.
         ///
         /// **After the swap, not before it.** ``betterAddress`` being present
-        /// means `AddDeviceView.prepare` has already put a travelling tailnet
-        /// address on the record, so the runner the ceremony is about to grant
+        /// means `AddDeviceView.prepare` has already put an address that does
+        /// travel on the record, so the runner the ceremony is about to grant
         /// travels even though ``reach`` still describes the address it started
         /// with. Reading ``reach`` alone here would call a runner LAN-only when
         /// this Mac had already fixed it.
