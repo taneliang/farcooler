@@ -375,6 +375,25 @@ struct AgentSurface: View {
             scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
         }
         .onAppear { scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom) }
+        // The pane is in agent mode with no agent in it, said where the
+        // conversation would have been.
+        //
+        // An OVERLAY on an empty transcript, not a replacement for the
+        // surface: the pane STAYS a chat. Falling back to the terminal on its
+        // own would respawn the pane under whatever the reader was in the
+        // middle of typing, so the switch is offered — it is the same control
+        // that has always been in the pane's header — and never taken for
+        // them.
+        //
+        // Before this the three ways an adapter can fail to start were all
+        // drawn as "Starting the agent…", forever, directly over the one
+        // message that explained the failure. The pane's own terminal still
+        // has that message; this is what says to go and read it.
+        .overlay {
+            if let failure = terminal.chatFailure, stream.transcript.rows.isEmpty {
+                AgentFailureRow(failure: failure, agent: terminal.agentLabel)
+            }
+        }
     }
 
     /// The end of the transcript's content.
@@ -588,5 +607,57 @@ private struct ApprovalCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(GlancePalette.amber(scheme).opacity(0.3)))
+    }
+}
+
+// MARK: - Failure
+
+/// A pane in agent mode with no agent in it.
+///
+/// Where the transcript would be, because that is the question the reader
+/// actually has: this pane is a chat and nothing is in it. It is a statement
+/// rather than a control — the switch back to the terminal is the one already
+/// in the pane's header, and pressing it is the reader's decision. Doing it
+/// for them would respawn the pane under whatever they were typing.
+///
+/// **Every word here belongs to this app.** The runner sends
+/// `not-authenticated`; the sentence is `AgentFailure`'s. A raw error string
+/// from a Rust process must never reach this view.
+private struct AgentFailureRow: View {
+    @Environment(\.colorScheme) private var scheme
+
+    let failure: AgentFailure
+    /// What to call the agent that did not start — "Claude", "Codex", or
+    /// "This pane" when nothing identified itself.
+    let agent: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text(failure.sentence)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(GlancePalette.amber(scheme))
+
+            if let advice = failure.advice {
+                Text(advice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            // The way out, named rather than performed.
+            Text("\(agent) is still in this pane. Switch it back to the terminal to see what it printed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: 420, alignment: .leading)
+        .background(
+            GlancePalette.amber(scheme).opacity(0.08), in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(GlancePalette.amber(scheme).opacity(0.3)))
+        .padding(16)
     }
 }

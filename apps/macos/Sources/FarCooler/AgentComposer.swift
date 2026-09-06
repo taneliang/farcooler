@@ -669,6 +669,18 @@ struct AgentComposer: View {
             }
             .font(.caption)
             .help("This chat reconnects on its own once the runner answers")
+        } else if let failure = terminal.chatFailure, stream.transcript.rows.isEmpty {
+            // Never the spinner over a failure. All three ways of failing to
+            // start an adapter used to leave this row reading "Starting the
+            // agent…" forever — describing a launch that had already given up.
+            // The transcript area carries the whole sentence and the way out;
+            // this one keeps the composer honest.
+            HStack(spacing: 5) {
+                StatusGlyph(status: .lost)
+                Text(failure.sentence)
+            }
+            .font(.caption)
+            .help(failure.advice ?? "Switch this pane back to the terminal to see what it printed")
         } else if stream.transcript.configOptions.isEmpty && stream.transcript.rows.isEmpty {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini)

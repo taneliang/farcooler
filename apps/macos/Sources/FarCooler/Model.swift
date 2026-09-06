@@ -337,6 +337,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var agentSessionId: String?
     var agentMode: String?
     var availableAgentModes: [String]?
+    /// Why this pane is in agent mode with no agent in it.
+    ///
+    /// A STABLE MACHINE WORD from the runner, never a sentence — see
+    /// `AgentFailure` below, which is where this app's sentences live. Absent
+    /// means nothing has said this pane failed, which for a pane still
+    /// starting up looks the same, so the composer keeps its spinner until
+    /// either this arrives or the transcript does.
+    var agentFailure: String?
     /// Whether this pane can be rendered as a chat.
     ///
     /// Answered on the host: identifying an agent takes a screen read, because
@@ -349,6 +357,13 @@ struct Terminal: Decodable, Identifiable, Hashable {
 
     /// Whether to draw a chat or a VT grid.
     var isAgentPane: Bool { paneMode == "agent" }
+
+    /// Why this chat has no agent in it, if it has none.
+    ///
+    /// A word this app does not recognize reads as no failure at all rather
+    /// than as an unexplained one: a newer runner inventing a fifth word must
+    /// leave this app drawing the spinner it drew before, not a blank row.
+    var chatFailure: AgentFailure? { agentFailure.flatMap(AgentFailure.init(rawValue:)) }
 
     /// Whether this pane is this worktree's diff.
     ///
@@ -635,6 +650,59 @@ struct Terminal: Decodable, Identifiable, Hashable {
         let quoted = (said ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !quoted.isEmpty { return quoted }
         return recentSteps.last
+    }
+}
+
+/// Why a pane in agent mode has no agent in it.
+///
+/// **The cases are the runner's stable words. THE APP OWNS THE SENTENCE**, the
+/// same rule `Refusal` states for the ceremony: the runner sends
+/// `not-authenticated`, never prose, and a raw Rust error string must never
+/// reach a screen. The words are defined once, in `AgentFailure` in
+/// `farcooler-agent-core`, and adding one there means adding a sentence here.
+///
+/// Each of the four gets its own sentence because each has a different fix,
+/// and "the agent could not start" is the state the endless spinner was
+/// already communicating.
+enum AgentFailure: String, CaseIterable {
+    /// Nothing is configured to speak ACP for this agent. The fix is a
+    /// `config.toml` entry.
+    case noAdapter = "no-adapter"
+    /// The agent has no credentials. The fix is not in this app at all: it is
+    /// the agent's own login, run on the runner.
+    case notAuthenticated = "not-authenticated"
+    /// It started and then said nothing until the runner gave up waiting.
+    case adapterSilent = "adapter-silent"
+    /// It would not start, it hung up, or it refused for a reason of its own.
+    case adapterFailed = "adapter-failed"
+
+    /// What a person reads.
+    ///
+    /// One line, because it sits where the transcript would be and shares the
+    /// pane with a composer. `advice` carries the rest.
+    var sentence: String {
+        switch self {
+        case .noAdapter: "No chat adapter is set up for this agent"
+        case .notAuthenticated: "This agent needs you to sign in"
+        case .adapterSilent: "The agent started but never answered"
+        case .adapterFailed: "The agent could not start"
+        }
+    }
+
+    /// What to do about it, when there is something specific to do.
+    ///
+    /// Nil where the honest answer is "nobody here knows" — inventing advice
+    /// for `adapter-failed` would send people to edit a file that is fine.
+    var advice: String? {
+        switch self {
+        case .noAdapter:
+            "Add an `[adapters]` entry for it in ~/.config/farcooler/config.toml on the runner."
+        case .notAuthenticated:
+            "Sign in with the agent's own command on the runner, then switch this pane back to a chat."
+        case .adapterSilent:
+            "It may still be installing. Switching to the terminal shows what it printed."
+        case .adapterFailed: nil
+        }
     }
 }
 
