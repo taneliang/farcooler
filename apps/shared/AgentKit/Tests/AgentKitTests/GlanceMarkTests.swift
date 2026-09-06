@@ -572,13 +572,23 @@ struct ActivityTraceTests {
     /// §04: "40 · island / 44 · island row / 52 · card row / 76 · widget. Four
     /// shipping sizes, one form."
     ///
-    /// The heights are NOT quoted — §04 leaves `h` to the surface — so what is
-    /// asserted here is that they come from one rule rather than four guesses:
-    /// the specimen's own proportion, 19pt of band at 156pt wide.
+    /// The heights are quoted where the design draws the surface and derived
+    /// where it does not. §02's Live Activity gives the card row 8 / 3 / 8, so
+    /// `cardRow` is 19 — the specimen's proportion would have made it 15, which
+    /// is the whole reason this case is exempt rather than a rounding of it. The
+    /// other three still come from one rule rather than three guesses: the
+    /// specimen's own proportion, 19pt of band at 156pt wide.
     @Test func thereAreFourShippingSizesAndNoOthers() {
         #expect(GlanceTraceSize.allCases.count == 4)
         #expect(GlanceTraceSize.allCases.map(\.width) == [40, 44, 52, 76])
-        for size in GlanceTraceSize.allCases {
+        #expect(GlanceTraceSize.cardRow.height == 19, "§02 draws the card row as 8 / 3 / 8")
+        #expect(
+            GlanceTraceLayout(
+                size: CGSize(
+                    width: GlanceTraceSize.cardRow.width,
+                    height: GlanceTraceSize.cardRow.height)
+            ).band == 8, "and the band is the half of it either side of the rule")
+        for size in GlanceTraceSize.allCases where size != .cardRow {
             let band = (size.width * 19 / 156).rounded()
             #expect(size.height == GlanceTraceLayout.axis + 2 * band)
         }

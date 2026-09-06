@@ -205,6 +205,25 @@ public enum GlancePalette {
     /// A bucket with no activity. Drawn, not omitted.
     public static let empty = GlanceInk(OKLCH(0.42, 0.002, 250))
 
+    // MARK: - The card's own rules
+    //
+    // §02's Live Activity divides the card with two weights, and the difference
+    // between them is the card's structure: the heavier one separates the three
+    // PARTS — header, body, tail — and the lighter one separates two rows inside
+    // the body. Drawn at one weight the card reads as five things in a list
+    // rather than as a header over two agents over a total.
+    //
+    // One figure each, for both appearances, exactly as the four trace tones
+    // above that §01 gives one figure for. The design draws the card on a dark
+    // ground and states no light value for either rule; when it draws light
+    // mode these take a second literal like `amber` and `review` did.
+
+    /// Under the header and above the tail.
+    public static let rule = GlanceInk(OKLCH(0.32, 0.004, 250))
+
+    /// Between two rows.
+    public static let rowRule = GlanceInk(OKLCH(0.28, 0.004, 250))
+
     // MARK: - Ink
 
     /// Names, counts, anything you read first.

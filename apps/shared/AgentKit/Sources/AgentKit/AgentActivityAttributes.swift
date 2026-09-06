@@ -158,15 +158,53 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     /// only one of them entitles the card to state a number. See
     /// `knowsFleet`.
     ///
-    /// The relay also sends `more` — the fleet minus the ROWS it sent — and
-    /// this type deliberately does not decode it. This card draws one agent
-    /// and counts the rest, so a number computed against four rows it never
-    /// draws would say "+3 more" over six agents. `more` belongs to the card
-    /// that draws a line each, and a field with no reader is the mistake this
-    /// type has been burned by once already: see the note on `detail`.
+    /// The relay also sends `more` — the fleet minus the ROWS it sent — and it
+    /// is decoded now, two fields below. It was deliberately left undecoded
+    /// while this card drew one agent and counted the rest: a number computed
+    /// against four rows the card never drew would have said "+3 more" over six
+    /// agents. The card draws rows, so `more` is finally the number it was
+    /// always for. The rule that kept it out has not been relaxed — a field
+    /// with no reader is still the mistake this type has been burned by once
+    /// already, see the note on `detail` — it has been satisfied.
     public var blocked: Int
     public var review: Int
     public var working: Int
+
+    /// Agents the card has no line for, as the RELAY counts them: the fleet
+    /// minus the rows it sent.
+    ///
+    /// **Not the number the tail prints.** The relay sends up to four rows and
+    /// the card draws two of them, so the agents with no line are these PLUS
+    /// the rows that did not fit. `AgentCardLayout.hidden` is where the two are
+    /// added, and it is the only thing that may be drawn as "+N more".
+    ///
+    /// `-1` for "the relay did not say", on `blocked`'s terms exactly: the key
+    /// is absent from every card an older relay started, and zero — a card
+    /// naming every agent there is — is a real answer that must not be confused
+    /// with silence.
+    public var more: Int
+
+    /// One line per agent, in the order the card draws them.
+    ///
+    /// Blocked first, then to-review, then working; within a tier the
+    /// longest-waiting first, so the agent that needs a person never falls off
+    /// the bottom. `services/relay/src/index.ts` does that sort, and this type
+    /// does not re-order: the relay is the only thing that has seen the whole
+    /// fleet, and a second opinion here would be a card disagreeing with its own
+    /// `+N more`.
+    ///
+    /// **Empty is the compatibility path and not a failure.** An app updated
+    /// ahead of its relay reads no `rows` key at all; `AgentCardLayout.init?`
+    /// returns nil for that and the card draws the headline exactly as it did
+    /// before rows existed.
+    ///
+    /// **The headline is not one of these by construction.** It is the agent the
+    /// notice was about; these are the fleet in tier order. The two coincide
+    /// most of the time and need not — a working agent's notice arriving while
+    /// another is blocked puts a different agent at the top of the rows — so a
+    /// card that drew the headline AND the rows would repeat an agent whenever
+    /// they do coincide, which is the usual case. It draws the rows.
+    public var rows: [AgentCardRow]
 
     /// What the whole fleet has changed: `+391 −112`, and the commits
     /// under it.
@@ -201,7 +239,9 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         working: Int = -1,
         insertions: Int? = nil,
         deletions: Int? = nil,
-        commits: Int? = nil
+        commits: Int? = nil,
+        more: Int = -1,
+        rows: [AgentCardRow] = []
     ) {
         self.terminal = terminal
         self.label = label
@@ -215,11 +255,14 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         self.insertions = insertions
         self.deletions = deletions
         self.commits = commits
+        self.more = more
+        self.rows = rows
     }
 
     private enum CodingKeys: String, CodingKey {
         case terminal, label, machine, status, detail, startedAt
         case blocked, review, working, insertions, deletions, commits
+        case more, rows
     }
 
     /// Hand-written for two reasons, and neither is the timestamp alone.
@@ -258,11 +301,12 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         machine = (try? container.decodeIfPresent(String.self, forKey: .machine)) ?? ""
         status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? ""
         detail = (try? container.decodeIfPresent(String.self, forKey: .detail)) ?? ""
-        let stamp = (try? container.decodeIfPresent(Double.self, forKey: .startedAt)) ?? nil
-        startedAt = stamp.flatMap { value in
-            guard value > 0 else { return nil }
-            return Date(timeIntervalSince1970: value > 1e11 ? value / 1000 : value)
-        }
+        // The seconds-or-milliseconds rule is `AgentCardClock`, which is where
+        // it moved when a row grew two more dates of exactly this kind. Three
+        // inline copies would have been three places to notice that the
+        // daemon's turn clock is milliseconds and everything else is seconds.
+        startedAt = AgentCardClock.date(
+            (try? container.decodeIfPresent(Double.self, forKey: .startedAt)) ?? nil)
         // `-1` and not `0` for an absent count, which is the whole of
         // `knowsFleet`: a relay too old to have a roster says nothing
         // here, and a card that read that as "nobody is blocked" would
@@ -274,9 +318,17 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         blocked = count(.blocked)
         review = count(.review)
         working = count(.working)
+        more = count(.more)
         insertions = (try? container.decodeIfPresent(Int.self, forKey: .insertions)) ?? nil
         deletions = (try? container.decodeIfPresent(Int.self, forKey: .deletions)) ?? nil
         commits = (try? container.decodeIfPresent(Int.self, forKey: .commits)) ?? nil
+        // A row that will not decode is dropped and the rest of the card
+        // survives, which is `decodeIfPresent`'s whole job here — the card is
+        // worth more than any one line on it, and an activity whose state throws
+        // is one nothing can end. See `AgentCardRow.init(from:)`, which defaults
+        // every field rather than throwing, so this arm is reached only for a
+        // `rows` that is not an array at all.
+        rows = ((try? container.decodeIfPresent([AgentCardRow].self, forKey: .rows)) ?? nil) ?? []
     }
 
     /// The other half of the same decision, and it is not decorative
@@ -291,8 +343,7 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         try container.encode(machine, forKey: .machine)
         try container.encode(status, forKey: .status)
         try container.encode(detail, forKey: .detail)
-        try container.encodeIfPresent(
-            startedAt.map { $0.timeIntervalSince1970 * 1000 }, forKey: .startedAt)
+        try container.encodeIfPresent(AgentCardClock.number(startedAt), forKey: .startedAt)
         // Written only when they are real, so that a persisted card
         // round-trips to the same `knowsFleet` it was decoded with.
         // Encoding `-1` would turn "the relay said nothing" into a stored
@@ -302,9 +353,17 @@ public struct AgentCardState: Codable, Hashable, Sendable {
             try container.encode(review, forKey: .review)
             try container.encode(working, forKey: .working)
         }
+        // On the same terms, and separately: `more` has its own absent value and
+        // a persisted `-1` would read back as an answer on the next decode.
+        if more >= 0 { try container.encode(more, forKey: .more) }
         try container.encodeIfPresent(insertions, forKey: .insertions)
         try container.encodeIfPresent(deletions, forKey: .deletions)
         try container.encodeIfPresent(commits, forKey: .commits)
+        // Written only when there are any, so that the round trip ActivityKit
+        // performs on every persisted card gives back the same `rows.isEmpty`
+        // it was handed — which is what `AgentCardLayout.init?` reads to tell a
+        // card that carries rows from one that never did.
+        if !rows.isEmpty { try container.encode(rows, forKey: .rows) }
     }
 }
 

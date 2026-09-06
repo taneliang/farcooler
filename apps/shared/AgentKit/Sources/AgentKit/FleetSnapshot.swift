@@ -202,7 +202,11 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         /// Blocked and done are facts about something that already happened and
         /// that only a person un-does. Working is a claim about right now, and
         /// right now passes.
-        public var isLatched: Bool { status == "blocked" || status == "done" }
+        /// The rule itself is `FleetSnapshot.isLatched(_:)`, over the status
+        /// word alone. There is a second thing with a status and an age now —
+        /// the card's pushed rows, which are not agents in any snapshot — and
+        /// two spellings of "does this state expire" is two answers to it.
+        public var isLatched: Bool { FleetSnapshot.isLatched(status) }
 
         /// Whether this agent SAYS the same thing as another — everything a
         /// surface draws, and not when we heard it.
@@ -442,8 +446,34 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// range still takes every one of them to "last seen" on the hour, which is
     /// the case the rule was written for.
     public func confidence(in agent: Agent, at now: Date) -> Confidence {
-        if agent.isLatched { return .known }
-        return age(of: agent, at: now) >= Self.staleAfter ? .lastSeen : .known
+        Self.confidence(status: agent.status, heard: age(of: agent, at: now))
+    }
+
+    /// Whether this status stays true as what we know about it ages.
+    ///
+    /// Blocked and done are facts about something that already happened and
+    /// that only a person un-does. Working is a claim about right now, and right
+    /// now passes. An unrecognized word is not latched, which errs toward saying
+    /// less about a state this build has never heard of.
+    ///
+    /// Over the word rather than over an `Agent`, because the other caller has
+    /// no agent: `AgentCardRow` is one line of a lock screen card, pushed by the
+    /// relay and never stored in a snapshot, and it has exactly this question.
+    public static func isLatched(_ status: String) -> Bool {
+        status == "blocked" || status == "done"
+    }
+
+    /// The staleness rule, over a status and an age and nothing else.
+    ///
+    /// `confidence(in:at:)` above is this function with the age looked up; the
+    /// card's rows call it with an age of their own. One rule in one place is
+    /// the whole point — `stalenessMoments(after:)` schedules a widget wake-up
+    /// against it, `glance(at:)` stops counting a working agent against it, and
+    /// a second copy that drifted would put a dashed ring and an asserted status
+    /// on the same screen.
+    public static func confidence(status: String, heard age: TimeInterval) -> Confidence {
+        if isLatched(status) { return .known }
+        return age >= staleAfter ? .lastSeen : .known
     }
 
     /// EVERY moment still ahead at which a surface drawing this snapshot would

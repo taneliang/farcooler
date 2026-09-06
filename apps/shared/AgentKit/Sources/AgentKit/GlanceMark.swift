@@ -156,7 +156,18 @@ public struct GlanceMark: Hashable, Sendable {
     /// other — see `Attention.toReview` for why that one is allowed and why a
     /// per-agent `reviewsWaiting` or `unreadDiff` still is not.
     public init(agent: FleetSnapshot.Agent, confidence: FleetSnapshot.Confidence = .known) {
-        switch agent.status {
+        self.init(status: agent.status, confidence: confidence)
+    }
+
+    /// The same, over the status WORD alone.
+    ///
+    /// The lock screen card's rows are pushed by the relay and are not agents in
+    /// any snapshot — see `AgentCardRow` — so they have a status and an age and
+    /// nothing else. The switch below is the one that was already here, moved
+    /// down one level rather than copied: a second mapping of `done` would be a
+    /// second chance for one surface to draw the review tier and another not to.
+    public init(status: String, confidence: FleetSnapshot.Confidence = .known) {
+        switch status {
         // Blocked is latched — an agent stopped an hour ago is still stopped —
         // so it keeps its heavy ring however old the snapshot is, and the core
         // is genuinely absent rather than merely unstated: being at a prompt is
@@ -567,10 +578,20 @@ public enum GlanceTraceSize: Hashable, Sendable, CaseIterable {
         }
     }
 
-    /// The specimen's proportion, held. See the type's own comment — this is
-    /// derived, not quoted.
+    /// The specimen's proportion, held — except where the design states the
+    /// figure outright.
+    ///
+    /// **§02's Live Activity draws the card row's trace as 8 / 3 / 8**, which is
+    /// 19 and not the 15 the proportion gives at 52 wide. So `cardRow` is
+    /// quoted like every other number in this file and the other three stay
+    /// derived, with the derivation still flagged as one: the design document
+    /// gives `h` for the surface it draws and leaves it to the surface
+    /// everywhere else.
     public var height: CGFloat {
-        GlanceTraceLayout.axis + 2 * (width * 19 / 156).rounded()
+        switch self {
+        case .cardRow: 19
+        default: GlanceTraceLayout.axis + 2 * (width * 19 / 156).rounded()
+        }
     }
 }
 
