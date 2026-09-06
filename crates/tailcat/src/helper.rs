@@ -223,7 +223,19 @@ pub async fn dial(
 }
 
 pub fn serve(key_path: &Path, ssh_port: u16, allow: &[String]) -> Result<(), TunnelError> {
-    // Refused BEFORE anything is spawned, and that ordering is the assertion
+    let mut slot = helper().lock().expect("the tunnel helper lock");
+    // Torn down first, exactly as the Go side's `serve` does — and BEFORE
+    // either refusal below, which is the half that used to be missing here.
+    // The allowlist is read at Start and never again, so a helper left running
+    // keeps admitting every device that was in the file when it started;
+    // rebuilding is not merely the available way to revoke a route, it is the
+    // only one. That makes the empty call the withdrawal rather than a no-op:
+    // `allowlist::start_tunnel` hands this an allowlist admitting nobody
+    // precisely when the last tunneled device has just been revoked, and a
+    // refusal that returned before this line would leave that device peered.
+    *slot = None;
+
+    // Refused before anything is SPAWNED, which is the assertion
     // `crates/daemon/tests/an_empty_allowlist_starts_no_tunnel.rs` makes: no
     // allowlist, no helper process. Tailcat reads an empty `AllowedClients` as
     // "admit everyone", so a runner that got this far with nobody admitted
@@ -240,13 +252,6 @@ pub fn serve(key_path: &Path, ssh_port: u16, allow: &[String]) -> Result<(), Tun
     if allow.iter().any(|key| key.split_whitespace().count() != 1) {
         return Err(TunnelError::Io(std::io::Error::from_raw_os_error(libc::EINVAL)));
     }
-
-    let mut slot = helper().lock().expect("the tunnel helper lock");
-    // Torn down first, exactly as the Go side's `serve` does: the allowlist is
-    // read at Start and never again, so a helper left running keeps admitting
-    // every device that was in the file when it started. Rebuilding is not
-    // merely the available way to revoke a route, it is the only one.
-    *slot = None;
 
     let mut helper = spawn(key_path)?;
     let outcome = helper

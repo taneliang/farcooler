@@ -191,11 +191,11 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
 /// allowlist at `Start` and consults it only when a client first registers, so
 /// a revoked device that is already peered keeps its route regardless. The only
 /// withdrawal is a fresh `serve`, which REPLACES the server and so drops every
-/// live tunnel, not only the revoked device's. Today `serve` is called once,
-/// from `allowlist::start_tunnel` at boot — so `revoke` removes the key from
-/// the file and from the next server, and the running one keeps it until the
-/// daemon restarts. Adding must not pay that price: the caller is holding a
-/// session on this runner right now, and every other device is holding one too.
+/// live tunnel, not only the revoked device's. `revoke` pays that price on
+/// purpose — it calls `allowlist::start_tunnel` after its write, so the running
+/// server is replaced by one built without the revoked key, and every other
+/// device redials. Adding must not pay it: the caller is holding a session on
+/// this runner right now, and every other device is holding one too.
 ///
 /// Nothing here touches `allowlist::tunnel_plan` or `start_tunnel`. Those
 /// decide whether a booting runner may serve at all, and their refusal to serve
@@ -337,14 +337,25 @@ fn rerender_with_node_key(
 /// the `farcoolerd --stdio` process that sshd launched exits with it, which ends
 /// the ssh session too.
 ///
-/// **And not the tunnel route, until the daemon restarts.** The allowlist is a
+/// **And the tunnel route, for a device that had one.** The allowlist is a
 /// projection of the file, so the key is gone from it the moment this write
-/// lands — but tailcat copies the allowlist at `Start`, there is no
-/// `allow_remove`, and `serve` is called once at boot. A revoked device that
-/// already peered can therefore still open a TCP connection to this host's sshd
-/// until then, where its deleted line means it authenticates as nobody. See
-/// `set_node_key` for why the withdrawal is a whole-server replacement rather
-/// than a subtraction, and what that costs every other device when it happens.
+/// lands — but the RUNNING tunnel holds the copy it was handed at `Start` and
+/// consults it only when a client first REGISTERS, so a device that already
+/// peered is never rechecked and keeps its path to this host's sshd. An
+/// `allow_remove` would not close that: withdrawing a key from the live set
+/// blocks a future registration and leaves the established connection up, which
+/// is precisely the compromised-phone case this call exists for. Replacing the
+/// server is the only thing that drops a peering, so that is what this does —
+/// `allowlist::start_tunnel`, which rebuilds the tunnel from the file just
+/// written — and it takes every OTHER device's live tunnel down with it. See
+/// `set_node_key` for why a subtraction was never on the table.
+///
+/// Only for a device that carried a node key. One enrolled without one was
+/// never admitted, so bouncing the tunnel for it would cost every other device
+/// its connection and contain nothing, and most revocations are of those.
+/// Revoking the LAST device that had one leaves this runner serving no tunnel
+/// at all, which is the correct end state rather than a gap: an empty allowlist
+/// is one tailcat reads as "admit everyone".
 ///
 /// **What it does not:** anything this daemon is not serving. A daemon in
 /// another `FARCOOLER_HOME` has its own registry, and a multiplexed ssh master
@@ -363,24 +374,37 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
         return Err(DomainError::InvalidArgument { what: "client_id" });
     }
     let closing = client_id.clone();
-    let remaining = blocking(move || {
+    let (remaining, was_tunneled) = blocking(move || {
         // Read and write under one lock hold, so that a revocation cannot rebuild
         // the block from a snapshot taken before a concurrent enrollment landed
         // and put the enrolled key back. See `fence::update`.
-        fence::update(&path, fence::AUTHORIZED_KEYS, fence::Placement::Last, |entries| {
-            let entries = attributed(entries);
-            // NOT_FOUND rather than a cheerful success. "Revoked" from a runner
-            // that revoked nothing is the one answer a person must never be given
-            // about a device they are trying to cut off. Decided in here, and
-            // `Refusal` is what carries it out — the file is not touched.
-            if !entries.iter().any(|e| e.client_id == client_id) {
-                return Err(Refusal(DomainError::NotFound));
-            }
-            let remaining: Vec<Entry> =
-                entries.into_iter().filter(|e| e.client_id != client_id).collect();
-            let (ours, foreign) = sorted(&remaining);
-            Ok((fence::Change::Write { entries: ours, foreign }, ()))
-        })?;
+        let was_tunneled = fence::update(
+            &path,
+            fence::AUTHORIZED_KEYS,
+            fence::Placement::Last,
+            |entries| {
+                let entries = attributed(entries);
+                // NOT_FOUND rather than a cheerful success. "Revoked" from a runner
+                // that revoked nothing is the one answer a person must never be given
+                // about a device they are trying to cut off. Decided in here, and
+                // `Refusal` is what carries it out — the file is not touched.
+                if !entries.iter().any(|e| e.client_id == client_id) {
+                    return Err(Refusal(DomainError::NotFound));
+                }
+                // Whether this device was in the tunnel's allowlist, read off the
+                // lines being REMOVED rather than inferred afterwards from a file
+                // it is no longer in. `allowlist::from_entries` admits a line only
+                // when it carries a node key, so a device without one was never
+                // served and rebuilding the tunnel for it would take every other
+                // device's live tunnel down for nothing.
+                let was_tunneled =
+                    entries.iter().any(|e| e.client_id == client_id && !e.node_key.is_empty());
+                let remaining: Vec<Entry> =
+                    entries.into_iter().filter(|e| e.client_id != client_id).collect();
+                let (ours, foreign) = sorted(&remaining);
+                Ok((fence::Change::Write { entries: ours, foreign }, was_tunneled))
+            },
+        )?;
         // Read back rather than answering with what was just computed, the same
         // way a settings write does: what the file now says is the only claim
         // worth making about who may log in.
@@ -389,7 +413,7 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
         // this is a report, not a decision. Nothing is rebuilt from it, so an
         // enrollment that lands between the write and this read shows up in the
         // answer — which is the file being the authority, not a lost update.
-        Ok(listing(&read(&path)?))
+        Ok((listing(&read(&path)?), was_tunneled))
     })
     .await?;
 
@@ -404,6 +428,29 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
     // round to it.
     let closed = svc.sessions().close(&closing);
     tracing::info!(client = %closing, closed, "revoked a device and closed its live sessions");
+
+    // Then the tunnel route, and still before the answer.
+    //
+    // `start_tunnel` rebuilds the running server from the file this just wrote,
+    // which is the only thing that severs a path a device has already peered
+    // on — and it drops every OTHER device's live tunnel to do it. That cost is
+    // why it is guarded: a device that carried no node key was never in the
+    // allowlist, and most revocations are of those.
+    //
+    // The answer waits for it, and it can wait tens of seconds: `serve` holds
+    // tailcat's package-wide mutex across up to two region picks and two
+    // `Start` attempts. That is the price of this call meaning what it says.
+    // Answering first and rebuilding after would report a containment that had
+    // not happened yet — the same mistake as closing the sessions afterwards,
+    // and this is the half of it a person is most likely to be acting on.
+    if was_tunneled {
+        let outcome = crate::allowlist::start_tunnel(svc).await;
+        tracing::info!(
+            client = %closing,
+            ?outcome,
+            "rebuilt this runner's tunnel without the revoked device"
+        );
+    }
 
     Ok(remaining)
 }

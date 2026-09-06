@@ -214,23 +214,19 @@ device, which removes its line and its node key in the same write. Read it as
 one more reason enrollment is a decision about a device rather than about a
 scope.
 
-**Revoking one device drops every device's tunnel, when it takes effect.** The
-line goes immediately, so the revoked device cannot log in from that moment, and
-the sessions it was holding are closed. Its tunnel *route* outlives that: the
-tunnel is handed the list of admitted keys when it starts, one key cannot be
-subtracted from a running tunnel, and the only withdrawal is starting a fresh
-one — which drops every other device's live tunnel with it. Today that happens
-when the runner's daemon next starts, so a revoked device keeps a path to an
-sshd that now refuses it until then. If you want the path gone as well as the
-login, restart that runner's daemon — and the command is the supervisor's, not
-Far Cooler's:
+**Revoking one device drops every device's tunnel, and it happens at the
+revocation.** The line goes immediately, so the revoked device cannot log in
+from that moment, the sessions it was holding are closed, and its tunnel *route*
+goes with them rather than outliving them. The tunnel is handed the list of
+admitted keys when it starts and one key cannot be subtracted from a running
+one, so the only withdrawal is starting a fresh tunnel — which drops every other
+device's live tunnel with it. That cost is real and it is paid there and then,
+by the revocation itself, rather than deferred to the runner's next restart. A
+device with a tunnel open when somebody else is revoked has to dial again.
 
-```bash
-# Linux, stable channel. A preview or canary runner names its own unit:
-# farcooler-preview.service, farcooler-canary.service, farcooler-local.service.
-ssh you@box 'systemctl --user restart farcooler'
-
-# macOS, stable channel. Same channel rule: com.farcooler.daemon.remote.preview,
-# and so on.
-ssh you@box 'launchctl kickstart -k gui/$(id -u)/com.farcooler.daemon.remote'
-```
+Two things soften it. A device that never registered a node key was never in the
+allowlist, so revoking it leaves the tunnel entirely alone — and most
+revocations are of devices like that. And revoking the last device that *did*
+carry one leaves the runner serving no tunnel at all, which is the correct end
+state rather than a gap: a tunnel handed an empty allowlist would admit
+everyone.

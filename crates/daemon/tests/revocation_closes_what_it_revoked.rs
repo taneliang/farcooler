@@ -239,3 +239,269 @@ async fn revoke_answers_only_after_it_has_closed() {
 
     assert!(probe.is_closed(), "revoke answered before the phone's session was closed");
 }
+
+/// The tunnel half of containment, where a revoked device's *route* lives.
+///
+/// Deleting a line stops the next login and closes the sessions this daemon is
+/// serving. Neither of those touches the tunnel: tailcat copies the allowlist
+/// at `Start` and consults it only when a client first registers, so a device
+/// that already peered keeps a path to this host's sshd until the server is
+/// replaced. Replacing it is what `enrollment::revoke` now does, and these are
+/// the tests that say so.
+///
+/// **Why the helper backend rather than a plain `cargo test`.** A default build
+/// links no tunnel at all, so `farcooler_tailcat::serve` refuses every call for
+/// any input — which makes "was the tunnel rebuilt" unobservable there, and any
+/// assertion about it vacuous. Under `tailcat-helper` the tunnel is a PROCESS,
+/// and a process cannot be faked: `FARCOOLER_TUNNEL_HELPER` points at a shell
+/// script that answers the line protocol and writes down every command it was
+/// given. `an_empty_allowlist_starts_no_tunnel.rs` makes the same argument for
+/// the same reason.
+#[cfg(feature = "tailcat-helper")]
+mod tunnel {
+    use super::*;
+    use farcooler_daemon::allowlist::{self, TunnelOutcome};
+    use farcooler_fence::Grant;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// `FARCOOLER_TUNNEL_HELPER` is process-wide, and so is the running helper
+    /// itself — one per process, mirroring the one server a runner has. Two of
+    /// these tests in flight at once would each be reading the other's tunnel.
+    static TUNNEL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    /// Two node keys that are genuinely two keys. 43 base64 characters carry
+    /// 258 bits, so the last character's low two bits are padding: "...AAA"
+    /// and "...AAB" decode to the same 32 bytes, and only "...AAE" moves a bit
+    /// that is really there. The same pair `allowlist.rs`'s own tests use.
+    const NODE_A: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const NODE_B: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE";
+
+    /// A running tunnel torn down with the test that started it.
+    ///
+    /// The helper is held in a process-wide static that never drops, so a test
+    /// that just returned would leave a shell blocked on a pipe for as long as
+    /// the test binary lives — and the next test would inherit it. `serve` with
+    /// an empty allowlist is the crate's own way to say "stop", which is the
+    /// same call `revoke` makes and therefore not a second mechanism invented
+    /// for the tests.
+    struct Tunnel(std::path::PathBuf);
+
+    impl Drop for Tunnel {
+        fn drop(&mut self) {
+            let _ = farcooler_tailcat::serve(&self.0, 22, &[]);
+            // SAFETY: as at the set below — the tunnel lock is still held by
+            // the test whose locals are being dropped, and nothing else in
+            // this binary reads this variable.
+            unsafe { std::env::remove_var("FARCOOLER_TUNNEL_HELPER") };
+        }
+    }
+
+    /// A helper that serves nothing and writes down everything it was asked.
+    ///
+    /// Returns the log it writes to. Every command arrives on one line, so the
+    /// log is the sequence of commands this runner's tunnel was given — which
+    /// is exactly what "the server was rebuilt, without that key" is a claim
+    /// about.
+    fn fake_helper(h: &Harness) -> std::path::PathBuf {
+        let dir = h.service.tailcat_key().parent().expect("a root").to_path_buf();
+        let log = dir.join("tunnel-commands.log");
+        let script = dir.join("fake-tunnel-helper");
+        std::fs::write(
+            &script,
+            format!(
+                r#"#!/bin/sh
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> {log}
+  case "$line" in
+    blob*) echo "ok fake-blob" ;;
+    *) echo "ok" ;;
+  esac
+done
+"#,
+                log = log.display()
+            ),
+        )
+        .expect("the fake helper was written");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // No product path creates this file yet — the device end-to-end run had
+        // to write it by hand too — and `tunnel_plan` refuses a runner without
+        // one, so every test here would answer `NoIdentity` instead of
+        // exercising anything.
+        std::fs::write(h.service.tailcat_key(), b"scratch tailcat identity, never read")
+            .expect("a scratch tailcat identity");
+        std::fs::set_permissions(h.service.tailcat_key(), std::fs::Permissions::from_mode(0o600))
+            .unwrap();
+
+        // SAFETY: `set_var` is sound only while no other thread reads the
+        // environment. The `TUNNEL` lock keeps the other tests in this module
+        // out, and nothing else in this binary touches this variable. The same
+        // argument `an_empty_allowlist_starts_no_tunnel.rs` makes.
+        unsafe { std::env::set_var("FARCOOLER_TUNNEL_HELPER", &script) };
+        log
+    }
+
+    /// Place one Far Cooler line, with or without a node key.
+    ///
+    /// Not `enrollment::enroll`: `ClientEnroll` carries no node key field and
+    /// nothing populates the ceremony offer's either, so no enrollment path can
+    /// produce a tunneled device today. This goes to `farcooler_fence`, which
+    /// is the same primitive `enrollment::enroll` itself calls.
+    async fn line(h: &Harness, key: &str, client_id: &str, node_key: Option<&str>) {
+        let rendered = farcooler_fence::render(
+            key,
+            client_id,
+            client_id,
+            Scope::Control,
+            Grant::FarCooler,
+            node_key,
+        )
+        .expect("a synthetic key and id render");
+        let path = h.service.authorized_keys().to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            farcooler_fence::update(
+                &path,
+                farcooler_fence::AUTHORIZED_KEYS,
+                farcooler_fence::Placement::Last,
+                move |entries| {
+                    let mut ours: Vec<String> = entries.iter().map(|e| e.line.clone()).collect();
+                    ours.push(rendered);
+                    Ok::<_, farcooler_fence::FenceError>((
+                        farcooler_fence::Change::Write { entries: ours, foreign: Vec::new() },
+                        (),
+                    ))
+                },
+            )
+        })
+        .await
+        .expect("the write task ran")
+        .expect("authorized_keys accepted the line");
+    }
+
+    async fn revoke_directly(h: &Harness, client_id: &str) {
+        farcooler_daemon::enrollment::revoke(
+            &h.service,
+            &farcooler_protocol::v1::ClientRevoke { client_id: client_id.into() },
+        )
+        .await
+        .expect("client.revoke");
+    }
+
+    fn commands(log: &std::path::Path) -> String {
+        std::fs::read_to_string(log).unwrap_or_default()
+    }
+
+    /// The tunnel is serving right now, as far as anything in this process can
+    /// tell. `conn_blob` asks the running helper for its token; with no helper
+    /// it answers ENOTCONN, which is the backend's word for "nothing is
+    /// serving".
+    fn serving() -> bool {
+        farcooler_tailcat::conn_blob().is_ok()
+    }
+
+    /// Revoking one of two tunneled devices rebuilds the tunnel around the one
+    /// that is left.
+    #[tokio::test]
+    async fn the_tunnel_is_rebuilt_without_the_revoked_device() {
+        let _serial = TUNNEL.lock().await;
+        let h = start().await;
+        let log = fake_helper(&h);
+        let _tunnel = Tunnel(h.service.tailcat_key());
+
+        line(&h, PHONE_KEY, "phone", Some(NODE_A)).await;
+        line(&h, LAPTOP_KEY, "laptop", Some(NODE_B)).await;
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert!(
+            matches!(outcome, TunnelOutcome::Serving(_)),
+            "the fixture's own tunnel never started: {outcome:?}"
+        );
+        assert!(
+            commands(&log).contains(&format!("serve 22 {NODE_A} {NODE_B}")),
+            "both devices were not admitted to begin with: {}",
+            commands(&log)
+        );
+
+        std::fs::write(&log, "").unwrap();
+        revoke_directly(&h, "phone").await;
+
+        let after = commands(&log);
+        assert!(
+            after.contains(&format!("serve 22 {NODE_B}")),
+            "revoking a tunneled device did not rebuild the tunnel: {after:?}"
+        );
+        assert!(
+            !after.contains(NODE_A),
+            "the revoked device's node key was handed to the rebuilt tunnel: {after:?}"
+        );
+        assert!(serving(), "the device nobody revoked lost the tunnel entirely");
+    }
+
+    /// The one this whole change exists for: revoking the LAST tunneled device
+    /// stops the server rather than leaving it running with that device still
+    /// in its set.
+    ///
+    /// `tunnel_plan` answers `NobodyAdmitted` here, and an implementation that
+    /// takes that as "nothing to start" returns without calling `serve` at all
+    /// — which leaves the compromised phone peered to a tunnel that no longer
+    /// appears in any file. The empty call IS the revocation: `serve` stops
+    /// whatever is running before it validates anything, so handing it an
+    /// allowlist that admits nobody is how a runner that admits nobody ends
+    /// with no tunnel.
+    #[tokio::test]
+    async fn revoking_the_last_tunneled_device_stops_the_tunnel() {
+        let _serial = TUNNEL.lock().await;
+        let h = start().await;
+        let log = fake_helper(&h);
+        let _tunnel = Tunnel(h.service.tailcat_key());
+
+        line(&h, PHONE_KEY, "phone", Some(NODE_A)).await;
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert!(
+            matches!(outcome, TunnelOutcome::Serving(_)),
+            "the fixture's own tunnel never started: {outcome:?}"
+        );
+        assert!(serving(), "the fixture's own tunnel is not serving");
+
+        revoke_directly(&h, "phone").await;
+
+        assert!(
+            !serving(),
+            "the tunnel kept running after the only device it admitted was \
+             revoked, so the revoked device still has a route to this sshd: {}",
+            commands(&log)
+        );
+    }
+
+    /// A device that was never in the allowlist costs nobody their tunnel.
+    ///
+    /// The absence is the assertion. Without the `node_key.is_empty()` guard in
+    /// `revoke` this still contains the revoked device perfectly — it was never
+    /// admitted — while dropping every other device's live tunnel to do it, and
+    /// most revocations are of direct-only devices.
+    #[tokio::test]
+    async fn revoking_a_device_that_was_never_admitted_leaves_the_tunnel_alone() {
+        let _serial = TUNNEL.lock().await;
+        let h = start().await;
+        let log = fake_helper(&h);
+        let _tunnel = Tunnel(h.service.tailcat_key());
+
+        line(&h, PHONE_KEY, "phone", Some(NODE_A)).await;
+        line(&h, LAPTOP_KEY, "laptop", None).await;
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert!(
+            matches!(outcome, TunnelOutcome::Serving(_)),
+            "the fixture's own tunnel never started: {outcome:?}"
+        );
+
+        std::fs::write(&log, "").unwrap();
+        revoke_directly(&h, "laptop").await;
+
+        assert_eq!(
+            commands(&log),
+            "",
+            "revoking a device with no node key rebuilt the tunnel anyway, \
+             which drops every other device's live tunnel for nothing"
+        );
+        assert!(serving(), "the phone's tunnel went down with a revocation that was not its own");
+    }
+}

@@ -7,10 +7,14 @@
 //! removes a device's key and forgets its node key — leaving a revoked device
 //! with a route to sshd. There is nothing here to forget to update.
 //!
-//! What this does NOT make instant is the RUNNING server, which holds the copy
-//! of the allowlist it was handed at `Start`. A revocation lands here at once
-//! and reaches the tunnel at the next `serve` — today, the next boot. See
-//! `enrollment::revoke`.
+//! The RUNNING server does not follow on its own: it holds the copy of the
+//! allowlist it was handed at `Start` and consults it only when a client first
+//! registers. A revocation lands in this projection the instant the file
+//! changes, and `enrollment::revoke` then calls `start_tunnel` to make the
+//! running server match — which means REPLACING it, because a key cannot be
+//! subtracted from a live one. See `enrollment::revoke` for what that costs
+//! every other device, and `start_tunnel` for why the empty case has to go
+//! through `serve` too.
 
 use std::path::Path;
 
@@ -123,12 +127,21 @@ pub fn tunnel_plan(key_path: &Path, entries: &[Entry]) -> Result<Allowlist, Tunn
     from_entries(entries).ok_or(TunnelOutcome::NobodyAdmitted)
 }
 
-/// Start this runner's tunnel, if it has one to start.
+/// Make this runner's running tunnel match its `authorized_keys`.
+///
+/// Named `start_tunnel` for the caller it was written for — `main.rs`, at boot,
+/// where there is nothing running and "start" is the whole of it — but what it
+/// means is the wider thing, because `enrollment::revoke` calls it too. Every
+/// path through it ends with `farcooler_tailcat::serve` having been handed the
+/// allowlist the file currently says, INCLUDING the path where the file admits
+/// nobody. `serve` tears down whatever was running before it validates anything
+/// it was given, so the empty call is what stops a server rather than a call
+/// that was skipped for having nothing to start.
 ///
 /// `tunnel_plan` makes the admit/refuse decision; this function is only the
-/// effect of it — reading `authorized_keys`, and then, only once admitted,
-/// reaching into `farcooler_tailcat`. See `tunnel_plan`'s doc comment for why
-/// the decision is split out rather than inlined here.
+/// effect of it — reading `authorized_keys`, and then reaching into
+/// `farcooler_tailcat`. See `tunnel_plan`'s doc comment for why the decision is
+/// split out rather than inlined here.
 ///
 /// `farcooler_tailcat::serve` and `conn_blob` are synchronous and can block
 /// for 30-45 seconds: the Go side holds a package-wide mutex for the whole of
@@ -171,6 +184,35 @@ pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
             return TunnelOutcome::NoIdentity;
         }
         Err(TunnelOutcome::NobodyAdmitted) => {
+            // Still through `serve`, and returning here instead is the bug
+            // this arm exists to not have. `serve` stops whatever is running
+            // BEFORE it looks at what it was handed — `tailcat.go`'s does,
+            // and so does `helper.rs`'s — so an allowlist that admits nobody
+            // is how a runner that admits nobody ends with no server at all.
+            // Skipping the call leaves the old server up, still carrying the
+            // set it copied at `Start`, which is precisely the revoked device
+            // whose last node key just left the file.
+            //
+            // At boot there is nothing running and this is a no-op, which is
+            // why it belongs here rather than in `enrollment::revoke`: the
+            // function means "make the running tunnel match the file", and
+            // that is the same sentence in both callers.
+            let key_path = key_path.clone();
+            let ssh_port = service.ssh_port();
+            let stopped =
+                tokio::task::spawn_blocking(move || farcooler_tailcat::serve(&key_path, ssh_port, &[]))
+                    .await;
+            // The refusal is the expected answer, not a failure: `EINVAL` from
+            // either real backend, `no_tailcat` from a build carrying no
+            // tunnel. Nothing was meant to start, so this must not be logged
+            // as a tunnel that did not start — the one line a reader would
+            // take as a broken runner is the line this arm must never write.
+            if let Ok(Err(error)) = stopped {
+                tracing::debug!(
+                    code = error.code(),
+                    "the empty allowlist was refused, as it is meant to be"
+                );
+            }
             tracing::info!("no enrolled device carries a node key; this runner serves no tunnel");
             return TunnelOutcome::NobodyAdmitted;
         }
