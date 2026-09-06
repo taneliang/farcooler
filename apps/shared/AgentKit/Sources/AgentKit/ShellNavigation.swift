@@ -362,10 +362,26 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// worktree unreachable would be a different feature. See
     /// `overviewOrder` and `hiddenOrder`.
     var isHidden: Bool
+    /// Whether this worktree IS the repository's own checkout.
+    ///
+    /// Carried for one reason: the overview card's menu must not offer to
+    /// remove it. `Workspace.isPrimaryCheckout` states the rule at length —
+    /// removing the primary checkout would offer to delete the directory the
+    /// repository itself lives in, the daemon refuses it independently, and
+    /// the flag exists so nobody is walked through a destructive confirmation
+    /// that cannot succeed.
+    ///
+    /// False is the offering answer, which is the same direction the model's
+    /// own `isPrimaryCheckout` defaults in and safe for the same reason: this
+    /// keeps a button off a menu, it is not what keeps the checkout safe.
+    /// `ShellHarness` sets it on one fixture workspace so the absent case is
+    /// reachable without a runner.
+    var isPrimaryCheckout: Bool
 
     init(
         id: String, name: String, server: String? = nil,
         tail: [String] = [], resume: Int? = nil, isHidden: Bool = false,
+        isPrimaryCheckout: Bool = false,
         tabs: [ShellTab]
     ) {
         self.id = id
@@ -375,6 +391,7 @@ struct ShellWorkspace: Identifiable, Hashable {
         self.tail = tail
         self.resume = resume
         self.isHidden = isHidden
+        self.isPrimaryCheckout = isPrimaryCheckout
     }
 
     /// The tab a deliberate arrival lands on: the remembered one where it

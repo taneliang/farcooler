@@ -141,6 +141,11 @@ struct ShellFleetMap {
                     // worktree somebody put away on the Mac came back as an
                     // ordinary card on the phone. See `ShellFleet.hiddenOrder`.
                     isHidden: workspace.isHidden,
+                    // The one workspace the overview card's menu must not
+                    // offer to remove. Carried rather than looked up again
+                    // from the connection at menu-build time, so the card and
+                    // the daemon are reading one fact.
+                    isPrimaryCheckout: workspace.isPrimaryCheckout,
                     tabs: tabs))
         }
 
@@ -637,6 +642,16 @@ struct ShellScreen: View {
     @State private var showQuickTask = false
     @State private var showNewWorkspace = false
 
+    /// Where a removal started from an overview card's menu has got to.
+    ///
+    /// Held HERE and not in the grid, for the reason the two sheets below are
+    /// presented here: the overview is mounted from the first point of a lift
+    /// and unmounted again when the grid is neither showing nor flying, so a
+    /// confirmation whose presenter lives inside it is a confirmation that can
+    /// lose the view it is attached to. A removal outlives the card that asked
+    /// for it — that is most of the point of asking.
+    @State private var removing: RemoveWorktreeRequest?
+
     @Environment(\.scenePhase) private var scenePhase
 
     private var map: ShellFleetMap { ShellFleetMap.of(connection) }
@@ -690,6 +705,41 @@ struct ShellScreen: View {
         }
         .sheet(isPresented: $showQuickTask) {
             TaskComposerView(connection: connection)
+        }
+        // The ceremony a card's menu starts, run from the screen rather than
+        // from the card. Shared with the pane's own bar — see
+        // `RemoveWorktreeFlow`.
+        .removeWorktreeFlow($removing, connection: connection)
+    }
+
+    /// The runner's workspace a card names, or nil when the fleet has moved on
+    /// since the grid was built.
+    ///
+    /// Looked up by id rather than by index, and that is the whole reason the
+    /// menu's closures carry a `ShellWorkspace` instead of a position: a poll
+    /// between the long press and the tap can have taken a worktree away, and
+    /// an index into a fleet that has changed length names a DIFFERENT
+    /// workspace rather than none. `FleetView`'s removed-workspace rule, kept.
+    private func workspace(_ shell: ShellWorkspace) -> Workspace? {
+        connection.fleet.workspaces.first { $0.id == shell.id }
+    }
+
+    /// Put a worktree away, or take it back out.
+    ///
+    /// Fire-and-refresh, which is what `Connection.hideWorkspace` is: hiding
+    /// is a view preference the runner stores, it cannot fail in a way this
+    /// app could usefully say a sentence about, and the answer arrives as the
+    /// card moving into — or out of — the grid's Hidden section. Nothing about
+    /// where you ARE changes, because `isHidden` changes where a workspace is
+    /// DRAWN and nothing else; see `ShellWorkspace.isHidden`.
+    private func toggleHidden(_ shell: ShellWorkspace) {
+        guard let workspace = workspace(shell) else { return }
+        Task {
+            if workspace.isHidden {
+                await connection.unhideWorkspace(workspace)
+            } else {
+                await connection.hideWorkspace(workspace)
+            }
         }
     }
 
@@ -792,6 +842,11 @@ struct ShellScreen: View {
             elsewhere: elsewhere,
             onCross: { group, workspace in
                 crossing = ShellCrossing(group: group, workspace: workspace)
+            },
+            onToggleHidden: toggleHidden,
+            onRemoveWorktree: { shell in
+                guard let workspace = workspace(shell) else { return }
+                removing = .confirming(workspace)
             },
             overviewActions: { overviewActions }
         ) { slot in

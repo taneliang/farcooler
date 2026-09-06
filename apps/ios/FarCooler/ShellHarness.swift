@@ -177,6 +177,17 @@ struct ShellHarness: View {
                     // few things away in. Coprime with neither cycle above, so
                     // it does not line up with the marks or the tails.
                     isHidden: Self.hides && index % 5 == 3,
+                    // Workspace 0 is the repository's own checkout, in every
+                    // fixture and unconditionally.
+                    //
+                    // Unconditional because of what it makes reachable: the
+                    // card menu's `Remove Worktree…` is ABSENT for the primary
+                    // checkout and present for everything else, and a fixture
+                    // where every workspace answered the same way could show
+                    // neither half of that rule working. One in four (or ten,
+                    // or forty) is also what a real runner looks like — a
+                    // repository has one checkout and many worktrees.
+                    isPrimaryCheckout: index == 0,
                     tabs: (0..<tabs).map { tab in
                         ShellTab(
                             id: "ws-\(index)-tab-\(tab)",

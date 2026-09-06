@@ -117,12 +117,17 @@ import SwiftUI
 /// **Remove worktree** — `Connection.removeWorktree` had no iOS caller at all
 /// after `FleetList` went. It is workspace-scoped, so the two candidate homes
 /// were this bar and the overview card's context menu; this bar won because
-/// the overview is being reworked into a multi-server grid by another lane and
-/// a destructive action landing in a file that is being rewritten underneath
-/// it is an action that quietly disappears again. It reads well here anyway:
-/// the moment you decide a worktree is finished with is the moment you are
-/// looking at it. The typed-name ceremony is unchanged — see
-/// `RemoveWorktreeConfirmSheet`, recovered rather than rewritten.
+/// the overview was being reworked into a multi-server grid by another lane
+/// and a destructive action landing in a file that is being rewritten
+/// underneath it is an action that quietly disappears again. It reads well
+/// here anyway: the moment you decide a worktree is finished with is the
+/// moment you are looking at it.
+///
+/// **The card's menu has it too now**, which is the Mac's own arrangement —
+/// the sidebar row and the workspace detail both carry it — and it is not two
+/// behaviors: the ceremony moved into `RemoveWorktreeFlow` so both doors ask
+/// for exactly the same confirmation. See `RemoveWorktreeConfirmSheet` for the
+/// typed name itself, recovered rather than rewritten.
 ///
 /// **Terminal ↔ chat** is here too, and that was the least obvious of the
 /// five. See `paneModeItem`.
@@ -167,9 +172,11 @@ struct ShellPaneChromeModifier: ViewModifier {
 
     @State private var showPhotoPicker = false
     @State private var pickedImage: PhotosPickerItem?
-    @State private var removeCandidate: Workspace?
-    @State private var confirmingRemove = false
-    @State private var needsTypedConfirmation: Workspace?
+    /// Where a removal started here has got to. The ceremony itself is
+    /// `RemoveWorktreeFlow`, shared with the overview card's menu so the two
+    /// doors into one destructive action cannot come to ask for different
+    /// amounts of confirmation.
+    @State private var removing: RemoveWorktreeRequest?
     @State private var newTerminalFailure: NewTerminalFailure?
 
     /// Which sentence a refused New Terminal shows.
@@ -243,33 +250,7 @@ struct ShellPaneChromeModifier: ViewModifier {
                     pickedImage = nil
                 }
             }
-            .confirmationDialog(
-                "Remove worktree for \(removeCandidate?.task ?? "")?",
-                isPresented: $confirmingRemove,
-                titleVisibility: .visible
-            ) {
-                Button("Remove", role: .destructive) {
-                    guard let ws = removeCandidate else { return }
-                    Task {
-                        switch await connection.removeWorktree(ws, confirm: "") {
-                        case .ok:
-                            break
-                        case .confirmationRequired, .failed:
-                            // The typed-name sheet also handles and displays a
-                            // `.failed` result — route every non-.ok outcome
-                            // there so there is one place this is shown, not
-                            // two.
-                            needsTypedConfirmation = ws
-                        }
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            }
-            .sheet(item: $needsTypedConfirmation) { ws in
-                RemoveWorktreeConfirmSheet(workspace: ws) { typed in
-                    await connection.removeWorktree(ws, confirm: typed)
-                }
-            }
+            .removeWorktreeFlow($removing, connection: connection)
             // Far Cooler's own two sentences, and nothing the runner wrote.
             //
             // An alert rather than the `SheetFailureSection` the remove flow
@@ -325,9 +306,7 @@ struct ShellPaneChromeModifier: ViewModifier {
     private func dismissEverything() {
         showPhotoPicker = false
         pickedImage = nil
-        confirmingRemove = false
-        needsTypedConfirmation = nil
-        removeCandidate = nil
+        removing = nil
         newTerminalFailure = nil
     }
 
@@ -400,8 +379,7 @@ struct ShellPaneChromeModifier: ViewModifier {
             if canRemove, let workspace {
                 Divider()
                 Button(role: .destructive) {
-                    removeCandidate = workspace
-                    confirmingRemove = true
+                    removing = .confirming(workspace)
                 } label: {
                     Label("Remove Worktree…", systemImage: "trash")
                 }

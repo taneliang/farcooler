@@ -1053,6 +1053,120 @@ struct RemoveWorktreeConfirmSheet: View {
     }
 }
 
+/// Where a removal has got to, held by whoever OPENS one.
+///
+/// Two steps and one value, rather than a bool and two optionals. The flow has
+/// a second phase — a worktree with uncommitted work needs its name typed —
+/// and the version this replaced tracked that with three pieces of state in
+/// each caller, which is three chances for a confirmation sheet to be left up
+/// over a screen that has moved on. One optional is dismissed by writing `nil`
+/// to it, from anywhere, and there is nothing else to forget.
+///
+/// Owned by the CALLER and not by the modifier below, for the reason
+/// `ShellScreen` gives about its own two sheets: the surface a menu item was
+/// tapped on can be unmounted before the answer comes back — the overview is
+/// mounted from the first point of a lift and gone again when nothing is
+/// touching it — so the presenter has to be something that outlives it.
+enum RemoveWorktreeRequest {
+    /// "Remove worktree for X?", with a Remove and a Cancel.
+    case confirming(Workspace)
+    /// The typed-name ceremony, which is also where a refusal is reported.
+    case typing(Workspace)
+
+    var workspace: Workspace {
+        switch self {
+        case .confirming(let workspace), .typing(let workspace): return workspace
+        }
+    }
+}
+
+/// The whole of removing a worktree from this app: ask, try, and fall through
+/// to the typed name when the runner says the work is not finished with.
+///
+/// **One copy, because it is a ceremony and ceremonies drift.** There are two
+/// doors into this now — the pane's own bar (`ShellPaneChromeModifier`) and
+/// the overview card's context menu — and the Mac has two as well. What must
+/// not vary between them is how much confirmation a destructive action gets,
+/// so the sequence lives here and the doors only decide when to open it.
+///
+/// The sequence mirrors macOS's: a plain confirmation first, and the typed
+/// name only when the daemon asks for one. `workspace.remove_worktree` is what
+/// decides that — a clean worktree goes on an empty `confirm`, a dirty one
+/// answers `confirmationRequired` — so the phone never asks for a typed name
+/// the runner would not have asked for, and never skips one it would.
+///
+/// Every non-`.ok` answer routes to the same sheet, refusals included. That is
+/// deliberate and it is `ShellPaneChromeModifier`'s note kept: a
+/// `confirmationDialog` has nowhere to put a sentence, and two places for one
+/// failure to appear is one of them nobody maintains.
+struct RemoveWorktreeFlow: ViewModifier {
+    @Binding var request: RemoveWorktreeRequest?
+    let connection: Connection
+
+    /// True only while the first dialog is the step we are on, so advancing to
+    /// the sheet takes the dialog down without ending the flow.
+    private var confirming: Bool {
+        if case .confirming = request { return true }
+        return false
+    }
+
+    private var typing: Workspace? {
+        if case .typing(let workspace) = request { return workspace }
+        return nil
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                "Remove worktree for \(request?.workspace.task ?? "")?",
+                isPresented: Binding(
+                    get: { confirming },
+                    // A dismissal that is not this flow moving on — the
+                    // Cancel, or a tap outside — ends it. Guarded on the step,
+                    // because SwiftUI also reports `false` at the moment the
+                    // sheet below takes over.
+                    set: { shown in if !shown, confirming { request = nil } }),
+                titleVisibility: .visible,
+                // `presenting:` rather than reading the binding back inside
+                // the action, because a dialog hands its buttons the value it
+                // was BUILT with. Read at tap time instead, the request can
+                // already have been cleared by the same tap's dismissal, and
+                // the Remove button would quietly do nothing.
+                presenting: request?.workspace
+            ) { workspace in
+                Button("Remove", role: .destructive) {
+                    Task {
+                        switch await connection.removeWorktree(workspace, confirm: "") {
+                        case .ok:
+                            request = nil
+                        case .confirmationRequired, .failed:
+                            request = .typing(workspace)
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) { request = nil }
+            }
+            .sheet(
+                item: Binding(
+                    get: { typing },
+                    set: { workspace in if workspace == nil { request = nil } })
+            ) { workspace in
+                RemoveWorktreeConfirmSheet(workspace: workspace) { typed in
+                    await connection.removeWorktree(workspace, confirm: typed)
+                }
+            }
+    }
+}
+
+extension View {
+    /// Ask about, and carry out, the removal `request` names.
+    func removeWorktreeFlow(
+        _ request: Binding<RemoveWorktreeRequest?>, connection: Connection
+    ) -> some View {
+        modifier(RemoveWorktreeFlow(request: request, connection: connection))
+    }
+}
+
 /// Registers a repository on a remote host. Always remote: this app has no
 /// filesystem of its own worth pointing at, unlike macOS's version of this
 /// sheet, which also offers a local file picker.

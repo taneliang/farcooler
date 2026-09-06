@@ -281,8 +281,8 @@ private struct ShellCardStyle: ButtonStyle {
     }
 }
 
-/// One workspace as a card in the grid: a face, a frame it publishes, and a
-/// tap that opens it.
+/// One workspace as a card in the grid: a face, a frame it publishes, a tap
+/// that opens it, and a long press that says what else can be done to it.
 private struct ShellOverviewCard: View {
     let workspace: ShellWorkspace
     /// Where this card sits in the fleet, which is the key its frame is
@@ -294,6 +294,14 @@ private struct ShellOverviewCard: View {
     /// it, because the page on its way here is the card.
     let isEmpty: Bool
     let onOpen: () -> Void
+    /// Put this worktree away, or take it back out. One closure and not two:
+    /// the card already knows which way round it is, and a caller that had to
+    /// decide would be a second place the same question is answered.
+    let onToggleHidden: () -> Void
+    /// Start the removal ceremony. The card does not run it — see
+    /// `RemoveWorktreeFlow`, and `ShellScreen` for why the presenter has to be
+    /// something that outlives this grid.
+    let onRemoveWorktree: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
@@ -333,6 +341,49 @@ private struct ShellOverviewCard: View {
         .accessibilityHidden(isEmpty)
         .accessibilityIdentifier("shell-card-\(workspace.id)")
         .accessibilityLabel(workspace.name)
+        // A long press, which is what a card on this platform answers with
+        // when there is more to do to it than the tap does. It is the same
+        // set the Mac puts on a sidebar row's menu, in the same order and with
+        // the same rule about the last one — see `SidebarViews.WorkspaceRow`.
+        //
+        // Attached AFTER the frame is published rather than around it: a
+        // context menu presents a copy of this view, and a preference read out
+        // of that copy would be a second frame published for one cell — a
+        // destination for the flight that exists only while a menu is up.
+        .contextMenu { menu }
+    }
+
+    /// Hide, and remove.
+    ///
+    /// **Two items and no `Open`.** A tap already opens the card, and a menu
+    /// whose first entry repeats the gesture that opened the menu is a menu
+    /// that has to be read before it can be dismissed.
+    ///
+    /// `Unhide` where the card is already put away, exactly as the Mac's menu
+    /// flips: the control is one thing in two states, and a menu carrying both
+    /// would leave one of them wrong.
+    ///
+    /// `Remove Worktree…` is ABSENT — not disabled — for the repository's own
+    /// checkout, which is the Mac's rule stated in `SidebarViews`: *"A
+    /// daemon-side refusal is a safety net; the button should not be there to
+    /// press."* The ellipsis is the platform's promise that something else is
+    /// going to be asked before anything happens, and `RemoveWorktreeFlow`
+    /// keeps it.
+    @ViewBuilder
+    private var menu: some View {
+        Button {
+            onToggleHidden()
+        } label: {
+            Label(
+                workspace.isHidden ? "Unhide" : "Hide",
+                systemImage: workspace.isHidden ? "eye" : "eye.slash")
+        }
+
+        if !workspace.isPrimaryCheckout {
+            Button(role: .destructive, action: onRemoveWorktree) {
+                Label("Remove Worktree…", systemImage: "trash")
+            }
+        }
     }
 }
 
@@ -427,6 +478,15 @@ struct ShellOverview<Actions: View>: View {
     /// A card on another runner, tapped. The grid does not know what crossing
     /// costs; `ShellScreen` does, and it is the one that asks.
     var onCross: (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in }
+    /// A card's menu, spent. Both default to nothing so the grid still stands
+    /// on `ShellHarness`'s canned fleet, where there is no runner to tell —
+    /// the same seam `actions` is, for the same reason.
+    ///
+    /// The workspace and not its index: an index is a position in a fleet this
+    /// view is sorting and filtering, and the caller resolves these against a
+    /// `Connection` that has moved on at least once since the grid was built.
+    var onToggleHidden: (ShellWorkspace) -> Void = { _ in }
+    var onRemoveWorktree: (ShellWorkspace) -> Void = { _ in }
     let onDismiss: () -> Void
     /// How far the pull-down out of the grid has come, in points, on every
     /// frame of it — and never called at all for a drag the gate below turned
@@ -719,12 +779,15 @@ struct ShellOverview<Actions: View>: View {
     /// shown cards and the hidden ones: hiding changes where a card is drawn,
     /// not what it is, and two card views would be two things to keep in step.
     private func liveCard(_ index: Int) -> some View {
-        ShellOverviewCard(
-            workspace: fleet.workspaces[index],
+        let workspace = fleet.workspaces[index]
+        return ShellOverviewCard(
+            workspace: workspace,
             index: index,
             isCurrent: index == current,
             isEmpty: index == current && currentIsEmpty,
-            onOpen: { onOpen(index) })
+            onOpen: { onOpen(index) },
+            onToggleHidden: { onToggleHidden(workspace) },
+            onRemoveWorktree: { onRemoveWorktree(workspace) })
             .id(index)
     }
 

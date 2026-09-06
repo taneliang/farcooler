@@ -94,6 +94,11 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     private let elsewhere: [ShellServerGroup]
     /// A card on another runner, tapped.
     private let onCross: (ShellServerGroup, ShellWorkspace) -> Void
+    /// A card's context menu, spent. Both reach exactly one view —
+    /// `ShellOverview` — and neither means anything to a fixture, so both
+    /// default to nothing. See `ShellOverviewCard.menu`.
+    private let onToggleHidden: (ShellWorkspace) -> Void
+    private let onRemoveWorktree: (ShellWorkspace) -> Void
     private let pane: (ShellPaneSlot) -> Pane
     /// What the overview puts in its navigation bar. See
     /// `ShellOverview.actions`.
@@ -532,6 +537,8 @@ struct ShellRootView<Pane: View, Actions: View>: View {
         liveServer: String? = nil,
         elsewhere: [ShellServerGroup] = [],
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
+        onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
+        onRemoveWorktree: @escaping (ShellWorkspace) -> Void = { _ in },
         @ViewBuilder overviewActions: @escaping () -> Actions,
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
@@ -539,6 +546,8 @@ struct ShellRootView<Pane: View, Actions: View>: View {
         self.liveServer = liveServer
         self.elsewhere = elsewhere
         self.onCross = onCross
+        self.onToggleHidden = onToggleHidden
+        self.onRemoveWorktree = onRemoveWorktree
         self.pane = pane
         self.overviewActions = overviewActions
         _request = request
@@ -860,6 +869,8 @@ struct ShellRootView<Pane: View, Actions: View>: View {
                     search: $overviewSearch,
                     onOpen: open(workspace:),
                     onCross: onCross,
+                    onToggleHidden: onToggleHidden,
+                    onRemoveWorktree: onRemoveWorktree,
                     onDismiss: closeOverview,
                     // The tracked way out. `ShellOverview` reads the finger
                     // and decides nothing; these two spend it. See
@@ -1352,12 +1363,16 @@ extension ShellRootView where Actions == EmptyView {
         liveServer: String? = nil,
         elsewhere: [ShellServerGroup] = [],
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
+        onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
+        onRemoveWorktree: @escaping (ShellWorkspace) -> Void = { _ in },
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
         self.init(
             fleet: fleet, initial: initial, openingOnOverview: openingOnOverview,
             request: request, onRest: onRest, liveServer: liveServer, elsewhere: elsewhere,
-            onCross: onCross, overviewActions: { EmptyView() }, pane: pane)
+            onCross: onCross, onToggleHidden: onToggleHidden,
+            onRemoveWorktree: onRemoveWorktree,
+            overviewActions: { EmptyView() }, pane: pane)
     }
 }
 

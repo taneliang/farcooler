@@ -413,6 +413,10 @@ UI_TEST_SOURCES = [
     # one, like TerminalScrollTests: the capability being tested is a wire call,
     # and a fixture cannot refuse it or make a tmux window.
     "NewTerminalTests.swift",
+    # The overview card's long press. Needs no runner — it presses a card in
+    # the canned fleet and reads the menu — so it cannot skip itself green when
+    # the demo daemon is down.
+    "ShellWorkspaceMenuTests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
