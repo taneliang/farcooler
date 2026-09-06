@@ -118,6 +118,20 @@ func handle(keyPath, line string) string {
 		// AllowedClients as "admit everyone", so this is a guard worth having
 		// twice.
 		return rc(serve(keyPath, uint16(port), strings.Join(fields[2:], "\n")))
+	// identity
+	//
+	// Create this runner's key file if it has none, and answer ok either way.
+	// The daemon asks before it asks to serve, because the guard that decides
+	// whether a runner may serve at all reads the file's EXISTENCE and refuses
+	// before serve is reached — see crates/daemon/src/allowlist.rs. The path is
+	// the one this helper was started with, never one the command carries: the
+	// pipe must not be a way to ask this program to write a key file anywhere
+	// on the runner.
+	case "identity":
+		if len(fields) != 1 {
+			return errno(syscall.EINVAL)
+		}
+		return rc(ensureIdentity(keyPath))
 	// allow <node key>
 	case "allow":
 		if len(fields) != 2 {

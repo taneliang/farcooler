@@ -306,6 +306,32 @@ pub fn mint_node_key() -> Result<super::NodeKeyPair, TunnelError> {
     Err(TunnelError::NoTailcatLinked)
 }
 
+/// Give this runner an identity file, if it has none.
+///
+/// The one command here that a runner asks BEFORE it serves anything, which is
+/// why it is also the one that will start a helper only to talk to it. Nothing
+/// is running at that point by definition — the daemon asks for an identity
+/// exactly when no tunnel is up — so the helper is spawned, asked, and dropped,
+/// which kills it by PID and reaps it. That costs a process launch on the first
+/// pairing of a runner's life and nothing afterwards.
+///
+/// The path is not sent as a word. `spawn` passes it as `--key=`, so the helper
+/// writes the file the daemon named and the pipe is not a way to ask this
+/// program to create a key file somewhere else on the runner.
+///
+/// A helper that IS running is asked instead of a second one being started: it
+/// was spawned with this same path, it has an identity by definition (it could
+/// not have served without one), and starting a second helper beside a serving
+/// one is the state `serve`'s teardown exists to avoid.
+pub fn ensure_identity(key_path: &Path) -> Result<(), TunnelError> {
+    let mut slot = helper().lock().expect("the tunnel helper lock");
+    if let Some(running) = slot.as_mut() {
+        return parse(&running.ask("identity")?).map(|_| ());
+    }
+    let mut throwaway = spawn(key_path)?;
+    parse(&throwaway.ask("identity")?).map(|_| ())
+}
+
 fn not_serving() -> TunnelError {
     TunnelError::Io(std::io::Error::from_raw_os_error(libc::ENOTCONN))
 }
@@ -340,8 +366,15 @@ mod tests {
     static SERIAL: Mutex<()> = Mutex::new(());
 
     /// A helper that is a shell script: it appends every command it is given
-    /// to `log`, and answers each with `ok`. Enough to be spawned, talked to,
-    /// and asked what it heard.
+    /// to `log`, tagged with its OWN pid, and answers each with `ok`. Enough to
+    /// be spawned, talked to, and asked what it heard.
+    ///
+    /// The pid is what makes "the same helper heard both commands" an
+    /// observation rather than an inference. Two helpers append to one log, so
+    /// a test that only compared the command text could not tell one process
+    /// answering twice from two processes answering once each — which is
+    /// exactly the difference between admitting a device and replacing a
+    /// running tunnel.
     ///
     /// SAFETY for the `set_var`: every test that reads this variable holds
     /// `SERIAL`, and nothing else in this crate touches the environment.
@@ -350,7 +383,7 @@ mod tests {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> {}\n  echo ok\ndone\n",
+                "#!/bin/sh\nwhile IFS= read -r line; do\n  printf '%s\\t%s\\n' \"$$\" \"$line\" >> {}\n  echo ok\ndone\n",
                 log.display()
             ),
         )
@@ -359,6 +392,24 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
             .expect("the fake helper is executable");
         unsafe { std::env::set_var(HELPER_PATH_ENV, &script) };
+    }
+
+    /// What the fake helper heard, as `(pid, command)` pairs in the order it
+    /// heard them.
+    fn heard(log: &Path) -> Vec<(String, String)> {
+        std::fs::read_to_string(log)
+            .expect("the helper recorded what it heard")
+            .lines()
+            .map(|line| {
+                let (pid, command) = line.split_once('\t').expect("a pid-tagged line");
+                (pid.to_string(), command.to_string())
+            })
+            .collect()
+    }
+
+    /// Just the commands, for the assertions that are only about those.
+    fn commands(log: &Path) -> Vec<String> {
+        heard(log).into_iter().map(|(_, command)| command).collect()
     }
 
     /// The guard that matters, at the boundary that would be exploited: an
@@ -447,17 +498,98 @@ mod tests {
         serve(&key, 22, &["a".repeat(43)]).expect("the fake helper accepted serve");
         allow_add(&"b".repeat(43)).expect("allow_add reached the running helper");
 
-        let heard = std::fs::read_to_string(&log).expect("the helper recorded what it heard");
-        let lines: Vec<&str> = heard.lines().collect();
+        let lines = heard(&log);
         assert_eq!(
-            lines,
+            commands(&log),
             [format!("serve 22 {}", "a".repeat(43)), format!("allow {}", "b".repeat(43))],
-            "the helper did not hear both commands on one connection: {lines:?}"
+            "the helper did not hear both commands: {lines:?}"
+        );
+        assert_eq!(
+            lines[0].0, lines[1].0,
+            "two helper PROCESSES answered, so the tunnel was replaced rather than added to: {lines:?}"
         );
 
         // And the slot really is torn down between serves, which is what makes
         // a revocation revoke: the allowlist is read at Start and never again.
         *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
+    /// Creating an identity reaches a helper, and leaves none running.
+    ///
+    /// The command a runner sends BEFORE it can serve anything, because
+    /// `allowlist::tunnel_plan` refuses a runner with no key file and refuses
+    /// before `serve` is reached. Nothing is serving at that moment by
+    /// definition, so a helper is started only to be asked and dropped — and
+    /// the drop matters: a throwaway left in the slot would be a helper serving
+    /// no allowlist that the next `serve` would then have to tear down.
+    ///
+    /// The fake helper records what it was actually sent, so this cannot pass
+    /// on a call that returned `Ok` without asking for anything.
+    #[test]
+    fn creating_an_identity_asks_a_helper_and_leaves_none_running() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("commands");
+        fake_helper(dir.path(), &log);
+
+        ensure_identity(&dir.path().join("tailcat.key"))
+            .expect("the fake helper answered the identity command");
+
+        assert_eq!(commands(&log), ["identity"], "the helper was not asked for an identity");
+        assert!(
+            helper().lock().expect("the tunnel helper lock").is_none(),
+            "a throwaway helper was left in the serving slot"
+        );
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
+    /// A runner that IS serving is asked, rather than a second helper started
+    /// beside the one holding the allowlist.
+    ///
+    /// Two helpers on one runner is the state `serve`'s teardown exists to
+    /// avoid — each would have its own idea of who is admitted — and this is
+    /// the one call that could produce it by accident, because it is the one
+    /// call that spawns without serving. The pids are what prove it: both
+    /// commands came from the same process.
+    #[test]
+    fn a_serving_runner_is_asked_rather_than_a_second_helper_started() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("commands");
+        fake_helper(dir.path(), &log);
+
+        let key = dir.path().join("tailcat.key");
+        serve(&key, 22, &["a".repeat(43)]).expect("the fake helper accepted serve");
+        ensure_identity(&key).expect("the running helper answered");
+
+        let lines = heard(&log);
+        assert_eq!(
+            commands(&log),
+            [format!("serve 22 {}", "a".repeat(43)), "identity".to_string()],
+            "the running helper did not hear the identity command: {lines:?}"
+        );
+        assert_eq!(
+            lines[0].0, lines[1].0,
+            "a second helper process was started beside the serving one: {lines:?}"
+        );
+
+        *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
+    /// No helper on disk is `no_tailcat`, not `Io(ENOENT)` — the same answer
+    /// `serve` gives for the same absence, which is what makes a tarball that
+    /// forgot to ship the helper fail `tunnel-smoke.sh` rather than pass it.
+    #[test]
+    fn creating_an_identity_with_no_helper_at_all_says_which_thing_is_missing() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::set_var(HELPER_PATH_ENV, "/nonexistent/farcooler-tunnel") };
+        let out = ensure_identity(Path::new("/nonexistent/tailcat.key"));
+        assert!(matches!(out, Err(TunnelError::NoTailcatLinked)), "{out:?}");
         unsafe { std::env::remove_var(HELPER_PATH_ENV) };
     }
 

@@ -40,6 +40,18 @@ pub fn mint_node_key() -> Result<super::NodeKeyPair, TunnelError> {
     Err(TunnelError::NoTailcatLinked)
 }
 
+/// Refused, and NOT quietly satisfied by touching a file.
+///
+/// The temptation here is real: creating a runner's identity looks like a file
+/// write, and a stub that made an empty `tailcat.key` would let
+/// `allowlist::tunnel_plan` past its `NoIdentity` guard on a build that can
+/// serve nothing. That is the exact shape this repository is most careful
+/// about — a check passing for work never done — and the runner would then be
+/// one whose key file holds nothing a real archive could ever read.
+pub fn ensure_identity(_: &Path) -> Result<(), TunnelError> {
+    Err(TunnelError::NoTailcatLinked)
+}
+
 /// The one entry point that does not error, because it claims nothing.
 /// Recording configuration is not reporting work done; every call that would
 /// actually open a tunnel still fails above.

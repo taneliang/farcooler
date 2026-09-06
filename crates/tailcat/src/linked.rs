@@ -24,6 +24,7 @@ unsafe extern "C" {
     fn fc_tailcat_serve(key_path: *const c_char, ssh_port: u16, allow: *const c_char) -> i32;
     fn fc_tailcat_conn_blob(buf: *mut c_char, len: usize) -> i32;
     fn fc_tailcat_allow_add(node_key: *const c_char) -> i32;
+    fn fc_tailcat_ensure_identity(key_path: *const c_char) -> i32;
     fn fc_tailcat_set_derp_map_url(url: *const c_char) -> i32;
     fn fc_tailcat_mint_node_key(buf: *mut c_char, len: usize) -> i32;
 }
@@ -261,6 +262,24 @@ pub fn mint_node_key() -> Result<super::NodeKeyPair, TunnelError> {
         private_key: private_key.to_string(),
         public_key: public_key.to_string(),
     })
+}
+
+/// Give this runner an identity file, if it has none. See
+/// `super::ensure_identity` for why this is its own call and not left to
+/// `serve`.
+pub fn ensure_identity(key_path: &Path) -> Result<(), TunnelError> {
+    let key_path =
+        CString::new(key_path.as_os_str().as_bytes()).map_err(|_| embedded_nul("the key path"))?;
+    let rc = unsafe { fc_tailcat_ensure_identity(key_path.as_ptr()) };
+    if rc < 0 {
+        // EINVAL (no path at all) or EACCES (a key file this runner may not
+        // read, one anybody else can read, one holding no key, or a directory
+        // it cannot write). Neither is a statement about the relay or a silent
+        // runner, so neither borrows `Derp`'s or `NoAnswer`'s words — and
+        // there is no new word for it, because nothing here reaches a network.
+        return Err(TunnelError::Io(std::io::Error::from_raw_os_error(-rc)));
+    }
+    Ok(())
 }
 
 pub fn set_derp_map_url(url: &str) {

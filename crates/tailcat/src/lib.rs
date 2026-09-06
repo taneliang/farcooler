@@ -146,6 +146,34 @@ pub fn mint_node_key() -> Result<NodeKeyPair, TunnelError> {
     backend::mint_node_key()
 }
 
+/// Give this runner a tunnel identity, if it does not already have one.
+///
+/// **The runner-side sibling of [`mint_node_key`], and the difference is the
+/// point of having both.** A mint returns a pair by value and writes nothing,
+/// because a phone keeps its private key in the Keychain; this takes a path and
+/// writes a file at 0600, because a runner has a home directory and must be the
+/// SAME node after a restart — every token already sitting in a device's
+/// manifest names this runner's node and its DERP region.
+///
+/// Idempotent, and that is what makes it safe on every pairing: a runner that
+/// already has the file is untouched, keeps its key, and keeps its pinned
+/// region.
+///
+/// **Why it exists as its own call rather than being left to `serve`.**
+/// `serve` would create the file — it is the same Go function underneath — but
+/// `farcooler_daemon::allowlist::tunnel_plan` refuses a runner with no key file
+/// BEFORE `serve` is reached, and that guard is deliberately the only admission
+/// check a build with no archive can prove anything about. So the identity is
+/// created first and the guard then passes on a runner that genuinely has one,
+/// rather than being bypassed for one that does not. See
+/// `crates/daemon/src/enrollment.rs`.
+///
+/// Creating an identity is not serving: this starts nothing, admits nobody, and
+/// reaches no network.
+pub fn ensure_identity(key_path: &Path) -> Result<(), TunnelError> {
+    backend::ensure_identity(key_path)
+}
+
 /// Point this process at a different DERP map.
 ///
 /// Process-wide rather than a parameter on every call, because it is
@@ -195,6 +223,27 @@ mod tests {
             panic!("a build with no archive minted something: {out:?}");
         };
         assert_eq!(TunnelError::NoTailcatLinked.code(), "no_tailcat");
+    }
+
+    /// The one a stub could most plausibly get wrong by being HELPFUL.
+    ///
+    /// Creating a runner's identity is, from the outside, a file write — and a
+    /// stub that made an empty `tailcat.key` would let
+    /// `farcooler_daemon::allowlist::tunnel_plan` past its `NoIdentity` guard on
+    /// a build that can serve nothing at all. That guard is the only admission
+    /// check a build with no archive can prove anything about, so satisfying it
+    /// with a file nothing could ever read is the exact shape of a check that
+    /// cannot fail. The file's ABSENCE is asserted, not just the error.
+    #[cfg(not(any(feature = "linked", feature = "helper")))]
+    #[test]
+    fn a_build_without_the_archive_creates_no_identity_file() {
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let path = dir.path().join("tailcat.key");
+        let out = ensure_identity(&path);
+        let Err(TunnelError::NoTailcatLinked) = out else {
+            panic!("a build with no archive created an identity: {out:?}");
+        };
+        assert!(!path.exists(), "a build with no tunnel wrote a key file anyway");
     }
 
     #[cfg(not(any(feature = "linked", feature = "helper")))]

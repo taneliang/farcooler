@@ -825,6 +825,51 @@ func mintNodeKey(buf []byte) (rc int) {
 	return len(text)
 }
 
+// ensureIdentity creates this runner's tunnel identity if it does not have one
+// yet, and does nothing at all if it does.
+//
+// The runner-side sibling of mintNodeKey, and the difference between the two is
+// the whole reason there are two. mintNodeKey returns a PAIR by value and
+// touches no file, deliberately, because a phone keeps its private key in the
+// Keychain — "not in UserDefaults and not in a file" — and handing it a path
+// would quietly reverse that. This one writes a file at 0600 and returns
+// nothing, because a runner has a home directory and needs the SAME identity
+// across restarts: the token already sitting in a device's manifest names this
+// runner's node, and a runner that minted a fresh key on every start would be a
+// new node every time.
+//
+// It is loadOrCreateIdentity, exposed. Nothing new decides anything here: the
+// mode check, the 0600 create, the O_EXCL that loses to whoever wrote first,
+// and the region line are all that function's, and a second implementation of
+// them would be a second answer to "what is this runner on the tunnel".
+//
+// Why a runner needs this at all: allowlist::tunnel_plan refuses to serve a
+// runner with no key file, and it refuses BEFORE serve — which is the only
+// other thing that would call loadOrCreateIdentity — is reached. So without
+// this, no product path ever creates the file and every runner is stuck at that
+// check forever. See crates/daemon/src/enrollment.rs's tunnel_route.
+//
+// It takes no lock and touches no server: creating an identity is not serving,
+// exactly as minting is not. A serve running concurrently reads or creates the
+// same file through the same function, and O_EXCL is what decides which of the
+// two wrote it.
+func ensureIdentity(keyPath string) (rc int) {
+	defer recoverToErrno(&rc)
+	if keyPath == "" {
+		return -int(syscall.EINVAL)
+	}
+	if _, err := loadOrCreateIdentity(keyPath); err != nil {
+		// EACCES, the same errno serve answers for the same failure from the
+		// same call: a key file this runner may not read, one that is
+		// group-readable, one that holds no key, or a directory that cannot be
+		// written. Splitting them further would be a distinction no caller of
+		// this makes.
+		log.Printf("tailcat: could not create %s: %v", keyPath, err)
+		return -int(syscall.EACCES)
+	}
+	return 0
+}
+
 // relayReachable reports whether the DERP node a token names will accept a TCP
 // connection.
 //

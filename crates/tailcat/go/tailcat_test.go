@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -367,6 +368,95 @@ func TestTheIdentityFileIsCreatedUnreadableByAnybodyElse(t *testing.T) {
 	// not known until Start has picked one.
 	if first.regionID != 0 {
 		t.Fatalf("a fresh identity claimed region %d", first.regionID)
+	}
+}
+
+// The export a runner's first pairing calls, and the property that makes it
+// safe to call on every pairing afterwards: it creates a key file where there
+// is none, and leaves the one that is there completely alone.
+//
+// A second identity is a different node. Every token already sitting in a
+// device's manifest names this runner's node and its pinned region, so an
+// ensureIdentity that overwrote — or that re-pinned, or that returned a fresh
+// key while leaving the file — would silently strand the whole fleet that had
+// already paired.
+func TestEnsuringAnIdentityCreatesOneOnceAndThenLeavesItAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tailcat.key")
+	if rc := ensureIdentity(path); rc != 0 {
+		t.Fatalf("ensureIdentity on a fresh runner: %d", rc)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("ensureIdentity created no file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("identity file is mode %04o, want 0600", perm)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	if rc := ensureIdentity(path); rc != 0 {
+		t.Fatalf("ensureIdentity on a runner that already has one: %d", rc)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read again: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("a second ensureIdentity rewrote the file: %q then %q", before, after)
+	}
+
+	// And what it wrote is a real identity, read back by the function every
+	// other caller uses — not merely some bytes at the right path.
+	id, err := loadOrCreateIdentity(path)
+	if err != nil {
+		t.Fatalf("what ensureIdentity wrote does not load: %v", err)
+	}
+	if id.priv.IsZero() {
+		t.Fatal("ensureIdentity wrote a file holding no key")
+	}
+}
+
+// A path this runner cannot write is an errno, not a panic and not a success.
+// The daemon treats a failure here as "pair this device as direct", which is
+// only the right answer if a failure is actually reported.
+func TestEnsuringAnIdentityReportsAPathItCannotWrite(t *testing.T) {
+	if rc := ensureIdentity(""); rc >= 0 {
+		t.Fatalf("an empty path was accepted: %d", rc)
+	}
+	dir := t.TempDir()
+	if rc := ensureIdentity(filepath.Join(dir, "no-such-directory", "tailcat.key")); rc >= 0 {
+		t.Fatalf("a path under a directory that does not exist was accepted: %d", rc)
+	}
+}
+
+// The helper's line protocol carries it too, because a Linux runner's daemon
+// links no archive at all — it spawns this program — and the daemon has to be
+// able to ask for an identity BEFORE it asks to serve.
+//
+// The path comes from the flag the helper was started with, never from the
+// command, so the pipe cannot be used to ask this program to write a key file
+// somewhere else on the runner.
+func TestTheHelperCreatesAnIdentityForThePathItWasStartedWith(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailcat.key")
+	elsewhere := filepath.Join(dir, "elsewhere.key")
+
+	if reply := handle(path, "identity"); reply != "ok" {
+		t.Fatalf("identity: %q", reply)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the helper created no identity: %v", err)
+	}
+
+	// An argument is refused rather than read as a path.
+	if reply := handle(path, "identity "+elsewhere); reply == "ok" {
+		t.Fatal("the helper took a path from the command")
+	}
+	if _, err := os.Stat(elsewhere); err == nil {
+		t.Fatalf("the helper wrote a key file the command named")
 	}
 }
 

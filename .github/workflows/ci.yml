@@ -69,6 +69,47 @@ jobs:
       # one lives in the `swift` job below and this one lives here instead.
       - run: ./scripts/appcast-test.sh
 
+  # The tunnel itself, which is Go, and which nothing in this workflow ran until
+  # now.
+  #
+  # `crates/tailcat/go` has had a test file since the tunnel landed, and every
+  # test in it executed nowhere but the machine that wrote it: the two jobs that
+  # install Go do so to BUILD an archive for an app, and neither ever ran `go
+  # test`. That covers the identity file's 0600 mode, the region pin that keeps
+  # a device's token resolving across a restart, the allowlist that must never
+  # be handed to tailcat empty, and the panic recovery that turns a crash into
+  # an errno — the guards nearest the part of this product that opens a path to
+  # somebody's sshd.
+  #
+  # Its own job because it needs nothing else: no Rust, no Xcode, no NDK, no
+  # tmux. Ubuntu, because none of it is platform-specific and a macOS runner
+  # bills at ten times the minutes for the same answer.
+  tunnel:
+    name: Tunnel (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/tailcat/go
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned by `go-version-file` rather than trusted to the image, the same
+      # way the two jobs that build the archive pin it: an image bump that
+      # changes Go under this fails with an error that never mentions Go.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+      # Unlike the Rust tree, which is hand-formatted and skips `fmt --check`
+      # on purpose, this directory is gofmt's. It is one command and it has an
+      # answer everybody agrees with.
+      - name: Check gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          [ -z "$unformatted" ] || { echo "gofmt wants: $unformatted"; exit 1; }
+      - run: go vet ./...
+      # `-count=1` so a cached result from a previous run is never mistaken for
+      # this commit passing.
+      - run: go test -count=1 ./...
+
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

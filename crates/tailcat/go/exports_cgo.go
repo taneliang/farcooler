@@ -64,6 +64,21 @@ func fc_tailcat_mint_node_key(buf *C.char, length C.size_t) C.int {
 	return C.int(mintNodeKey(unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(length))))
 }
 
+// The RUNNER's sibling of the export above, and the pair is worth reading
+// together. `mint_node_key` returns both halves by value and writes nothing,
+// because a phone keeps its private key in the Keychain and a path argument
+// would quietly put one in a file. This one takes a path and writes 0600,
+// because a runner has a home directory and has to be the same node after a
+// restart — the tokens already in devices' manifests name it.
+//
+// It does nothing when the file is already there, which is what makes it safe
+// to call on every pairing.
+//
+//export fc_tailcat_ensure_identity
+func fc_tailcat_ensure_identity(keyPath *C.char) C.int {
+	return C.int(ensureIdentity(C.GoString(keyPath)))
+}
+
 //export fc_tailcat_allow_add
 func fc_tailcat_allow_add(nodeKey *C.char) C.int {
 	return C.int(allowAdd(C.GoString(nodeKey)))
