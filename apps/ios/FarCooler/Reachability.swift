@@ -22,6 +22,16 @@ import Network
 /// stays here is the part that needs a phone: an `NWPathMonitor`, and the rule
 /// that only the transition INTO reachable is news.
 ///
+/// **Both other platforms keep ONE callback here, and that is not drift to be
+/// swept.** The Mac's `FleetStore.init` assigns `onShouldRetry` once and fans
+/// out with `reconnectAll()`; Android constructs `Reachability(application) {
+/// fleet.reconnectAll() }` and does the same. A list is what iOS needs while it
+/// has no fleet store — every connection subscribes for itself, because there
+/// is nothing above them to do it on their behalf. When iOS gains one, the
+/// right move is to follow the other two: the store becomes the single
+/// subscriber and the connections stop registering at all. A list with one
+/// entry costs nothing and is not the reason to keep several.
+///
 /// A subscriber still does not learn WHY now is a better moment than the one
 /// its timer picked, only that it is. That part of the original design is
 /// unchanged.
