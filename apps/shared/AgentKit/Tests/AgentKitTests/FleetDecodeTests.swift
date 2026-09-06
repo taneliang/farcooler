@@ -78,7 +78,8 @@ struct FleetDecodeTests {
               "chatCapable": true,
               "agentSessionId": "01J8Z2",
               "agentMode": "plan",
-              "availableAgentModes": ["plan", "edit"]
+              "availableAgentModes": ["plan", "edit"],
+              "agentFailure": "not-authenticated"
             }
           ]
         }
@@ -176,6 +177,11 @@ struct FleetDecodeTests {
         #expect(terminal.agentSessionId == "01J8Z2")
         #expect(terminal.agentMode == "plan")
         #expect(terminal.availableAgentModes == ["plan", "edit"])
+        // On the wire since `f45577c` and read by neither phone for a day
+        // after: both decoders ignore unknown keys, so a field nothing
+        // decodes breaks nothing and reports nothing. This list is where
+        // that is meant to be caught.
+        #expect(terminal.agentFailure == "not-authenticated")
     }
 
     /// The derivations the two screens actually draw, off the decoded fields.

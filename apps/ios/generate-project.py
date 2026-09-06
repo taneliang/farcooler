@@ -181,6 +181,13 @@ AGENTKIT_SOURCES = [
     # draws the card has to compile them too.
     "AgentCardRows.swift",
     "AgentEvent.swift",
+    # What a chat with no agent in it says. Here rather than in
+    # `AgentView.body` for `AdapterTest.swift`'s reason and for
+    # `AgentCardRows.swift`'s: the runner sends a stable machine word and
+    # the app owns the sentence, so the sentence has to be somewhere a test
+    # can read it back — and the iOS UI suite is compiled by CI and never
+    # executed. Not in the watch or extension lists: neither draws a pane.
+    "AgentFailure.swift",
     # What the Test button in an adapter editor says. Shared because the type
     # and its words were declared three times — here, on the Mac and on
     # Android — and one of the three sentences had quietly become false on one

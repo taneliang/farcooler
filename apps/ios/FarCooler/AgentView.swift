@@ -143,12 +143,30 @@ struct AgentView: View {
     /// From the fleet rather than inferred here: the daemon derives activity
     /// for every surface that shows it, and a second opinion computed on the
     /// phone is exactly the disagreement this design exists to prevent.
+    /// This pane's terminal in the fleet, or nil before the first fleet lands.
+    ///
+    /// One lookup rather than three. Everything on this screen that is a fact
+    /// about the PANE rather than about the conversation — the agent's name,
+    /// whether a turn is running, whether the runner gave up trying to start
+    /// one — reads it from here.
+    private var paneTerminal: Terminal? {
+        guard let workspaceID else { return nil }
+        return connection.terminal(terminalID, in: workspaceID)
+    }
+
+    /// What to say about a pane that is a chat with no agent in it.
+    ///
+    /// Nil unless the runner has said this pane's adapter gave up. The runner
+    /// sends a stable machine word on `agentFailure`; the sentence is chosen in
+    /// `AgentFailureCopy`, in AgentKit, where `swift test` reads it back — the
+    /// iOS UI suite is compiled by CI and never executed, so copy chosen in a
+    /// `View.body` is copy nothing checks. **A raw Rust error string never
+    /// reaches this view.**
+    private var chatFailure: AgentFailureCopy? { paneTerminal?.chatFailure }
+
     /// The agent behind this pane, capitalised for the placeholder.
     private var harnessName: String {
-        guard let workspaceID,
-            let preset = connection.terminal(terminalID, in: workspaceID)?.preset,
-            !preset.isEmpty
-        else { return "the agent" }
+        guard let preset = paneTerminal?.preset, !preset.isEmpty else { return "the agent" }
         return preset.capitalized
     }
 
@@ -162,10 +180,7 @@ struct AgentView: View {
     /// message is not lost.
     private var hasAgent: Bool { stream.phase != .starting }
 
-    private var isWorking: Bool {
-        guard let workspaceID else { return false }
-        return connection.terminal(terminalID, in: workspaceID)?.agent == .working
-    }
+    private var isWorking: Bool { paneTerminal?.agent == .working }
 
     #if DEBUG
     /// The canned conversation `AgentLayoutHarness` stands this pane on.
@@ -930,75 +945,118 @@ struct AgentView: View {
     private var emptyState: some View {
         VStack(spacing: 0) {
             Spacer()
-            switch stream.phase {
-            case .opening:
-                // One round trip, usually. Deliberately says nothing about
-                // whether a session exists, because nothing knows yet.
-                status(spinner: true, title: "Loading this session…")
+            if let failure = chatFailure {
+                // A verdict beats a guess.
+                //
+                // FIRST, ahead of the whole ladder below, because every state
+                // in it is a claim that this pane is still trying — and the
+                // runner has said it is not. `stream.phase` cannot know that:
+                // a pane whose adapter gave up holds no session, so the daemon
+                // answers "no session" and the ladder reads it as a shim that
+                // is slow. That is the reported bug exactly: three different
+                // failures, one spinner, forever.
+                failureState(failure)
+            } else {
+                switch stream.phase {
+                case .opening:
+                    // One round trip, usually. Deliberately says nothing about
+                    // whether a session exists, because nothing knows yet.
+                    status(spinner: true, title: "Loading this session…")
 
-            case .starting:
-                if stream.waited == .aMoment {
-                    // The Mac's words, not a second set: `AgentComposer`
-                    // draws "Starting the agent…" for a chat with no rows and
-                    // no config options, which is this exact fact.
-                    status(spinner: true, title: "Starting the agent…")
-                } else {
-                    // Still true, still not a failure, and no longer spinning.
-                    //
-                    // It promises nothing about what to do, because there is
-                    // nothing honest to promise: `terminal.agent_prompt` hands
-                    // the daemon a message for a shim, and `AgentSupervisor::
-                    // send` drops it when no shim is connected — so "send
-                    // something to start it" would be advice that does not
-                    // work. What starts one is the pane going into agent mode.
-                    status(
-                        symbol: "bubble.left.and.text.bubble.right", mark: .secondary,
-                        title: "No agent on this pane yet",
-                        message:
-                            "This pane hasn’t started one. The conversation "
-                            + "appears here as soon as it does.")
+                case .starting:
+                    if stream.waited == .aMoment {
+                        // The Mac's words, not a second set: `AgentComposer`
+                        // draws "Starting the agent…" for a chat with no rows and
+                        // no config options, which is this exact fact.
+                        status(spinner: true, title: "Starting the agent…")
+                    } else {
+                        // Still true, still not a failure, and no longer spinning.
+                        //
+                        // It promises nothing about what to do, because there is
+                        // nothing honest to promise: `terminal.agent_prompt` hands
+                        // the daemon a message for a shim, and `AgentSupervisor::
+                        // send` drops it when no shim is connected — so "send
+                        // something to start it" would be advice that does not
+                        // work. What starts one is the pane going into agent mode.
+                        status(
+                            symbol: "bubble.left.and.text.bubble.right", mark: .secondary,
+                            title: "No agent on this pane yet",
+                            message:
+                                "This pane hasn’t started one. The conversation "
+                                + "appears here as soon as it does.")
+                    }
+
+                case .failing:
+                    let trouble = stream.connectionError
+                    if stream.waited == .tooLong {
+                        status(
+                            symbol: "exclamationmark.triangle", mark: .red,
+                            title: "Could not load this session",
+                            // The core's own words, below a sentence rather than
+                            // standing in for one. Under this headline, in this
+                            // face, they used to read as Far Cooler's account of
+                            // the runner; they are not, and they are also the only
+                            // account anybody debugging an unreachable runner is
+                            // going to get, so they stay.
+                            message: trouble?.sentence, transcript: trouble?.transcript)
+                    } else if stream.waited == .aWhile {
+                        status(
+                            symbol: "arrow.clockwise", mark: .secondary,
+                            title: "Still trying", message: trouble?.sentence)
+                    } else {
+                        // A poll that did not come back is not news yet — there is
+                        // another one 700ms behind it. The sentence goes under the
+                        // spinner so the screen is not silent about it either.
+                        status(
+                            spinner: true, title: "Loading this session…",
+                            message: trouble?.sentence)
+                    }
+
+                case .live:
+                    Text("Say something to begin.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        // The same identifier `status` gives its headline. This
+                        // sentence IS this state's headline, and one name for
+                        // "what is this screen claiming" is what lets the states
+                        // be asserted as a set rather than one at a time.
+                        .accessibilityIdentifier("agent-empty-title")
                 }
-
-            case .failing:
-                let trouble = stream.connectionError
-                if stream.waited == .tooLong {
-                    status(
-                        symbol: "exclamationmark.triangle", mark: .red,
-                        title: "Could not load this session",
-                        // The core's own words, below a sentence rather than
-                        // standing in for one. Under this headline, in this
-                        // face, they used to read as Far Cooler's account of
-                        // the runner; they are not, and they are also the only
-                        // account anybody debugging an unreachable runner is
-                        // going to get, so they stay.
-                        message: trouble?.sentence, transcript: trouble?.transcript)
-                } else if stream.waited == .aWhile {
-                    status(
-                        symbol: "arrow.clockwise", mark: .secondary,
-                        title: "Still trying", message: trouble?.sentence)
-                } else {
-                    // A poll that did not come back is not news yet — there is
-                    // another one 700ms behind it. The sentence goes under the
-                    // spinner so the screen is not silent about it either.
-                    status(
-                        spinner: true, title: "Loading this session…",
-                        message: trouble?.sentence)
-                }
-
-            case .live:
-                Text("Say something to begin.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    // The same identifier `status` gives its headline. This
-                    // sentence IS this state's headline, and one name for
-                    // "what is this screen claiming" is what lets the states
-                    // be asserted as a set rather than one at a time.
-                    .accessibilityIdentifier("agent-empty-title")
             }
             Spacer()
         }
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity)
+    }
+
+    /// A pane that is a chat with no agent in it, and the one way out of it.
+    ///
+    /// **The pane STAYS a chat.** Nothing here flips `paneMode` back on its
+    /// own: the daemon respawns the pane to do that, which would land under
+    /// whatever the reader was in the middle of typing and take their draft
+    /// with it. The switch is OFFERED — it is the same action already on the
+    /// pane's overflow menu, under the same label — and pressing it is theirs.
+    ///
+    /// The composition is `status`, the same one every full-screen state on
+    /// this surface uses, with a button under it. Red rather than amber for
+    /// the reason `.failing` is red here: amber on this screen means an agent
+    /// is waiting on you, and a pane with no agent in it is not that.
+    ///
+    /// Every word is `AgentFailureCopy`'s. The runner sent `not-authenticated`
+    /// and nothing else; a Rust error string cannot reach this view.
+    @ViewBuilder
+    private func failureState(_ failure: AgentFailureCopy) -> some View {
+        status(
+            symbol: "exclamationmark.triangle", mark: .red,
+            title: failure.title, message: failure.message)
+        if let terminal = paneTerminal {
+            Button(failure.action) {
+                Task { await connection.setPaneMode(terminal, to: "terminal") }
+            }
+            .buttonStyle(.bordered)
+            .padding(.top, 18)
+            .accessibilityIdentifier("agent-failure-action")
+        }
     }
 
     /// One full-screen state, composed the one way this app composes them.

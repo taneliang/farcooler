@@ -346,6 +346,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var agentSessionId: String?
     var agentMode: String?
     var availableAgentModes: [String]?
+    /// Why this pane is in agent mode with no agent in it.
+    ///
+    /// A STABLE MACHINE WORD from the runner, never a sentence — see
+    /// `AgentFailure`, which is where this app's sentences live. Absent means
+    /// nothing has said this pane failed, which for a pane still starting up
+    /// looks exactly the same, so a screen with this nil keeps the spinner and
+    /// the "still starting" ladder it already had.
+    var agentFailure: String?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
 
@@ -399,6 +407,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
 
     /// Whether to draw a chat or a VT grid.
     var isAgentPane: Bool { paneMode == "agent" }
+
+    /// What to say about a chat that has no agent in it, if it has none.
+    ///
+    /// The whole of the decision is `AgentFailureCopy.forWord`, in AgentKit
+    /// where `swift test` can read it back — the iOS UI suite is compiled by CI
+    /// and never executed, so a sentence chosen in a `View.body` is a sentence
+    /// nothing checks.
+    var chatFailure: AgentFailureCopy? { AgentFailureCopy.forWord(agentFailure) }
 
     /// Whether this pane is a review of what its worktree changed.
     ///
