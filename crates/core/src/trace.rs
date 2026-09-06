@@ -261,6 +261,31 @@ impl Trace {
         Some(*WIDTHS.iter().find(|w| span <= *w * BUCKETS as i64).unwrap_or(&WIDTHS[2]))
     }
 
+    /// Commits on the axis of the window this trace would be drawn at.
+    ///
+    /// The same thirteen buckets `encode` renders, summed. It is the number a
+    /// card row puts beside `+142 −37`, and it is deliberately the TRACE's
+    /// count and not the branch's: `git log base..HEAD` would be a git call per
+    /// notification on the sampling loop's path, and this ring is already in
+    /// memory because the axis marks are drawn from it.
+    ///
+    /// So the two halves of that row measure different spans, and the row has
+    /// to be read that way: `+142 −37` is the whole branch against its base,
+    /// and this is what landed inside the trace beside it. They agree for the
+    /// ordinary branch — one that was started inside the window — and they
+    /// diverge for a long-lived one, where this says "four commits this
+    /// afternoon" rather than "four commits in total". That is the more useful
+    /// of the two sentences on a card about what is happening now, which is
+    /// what makes the cheaper number also the right one.
+    ///
+    /// Zero when the ring holds nothing, which is the same answer as a window
+    /// with no commits in it. Nothing distinguishes them and nothing needs to:
+    /// a row draws no commit count either way.
+    pub fn commits(&self, now: i64) -> u32 {
+        let Some(width) = self.width(now) else { return 0 };
+        self.buckets(now, width).iter().map(|bucket| bucket.commits).sum()
+    }
+
     /// The thirteen buckets, oldest first, at the given width.
     ///
     /// The newest bucket is the one `now` is in, and its left edge is

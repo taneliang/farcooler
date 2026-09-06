@@ -211,6 +211,53 @@ struct Notification<'a> {
     /// a card with no clock on it at all.
     #[serde(rename = "startedAt", skip_serializing_if = "Option::is_none")]
     started_at: Option<i64>,
+    /// The worktree's diff against its base, and the commits inside this
+    /// agent's trace window.
+    ///
+    /// **The first numbers this payload has ever carried**, and they are here
+    /// because the lock screen's card grew a row per agent. A row reads
+    /// `auth-refactor  force-push?  +142 −37  4 commits`, and none of that
+    /// reached the relay before: `title` and `subtitle` are sentences, and a
+    /// relay parsing `+142` back out of one would be the second copy of a rule
+    /// that `status` and `failed` already exist to avoid.
+    ///
+    /// A fleet spans several runners, each with its own daemon, so no daemon
+    /// can see the whole fleet and none can compose the card's header. The
+    /// relay is the only place that sees every runner's notices for one
+    /// account. These fields are what it accumulates.
+    ///
+    /// Not content, on the same test everything else here passes: a count of
+    /// changed lines says how MUCH happened and nothing about what. It is
+    /// strictly less than the composed line `subtitle` already carries.
+    ///
+    /// **Skipped when absent, never sent as zero.** A worktree nobody has
+    /// probed yet and one with no base to compare against have both said
+    /// nothing, and a card drawing `+0 −0` over either would be reporting a
+    /// measurement that was never made — see `review::Counts`, which has three
+    /// answers rather than a number with zero standing in for the other two.
+    /// The relay stores an absent count as NULL and a row draws no numbers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    insertions: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deletions: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commits: Option<u32>,
+    /// The thirteen buckets under the row, base64 of the wire's 66 bytes.
+    ///
+    /// Base64 rather than an array of 66 numbers because this one ends up on an
+    /// APNs payload with a hard 4KB ceiling and several rows to fit inside it:
+    /// the bytes encode to 88 characters, where `[12,0,7,...]` is upwards of
+    /// two hundred. `farcooler_core::base64` is the encoder and the relay's
+    /// column holds the string it produces, so nothing between here and the
+    /// widget has to decode it.
+    ///
+    /// Empty is omitted rather than sent as `""`. A trace with nothing in it
+    /// encodes to no bytes at all — deliberately, so a fleet at rest costs
+    /// nothing — and 66 zeroes is a different statement: thirteen quiet
+    /// buckets, which the glance spec says are drawn rather than omitted. See
+    /// `farcooler_core::trace::Trace::encode`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trace: Option<String>,
 }
 
 /// What one call to `notify` is about.
@@ -232,6 +279,17 @@ pub struct Outgoing<'a> {
     pub label: &'a str,
     pub terminal: &'a str,
     pub started_at: Option<i64>,
+    /// What this agent's row on the card draws beside its name. See
+    /// `Notification::insertions` for why absent is not zero, and
+    /// `watch::CardStats`, which is where all four are sampled together.
+    pub insertions: Option<u32>,
+    pub deletions: Option<u32>,
+    pub commits: Option<u32>,
+    /// The wire's 66 trace bytes, or empty for a terminal with no history.
+    /// Encoded to base64 at the boundary below rather than by the caller, so
+    /// the one place that knows this crosses an HTTP wire is the one that
+    /// spells it.
+    pub trace: &'a [u8],
 }
 
 /// Send one, or quietly do nothing if this runner was never paired.
@@ -240,7 +298,19 @@ pub struct Outgoing<'a> {
 /// missed notification; a push that takes the watcher down with it is every
 /// future notification missed as well, plus the fleet.
 pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoing<'_>) {
-    let Outgoing { title, subtitle, status, failed, label, terminal, started_at } = notice;
+    let Outgoing {
+        title,
+        subtitle,
+        status,
+        failed,
+        label,
+        terminal,
+        started_at,
+        insertions,
+        deletions,
+        commits,
+        trace,
+    } = notice;
     let url = format!("{}/v1/notify", pairing.relay.trim_end_matches('/'));
     let result = client
         .post(&url)
@@ -254,6 +324,10 @@ pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoin
             terminal,
             version: farcooler_protocol::BUILD,
             started_at,
+            insertions,
+            deletions,
+            commits,
+            trace: (!trace.is_empty()).then(|| farcooler_core::base64::encode(trace)),
         })
         .send()
         .await;
@@ -390,6 +464,17 @@ mod tests {
     /// part worth guarding is not the sending — it is the JSON, which three
     /// separate programs have to agree about.
     fn body(started_at: Option<i64>) -> serde_json::Value {
+        stats_body(started_at, None, None, None, &[])
+    }
+
+    /// The same body with a row's numbers on it. See `Notification::insertions`.
+    fn stats_body(
+        started_at: Option<i64>,
+        insertions: Option<u32>,
+        deletions: Option<u32>,
+        commits: Option<u32>,
+        trace: &[u8],
+    ) -> serde_json::Value {
         serde_json::to_value(Notification {
             title: "claude",
             subtitle: "3/7 · Designing test matrix",
@@ -399,6 +484,10 @@ mod tests {
             terminal: "term-1",
             version: "test",
             started_at,
+            insertions,
+            deletions,
+            commits,
+            trace: (!trace.is_empty()).then(|| farcooler_core::base64::encode(trace)),
         })
         .expect("serialize")
     }
@@ -426,6 +515,42 @@ mod tests {
             quiet.get("startedAt").is_none(),
             "no turn is running, so the card must be given no clock: {quiet}"
         );
+    }
+
+    #[test]
+    fn a_row_sends_its_numbers_or_no_key_at_all() {
+        // The three counts and the trace are what a card row is made of, and
+        // this is the only place on this side that spells their keys. The
+        // relay reads them by name and stores what it reads; a rename here
+        // would show up as a fleet card with no numbers on it, which is a card
+        // that still renders and says less — the kind of failure nobody
+        // reports.
+        let trace = vec![0x10u8; farcooler_core::trace::ENCODED_LEN];
+        let sent = stats_body(None, Some(142), Some(37), Some(4), &trace);
+        assert_eq!(sent["insertions"], serde_json::json!(142));
+        assert_eq!(sent["deletions"], serde_json::json!(37));
+        assert_eq!(sent["commits"], serde_json::json!(4));
+
+        // Base64 and not sixty-six numbers. The card these end up on has a hard
+        // 4KB ceiling and several rows to fit inside it — see the field's own
+        // note — so this is a size contract, not a formatting preference.
+        let encoded = sent["trace"].as_str().expect("a trace is a string");
+        assert_eq!(encoded.len(), 88, "66 bytes is 88 base64 characters: {encoded}");
+        assert_eq!(
+            farcooler_core::base64::decode(encoded).as_deref(),
+            Some(trace.as_slice()),
+            "the relay stores this string and the widget decodes it; it has to round trip"
+        );
+
+        // Absent is not zero, on every one of them. A worktree nobody has
+        // probed and one with no base have both said nothing, and a card
+        // drawing `+0 −0` over either would report a measurement nobody made.
+        // A trace is the same shape of claim: no bytes means no history seen,
+        // where sixty-six zeroes would mean thirteen buckets of observed quiet.
+        let quiet = stats_body(None, None, None, None, &[]);
+        for key in ["insertions", "deletions", "commits", "trace"] {
+            assert!(quiet.get(key).is_none(), "nothing measured `{key}`, so no key: {quiet}");
+        }
     }
 
     #[test]

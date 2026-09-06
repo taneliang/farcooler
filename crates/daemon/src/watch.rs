@@ -185,6 +185,33 @@ struct Notice {
     started_at: Option<i64>,
 }
 
+/// The half of a card row that is numbers rather than a sentence.
+///
+/// A `Notice` is one composed line about one moment; this is the standing state
+/// of the worktree behind it — what the row draws to the right of the agent's
+/// name, and the history under it. Kept apart from `Notice` deliberately: a
+/// notice is COMPOSED, at the moment something changed, and these are SAMPLED,
+/// at the moment the notice is sent. Folding them together would invite a row
+/// that quotes one tick's diff beside another tick's question.
+///
+/// See `Watcher::card_stats`, which is the only thing that builds one.
+#[derive(Debug, Default, Clone)]
+pub struct CardStats {
+    /// The worktree's diff against its base. `None` where nothing has measured
+    /// it — see `card_stats`, and `review::Counts` for why absent and zero are
+    /// different answers.
+    pub insertions: Option<u32>,
+    pub deletions: Option<u32>,
+    /// Commits inside the trace's own window, not on the branch. See
+    /// `farcooler_core::trace::Trace::commits`, which explains the difference
+    /// and why the cheaper number is also the right one here.
+    pub commits: Option<u32>,
+    /// The thirteen buckets, as the wire's 66 bytes. Empty when this terminal
+    /// has no history the trace can see — see `farcooler_core::trace::encode`,
+    /// where empty and thirteen zeroes are deliberately not the same thing.
+    pub trace: Vec<u8>,
+}
+
 /// What, if anything, is worth waking a phone for.
 ///
 /// Split out from the sending so it can be tested at all: the rule it encodes —
@@ -2465,6 +2492,11 @@ impl Watcher {
         // already owned — the label is the one the phone needs on its own, for
         // the half of the live card that is not a sentence.
         let label = label.to_string();
+        // Sampled HERE and not inside the spawn, which is the same rule
+        // `started_at` follows: the spawn runs whenever the executor gets to it,
+        // and a row whose numbers were read a second after the sentence was
+        // composed would draw one tick's diff beside another tick's question.
+        let stats = self.card_stats(terminal);
         // Cheap: a `reqwest::Client` is a handle to a shared pool, so this
         // clone keeps the connection reuse the one-client-per-daemon buys.
         let client = self.push.clone();
@@ -2481,6 +2513,10 @@ impl Watcher {
                     label: &label,
                     terminal: &terminal.to_string(),
                     started_at: notice.started_at,
+                    insertions: stats.insertions,
+                    deletions: stats.deletions,
+                    commits: stats.commits,
+                    trace: &stats.trace,
                 },
             )
             .await;
@@ -2622,15 +2658,20 @@ impl Watcher {
     /// at either call site.
     pub fn trace(&self, terminal: Uuid) -> Vec<u8> {
         let now = now_millis() / 1000;
-        let Some(mut trace) = self
-            .traces
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&terminal)
-            .cloned()
-        else {
-            return Vec::new();
-        };
+        match self.drawn_trace(terminal, now) {
+            Some(trace) => trace.encode(now),
+            None => Vec::new(),
+        }
+    }
+
+    /// One terminal's ring with its worktree's commit marks folded in.
+    ///
+    /// The shared half of `trace` and `card_stats`, which draw the same history
+    /// two ways — as thirteen bars and as a commit count — and must not disagree
+    /// about which marks belong to it.
+    fn drawn_trace(&self, terminal: Uuid, now: i64) -> Option<farcooler_core::trace::Trace> {
+        let mut trace =
+            self.traces.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).cloned()?;
         let workspace =
             self.trace_workspaces.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
         if let Some(workspace) = workspace {
@@ -2640,7 +2681,49 @@ impl Watcher {
                 trace.absorb(marks, now);
             }
         }
-        trace.encode(now)
+        Some(trace)
+    }
+
+    /// What one row of the lock screen's fleet card draws about this terminal,
+    /// beyond the sentence the notice already carries.
+    ///
+    /// `auth-refactor  force-push?  +142 −37  4 commits`, and the thirteen
+    /// buckets under it. None of it reaches the relay today — `Outgoing` carries
+    /// nothing numeric — so a card that wants a row per agent has to be given
+    /// the numbers a row is made of.
+    ///
+    /// **Nothing here runs git**, which is the same rule `record_workspace_trace`
+    /// keeps and for the same reason: this is on the sampling loop's push path,
+    /// once per notice, for every agent on the runner. `ReviewCache::counts` is
+    /// a map lookup by contract and the rings are already in memory.
+    ///
+    /// **Absent is not zero.** A worktree the loop has not reached yet, and one
+    /// with no base to compare against, have both said nothing — and a card that
+    /// drew `+0 −0` over either would be stating a measurement nobody made. See
+    /// `review::Counts`, which has three answers for exactly this reason, and
+    /// `Notification::insertions`, which skips the key rather than sending a
+    /// confident zero.
+    pub fn card_stats(&self, terminal: Uuid) -> CardStats {
+        let now = now_millis() / 1000;
+        let trace = self.drawn_trace(terminal, now);
+        let workspace =
+            self.trace_workspaces.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
+        let counts = workspace.map(|id| self.service.review_cache.counts(id));
+        let (insertions, deletions) = match counts {
+            Some(crate::review::Counts::Known(_, insertions, deletions)) => {
+                (Some(insertions), Some(deletions))
+            }
+            _ => (None, None),
+        };
+        CardStats {
+            insertions,
+            deletions,
+            // Only where there is a history to count them in. A terminal with no
+            // ring has not been observed rather than observed doing nothing, and
+            // the row says nothing about commits either way.
+            commits: trace.as_ref().map(|t| t.commits(now)),
+            trace: trace.map(|t| t.encode(now)).unwrap_or_default(),
+        }
     }
 
     /// Every terminal's trace added together, at one width for the whole fleet.
