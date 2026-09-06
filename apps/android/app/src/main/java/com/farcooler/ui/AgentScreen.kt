@@ -71,6 +71,11 @@ import com.farcooler.model.AgentChoice
 import com.farcooler.model.ComposerToken
 import com.farcooler.model.ConfigOption
 import com.farcooler.model.QueuedPrompt
+import com.farcooler.model.TailSample
+import com.farcooler.model.TranscriptItem
+import com.farcooler.model.TranscriptRow
+import com.farcooler.model.TranscriptTail
+import com.farcooler.model.transcriptItems
 import com.farcooler.model.activeToken
 import com.farcooler.net.AgentPhase
 import com.farcooler.net.AgentStream
@@ -141,13 +146,42 @@ fun AgentScreen(
     val listState = rememberLazyListState()
     var followingTail by remember { mutableStateOf(true) }
 
-    // Whether the reader is parked at the tail.
+    // What the READER did, not how far the end is.
+    //
+    // The whole argument is in [TranscriptTail], because the argument is the
+    // part worth keeping: asking how far the end was — which this asked in
+    // items, and the Mac used to ask in points — both detached with nobody
+    // having touched the scroll and failed to detach when somebody had.
     LaunchedEffect(listState) {
+        var previous: TailSample? = null
         snapshotFlow {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 2
-        }.collect { followingTail = it }
+            TailSample(
+                firstIndex = listState.firstVisibleItemIndex,
+                firstOffset = listState.firstVisibleItemScrollOffset,
+                // Exact, so this needs none of the slack the Mac's version
+                // carries: Compose answers "is there anything below the fold"
+                // rather than being asked to compare two measured heights.
+                atEnd = !listState.canScrollForward,
+            )
+        }.collect { now ->
+            followingTail = TranscriptTail.following(followingTail, previous ?: now, now)
+            previous = now
+        }
     }
+
+    // A stale error banner rather than a blanked screen: a failed poll is not a
+    // disconnection, so the last known transcript stays up while this device
+    // tries again.
+    val notice = (phase as? AgentPhase.Failing)?.trouble
+
+    // ONE value, so the list that is drawn and the index that is scrolled to
+    // cannot disagree about where the bottom is. That they could is what put an
+    // off-by-one here; see [TranscriptItem].
+    val items = transcriptItems(
+        hasNotice = notice != null,
+        rows = transcript.rows,
+        isWorking = isWorking,
+    )
 
     // Keyed on the REVISION, not the row count. A streamed reply coalesces into
     // the row already on screen, so the count does not change while the text
@@ -155,8 +189,9 @@ fun AgentScreen(
     // to the end on every event made reading anything older impossible.
     LaunchedEffect(revision) {
         if (!followingTail) return@LaunchedEffect
-        val count = transcript.rows.size
-        if (count > 0) listState.animateScrollToItem(count)
+        // [TranscriptItem.End] is always the last item, so there is no
+        // arithmetic here to be wrong by one.
+        listState.animateScrollToItem(items.lastIndex)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -172,47 +207,58 @@ fun AgentScreen(
             } else {
                 LazyColumn(
                     state = listState,
-                    contentPadding = PaddingValues(12.dp),
+                    // No bottom padding, because [TranscriptItem.End] is now
+                    // the last item and `spacedBy` puts the same 12 dp in front
+                    // of it. The slack under the last row is what it was.
+                    contentPadding = PaddingValues(
+                        start = 12.dp, top = 12.dp, end = 12.dp, bottom = 0.dp,
+                    ),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    (phase as? AgentPhase.Failing)?.trouble?.let { trouble ->
-                        item {
-                            // A stale error banner rather than a blanked
-                            // screen: a failed poll is not a disconnection, so
-                            // the last known transcript stays up while this
-                            // device tries again.
-                            Text(
-                                trouble.sentence,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.tertiary,
-                            )
-                            // Rare by construction, and that is what makes it
-                            // bearable at the head of a transcript already
-                            // scrolled to its tail: the failure that actually
-                            // happens on a phone is a dropped link, which
-                            // carries a written sentence and no transcript.
-                            trouble.transcript?.let { DetailBox(it) }
+                    items(items.size, key = { items[it].key }) { index ->
+                        when (val item = items[index]) {
+                            TranscriptItem.Notice -> {
+                                Text(
+                                    notice?.sentence.orEmpty(),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                )
+                                // Rare by construction, and that is what makes
+                                // it bearable at the head of a transcript
+                                // already scrolled to its tail: the failure
+                                // that actually happens on a phone is a dropped
+                                // link, which carries a written sentence and no
+                                // transcript.
+                                notice?.transcript?.let { DetailBox(it) }
+                            }
+
+                            is TranscriptItem.Row -> {
+                                val row = item.row
+                                AgentRowView(
+                                    row = row,
+                                    isLast = row.id == transcript.rows.lastOrNull()?.id,
+                                    pending = transcript.pendingPermission?.takeIf { pending ->
+                                        names(pending, row) ||
+                                            (row.kind as? TranscriptRow.Kind.Subagent)
+                                                ?.block?.children
+                                                ?.any { names(pending, it) } == true
+                                    },
+                                    onAnswer = { optionId ->
+                                        transcript.pendingPermission?.let {
+                                            stream.answer(it.id, optionId)
+                                        }
+                                    },
+                                )
+                            }
+
+                            // The turn that is still running, one line ahead of
+                            // what it has produced.
+                            TranscriptItem.Working -> WorkingRow()
+
+                            // Nothing to draw. It exists so that "the end of the
+                            // transcript" is an index rather than a sum.
+                            TranscriptItem.End -> Spacer(Modifier.height(0.dp))
                         }
-                    }
-                    items(transcript.rows.size, key = { transcript.rows[it].id }) { index ->
-                        val row = transcript.rows[index]
-                        AgentRowView(
-                            row = row,
-                            isLast = index == transcript.rows.lastIndex,
-                            pending = transcript.pendingPermission?.takeIf { pending ->
-                                names(pending, row) ||
-                                    (row.kind as? com.farcooler.model.TranscriptRow.Kind.Subagent)
-                                        ?.block?.children?.any { names(pending, it) } == true
-                            },
-                            onAnswer = { optionId ->
-                                transcript.pendingPermission?.let { stream.answer(it.id, optionId) }
-                            },
-                        )
-                    }
-                    // The turn that is still running, one line ahead of what it
-                    // has produced.
-                    if (isWorking) {
-                        item { WorkingRow() }
                     }
                 }
             }
