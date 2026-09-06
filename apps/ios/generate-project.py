@@ -304,11 +304,18 @@ WATCH_SOURCES = [
 # `SnapshotStore` are the model it renders and the container it caches into.
 #
 # `AgentActivityAttributes.swift` is deliberately NOT here even though the other
-# two extension lists carry it. It is `#if os(iOS)` guarded end to end, so on
-# watchOS it compiles to an empty translation unit — a build id and a phase
-# entry claiming a dependency the watch does not have. ActivityKit has no
-# watchOS counterpart and the watch renders no Live Activity; listing the file
-# for symmetry would tell the next reader of this list something untrue.
+# two extension lists carry it. ActivityKit has no watchOS counterpart and the
+# watch renders no Live Activity, so listing the file for symmetry would tell
+# the next reader of this list something untrue.
+#
+# It used to be `#if os(iOS)` guarded end to end, and that is no longer the whole
+# file: `AgentCardState` — the card's payload — was lifted out of the guard so
+# that `swift test`, which runs on macOS, can reach it at all. Nested inside the
+# attributes it was invisible to every test this repository has, and the one part
+# of that contract with real logic in it went untested for its whole life. So the
+# file would no longer compile to an empty translation unit here; it would
+# compile one plain `Codable` struct the watch has no reader for. Still not
+# listed, and now for the plainer reason: nothing on the watch reads it.
 WATCH_AGENTKIT_SOURCES = [
     "WatchLink.swift",
     # The three reachability states. In AgentKit and not in `FarCoolerWatch/`
