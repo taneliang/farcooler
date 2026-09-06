@@ -1560,17 +1560,33 @@ Do you want to allow this command?
     #[test]
     fn background_work_is_working_even_when_the_main_loop_is_idle() {
         let r = Registry::built_in();
-        for capture in [
-            include_str!("../captures/claude-background-agents-main-idle.txt"),
-            include_str!("../captures/claude-background-shell-main-idle-80col.txt"),
-            include_str!("../captures/claude-background-agent-main-idle-40col.txt"),
+        // Named, because which one goes red is the whole diagnosis: the shell
+        // capture alone means `· ↓ to manage` is gone, the 40-column one alone
+        // means `◯ ` is.
+        for (name, capture) in [
+            (
+                "claude-background-agents-main-idle.txt",
+                include_str!("../captures/claude-background-agents-main-idle.txt"),
+            ),
+            (
+                "claude-background-shell-main-idle-80col.txt",
+                include_str!("../captures/claude-background-shell-main-idle-80col.txt"),
+            ),
+            (
+                "claude-background-agent-main-idle-40col.txt",
+                include_str!("../captures/claude-background-agent-main-idle-40col.txt"),
+            ),
         ] {
+            let footer = footer_text(capture, DEFAULT_FOOTER_LINES);
             assert!(
-                !footer_text(capture, DEFAULT_FOOTER_LINES).contains("esc to interrupt")
-                    && !footer_text(capture, DEFAULT_FOOTER_LINES).contains("Thinking…"),
-                "the fixture really is a screen where the main loop is between turns"
+                !footer.contains("esc to interrupt") && !footer.contains("Thinking…"),
+                "{name}: the fixture is not a screen where the main loop is between turns"
             );
-            assert_eq!(r.classify("claude", capture), AgentActivity::Working);
+            assert_eq!(
+                r.classify("claude", capture),
+                AgentActivity::Working,
+                "{name}: background work read as no work"
+            );
         }
     }
 
