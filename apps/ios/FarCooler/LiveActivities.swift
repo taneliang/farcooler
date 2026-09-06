@@ -182,7 +182,14 @@ final class LiveActivities {
         _ card: Activity<AgentActivityAttributes>
     ) -> (Int, Int, Date, String) {
         (
-            card.attributes.isFleetShaped ? 1 : 0,
+            // The version itself, not `isFleetShaped`. It was a boolean tier
+            // because there were two shapes and one boundary between them; there
+            // are three now, and a boolean would rank a card that counts the
+            // fleet off a stale local snapshot equal to one the relay counted.
+            // Comparing the number keeps the old answer for 1 against 2 — it is
+            // the same comparison — and extends to every shape after it without
+            // a fourth constant to keep in step.
+            card.attributes.version,
             AgentStatus(card.content.state.status) == .blocked ? 1 : 0,
             card.content.staleDate ?? .distantPast,
             card.id

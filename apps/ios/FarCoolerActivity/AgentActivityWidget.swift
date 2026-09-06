@@ -18,20 +18,24 @@ import WidgetKit
 /// agent, chosen by the relay on the same precedence the rest of this product
 /// uses (blocked first), and COUNTS the others.
 ///
-/// The two halves come from two places, and that is deliberate:
+/// **Both halves come off the push now**, and the second one only recently:
 ///
 ///   - **the leader** is `context.state`, which arrives by push and is therefore
 ///     always as fresh as the last thing that happened;
-///   - **the tail** is the fleet snapshot in the App Group, because nothing on
-///     the push side can honestly count a fleet — the relay stores none, and a
-///     daemon knows only its own runner. This extension already reads that file
-///     for `FleetWidget`, and `FarCoolerNotify` refreshes it from every push
-///     that alerts.
+///   - **the tail** was the fleet snapshot in the App Group, because nothing on
+///     the push side could honestly count a fleet — the relay stored none, and a
+///     daemon knows only its own runner. The relay keeps a row per agent now,
+///     accumulated from the notices every runner on an account already sends it,
+///     so the counts arrive with the leader and are as fresh as it is.
 ///
-/// A snapshot is older than the push that arrived with the leader, sometimes by
-/// a lot, so `FleetTail` qualifies what it says rather than asserting it — the
-/// same rule `FleetSnapshot.complete` and `confidence(in:at:)` already put on
-/// every other surface outside the app.
+/// The snapshot is still the fallback, and still the source of the traces. A
+/// relay too old to have a roster says nothing about the fleet, `knowsFleet` is
+/// false, and `FleetTail` falls back to reading the file and to the hedged
+/// wording that goes with it — `FleetSnapshot.complete` and
+/// `confidence(in:at:)`, the same rule every other surface outside the app
+/// follows. That hedge exists because a snapshot is assembled from what this
+/// phone happens to have been told, which on a phone in a pocket that has not
+/// run the app today is not much; the pushed counts do not need it.
 ///
 /// Nothing here reaches into the app. The extension has no network, no daemon
 /// connection, and no way to ask about the fleet beyond that one file.
@@ -58,7 +62,7 @@ struct AgentActivityWidget: Widget {
                 // anywhere else.
                 tail: ask.isPresent
                     ? FleetTail.unknown
-                    : FleetTail.current(excluding: context.state.terminal),
+                    : FleetTail.current(for: context.state),
                 ask: ask)
                 // The card's own background. Left to the system's material
                 // rather than a color of ours: the lock screen wallpaper is
@@ -83,7 +87,7 @@ struct AgentActivityWidget: Widget {
             let ask = LeaderAsk.current(for: context.state)
             let tail =
                 ask.isPresent
-                ? FleetTail.unknown : FleetTail.current(excluding: context.state.terminal)
+                ? FleetTail.unknown : FleetTail.current(for: context.state)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     StatusBadge(status: status)
@@ -308,13 +312,80 @@ struct FleetTail {
     /// "Count leading, fleet trace trailing, thirteen buckets like every other."
     var fleetTrace: Data? = nil
 
+    /// What the whole fleet has changed, when the relay counted it: `+391 −112`.
+    ///
+    /// Only ever off the PUSH. The snapshot has per-agent counts and summing
+    /// them here would be this extension inventing a total out of a file that
+    /// may be missing agents — the same objection that kept counts off the
+    /// content state until something could write them honestly. `nil` means
+    /// nobody measured, which is not zero.
+    var insertions: Int? = nil
+    var deletions: Int? = nil
+
     /// Nothing known, which draws nothing.
     static let unknown = FleetTail(others: 0, blocked: 0, qualified: false)
 
-    static func current(excluding leader: String, now: Date = Date()) -> FleetTail {
-        guard let snapshot = SnapshotStore.read(),
-            snapshot.capturedAt.timeIntervalSince1970 > 0
-        else { return .unknown }
+    /// The tail, from the relay's roster if it sent one and from this phone's
+    /// snapshot otherwise.
+    ///
+    /// **The push wins, and the reason is not freshness alone.** The snapshot is
+    /// assembled from whatever this phone has been told — pushes it received,
+    /// polls the app made while it was open — so on the phone this feature is
+    /// actually for, one in a pocket that has not run the app today, it is
+    /// missing agents or missing entirely. That is what `complete` and
+    /// `confidence(in:at:)` have been qualifying all along, and why the tail has
+    /// been hedging a number it could not stand behind.
+    ///
+    /// The relay counted every runner's notices for this account, at the moment
+    /// it composed this push. So when it says a number, the number is not
+    /// qualified: there is nothing left for the hedge to be about.
+    ///
+    /// A relay too old to have a roster says nothing, `knowsFleet` is false, and
+    /// this falls all the way back to the snapshot and the wording it has always
+    /// used. That fallback is the compatibility story and not a nicety — an app
+    /// updated ahead of its relay is the ordinary case here.
+    static func current(
+        for state: AgentActivityAttributes.ContentState, now: Date = Date()
+    ) -> FleetTail {
+        let snapshot = SnapshotStore.read()
+        if state.knowsFleet {
+            // Everybody but the one agent this card names.
+            //
+            // Counted here rather than taken from the relay's own `more`, which
+            // is the fleet minus the ROWS it sent. That is the right number for
+            // a card that draws a line each and the wrong one for this card,
+            // which draws the headline and counts the rest: four rows sent
+            // against six agents would put "+3 more" under a card naming one of
+            // them. When this card grows rows, `more` is the field to read and
+            // this arithmetic is the thing to delete.
+            //
+            // `review` is left out, exactly as the snapshot branch below leaves
+            // out `done`: a finished run is not "more working", and counting it
+            // would make the card claim an idle fleet is busy.
+            let headlined = AgentStatus(state.status)
+            let onTheCard = headlined == .blocked || headlined == .working ? 1 : 0
+            let others = max(0, state.blocked + state.working - onTheCard)
+            // The headline is on the card, so it is not one of the OTHERS that
+            // need somebody — which is what this half of the line says.
+            let waiting = max(0, state.blocked - (headlined == .blocked ? 1 : 0))
+            return FleetTail(
+                others: others,
+                blocked: waiting,
+                // Counted by the one thing that sees every runner. Nothing to
+                // qualify.
+                qualified: false,
+                // The traces are still the snapshot's: the push carries a trace
+                // per row and this card draws one, the leader's, and reads it
+                // from the file it is already opening. Wiring the pushed trace
+                // through is the next card's work, not this line's.
+                leaderTrace: snapshot?.agents.first { $0.id == state.terminal }?.trace,
+                fleetTrace: snapshot?.fleetTrace,
+                insertions: state.insertions,
+                deletions: state.deletions)
+        }
+
+        guard let snapshot, snapshot.capturedAt.timeIntervalSince1970 > 0 else { return .unknown }
+        let leader = state.terminal
 
         // Both traces, read before the early return below. A fleet whose only
         // agent IS the leader has no tail and still has a history, and the two
@@ -365,6 +436,18 @@ struct FleetTail {
         guard others > 0 else { return nil }
         if blocked > 0 {
             return "+\(others) more · \(blocked) need\(blocked == 1 ? "s" : "") you"
+        }
+        // "+6 more · +391 −112" when the relay counted the diff, which is what
+        // the design asks the tail to say. It replaces the verb rather than
+        // joining it: the line is one caption on a card capped at about 160
+        // points, and "+6 more working · +391 −112" is the width at which the
+        // half that matters gets truncated away.
+        //
+        // A minus sign, U+2212, and not a hyphen — the same character every
+        // other diff count in this product uses, so a card and a sidebar row do
+        // not disagree about a number's shape.
+        if let plus = insertions, let minus = deletions {
+            return "+\(others) more · +\(plus) −\(minus)"
         }
         return qualified ? "+\(others) more last seen working" : "+\(others) more working"
     }
