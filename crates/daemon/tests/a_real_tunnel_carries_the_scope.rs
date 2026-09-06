@@ -49,7 +49,14 @@
 //! disk, and `TS_DEBUG_USE_DERP_HTTP=1` in the environment at exec.
 //! `scripts/tunnel-e2e.sh` supplies all three and is the only supported way to
 //! run this; every one of the three is a loud failure when absent and none of
-//! them is a skip. See that script's header for which CI line runs it.
+//! them is a skip.
+//!
+//! **No CI line runs this file.** `ci.yml` type-checks it — `cargo check -p
+//! farcooler-daemon --features tailcat --all-targets`, so it cannot rot — and
+//! runs nothing, because a job would need a Go toolchain, a built relay and an
+//! Apple silicon runner. That is written out at the `cargo check` line itself
+//! and in the script's header, including the one question that has to be
+//! answered before such a job can be added.
 
 #![cfg(feature = "tailcat")]
 

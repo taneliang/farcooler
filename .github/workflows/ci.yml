@@ -240,6 +240,36 @@ jobs:
       # with its own pid, so two servers are two numbers in a file.
       - run: cargo test -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel
 
+      # The end-to-end tunnel test, type-checked and NOT run — and the second
+      # half of that sentence is the point of this comment.
+      #
+      # `crates/daemon/tests/a_real_tunnel_carries_the_scope.rs` is the only
+      # thing in this repository that has ever carried a byte end to end
+      # through the tunnel: a real DERP relay on loopback, a real tailcat
+      # server and client, a real sshd, and the scope out of a real
+      # `authorized_keys`. **Nothing in this workflow runs it.** It needs a Go
+      # archive linked into the test binary, a `derper` built from the same
+      # tailscale.com, `TS_DEBUG_USE_DERP_HTTP=1` in the environment at exec,
+      # and an Apple silicon host — `scripts/tunnel-e2e.sh` assembles all four
+      # and is the only supported way to run it. See that script's header for
+      # what a job here would have to install, and why the Linux runner in this
+      # matrix cannot be the one to do it (its two tailcat targets are musl,
+      # where a linked Go c-archive segfaults in Go's runtime startup, and the
+      # helper backend it ships instead cannot dial at all).
+      #
+      # So this line buys exactly one thing and it should not be read as
+      # buying more: the file cannot rot. `--workspace` above builds default
+      # features, which `cfg`s that file away entirely, so a shipped API it
+      # calls could be renamed and nothing in CI would notice until somebody
+      # next ran the script by hand. `cargo check` links nothing, so it needs
+      # no archive and no Go toolchain — verified with `go` off PATH — and it
+      # goes red on exactly the drift it is here for: renaming
+      # `allowlist::tunnel_plan` under it gives
+      # `error[E0425]: cannot find function` and exit 101.
+      #
+      # It does NOT prove a tunnel comes up. Nothing here does.
+      - run: cargo check -p farcooler-daemon --features tailcat --all-targets
+
       # A `changes` pane runs THIS CHANNEL'S CLI by name — `changes_host_command`
       # asks `shim_binary`, which looks beside the daemon's own executable and
       # otherwise falls back to the bare name for PATH to resolve. Under `cargo

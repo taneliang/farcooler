@@ -5,10 +5,29 @@
 #   ./scripts/tunnel-e2e.sh
 #   ./scripts/tunnel-e2e.sh a_revoked_device        # one test by name
 #
-# CI runs this from the `tunnel-e2e` job in `.github/workflows/ci.yml`. Nothing
-# else runs it: `cargo test --workspace`, the `rust` job's last step, builds
-# default features, and `crates/daemon/tests/a_real_tunnel_carries_the_scope.rs`
-# is `cfg`'d away without `tailcat`.
+# ## Nothing in CI runs this, and that is a stated gap rather than an oversight
+#
+# `.github/workflows/ci.yml` type-checks the test —
+# `cargo check -p farcooler-daemon --features tailcat --all-targets`, in the
+# `rust` job, so the file cannot rot — and runs nothing. `cargo test
+# --workspace`, that job's last step, builds default features and `cfg`s the
+# file away entirely.
+#
+# What a job would have to install: Go (`actions/setup-go`, pinned by
+# `crates/tailcat/go/go.mod` like the two jobs that already do it), then this
+# script, on an Apple silicon `macos-latest` runner. The Linux runner in that
+# matrix cannot be the one: `build-tailcat.sh`'s two Linux targets are musl,
+# where a linked Go c-archive segfaults in Go's runtime startup, and the helper
+# backend Linux ships instead cannot dial at all — a descriptor cannot cross
+# its pipe as a word.
+#
+# The one thing that has never been tried, and the reason this job is not here
+# already: whether a non-root `sshd` starts on a GitHub macOS runner. No test in
+# this repository has ever run one in CI — `a_real_sshd_forces_the_scope.rs` is
+# `#[ignore]`d for a scheduled lane that does not exist — so adding the job
+# would be shipping an unverified check to `main`. Somebody with a branch and
+# one CI run can settle it in five minutes, and this comment is here so they
+# know it is the only open question.
 #
 # ## The three things this supplies that a plain `cargo test` cannot
 #
