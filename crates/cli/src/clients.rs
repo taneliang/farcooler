@@ -59,6 +59,20 @@ pub enum ClientCmd {
         /// for. The daemon refuses it beside any scope but host_admin.
         #[arg(long)]
         shell_access: bool,
+        /// The device's tailcat node public key, as a ceremony offer carried it:
+        /// 43 characters of unpadded base64-URL.
+        ///
+        /// Giving one is what asks this runner to join the tunnel network, so
+        /// the answer carries the token that device dials. Omitting it enrolls
+        /// the device exactly as this command always has, and creates no tunnel
+        /// identity — a runner nobody asked to join does not join.
+        ///
+        /// NOT with `--shell-access`: a plain line has no forced command and so
+        /// nowhere to put a key, and the daemon refuses the pair rather than
+        /// writing a line that admits nothing. A Mac passes it on its Key A call
+        /// only.
+        #[arg(long)]
+        node_key: Option<String>,
     },
     /// Remove a device's keys and close the sessions they were holding.
     ///
@@ -79,7 +93,7 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
     // whatever the far end says about an enum it was handed.
     let outbound = match &cmd {
         ClientCmd::List => req("client.list"),
-        ClientCmd::Enroll { key, label, client_id, scope, shell_access } => with(
+        ClientCmd::Enroll { key, label, client_id, scope, shell_access, node_key } => with(
             req("client.enroll"),
             request::Payload::ClientEnroll(pb::ClientEnroll {
                 public_key: key.clone(),
@@ -87,6 +101,9 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
                 client_id: client_id.clone(),
                 scope: parse_scope(scope)? as i32,
                 shell_access: *shell_access,
+                // Absent is the empty string, which the daemon reads as "this
+                // device asked for no tunnel" — not as an unusable key.
+                node_key: node_key.clone().unwrap_or_default(),
             }),
         ),
         ClientCmd::Revoke { client_id } => with(
@@ -137,6 +154,12 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
                         // `crates/client/src/session.rs`. One decoder, two
                         // transports.
                         "alreadyEnrolled": outcome.already_enrolled,
+                        // The tunnel token, when this runner just admitted the
+                        // device to one. Empty otherwise, which is every
+                        // enrollment that carried no node key — and the ONLY
+                        // way a granting Mac learns a token to put in a
+                        // ceremony reply's `Reach::Tailcat`.
+                        "connBlob": outcome.conn_blob,
                     })
                 );
                 return Ok(());
@@ -375,6 +398,7 @@ mod tests {
         let outcome = pb::ClientEnrollResult {
             client: Some(line("device-1", false, false, pb::Scope::Control)),
             already_enrolled: true,
+            conn_blob: String::new(),
         };
         let json = serde_json::json!({
             "client": outcome.client.as_ref().map(client_json),

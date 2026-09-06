@@ -48,6 +48,16 @@ pub async fn list(svc: &Service) -> Result<ClientList> {
 /// can rebuild the block from a snapshot that predates the other. It used to be
 /// the caller's job not to overlap them — a rule stated in a comment here and
 /// obeyed in a comment in `apps/macos`, which is not a rule that is enforced.
+///
+/// **A request carrying a node key also asks this runner to join the tunnel
+/// network**, and that is what the answer's `conn_blob` is. Being handed a
+/// device's node key is what "somebody asked this runner to be reachable
+/// through a tunnel" looks like — there is no other signal, and a separate
+/// opt-in command was considered and declined. So this runner mints its own
+/// identity if it has none and serves, which the first pairing pays for in
+/// seconds (see `tunnel_route`). A device that offers no key changes none of
+/// that: no identity is created, and a runner nobody asked to join does not
+/// join.
 pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrollResult> {
     let path = svc.authorized_keys().to_path_buf();
     // Which SHAPE, and nothing else about the bytes: `fence::render` builds both
@@ -57,14 +67,29 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
     // Rendered before the file is opened, so a request that could never produce
     // a line does not create a `.ssh` directory or a backup on its way to being
     // refused.
+    // The key the device offered, carried onto the line it is being given.
+    //
+    // `None` rather than `Some("")` for a device with none: `render` refuses
+    // any node key `usable_node_key` would refuse, and the empty string is one
+    // of those — so a v=1 device, or a phone whose own mint failed, would be
+    // refused an enrollment it is entitled to. Absent means "this device asked
+    // for no tunnel", which is a different thing from an unusable key and is
+    // the ordinary case.
+    //
+    // A node key beside `shell_access` is REFUSED by `render` rather than
+    // dropped here, and that refusal is worth keeping where it is: a plain line
+    // has no forced command, so there is nowhere on it to write one, and a
+    // caller told "written" about a key that went nowhere would wait forever
+    // for a tunnel that admits it. A Mac sends its node key on the Key A call
+    // and not on the Key B call.
+    let offered = (!request.node_key.is_empty()).then_some(request.node_key.as_str());
     let line = fence::render(
         &request.public_key,
         &request.label,
         &request.client_id,
         Scope::try_from(request.scope).unwrap_or(Scope::Unspecified),
         grant,
-        // Task 9's enrollment ceremony carries a node key; nothing does yet.
-        None,
+        offered,
     )
     .map_err(refused)?;
     // Read the line just rendered with the parser that will read it back out of
@@ -77,7 +102,14 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
     mine.account = local_account();
 
     let now = now_millis();
-    blocking(move || {
+    // The key this runner will admit once the write lands, or none.
+    //
+    // Kept beside the request rather than read back off the file afterwards:
+    // what the fence holds is what decides, and the closure below is the only
+    // place that knows whether the write happened or the line was already
+    // there.
+    let admitting = request.node_key.clone();
+    let (result, admitted) = blocking(move || {
         // Read and write under ONE lock hold. Two enrollments landing in the same
         // instant used to each rebuild the block from a snapshot taken before the
         // other's write, and the loser's key was silently gone — a device
@@ -123,10 +155,23 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
                 // device's access.
                 return Ok((
                     fence::Change::Leave,
-                    ClientEnrollResult {
-                        client: Some(wire::enrolled_client(existing, 0)),
-                        already_enrolled: true,
-                    },
+                    (
+                        ClientEnrollResult {
+                            client: Some(wire::enrolled_client(existing, 0)),
+                            already_enrolled: true,
+                            conn_blob: String::new(),
+                        },
+                        // Nothing was written, so the file admits this key only
+                        // if the line ALREADY carried it — which is the ordinary
+                        // shape of pairing a phone a second time against a runner
+                        // it is already on. A line that carries a different key,
+                        // or none, must not lead to an `allow_add`: that would
+                        // admit to the live server a key the fence does not hold,
+                        // and the next restart — which rebuilds the allowlist
+                        // from the file — would drop it again with nothing to
+                        // say why.
+                        !admitting.is_empty() && existing.node_key == admitting,
+                    ),
                 ));
             }
 
@@ -134,17 +179,155 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
             ours.push(line);
             Ok((
                 fence::Change::Write { entries: ours, foreign },
-                ClientEnrollResult {
-                    // The only moment this runner can honestly stamp a time: the
-                    // file records none, so every later read of this entry
-                    // reports 0.
-                    client: Some(wire::enrolled_client(&mine, now)),
-                    already_enrolled: false,
-                },
+                (
+                    ClientEnrollResult {
+                        // The only moment this runner can honestly stamp a time: the
+                        // file records none, so every later read of this entry
+                        // reports 0.
+                        client: Some(wire::enrolled_client(&mine, now)),
+                        already_enrolled: false,
+                        conn_blob: String::new(),
+                    },
+                    // The line just written is the one `render` built from
+                    // `offered`, so a non-empty key here IS in the file.
+                    !admitting.is_empty(),
+                ),
             ))
         })
     })
-    .await
+    .await?;
+
+    // The file first, the tunnel second, and the answer only after both.
+    //
+    // In that order because the fence is the authority: `allowlist::from_entries`
+    // is a projection of the file, so admitting a key the write had not landed
+    // would be a route that disappears at the next restart. And after the write
+    // rather than never, because the token does not exist until a server is up,
+    // and the token is the whole of what the paired device needs.
+    let mut result = result;
+    if admitted {
+        result.conn_blob = tunnel_route(svc, &request.node_key).await;
+    }
+    Ok(result)
+}
+
+/// Admit one node key to this runner's tunnel, and answer with the token a
+/// device dials — starting the tunnel if this runner is not serving one.
+///
+/// **The branch is the whole function, and getting it wrong is the mistake
+/// most available here.** `farcooler_tailcat::serve` REPLACES the running
+/// server, and tailcat copies the allowlist at `Start`, so calling it for every
+/// pairing would drop every other device's live tunnel each time somebody pairs
+/// a phone. `allow_add` mutates the running server instead and disturbs nobody,
+/// which is exactly what `set_node_key` already does and why the half they
+/// share is factored into [`admit_to_a_running_tunnel`] rather than written
+/// twice: two copies of "admit this key and tell me the token" are two things
+/// that can disagree about who a runner admits.
+///
+/// **The identity is created BEFORE `start_tunnel`, never inside it.**
+/// `allowlist::tunnel_plan` answers `NoIdentity` on a missing `tailcat.key`,
+/// and that guard stays exactly as it is — it is the only admission check a
+/// `cargo test` build can prove anything about, because the default build has
+/// no archive and `serve` refuses unconditionally, so an assertion on
+/// `start_tunnel`'s end-to-end result could not tell a guard that ran from a
+/// guard that was deleted. So the runner is given a real identity first and the
+/// guard then passes honestly, on a runner that genuinely has one.
+///
+/// **The first pairing on a fresh runner is slow, and that is accepted.**
+/// Creating the identity is a keygen and a file write. `serve` is the cost: it
+/// picks a DERP region the first time by measuring latency to each — 170-450 ms
+/// for an ordinary start, 6.05 s in one measured bad run, with a ceiling near
+/// 25 s (`crates/tailcat/go/tailcat.go`'s own figures). The pairing waits for
+/// it because the token does not exist until the server is up. No timeout and
+/// no async path: this was raised and accepted deliberately, and a pairing that
+/// answered before the token existed would answer with no token at all.
+///
+/// **A tunnel that will not come up must not fail the pairing.** Every failure
+/// here becomes an empty token, and the device pairs as direct — exactly as a
+/// phone whose own mint failed already does. Somebody who paired a phone and
+/// got a working direct runner has lost nothing; somebody whose pairing failed
+/// outright has lost the device.
+async fn tunnel_route(svc: &Service, node_key: &str) -> String {
+    if let Some(blob) = admit_to_a_running_tunnel(node_key).await {
+        return blob;
+    }
+
+    // Nothing is serving, so this runner needs an identity of its own before
+    // `tunnel_plan` will let `start_tunnel` past. Failing to create one is not
+    // fatal: `start_tunnel` will answer `NoIdentity` immediately afterwards and
+    // the pairing goes on as direct.
+    let key_path = svc.tailcat_key();
+    let creating = key_path.clone();
+    match tokio::task::spawn_blocking(move || farcooler_tailcat::ensure_identity(&creating)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(
+                code = error.code(),
+                "this runner could not create a tunnel identity; the device pairs as direct"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the tunnel identity task did not finish");
+        }
+    }
+
+    let outcome = crate::allowlist::start_tunnel(svc).await;
+    tracing::info!(?outcome, "started this runner's tunnel for a newly paired device");
+    outcome.blob().unwrap_or_default()
+}
+
+/// Admit one node key to the tunnel this runner is ALREADY serving, and read
+/// the token back.
+///
+/// `None` when nothing is serving one — which is what tells [`tunnel_route`] to
+/// start a tunnel, and what leaves `set_node_key` answering with no token, the
+/// answer it has always given a runner that serves none.
+///
+/// The half `enroll` and `set_node_key` share, in one place rather than two.
+/// Both are "admit this key and tell me the token", and two spellings of that
+/// are two things that can disagree about who a runner admits.
+///
+/// Both calls are synchronous and hold the Go side's package-wide mutex —
+/// `serve` on the same runner can hold it for 30-45 seconds — so neither may
+/// run on a runtime worker.
+async fn admit_to_a_running_tunnel(node_key: &str) -> Option<String> {
+    let admitting = node_key.to_string();
+    let outcome = tokio::task::spawn_blocking(move || {
+        // A runner serving no tunnel answers `ENOTCONN` here, which is not a
+        // failure worth logging as one: it is the ordinary state of a runner
+        // nobody has paired against yet, and of every build carrying no tunnel
+        // at all.
+        if let Err(error) = farcooler_tailcat::allow_add(&admitting) {
+            tracing::debug!(
+                code = error.code(),
+                "no running tunnel admitted this node key"
+            );
+            return None;
+        }
+        match farcooler_tailcat::conn_blob() {
+            Ok(blob) => Some(blob),
+            Err(error) => {
+                // The tunnel IS live — `allow_add` only succeeds against a
+                // running server — and only the token is missing. An empty
+                // string rather than `None`, because `None` here would send
+                // `enroll` on to REPLACE a server that is serving other
+                // devices perfectly well.
+                tracing::warn!(
+                    code = error.code(),
+                    "the tunnel admitted a device but would not report its token"
+                );
+                Some(String::new())
+            }
+        }
+    })
+    .await;
+    match outcome {
+        Ok(blob) => blob,
+        Err(error) => {
+            tracing::warn!(%error, "the tunnel task did not finish");
+            None
+        }
+    }
 }
 
 /// Admit a device's node key to the tunnel, on the line it already holds.
@@ -233,36 +416,15 @@ pub async fn set_node_key(
     .await?;
 
     // The allowlist is a projection of that file, so it is now one entry
-    // longer. `allow_add` and `conn_blob` are synchronous and hold the Go
-    // side's package-wide mutex — `serve` on the same runner can hold it for
-    // 30-45 seconds — so neither may run on a runtime worker, and this RPC
-    // must not be the thing that waits behind one inline.
-    let admitting = node_key;
-    let conn_blob = match tokio::task::spawn_blocking(move || {
-        // Best effort, and the line is already written either way. A runner
-        // serving no tunnel yet answers `ENOTCONN` here: the first device to
-        // register on a migrating runner is exactly that case, and what it has
-        // done is write the line that lets the next boot start a server at all.
-        if let Err(error) = farcooler_tailcat::allow_add(&admitting) {
-            tracing::warn!(
-                code = error.code(),
-                "the running tunnel did not admit a newly registered node key"
-            );
-        }
-        farcooler_tailcat::conn_blob()
-    })
-    .await
-    {
-        Ok(Ok(blob)) => blob,
-        Ok(Err(error)) => {
-            tracing::debug!(code = error.code(), "this runner has no tunnel token to hand back");
-            String::new()
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "the tunnel task did not finish");
-            String::new()
-        }
-    };
+    // longer. The same half `enroll` uses — see `admit_to_a_running_tunnel` —
+    // and deliberately only that half: a runner serving no tunnel yet answers
+    // nothing here, and what the caller has done is write the line that lets
+    // the next boot start a server at all. Starting one HERE would be
+    // `start_tunnel` on a call that reaches this runner over the very access
+    // it is registering a route for; enrollment is the call that has a reason
+    // to pay for it, because the device it grants cannot reach this runner any
+    // other way.
+    let conn_blob = admit_to_a_running_tunnel(&node_key).await.unwrap_or_default();
 
     tracing::info!(client = %peer.client_id.as_deref().unwrap_or("-"), "registered a node key");
     Ok(ClientSetNodeKeyResult { conn_blob })

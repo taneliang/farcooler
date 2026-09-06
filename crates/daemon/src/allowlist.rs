@@ -61,10 +61,12 @@ pub fn from_entries(entries: &[Entry]) -> Option<Allowlist> {
 /// A plain `Option<String>` cannot say which of these is true, and each one
 /// means something different to whoever reads the log. `NoIdentity` and
 /// `NobodyAdmitted` are this runner's own decision, and ordinary rather than
-/// alarming: they are what every runner reports whose devices carry no node
-/// key, which is every runner until one registers one. A ceremony does not
-/// change that — enrollment writes no node key — so these two are the normal
-/// reading, not a sign of a broken setup. `FenceUnreadable` is `authorized_keys`
+/// alarming: they are what a runner reports whose devices carry no node key,
+/// which is every runner nobody has yet paired a tunnel-capable device
+/// against. A ceremony is what changes it — `enrollment::enroll` writes the
+/// node key a device offered, and gives this runner an identity when it has
+/// none — so these two are the normal reading for a runner nobody has asked,
+/// not a sign of a broken setup. `FenceUnreadable` is `authorized_keys`
 /// itself refusing to parse. `ServeFailed` is `farcooler_tailcat::serve`
 /// refusing, named with its own stable code — `"no_tailcat"` for every build
 /// with no archive linked, which is every build `cargo test`/`cargo build`

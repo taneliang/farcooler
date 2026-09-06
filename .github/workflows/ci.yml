@@ -230,6 +230,15 @@ jobs:
       # a fake helper records commands for, which is the only shape in which
       # revoking the LAST tunneled device can be seen to stop a running server.
       - run: cargo test -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked
+      # The pairing's two halves, and they pull opposite ways: a runner with no
+      # tunnel must GET one, and a runner that has one must keep serving it
+      # rather than have it replaced under every other device. Neither is
+      # observable in a default build — `serve` refuses every call for any
+      # input there, so "was the running server replaced" has the same answer
+      # whatever the code does. Under the helper backend the tunnel is a
+      # process, and a fake helper records the commands it was given tagged
+      # with its own pid, so two servers are two numbers in a file.
+      - run: cargo test -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel
 
       # A `changes` pane runs THIS CHANNEL'S CLI by name — `changes_host_command`
       # asks `shim_binary`, which looks beside the daemon's own executable and

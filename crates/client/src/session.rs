@@ -1600,6 +1600,13 @@ impl Session {
     /// re-checked here: the daemon owns every rule about what may be written into
     /// `authorized_keys`, and a copy of that rule in three client languages is
     /// three places for it to drift from the file's authority.
+    /// `node_key` is the device's tailcat node public key, exactly as its
+    /// ceremony offer carried it, and empty for a device that has none. Sending
+    /// one is what asks this runner to join the tunnel network, and the answer's
+    /// `connBlob` is the token the granting app puts in the reply's
+    /// `Reach::Tailcat`. It goes on the Key A call only — the daemon refuses it
+    /// beside `shell_access`, because a plain line has no forced command to hold
+    /// it — and, like the pairing rule above, that refusal is the daemon's.
     pub async fn enroll_client(
         &mut self,
         public_key: &str,
@@ -1607,6 +1614,7 @@ impl Session {
         client_id: &str,
         scope: &str,
         shell_access: bool,
+        node_key: &str,
     ) -> Result<serde_json::Value, SessionError> {
         let Some(scope) = scope_from_word(scope) else {
             return Err(SessionError::Protocol(
@@ -1626,6 +1634,11 @@ impl Session {
                 // request asking for a shell while saying `read` does not agree
                 // with itself, and the daemon is the one that says so.
                 shell_access,
+                // Empty means "this device asked for no tunnel", which is what
+                // a v=1 offer and a phone whose own mint failed both send. It is
+                // NOT an unusable key: the daemon reads absence and presence
+                // differently, and refuses only the second.
+                node_key: node_key.to_string(),
             });
         match self.value("client.enroll", None, Some(payload)).await? {
             result::Value::ClientEnroll(r) => Ok(json!({
@@ -1635,6 +1648,13 @@ impl Session {
                 // a runner the device can already reach. The `client` beside it
                 // is then the grant it HAS, not the one that was asked for.
                 "alreadyEnrolled": r.already_enrolled,
+                // This runner's tunnel token, when the node key sent above was
+                // just admitted to one. Empty for every enrollment that carried
+                // no key, for a runner that has no tunnel and could not start
+                // one, and for a device whose line already carried a different
+                // key — all of which pair as direct, which is the outcome a
+                // device that cannot be given a tunnel is entitled to.
+                "connBlob": r.conn_blob,
             })),
             other => Err(wrong("client_enroll", &other)),
         }

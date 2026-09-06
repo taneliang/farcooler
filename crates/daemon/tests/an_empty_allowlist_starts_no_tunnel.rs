@@ -75,21 +75,21 @@ async fn enroll_without_a_node_key(service: &Service, client_id: &str) {
     write_line(service, client_id, None).await;
 }
 
-/// Enroll a device carrying a node key, as a ceremony that could offer one
-/// would leave it. None can: see `write_line`.
+/// Enroll a device carrying a node key, as a ceremony that offers one leaves
+/// it — placed directly rather than through `enroll`: see `write_line`.
 async fn enroll_with_a_node_key(service: &Service, client_id: &str, node_key: &str) {
     write_line(service, client_id, Some(node_key)).await;
 }
 
 /// Render one Far Cooler line and place it inside the fence.
 ///
-/// Not `enrollment::enroll`: that RPC layer function always renders with no
-/// node key — `ClientEnroll` has no field for one, and while the ceremony offer
-/// gained a `node_key` at v=2, nothing populates it, so no enrollment path
-/// passes one either — and it therefore cannot produce the fixture
-/// `enroll_with_a_node_key` needs. This goes straight to `farcooler_fence`,
-/// which is already a direct dependency of this crate and is the same
-/// primitive `enrollment::enroll` itself calls.
+/// Not `enrollment::enroll`: that now gives the runner an identity and starts
+/// a tunnel when the pairing carries a node key, which is a second effect these
+/// two tests are not about — they are about what `start_tunnel` refuses, so the
+/// fixture places a line and the test calls `start_tunnel` itself. This goes
+/// straight to `farcooler_fence`, which is already a direct dependency of this
+/// crate and is the same primitive `enrollment::enroll` itself calls. What a
+/// pairing does to the tunnel is `a_pairing_gives_the_runner_a_tunnel.rs`.
 async fn write_line(service: &Service, client_id: &str, node_key: Option<&str>) {
     let line = farcooler_fence::render(
         DEVICE_KEY,

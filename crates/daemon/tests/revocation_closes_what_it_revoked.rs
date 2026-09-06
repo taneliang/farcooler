@@ -136,6 +136,11 @@ async fn enroll(admin: &mut SocketClient, key: &str, label: &str, client_id: &st
         // and there is nothing to close on one: sshd runs a shell rather than
         // this daemon, so no session of ours ever arrives on it.
         shell_access: false,
+        // No tunnel wanted. Every test in this file is about closing sessions
+        // and rebuilding a tunnel, and a device admitted to one here would make
+        // the fixture itself start a server — see `line` below, which is how
+        // this file builds a tunneled device on purpose.
+        node_key: String::new(),
     }));
     admin.call(req).await.expect("client.enroll");
 }
@@ -343,10 +348,12 @@ done
 
     /// Place one Far Cooler line, with or without a node key.
     ///
-    /// Not `enrollment::enroll`: `ClientEnroll` carries no node key field and
-    /// nothing populates the ceremony offer's either, so no enrollment path can
-    /// produce a tunneled device today. This goes to `farcooler_fence`, which
-    /// is the same primitive `enrollment::enroll` itself calls.
+    /// Not `enrollment::enroll`: that now admits the key to a tunnel and will
+    /// START one for a runner with none, which is a second effect these tests
+    /// are not about — they are about what REVOKING does to a running server,
+    /// so the fixture places a line and the test starts the tunnel itself. This
+    /// goes to `farcooler_fence`, which is the same primitive
+    /// `enrollment::enroll` itself calls.
     async fn line(h: &Harness, key: &str, client_id: &str, node_key: Option<&str>) {
         let rendered = farcooler_fence::render(
             key,

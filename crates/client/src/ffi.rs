@@ -1640,6 +1640,19 @@ async fn dispatch(
                     // runner, a missing `shellAccess` can only narrow it. A Mac
                     // sends this twice, once each way, with the same `clientId`.
                     args.get("shellAccess").and_then(|v| v.as_bool()).unwrap_or(false),
+                    // Optional, like the label and for a related reason: a
+                    // device with no node key still enrolls, as direct. Absent
+                    // and empty are one thing here — "this device asked for no
+                    // tunnel" — and the daemon refuses an unusable key rather
+                    // than treating it as absence, so a phone whose mint
+                    // produced something malformed hears about it instead of
+                    // silently pairing without a tunnel.
+                    //
+                    // A phone sends its OWN key when it is the new device and
+                    // the offer's key when it is granting. Nothing here can tell
+                    // those apart, and nothing needs to: it is one public value
+                    // going onto one line.
+                    &text("nodeKey"),
                 )
                 .await
         }

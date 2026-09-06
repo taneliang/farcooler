@@ -80,6 +80,11 @@ async fn enroll(service: &Service, public_key: &str, client_id: &str, shell_acce
         client_id: client_id.into(),
         scope: if shell_access { Scope::HostAdmin as i32 } else { Scope::Control as i32 },
         shell_access,
+        // None, and that is the fixture's whole point: this file is about the
+        // MIGRATION path, where a fleet enrolled before the tunnel existed
+        // registers its keys afterwards. An enrollment carrying one would write
+        // the very thing `set_node_key` is here to add.
+        node_key: String::new(),
     };
     let out = enrollment::enroll(service, &request).await.expect("the fixture enrolls");
     assert!(!out.already_enrolled, "the fixture enrolled {client_id} twice");
@@ -328,6 +333,10 @@ async fn the_dispatch_table_writes_onto_the_connections_own_line() {
                 client_id: (*client_id).into(),
                 scope: Scope::Control as i32,
                 shell_access: false,
+                // See `enroll` above: these devices arrive with no tunnel, so
+                // the line `set_node_key` writes onto is the one every device
+                // in the field already has.
+                node_key: String::new(),
             }));
         admin.call(req).await.expect("client.enroll");
     }
@@ -367,6 +376,7 @@ async fn a_local_caller_is_refused_over_the_socket_too() {
         client_id: "c1".into(),
         scope: Scope::Control as i32,
         shell_access: false,
+        node_key: String::new(),
     }));
     admin.call(req).await.expect("client.enroll");
 

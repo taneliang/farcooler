@@ -133,15 +133,18 @@ impl Handler for Verifier {
 /// tunnel that runner holds open. Which one this device has is decided when the
 /// runner is set up, not per connection.
 ///
-/// **A token comes from `client.set_node_key` and from nowhere else, so
-/// `Tailcat` is unreachable from the ceremony today.** Enrollment answers with
-/// no token — `ClientEnrollResult` has no such field — and nothing yet mints a
-/// node key for a phone, so an offer carries none, a granting runner writes
-/// none, and every entry a ceremony produces is `Direct`. The one path that
-/// reaches this variant is a device that already holds a session, calling
-/// `client.set_node_key` and keeping the `conn_blob` it answers with. Where a
-/// phone's node key would come from is an open decision, not an oversight in
-/// this enum — and saying otherwise here would be the comment lying.
+/// **A token comes from one of two calls and from nowhere else.** A ceremony
+/// is the ordinary one: the device's offer carries its node key, the granting
+/// side sends it in `client.enroll`, and the runner answers with
+/// `ClientEnrollResult.conn_blob` — the token it is now serving, which the
+/// granting side puts in the reply as this variant. The other is
+/// `client.set_node_key`, for a device that already holds a session on a runner
+/// it can reach directly and wants a tunnel route as well; that is the
+/// migration path for a fleet enrolled before the tunnel existed.
+///
+/// A ceremony still produces `Direct` for every device that offers no node key,
+/// and for every runner whose tunnel could not be started — which is not a
+/// failure of the pairing and must never be made into one.
 ///
 /// One reach per runner, and no fallback. A `Direct` runner never quietly
 /// tries the tunnel and a `Tailcat` runner never quietly tries an address —

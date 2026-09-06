@@ -458,12 +458,18 @@ impl Service {
     /// Its existence IS the feature flag. No file, no server, no DERP
     /// connection, and "binds no port" is the whole of rule 1 for that runner.
     ///
-    /// No enrollment path creates this file, and a ceremony does not either:
-    /// `allowlist::tunnel_plan` answers `NoIdentity` on a missing one before
-    /// `farcooler_tailcat::serve` — the only function that would mint an
-    /// identity here — is ever reached. A runner serves a tunnel where somebody
-    /// put a file here, and nowhere else; today the only thing that does is
-    /// `scripts/tunnel-smoke.sh`.
+    /// A ceremony creates it. `enrollment::enroll` calls
+    /// `farcooler_tailcat::ensure_identity` when a pairing carries a node key,
+    /// because being handed a device's node key is what "somebody asked this
+    /// runner to be reachable through a tunnel" looks like. It happens BEFORE
+    /// `allowlist::start_tunnel`, so `tunnel_plan`'s `NoIdentity` guard is
+    /// passed by a runner that genuinely has one rather than bypassed — see
+    /// `enrollment::tunnel_route`.
+    ///
+    /// A pairing carrying NO node key creates nothing, and nothing else in the
+    /// product does either: a runner nobody asked to join does not join.
+    /// `scripts/tunnel-smoke.sh` writes one too, for a check that needs a
+    /// runner without a ceremony. Deleting the file undoes all of it.
     pub fn tailcat_key(&self) -> PathBuf {
         self.root.join("tailcat.key")
     }

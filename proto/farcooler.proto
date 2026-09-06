@@ -2153,6 +2153,21 @@ message ClientEnroll {
   // Default false, which is the restricted line — so a client built before this
   // field existed asks for exactly what it always asked for.
   bool shell_access = 5;
+  // The device's tailcat node PUBLIC key: 43 characters of unpadded base64-URL,
+  // exactly as the ceremony offer carried it. Empty for a device that has none,
+  // which is a device that enrolls as direct and asks this runner for nothing.
+  //
+  // This is the one field here that is a key rather than a shape, and it is
+  // still not bytes that reach the file as they arrived: `fence::render` decodes
+  // it, refuses anything `usable_node_key` would refuse, and writes it into the
+  // forced command it built. A restricted line is the only place it can go —
+  // a plain line has no options field — so a request carrying one beside
+  // `shell_access` is refused rather than quietly dropped. A Mac therefore sends
+  // it on its Key A call and not on its Key B call.
+  //
+  // Default empty, which is what a client built before this field existed
+  // sends, and what every device that cannot join a tunnel sends today.
+  string node_key = 6;
 }
 
 message ClientEnrollResult {
@@ -2175,6 +2190,24 @@ message ClientEnrollResult {
   // this device get a shell" a question about line order in a text file. A Mac's
   // two keys are two different keys, which is why it has two.
   bool already_enrolled = 2;
+  // This runner's tunnel token, for a device that was just admitted to it.
+  //
+  // Empty unless the request carried a node key this runner's fence now holds
+  // for that device AND this runner has a tunnel to hand back — so empty is the
+  // ordinary answer for a directly reachable runner, for a device that offered
+  // no key, and for a runner whose tunnel would not start. The same value
+  // `ClientSetNodeKeyResult.conn_blob` carries, produced by the same code.
+  //
+  // Not a secret in the sense a private key is: the token names a relay and a
+  // node, and dialing it gets nowhere without a node key this runner admits.
+  // The granting device puts it in the ceremony reply as `Reach::Tailcat`,
+  // which is the one path by which a paired device learns it.
+  //
+  // A pairing that could not be given a tunnel still succeeds and still answers
+  // with `client`: a person who paired a phone against a runner they can reach
+  // directly has lost nothing, and one whose pairing failed outright has lost
+  // the device.
+  string conn_blob = 3;
 }
 
 // Remove a device's lines from this runner's fence.

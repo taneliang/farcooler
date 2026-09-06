@@ -1773,6 +1773,13 @@ const OTHER_KEY: &str =
 /// the point: no field may ever carry BYTES for the file — options, a forced
 /// command, or a key to be written as it arrived — and the review that catches it
 /// should be the build failing rather than somebody noticing.
+///
+/// It has caught one. `node_key` was added here, and it is a KEY rather than a
+/// shape — so it went through that review and out the other side: `fence::render`
+/// decodes it, refuses anything `usable_node_key` would refuse, and writes it
+/// inside a forced command the daemon itself built. What reaches the file is the
+/// re-encoded key and nothing else, which is the same posture `public_key` has
+/// had since the first version of this message.
 fn enrollment_of(
     public_key: &str,
     label: &str,
@@ -1787,6 +1794,10 @@ fn enrollment_of(
         client_id: client_id.into(),
         scope: scope as i32,
         shell_access,
+        // Every test in this file is about the SHAPE of a line and who may ask
+        // for one, and a node key changes neither. It also asks this runner to
+        // join the tunnel network, which none of these tests is about.
+        node_key: String::new(),
     }));
     req
 }
@@ -1846,6 +1857,7 @@ fn the_enrollment_request_cannot_ask_for_a_line_far_cooler_did_not_render() {
             client_id: "c1".into(),
             scope: Scope::Control as i32,
             shell_access: false,
+            node_key: String::new(),
         }
     );
     for forbidden in ["restrict", "unrestricted", "raw", "options", "command", "force", "line"] {

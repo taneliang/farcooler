@@ -634,7 +634,7 @@ async fn a_device_enrolled_through_the_client_lands_in_the_runner_s_own_file() {
     the_scratch_file_is_the_one_being_read(&mut session, &authorized_keys).await;
 
     let answer = session
-        .enroll_client(A_DEVICE_KEY, "Ada's iPhone", "phone-7", "read", false)
+        .enroll_client(A_DEVICE_KEY, "Ada's iPhone", "phone-7", "read", false, "")
         .await
         .expect("client.enroll");
     assert_eq!(answer["alreadyEnrolled"], false);
@@ -687,7 +687,7 @@ async fn a_mac_enrolls_twice_and_gets_a_line_with_a_shell_behind_it() {
 
     // Key A: restricted, at the scope the ceremony grants.
     let a = session
-        .enroll_client(A_DEVICE_KEY, "MacBook Air", "mac-9", "control", false)
+        .enroll_client(A_DEVICE_KEY, "MacBook Air", "mac-9", "control", false, "")
         .await
         .expect("Key A");
     assert_eq!(a["client"]["shellAccess"], false);
@@ -695,7 +695,7 @@ async fn a_mac_enrolls_twice_and_gets_a_line_with_a_shell_behind_it() {
 
     // Key B: plain, host_admin, same client id.
     let b = session
-        .enroll_client(A_MAC_S_SHELL_KEY, "MacBook Air", "mac-9", "host_admin", true)
+        .enroll_client(A_MAC_S_SHELL_KEY, "MacBook Air", "mac-9", "host_admin", true, "")
         .await
         .expect("Key B");
     assert_eq!(b["client"]["shellAccess"], true, "the field Settings draws two rows from");
@@ -762,7 +762,7 @@ async fn a_plain_line_is_refused_at_any_scope_but_host_admin() {
     for scope in ["read", "control"] {
         assert!(
             session
-                .enroll_client(A_MAC_S_SHELL_KEY, "MacBook Air", "mac-9", scope, true)
+                .enroll_client(A_MAC_S_SHELL_KEY, "MacBook Air", "mac-9", scope, true, "")
                 .await
                 .is_err(),
             "a shell at {scope} does not agree with itself and was accepted"
@@ -786,11 +786,11 @@ async fn enrolling_a_device_that_is_already_enrolled_reports_the_grant_it_has() 
     the_scratch_file_is_the_one_being_read(&mut session, &authorized_keys).await;
 
     session
-        .enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "read", false)
+        .enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "read", false, "")
         .await
         .expect("first enrollment");
     let again = session
-        .enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "host_admin", false)
+        .enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "host_admin", false, "")
         .await
         .expect("second enrollment");
 
@@ -810,7 +810,7 @@ async fn revoking_a_device_removes_its_line_and_answers_with_the_rest() {
     let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
     the_scratch_file_is_the_one_being_read(&mut session, &authorized_keys).await;
 
-    session.enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "read", false).await.expect("enroll");
+    session.enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "read", false, "").await.expect("enroll");
 
     let remaining = session.revoke_client("phone-7").await.expect("client.revoke");
     let clients = remaining["clients"].as_array().unwrap();
@@ -838,8 +838,8 @@ async fn a_scope_word_nobody_has_is_refused_rather_than_guessed_at() {
     let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
     the_scratch_file_is_the_one_being_read(&mut session, &authorized_keys).await;
 
-    assert!(session.enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "admin", false).await.is_err());
-    assert!(session.enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "", false).await.is_err());
+    assert!(session.enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "admin", false, "").await.is_err());
+    assert!(session.enroll_client(A_DEVICE_KEY, "iPhone", "phone-7", "", false, "").await.is_err());
 
     // And the session is still usable, because a refusal is not a dropped link.
     assert!(session.enrolled_clients().await.is_ok());
