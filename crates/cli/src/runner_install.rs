@@ -103,6 +103,16 @@ const LAUNCH_AGENT_TEMPLATE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
        server and every agent inside it. The systemd unit's KillMode=process
        says the same thing for the same reason. -->
   <key>AbandonProcessGroup</key><true/>
+  <!-- Which rendezvous this runner meets tunneled devices at. Leave it out
+       and the tunnel uses its own default, which is what almost every runner
+       should do forever. It is written here, commented, because the day the
+       default stops answering is the day somebody has to find out WHERE to
+       put this, on a host they may only be able to reach through the very
+       tunnel that has stopped working:
+
+  <key>EnvironmentVariables</key>
+  <dict><key>FARCOOLER_DERP_MAP</key><string>https://example.com/derpmap.json</string></dict>
+  -->
 </dict>
 </plist>
 "#;
@@ -140,6 +150,12 @@ KillMode=process
 # The daemon supervises terminals a user is watching live, so it is not a
 # batch job to be throttled.
 Nice=-5
+# Which rendezvous this runner meets tunneled devices at. Left commented, and
+# almost every runner should leave it that way: unset means the tunnel's own
+# default map. It is written here so that the day that map stops answering,
+# somebody does not have to work out WHERE this goes on a host they may only
+# be able to reach through the tunnel that has stopped working.
+#Environment=FARCOOLER_DERP_MAP=https://example.com/derpmap.json
 
 [Install]
 WantedBy=default.target
@@ -901,6 +917,56 @@ mod tests {
             launch_agent().contains("<key>AbandonProcessGroup</key><true/>"),
             "a restart would kill the tmux server and every agent in it"
         );
+    }
+
+    /// Both service files name the DERP map variable, commented out.
+    ///
+    /// It is a recovery valve, and a recovery valve nobody can find is not
+    /// one. The day the tunnel's default rendezvous stops answering, whoever
+    /// has to move a fleet off it is looking at a host they may only be able
+    /// to reach THROUGH the tunnel that has stopped working — so the answer
+    /// to "where does this go" has to already be sitting in the file, on the
+    /// host, rather than in a document somewhere else.
+    ///
+    /// Commented out in both, because unset is the right value for almost
+    /// every runner forever, and a file that shipped a URL would hardcode the
+    /// exact map this exists to move off.
+    #[test]
+    fn both_service_files_say_where_a_derp_map_would_go() {
+        for (what, text) in [("the launch agent", launch_agent()), ("the unit", unit())] {
+            assert!(
+                text.contains("FARCOOLER_DERP_MAP"),
+                "{what} does not say where a DERP map would go"
+            );
+        }
+        // Commented, not set. A service file that actually exported one would
+        // pin every new runner to a map somebody typed into this source file —
+        // the exact map this setting exists to be able to leave.
+        assert!(
+            unit().contains("#Environment=FARCOOLER_DERP_MAP="),
+            "the unit exports a DERP map rather than showing where one goes"
+        );
+        // For the plist, what launchd reads is everything OUTSIDE the XML
+        // comments, so that is what is checked — a mention that had drifted
+        // out of the comment would be a real `EnvironmentVariables` key and
+        // this is the assertion that would notice.
+        assert!(
+            !outside_xml_comments(&launch_agent()).contains("FARCOOLER_DERP_MAP"),
+            "the launch agent exports a DERP map rather than showing where one goes"
+        );
+    }
+
+    /// Everything launchd actually reads: the plist with `<!-- ... -->`
+    /// removed.
+    fn outside_xml_comments(plist: &str) -> String {
+        let mut read = String::new();
+        let mut rest = plist;
+        while let Some((before, after)) = rest.split_once("<!--") {
+            read.push_str(before);
+            rest = after.split_once("-->").map_or("", |(_, tail)| tail);
+        }
+        read.push_str(rest);
+        read
     }
 
     #[test]
