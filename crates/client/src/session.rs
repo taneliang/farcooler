@@ -1967,7 +1967,12 @@ mod tests {
     /// Serializes the tests that move the tunnel library's process-wide DERP
     /// map. `cargo test` runs this crate's tests on many threads in one
     /// process.
-    static DERP_MAP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ///
+    /// `tokio`'s mutex and not `std`'s, because the section being serialized
+    /// contains an `.await`: a `std` guard held across one is what
+    /// `clippy::await_holding_lock` is about, and the runtime is free to
+    /// resume the task on another thread.
+    static DERP_MAP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// A destination this connect cannot possibly complete.
     ///
@@ -1995,7 +2000,7 @@ mod tests {
     /// is whether that happened before the dial or not at all.
     #[tokio::test]
     async fn a_configured_derp_map_is_applied_on_the_way_into_a_connect() {
-        let _serial = DERP_MAP.lock().unwrap_or_else(|e| e.into_inner());
+        let _serial = DERP_MAP.lock().await;
         farcooler_tailcat::set_derp_map_url("");
         let _ = Session::connect_ssh(&unreachable("https://derp.example/derpmap.json")).await;
         assert_eq!(
@@ -2016,7 +2021,7 @@ mod tests {
     /// rendezvous on the way past, at the moment it was dialing.
     #[tokio::test]
     async fn an_unset_derp_map_clears_nothing() {
-        let _serial = DERP_MAP.lock().unwrap_or_else(|e| e.into_inner());
+        let _serial = DERP_MAP.lock().await;
         farcooler_tailcat::set_derp_map_url("https://derp.example/already-set.json");
         let _ = Session::connect_ssh(&unreachable("")).await;
         assert_eq!(
