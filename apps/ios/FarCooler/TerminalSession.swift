@@ -1152,6 +1152,8 @@ final class TerminalSession: ObservableObject {
         guard let inbox else { return }
         let bytes = inbox.take()
         guard !bytes.isEmpty else { return }
+        // Nothing to restore unless this call is the handover below.
+        var wasScrolledBackTo = 0
         // The stream spoke, so the deadline on its silence is spent. Cancelled
         // rather than left to fire and find `phase` already `.live`, because a
         // task sleeping for two seconds per pane per open is a real cost on a
@@ -1191,12 +1193,34 @@ final class TerminalSession: ObservableObject {
         if let streamCore {
             poller?.cancel()
             poller = nil
+            // Where the reader was, carried across the swap.
+            //
+            // `render` has done this for the poll path since scrollback
+            // existed, and the stream path never did — so the two painters
+            // disagreed about the same gesture. Swiping to the next tab and
+            // back put a POLLED pane where you left it and a STREAMED one at
+            // the bottom, and every pane on a modern runner is streamed.
+            //
+            // Measured: `testCrossingRunnersThrowsAwayPanesThatAWorkspaceSwipeKeeps`
+            // scrolls 28 lines back, swipes away and returns, and read 0. Its
+            // own doc calls that half the CONTROL — "the pane keeps the
+            // scrollback position it was left on" — so the test that reported
+            // it was describing behavior the app had stopped having.
+            //
+            // Applied after the feed below rather than here, because a fresh
+            // emulator has nothing above its screen yet: the replay's own
+            // history is what makes an offset mean anything.
+            wasScrolledBackTo = vt?.scrollPosition.offset ?? 0
             vt = streamCore.emulator
             paneSize = (streamCore.columns, streamCore.rows)
             self.streamCore = nil
         }
         guard let vt else { return }
         vt.feed(bytes)
+        // Once, on the replay that carried the history — never on the live
+        // bytes after it. Scrolling the view on ordinary output would be the
+        // app moving the page under somebody reading it.
+        if wasScrolledBackTo > 0 { vt.scroll(lines: Int32(wasScrolledBackTo)) }
         // From here on the emulator's own caret is the true one: these bytes
         // are a continuation of the screen they move the caret across, unlike
         // a capture. See `capturedCursor`.
