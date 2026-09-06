@@ -1375,6 +1375,21 @@ impl Service {
 
         // A claude terminal gets its session id now, so that adopting it into
         // agent pane mode later is exact.
+        //
+        // Claude and nothing else, deliberately, and it is worth saying why
+        // rather than leaving it looking like an oversight. This id is only
+        // real because `preset_command` declares it to the process with
+        // `--session-id`, and claude is the one CLI that understands that
+        // flag. Minting one for codex would record a uuid codex never uses:
+        // `codex_rollout_exists` could never find a rollout behind it, so
+        // `respawn_command` would compute `resumable = false` for it forever,
+        // and the first switch to chat mode would hand the shim `--session
+        // <a session that does not exist>` for `session/load` to fail on.
+        // Codex gets a real id the only way it can — from the shim's
+        // `Established` report, which `set_pane_mode` stores — and a codex
+        // pane that has been a chat once does now restart back into its
+        // conversation. Giving it one from disk at launch needs a
+        // `~/.codex/sessions` reader that does not exist yet.
         let declared = command_preset.starts_with("claude").then(|| Uuid::now_v7().to_string());
         let term = if let Some(ref sid) = declared {
             self.store.set_pane_mode(
