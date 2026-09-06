@@ -284,6 +284,21 @@ data class Terminal(
     val agentSessionId: String? = null,
     val agentMode: String? = null,
     val availableAgentModes: List<String>? = null,
+    /**
+     * Why this pane is in agent mode with no agent in it.
+     *
+     * A STABLE MACHINE WORD from the runner — `no-adapter`,
+     * `not-authenticated`, `adapter-silent`, `adapter-failed` — and never a
+     * sentence. The words are defined once, in `AgentFailure` in
+     * `farcooler-agent-core`, and this app owns the sentence a person reads:
+     * see `agentFailureState` in `ui/AgentScreen.kt`. A Rust error string must
+     * never reach a screen.
+     *
+     * Null means nothing has said this pane failed, which for a pane still
+     * starting up looks exactly the same — so a null here leaves the empty
+     * state drawing the spinner and the ladder it already had.
+     */
+    val agentFailure: String? = null,
 ) {
     val agent: AgentActivity get() = AgentActivity.parse(activity)
 

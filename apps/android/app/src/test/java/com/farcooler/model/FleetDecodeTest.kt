@@ -72,7 +72,8 @@ class FleetDecodeTest {
                   "chatCapable": true,
                   "agentSessionId": "01J8Z2",
                   "agentMode": "plan",
-                  "availableAgentModes": ["plan", "edit"]
+                  "availableAgentModes": ["plan", "edit"],
+                  "agentFailure": "not-authenticated"
                 }
               ]
             }
@@ -114,6 +115,12 @@ class FleetDecodeTest {
         assertEquals("01J8Z2", t.agentSessionId)
         assertEquals("plan", t.agentMode)
         assertEquals(listOf("plan", "edit"), t.availableAgentModes)
+        // On the wire since the runner started reporting a pane that could
+        // not start its agent, and read by neither phone for a day after:
+        // this decoder ignores keys it does not know, so a field nothing
+        // decodes breaks nothing and reports nothing. This list is where
+        // that is meant to be caught.
+        assertEquals("not-authenticated", t.agentFailure)
     }
 
     @Test

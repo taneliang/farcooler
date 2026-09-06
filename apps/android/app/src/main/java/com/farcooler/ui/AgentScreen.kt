@@ -41,6 +41,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -203,7 +204,24 @@ fun AgentScreen(
                 // session that never loaded showed "Say something to begin"
                 // with the reason it was empty hidden behind the very condition
                 // that made it empty.
-                AgentEmpty(phase)
+                AgentEmpty(
+                    phase = phase,
+                    // On the wire since the runner started reporting a pane
+                    // that could not start its agent. Read here rather than
+                    // inferred from [phase], which cannot know: a pane whose
+                    // adapter gave up holds no session, so the daemon answers
+                    // "no session" and every state in the ladder reads that as
+                    // a shim that is merely slow.
+                    failure = terminal?.agentFailure,
+                    // NOT gated on [Terminal.canSwitchPaneMode], deliberately.
+                    // That flag is the daemon's answer to "can this pane become
+                    // a chat", and a pane with no adapter answers no — which is
+                    // exactly one of the failures below. The way OUT of a chat
+                    // is always open; the daemon holds it open on purpose.
+                    onShowTerminal = terminal?.let { pane ->
+                        { scope.launch { connection.setPaneMode(pane, "terminal") } }
+                    },
+                )
             } else {
                 LazyColumn(
                     state = listState,
@@ -339,6 +357,15 @@ internal data class AgentEmptyState(
     val message: String? = null,
     /** What the runner itself said, if it said anything. Never rewritten. */
     val transcript: String? = null,
+    /**
+     * The label on the one action this state offers, where it offers one.
+     *
+     * Only a failure does. **The pane STAYS a chat**: nothing here switches it
+     * back on its own, because the daemon respawns the pane to do that and it
+     * would land under whatever the reader was in the middle of typing. The
+     * switch is named and pressing it is theirs.
+     */
+    val action: String? = null,
 ) {
     enum class Mark {
         /** Still working on it, and no claim either way. */
@@ -390,7 +417,106 @@ internal data class AgentEmptyState(
  * because that is the advice that does not work. What starts one is the pane
  * going into agent mode.
  */
-internal fun agentEmptyState(phase: AgentPhase): AgentEmptyState = when (phase) {
+/**
+ * Why a pane in agent mode has no agent in it.
+ *
+ * **The runner's stable words, and this app owns the sentence** — the rule
+ * [com.farcooler.model.AdapterTestOutcome] states for the Test button and
+ * `TunnelError.code` states for the tunnel. The runner sends
+ * `not-authenticated`; a Rust error string must never reach a screen, which is
+ * exactly what happened while the only report of a failed adapter was a line
+ * printed to a pane's stdout that the transcript view then covered up.
+ *
+ * The words are defined once, in `AgentFailure` in `farcooler-agent-core`, and
+ * adding one there means adding a sentence here. Four rather than one because
+ * each has a different fix, and "the agent could not start" is the state the
+ * endless spinner was already communicating.
+ */
+internal enum class AgentFailure(val word: String) {
+    /** Nothing on the runner speaks ACP for this agent. The fix is config. */
+    NO_ADAPTER("no-adapter"),
+
+    /** No credentials. The fix is a login, on the runner, in the agent's CLI. */
+    NOT_AUTHENTICATED("not-authenticated"),
+
+    /** It started and then said nothing until the runner gave up waiting. */
+    ADAPTER_SILENT("adapter-silent"),
+
+    /** It would not spawn, it hung up, or it refused for a reason of its own. */
+    ADAPTER_FAILED("adapter-failed"),
+    ;
+
+    companion object {
+        /** The word back, or null for one this build has never heard of. */
+        fun of(word: String?): AgentFailure? = entries.firstOrNull { it.word == word }
+    }
+}
+
+/**
+ * What a chat with no agent in it says, or null when nothing has said one
+ * failed.
+ *
+ * **An absent word is not a failure.** A pane still coming up looks exactly
+ * like this, so null here leaves [agentEmptyState] drawing the spinner and the
+ * ladder underneath it.
+ *
+ * **An unrecognized word IS a failure**, and this is the one place the phones
+ * part company with the Mac, which reads a fifth word as no failure at all. The
+ * runner only ever sends this field to say a pane gave up; reading its word as
+ * silence puts the endless spinner back, which is the whole bug. So a word from
+ * the future reads as the generic failure, with the offer to go and look at the
+ * terminal — precisely what `adapter-failed` already means.
+ */
+internal fun agentFailureState(word: String?): AgentEmptyState? {
+    if (word.isNullOrEmpty()) return null
+    // Sentence case for the copy and for the button, which is Android's, not
+    // Apple's: the pane's own header already says "Show the terminal" and one
+    // action with two spellings is two actions to a reader.
+    val terminal = "Show the terminal"
+    return when (AgentFailure.of(word) ?: AgentFailure.ADAPTER_FAILED) {
+        AgentFailure.NO_ADAPTER -> AgentEmptyState(
+            AgentEmptyState.Mark.ALARM,
+            "No chat adapter for this agent",
+            "Nothing on the runner is set up to talk to it. Add an adapter for it in the " +
+                "runner’s config.toml, then switch this pane back to a chat.",
+            action = terminal,
+        )
+
+        AgentFailure.NOT_AUTHENTICATED -> AgentEmptyState(
+            AgentEmptyState.Mark.ALARM,
+            "This agent needs you to sign in",
+            "Sign in with the agent’s own command on the runner, then switch this pane " +
+                "back to a chat.",
+            action = terminal,
+        )
+
+        AgentFailure.ADAPTER_SILENT -> AgentEmptyState(
+            AgentEmptyState.Mark.ALARM,
+            "The agent started but never answered",
+            "It may still be installing. This pane’s terminal has whatever it printed.",
+            action = terminal,
+        )
+
+        AgentFailure.ADAPTER_FAILED -> AgentEmptyState(
+            AgentEmptyState.Mark.ALARM,
+            "The agent couldn’t start",
+            "Nothing here knows why. This pane’s terminal has whatever it printed.",
+            action = terminal,
+        )
+    }
+}
+
+internal fun agentEmptyState(
+    phase: AgentPhase,
+    /**
+     * The runner's word for why this pane has no agent, if it has said one.
+     *
+     * Checked FIRST, ahead of the whole ladder below, because every state in
+     * that ladder is a claim that this pane is still trying and the runner has
+     * said it is not.
+     */
+    failure: String? = null,
+): AgentEmptyState = agentFailureState(failure) ?: when (phase) {
     // One round trip, usually. Says nothing about whether a session exists,
     // because nothing knows yet.
     is AgentPhase.Opening ->
@@ -449,8 +575,13 @@ internal fun agentEmptyState(phase: AgentPhase): AgentEmptyState = when (phase) 
  * theme's surface, and the copy would have been the only part worth reusing.
  */
 @Composable
-private fun AgentEmpty(phase: AgentPhase) {
-    val state = agentEmptyState(phase)
+private fun AgentEmpty(
+    phase: AgentPhase,
+    failure: String? = null,
+    /** Null before the first fleet lands, and only then. */
+    onShowTerminal: (() -> Unit)? = null,
+) {
+    val state = agentEmptyState(phase, failure)
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -516,6 +647,14 @@ private fun AgentEmpty(phase: AgentPhase) {
         state.transcript?.let { words ->
             Spacer(Modifier.height(10.dp))
             DetailBox(words)
+        }
+
+        // The way out, offered and never taken. Only a failure carries one.
+        state.action?.let { label ->
+            if (onShowTerminal != null) {
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(onClick = onShowTerminal) { Text(label) }
+            }
         }
     }
 }
