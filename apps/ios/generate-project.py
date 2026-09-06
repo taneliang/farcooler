@@ -417,6 +417,10 @@ UI_TEST_SOURCES = [
     # the canned fleet and reads the menu — so it cannot skip itself green when
     # the demo daemon is down.
     "ShellWorkspaceMenuTests.swift",
+    # Where the overview's cards actually land, measured off the running app.
+    # `ShellGridTests` proves the arithmetic; this proves the grid is laid out
+    # by it. Needs no runner either.
+    "ShellGridLayoutTests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]

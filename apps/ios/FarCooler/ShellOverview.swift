@@ -77,6 +77,25 @@ struct ShellTileFrame: PreferenceKey {
 struct ShellCardFace: View {
     let workspace: ShellWorkspace
     let isCurrent: Bool
+    /// How wide the card's rectangle is.
+    ///
+    /// **The card stretches now**, which is what took the gaps out of the
+    /// sides of the grid: `ShellGrid.cardWidth` divides the display between
+    /// the margins and the gutters, and what is left over goes into the cards
+    /// rather than into the two outer edges. `ShellGrid.card.width` is the
+    /// default because it is the design's reference width and the right answer
+    /// for a card drawn outside a grid.
+    ///
+    /// The flight passes the CELL's measured width, and it has to: the page
+    /// layer lays this out at `width` and then scales it by `pageFrame.width /
+    /// tile.width`, so the two only compose back into a full-bleed page while
+    /// `width` and `tile.width` are the same number. They were both 168 by
+    /// coincidence until the grid started computing one of them.
+    ///
+    /// FIRST of the defaulted properties, which is not tidiness: the
+    /// memberwise initializer's argument order is the declaration order, and
+    /// every call site here passes `width` and nothing else.
+    var width: CGFloat = ShellGrid.card.width
     /// How tall the card's own rectangle is — its ground, its fill, its
     /// corner and its outline.
     ///
@@ -89,7 +108,7 @@ struct ShellCardFace: View {
     /// the fill, the corner and the amber edge are the page's own — so what
     /// arrives in the cell is a card that has been a card the whole way rather
     /// than a small card pasted onto a big rectangle.
-    var height: CGFloat = ShellCardFace.size.height
+    var height: CGFloat = ShellGrid.card.height
     /// The corner that rectangle is drawn with. The display's while the page
     /// is still page-shaped, the card's once it is not.
     var radius: CGFloat = ShellMotion.cardRadius
@@ -184,15 +203,19 @@ struct ShellCardFace: View {
                 .truncationMode(.middle)
         }
         .padding(PaneMetrics.card)
-        // 168×132, from the mechanics doc. Two across on a phone, which at 393
-        // points leaves the grid its own margins without any of the cards
-        // having to be a different width from the others.
-        .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)
+        // 132 tall, from the mechanics doc, and as wide as the grid says.
+        //
+        // The width used to be the doc's 168 as well, on every display, and
+        // that is what put the gaps down the sides: two fixed columns and a
+        // gutter come to 348, a `LazyVGrid` centers fixed columns in whatever
+        // it is offered, and the other 54 points of a 402-point phone went
+        // half to each edge. See `ShellGrid`.
+        .frame(width: width, height: ShellGrid.card.height, alignment: .topLeading)
         // And then the rectangle the card IS, which is only a different size
         // while a flight is in the air. Bottom-aligned, because the bottom
         // edge is the one the flight's crop keeps: the words hold perfectly
         // still against it while the rectangle closes around them.
-        .frame(width: Self.size.width, height: max(Self.size.height, height), alignment: .bottom)
+        .frame(width: width, height: max(ShellGrid.card.height, height), alignment: .bottom)
         .background(
             opaqueGround
                 ? AnyShapeStyle(Themes.shared.current.backgroundColor) : AnyShapeStyle(.clear),
@@ -223,11 +246,6 @@ struct ShellCardFace: View {
             }
         }
     }
-
-    /// The card's own size, in one place because two things are laid out
-    /// against it: the grid's columns, and the flight that scales a page down
-    /// until it is exactly this.
-    static let size = CGSize(width: 168, height: 132)
 }
 
 /// A card, under a thumb.
@@ -290,6 +308,13 @@ private struct ShellOverviewCard: View {
     /// filtered has for it.
     let index: Int
     let isCurrent: Bool
+    /// How wide this cell is, from `ShellGrid.cardWidth`.
+    ///
+    /// Handed down rather than measured here. The grid is what divides the
+    /// display, the column is `.fixed` at exactly this, and a card that
+    /// measured its own cell would be a second answer to a question that has
+    /// already been answered — one frame later, and only after a layout pass.
+    let width: CGFloat
     /// Whether this cell is a HOLE: the space reserved, and nothing drawn in
     /// it, because the page on its way here is the card.
     let isEmpty: Bool
@@ -305,7 +330,7 @@ private struct ShellOverviewCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            ShellCardFace(workspace: workspace, isCurrent: isCurrent)
+            ShellCardFace(workspace: workspace, isCurrent: isCurrent, width: width)
                 // Every card reports where it is: any of them can be the end
                 // of a flight, and the one that is stops being known the
                 // moment a finger lands on a different one.
@@ -409,11 +434,15 @@ private struct ShellOverviewCard: View {
 ///   `onOpen`, which crosses runners and says so first.
 private struct ShellElsewhereCard: View {
     let workspace: ShellWorkspace
+    /// The same cell width the live cards get. A cached runner's section is
+    /// in the same grid, and a card that kept the design's 168 while its
+    /// neighbours stretched would be the only ragged column on the screen.
+    let width: CGFloat
     let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            ShellCardFace(workspace: workspace, isCurrent: false)
+            ShellCardFace(workspace: workspace, isCurrent: false, width: width)
         }
         .buttonStyle(ShellCardStyle())
         .dynamicTypeSize(...DynamicTypeSize.large)
@@ -778,31 +807,19 @@ struct ShellOverview<Actions: View>: View {
     /// One card of the fleet this app is connected to. The same view for the
     /// shown cards and the hidden ones: hiding changes where a card is drawn,
     /// not what it is, and two card views would be two things to keep in step.
-    private func liveCard(_ index: Int) -> some View {
+    private func liveCard(_ index: Int, width: CGFloat) -> some View {
         let workspace = fleet.workspaces[index]
         return ShellOverviewCard(
             workspace: workspace,
             index: index,
             isCurrent: index == current,
+            width: width,
             isEmpty: index == current && currentIsEmpty,
             onOpen: { onOpen(index) },
             onToggleHidden: { onToggleHidden(workspace) },
             onRemoveWorktree: { onRemoveWorktree(workspace) })
             .id(index)
     }
-
-    /// How wide the two columns of cards actually are.
-    ///
-    /// A section header is offered the whole container, and the columns are
-    /// `.fixed` and therefore CENTERED in it — so a header at `maxWidth:
-    /// .infinity` starts 27 points to the left of the cards it stands over on
-    /// a 402-point display, which on this one clipped the first letter of the
-    /// runner's name off the edge of the screen. Measured, not reasoned: the
-    /// cards' left edge is at x=28 and the header's text was at x=0.
-    ///
-    /// Said as the same expression the columns are built from, so the two
-    /// cannot drift.
-    static var gridWidth: CGFloat { ShellCardFace.size.width * 2 + PaneMetrics.card }
 
     /// A section heading: the runner, and one line about how current it is.
     ///
@@ -827,7 +844,18 @@ struct ShellOverview<Actions: View>: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(width: Self.gridWidth, alignment: .leading)
+        // The whole width the grid was given, which is now the width the cards
+        // span: the grid is padded to its margins and its columns fill what is
+        // left, so a header at `maxWidth: .infinity` starts exactly where the
+        // first card does.
+        //
+        // This used to be `.frame(width: gridWidth)` — two card widths and a
+        // gutter — and it was a compensation rather than a layout: the columns
+        // were `.fixed` and therefore centered, so a full-width header began 27
+        // points to the LEFT of the cards it stood over and clipped the first
+        // letter of the runner's name off the edge of the screen. Taking the
+        // slack out of the edges is what makes the compensation unnecessary.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, PaneMetrics.card)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("shell-section-\(name)")
@@ -854,7 +882,7 @@ struct ShellOverview<Actions: View>: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .frame(width: Self.gridWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, PaneMetrics.card)
         .accessibilityIdentifier("shell-hidden-section")
         // "Hidden Workspaces" and not "Show Hidden Workspaces": the control is
@@ -875,19 +903,51 @@ struct ShellOverview<Actions: View>: View {
         return "Last seen \(date.formatted(.relative(presentation: .numeric)))"
     }
 
+    /// The grid, over the display it was handed.
+    ///
+    /// **A `GeometryReader` and not a size class**, because the two numbers
+    /// below are arithmetic on the width and not a category: how many cards
+    /// fit, and how wide each is so that a row lands exactly on both margins.
+    /// `ShellGrid` is where that arithmetic lives and `ShellGridTests` is what
+    /// holds it down; this reads a width and spends it.
+    ///
+    /// It wraps the `ScrollView` rather than sitting inside it. A reader
+    /// inside would report the CONTENT's width, which is the thing being
+    /// computed — and it would report it one layout pass late, so the first
+    /// frame of every lift would draw a grid at some default width and then
+    /// jump. Outside, the width is the display's and is known before anything
+    /// is laid out.
     private var grid: some View {
-        ScrollView {
+        GeometryReader { geo in
+            gridBody(width: geo.size.width)
+        }
+    }
+
+    private func gridBody(width: CGFloat) -> some View {
+        let columns = ShellGrid.columns(
+            width: width, margin: PaneMetrics.edge, gutter: PaneMetrics.card)
+        let cardWidth = ShellGrid.cardWidth(
+            width: width, margin: PaneMetrics.edge, gutter: PaneMetrics.card)
+        return ScrollView {
             LazyVGrid(
-                columns: [
-                    GridItem(.fixed(ShellCardFace.size.width), spacing: PaneMetrics.card),
-                    GridItem(.fixed(ShellCardFace.size.width), spacing: PaneMetrics.card),
-                ],
+                // `.fixed` at the computed width, and not `.flexible`.
+                //
+                // The two lay out identically here — the columns add up to the
+                // padded width either way — and `.fixed` is the honest one:
+                // the number is decided by `ShellGrid`, which is tested, rather
+                // than by whatever a flexible column is offered on the day. A
+                // card is also handed this same number for its own frame, and
+                // two different opinions about a cell's width is exactly the
+                // drift that put a 168-point card in a 179-point column.
+                columns: Array(
+                    repeating: GridItem(.fixed(cardWidth), spacing: PaneMetrics.card),
+                    count: columns),
                 spacing: PaneMetrics.card
             ) {
                 // The runner you are ON, first and unlabeled unless there is
                 // something under it to tell it apart from.
                 Section {
-                    ForEach(order, id: \.self) { index in liveCard(index) }
+                    ForEach(order, id: \.self) { index in liveCard(index, width: cardWidth) }
                 } header: {
                     if let liveServer, !groups.isEmpty {
                         header(liveServer, detail: "Connected")
@@ -898,7 +958,9 @@ struct ShellOverview<Actions: View>: View {
                 if !hidden.isEmpty {
                     Section {
                         if hiddenShown {
-                            ForEach(hidden, id: \.self) { index in liveCard(index) }
+                            ForEach(hidden, id: \.self) { index in
+                                liveCard(index, width: cardWidth)
+                            }
                         }
                     } header: {
                         hiddenHeader
@@ -915,6 +977,7 @@ struct ShellOverview<Actions: View>: View {
                             let workspace = group.workspaces[index]
                             ShellElsewhereCard(
                                 workspace: workspace,
+                                width: cardWidth,
                                 onOpen: { onCross(group, workspace) })
                                 .id("\(group.id)/\(workspace.id)")
                         }
@@ -923,7 +986,12 @@ struct ShellOverview<Actions: View>: View {
                     }
                 }
             }
-            .padding(.vertical, PaneMetrics.edge)
+            // The SAME number on all four sides, which is most of the point.
+            // The grid used to be padded vertically and not horizontally at
+            // all, so its side gaps were whatever a centered pair of fixed
+            // columns left over — 27 points on this phone against 16 above and
+            // below, and a different number on every other device.
+            .padding(PaneMetrics.edge)
         }
         .scrollDismissesKeyboard(.immediately)
         // Nothing of its own under the cards: the ground this screen draws is

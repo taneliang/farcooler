@@ -186,6 +186,13 @@ extension ShellRootView {
             // keeps. The corner travels the same way and for the same reason.
             ShellCardFace(
                 workspace: workspace, isCurrent: true,
+                // The CELL's width, measured, and not the design's 168. The
+                // whole thing is scaled by `magnify` — `pageFrame.width /
+                // tile.width` — so laying it out at the tile's own width is
+                // what draws it exactly page-wide on the way. The two were the
+                // same number until the grid started stretching its cards to
+                // the display; see `ShellGrid`.
+                width: tile.width,
                 height: flightHeight / magnify, radius: flightRadius / magnify,
                 opaqueGround: true)
                 .scaleEffect(magnify, anchor: .bottom)

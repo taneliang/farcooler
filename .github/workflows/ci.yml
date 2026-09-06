@@ -442,23 +442,45 @@ jobs:
       # the default two-architecture build fails at link; naming a device
       # instead ("iPhone 17 Pro") would work until the runner image ships a
       # different set of simulators, which it does without warning.
-      - name: Build
+      # `build-for-testing` and not `build`, which is a one-word difference
+      # and the difference between compiling the UI suite and not.
+      #
+      # The scheme's Build action lists the app and nothing else — the test
+      # bundle is in its Test action — so plain `build` compiled zero lines of
+      # `FarCoolerUITests`. A UI test that did not compile therefore passed CI
+      # and failed only on the laptop that eventually ran it, which is this
+      # repo's own defining failure wearing a hat: a check that cannot fail.
+      # `build-for-testing` compiles the app AND the bundle, boots no
+      # simulator, and adds the test target's own compile time and nothing
+      # else.
+      #
+      # It does NOT run them. See the note below, which is unchanged.
+      - name: Build, including the UI test bundle
         run: |
           xcodebuild -project apps/ios/FarCooler.xcodeproj \
             -scheme FarCooler \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             ARCHS=arm64 \
-            build
+            build-for-testing
         env:
           NSUnbufferedIO: YES
 
-      # NOT run here: FarCoolerUITests. Every test in it that proves anything
-      # needs a live runner — an sshd, a daemon and a tmux fleet, which is what
-      # scripts/demo-host.sh stands up on a laptop and what this job has none of.
-      # So the iOS suite's coverage of the app's behavior is a LOCAL guarantee,
-      # and CI's silence about it is absence of evidence, not evidence of
-      # absence. Run it before landing anything that touches a pane:
+      # NOT run here: FarCoolerUITests. The suite is COMPILED by the step above
+      # and executed by none, and the two halves of that are worth keeping
+      # apart: a test that does not build is a defect this job can catch for
+      # nothing, and a test that does not run is a guarantee this job cannot
+      # give at all.
+      #
+      # Most of what proves anything in that suite needs a live runner — an
+      # sshd, a daemon and a tmux fleet, which is what scripts/demo-host.sh
+      # stands up on a laptop and what this job has none of. Some of it does
+      # not: everything that stands on `-shell-harness` needs only a simulator.
+      # Running that subset here is a real option and deliberately not taken
+      # yet — it means booting a simulator in CI — so the iOS suite's coverage
+      # of the app's behavior remains a LOCAL guarantee, and CI's silence about
+      # it is absence of evidence rather than evidence of absence. Run it
+      # before landing anything that touches a pane:
       #
       #   ./scripts/demo-host.sh
       #   ./scripts/ios-ui-tests.sh

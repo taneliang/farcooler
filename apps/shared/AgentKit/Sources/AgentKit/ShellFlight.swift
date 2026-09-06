@@ -426,3 +426,80 @@ enum ShellFlight {
             height: cell.height + (home.height - cell.height) * along)
     }
 }
+
+/// How the overview's grid of cards divides a display.
+///
+/// **The gaps down each side of the grid were the biggest thing on it that
+/// nobody chose.** The columns were two `GridItem(.fixed(168))` with a
+/// 12-point gutter, in a `LazyVGrid` with no horizontal padding at all — and a
+/// `LazyVGrid` centers fixed columns in whatever width it is offered, so every
+/// point the display had over 348 was split between the two outer edges. On
+/// the phone this shell is tuned on that is `(402 - 348) / 2 = 27` points a
+/// side against a 12-point gutter and a 16-point padding above and below:
+/// three different numbers where the design has two, and the biggest of them
+/// arrived at by subtraction. It also moved with the device — 13.5 on a
+/// 375-point phone, 46 on a 440-point one, 243 on an iPad — so the one
+/// measurement a person actually reads off a grid was the one measurement
+/// nothing in the app had an opinion about.
+///
+/// This is that opinion. The MARGIN is fixed and the CARD is what stretches,
+/// which is the ordinary way a grid is laid out on this platform and the only
+/// arrangement where the outer gap can be stated rather than computed.
+///
+/// Pure, and in this package rather than beside the view, for the reason
+/// `ShellNavigation.swift`'s header gives: the iOS target has no unit test
+/// bundle, so arithmetic written inside a `View` can only be checked by
+/// somebody looking at it — and "the gaps look wrong" is precisely the kind of
+/// defect that survives being looked at.
+///
+/// The margin and the gutter are ARGUMENTS and not constants here. They belong
+/// to the app's spacing scale (`PaneMetrics.edge` and `PaneMetrics.card`),
+/// which lives in the iOS target; restating the numbers in this package would
+/// be a second copy of a scale, which is exactly the drift this file is
+/// otherwise about.
+enum ShellGrid {
+    /// The card the design specifies: 168 × 132, from the mechanics doc.
+    ///
+    /// The HEIGHT is the card's, everywhere and always. The WIDTH is now a
+    /// reference rather than a rule — it is the width a column has to be able
+    /// to hold before the grid will fit another one in, and the width a card
+    /// is drawn at when nothing says otherwise. What a card is actually drawn
+    /// at in the grid is `cardWidth`, and on the phone the shell was tuned on
+    /// that is 179 rather than 168: the eleven points are the ones that used
+    /// to be piled up against the edges of the screen.
+    static let card = CGSize(width: 168, height: 132)
+
+    /// How many cards fit across a display `width` wide.
+    ///
+    /// Never fewer than two, and the floor is the design's rather than the
+    /// arithmetic's: "two across on a phone" is what the card was sized for,
+    /// and the narrowest phone this app runs on is 375 points, where a
+    /// 168-point minimum and a 16-point margin admit exactly one. A grid of
+    /// one column is a list, and this screen is not a list.
+    ///
+    /// More than two only where there is honestly room — an iPad, which this
+    /// app is built for (`TARGETED_DEVICE_FAMILY = "1,2"`) and where two cards
+    /// stretched across 800 points would be two banners.
+    static func columns(width: CGFloat, margin: CGFloat, gutter: CGFloat) -> Int {
+        let available = width - margin * 2
+        guard available > 0 else { return 2 }
+        // `n` cards need `n * card + (n - 1) * gutter`, so the largest `n`
+        // that fits is `(available + gutter) / (card + gutter)`, floored.
+        let fits = (available + gutter) / (card.width + gutter)
+        return max(2, Int(fits.rounded(.down)))
+    }
+
+    /// How wide each card is drawn, so that a row of them fills the display
+    /// exactly between its two margins.
+    ///
+    /// The whole of the fix, and it is one line of division: the slack that
+    /// used to be split between the outer edges is divided among the cards
+    /// instead. `columns * cardWidth + (columns - 1) * gutter + 2 * margin`
+    /// is `width`, which is what makes the margin a number this app chose
+    /// rather than a remainder.
+    static func cardWidth(width: CGFloat, margin: CGFloat, gutter: CGFloat) -> CGFloat {
+        let count = CGFloat(columns(width: width, margin: margin, gutter: gutter))
+        let available = width - margin * 2 - gutter * (count - 1)
+        return max(0, available / count)
+    }
+}
