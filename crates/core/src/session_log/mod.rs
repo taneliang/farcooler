@@ -28,11 +28,14 @@ pub mod tail;
 /// Deliberately small. Three formats with nothing in common map onto this, and
 /// anything richer would be one agent's vocabulary imposed on the others.
 ///
-/// `TaskState` and `Subagent` are, today, claude's alone — codex writes
-/// `update_plan` in one rollout of 264 and cursor writes nothing task-shaped
-/// at all, so neither has anything to say here yet. That is not a gap to paper
-/// over: a pane with no task list falls back to its action line and its
-/// transcript, which is what codex and cursor and most claude sessions do.
+/// `TaskState` is, today, claude's alone — codex writes `update_plan` in one
+/// rollout of 264 and cursor writes nothing task-shaped at all, so neither has
+/// anything to say here yet. That is not a gap to paper over: a pane with no
+/// task list falls back to its action line and its transcript, which is what
+/// codex and cursor and most claude sessions do.
+///
+/// `Subagent` is claude's and codex's, and the two report it very differently —
+/// see [`TurnEvent::Subagent`]. Cursor spawns nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnEvent {
     /// The human asked for something.
@@ -136,9 +139,22 @@ pub enum TurnEvent {
     },
     /// One agent this agent spawned, and whether it is still going.
     ///
-    /// `id` is the `tool_use` id that spawned it, which is also the
-    /// `toolUseId` in the sibling `subagents/agent-<id>.meta.json` (plan task
-    /// 3), so the two can be joined without a heuristic.
+    /// `id` is whatever the agent itself uses to mean one subagent across two
+    /// records a minute apart, which is not the same thing in both formats and
+    /// only has to be stable WITHIN one. For claude it is the `tool_use` id
+    /// that spawned it, which is also the `toolUseId` in the sibling
+    /// `subagents/agent-<id>.meta.json`, so the two join without a heuristic.
+    /// For codex it is `agent_path` (`/root/stage_probe`) — the one identifier
+    /// its spawn record and its roster entry both carry, since the roster
+    /// names no thread id and the spawn names no `agent_name`.
+    ///
+    /// The two agents differ in how well `running: false` is known, and the
+    /// difference is worth carrying in mind at the fold. Claude states an
+    /// ending outright on the tool result. Codex has no completion event at
+    /// all — only a `list_agents` roster it writes when the model happens to
+    /// ask — so a codex fleet can stay listed past the moment it stopped, and
+    /// what takes it off the row is the turn ending. See `codex::
+    /// sub_agent_activity` for why that is the honest limit rather than a bug.
     Subagent { id: String, description: String, running: bool },
     /// The turn is over, however it went.
     Ended { at_ms: Option<i64>, duration_ms: Option<i64>, outcome: TurnOutcome },

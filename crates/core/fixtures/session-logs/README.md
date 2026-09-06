@@ -114,6 +114,7 @@ dropped from the other fixtures.
 | `codex-complete-turn.jsonl` | a complete turn | 0.139.0 |
 | `codex-unmatched-task-started.jsonl` | `task_started` with no completion anywhere in the file | 0.147.0 |
 | `codex-item-completed-turn.jsonl` | a complete turn in the shape 0.147.0 writes | 0.147.0 |
+| `codex-subagents.jsonl` | agents spawned, interacted with, and one listed as finished | 0.144.6 + 0.147.0 |
 
 **`codex-complete-turn.jsonl`** (11 lines) is a real "say hi" session from
 `~/.codex/sessions/`, `session_meta.originator: "codex_exec"`,
@@ -179,6 +180,40 @@ with `/Users/example/project` everywhere it appears, including inside
 consistently, so a `turn_id` still matches the `task_started` it belongs to,
 and codex's opaque model item ids (`msg_…`, `rs_…`) are cut to a stub — no
 parser reads them and they are account-scoped.
+
+**`codex-subagents.jsonl`** (8 lines) is a fleet running, and the only record
+codex ever writes that takes one off the row. Lines 1–6 and 8 are drawn from a
+real 0.144.6 `codex-tui` session that built a feature with four spawned agents;
+line 7 comes from a different, 0.147.0 session, because the two shapes of the
+same fact are split across versions exactly as `agent_message` and
+`item_completed` are, and one fixture has to carry both.
+
+In order: `session_meta`; `event_msg`/`task_started`; two
+`event_msg`/`sub_agent_activity` records with `kind: "started"`
+(`/root/stage_probe`, `/root/marked_picker`); a
+`response_item`/`function_call_output` holding the `list_agents` roster —
+`/root` (the session's own agent, which is not a subagent of itself),
+`/root/marked_picker` with an OBJECT status `{"completed": ...}`, and two more
+still `"running"`; a `sub_agent_activity` with `kind: "interacted"`; the
+0.147.0 `item_completed`/`SubAgentActivity` shape of a spawn
+(`/root/coverage_audit`); and the closing `event_msg`/`task_complete`.
+
+The roster is the point. `kind` has only ever been `started` or `interacted`
+across the 137 activity records on this machine — there is no completion kind —
+so an `agent_status` that is an object rather than the string `"running"` is
+the only thing in a rollout that ends a subagent. The source files were 2,914
+and 4,900+ lines; everything between these records was dropped as noise.
+
+Redacted: every uuid and every `call_…` id is replaced with a synthetic one,
+consistently, so the `turn_id` on line 2 still matches line 8's. The real
+`cwd` is replaced with `/Users/example/project`, `base_instructions` with a
+placeholder and `git` with `"REDACTED"`. The completed agent's report (a
+~700-character summary naming private source files) is cut to two sentences,
+and `last_agent_message` to one — the record shape needs an object-valued
+`agent_status`, not the essay inside it. The agent names themselves
+(`stage_probe`, `marked_picker`, `coverage_audit`) are as codex wrote them:
+they are `task_name`s the agent invented for its own work, and they are the
+thing this fixture exists to show reaching a row.
 
 ## cursor
 

@@ -227,6 +227,45 @@ while anyone is watching. The agent's private thinking is **not** this: codex
 writes that as its own `agent_reasoning` payload, 896 records, which the parser
 does not read.
 
+**Subagents are written down, and codex shows them nowhere.** Codex spawns
+agents through a `collaboration` namespace — `spawn_agent` (naming a
+`task_name`), `send_message`, `followup_task`, `wait_agent`, `list_agents` —
+and its own TUI has no list of them anywhere. The rollout does. Counted across
+443 rollouts on this machine, 15 of them carry subagents at all:
+
+| record | what it says |
+| --- | --- |
+| `event_msg`/`sub_agent_activity` | `kind`, `agent_path`, `agent_thread_id`, `event_id`, `occurred_at_ms` |
+| `item_completed` item `SubAgentActivity` | the same fields, in the 0.147.0 item shape |
+| `function_call_output` for `list_agents` | `{"agents":[{"agent_name","agent_status"}]}` |
+
+`agent_path` is `/root/<task_name>`, and **`/root` is the session's OWN agent**
+— every roster names it, and a subagent's own rollout uses it to mean the
+parent, so it is never a child of the pane reading it.
+
+**There is no completion event, and this is the whole difficulty.** `kind` is
+`started` (20 records) or `interacted` (117) and has never been anything else —
+no `finished`, no `completed`, no `exited`. The only record that ever says an
+agent stopped is the `list_agents` ROSTER, whose `agent_status` is either the
+string `"running"` or an object `{"completed": "<the agent's report>"}`. That
+roster is authoritative when it arrives and arrives only when the model asks
+for it: 6 of the 15 subagent-bearing files contain one.
+
+`completed` is not death either — `marked_picker` is `completed` in one roster
+and `running` in the next, because `followup_task` re-tasks an idle agent. It
+means "answered", not "gone".
+
+**Every subagent-bearing rollout here is over a megabyte** — 1.02 MB smallest,
+92 MB largest, 8 of 8 — so all of them are past `tail`'s read-from-start bound
+and are attached to at their END. A reader that waits for `started` will
+usually never see one, which is why `interacted` is worth reading as evidence
+that a fleet exists.
+
+The subagent's own thread is a rollout of its own: `agent_thread_id` is the
+uuid in a sibling `rollout-<ts>-<agent_thread_id>.jsonl`, true for all 17 ids
+seen. That file states its own `task_complete` — a real completion signal, at
+the cost of following a second file per subagent, which nothing does today.
+
 `session_meta.originator` is `codex-tui` for a real interactive session and
 `farcooler`/`vscode` for a programmatic one — useful for ignoring panes that are
 not a person's terminal.
