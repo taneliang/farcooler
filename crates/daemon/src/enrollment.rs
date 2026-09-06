@@ -64,9 +64,6 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
     // from the same decoded key material, so this chooses between two lines this
     // daemon writes rather than between writing and being written to.
     let grant = if request.shell_access { fence::Grant::Shell } else { fence::Grant::FarCooler };
-    // Rendered before the file is opened, so a request that could never produce
-    // a line does not create a `.ssh` directory or a backup on its way to being
-    // refused.
     // The key the device offered, carried onto the line it is being given.
     //
     // `None` rather than `Some("")` for a device with none: `render` refuses
@@ -83,6 +80,9 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
     // for a tunnel that admits it. A Mac sends its node key on the Key A call
     // and not on the Key B call.
     let offered = (!request.node_key.is_empty()).then_some(request.node_key.as_str());
+    // Rendered before the file is opened, so a request that could never produce
+    // a line does not create a `.ssh` directory or a backup on its way to being
+    // refused.
     let line = fence::render(
         &request.public_key,
         &request.label,
@@ -109,7 +109,7 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
     // place that knows whether the write happened or the line was already
     // there.
     let admitting = request.node_key.clone();
-    let (result, admitted) = blocking(move || {
+    let (mut result, admitted) = blocking(move || {
         // Read and write under ONE lock hold. Two enrollments landing in the same
         // instant used to each rebuild the block from a snapshot taken before the
         // other's write, and the loser's key was silently gone — a device
@@ -204,7 +204,6 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
     // would be a route that disappears at the next restart. And after the write
     // rather than never, because the token does not exist until a server is up,
     // and the token is the whole of what the paired device needs.
-    let mut result = result;
     if admitted {
         result.conn_blob = tunnel_route(svc, &request.node_key).await;
     }
