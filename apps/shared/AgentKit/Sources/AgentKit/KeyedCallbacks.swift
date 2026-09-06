@@ -60,15 +60,22 @@ final class KeyedCallbacks {
         handlers[key] = nil
     }
 
-    /// Tell all of them.
+    /// Tell all of them, as they were when the event arrived.
     ///
-    /// Over a snapshot of the values, and that is the load-bearing line rather
-    /// than a defensive one: a handler here reconnects a runner, a reconnect
-    /// can reconcile the fleet, and a reconcile adds and removes subscribers.
-    /// Walking the live dictionary while it is being mutated is undefined at
-    /// best; walking a copy means every subscriber that was listening when the
-    /// event arrived is told about it, and one added by a handler is not told
-    /// about an event that predates it.
+    /// A handler here reconnects a runner, a reconnect can reconcile the
+    /// fleet, and a reconcile adds and removes subscribers — so this loop has
+    /// to have an answer for its own collection changing underneath it. The
+    /// answer is the one the language already gives: `Dictionary` is a value
+    /// type, so the sequence walked here is a copy and mutating `handlers`
+    /// during the walk neither corrupts it nor is visible to it.
+    ///
+    /// **The `Array(…)` is therefore explicitness and not a fix**, and it is
+    /// worth saying so out loud rather than leaving a reader to assume this
+    /// line is load-bearing: `for handler in handlers.values` behaves
+    /// identically. What is behavior, and what `KeyedCallbackTests` actually
+    /// pins, is the consequence — every subscriber listening at the moment of
+    /// the event is told about it, and one a handler adds mid-dispatch is not
+    /// told about an event that predates it.
     func fire() {
         for handler in Array(handlers.values) { handler() }
     }

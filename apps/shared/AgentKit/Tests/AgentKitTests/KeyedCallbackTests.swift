@@ -52,6 +52,13 @@ struct KeyedCallbackTests {
     /// Reconciling a fleet is the ordinary thing for one of these handlers to
     /// do, and a reconcile adds and removes subscribers. Every subscriber that
     /// was listening when the event arrived is still told.
+    ///
+    /// This pins the OBSERVABLE rule and not the line that implements it.
+    /// `fire`'s `Array(…)` cannot be broken by deleting it — `Dictionary` is a
+    /// value type and the loop already walks a copy — so a test written
+    /// against that line would be a test that cannot fail. What can be broken
+    /// is the rule: a subscriber added mid-dispatch being told about an event
+    /// that predates it, or one of the two that were listening being skipped.
     @Test func aHandlerMayReconcileTheFleetWhileTheEventIsBeingDelivered() {
         let seen = Counter()
         let callbacks = KeyedCallbacks()
