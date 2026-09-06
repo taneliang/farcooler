@@ -848,7 +848,7 @@ private struct FleetCard: View {
     /// One of the card's two rules, at the width it was given.
     ///
     /// A `Rectangle` and not a `Divider`: the two weights are the design's and
-    /// `Divider` draws the system's separator, which is one weight and a colour
+    /// `Divider` draws the system's separator, which is one weight and a color
     /// nobody chose.
     private func hairline(_ ink: GlanceInk) -> some View {
         Rectangle()
@@ -874,7 +874,7 @@ private struct FleetCard: View {
 /// this draws nothing in a box of exactly the same size rather than letting the
 /// figures beside it slide left. The row that HAS a trace and has touched no
 /// files is the other case, and it draws itself: an empty upper half against a
-/// visible centre rule, absence drawn rather than omitted.
+/// visible center rule, absence drawn rather than omitted.
 private struct CardRow: View {
     let row: AgentCardLayout.Row
 
