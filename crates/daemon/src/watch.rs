@@ -1029,6 +1029,27 @@ struct LogTurn {
     /// answers is "is this file still being written", which is about when we
     /// read it and not about what the writer believed the time was.
     last_event_at: i64,
+    /// How many background agents the turn that ENDED left running.
+    ///
+    /// Claude states this itself, on the same `turn_duration` record that
+    /// ends the turn (`pendingBackgroundAgentCount`, present only when it is
+    /// above zero), and it is the whole reason `parse_line` returns a `Vec`:
+    /// one line reports two independent facts, and a reader needs both. This
+    /// is the second of them, and without it the first one alone said a pane
+    /// with three subagents an hour deep was idle.
+    ///
+    /// Only ever non-zero alongside `running: false`, for the same reason
+    /// `failed` is: it is a reading of an END. A turn that is open is Working
+    /// already, and its own end will restate this.
+    ///
+    /// The count and not the names, deliberately. On the machine this was
+    /// measured on every one of 100 `Agent` spawns in the live session came
+    /// back `async_launched` and NONE of them ever got a second result, so
+    /// the log offers no per-agent ending to reap a list of names with —
+    /// `Signals::subagents` already documents what to do with a running agent
+    /// it cannot name, which is to count it and leave the line to something
+    /// that can.
+    background_agents: u32,
 }
 
 /// A question the agent asked and is holding for, as its log stated it.
@@ -1204,18 +1225,31 @@ impl PaneLog {
 fn fold_log_events(turn: Option<LogTurn>, events: &[TurnEvent], now: i64) -> Option<LogTurn> {
     let mut folded = turn;
     for event in events {
-        let (running, failed) = match event {
-            TurnEvent::Started { .. } => (true, false),
-            TurnEvent::Ended { outcome, .. } => (false, *outcome == TurnOutcome::Failed),
+        let (running, failed, background_agents) = match event {
+            TurnEvent::Started { .. } => (true, false, 0),
+            TurnEvent::Ended { outcome, .. } => (false, *outcome == TurnOutcome::Failed, 0),
+            // Read AFTER the end it arrives with, never instead of it, and
+            // that order is a contract rather than a coincidence:
+            // `claude::parse_line` emits `[Ended, BackgroundAgents(n)]` from
+            // the one `turn_duration` record, in that order, and the key is
+            // absent rather than zero when nothing is pending. So the end
+            // clears the count and this puts back whatever the same line
+            // stated — which is how a turn that ends with nothing outstanding
+            // is told from one that ends with three agents still going,
+            // without a second record to wait for.
+            TurnEvent::BackgroundAgents(count) => match folded {
+                Some(t) => (t.running, t.failed, *count),
+                None => continue,
+            },
             // Not a boundary. Keeps whatever was believed, and if nothing was
             // believed yet it stays unbelieved: a `Step` alone cannot tell a
             // turn that is running from one whose start we simply never saw.
             _ => match folded {
-                Some(t) => (t.running, t.failed),
+                Some(t) => (t.running, t.failed, t.background_agents),
                 None => continue,
             },
         };
-        folded = Some(LogTurn { running, failed, last_event_at: now });
+        folded = Some(LogTurn { running, failed, last_event_at: now, background_agents });
     }
     folded
 }
@@ -1344,6 +1378,34 @@ fn resolved_activity(
         return AgentActivity::Blocked;
     }
     if let Some(turn) = log {
+        // A turn can end without the pane going quiet. Claude dispatches
+        // background agents and background shells that outlive the turn that
+        // started them, ends the turn, and sits there — `Waiting for 3
+        // background agents to finish`, with one of them two and a half hours
+        // old — and the rung below read that as Idle every time, which is the
+        // bug this branch exists for. `Done` fired the moment the work was
+        // handed off, so the notification that said "finished" was the least
+        // true thing on the screen.
+        //
+        // Above the ended-turn rung and not below it, because that rung is
+        // unconditional: it returns `Idle` for any turn that is not running
+        // and would swallow this. Still under `screen != None`, for exactly
+        // the reason the rung below is: a quit claude leaves a log whose last
+        // word was a pending count, and a plain shell must not inherit it.
+        //
+        // No staleness bound, and that is the same call `asked` makes one rung
+        // up: a main loop waiting on a background agent writes NOTHING to its
+        // own log while it waits — the agent writes to its own transcript —
+        // so a bound would expire this at the moment it became true. The cost
+        // is the other direction: the count is only ever restated at a turn
+        // end, so a pane whose agents finish while nobody types again holds
+        // `Working` until the next turn ends. Wrongly Working is a row that
+        // says something is happening when it stopped; wrongly Idle is a
+        // notification that says an agent is done while it is two hours into
+        // the work. The second one is what this file exists to prevent.
+        if !turn.running && turn.background_agents > 0 && screen != AgentActivity::None {
+            return AgentActivity::Working;
+        }
         if !turn.running {
             // Only while the screen still shows an agent at all.
             //
@@ -1559,6 +1621,16 @@ struct Signals {
     /// still open says `Running cd …`, and the same call once the turn is
     /// over says `Ran cd …`. See `line`.
     action: Option<(String, String)>,
+    /// What the turn that just ended said was still running behind it.
+    ///
+    /// `spawns` cannot answer this and must not be asked to. It is cleared at
+    /// both ends of a turn — see `forget_the_turn`, and the reason is that a
+    /// background `Agent` call's result arrives IMMEDIATELY, carrying
+    /// `async_launched`, and no second result ever comes: 100 of 100 spawns in
+    /// the live session this was measured against, so a list that survived the
+    /// boundary would only ever grow. The count claude itself states at the
+    /// end of the turn is the one thing here that goes back down.
+    background_agents: u32,
 }
 
 impl Signals {
@@ -1599,11 +1671,15 @@ impl Signals {
             // which is decided before this fold runs and on the other side of
             // the state mutex. The action line for a question is already
             // carried by the `Did` that arrived with it — `Asking · End state`.
+            // Arrives from the same line as the `Ended` just above and always
+            // after it, so this lands on a cleared count rather than adding to
+            // a stale one. See `fold_log_events`, which folds the same pair
+            // into the pane's turn.
+            TurnEvent::BackgroundAgents(count) => self.background_agents = *count,
             TurnEvent::Asked { .. }
             | TurnEvent::Answered { .. }
             | TurnEvent::Said { .. }
-            | TurnEvent::Title(_)
-            | TurnEvent::BackgroundAgents(_) => {}
+            | TurnEvent::Title(_) => {}
         }
     }
 
@@ -1613,6 +1689,11 @@ impl Signals {
         self.tasks.clear();
         self.active = None;
         self.spawns.clear();
+        // Cleared here so that the `BackgroundAgents` arriving from the same
+        // line restates it rather than adds to it, and so that a turn ending
+        // with the key absent — which is how claude spells zero — really does
+        // read as zero.
+        self.background_agents = 0;
     }
 
     /// One task fact, joined to the task it is about.
@@ -1766,8 +1847,19 @@ impl Signals {
     }
 
     /// How many are still running, named or not.
+    ///
+    /// Two sources and they never overlap: inside a turn the spawns are the
+    /// only account there is, and at the end of one claude states the count
+    /// itself while `forget_the_turn` has just emptied the spawns. `max`
+    /// rather than a sum for that reason — it is one number read from
+    /// whichever of the two can currently see it, not two populations added
+    /// together.
     fn running(&self) -> usize {
-        self.spawns.iter().filter(|spawn| spawn.running).count()
+        self.spawns
+            .iter()
+            .filter(|spawn| spawn.running)
+            .count()
+            .max(self.background_agents as usize)
     }
 
     /// The signal line: where this agent is, in one line.
@@ -5081,7 +5173,7 @@ mod tests {
 
     /// A log that has just said something, `age` milliseconds ago.
     fn log_said(running: bool, now: i64, age: i64) -> Option<LogTurn> {
-        Some(LogTurn { running, failed: false, last_event_at: now - age })
+        Some(LogTurn { running, failed: false, last_event_at: now - age, background_agents: 0 })
     }
 
     /// The log outranks the screen while it is fresh.
@@ -5265,7 +5357,7 @@ mod tests {
     fn a_finished_turn_does_not_start_itself_again_while_the_log_stays_quiet() {
         let start = 1_000_000;
         let stale_footer = AgentActivity::Working;
-        let ended = Some(LogTurn { running: false, failed: false, last_event_at: start });
+        let ended = Some(LogTurn { running: false, failed: false, last_event_at: start, background_agents: 0 });
 
         let mut entry = Observed::begin(AgentActivity::Working, start);
         assert_eq!(entry.turn_started_at, Some(start), "a turn is running");
@@ -5317,7 +5409,7 @@ mod tests {
     #[test]
     fn a_finished_log_does_not_keep_a_shell_looking_like_an_agent() {
         let now = 1_000_000;
-        let ended = Some(LogTurn { running: false, failed: false, last_event_at: now - 60_000 });
+        let ended = Some(LogTurn { running: false, failed: false, last_event_at: now - 60_000, background_agents: 0 });
 
         // The agent is gone: nothing on the screen identifies one.
         assert_eq!(
@@ -5337,12 +5429,151 @@ mod tests {
         // The running half is deliberately NOT gated the same way: a log
         // saying a turn is open is evidence about a pane whose screen may
         // simply not have redrawn yet.
-        let open = Some(LogTurn { running: true, failed: false, last_event_at: now });
+        let open = Some(LogTurn { running: true, failed: false, last_event_at: now, background_agents: 0 });
         assert_eq!(
             resolved_without_a_question(AgentActivity::None, open, now, "", "claude", "Mac", 0),
             AgentActivity::Working,
             "an open turn stopped being believed over an unredrawn screen"
         );
+    }
+
+    /// A turn that ends is not the same thing as work that stops.
+    ///
+    /// The reported bug, in the layer that actually decided it. A pane with
+    /// three subagents running — one of them two and a half hours in — read
+    /// `idle`, and no amount of reading the screen would have changed it: the
+    /// rung below returns `Idle` for ANY turn that is not running, so it sat
+    /// above whatever the footer said. `Done` therefore fired the moment the
+    /// work was handed off, and the notification that said an agent had
+    /// finished went out while it was an hour from finishing.
+    ///
+    /// Claude states the count itself, on the same record that ends the turn.
+    /// This is that number being believed.
+    #[test]
+    fn a_turn_that_ended_with_agents_still_running_is_still_working() {
+        let now = 1_000_000;
+        let waiting =
+            Some(LogTurn { running: false, failed: false, last_event_at: now - 60_000, background_agents: 3 });
+
+        assert_eq!(
+            resolved_without_a_question(AgentActivity::Idle, waiting, now, "", "claude", "Mac", 0),
+            AgentActivity::Working,
+            "a pane waiting on three background agents reported as idle"
+        );
+
+        // Deliberately without a staleness bound, and this is the case that
+        // needs it: a main loop waiting on a background agent writes nothing
+        // to its own log for as long as the wait lasts.
+        assert_eq!(
+            resolved_without_a_question(
+                AgentActivity::Idle,
+                Some(LogTurn {
+                    running: false,
+                    failed: false,
+                    last_event_at: now - 9_000_000,
+                    background_agents: 1,
+                }),
+                now,
+                "",
+                "claude",
+                "Mac",
+                0
+            ),
+            AgentActivity::Working,
+            "two and a half hours of silence is what waiting looks like"
+        );
+
+        // The same count cannot make an agent out of a pane that has none.
+        // A quit claude leaves a log whose last word was a pending count, and
+        // `screen == None` is the only thing that can tell.
+        assert_eq!(
+            resolved_without_a_question(AgentActivity::None, waiting, now, "", "zsh", "Mac", 0),
+            AgentActivity::None,
+            "a shell inherited the agent's outstanding work"
+        );
+
+        // And a turn that ended with nothing outstanding is still idle, which
+        // is the regression this could most easily cause.
+        let done =
+            Some(LogTurn { running: false, failed: false, last_event_at: now - 60_000, background_agents: 0 });
+        assert_eq!(
+            resolved_without_a_question(AgentActivity::Idle, done, now, "", "claude", "Mac", 0),
+            AgentActivity::Idle,
+            "a finished agent stopped being finished"
+        );
+    }
+
+    /// The pair of facts one line reports, folded as a pair.
+    ///
+    /// `claude::parse_line` emits `[Ended, BackgroundAgents(n)]` from one
+    /// `turn_duration` record and the key is ABSENT rather than zero when
+    /// nothing is pending — so the end clearing the count and the count
+    /// restating it is the only way a turn ending with three agents behind it
+    /// is told from one ending with none. Fold them in the wrong order, or
+    /// leave the end from a previous turn standing, and a pane holds `Working`
+    /// forever on a number nobody ever takes back.
+    #[test]
+    fn a_pending_agent_count_lives_and_dies_with_the_turn_that_stated_it() {
+        let start = 5_000;
+        let open = fold_log_events(None, &[TurnEvent::Started { at_ms: None }], start);
+        assert_eq!(open.map(|t| t.background_agents), Some(0));
+
+        let waiting = fold_log_events(
+            open,
+            &[
+                TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished },
+                TurnEvent::BackgroundAgents(3),
+            ],
+            start + 1_000,
+        );
+        assert_eq!(waiting.map(|t| (t.running, t.background_agents)), Some((false, 3)));
+
+        // A later turn that ends with the key absent takes it back to zero.
+        let cleared = fold_log_events(
+            waiting,
+            &[
+                TurnEvent::Started { at_ms: None },
+                TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished },
+            ],
+            start + 2_000,
+        );
+        assert_eq!(cleared.map(|t| t.background_agents), Some(0));
+
+        // A count with no turn believed invents no turn, exactly as a step
+        // does not.
+        assert_eq!(fold_log_events(None, &[TurnEvent::BackgroundAgents(2)], start), None);
+    }
+
+    /// The count survives the turn boundary that empties the names.
+    ///
+    /// `subagents` is emptied at every turn end and has to be: a background
+    /// `Agent` call's result comes back immediately as `async_launched` and no
+    /// second result ever arrives — 100 of 100 spawns in the session this was
+    /// measured against — so a list that outlived the boundary would only ever
+    /// grow. The number claude states is the one thing that goes back down, so
+    /// it is what a row counts.
+    #[test]
+    fn the_agents_a_turn_leaves_behind_are_counted_after_it_ends() {
+        let mut signals = Signals::default();
+        signals.saw(&TurnEvent::Started { at_ms: None });
+        signals.saw(&TurnEvent::Subagent {
+            id: "toolu_1".into(),
+            description: "Auditing the redaction rules".into(),
+            running: true,
+        });
+        assert_eq!(signals.running(), 1);
+        assert_eq!(signals.subagents(), vec!["Auditing the redaction rules"]);
+
+        signals.saw(&TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished });
+        signals.saw(&TurnEvent::BackgroundAgents(2));
+        assert_eq!(signals.running(), 2, "the turn's own account of what it left running was lost");
+        // Named is a different question from counted, and this is the case
+        // `subagents` documents: an agent it cannot name is counted and
+        // skipped rather than given a blank line.
+        assert!(signals.subagents().is_empty());
+
+        signals.saw(&TurnEvent::Started { at_ms: None });
+        assert_eq!(signals.running(), 0, "a new turn inherited the old turn's count");
     }
 
     /// A log that stopped being written stops being believed.
@@ -5479,7 +5710,7 @@ mod tests {
         let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         writeln!(file, r#"{{"type":"user","promptSource":"typed","message":{{"role":"user"}}}}"#).unwrap();
         let (log, events) = advance_log(log, &pane, 5_000, false, false, never_joined);
-        assert_eq!(log.turn, Some(LogTurn { running: true, failed: false, last_event_at: 5_000 }));
+        assert_eq!(log.turn, Some(LogTurn { running: true, failed: false, last_event_at: 5_000, background_agents: 0 }));
         assert!(
             matches!(events.as_slice(), [TurnEvent::Started { .. }]),
             "a turn start is a boundary and nothing the agent did: {events:?}"
@@ -5495,7 +5726,7 @@ mod tests {
         let (log, _) = advance_log(log, &pane, 6_000, false, false, never_joined);
         assert_eq!(
             log.turn,
-            Some(LogTurn { running: true, failed: false, last_event_at: 5_000 }),
+            Some(LogTurn { running: true, failed: false, last_event_at: 5_000, background_agents: 0 }),
             "a tool result is not an event, so it neither ends the turn nor touches the clock"
         );
 
@@ -5516,7 +5747,7 @@ mod tests {
         writeln!(file, r#"{{"type":"system","subtype":"turn_duration","durationMs":1200}}"#).unwrap();
         let (log, events) = advance_log(log, &pane, 7_000, false, false, never_joined);
         entry.saw_events(&events);
-        assert_eq!(log.turn, Some(LogTurn { running: false, failed: false, last_event_at: 7_000 }));
+        assert_eq!(log.turn, Some(LogTurn { running: false, failed: false, last_event_at: 7_000, background_agents: 0 }));
         assert_eq!(
             entry.signals.line(false).as_deref(),
             Some("Wrote haiku.txt"),
@@ -5571,7 +5802,7 @@ mod tests {
 
         assert_eq!(
             log.turn,
-            Some(LogTurn { running: true, failed: false, last_event_at: 5_000 }),
+            Some(LogTurn { running: true, failed: false, last_event_at: 5_000, background_agents: 0 }),
             "the turn the pane is in the middle of"
         );
         let mut entry = Observed::begin(AgentActivity::Working, 5_000);
@@ -5719,10 +5950,10 @@ mod tests {
         assert_eq!(joins.get(), 1, "a pane with no log is looked up at once");
         append(&first, TURN_STARTED);
         let (log, _) = advance_log(log, &pane, start + 1_000, true, true, find);
-        assert_eq!(log.turn, Some(LogTurn { running: true, failed: false, last_event_at: start + 1_000 }));
+        assert_eq!(log.turn, Some(LogTurn { running: true, failed: false, last_event_at: start + 1_000, background_agents: 0 }));
         append(&first, TURN_ENDED);
         let (log, _) = advance_log(log, &pane, start + 2_000, true, true, find);
-        assert_eq!(log.turn, Some(LogTurn { running: false, failed: false, last_event_at: start + 2_000 }));
+        assert_eq!(log.turn, Some(LogTurn { running: false, failed: false, last_event_at: start + 2_000, background_agents: 0 }));
         assert_eq!(joins.get(), 1, "a live log is never re-joined; that is the cache");
 
         // `/clear`. A new file, a new turn typed into it, and not one more byte
@@ -5756,7 +5987,7 @@ mod tests {
         // Past tense: the appended turn ended. What matters here is that the
         // row is reading the NEW session at all.
         assert_eq!(entry.signals.line(false).as_deref(), Some("Wrote haiku.txt"), "the row unfroze");
-        assert_eq!(log.turn, Some(LogTurn { running: false, failed: false, last_event_at: start + 40_000 }));
+        assert_eq!(log.turn, Some(LogTurn { running: false, failed: false, last_event_at: start + 40_000, background_agents: 0 }));
     }
 
     /// An agent that is simply resting is never looked up again.
@@ -5786,7 +6017,7 @@ mod tests {
         let mut log = PaneLog::new();
         log.tail = Some((Tail::new(path.clone()), LogFormat::Claude));
         log.attempted_at = start;
-        log.turn = Some(LogTurn { running: false, failed: false, last_event_at: start });
+        log.turn = Some(LogTurn { running: false, failed: false, last_event_at: start, background_agents: 0 });
 
         // Two hours of nothing, with the filesystem busy the whole time —
         // other panes' logs are churning, which is what would otherwise open
@@ -5805,7 +6036,7 @@ mod tests {
         // set to say above — and the 7,199 ticks after it read nothing at all.
         assert_eq!(
             log.turn,
-            Some(LogTurn { running: false, failed: false, last_event_at: start + 1_000 })
+            Some(LogTurn { running: false, failed: false, last_event_at: start + 1_000, background_agents: 0 })
         );
 
         // The contradiction is the whole of the difference: the same silent
