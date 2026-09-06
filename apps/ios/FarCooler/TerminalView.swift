@@ -1218,7 +1218,29 @@ struct TerminalView: View {
                 // can say "further than the finger travelled" in the units the
                 // finger travelled in. See `TerminalScrollReadout`.
                 .accessibilityValue(
-                    "offset=\(session.scrollPosition.offset) "
+                    // `visible` FIRST and, of everything here, the one field
+                    // that is not about the emulator at all.
+                    //
+                    // The shell mounts every pane in the fleet, so several
+                    // `terminal-surface` elements are in the accessibility tree
+                    // at once and their values are all live. Picking the one a
+                    // person is looking at used to be done by frame — "the
+                    // surface under the middle of the screen" — and that is
+                    // ambiguous the moment a second WORKSPACE is mounted: its
+                    // panes are not offset sideways the way a neighbouring TAB
+                    // is, so two surfaces contain the centre and the query
+                    // returns whichever the tree lists first. Measured on the
+                    // demo fleet: the pane in front reported 1986 lines of
+                    // scrollback while `TerminalScrollTests` read `history=2`
+                    // off a pane in a workspace nobody was looking at, and
+                    // three scroll tests skipped and one passed on the strength
+                    // of it.
+                    //
+                    // `ShellPaneSlot.isVisible` is the answer the shell already
+                    // has — "the pane at rest, and there is exactly one in the
+                    // whole track" — so it is published rather than inferred.
+                    "visible=\(isVisible ? 1 : 0) "
+                        + "offset=\(session.scrollPosition.offset) "
                         + "history=\(session.scrollPosition.history) "
                         + "source=\(session.scrollPosition.streaming ? "stream" : "poll") "
                         + "mouse=\(session.scrollPosition.wantsMouse ? "on" : "off") "

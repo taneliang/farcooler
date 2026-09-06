@@ -262,6 +262,13 @@ AGENTKIT_SOURCES = [
     "TokenStore.swift",
     "VersionSection.swift",
     "Transcript.swift",
+    # What a polling terminal asks the host for. In AgentKit for the one reason
+    # that list of reasons keeps coming back to: the iOS target has no unit
+    # tests, only UI tests, and CI compiles those and never runs them. The ask
+    # is one number whose loss is silent on the wire AND silent in the suite —
+    # every scroll test would skip rather than fail — so it is guarded by
+    # `swift test --package-path apps/shared/AgentKit`, which CI does run.
+    "TerminalScreenAsk.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #

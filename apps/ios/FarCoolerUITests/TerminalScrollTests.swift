@@ -5,11 +5,31 @@ import XCTest
 /// This is the regression that could not be caught anywhere else. The gesture
 /// works and always did — a `UIPanGestureRecognizer` on the keyboard sink,
 /// converting the drag to whole lines — but a pane on the capture-polling
-/// fallback holds a `VTCore` that is exactly as tall as the screen, so
-/// `scroll` had nothing to move through and the swipe did nothing at all,
-/// silently, forever. Nothing in the Rust tests can see that: the daemon was
-/// answering every question it was asked correctly, and the phone was not
-/// asking for the scrollback.
+/// fallback HELD a `VTCore` exactly as tall as the screen, so `scroll` had
+/// nothing to move through and the swipe did nothing at all, silently,
+/// forever. Nothing in the Rust tests could see that: the daemon was answering
+/// every question it was asked correctly, and the phone was not asking for the
+/// scrollback.
+///
+/// **The tense in that paragraph is load-bearing, and getting it wrong costs a
+/// day.** The phone asks now — `TerminalScreenAsk`, on every open and on every
+/// return to the live screen — so a POLLED pane carries the same history a
+/// streamed one does. `source=poll` is therefore a fact about which painter is
+/// feeding the pane and says nothing whatsoever about whether it can scroll. A
+/// lane read it the old way, saw `source=poll history=2` on a fleet whose
+/// runner held 1986 lines, and concluded scrollback was broken in the product.
+/// It was not. What was broken was WHICH PANE the suite was reading — see
+/// `visibleSurface`.
+///
+/// **And what the pane is has to be checked, every time.** These assertions are
+/// satisfiable by a pane with nothing above it: a swipe that moves two lines
+/// "scrolled into the scrollback", and a flick that clamps at the top
+/// "travelled further than the finger". Measured against unmodified `main` on
+/// the real fixture: one of these tests passed and three skipped, all four on a
+/// bare two-line pane, while the pane they were written for sat two tabs away
+/// with 1986 lines in it. So the walk is `openAPaneWithScrollback`, which keeps
+/// going until it finds a pane worth measuring and goes RED — with a census of
+/// every pane it saw — rather than quiet when the fleet has none.
 ///
 /// So the assertion is on the emulator's own numbers, published through
 /// `terminal-surface`'s accessibility value. `history` says whether there is
@@ -100,20 +120,42 @@ final class TerminalScrollTests: XCTestCase {
     /// elements and every use of it raises "Multiple matching elements found".
     /// The identifier names a KIND of element here, not one element.
     ///
-    /// The visible one is the one under the middle of the screen. Chosen by
-    /// frame rather than by `firstMatch`, which returns whichever the
-    /// accessibility tree happens to list first — off-screen panes included,
-    /// and their values are live, so a test could read `mouse=on` off a pane
-    /// nobody is looking at and swipe a different one entirely.
+    /// **It asks the pane, and falls back to the frame.** This used to be the
+    /// frame alone — "the surface under the middle of the screen" — which is
+    /// right for a neighbouring TAB, laid out beside this one, and wrong for a
+    /// neighbouring WORKSPACE, which is mounted at the same rect. The moment
+    /// the demo fleet grew a second workspace with a terminal in it, two
+    /// surfaces contained the centre and this returned whichever the
+    /// accessibility tree listed first.
+    ///
+    /// It cost a day and it is worth writing down. On the fixture
+    /// `scripts/demo-host.sh` builds, the pane in front had 1986 lines of
+    /// scrollback and the tree ALSO held a bare two-line pane belonging to the
+    /// `crossing` workspace. Every test in this file read that one:
+    /// `testTheGridTracksTheThumbBetweenRows` failed naming the two lines,
+    /// three tests skipped saying the pane was too shallow, and
+    /// `testASwipeScrollsIntoTheScrollback` PASSED — a swipe does move two
+    /// lines. A whole lane was spent on "scrollback is broken in the product"
+    /// off the back of that, and the runner had 1986 lines the whole time.
+    ///
+    /// `visible=1` is the shell's own answer — `ShellPaneSlot.isVisible`, "the
+    /// pane at rest, and there is exactly one in the whole track" — published
+    /// on the surface for exactly this. The frame test is kept underneath it so
+    /// an app too old to publish the field behaves as it always did rather than
+    /// finding no pane at all.
     private func visibleSurface(_ app: XCUIApplication) -> XCUIElement? {
         let centre = CGPoint(x: app.frame.midX, y: app.frame.midY)
         let all = app.otherElements.matching(identifier: "terminal-surface")
+        var underTheCentre: XCUIElement?
         for i in 0..<all.count {
             let element = all.element(boundBy: i)
             guard element.exists else { continue }
-            if element.frame.contains(centre) { return element }
+            if let value = element.value as? String, Self.field(value, "visible") == "1" {
+                return element
+            }
+            if underTheCentre == nil, element.frame.contains(centre) { underTheCentre = element }
         }
-        return nil
+        return underTheCentre
     }
 
     private func surfaceValue(_ app: XCUIApplication) -> String? {
@@ -151,17 +193,50 @@ final class TerminalScrollTests: XCTestCase {
         surfaceValue(app).flatMap { Self.field($0, "mouse") }.map { $0 == "on" }
     }
 
-    /// Wait until the pane in front of us reports scrollback above it.
+    /// Wait until the pane in front of us reports at least this much scrollback.
     ///
     /// A block predicate rather than `ENDSWITH`, because the ENDSWITH version
     /// of this was vacuous — see `field`. It is worth the words: without
     /// history, "the swipe did not move the view" and "the view had nowhere to
     /// go" are the same observation, and only one of them is a bug.
-    private func waitForHistory(_ app: XCUIApplication, timeout: TimeInterval = 30) -> Bool {
+    private func waitForHistory(
+        _ app: XCUIApplication, atLeast lines: Int = 1, timeout: TimeInterval = 30
+    ) -> Bool {
         let has = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in (self.position(app)?.history ?? 0) > 0 },
+            predicate: NSPredicate { _, _ in (self.position(app)?.history ?? 0) >= lines },
             object: nil)
         return XCTWaiter.wait(for: [has], timeout: timeout) == .completed
+    }
+
+    /// A fleet with no pane deep enough to measure.
+    ///
+    /// Thrown rather than skipped, and that is the whole point of it — see
+    /// `openAPaneWithScrollback`. XCTest records an error out of a `throws`
+    /// test as a failure and prints this description, so one throw is one red
+    /// with the census attached.
+    private struct NothingDeepEnough: Error, CustomStringConvertible {
+        let description: String
+    }
+
+    /// Every `terminal-surface` in the tree and what it says about itself.
+    ///
+    /// Only ever used in a failure message, and it is the difference between
+    /// "the pane reported no scrollback" and knowing WHICH pane was read and
+    /// what the alternatives were. The whole of this lane's confusion fits in
+    /// one of these lines.
+    private func census(_ app: XCUIApplication) -> String {
+        let all = app.otherElements.matching(identifier: "terminal-surface")
+        var seen: [String] = []
+        for i in 0..<all.count {
+            let element = all.element(boundBy: i)
+            guard element.exists, let value = element.value as? String else { continue }
+            let front = Self.field(value, "visible") == "1" ? "in front" : "mounted"
+            seen.append(
+                "  \(front): history=\(Self.field(value, "history") ?? "?") "
+                    + "source=\(Self.field(value, "source") ?? "?") "
+                    + "mouse=\(Self.field(value, "mouse") ?? "?")")
+        }
+        return seen.isEmpty ? "  (no terminal-surface in the tree at all)" : seen.joined(separator: "\n")
     }
 
     /// Walk from wherever the app opens to a terminal pane.
@@ -175,6 +250,76 @@ final class TerminalScrollTests: XCTestCase {
     @discardableResult
     private func openATerminal(_ app: XCUIApplication) throws -> XCUIElement {
         try openATerminalInTheShell(app)
+    }
+
+    /// Walk to a pane this suite can actually measure — one with scrollback
+    /// above it — and go RED rather than quiet when the fleet has none.
+    ///
+    /// **This is the difference between a scroll suite and a check that cannot
+    /// fail.** A pane with nothing above it is a pane on which every assertion
+    /// in this file is vacuously satisfiable: a swipe that moves nothing is
+    /// correct, and a swipe that moves two lines "scrolled into the
+    /// scrollback". Both read as green. Measured, on the fixture
+    /// `scripts/demo-host.sh` builds and against unmodified `main`:
+    /// `testASwipeScrollsIntoTheScrollback` passed on a two-line pane while the
+    /// pane the fixture built for it, two tabs away, held 1986 lines.
+    ///
+    /// So the walk keeps going. The demo fleet's terminals are not all equal —
+    /// a workspace the daemon made carries a bare login shell, and the UI suite
+    /// adds another every time it runs, because `NewTerminalTests` creates one
+    /// and iOS has no way to close it — and any of those can sit in front of
+    /// the pane the assertions were written for.
+    ///
+    /// Failing and not skipping when the walk comes up empty, deliberately. A
+    /// laptop with no runner is already handled a level down, by
+    /// `openATerminalInTheShell`, which skips; arriving HERE means the shell
+    /// rendered, a terminal exists, and not one pane in the fleet has a line
+    /// above its screen. That is a broken fixture or a broken product, never a
+    /// legitimate configuration, and both deserve a red. The census says which.
+    /// A hundred lines, not one, and the number is the whole guard.
+    ///
+    /// One line is a bar that a bare login shell clears — measured: the pane
+    /// this walk first landed on reported `history=2`, which is more than zero
+    /// and is not scrollback. A hundred is comfortably more than any phone
+    /// screen is tall, so nothing that has merely printed a prompt can pass it,
+    /// and comfortably under the 400 lines `scripts/demo-host.sh` prints, so a
+    /// pane that has had some of them scroll off still counts.
+    private static let enoughToMeasure = 100
+
+    @discardableResult
+    private func openAPaneWithScrollback(
+        _ app: XCUIApplication, atLeast lines: Int = TerminalScrollTests.enoughToMeasure
+    ) throws -> XCUIElement {
+        _ = try openATerminalInTheShell(app)
+
+        // One pass per tab in the flat sequence, plus slack, exactly as
+        // `findAPaneThatWantsTheMouse` walks. The walk wraps, so a longer loop
+        // would keep revisiting panes it has already rejected.
+        for _ in 0..<8 {
+            if let surface = visibleSurface(app), waitForHistory(app, atLeast: lines, timeout: 5) {
+                return surface
+            }
+            let y = 0.42
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y))
+            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y))
+            from.press(
+                forDuration: 0.05, thenDragTo: to, withVelocity: .slow,
+                thenHoldForDuration: 0.4)
+            _ = waitForVisibleSurface(app, timeout: 3)
+        }
+        print(app.debugDescription)
+        throw NothingDeepEnough(
+            description: """
+                No pane in this fleet has \(lines) line(s) of scrollback, so every scroll \
+                assertion below would have measured nothing and reported success. \
+                What the shell is holding:
+                \(census(app))
+                `scripts/demo-host.sh` puts 400 lines in the 'scrolling' workspace's two \
+                panes. Re-run it. If it has been run and this still says two lines, the \
+                history is being lost between tmux and the phone — compare \
+                `tmux -L farcooler-$(cat "$TMPDIR/farcooler-demo-host/fc/install-id") \
+                list-panes -a -F '#{history_size}'` against the numbers above.
+                """)
     }
 
     func testASwipeScrollsIntoTheScrollback() throws {
@@ -211,11 +356,7 @@ final class TerminalScrollTests: XCTestCase {
     /// be stale.
     func testSwipingBackDownReturnsToTheLiveScreen() throws {
         let app = launch()
-        try openATerminal(app)
-
-        let surface = try XCTUnwrap(waitForVisibleSurface(app, timeout: 10))
-        try XCTSkipUnless(
-            waitForHistory(app), "This pane has no scrollback to leave and come back from.")
+        let surface = try openAPaneWithScrollback(app)
 
         surface.swipeDown(velocity: .slow)
         try XCTSkipUnless(
@@ -339,9 +480,7 @@ final class TerminalScrollTests: XCTestCase {
     /// while `testTheGridTracksTheThumbBetweenRows` passed in the same run.
     func testAFlickTravelsFurtherThanTheFingerDid() throws {
         let app = launch()
-        let surface = try openATerminalInTheShell(app)
-        try XCTSkipUnless(
-            waitForHistory(app), "This pane has no scrollback, so a flick has nowhere to go.")
+        let surface = try openAPaneWithScrollback(app)
 
         let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
         try XCTSkipUnless(cell > 0, "the pane reported a zero row height")
@@ -355,12 +494,18 @@ final class TerminalScrollTests: XCTestCase {
         let toY: CGFloat = 0.71
         let travel = surface.frame.height * (toY - fromY)
         let finger = Int(travel / CGFloat(cell))
-        try XCTSkipUnless(
-            before.history > finger * 4,
-            """
-            \(before.history) lines of scrollback is not enough room for a throw \
-            worth \(finger) rows of finger to be told apart from a clamp at the top.
-            """)
+        // Thrown, not skipped. A pane with room for the finger and not for the
+        // throw makes this assertion unfalsifiable, and a skip says so where
+        // nobody reads it — see `openAPaneWithScrollback`.
+        guard before.history > finger * 4 else {
+            throw NothingDeepEnough(
+                description: """
+                    \(before.history) lines of scrollback is not enough room for a throw \
+                    worth \(finger) rows of finger to be told apart from a clamp at the top. \
+                    What the shell is holding:
+                    \(census(app))
+                    """)
+        }
 
         flick(surface, fromY: fromY, toY: toY)
         let settled = try XCTUnwrap(settledOffset(app))
@@ -415,7 +560,7 @@ final class TerminalScrollTests: XCTestCase {
     /// prove momentum did NOT carry once the second finger landed.
     func testTappingAMovingPaneStopsItWithoutRaisingTheKeyboard() throws {
         let app = launch()
-        let surface = try openATerminalInTheShell(app)
+        let surface = try openAPaneWithScrollback(app)
 
         // A pane raises the keyboard the moment it appears (see the note on
         // `testThePaneIsPaintedOnTheTerminalsOwnGround`), which would sit in
@@ -431,9 +576,6 @@ final class TerminalScrollTests: XCTestCase {
             XCTWaiter.wait(for: [down], timeout: 10) == .completed,
             "the keyboard never went away, so a later absence of one proves nothing")
 
-        try XCTSkipUnless(
-            waitForHistory(app), "This pane has no scrollback, so a flick has nowhere to go.")
-
         let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
         try XCTSkipUnless(cell > 0, "the pane reported a zero row height")
         let before = try XCTUnwrap(position(app))
@@ -443,12 +585,16 @@ final class TerminalScrollTests: XCTestCase {
         let toY: CGFloat = 0.71
         let travel = surface.frame.height * (toY - fromY)
         let finger = Int(travel / CGFloat(cell))
-        try XCTSkipUnless(
-            before.history > finger * 4,
-            """
-            \(before.history) lines of scrollback is not enough room for a throw \
-            worth \(finger) rows of finger to be told apart from a clamp at the top.
-            """)
+        // Thrown, not skipped, for the reason `openAPaneWithScrollback` gives.
+        guard before.history > finger * 4 else {
+            throw NothingDeepEnough(
+                description: """
+                    \(before.history) lines of scrollback is not enough room for a throw \
+                    worth \(finger) rows of finger to be told apart from a clamp at the top. \
+                    What the shell is holding:
+                    \(census(app))
+                    """)
+        }
 
         flick(surface, fromY: fromY, toY: toY)
         // No wait between the flick and the tap: `flick` returns the instant
@@ -538,9 +684,7 @@ final class TerminalScrollTests: XCTestCase {
     /// zero so that a rubberband cannot stand in for the thing being measured.
     func testTheGridTracksTheThumbBetweenRows() throws {
         let app = launch()
-        let surface = try openATerminalInTheShell(app)
-        try XCTSkipUnless(
-            waitForHistory(app), "This pane has no scrollback, so a drag has nowhere to go.")
+        let surface = try openAPaneWithScrollback(app)
 
         let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
         try XCTSkipUnless(cell >= 8, "a row of \(cell) points has no room to be between")
@@ -700,9 +844,7 @@ final class TerminalScrollTests: XCTestCase {
     /// same sentence about the other end, in the same run.
     func testOverDraggingPastTheTopOfTheScrollbackResistsAndReturns() throws {
         let app = launch()
-        let surface = try openATerminalInTheShell(app)
-        try XCTSkipUnless(
-            waitForHistory(app), "This pane has no scrollback, so there is no top to reach.")
+        let surface = try openAPaneWithScrollback(app)
 
         let cell = try XCTUnwrap(metric(app, "cell"), "the pane never published its row height")
         try XCTSkipUnless(cell > 0, "the pane reported a zero row height")
@@ -791,10 +933,7 @@ final class TerminalScrollTests: XCTestCase {
     /// stolen gesture as a broken scrollback.
     func testTheShellDoesNotStealTheTerminalsScroll() throws {
         let app = launch()
-        let surface = try openATerminalInTheShell(app)
-
-        try XCTSkipUnless(
-            waitForHistory(app), "This pane has no scrollback, so a swipe has nowhere to go.")
+        let surface = try openAPaneWithScrollback(app)
 
         let before = try XCTUnwrap(position(app))
         XCTAssertEqual(before.offset, 0, "a pane opens at the live screen")
@@ -1093,9 +1232,18 @@ final class TerminalScrollTests: XCTestCase {
         let app = launch()
         let surface = try findAPaneThatWantsTheMouse(app)
 
-        try XCTSkipUnless(
-            waitForHistory(app),
-            "The pane reported no scrollback, so a swipe has nowhere to go.")
+        // Thrown, not skipped. `scripts/demo-host.sh` prints the same 400 lines
+        // into this pane as into the one beside it, so "no scrollback here" is
+        // a broken fixture or a broken wire and never a configuration.
+        guard waitForHistory(app) else {
+            throw NothingDeepEnough(
+                description: """
+                    The pane that asked for the mouse reported no scrollback, so a swipe \
+                    has nowhere to go and this assertion cannot fail. What the shell is \
+                    holding:
+                    \(census(app))
+                    """)
+        }
 
         // Re-read after the wait rather than trusting the walk: arriving at a
         // pane and its first full paint are not the same moment, and `mouse=`
@@ -1476,9 +1624,10 @@ final class TerminalScrollTests: XCTestCase {
     /// `View.shellCrossingAlert`.
     func testCrossingRunnersThrowsAwayPanesThatAWorkspaceSwipeKeeps() throws {
         let app = launchTwoRunners()
-        let surface = try openATerminalInTheShell(app)
-        try XCTSkipUnless(
-            waitForHistory(app), "This pane has no scrollback, so there is no place to lose.")
+        // The pane with scrollback, not merely the first pane. A place is only
+        // lost by something that had one, and on a two-line pane "came back at
+        // the bottom" and "came back where it was" are the same observation.
+        let surface = try openAPaneWithScrollback(app)
 
         // **Where the swipe ENDED, not where it was when the finger left.**
         //
