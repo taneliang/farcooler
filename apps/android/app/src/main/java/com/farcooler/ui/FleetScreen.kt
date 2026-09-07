@@ -55,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,7 @@ import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
 import com.farcooler.net.Connection
 import com.farcooler.net.FleetEntry
+import com.farcooler.net.HostKeyQuestion
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -302,10 +304,16 @@ private fun FleetBody(
                         connection.host.copy(fingerprint = fingerprint),
                     )
                 },
+                // Both halves, and the second is not decoration: forgetting
+                // a key this device never pinned changes nothing at all, so
+                // without the dial beside it this is a button that runs and
+                // leaves the screen exactly as it was. iOS shipped precisely
+                // that — see `53c6c57`.
                 onReviewKey = {
                     model.hosts.forgetKey(connection.host)
                     model.fleet.retry(connection.host.id, connection.host.copy(fingerprint = null))
                 },
+                onNotNow = { connection.declineHostKey() },
                 onEdit = { editingRunner = connection.host },
             )
         }
@@ -544,6 +552,14 @@ private fun liveSummary(connections: List<Connection>): String {
  * door draws THESE rows rather than a second, shorter version of them, because
  * two screens offering different next moves about the same runner is the drift
  * this codebase keeps finding.
+ *
+ * **The unknown-key question's answers are not decided here either.** This row
+ * offered two of the three for the life of the multi-runner front door — "Trust
+ * it" and "Edit", so the ways past a fingerprint somebody could not vouch for
+ * were agreeing to it and force-quitting — while
+ * [Connection.declineHostKey] sat written and uncalled. The list is
+ * [HostKeyQuestion.Answer] now and this file iterates it; [onNotNow] is the
+ * answer that was missing.
  */
 @Composable
 internal fun RunnerStatusRow(
@@ -553,10 +569,21 @@ internal fun RunnerStatusRow(
     onReconnectNow: () -> Unit,
     onTrust: (String) -> Unit,
     onReviewKey: () -> Unit,
+    onNotNow: () -> Unit,
     onEdit: () -> Unit,
 ) {
     val phase by connection.phase.collectAsStateWithLifecycle()
     if (phase is Connection.Phase.Connected) return
+
+    // One answer to the fingerprint question, as something to call. Wiring, and
+    // nothing more — WHICH answers exist is [HostKeyQuestion]'s, and the
+    // compiler is what makes adding a fourth arrive here rather than silently
+    // drawing a button wired to nothing.
+    fun answered(answer: HostKeyQuestion.Answer, fingerprint: String) = when (answer) {
+        HostKeyQuestion.Answer.TRUST_IT -> onTrust(fingerprint)
+        HostKeyQuestion.Answer.NOT_NOW -> onNotNow()
+        HostKeyQuestion.Answer.EDIT -> onEdit()
+    }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
         Text(
@@ -608,9 +635,23 @@ internal fun RunnerStatusRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Every answer the question has, drawn FROM the list rather
+                // than written out here. Two `TextButton`s written out is how
+                // the third one went missing — on both this app and iOS — and
+                // how the loss stayed invisible afterwards: this is a
+                // composable, which CI compiles and never runs, so a button
+                // that is simply not here leaves no trace in a build. See
+                // [HostKeyQuestion], which is where the list lives so that
+                // losing one is an edit in front of a test.
                 Row {
-                    TextButton(onClick = { onTrust(current.fingerprint) }) { Text("Trust it") }
-                    TextButton(onClick = onEdit) { Text("Edit") }
+                    for (answer in HostKeyQuestion.Answer.entries) {
+                        TextButton(onClick = { answered(answer, current.fingerprint) }) {
+                            Text(
+                                answer.label,
+                                fontWeight = if (answer.isTheAnswer) FontWeight.SemiBold else null,
+                            )
+                        }
+                    }
                 }
             }
 
