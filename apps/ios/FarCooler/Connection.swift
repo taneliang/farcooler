@@ -277,17 +277,20 @@ final class Connection: ObservableObject {
         newsRefresh?.cancel()
         reconnectTask?.cancel()
         self.host = host
-        // The watch performs everything through whichever connection the app is
-        // running, and this is the one place that knows which that is. Handed
-        // over before connecting rather than after: `WatchLinkHost` checks the
-        // phase itself, and registering only on success would answer "open the
-        // app" to somebody who is holding it open while it reconnects.
-        WatchLinkHost.shared.adopt(self)
-        // The same handover, for the enrollment ceremony, and in the same
-        // place so the two cannot disagree about which connections exist. Also
-        // before connecting: `enroll` checks the phase itself, and the ceremony
-        // is reached from a settings screen that a person can open while this
-        // is still reconnecting.
+        // The watch is no longer handed a connection here.
+        //
+        // It used to be: the phone ran one session and this was the one place
+        // that knew which. `WatchLinkHost` adopts the whole `FleetStore` now
+        // (`ConnectedRoot`), because a request from a wrist names a TERMINAL
+        // and the runner it is on is something only the merged fleet can
+        // answer. Registering here under N connections would have meant the
+        // watch performing everything through whichever runner started last.
+        //
+        // The enrollment ceremony still registers here, because what it needs
+        // is per-runner rather than per-fleet — which machine a device's key
+        // may be written to. Before connecting rather than after: `enroll`
+        // checks the phase itself, and the ceremony is reached from a settings
+        // screen a person can open while this is still reconnecting.
         //
         // Keyed by the runner rather than assigned to one slot, so a phone
         // holding three connections enrolls a device on the three the ceremony

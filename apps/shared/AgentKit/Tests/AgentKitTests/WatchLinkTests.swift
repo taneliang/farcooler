@@ -321,3 +321,46 @@ struct WatchLinkTests {
         ])
     }
 }
+
+/// Which pane a request is about, which is now which RUNNER it is about.
+///
+/// The phone routes every watch and lock-screen request by this property —
+/// `WatchLinkHost.connection(forTerminal:)` — so a case that reported the wrong
+/// field would send an agent's answer to a different machine's session, or to
+/// none. That could not be got wrong while the phone held one connection,
+/// because there was one place a pane could be; it can be got wrong now, and
+/// nothing else in either app would report it.
+struct WatchRequestRoutingTests {
+    @Test func promptIsAboutItsTerminal() {
+        #expect(WatchRequest.prompt(terminal: "t-1", text: "hello").terminal == "t-1")
+    }
+
+    /// The one with three fields, and the one where picking the wrong one is
+    /// plausible: `request` and `option` are strings sitting beside `terminal`.
+    @Test func answerIsAboutItsTerminalAndNotItsRequestOrOption() {
+        let request = WatchRequest.answer(terminal: "t-2", request: "r-9", option: "o-3")
+        #expect(request.terminal == "t-2")
+    }
+
+    @Test func pendingPermissionIsAboutItsTerminal() {
+        #expect(WatchRequest.pendingPermission(terminal: "t-3").terminal == "t-3")
+    }
+
+    @Test func transcriptIsAboutItsTerminal() {
+        #expect(WatchRequest.transcript(terminal: "t-4").terminal == "t-4")
+    }
+
+    /// The routing key and the wire agree. `dictionary` is what actually
+    /// crosses to the phone, so a `terminal` that disagreed with it would route
+    /// one pane's request while the payload named another.
+    @Test func theRoutingKeyIsWhatTheWireCarries() {
+        for request in [
+            WatchRequest.prompt(terminal: "t-1", text: "x"),
+            .answer(terminal: "t-2", request: "r", option: "o"),
+            .pendingPermission(terminal: "t-3"),
+            .transcript(terminal: "t-4"),
+        ] {
+            #expect(request.dictionary[WatchLink.Key.terminal] as? String == request.terminal)
+        }
+    }
+}

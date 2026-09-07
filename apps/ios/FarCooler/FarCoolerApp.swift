@@ -170,6 +170,16 @@ struct ConnectedRoot: View {
         // an identity to offer. Doing it here costs one keygen on first run and
         // nothing on every run after — `privateKey()` returns the stored one.
         .task {
+            // The watch, the lock screen card and the widget's answer intent
+            // all reach a runner through this object, and what they name is a
+            // pane rather than a machine — so what it needs is the whole fleet.
+            //
+            // Here rather than in `Connection.start`, which is where it used to
+            // be: a connection registering itself made the watch perform
+            // everything through whichever runner started last. Idempotent, and
+            // a `.task` because a background launch that never builds a scene
+            // has no fleet to adopt — `WatchLinkHost.perform` says so in words.
+            WatchLinkHost.shared.adopt(fleet)
             // Worktrees remembered for a runner nobody has any more are
             // worktrees the grid would offer to cross to and then could not.
             // Here rather than in `RunnerStore.remove`, because a runner can
