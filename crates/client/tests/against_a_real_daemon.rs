@@ -422,15 +422,19 @@ async fn a_refusal_keeps_the_reason_the_runner_named_it_by() {
 
     // A location that can never be allowlisted. "Pick a folder inside it."
     //
-    // `/usr` rather than the more obvious `/etc`, and the reason is a finding
-    // in its own right: `Service::add_root` canonicalizes BEFORE it asks
-    // `reject_sensitive_root`, and on macOS `/etc`, `/var` and `/tmp` are
-    // symlinks into `/private`, so what that guard is handed is `/private/etc`
-    // and every one of its `starts_with("/etc")` prefixes misses. Its unit test
-    // hands it the literal path and so cannot see that. `/usr` is a real
-    // directory on macOS and is the same before and after canonicalizing.
-    let e = session.add_repository_root("/usr").await.expect_err("/usr is a system path");
-    assert_eq!(word(e), "sensitive-root");
+    // `/etc` as well as `/usr`, and the second one is the whole end-to-end
+    // point: `Service::add_root` canonicalizes BEFORE it asks
+    // `reject_sensitive_root`, and on macOS `/etc` is a symlink, so the guard
+    // is really handed `/private/etc`. This asks over a real socket, so it is
+    // the resolved path being refused and not the typed one. `/usr` is the
+    // same before and after canonicalizing and holds the other half.
+    for system in ["/usr", "/etc"] {
+        let e = session
+            .add_repository_root(system)
+            .await
+            .expect_err("a system path is never allowlistable");
+        assert_eq!(word(e), "sensitive-root", "{system} is a system path");
+    }
 
     // A folder that overlaps one already added. Same screen, same control, and
     // an entirely different thing to do about it.

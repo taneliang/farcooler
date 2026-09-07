@@ -2356,16 +2356,44 @@ fn terminal_update(
 }
 
 /// Refuse `/`, a home directory root, and system directories.
+///
+/// What this is handed has already been through `Path::canonicalize`, because
+/// `add_root` resolves before it asks — and on macOS that is not the path the
+/// person typed. `/etc`, `/var` and `/tmp` are symlinks into `/private`, so the
+/// guard is shown `/private/etc` and a list of prefixes named after the
+/// spellings a person uses misses every one of them. That is why the `/private`
+/// canonicalizing prepends is taken back off first: the names below can then
+/// stay the ones a person would recognize, and they match on either platform.
+///
+/// `/var/folders` is carved back out, and deliberately rather than by accident.
+/// It is not a system location: it is the per-user scratch tree Darwin hands
+/// out as `$TMPDIR`, owned by the invoking user, and refusing it would refuse
+/// every temp directory on a Mac. Measured cost of not carving it out: 83 tests
+/// across `farcooler-daemon` and `farcooler-client` that add a temp directory as
+/// a root, plus anyone trying Far Cooler on a scratch checkout. It protects
+/// nothing in exchange — everything under it already belongs to this user.
+///
+/// `/tmp` is absent for the same reason and always has been. It is shared
+/// scratch space, not somewhere the system keeps its own files, and on Linux it
+/// is where `$TMPDIR` points.
 fn reject_sensitive_root(path: &Path) -> Result<()> {
-    let s = path.to_string_lossy();
-    let sensitive = s == "/"
-        || s.starts_with("/System")
-        || s.starts_with("/Library")
-        || s.starts_with("/usr")
-        || s.starts_with("/bin")
-        || s.starts_with("/sbin")
-        || s.starts_with("/etc")
-        || s.starts_with("/var");
+    let resolved = path.to_string_lossy();
+    // Undo what canonicalizing added, so one list covers both spellings.
+    let path = Path::new(
+        resolved.strip_prefix("/private").filter(|rest| rest.starts_with('/')).unwrap_or(&resolved),
+    );
+
+    // Whole components, not a string prefix: `/variants` is not `/var`.
+    let under = |prefix: &str| path.starts_with(prefix);
+    let sensitive = path == Path::new("/")
+        || path == Path::new("/private")
+        || under("/System")
+        || under("/Library")
+        || under("/usr")
+        || under("/bin")
+        || under("/sbin")
+        || under("/etc")
+        || (under("/var") && !under("/var/folders"));
 
     if sensitive {
         return Err(DomainError::SensitiveRoot);
@@ -2426,13 +2454,101 @@ mod tests {
         assert!(preset_command("cursor", None).contains("cursor-agent"));
     }
 
+    /// The guard is asked about the path `add_root` canonicalized, so this asks
+    /// it the same way.
+    ///
+    /// The literal spellings alone are what let a real hole survive: on macOS
+    /// `/etc` and `/var` are symlinks into `/private`, `add_root` canonicalizes
+    /// before it asks, and a test that only ever hands over `/etc` cannot see
+    /// that the guard is never shown `/etc` in production.
+    ///
+    /// Every prefix the guard lists appears here, because an arm no input
+    /// reaches is an arm any mistake can be made in.
     #[test]
-    fn sensitive_roots_are_refused() {
-        for p in ["/", "/System/Library", "/usr/local", "/etc"] {
+    fn sensitive_roots_are_refused_as_add_root_spells_them() {
+        let mut cases = vec!["/", "/usr", "/usr/local", "/bin", "/sbin", "/etc", "/var", "/var/log"];
+        // Neither exists on Linux, and `canonicalize` fails outright on a path
+        // that is not there.
+        if cfg!(target_os = "macos") {
+            cases.extend(["/System", "/Library", "/System/Library"]);
+        }
+
+        for p in cases {
+            let literal = Path::new(p);
             assert!(
-                reject_sensitive_root(Path::new(p)).is_err(),
+                reject_sensitive_root(literal).is_err(),
                 "{p} should be refused as a repository root"
             );
+
+            // `add_root` never gets to ask about anything else.
+            let canonical = literal.canonicalize().unwrap_or_else(|e| panic!("{p}: {e}"));
+            assert!(
+                reject_sensitive_root(&canonical).is_err(),
+                "{p} canonicalizes to {} and must be refused by that name too",
+                canonical.display()
+            );
+        }
+    }
+
+    /// The `/private` spelling is refused everywhere, not only where macOS
+    /// produces it.
+    ///
+    /// Unguarded by `cfg`, deliberately: this is the guard's own logic, it is
+    /// the same on both platforms, and the Linux half of the CI matrix would
+    /// otherwise never reach the code that closes the macOS hole. A guard only
+    /// one runner exercises is a guard half of CI cannot break.
+    #[test]
+    fn the_private_spelling_macos_produces_is_refused_too() {
+        for p in ["/private", "/private/etc", "/private/var", "/private/var/log"] {
+            assert!(reject_sensitive_root(Path::new(p)).is_err(), "{p} should be refused");
+        }
+    }
+
+    /// The rewrite the canonicalizing test rides on, pinned.
+    ///
+    /// Without this, that test would keep passing on a Mac for the wrong
+    /// reason if `/etc` ever stopped being a symlink — every case would
+    /// quietly collapse back into the literal one, which is the exact shape
+    /// of the bug it was written for.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_really_does_hand_the_guard_a_private_path() {
+        assert_eq!(Path::new("/etc").canonicalize().unwrap(), Path::new("/private/etc"));
+        assert_eq!(Path::new("/var").canonicalize().unwrap(), Path::new("/private/var"));
+        assert_eq!(Path::new("/tmp").canonicalize().unwrap(), Path::new("/private/tmp"));
+    }
+
+    /// A temp directory stays addable, on both platforms.
+    ///
+    /// This is the reason `/var` cannot be a blanket refusal: on a Mac the OS
+    /// hands out `$TMPDIR` under `/var/folders`, so refusing all of `/var`
+    /// refuses every scratch checkout a person could try Far Cooler on — and
+    /// 83 tests across this crate and `farcooler-client`, which add exactly
+    /// this as a root.
+    ///
+    /// The literal `/var/folders` case is spelled out as well as the real one,
+    /// because on Linux `$TMPDIR` is `/tmp` and the carve-out would otherwise
+    /// be unreachable there.
+    #[test]
+    fn a_temp_directory_is_still_addable() {
+        let dir = tempfile::tempdir().unwrap();
+        let canonical = dir.path().canonicalize().unwrap();
+        assert!(
+            reject_sensitive_root(&canonical).is_ok(),
+            "{} is per-user scratch space, not a system location",
+            canonical.display()
+        );
+
+        for p in ["/var/folders/3c/abc/T/scratch", "/private/var/folders/3c/abc/T/scratch"] {
+            assert!(reject_sensitive_root(Path::new(p)).is_ok(), "{p} is this user's own $TMPDIR");
+        }
+    }
+
+    /// A prefix is a whole path component, not a string.
+    #[test]
+    fn a_name_that_merely_starts_like_a_system_path_is_allowed() {
+        for p in ["/variants", "/etcetera", "/binaries", "/sbinary", "/usrs", "/privateer"] {
+            assert!(reject_sensitive_root(Path::new(p)).is_ok(), "{p} is not a system location");
         }
     }
 
