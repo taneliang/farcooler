@@ -128,10 +128,21 @@ struct RunnerStatusRow: View {
         case .connected:
             EmptyView()
 
+        // A way out, which this phase had none of. A mistyped but ROUTABLE
+        // address reads as "Connecting…" for the length of the OS's TCP
+        // timeout — over a minute — and until this button existed the only
+        // thing to do about it was wait the minute out and then correct it. The
+        // address is exactly what is wrong in that case, so the editor is the
+        // move; there is deliberately no per-row stop, because stopping is a
+        // fleet-level offer and `FleetView` already makes it once, held back
+        // four seconds so it does not flash up on a healthy launch. See
+        // `StopWaiting`.
         case .connecting:
             Text("Connecting…")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            Button("Edit…", action: onEdit)
+                .font(.footnote)
 
         // Not an error, and deliberately not worded as one: the rows above this
         // are this runner's last good answer and are still worth reading.
