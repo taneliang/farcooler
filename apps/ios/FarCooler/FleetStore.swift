@@ -102,14 +102,14 @@ final class FleetStore: ObservableObject {
     private var watchers: [UUID: AnyCancellable] = [:]
 
     private var runnersObserver: AnyCancellable?
+    private var settingObserver: AnyCancellable?
 
-    /// Whether to talk to every configured runner, or only the selected one.
-    ///
-    /// Hard `true` for one commit only. It becomes a setting in step 2 of the
-    /// port, mirroring Android's `Settings.allRunnersAtOnce` and its default —
-    /// see `FleetMembership.wanted`, which is where the choice is already
-    /// honored and already pinned by a test.
-    private let everyRunnerAtOnce = true
+    /// The gate's last known value, kept so the notification below can tell a
+    /// change from the hundred other things that write to `UserDefaults`.
+    /// `UserDefaults.didChangeNotification` fires for every one of them, and
+    /// reconciling on each would be harmless but would republish two arrays
+    /// per keystroke in the font-size slider.
+    private var everyRunnerAtOnce = FleetSettings.allRunnersAtOnce
 
     init(hosts: RunnerStore) {
         self.hosts = hosts
@@ -121,6 +121,11 @@ final class FleetStore: ObservableObject {
             // the same way.
             Task { @MainActor in self?.reconcile() }
         }
+        settingObserver = NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.gateChanged() }
+            }
     }
 
     deinit {
@@ -130,6 +135,13 @@ final class FleetStore: ObservableObject {
         // connection and would otherwise run a connect against a runner nobody
         // is looking at.
         for task in starts.values { task.cancel() }
+    }
+
+    private func gateChanged() {
+        let now = FleetSettings.allRunnersAtOnce
+        guard now != everyRunnerAtOnce else { return }
+        everyRunnerAtOnce = now
+        reconcile()
     }
 
     // MARK: - Membership

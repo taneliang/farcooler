@@ -64,6 +64,37 @@ enum NotificationSettings {
     }
 }
 
+/// What the phone is allowed to spend on the runners you are not looking at.
+///
+/// A bare key for the same reason the two above are: `@AppStorage` in a
+/// settings screen and `UserDefaults` in `FleetStore` read and write the same
+/// slot, so a change takes effect with nothing in between to publish it.
+enum FleetSettings {
+    static let allRunnersAtOnceKey = "allRunnersAtOnce"
+
+    /// Whether to connect every configured runner at once.
+    ///
+    /// **Defaults on**, matching Android's `Settings.allRunnersAtOnce`. The Mac
+    /// does this unconditionally and has no such setting, and the argument for
+    /// it is stronger on a phone rather than weaker — switching runners there
+    /// costs a sheet and two taps, and the product's whole claim is that an
+    /// agent blocked on a runner in another room is exactly as urgent as one on
+    /// this desk. It is a setting at all only because a phone pays for each
+    /// extra SSH session in radio wake-ups: somebody with six runners on a
+    /// train may want one.
+    ///
+    /// **No control writes this yet, on purpose.** The row belongs in
+    /// `SettingsView` beside the notification toggles, and it goes in when
+    /// `FleetStore` is the thing the app connects through — step 8 of the port
+    /// (`.claude/agent/done/the-fifth-cost-of-the-multi-runner-port.md`). A
+    /// switch labeled "Connect every runner at once" in an app that connects to
+    /// one runner at a time would be a control that does nothing, which is the
+    /// same lie as deleting the crossing alert before the crossing is free.
+    static var allRunnersAtOnce: Bool {
+        UserDefaults.standard.object(forKey: allRunnersAtOnceKey) as? Bool ?? true
+    }
+}
+
 /// Whether the bundled font actually made it into the running app.
 ///
 /// A font missing from `UIAppFonts`, or listed there under the wrong
