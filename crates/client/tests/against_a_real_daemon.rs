@@ -385,6 +385,74 @@ async fn a_failed_call_arrives_as_an_error_not_a_dropped_session() {
     assert!(session.fleet().await.is_ok());
 }
 
+/// A real refusal, from a real daemon, still naming its reason by the time it
+/// reaches the layer a phone reads.
+///
+/// `crates/core` maps every domain error onto a stable code and the daemon puts
+/// that code on the wire — and then, until now, `From<ClientError> for
+/// SessionError` collapsed it into `Protocol(message)` and the code was gone
+/// one layer above the wire. Twenty-eight machine words crossed the FFI and
+/// every one of them became the same generic apology, which is why both phones
+/// ended up matching substrings of a Rust `Display` string.
+///
+/// Three different refusals rather than one, because the value is in TELLING
+/// THEM APART: a phone that cannot distinguish "that folder can never be
+/// allowlisted" from "that folder overlaps one you already added" has to
+/// apologize the same way for both, and the two have opposite next moves.
+#[tokio::test]
+async fn a_refusal_keeps_the_reason_the_runner_named_it_by() {
+    use farcooler_client::session::SessionError;
+
+    let word = |e: SessionError| -> String {
+        match e {
+            SessionError::Refused { code, .. } => {
+                farcooler_core::error::word_for(code).to_string()
+            }
+            other => panic!("expected a named refusal, got {other:?}"),
+        }
+    };
+
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+
+    // Nothing by that id. "Refresh, it's gone" — not "try again".
+    let missing = uuid::Uuid::now_v7();
+    let e = session.hide_workspace(missing).await.expect_err("no such workspace");
+    assert_eq!(word(e), "not-found");
+
+    // A location that can never be allowlisted. "Pick a folder inside it."
+    //
+    // `/usr` rather than the more obvious `/etc`, and the reason is a finding
+    // in its own right: `Service::add_root` canonicalizes BEFORE it asks
+    // `reject_sensitive_root`, and on macOS `/etc`, `/var` and `/tmp` are
+    // symlinks into `/private`, so what that guard is handed is `/private/etc`
+    // and every one of its `starts_with("/etc")` prefixes misses. Its unit test
+    // hands it the literal path and so cannot see that. `/usr` is a real
+    // directory on macOS and is the same before and after canonicalizing.
+    let e = session.add_repository_root("/usr").await.expect_err("/usr is a system path");
+    assert_eq!(word(e), "sensitive-root");
+
+    // A folder that overlaps one already added. Same screen, same control, and
+    // an entirely different thing to do about it.
+    let dir = tempfile::tempdir().unwrap();
+    let inside = dir.path().join("nested");
+    std::fs::create_dir(&inside).unwrap();
+    session
+        .add_repository_root(&dir.path().to_string_lossy())
+        .await
+        .expect("the outer folder is addable");
+    let e = session
+        .add_repository_root(&inside.to_string_lossy())
+        .await
+        .expect_err("nested inside a root already added");
+    assert_eq!(word(e), "path-not-allowed");
+
+    // The session survived all three, which is the property
+    // `a_failed_call_arrives_as_an_error_not_a_dropped_session` guards and this
+    // must not have broken.
+    assert!(session.fleet().await.is_ok());
+}
+
 #[tokio::test]
 async fn removing_a_clean_worktree_needs_no_typed_name() {
     let daemon = start().await;

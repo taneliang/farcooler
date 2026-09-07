@@ -43,6 +43,16 @@ pub enum SessionError {
     DaemonMissing { daemon: &'static str },
     #[error("the runner runs protocol {daemon}; this client speaks {client}")]
     VersionMismatch { daemon: u32, client: u32 },
+    /// A refusal the runner NAMED, carrying the stable code it named it by.
+    ///
+    /// Deliberately distinct from `Protocol`, which is this client failing to
+    /// make sense of an answer. The code is the whole reason for the variant:
+    /// it is the only part of a refusal a client can act on, and folding it
+    /// into a string here is what made every refusal on both phones the same
+    /// generic apology. `Display` is still just the message, so nothing that
+    /// only wants the prose has to change.
+    #[error("{message}")]
+    Refused { code: i32, retryable: bool, message: String },
     /// The link underneath this session is gone.
     ///
     /// Deliberately distinct from `Protocol`, which is the far side saying
@@ -69,6 +79,7 @@ impl SessionError {
             | SessionError::Disconnected(_)
             | SessionError::DaemonMissing { .. } => true,
             SessionError::Protocol(_)
+            | SessionError::Refused { .. }
             | SessionError::WrongResult { .. }
             | SessionError::VersionMismatch { .. } => false,
         }
@@ -94,6 +105,12 @@ impl From<ClientError> for SessionError {
             ClientError::Codec(CodecError::Io(e)) => SessionError::Disconnected(e.to_string()),
             ClientError::Codec(e @ CodecError::Truncated) => {
                 SessionError::Disconnected(e.to_string())
+            }
+            // The runner said no, and said why. Kept whole: `Protocol` would
+            // throw the code away, and the code is the only thing an app can
+            // write a useful sentence from.
+            ClientError::Daemon { code, retryable, message } => {
+                SessionError::Refused { code, retryable, message }
             }
             other => SessionError::Protocol(other.to_string()),
         }

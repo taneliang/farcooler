@@ -492,6 +492,32 @@ impl Lost {
             Lost::Call(e) => e.to_string(),
         }
     }
+
+    /// The runner's stable word for this refusal, when a runner produced one.
+    ///
+    /// **The runner sends a machine word; the app owns the sentence.** The same
+    /// rule `Terminal.agent_failure` follows — and the reason it has to be
+    /// answered here rather than in Swift and again in Kotlin is the one
+    /// `push_call` already gives for `disconnected`: Rust still has the type at
+    /// the moment the error is produced, and both phones were reduced to
+    /// matching substrings of a Rust `Display` string because nothing carried
+    /// it across.
+    ///
+    /// `None` where nothing crossed the wire — no session at all, a dropped
+    /// link, an argument this boundary rejected before sending. Those have no
+    /// code because no runner produced one, and inventing a word for them would
+    /// tell an app a refusal happened when none did.
+    ///
+    /// A code this build has never seen still gets a word; see
+    /// `farcooler_core::error::word_for`.
+    fn word(&self) -> Option<&'static str> {
+        match self {
+            Lost::Call(SessionError::Refused { code, .. }) => {
+                Some(farcooler_core::error::word_for(*code))
+            }
+            Lost::Already | Lost::Call(_) => None,
+        }
+    }
 }
 
 /// Generate a new ed25519 key pair for this device.
@@ -2261,12 +2287,21 @@ fn push_call(
 ) {
     let payload = match outcome {
         Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
-        Err(reason) => json!({
-            "ticket": ticket,
-            "ok": false,
-            "error": reason.message(),
-            "disconnected": lost,
-        }),
+        Err(reason) => {
+            let mut line = json!({
+                "ticket": ticket,
+                "ok": false,
+                "error": reason.message(),
+                "disconnected": lost,
+            });
+            // Absent rather than null where no runner refused anything: a
+            // dropped link and a runner saying no are different failures, and
+            // a key that is always there would make an app read them alike.
+            if let Some(word) = reason.word() {
+                line["code"] = json!(word);
+            }
+            line
+        }
     };
     locked(queue).push_back(payload.to_string());
 }
@@ -2297,6 +2332,67 @@ unsafe fn read_str(pointer: *const c_char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The line a phone reads carries the runner's word, not just its prose.
+    ///
+    /// Read off `push_call`'s own JSON rather than off `Lost::word`, because
+    /// the JSON is the boundary: iOS and Android decode this line and nothing
+    /// else, so a word that exists in Rust but never reaches the line is a word
+    /// that never reaches a screen.
+    #[test]
+    fn a_refusal_reaches_the_line_with_the_runner_s_word_on_it() {
+        let line = |outcome: Result<Value, Lost>, lost: bool| -> Value {
+            let queue: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+            push_call(&queue, 7, outcome, lost);
+            let raw = locked(&queue).pop_front().expect("a line");
+            serde_json::from_str(&raw).expect("json")
+        };
+
+        let refused = line(
+            Err(Lost::Call(SessionError::Refused {
+                code: farcooler_protocol::v1::ErrorCode::WorkspacesExist as i32,
+                retryable: false,
+                message: "workspaces still exist under this resource".into(),
+            })),
+            false,
+        );
+        assert_eq!(refused["ok"], false);
+        assert_eq!(refused["code"], "workspaces-exist");
+        // The prose is still there. It is the app's fallback and its transcript,
+        // and carrying the word must not have cost it.
+        assert_eq!(refused["error"], "workspaces still exist under this resource");
+
+        // A runner NEWER than this build names a reason this build cannot read.
+        // It must still arrive as a word: an app that reads an unknown code as
+        // no code at all shows nothing where it owes the reader a failure.
+        let future = line(
+            Err(Lost::Call(SessionError::Refused {
+                code: 9_999,
+                retryable: false,
+                message: "something this build has never heard of".into(),
+            })),
+            false,
+        );
+        assert_eq!(future["code"], farcooler_core::error::UNRECOGNIZED_WORD);
+
+        // No runner refused anything here, so there is no word to carry. The
+        // key is ABSENT rather than null: a dropped link and a runner saying no
+        // are different failures and an app must not read them alike.
+        let dropped = line(
+            Err(Lost::Call(SessionError::Disconnected("the pipe closed".into()))),
+            true,
+        );
+        assert_eq!(dropped["disconnected"], true);
+        assert!(dropped.get("code").is_none(), "a dropped link is not a refusal");
+
+        let never_connected = line(Err(Lost::Already), true);
+        assert!(never_connected.get("code").is_none());
+
+        // And an answer that worked carries neither.
+        let ok = line(Ok(json!({ "fine": true })), false);
+        assert_eq!(ok["ok"], true);
+        assert!(ok.get("code").is_none());
+    }
 
     /// A pair whose public half the fence would refuse never reaches an app.
     ///

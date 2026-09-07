@@ -171,6 +171,76 @@ impl DomainError {
     }
 }
 
+/// The word a client switches on, for a code that came off the wire.
+///
+/// **The runner sends a stable machine word; the app owns the sentence.** The
+/// same rule `Terminal.agent_failure` follows with `not-authenticated` and
+/// friends, and `TunnelError::code` follows for the tunnel — spelled the same
+/// way, in kebab-case, rather than in the proto's `ERROR_CODE_SCOPE_DENIED`
+/// shouting form, because these are read in Swift and Kotlin beside those
+/// other words and one vocabulary is easier to hold than three.
+///
+/// Deliberately NOT `DomainError`'s `Display`. That text is written for
+/// whoever is reading a daemon log — "resource version is stale", "invalid
+/// argument: idempotency_key" — and it is the thing this word exists to keep
+/// off a screen.
+///
+/// Exhaustive: adding a code to the proto without a word here fails the build.
+pub fn word(code: ErrorCode) -> &'static str {
+    match code {
+        ErrorCode::Unspecified => "unspecified",
+        ErrorCode::AuthRequired => "auth-required",
+        ErrorCode::ScopeDenied => "scope-denied",
+        ErrorCode::VersionIncompatible => "version-incompatible",
+        ErrorCode::HostOffline => "host-offline",
+        ErrorCode::RepositoryLocked => "repository-locked",
+        ErrorCode::BranchExists => "branch-exists",
+        ErrorCode::WorktreeExists => "worktree-exists",
+        ErrorCode::DirtyWorktree => "dirty-worktree",
+        ErrorCode::RunningProcesses => "running-processes",
+        ErrorCode::OutputGap => "output-gap",
+        ErrorCode::ClientTooSlow => "client-too-slow",
+        ErrorCode::OperationFailed => "operation-failed",
+        ErrorCode::ResourceConflict => "resource-conflict",
+        ErrorCode::NotFound => "not-found",
+        ErrorCode::InvalidArgument => "invalid-argument",
+        ErrorCode::IdempotencyMismatch => "idempotency-mismatch",
+        ErrorCode::TmuxUnavailable => "tmux-unavailable",
+        ErrorCode::PathNotAllowed => "path-not-allowed",
+        ErrorCode::ConfirmationRequired => "confirmation-required",
+        ErrorCode::WorkspacesExist => "workspaces-exist",
+        ErrorCode::SensitiveRoot => "sensitive-root",
+        ErrorCode::BaseUnresolvable => "base-unresolvable",
+        ErrorCode::DiffTooLarge => "diff-too-large",
+        ErrorCode::DiffUnsupported => "diff-unsupported",
+        ErrorCode::PrStateUnavailable => "pr-state-unavailable",
+        ErrorCode::AttachmentLimit => "attachment-limit",
+        ErrorCode::DispatchUnknown => "dispatch-unknown",
+        ErrorCode::CapabilityUnsupported => "capability-unsupported",
+    }
+}
+
+/// A code number this build has no name for.
+///
+/// Its own word rather than `"unspecified"`, which means something else and
+/// already has a code: zero is a daemon that named no reason, this is a daemon
+/// that named one we are too old to read.
+pub const UNRECOGNIZED_WORD: &str = "unrecognized";
+
+/// The word for a raw wire integer, INCLUDING one this build has never heard
+/// of.
+///
+/// Total by construction, and that is the whole point. A runner newer than the
+/// client sends a number that is not in `ErrorCode` yet, and the one thing that
+/// must not happen then is for the refusal to arrive carrying no code at all: a
+/// client that reads an unknown code as nothing shows nothing where it owes the
+/// reader a failure. That exact bug shipped in the agent-failure work and had to
+/// be fixed on macOS afterwards; it is answered here so no client has to
+/// remember to.
+pub fn word_for(code: i32) -> &'static str {
+    ErrorCode::try_from(code).map(word).unwrap_or(UNRECOGNIZED_WORD)
+}
+
 pub type Result<T> = std::result::Result<T, DomainError>;
 
 #[cfg(test)]
@@ -237,6 +307,50 @@ mod tests {
             assert!(!m.contains('\\'), "{e:?} message contains a path separator");
             assert!(!m.contains("session"), "{e:?} message mentions a session id");
         }
+    }
+
+    /// A word per variant, and never the two that mean "no word".
+    ///
+    /// `unspecified` is a daemon that named no reason and `unrecognized` is a
+    /// code this build cannot read; a produced error landing on either would be
+    /// a code that reaches a phone as no code at all.
+    #[test]
+    fn every_variant_has_a_word_of_its_own() {
+        let mut seen = std::collections::HashSet::new();
+        for e in all_variants() {
+            let w = word(e.code());
+            assert_ne!(w, "unspecified", "{e:?} has no word");
+            assert_ne!(w, UNRECOGNIZED_WORD, "{e:?} has no word");
+            assert!(seen.insert(w), "{e:?} reuses the word {w}");
+        }
+    }
+
+    /// The words are what Swift and Kotlin switch on, so their SHAPE is part of
+    /// the contract: lowercase kebab, the way `agent_failure`'s are.
+    #[test]
+    fn words_are_lowercase_kebab() {
+        for e in all_variants() {
+            let w = word(e.code());
+            assert!(
+                w.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+                "{e:?} has the word {w}, which is not lowercase kebab"
+            );
+        }
+    }
+
+    /// The rule an unknown code has to obey, stated where it is decided.
+    ///
+    /// A runner newer than this client sends a number `ErrorCode` does not
+    /// have. It must come back as a word — the generic one — and never as
+    /// nothing, because a client that reads it as nothing shows nothing.
+    #[test]
+    fn a_code_from_the_future_still_has_a_word() {
+        assert_eq!(word_for(ErrorCode::TmuxUnavailable as i32), "tmux-unavailable");
+        assert_eq!(word_for(0), "unspecified");
+        // Well past the last code the proto declares, which is what the next
+        // release of the daemon will be sending.
+        assert_eq!(word_for(9_999), UNRECOGNIZED_WORD);
+        assert_eq!(word_for(-1), UNRECOGNIZED_WORD);
     }
 
     #[test]
