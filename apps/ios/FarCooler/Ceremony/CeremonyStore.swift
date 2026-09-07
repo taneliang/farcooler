@@ -737,18 +737,35 @@ final class CeremonyStore: ObservableObject {
         }
     }
 
-    /// The runners this device can actually write to: at most one of them.
+    /// The runners this device can actually write to: every granted runner it
+    /// has a live connection to.
     ///
     /// A Mac reaches every granted runner, because its `Enrollment` shells out
     /// to `farcooler --runner <target> client enroll` and inherits the agent,
     /// the passphrase prompt, `ProxyJump` and everything else ssh already
-    /// knows. **A phone has no ssh at all.** What it has is one `Connection` —
-    /// the session `FleetView` is running, to the runner whose fleet is on
-    /// screen — so for every other granted runner the honest answer is no entry
-    /// at all, and `confirm()` marks those pending. That is not a shortfall
-    /// being hidden: pending is exactly "the trusted device has not yet written
-    /// this key into that runner's `authorized_keys`", and it is what the new
+    /// knows. **A phone has no ssh at all.** What it has is the sessions the
+    /// store is running — and that used to be one, which is why this wrote at
+    /// most one `authorized_keys` however many runners a manifest granted.
+    ///
+    /// It is no longer one, so this is an intersection rather than a lookup,
+    /// and `CeremonyReach` is where that intersection and its rule live: **a
+    /// live connection is not an authorization.** The manifest is. A runner
+    /// this phone happens to hold a session to, that nobody granted, must never
+    /// have a key appended to it — and that direction has a cost the other one
+    /// does not, which is why it is pinned by a test rather than by this
+    /// sentence.
+    ///
+    /// A granted runner with no connection is still no entry at all, and
+    /// `confirm()` still marks those pending. That is not a shortfall being
+    /// hidden: pending is exactly "the trusted device has not yet written this
+    /// key into that runner's `authorized_keys`", and it is what the new
     /// device's screen reads.
+    ///
+    /// One at a time rather than in a group. Each of these is an SSH round trip
+    /// to a different machine, and what a person is waiting on is the manifest
+    /// as a whole; running them concurrently would buy seconds on the rare
+    /// three-runner grant at the cost of N in-flight writes to N
+    /// `authorized_keys` files with one shared failure story.
     ///
     /// Matched by id, and by the ceremony's spelling of one: these records came
     /// from this device's own runner list a moment ago in `picked()`, so the id
@@ -758,14 +775,18 @@ final class CeremonyStore: ObservableObject {
         publicKey: String, label: String, clientId: String, nodeKey: String,
         runners: [CeremonyRunner]
     ) async -> [String: Connection.Enrollment] {
-        guard let connection = Connection.current,
-            let reachable = connection.hostId?.uuidString,
-            runners.contains(where: { $0.id == reachable })
-        else { return [:] }
-        return [
-            reachable: await connection.enroll(
+        let writable = CeremonyReach.writable(
+            granted: runners.map(\.id),
+            live: Connection.liveRunners.map(\.uuidString))
+        var written: [String: Connection.Enrollment] = [:]
+        for id in writable {
+            guard let runner = UUID(uuidString: id),
+                let connection = Connection.live(for: runner)
+            else { continue }
+            written[id] = await connection.enroll(
                 publicKey: publicKey, label: label, clientId: clientId, nodeKey: nodeKey)
-        ]
+        }
+        return written
     }
 
     /// What to say about the runners that did not take the key, or nil when

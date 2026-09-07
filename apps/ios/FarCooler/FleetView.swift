@@ -22,8 +22,23 @@ import SwiftUI
 struct FleetView: View {
     let host: Runner
     let store: RunnerStore
+    /// Every runner this app is talking to.
+    ///
+    /// It used to own a `Connection` of its own — one `@StateObject`, started
+    /// by this view's `.task` and torn down with it. That is what made the
+    /// runner a mode: the connection's lifetime was a screen's lifetime, so
+    /// reaching another runner meant destroying the screen. The store owns
+    /// every connection now and this view reads the one for its runner.
+    @ObservedObject var fleet: FleetStore
 
-    @StateObject private var connection = Connection()
+    /// This runner's connection, or nil while the store has not brought one up.
+    ///
+    /// Nil is the moment between a runner being added and its connection
+    /// existing, which is a frame or two. Drawn as `connecting`, because that
+    /// is what it is.
+    private var connection: Connection? { fleet.connection(for: host.id) }
+
+    private var phase: Connection.Phase { connection?.phase ?? .connecting }
 
     /// Whether the runner has told us what it has, at least once.
     ///
@@ -37,7 +52,7 @@ struct FleetView: View {
     /// back through `reconnectNow` — which is the ordinary way out of the
     /// failure screen. `Connection.hasFleet` is set by the read itself, which
     /// is the only moment that actually answers the question.
-    private var hasFleet: Bool { connection.hasFleet }
+    private var hasFleet: Bool { connection?.hasFleet ?? false }
 
     /// The terminal a tapped Live Activity card asked for, held until a fleet
     /// arrives that has it.
@@ -85,7 +100,6 @@ struct FleetView: View {
                     onSave: { store.update($0) },
                     onRemove: { store.remove($0) })
             }
-            .task { await connect(host) }
             // The app coming back is the moment a backoff timer cannot predict.
             //
             // Here rather than in `RootView`, because this is where the
@@ -94,8 +108,10 @@ struct FleetView: View {
             // phone in a pocket stops polling — which is both a battery
             // question and one plausible way the session died in the first
             // place.
+            // Every runner, not one. One scene phase, N connections — see
+            // `FleetStore.setActive`.
             .onChange(of: scenePhase) { _, phase in
-                connection.setActive(phase == .active)
+                fleet.setActive(phase == .active)
             }
             // A workspace leaving the fleet no longer needs anything from this
             // view.
@@ -138,7 +154,7 @@ struct FleetView: View {
             // coming. Watched on the fleet's own generation rather than on
             // `hasFleet` alone, because the pane a card names can also be
             // stopped between the tap and the answer.
-            .onChange(of: connection.pollGeneration) { _, _ in dropUnknownTerminal() }
+            .onChange(of: connection?.pollGeneration) { _, _ in dropUnknownTerminal() }
     }
 
     /// One branch per connection phase, and the one place a `NavigationStack`
@@ -161,7 +177,7 @@ struct FleetView: View {
     /// bar in it belongs to the overview, which declares a stack of its own.
     @ViewBuilder
     private var phases: some View {
-        switch connection.phase {
+        switch phase {
         case .connecting:
             NavigationStack { escapable { connecting } }
 
@@ -218,7 +234,9 @@ struct FleetView: View {
     /// Held open, a pane created much later would be jumped to long after
     /// anybody tapped anything.
     private func dropUnknownTerminal() {
-        guard let id = pendingTerminal, connection.phase == .connected, hasFleet else { return }
+        guard let id = pendingTerminal, let connection, connection.phase == .connected,
+            hasFleet
+        else { return }
         let all = connection.fleet.workspaces.flatMap(\.terminals)
         guard !all.contains(where: { $0.id == id }) else { return }
         pendingTerminal = nil
@@ -269,7 +287,7 @@ struct FleetView: View {
                 .foregroundStyle(.secondary)
 
             if stalled {
-                Button("Stop Waiting") { connection.giveUp(on: host) }
+                Button("Stop Waiting") { connection?.giveUp(on: host) }
                     .buttonStyle(.bordered)
                     .padding(.top, 8)
                     .transition(.opacity)
@@ -300,7 +318,7 @@ struct FleetView: View {
     /// same question with rows instead of cards was a second thing to keep
     /// true.
     private var connected: some View {
-        ShellScreen(connection: connection, hosts: store, pendingTerminal: $pendingTerminal)
+        ShellScreen(fleet: fleet, hosts: store, pendingTerminal: $pendingTerminal)
     }
 
     /// The wait for the runner's first answer.
@@ -316,29 +334,21 @@ struct FleetView: View {
             .navigationBarTitleDisplayMode(.inline)
     }
 
-    /// Connect, then let the inbox draw whatever fleet that connection
-    /// produced.
+    /// Dial this runner again, from the beginning.
     ///
-    /// Shared by the initial `.task` and every retry below — the approval
-    /// screen's "Trust This Runner" and the failure screen's "Try Again" each
-    /// start a fresh connection of their own, and each one has to end with the
-    /// deep link getting its second look.
+    /// **This view no longer starts a connection**, and that is the shape of
+    /// the whole port. It used to own one and drive it — `.task { await
+    /// connect(host) }` on appearance, a fresh `start` behind every button —
+    /// which is what tied a connection's lifetime to a screen's. `FleetStore`
+    /// dials, and this is the one runner's retry, which is deliberately not the
+    /// same act as "reconnect everything": retrying the runner in the spare room
+    /// must not cost a reconnect on the one being read.
     ///
-    /// What is gone from here is `landing = connection.fleet.landingTerminal`.
-    /// That line chose an agent for you at every connect, and it chose one on
-    /// every reconnection ceremony too — so a phone that lost its tunnel in
-    /// transit could come back on a different pane than the one you were
-    /// reading.
-    private func connect(_ target: Runner) async {
-        await connection.start(host: target)
-        // A card tapped at cold launch delivers its URL before there is a
-        // fleet to look the id up in. Nothing has to be re-run for it now:
-        // `ShellScreen.requestedTab` is derived from this connection's own
-        // fleet, so a fleet arriving IS the second look. What is left is
-        // deciding that an id this runner does not have is never coming — see
-        // `dropUnknownTerminal`.
-        dropUnknownTerminal()
-    }
+    /// Nothing has to be re-run for a deep link. `ShellScreen.requestedTab` is
+    /// derived from the fleet, so a fleet arriving IS the second look; what is
+    /// left is deciding that an id nobody has is never coming, which
+    /// `dropUnknownTerminal` does off the poll counter.
+    private func retry() { fleet.retry(host.id) }
 
     // MARK: - Phases
 
@@ -406,10 +416,15 @@ struct FleetView: View {
 
             VStack(spacing: 18) {
                 Button {
+                    // **One connect for one tap.** Writing the fingerprint into
+                    // `hosts` is the connect: the store sees this runner's
+                    // details no longer match the ones its connection was
+                    // dialed with, retires the unpinned session and dials a
+                    // fresh one carrying the key. This used to do that AND
+                    // start a second connection with its own approved copy,
+                    // which under the store would be two connects racing for
+                    // one runner id. See `RunnerStore.trust`.
                     store.trust(host, fingerprint: fingerprint)
-                    var trusted = host
-                    trusted.fingerprint = fingerprint
-                    Task { await connect(trusted) }
                 } label: {
                     Text("Trust This Runner").frame(maxWidth: .infinity)
                 }
@@ -427,7 +442,7 @@ struct FleetView: View {
                 // `failure` gives about its own alternatives: two pills give two
                 // things the same weight when only one of them is the answer.
                 Button("Not Now") {
-                    connection.declineHostKey(host)
+                    connection?.declineHostKey(host)
                 }
             }
             .padding(.horizontal, 40)
@@ -505,7 +520,7 @@ struct FleetView: View {
                 primaryAction(kind)
 
                 if kind.worthRetryingAsAlternative {
-                    Button("Try Again") { Task { await connect(host) } }
+                    Button("Try Again") { retry() }
                 }
                 if kind.offersEditingTheRunner {
                     Button("Edit This Runner…") { editing = true }
@@ -549,10 +564,11 @@ struct FleetView: View {
 
         case .reviewTheNewKey:
             Button(role: .destructive) {
+                // Forgetting the pin is the reconnect, for `trust`'s reason
+                // exactly: the details change, so the store rebuilds — and the
+                // fresh connection comes back asking the fingerprint question,
+                // which is the whole point of this button.
                 store.forgetKey(host)
-                var untrusted = host
-                untrusted.fingerprint = nil
-                Task { await connect(untrusted) }
             } label: {
                 Text(kind.nextMove.label).frame(maxWidth: .infinity)
             }
@@ -561,9 +577,10 @@ struct FleetView: View {
 
         case .showTheKeyAgain:
             Button {
-                var untrusted = host
-                untrusted.fingerprint = nil
-                Task { await connect(untrusted) }
+                // The same act as `reviewTheNewKey` from the store's side —
+                // clear the pin, which is what makes the store dial again and
+                // ask. What differs is only what the app is admitting.
+                store.forgetKey(host)
             } label: {
                 Text(kind.nextMove.label).frame(maxWidth: .infinity)
             }
@@ -572,7 +589,7 @@ struct FleetView: View {
 
         case .tryAgain:
             Button {
-                Task { await connect(host) }
+                retry()
             } label: {
                 Text(kind.nextMove.label).frame(maxWidth: .infinity)
             }
@@ -583,7 +600,7 @@ struct FleetView: View {
 
     @ViewBuilder
     private func retry(_ style: some PrimitiveButtonStyle) -> some View {
-        Button("Try Again") { Task { await connect(host) } }
+        Button("Try Again") { retry() }
             .buttonStyle(style)
     }
 }
@@ -605,9 +622,13 @@ struct FleetView: View {
 struct HostSwitcherBar: View {
     @ObservedObject var hosts: RunnerStore
     /// The connection whose state the chip shows, and which its tap retries.
-    /// Also how the settings screen names the daemon it is talking to. Absent
-    /// before a connection exists, which is most of the time this bar matters.
-    @ObservedObject var connection: Connection
+    /// Also how the settings screen names the daemon it is talking to.
+    ///
+    /// Optional now that the store owns connections: a runner that has just
+    /// been added has no connection for the frame before the store brings one
+    /// up, and this bar is under exactly the screens that show before one
+    /// exists.
+    var connection: Connection?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -619,7 +640,7 @@ struct HostSwitcherBar: View {
 
             Spacer(minLength: 0)
 
-            LinkStatusChip(connection: connection)
+            if let connection { LinkStatusChip(connection: connection) }
         }
         .padding(.horizontal, 16)
         // The 10 points of vertical padding that used to be here are gone, and
@@ -650,7 +671,14 @@ struct HostSwitcherBar: View {
 /// offering different things.
 struct RunnerMenu: View {
     @ObservedObject var hosts: RunnerStore
-    @ObservedObject var connection: Connection
+    /// The runner this menu is standing over, for the settings sheet it opens.
+    ///
+    /// Optional, and nil is an ordinary answer rather than a gap: the shell
+    /// draws this over a MERGED fleet, so before it has come to rest there is
+    /// no one runner the menu is about. `SettingsView` has taken an optional
+    /// connection since the onboarding screen learned to open it, and for the
+    /// same reason — a screen with no runner behind it still has settings.
+    var connection: Connection?
     /// Called after picking a different runner, for a caller that has something
     /// to close. Nil everywhere it is part of the screen.
     var onSwitch: (() -> Void)?
@@ -993,15 +1021,29 @@ struct RemoveWorktreeConfirmSheet: View {
 /// tapped on can be unmounted before the answer comes back — the overview is
 /// mounted from the first point of a lift and gone again when nothing is
 /// touching it — so the presenter has to be something that outlives it.
+/// **The connection is part of the request**, and that is the multi-runner
+/// port's mark on this ceremony. A removal is a call to ONE daemon about a
+/// worktree only that daemon has, and the screen that starts it can be looking
+/// at a merged fleet: the overview's grid holds cards from every connected
+/// runner. Resolving the connection where the flow runs rather than where the
+/// menu was tapped would run `workspace.remove_worktree` against whichever
+/// runner the shell happened to be resting on — with an id that is eight hex
+/// characters and means something different over there.
 enum RemoveWorktreeRequest {
     /// "Remove worktree for X?", with a Remove and a Cancel.
-    case confirming(Workspace)
+    case confirming(Workspace, on: Connection)
     /// The typed-name ceremony, which is also where a refusal is reported.
-    case typing(Workspace)
+    case typing(Workspace, on: Connection)
 
     var workspace: Workspace {
         switch self {
-        case .confirming(let workspace), .typing(let workspace): return workspace
+        case .confirming(let workspace, _), .typing(let workspace, _): return workspace
+        }
+    }
+
+    var connection: Connection {
+        switch self {
+        case .confirming(_, let connection), .typing(_, let connection): return connection
         }
     }
 }
@@ -1027,7 +1069,6 @@ enum RemoveWorktreeRequest {
 /// failure to appear is one of them nobody maintains.
 struct RemoveWorktreeFlow: ViewModifier {
     @Binding var request: RemoveWorktreeRequest?
-    let connection: Connection
 
     /// True only while the first dialog is the step we are on, so advancing to
     /// the sheet takes the dialog down without ending the flow.
@@ -1037,7 +1078,7 @@ struct RemoveWorktreeFlow: ViewModifier {
     }
 
     private var typing: Workspace? {
-        if case .typing(let workspace) = request { return workspace }
+        if case .typing(let workspace, _) = request { return workspace }
         return nil
     }
 
@@ -1061,12 +1102,16 @@ struct RemoveWorktreeFlow: ViewModifier {
                 presenting: request?.workspace
             ) { workspace in
                 Button("Remove", role: .destructive) {
+                    // Read off the request rather than off the modifier, so the
+                    // call goes to the runner the worktree is on. See
+                    // `RemoveWorktreeRequest`.
+                    guard let connection = request?.connection else { return }
                     Task {
                         switch await connection.removeWorktree(workspace, confirm: "") {
                         case .ok:
                             request = nil
                         case .confirmationRequired, .failed:
-                            request = .typing(workspace)
+                            request = .typing(workspace, on: connection)
                         }
                     }
                 }
@@ -1077,8 +1122,20 @@ struct RemoveWorktreeFlow: ViewModifier {
                     get: { typing },
                     set: { workspace in if workspace == nil { request = nil } })
             ) { workspace in
+                // The connection is captured from the request that BUILT this
+                // sheet rather than read at tap time, for the same reason the
+                // dialog's `presenting:` exists one modifier up: the answer
+                // arrives after the request has been cleared.
+                let connection = request?.connection
                 RemoveWorktreeConfirmSheet(workspace: workspace) { typed in
-                    await connection.removeWorktree(workspace, confirm: typed)
+                    // A sheet with no connection behind it cannot happen — the
+                    // request that opened it carried one — and reports the
+                    // runner having gone rather than claiming a removal that
+                    // never left the phone.
+                    guard let connection else {
+                        return .failed("This runner is no longer connected.", word: nil)
+                    }
+                    return await connection.removeWorktree(workspace, confirm: typed)
                 }
             }
     }
@@ -1086,10 +1143,8 @@ struct RemoveWorktreeFlow: ViewModifier {
 
 extension View {
     /// Ask about, and carry out, the removal `request` names.
-    func removeWorktreeFlow(
-        _ request: Binding<RemoveWorktreeRequest?>, connection: Connection
-    ) -> some View {
-        modifier(RemoveWorktreeFlow(request: request, connection: connection))
+    func removeWorktreeFlow(_ request: Binding<RemoveWorktreeRequest?>) -> some View {
+        modifier(RemoveWorktreeFlow(request: request))
     }
 }
 

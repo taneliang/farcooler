@@ -36,19 +36,13 @@ struct FleetEntry: Identifiable {
 /// publishes the merge. Views observe this one object rather than a connection
 /// each.
 ///
-/// **Nothing constructs this yet, and that is deliberate.** It is step 1 of a
-/// nine-step port (`.claude/agent/done/the-fifth-cost-of-the-multi-runner-port.md`),
-/// and steps 5 to 7 are what make it safe to wire in. Until they land, this
-/// store starting N connections would have every one of them fight over the
-/// three process-wide slots `Connection.start` still claims:
+/// **This is what the app connects through.** `RootView` owns one, every screen
+/// reads it, and `FleetView` no longer owns a `Connection` of its own.
 ///
-/// - `WatchLinkHost.shared.adopt` — the watch would perform everything through
-///   whichever runner happened to start last.
-/// - `Connection.current` — the enrollment ceremony writes `authorized_keys`
-///   through that slot, so the same lottery would decide which runner a device
-///   gets added to.
-/// - the one `fleet.json` — whichever connection polled last would define the
-///   whole lock screen's fleet.
+/// How MANY runners it dials is `Scope`'s answer, and while the port is
+/// unfinished that answer is deliberately one — see `Scope.oneRunner`, which is
+/// the whole of what keeps this app single-connection until the slots
+/// `Connection.start` still claims have owners.
 ///
 /// `Reachability` is NOT on that list any more: it holds a list of subscribers
 /// keyed by runner id rather than one slot, so every connection here is woken
@@ -65,6 +59,31 @@ struct FleetEntry: Identifiable {
 /// why" to live. That somewhere is `RunnerStatusRow`.
 @MainActor
 final class FleetStore: ObservableObject {
+    /// How many runners this store may dial.
+    ///
+    /// **A step in the port wearing a type, and it is meant to be deleted.**
+    /// Steps 5 to 7 rewire every screen, the watch and `fleet.json` to a merged
+    /// fleet, and each of them is meant to be behavior-neutral: with one
+    /// connection in the store, the app does exactly what it did. What makes
+    /// that a guarantee rather than a hope is this — not the `allRunnersAtOnce`
+    /// setting, which defaults ON and would make the app multi-connection the
+    /// moment the store went live, with the watch, the ceremony and the lock
+    /// screen still fighting over the one slot each of them holds.
+    enum Scope: Equatable {
+        /// Every runner the battery gate allows. What the app becomes at step
+        /// 8, and what the setting means anything for.
+        case theWholeFleet
+        /// The selected runner, whatever the setting says.
+        ///
+        /// Not "one connection" as a policy — the runner list is still watched,
+        /// and selecting another one retires this connection and dials that
+        /// one, which is what `RootView` used to do by rebuilding its whole
+        /// tree.
+        case oneRunner
+    }
+
+    let scope: Scope
+
     /// Every workspace on every connected runner, in runner order.
     @Published private(set) var entries: [FleetEntry] = []
 
@@ -72,6 +91,16 @@ final class FleetStore: ObservableObject {
     @Published private(set) var active: [Connection] = []
 
     private let hosts: RunnerStore
+
+    /// The runners to publish in the order of, which is `hosts` in the app and
+    /// a canned list in the layout harness. See `standIn(on:host:)`.
+    private var runnerOrder: [Runner] {
+        #if DEBUG
+        standInOrder.isEmpty ? hosts.hosts : standInOrder
+        #else
+        hosts.hosts
+        #endif
+    }
 
     private var connections: [UUID: Connection] = [:]
 
@@ -109,10 +138,14 @@ final class FleetStore: ObservableObject {
     /// `UserDefaults.didChangeNotification` fires for every one of them, and
     /// reconciling on each would be harmless but would republish two arrays
     /// per keystroke in the font-size slider.
-    private var everyRunnerAtOnce = FleetSettings.allRunnersAtOnce
+    private var everyRunnerAtOnce: Bool
 
-    init(hosts: RunnerStore) {
+    init(hosts: RunnerStore, scope: Scope = .theWholeFleet) {
         self.hosts = hosts
+        self.scope = scope
+        // Read once here rather than at every reconcile, so `oneRunner` is not
+        // a filter that a `UserDefaults` write could step around.
+        self.everyRunnerAtOnce = scope == .theWholeFleet && FleetSettings.allRunnersAtOnce
         reconcile()
         runnersObserver = hosts.objectWillChange.sink { [weak self] _ in
             // `objectWillChange` fires BEFORE the array is updated, so this has
@@ -138,6 +171,10 @@ final class FleetStore: ObservableObject {
     }
 
     private func gateChanged() {
+        // Nothing to change while the port has this store pinned to one runner.
+        // A setting nobody can reach cannot move, but reading it here anyway
+        // would make `oneRunner` depend on that being true.
+        guard scope == .theWholeFleet else { return }
         let now = FleetSettings.allRunnersAtOnce
         guard now != everyRunnerAtOnce else { return }
         everyRunnerAtOnce = now
@@ -221,10 +258,10 @@ final class FleetStore: ObservableObject {
     /// both other platforms do, and `RunnerStatusRow` is what explains why those
     /// rows are stale.
     private func publish() {
-        let ordered = FleetMembership.published(order: hosts.hosts.map(\.id), live: connections)
+        let ordered = FleetMembership.published(order: runnerOrder.map(\.id), live: connections)
         active = ordered
 
-        let byID = Dictionary(hosts.hosts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let byID = Dictionary(runnerOrder.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         entries = ordered.flatMap { connection -> [FleetEntry] in
             guard let id = connection.hostId, let host = byID[id] else { return [] }
             let counts = connection.inbox
@@ -288,4 +325,58 @@ final class FleetStore: ObservableObject {
     func setActive(_ active: Bool) {
         for connection in connections.values { connection.setActive(active) }
     }
+
+    // MARK: - What the screens ask
+
+    /// Whether ANY runner has said what it has, at least once.
+    ///
+    /// `Connection.hasFleet`'s question asked of a fleet rather than of a
+    /// runner, and the difference is the whole of why the app no longer blanks
+    /// for one sleeping laptop: the shell opens as soon as there is a pane to
+    /// open on, wherever it is, and a runner still connecting is a row rather
+    /// than a screen. See `RunnerStatusRow`.
+    var hasFleet: Bool { active.contains { $0.hasFleet } }
+
+    /// The runners being talked to, paired with what they are, in list order.
+    ///
+    /// For the screens that draw a row per runner. `active` alone cannot answer
+    /// it — a `Connection` reports an id and this is what turns that back into
+    /// the runner a person named.
+    var runners: [(host: Runner, connection: Connection)] {
+        hosts.hosts.compactMap { host in
+            connections[host.id].map { (host, $0) }
+        }
+    }
+
+    #if DEBUG
+    /// Stand this store on one connection nobody dialed, for
+    /// `AgentLayoutHarness` — the same trick `Connection.standIn(on:)` plays,
+    /// one layer up, and for the same reason.
+    ///
+    /// The harness mounts the shipping shell over a canned fleet, and the shell
+    /// reads a store now rather than a connection. Without this the harness
+    /// would need a real `Runner` in a real `RunnerStore`, which is a harness
+    /// that dials a machine.
+    static func standIn(on connection: Connection, host: Runner) -> FleetStore {
+        let store = FleetStore(hosts: RunnerStore(), scope: .oneRunner)
+        store.connections[host.id] = connection
+        store.dialed[host.id] = host
+        store.standInOrder = [host]
+        store.publish()
+        return store
+    }
+
+    /// The runner order to publish in when there is no `RunnerStore` behind
+    /// this one. Empty in the app, where `hosts` is the answer.
+    private var standInOrder: [Runner] = []
+
+    /// Publish again, for a harness that has just filled its canned fleet in.
+    ///
+    /// `publish` runs off `Connection.objectWillChange`, which fires on the
+    /// turn BEFORE the value lands — so a fixture written in a `.task` reaches
+    /// the merge one body pass later, and the shell draws an empty fleet in
+    /// between. The app never sees that gap because its first fleet arrives
+    /// after several polls of nothing; a harness's arrives at once.
+    func republish() { publish() }
+    #endif
 }

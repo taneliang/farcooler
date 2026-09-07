@@ -151,6 +151,12 @@ AGENTKIT_SOURCES = [
     # the iOS UI suite is compiled by CI and never executed. See
     # `ShellIdentityTests`.
     "ShellIdentity.swift",
+    # Which of the runners a ceremony granted this device may write a key into.
+    # Here rather than in `CeremonyStore` because of what the answer is used for
+    # -- appending to `~/.ssh/authorized_keys` -- and because the direction that
+    # costs something, a live runner nobody granted, is a rule no screen can
+    # show you. See `CeremonyReachTests`.
+    "CeremonyReach.swift",
     # Which runners the phone should be talking to, and what changing that list
     # costs. Here for `ShellNavigation.swift`'s reason exactly: the rules a
     # reconcile has to keep have no screen in them, and the iOS UI suite is

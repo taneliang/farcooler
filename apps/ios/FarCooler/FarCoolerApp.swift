@@ -93,6 +93,42 @@ struct RootView: View {
     @StateObject private var hosts = RunnerStore()
 
     var body: some View {
+        // The runner list and the connections to those runners are two objects
+        // with two lifetimes, and this view can only own one `@StateObject`
+        // that the other's initializer can see. So the store is built one level
+        // down, from a `RunnerStore` that already exists. See `ConnectedRoot`.
+        ConnectedRoot(hosts: hosts)
+    }
+}
+
+/// The app, with somewhere to put the connections.
+///
+/// Split from `RootView` for one reason: `FleetStore` takes the `RunnerStore`
+/// it watches, and a `@StateObject`'s initial value cannot read another
+/// `@StateObject` in the same view. Passing an already-built `RunnerStore` in
+/// makes the dependency an argument instead of an ordering problem.
+///
+/// **The store is owned HERE and not inside `FleetView`**, and that is the
+/// whole point of the split. `FleetView` is keyed `.id(host)` and is destroyed
+/// when the selected runner changes; a store that went with it would tear down
+/// every connection on every crossing, which is the mode the port exists to
+/// remove. The store outlives the screen and reconciles instead.
+struct ConnectedRoot: View {
+    @ObservedObject var hosts: RunnerStore
+    @StateObject private var fleet: FleetStore
+
+    init(hosts: RunnerStore) {
+        self.hosts = hosts
+        // `.oneRunner` while the port is unfinished, and it is deliberately not
+        // the `allRunnersAtOnce` setting. Steps 5 to 7 rewire the screens, the
+        // watch and `fleet.json` to a merged fleet and are each meant to change
+        // no behavior; what makes that a guarantee is this argument. Step 8 is
+        // where it becomes `.theWholeFleet` and the setting starts meaning
+        // something. See `FleetStore.Scope`.
+        _fleet = StateObject(wrappedValue: FleetStore(hosts: hosts, scope: .oneRunner))
+    }
+
+    var body: some View {
         Group {
             if let host = hosts.selected {
                 // Keyed on the host, so switching runners rebuilds everything
@@ -119,7 +155,7 @@ struct RootView: View {
                 // `Connection` it has to be read against; see the comment on
                 // `FleetView.body`. This `.id` still rebuilds it, along with
                 // everything else, when the runner changes.
-                FleetView(host: host, store: hosts)
+                FleetView(host: host, store: hosts, fleet: fleet)
                     .id(host)
             } else {
                 HostOnboardingView(hosts: hosts)

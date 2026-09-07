@@ -199,21 +199,45 @@ final class Connection: ObservableObject {
     /// a handle on it.
     var hostId: UUID? { host?.id }
 
-    /// The connection the app is currently running, if it is running one.
+    /// Every connection the app is currently running, by runner id.
     ///
-    /// Weak, exactly as `WatchLinkHost` holds the same thing and for the same
-    /// reason: `Connection` is a `@StateObject` owned by `FleetView`, switching
-    /// runners replaces it, and a strong reference here would keep the old
-    /// runner's SSH session alive forever — while still answering as though it
-    /// were the runner the person is looking at.
+    /// **This was one slot**, and it was one because the app ran one session:
+    /// `static weak var current`, assigned in `start`, read by the enrollment
+    /// ceremony. With a connection per runner that slot became a lottery — the
+    /// last runner to start would decide which machine a device got added to —
+    /// so it is a registry keyed by the runner, which is the only key that
+    /// answers the ceremony's actual question.
     ///
-    /// It exists because the enrollment ceremony has no other way to reach a
-    /// session. `SettingsView` builds `AddDeviceView` from a `RunnerStore`
-    /// alone; it holds a `Connection` and does not pass it on, so a
-    /// `CeremonyStore` that took one as an argument would be a `CeremonyStore`
-    /// nothing ever hands one to. See `CeremonyStore.throughTheLiveConnection`,
-    /// which is the only reader.
-    private(set) static weak var current: Connection?
+    /// Weak values, for the reason the single slot was weak: this must never be
+    /// what keeps a retired runner's SSH session alive, and a retirement that
+    /// forgot to unregister would otherwise leave a connection answering for a
+    /// runner nobody is talking to. `retire()` clears its entry and the box
+    /// empties itself either way.
+    ///
+    /// It is static because the ceremony has no other way to reach a session.
+    /// `SettingsView` builds `AddDeviceView` from a `RunnerStore` alone, so a
+    /// `CeremonyStore` that took connections as an argument would be one
+    /// nothing ever hands any to. See `CeremonyStore.throughTheLiveConnection`,
+    /// which is still the only reader, and `CeremonyReach`, which is the rule
+    /// about what it may write to.
+    private final class Box {
+        weak var connection: Connection?
+        init(_ connection: Connection) { self.connection = connection }
+    }
+
+    private static var registry: [UUID: Box] = [:]
+
+    /// The runners with a live connection, in no particular order.
+    ///
+    /// Pruned on the way out rather than on a timer: a box whose connection has
+    /// been freed is an entry nobody removed, and reporting its runner as live
+    /// would have the ceremony believe it can write to a machine it cannot
+    /// reach.
+    static var liveRunners: [UUID] {
+        registry.compactMap { $0.value.connection == nil ? nil : $0.key }
+    }
+
+    static func live(for runner: UUID) -> Connection? { registry[runner]?.connection }
 
     /// The armed retry, or the attempt in flight. One slot, so a second
     /// request to reconnect replaces the first rather than running alongside
@@ -260,11 +284,16 @@ final class Connection: ObservableObject {
         // app" to somebody who is holding it open while it reconnects.
         WatchLinkHost.shared.adopt(self)
         // The same handover, for the enrollment ceremony, and in the same
-        // place so the two cannot disagree about which connection is current.
-        // Also before connecting: `enroll` checks the phase itself, and the
-        // ceremony is reached from a settings screen that a person can open
-        // while this is still reconnecting.
-        Connection.current = self
+        // place so the two cannot disagree about which connections exist. Also
+        // before connecting: `enroll` checks the phase itself, and the ceremony
+        // is reached from a settings screen that a person can open while this
+        // is still reconnecting.
+        //
+        // Keyed by the runner rather than assigned to one slot, so a phone
+        // holding three connections enrolls a device on the three the ceremony
+        // granted rather than on whichever started last. See
+        // `Connection.registry`.
+        Connection.registry[host.id] = Box(self)
         attempt += 1
         let mine = attempt
         phase = .connecting
@@ -603,14 +632,22 @@ final class Connection: ObservableObject {
     /// because nothing will render this again.
     ///
     /// Three things have to stop, and dropping the last reference only handles
-    /// the first two. `ClientCore.deinit` frees the native session and cancels
-    /// its pump, and the two slots this claimed in `start` — `WatchLinkHost`'s
-    /// and `Connection.current` — are both weak, so they empty themselves. What
-    /// does NOT is the `Reachability` subscription: that list holds a closure
-    /// under a runner's id, and a closure is not the connection, so a retired
-    /// connection would be woken by every door the phone walked through for the
-    /// life of the process. `RunnerStore.remove` already unsubscribes for the
-    /// one case it can see; this covers the three it cannot.
+    /// the first. `ClientCore.deinit` frees the native session and cancels its
+    /// pump. What does NOT clear itself is the `Reachability` subscription:
+    /// that list holds a closure under a runner's id, and a closure is not the
+    /// connection, so a retired connection would be woken by every door the
+    /// phone walked through for the life of the process. `RunnerStore.remove`
+    /// already unsubscribes for the one case it can see; this covers the three
+    /// it cannot.
+    ///
+    /// The ceremony's registry is cleared here as well, and NOT left to its
+    /// weak box. The box empties when the object is freed, which is whenever
+    /// the last view holding it goes away — and between the retirement and that
+    /// moment, `CeremonyReach` would count this runner as one this device can
+    /// write `authorized_keys` on. It cannot: nothing is polling it and nobody
+    /// wants it. `WatchLinkHost`'s reference is still weak and still empties
+    /// itself, because what it holds is a way to answer the watch rather than a
+    /// claim about which machines are reachable.
     ///
     /// Removing a key nothing registered is explicitly fine — see
     /// `KeyedCallbacks.remove` — so retiring a connection that never got as far
@@ -623,7 +660,15 @@ final class Connection: ObservableObject {
         newsRefresh?.cancel()
         newsRefresh = nil
         reconnectTask?.cancel()
-        if let host { Reachability.shared.stopWatching(host.id.uuidString) }
+        if let host {
+            Reachability.shared.stopWatching(host.id.uuidString)
+            // Out of the ceremony's registry too, and here rather than only in
+            // the weak box's own emptying: a retired connection is not a
+            // machine this device can write `authorized_keys` on, and the
+            // object can outlive the retirement by however long the last view
+            // holding it takes to go away.
+            Connection.registry[host.id] = nil
+        }
     }
 
     /// Back out of the fingerprint question without answering it.

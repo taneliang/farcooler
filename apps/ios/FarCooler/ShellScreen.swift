@@ -663,7 +663,15 @@ struct ShellPaneRealView: View {
 ///   the pane AT REST changes and at no other time — never mid-gesture, when
 ///   two panes are on screen and neither has arrived.
 struct ShellScreen: View {
-    @ObservedObject var connection: Connection
+    /// Every runner this app is talking to, and the merged fleet across them.
+    ///
+    /// It was one `Connection`, and the whole screen read that one object: the
+    /// fleet to map, the inbox to mark a diff with, the object to send an RPC
+    /// down. A merged fleet has no such object — a pane on `gpu-box-2` and a
+    /// pane on the laptop are two sessions — so every call site that used to
+    /// reach for `connection` now resolves one from the pane it is about. See
+    /// `connection(_:)`, which is the one place that resolution happens.
+    @ObservedObject var fleet: FleetStore
     /// The runners this device knows, for the menu in the overview's toolbar.
     ///
     /// The app's only way to reach another runner, to correct the one it is on,
@@ -750,17 +758,30 @@ struct ShellScreen: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    /// This runner's fleet, in the shell's vocabulary.
+    /// The whole fleet, in the shell's vocabulary, rebuilt every poll.
+    private var map: ShellFleetMap { ShellFleetMap.of(fleet) }
+
+    // MARK: - Which runner a thing is on
+
+    /// The connection a pane is on, or nil for a runner this app has stopped
+    /// talking to.
     ///
-    /// Resolved through the runner list rather than off the connection, because
-    /// every id the map mints now carries the runner and a `Connection` reports
-    /// only an id. One runner still, at this step: the store is what makes it
-    /// several.
-    private var map: ShellFleetMap {
-        guard let host = hosts.hosts.first(where: { $0.id == connection.hostId })
-        else { return ShellFleetMap(fleet: ShellFleet(workspaces: []), refs: [:]) }
-        return ShellFleetMap.of(connection, host: host)
+    /// **The one place the resolution happens.** Nil is an ordinary answer and
+    /// not an error: the battery gate can retire a runner while a pane of its
+    /// is still mounted, and a screen that forced an answer here would be a
+    /// screen sending one runner's RPC down another runner's session — the
+    /// exact mistake `ShellPaneRef` gained a runner to prevent.
+    private func connection(_ ref: ShellPaneRef?) -> Connection? {
+        ref.flatMap { fleet.connection(for: $0.runner) }
     }
+
+    /// The connection the pane AT REST is on.
+    ///
+    /// What the screen's own furniture reads — the toolbar's link chip, the two
+    /// sheets that start work, the pull request on the Changes tab. Each of
+    /// those is about the runner somebody is looking at, which is what "at
+    /// rest" means, and none of them is about a pane.
+    private var resting: Connection? { connection(restingRef) }
 
     var body: some View {
         Group {
@@ -778,12 +799,20 @@ struct ShellScreen: View {
         }
         .onAppear {
             seed()
-            // Read here rather than in a computed property: see
-            // `readElsewhere`. A `ShellScreen` is destroyed and rebuilt on
-            // every change of runner, so "once per mount" is once per runner.
             elsewhere = readElsewhere()
         }
-        .onChange(of: connection.hasFleet) { _, _ in seed() }
+        // A fleet arriving from ANY runner is a fleet to open on. `seed` runs
+        // once and only once — see it — so this being several runners' answer
+        // rather than one costs nothing beyond the guard it already has.
+        .onChange(of: fleet.hasFleet) { _, _ in seed() }
+        // The runner list changing changes which runners are somewhere else.
+        // It used to be read once per mount and that was correct then: the
+        // screen was destroyed and rebuilt on every change of runner, and
+        // nothing in the process could write another runner's entry. Both
+        // halves have stopped being true — the screen survives a crossing now,
+        // and every live connection writes its own directory — so this is read
+        // again whenever the set of live runners moves. See `readElsewhere`.
+        .onChange(of: liveRunners) { _, _ in elsewhere = readElsewhere() }
         .task(id: pullRequestKey) { await readPullRequest() }
         .onChange(of: scenePhase) { _, phase in
             // Coming back to the app is reading whatever it comes back to.
@@ -801,21 +830,40 @@ struct ShellScreen: View {
         // flying — so a sheet whose presenter lives inside it is a sheet whose
         // presenter can go away underneath it, and a sheet with nobody left to
         // close it is a sheet you cannot close.
+        // On the runner at REST, which is the one being looked at.
+        //
+        // Both sheets used to have no such question to answer: there was one
+        // connection and a new worktree could only go on it. With a merged
+        // fleet "start some work" has to name a machine, and the honest default
+        // is the one whose worktree is on screen — the same answer the overview
+        // gives by putting these actions in its own toolbar, over its own
+        // cards. Absent until the shell has come to rest at least once, which
+        // is before the first frame anybody can tap.
         .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceView(
-                repositories: connection.repositories, connection: connection
-            ) { repository, name, branch, adopt in
-                await connection.createWorkspace(
-                    repository: repository, name: name, branch: branch, adopt: adopt)
+            if let connection = resting {
+                NewWorkspaceView(
+                    repositories: connection.repositories, connection: connection
+                ) { repository, name, branch, adopt in
+                    await connection.createWorkspace(
+                        repository: repository, name: name, branch: branch, adopt: adopt)
+                }
             }
         }
         .sheet(isPresented: $showQuickTask) {
-            TaskComposerView(connection: connection)
+            if let connection = resting {
+                TaskComposerView(connection: connection)
+            }
         }
         // The ceremony a card's menu starts, run from the screen rather than
         // from the card. Shared with the pane's own bar — see
         // `RemoveWorktreeFlow`.
-        .removeWorktreeFlow($removing, connection: connection)
+        //
+        // On the connection the REQUEST carries, not on whatever is at rest: a
+        // long press on a card in another runner's section is a removal on that
+        // runner, and resolving it from the screen's own position would run the
+        // ceremony against the wrong machine. `RemoveWorktreeRequest` carries
+        // the connection for exactly this.
+        .removeWorktreeFlow($removing)
     }
 
     /// The runner's workspace a card names, or nil when the fleet has moved on
@@ -826,9 +874,17 @@ struct ShellScreen: View {
     /// between the long press and the tap can have taken a worktree away, and
     /// an index into a fleet that has changed length names a DIFFERENT
     /// workspace rather than none. `FleetView`'s removed-workspace rule, kept.
-    private func workspace(_ shell: ShellWorkspace) -> Workspace? {
-        guard let daemonID = map.entries[shell.id]?.workspace.id else { return nil }
-        return connection.fleet.workspaces.first { $0.id == daemonID }
+    private func workspace(_ shell: ShellWorkspace) -> (Workspace, Connection)? {
+        // Through the map's own entry, which carries the runner this card is
+        // on. Looking the id up in "the" fleet is what a single-connection
+        // screen could do and a merged one cannot: `ShellWorkspace.id` is a
+        // composite now, and the daemon's eight characters are only unique on
+        // the machine that minted them.
+        guard let entry = map.entries[shell.id],
+            let connection = fleet.connection(for: entry.host.id),
+            let live = connection.fleet.workspaces.first(where: { $0.id == entry.workspace.id })
+        else { return nil }
+        return (live, connection)
     }
 
     /// Put a worktree away, or take it back out.
@@ -840,7 +896,7 @@ struct ShellScreen: View {
     /// where you ARE changes, because `isHidden` changes where a workspace is
     /// DRAWN and nothing else; see `ShellWorkspace.isHidden`.
     private func toggleHidden(_ shell: ShellWorkspace) {
-        guard let workspace = workspace(shell) else { return }
+        guard let (workspace, connection) = workspace(shell) else { return }
         Task {
             if workspace.isHidden {
                 await connection.unhideWorkspace(workspace)
@@ -876,10 +932,21 @@ struct ShellScreen: View {
     /// this product uses. Each is named for the sheet it opens.
     @ViewBuilder
     private var overviewActions: some View {
-        RunnerMenu(hosts: hosts, connection: connection)
+        // Both are about the runner AT REST — the one whose worktree is on
+        // screen — and both are absent before the shell has come to rest, which
+        // is before there is anything to look at. The chip in particular has to
+        // be one runner's: it says "reconnecting" and offers a reconnect, and a
+        // fleet-wide version of that sentence would be a chip that is amber
+        // whenever any laptop anywhere is asleep. What says the same thing per
+        // runner, next to the runner, is `RunnerStatusRow`.
+        if let resting {
+            RunnerMenu(hosts: hosts, connection: resting)
 
-        if connection.phase != .connected {
-            LinkStatusChip(connection: connection)
+            if resting.phase != .connected {
+                LinkStatusChip(connection: resting)
+            }
+        } else {
+            RunnerMenu(hosts: hosts, connection: nil)
         }
 
         Button { showQuickTask = true } label: { Image(systemName: "sparkle") }
@@ -889,17 +956,27 @@ struct ShellScreen: View {
             .accessibilityLabel("New Workspace")
     }
 
-    /// The other runners' worktrees, read once.
+    /// The runners this app is CURRENTLY talking to.
     ///
-    /// **Once is correct, not thrifty.** This app talks to one runner at a
-    /// time, so nothing in this process can change another runner's entry
-    /// while this screen is mounted — the only writer is
-    /// `Connection.recordDirectory`, and the connection it belongs to is the
-    /// one runner this list excludes. Re-reading it from a `body` that runs
-    /// three times a second would be a JSON decode per poll for an answer that
-    /// cannot have moved.
+    /// The trigger for re-reading the cache, and a value rather than a
+    /// derivation at the point of use so `onChange` has something to compare.
+    private var liveRunners: Set<String> {
+        Set(fleet.active.compactMap { $0.hostId?.uuidString })
+    }
+
+    /// The worktrees on runners this app is NOT talking to.
+    ///
+    /// Read on the runners changing rather than on every body pass — see the
+    /// `onChange` in `body`. It used to be read once per mount, and the reason
+    /// given was that this app talks to one runner at a time so nothing in the
+    /// process could change another runner's entry. That is exactly what
+    /// stopped being true: every live connection writes its own directory now,
+    /// and the screen is no longer destroyed when the runner changes. What has
+    /// not changed is that a JSON decode on a `body` running three times a
+    /// second would be waste — the set of live runners moves when somebody adds
+    /// or removes one, which is not a per-poll event.
     private func readElsewhere() -> [ShellServerGroup] {
-        let live = connection.hostId?.uuidString
+        let live = liveRunners
         let known = Set(hosts.hosts.map(\.id.uuidString))
         return RunnerDirectoryStore.read()
             // The live runner is excluded by ID, not by label: two entries can
@@ -909,7 +986,7 @@ struct ShellScreen: View {
             //
             // A runner somebody has since removed is excluded too. A card for
             // one would be a card whose tap can do nothing.
-            .filter { $0.runner != live && known.contains($0.runner) }
+            .filter { !live.contains($0.runner) && known.contains($0.runner) }
             .map { $0.group() }
     }
 
@@ -945,25 +1022,41 @@ struct ShellScreen: View {
                 restingRef = arrived
                 markVisible(arrived)
             },
-            liveServer: connection.hostLabel,
+            // The header over the live cards names the runner, but only when
+            // there is one runner for it to name. With several merged into one
+            // grid there is no single answer, and each card carries its own —
+            // see `ShellFleetMap.one`, which is where that condition is
+            // decided. A header saying one machine's name over another
+            // machine's worktrees is the one thing worse than no header.
+            liveServer: fleet.active.count == 1 ? fleet.active[0].hostLabel : nil,
             elsewhere: elsewhere,
             onCross: { group, workspace in
                 crossing = ShellCrossing(group: group, workspace: workspace)
             },
             onToggleHidden: toggleHidden,
             onRemoveWorktree: { shell in
-                guard let workspace = workspace(shell) else { return }
-                removing = .confirming(workspace)
+                guard let (workspace, connection) = workspace(shell) else { return }
+                removing = .confirming(workspace, on: connection)
             },
             overviewActions: { overviewActions }
         ) { slot in
-            if let ref = map.refs[slot.tab.id] {
+            // **The pane resolves its own runner.** A slot names a tab, the map
+            // says which pane that is and which runner it is on, and this is
+            // where the connection to talk to it over comes from. A pane whose
+            // runner has been retired draws nothing rather than borrowing a
+            // neighbour's session.
+            if let ref = map.refs[slot.tab.id], let connection = connection(ref) {
                 ShellPaneRealView(
                     slot: slot, ref: ref, connection: connection, pastes: pastes,
                     // Only the workspace at rest gets an answer. A neighbour's
                     // diff header can wait until you land on it; asking for
                     // three is three GitHub round trips per swipe.
-                    pullRequest: ref.workspace == restingRef?.workspace ? pullRequest : nil,
+                    // The WHOLE ref's workspace, runner included: two runners
+                    // can mint the same eight characters, and a comparison on
+                    // the daemon's id alone would hand one machine's pull
+                    // request to a worktree on another.
+                    pullRequest: ref.workspace == restingRef?.workspace
+                        && ref.runner == restingRef?.runner ? pullRequest : nil,
                     onCreated: { createdTerminal = $0 })
             }
         }
@@ -971,7 +1064,9 @@ struct ShellScreen: View {
         // typed. Nothing about a transfer is ever written into the pane itself.
         .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
         // The teardown, asked for out loud. See `shellCrossingAlert`.
-        .shellCrossingAlert($crossing, leaving: connection.hostLabel) { cross(to: $0) }
+        .shellCrossingAlert($crossing, leaving: resting?.hostLabel ?? "this runner") {
+            cross(to: $0)
+        }
     }
 
     /// Change runners, carrying the tapped worktree across the rebuild.
@@ -1016,11 +1111,15 @@ struct ShellScreen: View {
         // the self-fulfilling memory `remember(_:leaving:tab:)` refuses for
         // the same reason one paragraph down.
         let workspace = takeCrossing().flatMap { wanted in
-            // Against the DAEMON's id, which is what a crossing note carries.
-            // `ShellWorkspace.id` is the shell's composite now — see
-            // `ShellIdentity` — and comparing the two would never match.
+            // Both halves, and the runner is the half that matters now: a
+            // crossing note carries the daemon's own workspace id, which is
+            // eight hex characters unique on ONE machine. Matching on it alone
+            // across a merged fleet is how a crossing lands on the wrong
+            // worktree with the right name.
             map.fleet.workspaces.indices.first {
-                map.entries[map.fleet.workspaces[$0].id]?.workspace.id == wanted
+                let entry = map.entries[map.fleet.workspaces[$0].id]
+                return entry?.workspace.id == wanted.workspace
+                    && entry?.host.id.uuidString == wanted.runner
             }
         } ?? at.workspace
         initial = ShellPosition(
@@ -1032,14 +1131,17 @@ struct ShellScreen: View {
     /// Checked against the runner as well as read, because the note outlives
     /// the tap: an app killed between the alert and the connection would come
     /// back with a note about a runner somebody may no longer be on.
-    private func takeCrossing() -> String? {
+    private func takeCrossing() -> (runner: String, workspace: String)? {
         guard let note = UserDefaults.standard.string(forKey: Self.crossingKey) else { return nil }
         UserDefaults.standard.removeObject(forKey: Self.crossingKey)
         let parts = note.split(separator: "/", maxSplits: 1)
-        guard parts.count == 2, let runner = connection.hostId?.uuidString,
-            parts[0] == runner
-        else { return nil }
-        return String(parts[1])
+        // Checked against the runners that are LIVE rather than against the one
+        // this screen is on, because there is no longer one it is on. An app
+        // killed between the tap and the connection comes back with a note
+        // about a runner it may no longer be talking to, and a note that names
+        // nothing here is spent rather than honored.
+        guard parts.count == 2, liveRunners.contains(String(parts[0])) else { return nil }
+        return (String(parts[0]), String(parts[1]))
     }
 
 
@@ -1080,8 +1182,13 @@ struct ShellScreen: View {
         let linked = linkedTab
         linkedTab = nil
         if let tab, tab == linked { return }
-        guard let arrived, arrived.workspace == previous?.workspace else { return }
-        connection.rememberFocus(arrived.pane.focus, in: arrived.workspace)
+        guard let arrived, arrived.workspace == previous?.workspace,
+            arrived.runner == previous?.runner
+        else { return }
+        // On the runner the pane is on. The memory is `Connection.lastFocus`,
+        // which is per runner because a workspace id means nothing off the
+        // machine that minted it.
+        connection(arrived)?.rememberFocus(arrived.pane.focus, in: arrived.workspace)
     }
 
     // MARK: - A card tapped from outside the app
@@ -1111,13 +1218,18 @@ struct ShellScreen: View {
     /// shell does not actually have that tab" to be got wrong.
     private func requestedTab(in map: ShellFleetMap) -> String? {
         guard let id = pendingTerminal ?? createdTerminal else { return nil }
-        for workspace in connection.fleet.workspaces {
-            guard let terminal = workspace.terminals.first(where: { $0.id == id }) else {
-                continue
-            }
-            guard let runner = connection.hostId else { return nil }
+        // Across every runner, because a card carries a terminal id and no
+        // host: the URL is `…://terminal/<id>` and always has been, so the only
+        // way to answer "which runner is that on" is to look. One connection
+        // made the question invisible rather than answering it — a card about
+        // another runner simply resolved to nothing and the tap opened the app
+        // on whatever it would have opened on anyway. Now it lands.
+        for entry in map.entries.values {
+            guard
+                let terminal = entry.workspace.terminals.first(where: { $0.id == id })
+            else { continue }
             let tab = ShellFleetMap.tabID(
-                runner: runner, workspace: workspace.id, pane: Pane(terminal))
+                runner: entry.host.id, workspace: entry.workspace.id, pane: Pane(terminal))
             // Only if the shell actually has it. A `changes` pane the host
             // happens to have open is folded into the Changes tab by
             // `Pane.init(_:)` and is not a tab of its own, so an id naming one
@@ -1138,8 +1250,13 @@ struct ShellScreen: View {
     /// `Connection.markVisibleSeen` reads exactly this and reports an empty
     /// watch list for it.
     private func markVisible(_ ref: ShellPaneRef? = nil) {
-        Notifier.shared.visibleTerminal = (ref ?? restingRef)?.pane.terminal?.id
-        Task { await connection.markVisibleSeen() }
+        let at = ref ?? restingRef
+        Notifier.shared.visibleTerminal = at?.pane.terminal?.id
+        // Claimed on the runner the pane is on, and only there. Every other
+        // runner clears its own watch on its own next poll — `Connection.refresh`
+        // has always ended with this call — so fanning out here would be N round
+        // trips to say the same thing the polls are already saying.
+        Task { await connection(at)?.markVisibleSeen() }
     }
 
     // MARK: - The Changes tab's header
@@ -1152,9 +1269,15 @@ struct ShellScreen: View {
     /// including the branch being in the key so a worktree that changes branch
     /// under you re-reads at once.
     private var pullRequestKey: String {
-        guard let ref = restingRef, case .changes = ref.pane else { return "" }
+        guard let ref = restingRef, case .changes = ref.pane,
+            let connection = connection(ref)
+        else { return "" }
         let branch = connection.fleet.workspaces.first { $0.id == ref.workspace }?.branch ?? ""
-        return "\(ref.workspace)|\(branch)|\(connection.pollGeneration)"
+        // The runner is in the key for the reason it is in every other id here:
+        // two runners can hold a worktree with the same eight characters on the
+        // same branch, and a key that could not tell them apart would leave one
+        // machine's pull request on the other's header.
+        return "\(ref.runner)|\(ref.workspace)|\(branch)|\(connection.pollGeneration)"
     }
 
     /// Read `stack.get` for the resting worktree's branch.
@@ -1165,6 +1288,7 @@ struct ShellScreen: View {
     /// be handed a `Connection` at all.
     private func readPullRequest() async {
         guard let ref = restingRef, case .changes = ref.pane,
+            let connection = connection(ref),
             let workspace = connection.fleet.workspaces.first(where: { $0.id == ref.workspace })
         else { return }
         guard let repository = workspace.repository, !workspace.branch.isEmpty else {

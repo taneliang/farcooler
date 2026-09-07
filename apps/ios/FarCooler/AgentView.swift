@@ -3343,6 +3343,15 @@ struct AgentLayoutHarness: View {
     /// No runners, and that is the fixture. The menu is real and its sheets
     /// open; there is simply nothing on this device to switch to.
     @StateObject private var hosts = RunnerStore()
+    /// The shell reads a `FleetStore` now, so the fixture needs one — standing
+    /// on the canned connection above rather than on anything that dials. See
+    /// `FleetStore.standIn(on:host:)`.
+    ///
+    /// The runner behind it is canned too, and is NOT in `hosts`: the menu goes
+    /// on saying "No Runner", which is still the truth about this launch.
+    @StateObject private var fleetStore: FleetStore
+    private static let harnessRunner = Runner(
+        label: "Layout harness", address: "harness.invalid", user: "harness")
 
     /// The pane to open on, as the shell's own deep-link request.
     ///
@@ -3353,8 +3362,15 @@ struct AgentLayoutHarness: View {
     /// because the rule happened to agree.
     @State private var open: String?
 
+    init() {
+        let connection = Connection()
+        _connection = StateObject(wrappedValue: connection)
+        _fleetStore = StateObject(
+            wrappedValue: FleetStore.standIn(on: connection, host: Self.harnessRunner))
+    }
+
     var body: some View {
-        ShellScreen(connection: connection, hosts: hosts, pendingTerminal: $open)
+        ShellScreen(fleet: fleetStore, hosts: hosts, pendingTerminal: $open)
             .task { stand() }
     }
 
@@ -3394,6 +3410,11 @@ struct AgentLayoutHarness: View {
         }
         connection.standIn(
             on: Fleet(runtimeHealthy: true, livePanes: 2, workspaces: [Self.workspace]))
+        // The store publishes off `Connection.objectWillChange`, which
+        // `standIn` fires — but on the turn AFTER this one, so the merged fleet
+        // this shell reads is empty for one body pass. Republishing here closes
+        // it, the same way the app's first poll does.
+        fleetStore.republish()
         open = Self.agentPane.id
     }
 

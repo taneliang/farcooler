@@ -250,7 +250,7 @@ struct ShellPaneChromeModifier: ViewModifier {
                     pickedImage = nil
                 }
             }
-            .removeWorktreeFlow($removing, connection: connection)
+            .removeWorktreeFlow($removing)
             // Far Cooler's own two sentences, and nothing the runner wrote.
             //
             // An alert rather than the `SheetFailureSection` the remove flow
@@ -379,7 +379,7 @@ struct ShellPaneChromeModifier: ViewModifier {
             if canRemove, let workspace {
                 Divider()
                 Button(role: .destructive) {
-                    removing = .confirming(workspace)
+                    removing = .confirming(workspace, on: connection)
                 } label: {
                     Label("Remove Worktree…", systemImage: "trash")
                 }
