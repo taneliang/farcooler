@@ -672,7 +672,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// those were worth hand-building and all of them were noticed missing.
     private var overviewBody: some View {
         NavigationStack {
-            content
+            grid
                 .background { ground }
                 // The count in the title, which is where a count belongs on
                 // this platform and where the hand-built header already had
@@ -796,31 +796,12 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        if order.isEmpty && hidden.isEmpty && groups.isEmpty {
-            // The platform's empty state, which is a layout and not a
-            // sentence: glyph, title and explanation, centred and sized the
-            // way every other iOS app's is. The wording is still this app's —
-            // what failed is a match against a fleet, and "No Results" alone
-            // would not say that.
-            ContentUnavailableView {
-                Label("No Workspaces", systemImage: "rectangle.on.rectangle.slash")
-            } description: {
-                // Two reasons a fleet can be empty, and they are not the same
-                // sentence: nothing MATCHED, or there is nothing to match. The
-                // hand-built version quoted the search either way, so a runner
-                // with no workspaces at all was told that none of them matched
-                // the empty string.
-                if search.isEmpty {
-                    Text("This runner has no workspaces yet.")
-                } else {
-                    Text("No workspace matches “\(search)”.")
-                }
-            }
-        } else {
-            grid
-        }
+    /// Whether there is a single card to draw, anywhere in this grid.
+    ///
+    /// Its own name because the empty state is now a case INSIDE the grid
+    /// rather than a screen instead of one — see `gridBody`.
+    private var hasCards: Bool {
+        !(order.isEmpty && hidden.isEmpty && groups.isEmpty)
     }
 
     /// One card of the fleet this app is connected to. The same view for the
@@ -938,85 +919,122 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// is laid out.
     private var grid: some View {
         GeometryReader { geo in
-            gridBody(width: geo.size.width)
+            gridBody(size: geo.size)
         }
     }
 
-    private func gridBody(width: CGFloat) -> some View {
+    private func gridBody(size: CGSize) -> some View {
         let columns = ShellGrid.columns(
-            width: width, margin: PaneMetrics.edge, gutter: PaneMetrics.card)
+            width: size.width, margin: PaneMetrics.edge, gutter: PaneMetrics.card)
         let cardWidth = ShellGrid.cardWidth(
-            width: width, margin: PaneMetrics.edge, gutter: PaneMetrics.card)
+            width: size.width, margin: PaneMetrics.edge, gutter: PaneMetrics.card)
         return ScrollView {
             // Above the grid rather than inside it, and above the SEARCH
             // results too: a runner that is not answering is not a card and
             // must not be filtered away by typing a worktree's name. It is the
             // reason the grid under it may be missing things.
+            //
+            // **And above the EMPTY state, which is why that state is a branch
+            // in here rather than a screen instead of this one.** It was the
+            // second: `content` chose between a `ContentUnavailableView` and
+            // this whole view, so an empty grid took the runner rows down with
+            // it — and the paragraph above says the opposite in as many words,
+            // because a search matching nothing empties the grid and did
+            // exactly what typing must not do. There is no other surface
+            // anywhere for a runner's next move: the four full-screen phases
+            // that used to carry the fingerprint question and the failure are
+            // gone, and these rows are what replaced them. A runner holding a
+            // host key question, on a phone with "api" left in its search box,
+            // had nowhere to ask it.
+            //
+            // One call site now, so no branch can forget it again.
             runners()
 
-            LazyVGrid(
-                // `.fixed` at the computed width, and not `.flexible`.
-                //
-                // The two lay out identically here — the columns add up to the
-                // padded width either way — and `.fixed` is the honest one:
-                // the number is decided by `ShellGrid`, which is tested, rather
-                // than by whatever a flexible column is offered on the day. A
-                // card is also handed this same number for its own frame, and
-                // two different opinions about a cell's width is exactly the
-                // drift that put a 168-point card in a 179-point column.
-                columns: Array(
-                    repeating: GridItem(.fixed(cardWidth), spacing: PaneMetrics.card),
-                    count: columns),
-                spacing: PaneMetrics.card
-            ) {
-                // The runner you are ON, first and unlabeled unless there is
-                // something under it to tell it apart from.
-                Section {
-                    ForEach(order, id: \.self) { index in liveCard(index, width: cardWidth) }
-                } header: {
-                    if let liveServer, !groups.isEmpty {
-                        header(liveServer, detail: "Connected")
-                    }
+            if !hasCards {
+                // The platform's empty state, which is a layout and not a
+                // sentence: glyph, title and explanation, centred and sized the
+                // way every other iOS app's is. The wording is still this
+                // app's — what failed is a match against a fleet, and "No
+                // Results" alone would not say that. Both sentences live in
+                // `ShellEmptyCopy`, in AgentKit, because the shell's bring-up
+                // screen says them too and two transcriptions drift.
+                ContentUnavailableView {
+                    Label(ShellEmptyCopy.title, systemImage: ShellEmptyCopy.symbol)
+                } description: {
+                    Text(ShellEmptyCopy.description(matching: search))
                 }
-
-                // Then what this runner has been told to stop showing.
-                if !hidden.isEmpty {
+                // As tall as the scroll view's own container, so it centres in
+                // the display the way it did when it WAS the display — and,
+                // with a runner row above it, scrolls by exactly that row's
+                // height rather than being shoved off centre. On the ordinary
+                // day `runners()` draws nothing at all, this is the whole
+                // content, and it scrolls not at all.
+                .containerRelativeFrame(.vertical)
+            } else {
+                LazyVGrid(
+                    // `.fixed` at the computed width, and not `.flexible`.
+                    //
+                    // The two lay out identically here — the columns add up to the
+                    // padded width either way — and `.fixed` is the honest one:
+                    // the number is decided by `ShellGrid`, which is tested, rather
+                    // than by whatever a flexible column is offered on the day. A
+                    // card is also handed this same number for its own frame, and
+                    // two different opinions about a cell's width is exactly the
+                    // drift that put a 168-point card in a 179-point column.
+                    columns: Array(
+                        repeating: GridItem(.fixed(cardWidth), spacing: PaneMetrics.card),
+                        count: columns),
+                    spacing: PaneMetrics.card
+                ) {
+                    // The runner you are ON, first and unlabeled unless there is
+                    // something under it to tell it apart from.
                     Section {
-                        if hiddenShown {
-                            ForEach(hidden, id: \.self) { index in
-                                liveCard(index, width: cardWidth)
+                        ForEach(order, id: \.self) { index in liveCard(index, width: cardWidth) }
+                    } header: {
+                        if let liveServer, !groups.isEmpty {
+                            header(liveServer, detail: "Connected")
+                        }
+                    }
+
+                    // Then what this runner has been told to stop showing.
+                    if !hidden.isEmpty {
+                        Section {
+                            if hiddenShown {
+                                ForEach(hidden, id: \.self) { index in
+                                    liveCard(index, width: cardWidth)
+                                }
                             }
+                        } header: {
+                            hiddenHeader
                         }
-                    } header: {
-                        hiddenHeader
                     }
-                }
 
-                // Then every other runner, as it was when this app last saw
-                // it. These are the only cards in this grid that are not a
-                // place you can go by swiping: a tap crosses runners, and
-                // `ShellScreen` is what says what that costs.
-                ForEach(groups) { group in
-                    Section {
-                        ForEach(group.order(matching: search), id: \.self) { index in
-                            let workspace = group.workspaces[index]
-                            ShellElsewhereCard(
-                                workspace: workspace,
-                                width: cardWidth,
-                                onOpen: { onCross(group, workspace) })
-                                .id("\(group.id)/\(workspace.id)")
+                    // Then every other runner, as it was when this app last saw
+                    // it. These are the only cards in this grid that are not a
+                    // place you can go by swiping: a tap crosses runners, and
+                    // `ShellScreen` is what says what that costs.
+                    ForEach(groups) { group in
+                        Section {
+                            ForEach(group.order(matching: search), id: \.self) { index in
+                                let workspace = group.workspaces[index]
+                                ShellElsewhereCard(
+                                    workspace: workspace,
+                                    width: cardWidth,
+                                    onOpen: { onCross(group, workspace) })
+                                    .id("\(group.id)/\(workspace.id)")
+                            }
+                        } header: {
+                            header(group.name, detail: Self.lastSeen(group.lastSeen))
                         }
-                    } header: {
-                        header(group.name, detail: Self.lastSeen(group.lastSeen))
                     }
                 }
+                // The SAME number on all four sides, which is most of the point.
+                // The grid used to be padded vertically and not horizontally at
+                // all, so its side gaps were whatever a centered pair of fixed
+                // columns left over — 27 points on this phone against 16 above and
+                // below, and a different number on every other device.
+                .padding(PaneMetrics.edge)
             }
-            // The SAME number on all four sides, which is most of the point.
-            // The grid used to be padded vertically and not horizontally at
-            // all, so its side gaps were whatever a centered pair of fixed
-            // columns left over — 27 points on this phone against 16 above and
-            // below, and a different number on every other device.
-            .padding(PaneMetrics.edge)
         }
         .scrollDismissesKeyboard(.immediately)
         // Nothing of its own under the cards: the ground this screen draws is
