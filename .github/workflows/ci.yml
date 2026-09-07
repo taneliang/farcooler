@@ -260,6 +260,17 @@ jobs:
       # None of these link, so none of them need a Go toolchain — verified with
       # `go` off PATH, the same standard `cargo check -p farcooler-daemon
       # --features tailcat` below is held to.
+      #
+      # Six of the seven lint source no other line here reaches: a
+      # `cfg(feature = ...)` or `cfg(not(feature = ...))` item that the default
+      # build never compiles. `farcooler-jni` is the exception and is kept
+      # anyway — it has no feature-gated source of its own TODAY, so today it
+      # only re-lints what `--workspace` already did, but `--features tailcat`
+      # is what `scripts/build-android-libs.sh` and
+      # `scripts/build-ios-frameworks.sh` both ship that crate with, and the
+      # first `cfg` anybody writes there would otherwise land unlinted the same
+      # way these findings did. Each of the seven was watched to go red on a
+      # mutation behind its own feature while `--workspace` above stayed green.
       - run: cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings
       - run: cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings
       - run: cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings
