@@ -172,6 +172,23 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         return ReviewTrouble(sentence: context + " " + refusal.sentence, transcript: nil)
     }
 
+    /// The runner's word, read off one answer line from the client core.
+    ///
+    /// Two lines, and here rather than in `ClientCore.drain` for the reason the
+    /// sentences are here: `apps/ios` has no unit tests CI runs, so a field
+    /// name typed wrong in that loop is a mistake nothing catches — every
+    /// sentence below silently reverts to the generic and every screen looks
+    /// exactly as it did before this existed. `swift test --package-path
+    /// apps/shared/AgentKit` runs this.
+    ///
+    /// `code` is the key `push_call` writes in `crates/client/src/ffi.rs`, and
+    /// it is ABSENT rather than null where no runner refused anything — a
+    /// dropped link, or nothing ever connected. Android's
+    /// `RunnerRefusal.wordInAnswerLine` reads the same key off the same line.
+    public static func word(inAnswerLine line: [String: Any]) -> String? {
+        line["code"] as? String
+    }
+
     /// A word this build has a sentence for, or nil for every other input —
     /// absent, empty, the generic, a code that cannot reach a phone, and a code
     /// from a runner newer than this build.

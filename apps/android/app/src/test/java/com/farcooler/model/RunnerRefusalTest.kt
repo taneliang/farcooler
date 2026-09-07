@@ -5,6 +5,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 
 /**
@@ -52,6 +54,45 @@ class RunnerRefusalTest {
                 proto.contains(declared),
             )
         }
+    }
+
+    /**
+     * The word is read off the line the client core actually writes.
+     *
+     * **A gap this suite had, found by breaking it.** Blanking the field read in
+     * `ClientCore.drain` left every one of these tests green — the table was
+     * perfect and nothing ever reached it, which is exactly the failure this
+     * whole change is about, one layer up. So the line that reads it moved into
+     * [RunnerRefusal.wordInAnswerLine], where this can break it.
+     *
+     * The shapes below are `push_call`'s in `crates/client/src/ffi.rs`, which
+     * the Rust test `a_refusal_reaches_the_line_with_the_runner_s_word_on_it`
+     * pins from the writing side.
+     */
+    @Test
+    fun theWordIsReadOffTheLineTheCoreWrites() {
+        val json = Json { ignoreUnknownKeys = true }
+        fun line(raw: String) = json.parseToJsonElement(raw).jsonObject
+
+        val refused = line(
+            """{"ticket":7,"ok":false,"disconnected":false,""" +
+                """"error":"workspaces still exist under this resource",""" +
+                """"code":"workspaces-exist"}"""
+        )
+        assertEquals("workspaces-exist", RunnerRefusal.wordInAnswerLine(refused))
+        assertEquals(
+            RunnerRefusal.WORKSPACES_EXIST.sentence,
+            troubleFor(RunnerRefusal.wordInAnswerLine(refused), "raw", "Generic.").sentence,
+        )
+
+        // A dropped link carries no code at all — the key is absent, not null.
+        val dropped = line(
+            """{"ticket":8,"ok":false,"disconnected":true,"error":"not connected"}"""
+        )
+        assertNull(RunnerRefusal.wordInAnswerLine(dropped))
+
+        // And an answer that worked carries neither.
+        assertNull(RunnerRefusal.wordInAnswerLine(line("""{"ticket":9,"ok":true,"result":{}}""")))
     }
 
     /**

@@ -305,7 +305,7 @@ class ClientCore {
                 val message =
                     line["error"]?.jsonPrimitive?.contentOrNull ?: "the host refused the request"
                 val lost = line["disconnected"]?.jsonPrimitive?.booleanOrNull == true
-                val word = line["code"]?.jsonPrimitive?.contentOrNull
+                val word = com.farcooler.model.RunnerRefusal.wordInAnswerLine(line)
                 waiter.completeExceptionally(
                     if (lost) DisconnectedException(message) else CoreException(message, word)
                 )

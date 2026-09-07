@@ -341,7 +341,8 @@ actor ClientCore {
                     continuation.resume(throwing: CoreError.disconnected(message))
                 } else {
                     continuation.resume(
-                        throwing: CoreError.rejected(message, word: object["code"] as? String))
+                        throwing: CoreError.rejected(
+                            message, word: RunnerRefusal.word(inAnswerLine: object)))
                 }
             }
         }

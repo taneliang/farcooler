@@ -1,5 +1,9 @@
 package com.farcooler.model
 
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+
 /**
  * Why a runner said no to one request, and what this app says about it.
  *
@@ -98,6 +102,24 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
             "the app, not in anything you typed.");
 
     companion object {
+        /**
+         * The runner's word, read off one answer line from the client core.
+         *
+         * Two lines, and here rather than in `ClientCore.drain` because that
+         * loop cannot be unit tested — it polls a JNI handle — so a field name
+         * typed wrong in it is a mistake nothing catches: every sentence above
+         * silently reverts to the generic and every screen looks exactly as it
+         * did before this existed. `./gradlew testInstrumentedUnitTest` runs
+         * this.
+         *
+         * `code` is the key `push_call` writes in `crates/client/src/ffi.rs`,
+         * and it is ABSENT rather than null where no runner refused anything.
+         * `RunnerRefusal.word(inAnswerLine:)` in AgentKit reads the same key off
+         * the same line.
+         */
+        fun wordInAnswerLine(line: JsonObject): String? =
+            line["code"]?.jsonPrimitive?.contentOrNull
+
         /**
          * A word this build has a sentence for, or null for every other input —
          * absent, empty, the generic, a code that cannot reach a phone, and a

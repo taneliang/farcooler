@@ -50,6 +50,42 @@ import Testing
     }
 }
 
+/// The word is read off the line the client core actually writes.
+///
+/// **A gap this suite had, found by breaking it.** Blanking the field read in
+/// `ClientCore.drain` left every one of these tests green — the table was
+/// perfect and nothing ever reached it, which is exactly the failure this whole
+/// change is about, one layer up. So the two lines that read the line moved
+/// here, where `swift test` can break them.
+///
+/// The shapes below are `push_call`'s in `crates/client/src/ffi.rs`, which the
+/// Rust test `a_refusal_reaches_the_line_with_the_runner_s_word_on_it` pins from
+/// the writing side.
+@Test func theWordIsReadOffTheLineTheCoreWrites() {
+    let refused: [String: Any] = [
+        "ticket": 7, "ok": false, "disconnected": false,
+        "error": "workspaces still exist under this resource",
+        "code": "workspaces-exist",
+    ]
+    #expect(RunnerRefusal.word(inAnswerLine: refused) == "workspaces-exist")
+    #expect(
+        RunnerRefusal.trouble(
+            forWord: RunnerRefusal.word(inAnswerLine: refused),
+            message: refused["error"] as? String ?? "",
+            otherwise: "Generic."
+        ).sentence == RunnerRefusal.workspacesExist.sentence)
+
+    // A dropped link carries no code at all — the key is absent, not null.
+    let dropped: [String: Any] = [
+        "ticket": 8, "ok": false, "disconnected": true, "error": "not connected",
+    ]
+    #expect(RunnerRefusal.word(inAnswerLine: dropped) == nil)
+
+    // And an answer that worked carries neither.
+    let fine: [String: Any] = ["ticket": 9, "ok": true, "result": [String: Any]()]
+    #expect(RunnerRefusal.word(inAnswerLine: fine) == nil)
+}
+
 /// A word this build has never heard of still says something failed.
 ///
 /// **The rule, stated where it is decided.** A runner newer than this app sends
