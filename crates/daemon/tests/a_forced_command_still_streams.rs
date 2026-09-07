@@ -22,11 +22,18 @@
 //! product was broken, and would pass again the next time somebody makes the
 //! client depend on which line it holds.
 //!
-//! **Scheduled lane, not per-commit,** for the reason
-//! `a_real_sshd_forces_the_scope.rs` gives: this drives a real sshd, and a test
-//! that quietly detected a missing one and printed "ok" would be a lie told to a
-//! release gate. Each test is `#[ignore]`d and Rust reports an ignored test as
-//! ignored.
+//! **Per-commit, on both runners,** for the reason
+//! `a_real_sshd_forces_the_scope.rs` now gives: a non-root sshd is all this
+//! needs, and it was measured on macOS and Linux before either file's
+//! `#[ignore]` came off. These carried the same attribute and the same reason —
+//! a scheduled lane that no workflow in `.github/workflows/` has ever had a
+//! `schedule:` trigger for — so the one test that can tell a working stream from
+//! a channel that opens and delivers nothing ran nowhere. `cargo test
+//! --workspace` runs it now; three tests, one sshd each, 2.2 seconds.
+//!
+//! A missing sshd still fails loudly rather than skipping. A test that quietly
+//! detected one and printed "ok" would be a lie told to a release gate, and that
+//! half of the original reasoning was right and is unchanged.
 //!
 //! **The harness below is deliberately not shared with
 //! `a_real_sshd_forces_the_scope.rs`.** That file is the security proof that the
@@ -72,8 +79,6 @@ const FIRST_BYTE_CEILING: Duration = Duration::from_secs(5);
 /// also holds and every test used to hold exclusively. Same client, same daemon,
 /// same pane.
 #[tokio::test]
-#[ignore = "drives a real loopback sshd, so the scheduled lane only: \
-    cargo test -p farcooler-daemon --test a_forced_command_still_streams -- --ignored"]
 async fn both_kinds_of_key_reach_the_first_byte() {
     let runner = start().await;
     let terminal = a_pane(&runner).await;
@@ -109,8 +114,6 @@ async fn both_kinds_of_key_reach_the_first_byte() {
 /// screen, and asserts it comes back — through the forced-command key, which is
 /// the one that used to get nothing at all.
 #[tokio::test]
-#[ignore = "drives a real loopback sshd, so the scheduled lane only: \
-    cargo test -p farcooler-daemon --test a_forced_command_still_streams -- --ignored"]
 async fn a_forced_command_key_replays_the_scrollback() {
     let runner = start().await;
     let terminal = a_pane(&runner).await;
@@ -165,8 +168,6 @@ async fn a_forced_command_key_replays_the_scrollback() {
 /// runner says it need not. Exec'd directly here, because a client talking to a
 /// runner that has the capability will never choose it.
 #[tokio::test]
-#[ignore = "drives a real loopback sshd, so the scheduled lane only: \
-    cargo test -p farcooler-daemon --test a_forced_command_still_streams -- --ignored"]
 async fn the_stream_command_still_streams_on_a_key_that_forces_nothing() {
     let runner = start().await;
     let terminal = a_pane(&runner).await;
