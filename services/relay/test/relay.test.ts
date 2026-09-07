@@ -3321,6 +3321,91 @@ describe('/v1/notify/retire', () => {
   })
 })
 
+// MARK: - The management screen, and what it must not carry
+
+/// What `/v1/account` answers with, which nothing checked the SHAPE of.
+///
+/// The route's own comment says "Never the tokens — not the push tokens, not
+/// the daemon token hashes. A screen that lists devices needs to name them, not
+/// to be able to become them." Nothing enforced that sentence. Adding
+/// `push_token` to the SELECT and the object built from it left the suite
+/// green, and what that ships is every device's push token to anyone holding a
+/// session — which is the ability to notify that person's phone with anything,
+/// from anywhere, for as long as the token lives.
+///
+/// Two assertions, deliberately overlapping. The key sets catch a column that
+/// was added and mapped; the sweep for the secrets themselves catches one that
+/// was mapped under an innocent name.
+describe('/v1/account', () => {
+  it('names the devices and machines without handing back a way to become them', async () => {
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await register('user_1', {
+      label: 'iPhone',
+      version: '1.2.3',
+      pushToken: 'a-push-token-nobody-else-may-have',
+      liveActivityStartToken: 'a-start-token-nobody-else-may-have',
+    })
+    const paired = await (await post('/v1/daemons', { label: 'Studio' }, session)).json<any>()
+
+    const body = await (await post('/v1/account', {}, session)).json<any>()
+
+    expect(Object.keys(body).sort()).toEqual(['devices', 'email', 'machines'])
+    expect(Object.keys(body.devices[0]).sort()).toEqual([
+      'id',
+      'label',
+      'platform',
+      'state',
+      'updatedAt',
+      'version',
+    ])
+    expect(Object.keys(body.machines[0]).sort()).toEqual([
+      'createdAt',
+      'expiresAt',
+      'id',
+      'label',
+      'lastSeenAt',
+      'version',
+    ])
+
+    // And the same thing again over the whole wire, because a token returned
+    // under a field named something else is the same token.
+    const wire = JSON.stringify(body)
+    for (const secret of [
+      'a-push-token-nobody-else-may-have',
+      'a-start-token-nobody-else-may-have',
+      paired.token,
+      await sha256(paired.token),
+    ]) {
+      expect(wire, secret).not.toContain(secret)
+    }
+  })
+
+  it('lists this account and never another', async () => {
+    // Three queries, three account clauses, and one screen. Every other test
+    // that reads this route has a single account in the database, and against
+    // one account a scoped read and an unscoped one return the same two lists
+    // and the same email.
+    //
+    // **The other account is registered FIRST, and that ordering is the whole
+    // test for the email.** The email lookup is a `.first()`, so an unscoped
+    // version returns whichever account row SQLite reaches first — which, with
+    // this account created first, is this account's own email. Written the
+    // obvious way round, dropping that clause changed nothing anyone could see.
+    watchFetch()
+    await register('user_2', { label: 'Their iPhone', pushToken: 'their-device-token' })
+    await post('/v1/daemons', { label: 'Their Studio' }, await sessionFor('user_2'))
+    await register('user_1', { label: 'My iPhone' })
+    await post('/v1/daemons', { label: 'My Studio' }, await sessionFor('user_1'))
+
+    const body = await (await post('/v1/account', {}, await sessionFor('user_1'))).json<any>()
+
+    expect(body.email).toBe('user_1@example.test')
+    expect(body.devices.map((each: any) => each.label)).toEqual(['My iPhone'])
+    expect(body.machines.map((each: any) => each.label)).toEqual(['My Studio'])
+  })
+})
+
 // MARK: - Taking a device or a machine away
 
 /// `/v1/daemons/revoke` had no test of any kind.
