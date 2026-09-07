@@ -705,8 +705,8 @@ private struct AgentLine: View {
                     .glanceType(.rowName)
                     // **Stated, because a `Link` tints its label.** The rows on
                     // the medium and large families are wrapped in one so a tap
-                    // opens that agent, and a `Link` label with no colour of
-                    // its own is drawn in the accent colour — so every agent's
+                    // opens that agent, and a `Link` label with no color of
+                    // its own is drawn in the accent color — so every agent's
                     // name on the two biggest tiles was blue, which in a
                     // palette whose whole rule is that one hue is reserved is a
                     // second hue nobody chose. §01's `text 1`: "Names, counts,
@@ -1021,13 +1021,13 @@ private struct StaleFooter: View {
     /// same way `GlanceMark.swift`'s own matrix preview does, "the same grid
     /// desaturated", which is enough to answer the one question that
     /// matters here: with color gone, can the ribbon still be read? What
-    /// should survive per row: row 1 in full colour; rows 2–3 down to
+    /// should survive per row: row 1 in full color; rows 2–3 down to
     /// stroke weight and presence only, with the two hairline "quiet" marks
     /// dropped and only the two heavier "needs you" rings left.
     #Preview("Ribbon · monochrome legibility") {
         let fixture = PreviewFleet.snapshot(PreviewFleet.blocked, reviews: 3)
         let rows: [(String, WidgetRenderingMode)] = [
-            ("full colour — widget gallery", .fullColor),
+            ("full color — widget gallery", .fullColor),
             ("vibrant — Lock Screen", .vibrant),
             ("accented — tinted Home Screen", .accented),
         ]

@@ -547,7 +547,7 @@ struct RunnerSettingsView: View {
     }
 }
 
-/// A theme's colours as one strip, for a list row.
+/// A theme's colors as one strip, for a list row.
 struct ThemeStrip: View {
     let theme: Theme
 
@@ -568,10 +568,10 @@ struct ThemeStrip: View {
 
 extension Color {
     // `Color(packed:)` already exists, in TerminalSession.swift, where the
-    // renderer needed it first. Only the reverse direction is new — a colour
+    // renderer needed it first. Only the reverse direction is new — a color
     // well hands back a `Color` and the config file wants an integer.
 
-    /// This colour as `0x00RRGGBB`.
+    /// This color as `0x00RRGGBB`.
     var packed: UInt32 {
         let resolved = UIColor(self)
         var r: CGFloat = 0

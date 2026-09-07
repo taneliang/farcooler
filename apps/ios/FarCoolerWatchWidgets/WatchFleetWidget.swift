@@ -268,9 +268,9 @@ private func headline(
 /// a lone indicator. `accessoryRectangular` takes the row size "because it IS a
 /// row: mark, label, trace."
 ///
-/// **The colour comes from `GlancePalette` and is no longer a copy.** There
+/// **The color comes from `GlancePalette` and is no longer a copy.** There
 /// used to be a `glanceTint` here whose own comment explained that it HAD to be
-/// a copy of the phone's, because a colour is a SwiftUI type and
+/// a copy of the phone's, because a color is a SwiftUI type and
 /// `FleetSnapshot` — the file both targets compile — has no business importing
 /// SwiftUI. That was true of `FleetSnapshot` and still is
 /// (`FleetSnapshot.swift:466-470`); it was never true of the seam. The tint
@@ -401,7 +401,7 @@ struct WatchFleetView: View {
 ///
 /// **Stroke and not hue is what does the work here**, which matters on this
 /// family more than anywhere: a watch face flattens every accessory to a single
-/// tint, so a drawing that told the two apart by colour told them apart
+/// tint, so a drawing that told the two apart by color told them apart
 /// nowhere. §03: "the mark distinguishes states by stroke weight, fill and
 /// dash, so hue was always redundant reinforcement."
 private struct Circular: View {

@@ -1184,12 +1184,12 @@ final class TerminalScrollTests: XCTestCase {
     /// `NavigationStack`, which is a `UINavigationController` and paints its
     /// own opaque `systemBackground` over the top. Under a terminal's dark
     /// scheme that is pure black. A diff never showed it because `ChangesView`
-    /// paints the same colour on its own scroll view, which fills the pane;
+    /// paints the same color on its own scroll view, which fills the pane;
     /// a grid is a `GeometryReader` in the SAFE region and fills nothing else.
     ///
     /// **Asserted on pixels, because there is nothing else to assert on.** A
     /// background is not an element and has no accessibility value; the only
-    /// honest question is what colour came out of the renderer. Three samples
+    /// honest question is what color came out of the renderer. Three samples
     /// down the left margin — inside the grid's own padding, so no glyph can
     /// land on any of them — and the two outside the grid have to match the one
     /// inside it.
@@ -1873,7 +1873,7 @@ extension UIImage {
     /// A screenshot is in PIXELS and a frame is in POINTS, so the scale is
     /// applied here rather than at each call site — getting that wrong reads a
     /// point a third of the way down the screen from the one being asked about,
-    /// which on a strip 34 points tall is a different colour and a passing test.
+    /// which on a strip 34 points tall is a different color and a passing test.
     func colorAt(x: CGFloat, y: CGFloat) -> ScreenPixel? {
         guard let cg = cgImage else { return nil }
         let px = Int((x * scale).rounded())

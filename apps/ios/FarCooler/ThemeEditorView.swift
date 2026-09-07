@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Nineteen colours, over a terminal actually rendering them.
+/// Nineteen colors, over a terminal actually rendering them.
 ///
 /// All nineteen on a phone, which was a deliberate choice rather than the easy
-/// one: the config format treats the sixteen ANSI colours as optional, so a
+/// one: the config format treats the sixteen ANSI colors as optional, so a
 /// "grounds only" editor would have been a first-class config and less work. But
 /// the runner holding the file is often on a Linux box with no app on it, and a
-/// phone that could only edit three colours would send you back to ssh for the
+/// phone that could only edit three colors would send you back to ssh for the
 /// other sixteen.
 ///
 /// The preview earns more room here than on the Mac, because the grid is small
@@ -108,7 +108,7 @@ struct ThemeEditorView: View {
 /// A terminal rendering a fixture in the theme being edited.
 ///
 /// Draws through the same `VTCore` a live pane uses, fed the same kind of bytes.
-/// Cell colours are resolved inside that core precisely so three renderers cannot
+/// Cell colors are resolved inside that core precisely so three renderers cannot
 /// drift; a hand-drawn preview here would be a fourth drifting from all of them.
 private struct ThemePreviewCanvas: View {
     let theme: Theme
@@ -129,7 +129,7 @@ private struct ThemePreviewCanvas: View {
 
     /// A grid rendered by a throwaway core, in the palette being edited.
     ///
-    /// Rebuilt on every change rather than recoloured in place: the fixture is a
+    /// Rebuilt on every change rather than recolored in place: the fixture is a
     /// few hundred bytes, and a fresh core cannot carry state from a palette that
     /// is no longer chosen.
     private static func grid(theme: Theme, columns: Int) -> TerminalGrid? {
@@ -139,7 +139,7 @@ private struct ThemePreviewCanvas: View {
         return core.withSnapshot { TerminalGrid(snapshot: $0) }
     }
 
-    /// Output chosen to exercise what a theme has to get right: every colour,
+    /// Output chosen to exercise what a theme has to get right: every color,
     /// bold, a prompt, a diff, and an agent waiting on you.
     private static let fixture: String = {
         var out = "\u{1b}[H\u{1b}[2J"
@@ -175,7 +175,7 @@ private struct ThemePreviewCanvas: View {
 
                 // Only what differs from the ground, like the real renderers:
                 // filling every cell would be four hundred rects a frame to
-                // paint the colour already behind them.
+                // paint the color already behind them.
                 if cell.background != ground {
                     context.fill(
                         Path(

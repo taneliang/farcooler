@@ -141,7 +141,7 @@ struct SettingsView: View {
     /// `Themes.selectedName` is backed by `@AppStorage` on the model rather
     /// than being `@Published`, because what is stored is deliberately a name
     /// and not a value — a host theme that gets edited must not keep showing
-    /// its old colours. This adapts it for the picker.
+    /// its old colors. This adapts it for the picker.
     private var themeBinding: Binding<String> {
         Binding(get: { themes.selectedName }, set: { themes.selectedName = $0 })
     }

@@ -140,12 +140,12 @@ AGENTKIT_SOURCES = [
     # iOS target has no unit tests — a transform inside a `View` can be checked
     # by nothing but a person swiping at it. See `ShellFlightTests`.
     "ShellFlight.swift",
-    # The glance surfaces' colour, their one state mark and their type scale, in
+    # The glance surfaces' color, their one state mark and their type scale, in
     # FOUR lists: this
     # one, `activity_build_ids`, `WATCH_AGENTKIT_SOURCES` and
     # `WATCH_WIDGET_AGENTKIT_SOURCES`. Same argument as `FleetSnapshot.swift`
     # below — several targets, several binaries, one file — and here the file
-    # is the reason three copies of one colour rule stopped existing: the two
+    # is the reason three copies of one color rule stopped existing: the two
     # `glanceTint` functions in the widget extensions and `ShellMarkView`'s four
     # literals were three places one amber could drift.
     #
@@ -367,14 +367,14 @@ WATCH_AGENTKIT_SOURCES = [
     "WatchState.swift",
     "FleetSnapshot.swift",
     "SnapshotStore.swift",
-    # The colour, the mark and the type scale, which the watch app's own detail
+    # The color, the mark and the type scale, which the watch app's own detail
     # header draws at
     # the 22pt lone-indicator size. Measured to typecheck for
     # `arm64_32-apple-watchos` before being listed here, which is the bar this
     # list sets a few lines above — the conversion in `GlancePalette` is plain
     # `Double` arithmetic and the mark is plain SwiftUI shapes, precisely so it
     # clears it. Nothing in either file reaches for `UIColor`, an asset catalog
-    # or a dynamic colour provider, none of which the watch has.
+    # or a dynamic color provider, none of which the watch has.
     "GlancePalette.swift",
     "GlanceMark.swift",
     "GlanceType.swift",

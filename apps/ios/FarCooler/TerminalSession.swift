@@ -83,7 +83,7 @@ final class TerminalSession: ObservableObject {
     private var lastScreen: ScreenResponse?
 
     /// The pane's scrollback, as bytes ready to feed straight into an
-    /// emulator: CRLF-repaired, colour-reset and terminated by the host, with
+    /// emulator: CRLF-repaired, color-reset and terminated by the host, with
     /// the alternate-screen case already decided there. See `TerminalScreenAsk`
     /// for how much of it is asked for, and `render` for where it goes.
     ///
@@ -1528,7 +1528,7 @@ final class TerminalSession: ObservableObject {
         // own `replay` writes down a stream — see `replay` in
         // `crates/daemon/src/runtime.rs`. The host has already done the parts
         // that need tmux to answer for them: repairing bare line feeds,
-        // resetting the colour the last history line left set, and deciding
+        // resetting the color the last history line left set, and deciding
         // that an alternate screen has no history worth sending.
         //
         // What is left here is the clear, and what it buys is ALIGNMENT, not
@@ -2098,7 +2098,7 @@ struct TerminalCell {
     ///
     /// Both were `Color` and both are read thousands of times per frame — the
     /// renderer compares neighbouring cells to batch background runs, and
-    /// batches glyphs by the colour they are drawn in. `Color` is an opaque
+    /// batches glyphs by the color they are drawn in. `Color` is an opaque
     /// box: comparing two of them is a protocol-witness call into SwiftUI, and
     /// building one is an allocation. As `UInt32` both are a register compare
     /// and a hash of four bytes, and the renderer turns the handful that
@@ -2112,7 +2112,7 @@ struct TerminalCell {
     var foregroundPacked: UInt32
     var backgroundPacked: UInt32
 
-    /// The same two colours for anything drawing a handful of cells rather
+    /// The same two colors for anything drawing a handful of cells rather
     /// than a screenful of them — the theme editor's preview, above all.
     var foreground: Color { Color(packed: foregroundPacked) }
     var background: Color { Color(packed: backgroundPacked) }

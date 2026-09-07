@@ -275,7 +275,7 @@ struct ShellPaneTrack<Pane: View>: View {
         // shrink read as a page rather than as text getting smaller. The dim
         // over it is the desk the cards sit on, and it only exists while they
         // are crossing: each pane carries the same ground, so the gap a
-        // shrunken card opens beside it would otherwise reveal the exact colour
+        // shrunken card opens beside it would otherwise reveal the exact color
         // the card had been covering.
         .background {
             ZStack {
@@ -321,7 +321,7 @@ struct ShellPaneTrack<Pane: View>: View {
             // window, which is a window, not a pair of cards.
             //
             // At rest all three of these are identities: a radius of zero, a
-            // scale of one, and a ground the same colour as the one behind it.
+            // scale of one, and a ground the same color as the one behind it.
             // That is what keeps a tab-to-tab swipe inside a workspace exactly
             // as light as it was — `crossing` is zero for one of those, and so
             // is all of this.

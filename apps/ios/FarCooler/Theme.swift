@@ -1,11 +1,11 @@
 import FarCoolerClient
 import SwiftUI
 
-/// A colour scheme: the terminal's palette, and which way the app around it
+/// A color scheme: the terminal's palette, and which way the app around it
 /// goes.
 ///
 /// The same shape the Mac decodes, from the same source — the built-in table
-/// in `farcooler_core::theme`. Neither app defines a colour of its own, which
+/// in `farcooler_core::theme`. Neither app defines a color of its own, which
 /// is what stops "Nord" meaning two different things on two screens.
 struct Theme: Decodable, Equatable, Identifiable {
     var name: String
@@ -56,7 +56,7 @@ final class Themes: ObservableObject {
     static let shared = Themes()
 
     @Published private(set) var available: [Theme] = []
-    /// Bumped whenever the colours in force change, so a live terminal
+    /// Bumped whenever the colors in force change, so a live terminal
     /// repaints. The same mechanism the font size already uses.
     @Published private(set) var revision = 0
 
@@ -70,7 +70,7 @@ final class Themes: ObservableObject {
     ///
     /// Falls back rather than to nothing when a stored name no longer
     /// resolves: a theme that vanished because a host's config file moved
-    /// should cost you your colours, not your terminal.
+    /// should cost you your colors, not your terminal.
     var current: Theme {
         available.first { $0.name == stored } ?? .fallback
     }

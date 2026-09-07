@@ -155,9 +155,9 @@ final class TerminalGlyphCache {
         return font
     }
 
-    /// The colour the core packed, as CoreGraphics wants it.
+    /// The color the core packed, as CoreGraphics wants it.
     ///
-    /// Cached because a terminal has sixteen colours, or two hundred and
+    /// Cached because a terminal has sixteen colors, or two hundred and
     /// fifty-six of them, and building a `CGColor` per run per frame is a
     /// per-frame allocation for a value that never changes.
     func color(_ packed: UInt32) -> CGColor {
@@ -165,7 +165,7 @@ final class TerminalGlyphCache {
         // sRGB by name, not `CGColor(red:green:blue:alpha:)`, which is generic
         // device RGB. `Color(packed:)` is a SwiftUI `Color(red:green:blue:)`
         // and that is sRGB, so the device variant drew every cell of the grid
-        // in a colour a few values off the one the rest of the app uses — a
+        // in a color a few values off the one the rest of the app uses — a
         // difference too small to notice by eye and large enough that a
         // pixel comparison of the two drawing paths found 88% of the screen
         // disagreeing.
@@ -253,7 +253,7 @@ final class TerminalGlyphCache {
 /// see `TerminalBenchHarness`.
 enum TerminalDrawPath: String {
     /// Glyph indices placed at cell positions. One CoreText call per distinct
-    /// (face, colour) on the whole screen, and no shaper anywhere in the path.
+    /// (face, color) on the whole screen, and no shaper anywhere in the path.
     case glyphs
     #if DEBUG
     /// One `context.draw(Text)` per cell, which is what this renderer did
@@ -409,8 +409,8 @@ struct TerminalRenderer {
         // downwards from the top of the row.
         let baseline = cache.baseline(size: scaledSize, choice: fontChoice)
 
-        // Filled by colour across the WHOLE grid rather than per row: a screen
-        // has a handful of distinct colours and thousands of cells, and
+        // Filled by color across the WHOLE grid rather than per row: a screen
+        // has a handful of distinct colors and thousands of cells, and
         // `CGContext.fill(_ rects:)` takes the lot in one call.
         var fills: [UInt32: [CGRect]] = [:]
         var batches: [GlyphBatch: GlyphRun] = [:]
@@ -2425,7 +2425,7 @@ struct TerminalBenchHarness: View {
     }
 
     /// A screenful that looks like work: code, punctuation a coding face has
-    /// opinions about, a coloured prompt, a diff, and a selected line with a
+    /// opinions about, a colored prompt, a diff, and a selected line with a
     /// background of its own.
     ///
     /// Deterministic — the same screen every run, on every machine — because a

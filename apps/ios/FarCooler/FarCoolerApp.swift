@@ -27,7 +27,7 @@ struct FarCoolerApp: App {
                 // The theme's own ground, not just its light/dark leaning.
                 //
                 // The scheme alone gives the SYSTEM's black, which is the
-                // colour the complaint that started this was about — picking
+                // color the complaint that started this was about — picking
                 // Nord and still getting `#000000` chrome around a `#2E3440`
                 // terminal is the theme applying to half the screen.
                 .background(themes.current.backgroundColor)

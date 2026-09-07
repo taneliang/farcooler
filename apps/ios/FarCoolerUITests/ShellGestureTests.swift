@@ -1158,7 +1158,7 @@ final class ShellGestureTests: XCTestCase {
 
     /// How bright that rectangle is on average, 0…255.
     ///
-    /// The plain mean of the three colour channels and not a weighted
+    /// The plain mean of the three color channels and not a weighted
     /// luminance: this card's fill is a near-neutral slate and both treatments
     /// move all three channels together, so a perceptual weighting would be
     /// arithmetic that changes no answer and one more thing to be wrong.

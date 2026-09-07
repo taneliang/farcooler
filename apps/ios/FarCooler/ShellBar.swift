@@ -31,11 +31,11 @@ import SwiftUI
 /// have to open the column to understand.
 ///
 /// Elongation is therefore the only thing `isCurrent` changes. Same fill, same
-/// stroke, same colour; 2.5 times as wide, with a capsule radius — which at
+/// stroke, same color; 2.5 times as wide, with a capsule radius — which at
 /// equal width and height is a circle, so one shape draws both.
 ///
 /// **The four drawings are gone; this is `GlanceMarkView` now.** They were four
-/// colour literals — `Color.orange`, `Color.cyan`, and white at two opacities —
+/// color literals — `Color.orange`, `Color.cyan`, and white at two opacities —
 /// which made this file the third of three places one amber could drift, beside
 /// the two `glanceTint` functions in the widget extensions. The glance spec's
 /// §03 is one mark for the whole product, and the argument for it is exactly
@@ -351,7 +351,7 @@ struct ShellColumn: View {
             // `#FF9F0A` means exactly one thing, an agent has stopped and
             // needs a human. Nothing else in the product may be amber." A row
             // being under your thumb is not an agent needing you, and a
-            // colour that means two things means neither.
+            // color that means two things means neither.
             //
             // (The same contradiction sits in the brief's own §4, which
             // outlines the current workspace's card in amber. Flagged rather

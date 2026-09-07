@@ -200,9 +200,9 @@ final class TerminalLigatureTests: XCTestCase {
             return (x, y, w, h)
         }
 
-        /// The fraction of a cell that is not the colour of its own corner.
+        /// The fraction of a cell that is not the color of its own corner.
         ///
-        /// The corner rather than a fixed colour, so this reads the same on a
+        /// The corner rather than a fixed color, so this reads the same on a
         /// black fixture and on whatever ground a theme puts behind it.
         func ink(in rect: CGRect) -> Double {
             let box = pixels(rect)

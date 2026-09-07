@@ -118,7 +118,7 @@ struct ShellCardFace: View {
     /// is meant to sample it. True on the flight, where there is a terminal
     /// underneath that would otherwise read through the fill — and where the
     /// ground it needs is the same one the page carries, so the two composite
-    /// to the same colour and the handover at the end has nothing to give
+    /// to the same color and the handover at the end has nothing to give
     /// away.
     var opaqueGround: Bool = false
 
