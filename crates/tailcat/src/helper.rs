@@ -659,6 +659,55 @@ mod tests {
         unsafe { std::env::remove_var(HELPER_PATH_ENV) };
     }
 
+    /// A DERP map URL carrying a newline reaches a helper as ONE line or as
+    /// none, never as two.
+    ///
+    /// This is the boundary the refusal in `super::set_derp_map_url` exists to
+    /// protect, asserted here rather than reasoned about, because the cost is
+    /// not a bad URL — it is this pipe going permanently out of step. `ask`
+    /// writes one line and reads one line back; a newline inside the value ends
+    /// the line early, so the remainder arrives as a SECOND command the helper
+    /// answers with a SECOND reply. From then on every reply is one behind: the
+    /// `serve` below would read the stray line's answer, report whatever that
+    /// said, and the runner would serve no tunnel with nothing anywhere naming
+    /// a newline.
+    ///
+    /// The fake helper answers `ok` to everything, so a desync is invisible in
+    /// the RESULT here — which is the point. It shows up in what the helper was
+    /// actually sent, and that is what this reads.
+    #[test]
+    fn a_derp_map_url_carrying_a_newline_never_reaches_a_helper_as_two_lines() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let _setting = super::super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        *helper().lock().expect("the tunnel helper lock") = None;
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("commands");
+        fake_helper(dir.path(), &log);
+
+        super::super::set_derp_map_url("https://derp.example/derpmap.json");
+        super::super::set_derp_map_url("https://derp.example/map.json\n");
+        let key = dir.path().join("tailcat.key");
+        serve(&key, 22, &["a".repeat(43)]).expect("the fake helper accepted serve");
+
+        let heard = commands(&log);
+        assert!(
+            !heard.iter().any(|command| command.is_empty()),
+            "a blank line reached the helper, so every reply after it is one behind: {heard:?}"
+        );
+        assert_eq!(
+            heard,
+            [
+                "derpmap https://derp.example/derpmap.json".to_string(),
+                format!("serve 22 {}", "a".repeat(43)),
+            ],
+            "the newline URL was taken instead of being refused"
+        );
+
+        super::super::set_derp_map_url("");
+        *helper().lock().expect("the tunnel helper lock") = None;
+        unsafe { std::env::remove_var(HELPER_PATH_ENV) };
+    }
+
     /// No helper on disk is `no_tailcat`, not `Io(ENOENT)` — the same answer
     /// `serve` gives for the same absence, which is what makes a tarball that
     /// forgot to ship the helper fail `tunnel-smoke.sh` rather than pass it.

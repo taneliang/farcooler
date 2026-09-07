@@ -192,13 +192,22 @@ pub fn ensure_identity(key_path: &Path) -> Result<(), TunnelError> {
 ///
 /// A URL with whitespace in it is refused here rather than in each backend,
 /// because it is not a URL on any of them and because one of them would be
-/// actively harmed by it: `helper.rs` sends this to a subprocess over a
-/// line protocol whose fields are separated by spaces, so a second field
-/// would arrive as a command the helper never meant to be given. Refused, not
-/// trimmed — a value somebody typed wrong should stay unset rather than
-/// become a different URL nobody chose.
+/// actively harmed by it: `helper.rs` sends this to a subprocess over a line
+/// protocol that is one command per line and one reply per line. A space makes
+/// a second FIELD, which would arrive as a command the helper never meant to be
+/// given; a newline makes a second LINE, which is worse — the helper answers it
+/// too, and every reply after that is one behind, so the `serve` that follows
+/// reads the stray line's `err 22` and the runner serves no tunnel for a reason
+/// nothing names.
+///
+/// **Any whitespace, not a field count.** `split_whitespace` counts fields, and
+/// a value that merely ENDS in a newline has one of them — which is exactly the
+/// shape a plist `<string>` or a systemd `Environment=` with the URL on its own
+/// line produces, and it was being taken. Refused, not trimmed: a value
+/// somebody typed wrong should stay unset rather than become a different URL
+/// nobody chose.
 pub fn set_derp_map_url(url: &str) {
-    if url.split_whitespace().count() > 1 {
+    if url.chars().any(char::is_whitespace) {
         tracing::warn!("tailcat: the DERP map URL has whitespace in it; ignoring it");
         return;
     }
@@ -288,6 +297,43 @@ mod tests {
             "https://derp.example/derpmap.json",
             "a DERP map URL carrying a second field was taken"
         );
+        set_derp_map_url("");
+    }
+
+    /// A URL with a NEWLINE in it is refused too, and it is NOT the same
+    /// mistake as the one above.
+    ///
+    /// `split_whitespace` counts FIELDS, and a value that ends in a newline
+    /// has exactly one — so `"https://derp.example/map.json\n"` counted as one
+    /// field and was taken. A plist `<string>` or a systemd `Environment=`
+    /// with the URL on its own line is all it takes to produce one, and
+    /// nothing between there and here trims it.
+    ///
+    /// The cost is not a bad URL, which would at least fail visibly. The
+    /// helper backend writes this as `derpmap <url>` followed by a newline,
+    /// down a pipe whose whole contract is one reply per line: the newline
+    /// INSIDE the value ends the line early, and what follows it arrives as a
+    /// second command the helper answers with a second reply. Every reply
+    /// after that is one behind. The `serve` that follows reads the stray
+    /// line's `err 22` and reports `EINVAL`, so the runner serves no tunnel
+    /// and nothing anywhere names the newline.
+    #[test]
+    fn a_derp_map_url_with_a_newline_in_it_is_refused() {
+        let _serial = super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        set_derp_map_url("https://derp.example/derpmap.json");
+        for spelling in [
+            "https://derp.example/map.json\n",
+            "\nhttps://derp.example/map.json",
+            "https://derp.example/map.json\r\n",
+            "https://derp.example/map.json\t",
+        ] {
+            set_derp_map_url(spelling);
+            assert_eq!(
+                derp_map_url(),
+                "https://derp.example/derpmap.json",
+                "{spelling:?} was taken; it would reach a helper as two lines"
+            );
+        }
         set_derp_map_url("");
     }
 
