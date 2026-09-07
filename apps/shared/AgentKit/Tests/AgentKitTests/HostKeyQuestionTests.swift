@@ -66,7 +66,8 @@ struct HostKeyQuestionTests {
     /// files the runner under `kept`, and nothing re-dials. So this move
     /// carries the dial itself.
     @Test func showingTheKeyAgainDialsAndDoesNotOnlyForget() {
-        #expect(RunnerTrouble.NextMove.showTheKeyAgain.acts == [.forgetThePinnedKey, .dialAgain])
+        #expect(
+            RunnerTrouble.NextMove.showTheKeyAgain.acts == [.forgetThePinnedKey, .dialAgain])
     }
 
     /// The other half of the same rule, and the reason it is not "always dial":
@@ -121,12 +122,12 @@ struct HostKeyQuestionTests {
     /// the classifier that has to recognize it. A reword breaks exactly one of
     /// these, by name.
     @Test func everySentenceTheAppWritesClassifiesBack() {
-        #expect(
-            RunnerTrouble(message: RunnerTrouble.Said.stoppedWaiting(for: "10.0.0.4")) == .stopped)
+        let stopped = RunnerTrouble.Said.stoppedWaiting(for: "10.0.0.4")
+        #expect(RunnerTrouble(message: stopped) == .stopped)
         #expect(RunnerTrouble(message: RunnerTrouble.Said.noIdentity) == .noIdentity)
         #expect(RunnerTrouble(message: RunnerTrouble.Said.noNodeKey) == .noNodeKey)
-        #expect(
-            RunnerTrouble(message: RunnerTrouble.Said.declined(runner: "box")) == .keyNotTrusted)
+        let declined = RunnerTrouble.Said.declined(runner: "box")
+        #expect(RunnerTrouble(message: declined) == .keyNotTrusted)
     }
 
     /// The four are told APART, not merely recognized. A phrase generic enough

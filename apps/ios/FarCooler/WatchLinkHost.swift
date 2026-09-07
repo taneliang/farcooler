@@ -179,8 +179,8 @@ final class WatchLinkHost: NSObject {
     private func missed(hasScene: Bool) -> String {
         let miss =
             TerminalReach.miss(
-                hasScene: hasScene, everyRunnerHasAnswered: everyRunnerHasAnswered, found: false)
-            ?? .notOnAnyRunner
+                hasScene: hasScene, everyRunnerHasAnswered: everyRunnerHasAnswered,
+                found: false) ?? .notOnAnyRunner
         return TerminalReach.sentence(
             miss, appName: appName, deviceKind: DeviceKind.current)
     }
@@ -289,7 +289,9 @@ final class WatchLinkHost: NSObject {
         // Given the fleet a moment to arrive, because this is routinely a phone
         // that has just been WOKEN by this very request and has a scene before
         // it has any entries. See `connection(forTerminal:within:)`.
-        guard let connection = await connection(forTerminal: request.terminal, within: Self.fleetBudget)
+        guard
+            let connection = await connection(
+                forTerminal: request.terminal, within: Self.fleetBudget)
         else {
             return .failed(missed(hasScene: true))
         }
@@ -749,7 +751,8 @@ final class WatchLinkHost: NSObject {
         // The wait is the same too: a lock-screen tap launches the app, so the
         // fleet is routinely younger than the request. See `TerminalReach`.
         guard
-            let connection = await connection(forTerminal: terminal, within: Self.glanceFleetBudget)
+            let connection = await connection(
+                forTerminal: terminal, within: Self.glanceFleetBudget)
         else {
             await settle(intent, .nothingSent, missed(hasScene: true))
             return

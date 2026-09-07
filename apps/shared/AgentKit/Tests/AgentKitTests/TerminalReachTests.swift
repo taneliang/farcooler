@@ -14,14 +14,17 @@ struct TerminalReachTests {
 
     /// The ordinary case: the pane was found and there is nothing to say.
     @Test func findingThePaneIsNotAMiss() {
-        #expect(TerminalReach.miss(hasScene: true, everyRunnerHasAnswered: true, found: true) == nil)
+        #expect(
+            TerminalReach.miss(hasScene: true, everyRunnerHasAnswered: true, found: true)
+                == nil)
     }
 
     /// Found beats everything. A pane that resolved while the rest of the fleet
     /// was still connecting is a pane this phone can act on.
     @Test func findingThePaneBeforeTheFleetHasSettledIsStillNotAMiss() {
         #expect(
-            TerminalReach.miss(hasScene: false, everyRunnerHasAnswered: false, found: true) == nil)
+            TerminalReach.miss(hasScene: false, everyRunnerHasAnswered: false, found: true)
+                == nil)
     }
 
     /// No scene at all. There is no app-wide store to fall back to, so this is

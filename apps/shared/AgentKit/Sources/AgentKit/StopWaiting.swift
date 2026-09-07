@@ -75,7 +75,9 @@ enum StopWaiting {
     /// a different list than the one it drew — which is the shape the bug had:
     /// the rows iterated the unanswered runners and the button iterated all of
     /// them.
-    static func stopping<Runner>(_ runners: [Runner], standing: (Runner) -> Standing) -> [Runner] {
+    static func stopping<Runner>(_ runners: [Runner], standing: (Runner) -> Standing)
+        -> [Runner]
+    {
         runners.filter { standing($0).isWaitingOnTheNetwork }
     }
 
