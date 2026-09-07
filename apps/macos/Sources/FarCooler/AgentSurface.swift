@@ -579,7 +579,7 @@ private struct PlanPanel: View {
 /// paused waiting on it, so it belongs in the flow of the conversation it
 /// interrupted, not in a window layered on top of it.
 private struct ApprovalCard: View {
-    /// §01's amber is a different colour in each appearance — "Not a filter
+    /// §01's amber is a different color in each appearance — "Not a filter
     /// flip" — so this card resolves it rather than holding a constant.
     @Environment(\.colorScheme) private var scheme
 

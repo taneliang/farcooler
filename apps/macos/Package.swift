@@ -100,7 +100,7 @@ let package = Package(
         // The third target, and it earns one because its charter is the
         // opposite of `CeremonyTests`'. That suite is for rules whose failure
         // modes are invisible by looking; this one is for the claim that a
-        // drawing is a particular colour, which no other kind of test can
+        // drawing is a particular color, which no other kind of test can
         // reach. The glance vocabulary is a difference in ring weight, hue,
         // dash and core — a view asked what it is will happily answer
         // correctly while rendering something else — so this target rasterises

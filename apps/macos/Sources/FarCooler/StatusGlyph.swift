@@ -81,7 +81,7 @@ struct StatusGlyph: View {
         }
     }
 
-    /// Resolved here rather than by a dynamic colour provider, for the reason
+    /// Resolved here rather than by a dynamic color provider, for the reason
     /// `GlanceInk` gives: the provider APIs are `NSColor`/`UIColor` and the
     /// watch has neither, so `@Environment(\.colorScheme)` is the one
     /// mechanism the whole palette shares. Only `outcome` reads it — the mark
@@ -294,7 +294,7 @@ extension Status {
     /// **A function of the appearance, because the glance inks are.** §01 is
     /// explicit that light mode is "Not a filter flip" — amber darkens to hold
     /// its contrast on a pale backdrop, and review darkens with it — so the
-    /// two colours in here that belong to the glance system have to be
+    /// two colors in here that belong to the glance system have to be
     /// resolved against a `ColorScheme` rather than being constants. Red does
     /// not vary, and it does not come from `GlancePalette` because §01 has no
     /// figure for it: it is this app's own ink for the four states §03 does
@@ -313,7 +313,7 @@ extension Status {
         case .blocked: return GlancePalette.amber(scheme)
         // The other glance ink, and the same value `GlanceMarkView` strokes
         // the review ring in — so a `done` terminal's glyph and the tile
-        // washed behind it cannot come out two different colours.
+        // washed behind it cannot come out two different colors.
         case .done: return GlancePalette.review(scheme)
         // `failedRun` and `failedTurn` are filled rather than hollow: both are
         // a definite outcome, not a missing answer. Left out of the shape
@@ -325,7 +325,7 @@ extension Status {
         case .lost, .failed, .failedRun, .failedTurn: return .red
         // Not red. Red is reserved for something that has gone wrong and wants
         // a decision; a runner that has not answered yet is neither, and
-        // painting the whole fleet red every time tmux is busy is how a colour
+        // painting the whole fleet red every time tmux is busy is how a color
         // stops meaning anything.
         case .unreadable: return GlancePalette.ink2(scheme)
         case .working, .starting: return GlancePalette.ink2(scheme)

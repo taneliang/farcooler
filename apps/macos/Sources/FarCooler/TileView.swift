@@ -661,7 +661,7 @@ private struct TilePane: View {
                 // amber answers one question, "is an agent waiting on me", and
                 // a worktree with uncommitted work is nobody waiting. It is a
                 // diff nobody has dealt with, which is exactly what
-                // `GlancePalette.review` is the colour for, and reviews are
+                // `GlancePalette.review` is the color for, and reviews are
                 // counted per WORKSPACE, which is the level this dot sits at.
                 Circle()
                     .fill(GlancePalette.review(scheme))

@@ -320,7 +320,7 @@ private struct ToolRowView: View {
                 // §01's one saturated hue, from the one place it is written
                 // down. A tool call that has stopped and is waiting for a
                 // person to answer is the definition of `needsYou`, so this
-                // outline and the sidebar's amber ring are the same colour by
+                // outline and the sidebar's amber ring are the same color by
                 // construction rather than by two hands typing `.orange`.
                 RoundedRectangle(cornerRadius: 7)
                     .strokeBorder(GlancePalette.amber(scheme).opacity(0.45))

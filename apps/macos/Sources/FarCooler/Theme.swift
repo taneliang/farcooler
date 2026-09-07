@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// A colour scheme: the terminal's palette, and which way the app around it
+/// A color scheme: the terminal's palette, and which way the app around it
 /// goes.
 ///
 /// Both halves in one value, because a light terminal inside black chrome is
@@ -33,7 +33,7 @@ struct Theme: Decodable, Equatable, Identifiable {
     ///
     /// Duplicated from `farcooler_core::theme` deliberately and kept small: it
     /// is the one theme that has to exist before the CLI has answered, and the
-    /// alternative is a window that renders with no colours at all for the
+    /// alternative is a window that renders with no colors at all for the
     /// hundred milliseconds a subprocess takes. Everything else — including
     /// this same theme, once the list arrives — comes from the core.
     static let fallback = Theme(
@@ -55,7 +55,7 @@ struct Theme: Decodable, Equatable, Identifiable {
     /// The selection wash.
     ///
     /// Derived rather than carried, because no terminal theme in the world
-    /// specifies one and inventing a twentieth colour for every theme file
+    /// specifies one and inventing a twentieth color for every theme file
     /// would be asking authors to answer a question they do not have. ANSI
     /// blue at low alpha reads as a selection on every ground this ships.
     var selectionColor: NSColor { Theme.color(ansi.count > 4 ? ansi[4] : foreground).withAlphaComponent(0.45) }
@@ -218,9 +218,9 @@ struct PaneHeaderBackground: View {
 
 /// Every theme this runner offers, and which one is in force.
 ///
-/// One object rather than a preference holding colours: a theme defined on a
+/// One object rather than a preference holding colors: a theme defined on a
 /// host can be EDITED, and a client that had cached its values would go on
-/// showing the old ones forever. What is stored is the name; the colours are
+/// showing the old ones forever. What is stored is the name; the colors are
 /// re-read whenever the list is.
 @MainActor
 final class Themes: ObservableObject {
@@ -228,11 +228,11 @@ final class Themes: ObservableObject {
 
     @Published private(set) var available: [Theme] = [.fallback]
 
-    /// Bumped whenever the colours in force change, so a live terminal view
+    /// Bumped whenever the colors in force change, so a live terminal view
     /// repaints. The same mechanism `Preferences.revision` uses for fonts.
     @Published private(set) var revision = 0
 
-    /// The chosen theme's NAME, not its colours — see the type's note.
+    /// The chosen theme's NAME, not its colors — see the type's note.
     var selectedName: String {
         get { UserDefaults.standard.string(forKey: "app.theme") ?? Theme.fallback.name }
         set {
@@ -261,7 +261,7 @@ final class Themes: ObservableObject {
 
     /// The theme in force. Falls back rather than to nothing when a stored
     /// name no longer resolves — a theme that vanished because a config file
-    /// moved should cost you your colours, not your terminal.
+    /// moved should cost you your colors, not your terminal.
     var current: Theme {
         available.first { $0.name == selectedName } ?? .fallback
     }

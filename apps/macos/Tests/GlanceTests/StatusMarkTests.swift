@@ -31,7 +31,7 @@ import Testing
 ///
 /// `scale` is 16 rather than 2 on purpose. A quiet mark is a ONE POINT ring;
 /// at 2× that is two device pixels, both of them antialiased against the
-/// backdrop, and no sample taken from it is the colour the palette named. At
+/// backdrop, and no sample taken from it is the color the palette named. At
 /// 16× the same ring is sixteen pixels across and its middle ones are the
 /// literal value, so a mismatch is a mismatch and not a rounding argument.
 @MainActor
@@ -57,7 +57,7 @@ private func raster<V: View>(
 ///
 /// Drawn into a context this file owns rather than read out of whatever
 /// `cgImage` happened to produce: the renderer's own bitmap may be premultiplied,
-/// float, or in the display's colour space, and every one of those turns a
+/// float, or in the display's color space, and every one of those turns a
 /// comparison against an `oklch()`-derived value into a comparison against a
 /// conversion of it.
 private struct Raster {
@@ -95,7 +95,7 @@ private struct Raster {
         return (Double(pixels[i]) / 255, Double(pixels[i + 1]) / 255, Double(pixels[i + 2]) / 255)
     }
 
-    /// The colour that most of the ink is, ignoring the backdrop.
+    /// The color that most of the ink is, ignoring the backdrop.
     ///
     /// A histogram over every pixel, with anything within `nearBackdrop` of the
     /// given ground thrown away and the survivors bucketed at 1/255. Taking a
@@ -103,7 +103,7 @@ private struct Raster {
     /// tool: a 2pt ring on an 8pt mark leaves the sampler chasing a curve, and
     /// a test that fails because the geometry moved half a point is a test
     /// nobody keeps. The MODE is stable under any change that keeps the mark
-    /// the same colour, which is the only thing this is asserting.
+    /// the same color, which is the only thing this is asserting.
     func dominantInk(against ground: (Double, Double, Double), nearBackdrop: Double = 0.12)
         -> (Double, Double, Double)?
     {
@@ -345,14 +345,14 @@ struct StatusMarkPixelTests {
         #expect(dashed < solid * 0.9, "dashed (\(dashed)) is not broken against solid (\(solid))")
     }
 
-    /// A dead turn still says so in the colour it always did, and a finished
+    /// A dead turn still says so in the color it always did, and a finished
     /// one now says so in the review ink rather than green. If this starts
     /// failing, somebody folded one of them into the hairline — or folded them
     /// into each other, which is the defect red was introduced to fix.
     ///
     /// **The `done` row is read out of the pixels and not out of the switch.**
     /// `Status.tint` returning the review ink is not the claim; the claim is
-    /// that the glyph a person looks at is that colour, which after this change
+    /// that the glyph a person looks at is that color, which after this change
     /// it reaches by a different route — `Status.glanceMark` and
     /// `GlanceMarkView`'s ring, not `StatusGlyph.outcome`'s fill.
     @Test("A finished turn is the review ink and a dead one still red")

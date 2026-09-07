@@ -306,7 +306,7 @@ struct CommandPalette: View {
 /// space.
 private struct SwitcherTile: View {
     /// The wash below is amber for a blocked agent, and §01's amber is a
-    /// different colour in each appearance rather than the same one dimmed.
+    /// different color in each appearance rather than the same one dimmed.
     @Environment(\.colorScheme) private var scheme
 
     let entry: PaletteEntry

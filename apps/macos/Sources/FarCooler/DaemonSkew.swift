@@ -218,7 +218,7 @@ enum DaemonRestartCost {
 /// retry dot there today, and retrying a protocol mismatch is the one thing
 /// that provably cannot work.
 struct DaemonSkewDot: View {
-    /// §01's amber is a different colour in each appearance, not the same one
+    /// §01's amber is a different color in each appearance, not the same one
     /// dimmed, so this resolves it rather than holding a constant.
     @Environment(\.colorScheme) private var scheme
 

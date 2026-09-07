@@ -31,7 +31,7 @@ struct RenderCostTests {
     enum Fill {
         /// Every cell blank. The floor: backgrounds, cursor, nothing else.
         case blank
-        /// Plain uncoloured text in every cell.
+        /// Plain uncolored text in every cell.
         case text
         /// Text plus an SGR change every eight cells, which is what an agent's
         /// syntax-highlighted output looks like.
@@ -98,7 +98,7 @@ struct RenderCostTests {
         return best
     }
 
-    @Test("One frame, ablated: blank grid, plain text, coloured text")
+    @Test("One frame, ablated: blank grid, plain text, colored text")
     func theFrameCost() {
         // Returns rather than fails when unset. There is no skip in
         // swift-testing, and a benchmark that reddens every ordinary `swift

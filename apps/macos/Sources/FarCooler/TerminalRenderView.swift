@@ -408,14 +408,14 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     /// Hand the palette to the core.
     ///
-    /// Chrome alone is not enough: every CELL's colour is resolved inside the
+    /// Chrome alone is not enough: every CELL's color is resolved inside the
     /// emulator — deliberately, so three renderers cannot drift — so a theme
     /// the core has not been told about would repaint the background and leave
-    /// every character in the old colours.
+    /// every character in the old colors.
     func applyTheme() {
         core.setPalette(Themes.shared.current.packed)
         // And the core waiting for the replay, which will be on screen shortly
-        // and would otherwise arrive in the previous theme's colours.
+        // and would otherwise arrive in the previous theme's colors.
         pendingCore?.setPalette(Themes.shared.current.packed)
         layer?.backgroundColor = Palette.background.cgColor
     }
@@ -430,7 +430,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         // A fresh core starts on the VT crate's own default palette, which is
         // not the theme in force. Without this, pointing a view at a different
         // terminal repainted its chrome correctly and left every character in
-        // the wrong colours.
+        // the wrong colors.
         core.setPalette(Themes.shared.current.packed)
         selection = nil
         lastDrawnRevision = .max
@@ -1301,7 +1301,7 @@ enum Palette {
 
     /// Packed RGB as a `CGColor`, memoised.
     ///
-    /// Called once per run of same-coloured cells, in both the background pass
+    /// Called once per run of same-colored cells, in both the background pass
     /// and the glyph pass — so on a screen of syntax-highlighted output, which
     /// is what an agent produces, it is called a thousand times a frame at 120
     /// Hz. `CGColor` is a reference type and each of those was an allocation.
@@ -1311,12 +1311,12 @@ enum Palette {
     /// not what a packed value means.
     ///
     /// Capped because the key space is not small. Sixteen palette entries and a
-    /// handful of truecolour picks is the normal case, but `\e[38;2;r;g;bm` can
-    /// name sixteen million colours — a program drawing an image in the
+    /// handful of truecolor picks is the normal case, but `\e[38;2;r;g;bm` can
+    /// name sixteen million colors — a program drawing an image in the
     /// terminal would name a great many of them — and an unbounded table would
     /// grow to hundreds of megabytes to save an allocation. Emptied wholesale
     /// rather than evicted one at a time: the cheap case is a screen with a few
-    /// dozen colours on it, which refills in one frame.
+    /// dozen colors on it, which refills in one frame.
     private static var colors: [UInt32: CGColor] = [:]
     private static let colorCeiling = 4096
 

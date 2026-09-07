@@ -31,11 +31,11 @@ final class VTCore {
         bytes.withUnsafeBufferPointer { farcooler_vt_feed(handle, $0.baseAddress, $0.count) }
     }
 
-    /// Recolour every cell the next snapshot produces.
+    /// Recolor every cell the next snapshot produces.
     ///
     /// `colors` is nineteen packed values: sixteen ANSI, then foreground,
-    /// background, cursor. The core resolves cell colours when a snapshot is
-    /// taken rather than when bytes arrive, so this recolours scrollback too —
+    /// background, cursor. The core resolves cell colors when a snapshot is
+    /// taken rather than when bytes arrive, so this recolors scrollback too —
     /// which is what makes switching themes instant instead of a repaint of
     /// history the terminal no longer holds.
     @discardableResult

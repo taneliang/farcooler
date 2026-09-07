@@ -1,14 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// Nineteen colours, over a terminal actually rendering them.
+/// Nineteen colors, over a terminal actually rendering them.
 ///
 /// The preview is the point. Nineteen hex values tell you nothing about whether
-/// a theme is readable, and the one question anybody has about a colour scheme —
+/// a theme is readable, and the one question anybody has about a color scheme —
 /// can I look at this for eight hours — is only answerable by looking at it.
 ///
 /// It is a real `TerminalRenderView` fed a fixture, not a hand-drawn mock:
-/// cell colours are resolved inside the VT core on purpose, so three renderers
+/// cell colors are resolved inside the VT core on purpose, so three renderers
 /// cannot drift, and a mock here would be a fourth renderer drifting from all of
 /// them. Previewing means setting a palette on a throwaway core, which is the
 /// same call a live terminal takes.
@@ -93,10 +93,10 @@ struct ThemeEditor: View {
         .padding(.vertical, 12)
     }
 
-    /// One labelled colour well.
+    /// One labelled color well.
     ///
     /// `NSColorWell` through SwiftUI's `ColorPicker`, so it is the system picker
-    /// with the eyedropper people already know — picking a colour off a running
+    /// with the eyedropper people already know — picking a color off a running
     /// terminal is exactly how someone matches a theme to a screenshot.
     private func well(_ label: String, _ packed: Binding<UInt32>) -> some View {
         ColorPicker(label, selection: Binding(
@@ -129,9 +129,9 @@ struct ThemeEditor: View {
     ]
     static let brightNames = normalNames.map { "Bright \($0)" }
 
-    /// A SwiftUI colour as `0x00RRGGBB`.
+    /// A SwiftUI color as `0x00RRGGBB`.
     ///
-    /// Through sRGB explicitly. A `Color` can be in any colour space, and taking
+    /// Through sRGB explicitly. A `Color` can be in any color space, and taking
     /// its components without converting produces values that look right in the
     /// picker and wrong in the terminal.
     static func pack(_ color: Color) -> UInt32 {
@@ -185,7 +185,7 @@ private struct ThemePreview: NSViewRepresentable {
             let palette = theme.packed
             guard palette != lastPalette else { return }
             lastPalette = palette
-            // A fresh core each time rather than recolouring in place: the
+            // A fresh core each time rather than recoloring in place: the
             // fixture is a few hundred bytes, and rebuilding means the preview
             // cannot accumulate state from a palette that is no longer chosen.
             view.reset(columns: 64, rows: 11)
@@ -196,7 +196,7 @@ private struct ThemePreview: NSViewRepresentable {
         }
 
         /// Output chosen to exercise what a theme actually has to get right:
-        /// all sixteen colours, bold, a prompt, a diff, and an agent's furniture.
+        /// all sixteen colors, bold, a prompt, a diff, and an agent's furniture.
         static let fixture: String = {
             var out = "\u{1b}[H\u{1b}[2J"
             out += "\u{1b}[1;32m~/project\u{1b}[0m \u{1b}[1;34mmain\u{1b}[0m $ claude\r\n"
@@ -207,7 +207,7 @@ private struct ThemePreview: NSViewRepresentable {
             out += "\u{1b}[33m!\u{1b}[0m \u{1b}[1mDo you want to make this edit?\u{1b}[0m\r\n"
             out += "  \u{1b}[36m❯ 1. Yes\u{1b}[0m\r\n"
             out += "    2. No, tell Claude what to do differently\r\n"
-            // Every colour, so nothing is untested by the eye.
+            // Every color, so nothing is untested by the eye.
             out += "\r\n "
             for code in 30...37 { out += "\u{1b}[\(code)m███\u{1b}[0m" }
             out += "\r\n "
