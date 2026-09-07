@@ -11,6 +11,14 @@ import Testing
 /// is a button that runs and does nothing. This suite is what makes each of
 /// them go red.
 struct HostKeyQuestionTests {
+    /// A runner named the way `Runner.named` names one, which is what the two
+    /// sentences below take. A tunneled runner has no address at all — see
+    /// `RunnerTrouble.Said` — so a `String` was the wrong parameter and the
+    /// bug it let through was invisible here.
+    private func named(_ name: String, port: Int? = 22) -> RunnerTrouble.Words {
+        RunnerTrouble.Words(name: name, reachDetail: "e@\(name)", port: port)
+    }
+
     // MARK: - Every answer survives
 
     /// **The ruling.** The port replaced a full-screen approval phase with a
@@ -47,7 +55,7 @@ struct HostKeyQuestionTests {
     /// written in one file and matched in the same one, and this is what stops
     /// a reword turning a decision somebody made into "Can't Connect".
     @Test func decliningClassifiesAsKeyNotTrusted() {
-        let said = RunnerTrouble.Said.declined(runner: "box.local")
+        let said = RunnerTrouble.Said.declined(runner: named("box.local"))
         #expect(RunnerTrouble(message: said) == .keyNotTrusted)
         #expect(RunnerTrouble(message: said) == HostKeyQuestion.declining)
     }
@@ -81,7 +89,7 @@ struct HostKeyQuestionTests {
     /// The circle closed: decline, land, and the move offered there gets you
     /// back to a fingerprint on screen.
     @Test func theWayBackFromDecliningReachesTheQuestionAgain() {
-        let kind = RunnerTrouble(message: RunnerTrouble.Said.declined(runner: "box.local"))
+        let kind = RunnerTrouble(message: RunnerTrouble.Said.declined(runner: named("box.local")))
         let acts = kind.nextMove.acts
         #expect(acts.contains(.forgetThePinnedKey))
         #expect(acts.contains(.dialAgain))
@@ -122,11 +130,11 @@ struct HostKeyQuestionTests {
     /// the classifier that has to recognize it. A reword breaks exactly one of
     /// these, by name.
     @Test func everySentenceTheAppWritesClassifiesBack() {
-        let stopped = RunnerTrouble.Said.stoppedWaiting(for: "10.0.0.4")
+        let stopped = RunnerTrouble.Said.stoppedWaiting(for: named("10.0.0.4"))
         #expect(RunnerTrouble(message: stopped) == .stopped)
         #expect(RunnerTrouble(message: RunnerTrouble.Said.noIdentity) == .noIdentity)
         #expect(RunnerTrouble(message: RunnerTrouble.Said.noNodeKey) == .noNodeKey)
-        let declined = RunnerTrouble.Said.declined(runner: "box")
+        let declined = RunnerTrouble.Said.declined(runner: named("box"))
         #expect(RunnerTrouble(message: declined) == .keyNotTrusted)
     }
 
@@ -135,13 +143,38 @@ struct HostKeyQuestionTests {
     /// to the wrong button.
     @Test func theAppsFourSentencesAreDistinct() {
         let said = [
-            RunnerTrouble.Said.declined(runner: "box"),
-            RunnerTrouble.Said.stoppedWaiting(for: "box"),
+            RunnerTrouble.Said.declined(runner: named("box")),
+            RunnerTrouble.Said.stoppedWaiting(for: named("box")),
             RunnerTrouble.Said.noIdentity,
             RunnerTrouble.Said.noNodeKey,
         ]
         let kinds = said.map { RunnerTrouble(message: $0) }
         #expect(kinds == [.keyNotTrusted, .stopped, .noIdentity, .noNodeKey])
         #expect(!kinds.contains(.other))
+    }
+
+    /// **The two sentences that name a runner name the runner.**
+    ///
+    /// A tunneled runner is named by the label somebody ticked, not by an
+    /// address it does not have, and both of these were built out of
+    /// `Runner.address` — empty for a tunnel — so they read "Stopped waiting
+    /// for ." and "The key  presented has not been trusted on this device."
+    ///
+    /// The parameter is a `Words` now, which is what stops the address being
+    /// passed at all. This is the other half: that what lands in the sentence
+    /// is `name` and not one of the two fields beside it.
+    @Test func theSentencesNameTheRunnerTheWayASentenceDoes() {
+        let tunneled = RunnerTrouble.Words(
+            name: "the spare room", reachDetail: "e, through the tunnel", port: nil)
+        let stopped = RunnerTrouble.Said.stoppedWaiting(for: tunneled)
+        #expect(stopped == "Stopped waiting for the spare room. It may be asleep or off the network.")
+        let declined = RunnerTrouble.Said.declined(runner: tunneled)
+        #expect(declined.hasPrefix("The key the spare room presented has not been trusted"))
+        // The hole the address left, named so a regression is recognizable
+        // rather than merely unequal.
+        for sentence in [stopped, declined] {
+            #expect(!sentence.contains("for ."), "the runner's name is missing: \(sentence)")
+            #expect(!sentence.contains("key  presented"), "the runner's name is missing: \(sentence)")
+        }
     }
 }

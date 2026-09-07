@@ -648,7 +648,7 @@ final class Connection: ObservableObject {
     /// about to succeed, and until this existed the only way out of that was to
     /// kill the app.
     func giveUp(on host: Runner) {
-        abandon(RunnerTrouble.Said.stoppedWaiting(for: host.address))
+        abandon(RunnerTrouble.Said.stoppedWaiting(for: host.words))
     }
 
     /// Stop, for good, because nobody wants this runner any more.
@@ -718,7 +718,7 @@ final class Connection: ObservableObject {
     /// call sites pass it now, and `HostKeyQuestion` is what stops the pair
     /// coming apart again.
     func declineHostKey(_ host: Runner) {
-        abandon(RunnerTrouble.Said.declined(runner: host.address))
+        abandon(RunnerTrouble.Said.declined(runner: host.words))
     }
 
     private func abandon(_ message: String) {

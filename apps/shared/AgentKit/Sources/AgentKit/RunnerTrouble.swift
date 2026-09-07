@@ -165,17 +165,32 @@ enum RunnerTrouble: Equatable {
     /// `RunnerTroubleTests` reads each one back through `init(message:)`. That
     /// test is the only enforcement this rule has, and it is the reason these
     /// are here rather than beside the code that raises them.
+    /// **The two that name a runner take ``Words``, not a `String`.** That is a
+    /// fix and not a tidy-up. Both call sites in `Connection` passed
+    /// `Runner.address`, which returns the empty string for a tunneled runner
+    /// and whose own doc says "nothing a person reads should be built out of
+    /// this" — so a stalled tunneled runner read "Stopped waiting for ." and a
+    /// declined one read "The key  presented has not been trusted on this
+    /// device." Correct when they were written: `Runner` was an address until
+    /// `Reach` arrived, and `headline` was taught `words.name` while these were
+    /// left behind. Android had already moved to `named`.
+    ///
+    /// Nothing could go red about it. `Connection` is in the iOS target, which
+    /// CI compiles and never runs, so the guard has to be one a COMPILE can
+    /// make: an address is a `String` and a ``Words`` is not, and the only
+    /// `Words` in the app is `Runner.words`, which is built out of
+    /// `Runner.named`.
     enum Said {
         /// The user was shown a fingerprint and backed out of the question.
         /// Matches on "has not been trusted".
-        static func declined(runner: String) -> String {
-            "The key \(runner) presented has not been trusted on this device. "
+        static func declined(runner: Words) -> String {
+            "The key \(runner.name) presented has not been trusted on this device. "
                 + "Far Cooler won’t connect until it is."
         }
 
         /// The user stopped waiting out a dial. Matches on "Stopped waiting".
-        static func stoppedWaiting(for runner: String) -> String {
-            "Stopped waiting for \(runner). It may be asleep or off the network."
+        static func stoppedWaiting(for runner: Words) -> String {
+            "Stopped waiting for \(runner.name). It may be asleep or off the network."
         }
 
         /// No SSH key, and none could be made. Matches on "no SSH key".
