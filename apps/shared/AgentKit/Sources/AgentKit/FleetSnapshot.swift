@@ -851,6 +851,28 @@ public struct ActivityTrace: Sendable, Equatable {
             case .day: "24h"
             }
         }
+
+        /// Seconds in ONE bucket of this window. `farcooler_core::trace::WIDTHS`.
+        ///
+        /// Thirteen of these is the window, which is why these are 300 / 1800 /
+        /// 7200 and the labels above are `1h` / `6h` / `24h` — see the comment
+        /// on the enum, which is where that departure is accounted for.
+        ///
+        /// **The three are whole multiples of one another** — 1800 is 6 x 300
+        /// and 7200 is 4 x 1800 — and that is not a coincidence to be relied on
+        /// quietly: `farcooler_core::trace::BASE_WIDTH` says every width is a
+        /// whole multiple of the finest "so a coarser window is summed out of
+        /// these rather than sampled on its own clock". `rebucketed(to:)` is
+        /// this client doing the same sum, and
+        /// `theWidthsAreWholeMultiplesOfEachOther` is the test that stops a
+        /// fourth width being added that is not.
+        public var bucketSeconds: Int {
+            switch self {
+            case .hour: 300
+            case .sixHours: 1800
+            case .day: 7200
+            }
+        }
     }
 
     /// The 66 bytes, held whole. Indexing goes through `byte(_:)` because a
@@ -907,6 +929,112 @@ public struct ActivityTrace: Sendable, Equatable {
     /// than omitted."
     public var tallestCode: UInt16 { (0..<Self.buckets).reduce(0) { max($0, code($1)) } }
     public var tallestOutput: UInt16 { (0..<Self.buckets).reduce(0) { max($0, output($1)) } }
+
+    /// The bytes and the span they declare, for a trace this build computed
+    /// rather than received. Private, so the only public way in stays `init?`
+    /// and its refusals.
+    private init(bytes: Data, span: Span) {
+        self.bytes = bytes
+        self.span = span
+    }
+
+    /// This trace summed onto a coarser window, so several rows can be drawn on
+    /// ONE axis.
+    ///
+    /// # Why this exists
+    ///
+    /// The card's second rule is "one shared time axis down the card, so a
+    /// column is comparable across rows", and it is what makes two rows stopping
+    /// in the same column read as a runner going away. Nothing was enforcing it:
+    /// every trace snaps to the shortest of three windows containing its OWN
+    /// activity, so a five-minute row and a two-hour row drawn side by side gave
+    /// column 4 two meanings twenty-four times apart. `AgentCardLayout` now
+    /// picks the coarsest window its drawn rows carry and brings the rest here.
+    ///
+    /// # Why summing is exact and loses nothing it does not admit to
+    ///
+    /// `bucketSeconds` are whole multiples of each other, so `per` fine buckets
+    /// tile one coarse bucket exactly and a coarse count is the sum of the fine
+    /// counts inside it. No number is interpolated, spread or invented;
+    /// resolution is lost and that is the whole cost. Commits are summed the
+    /// same way — they are counts on the axis, not a series to be scaled.
+    ///
+    /// A row with less history than the axis covers therefore fills only the
+    /// newest columns and leaves the rest EMPTY, which is §04's own case: "an
+    /// agent that has touched no files shows an empty upper half against a
+    /// visible centre rule — absence drawn, not omitted." Nothing here pads,
+    /// stretches or centres a short trace to fill the axis; that would be this
+    /// client inventing history it was not sent.
+    ///
+    /// # The one thing this CANNOT do, stated rather than hidden
+    ///
+    /// **The wire carries a shape and not an anchor.** A trace is thirteen
+    /// counts and a width code; the absolute second its newest bucket starts at
+    /// is not on it, and it is not recoverable from it. The daemon's buckets are
+    /// `[k*width, (k+1)*width)` in absolute Unix seconds, so placing a fine
+    /// bucket in the right coarse column needs `floor(t / fine) mod per` — the
+    /// PHASE — where `t` is the second the trace was encoded at. That number is
+    /// three bits nobody sends.
+    ///
+    /// So this packs from the newest end: the newest `per` fine buckets make the
+    /// newest coarse column, the `per` before them the one before, and so on.
+    /// That is exactly right when the phase is `per - 1` and too NEW by at most
+    /// one column otherwise — never by more, and never in the other direction.
+    /// It needs no clock, so the same bytes always draw the same picture, which
+    /// is the property `farcooler_core::trace`'s header spends itself on.
+    ///
+    /// A residual of under one column against the twenty-four-fold mismatch it
+    /// replaces is worth taking, and it is a residual rather than a fix: closing
+    /// it needs one number per trace on the wire and is written up in
+    /// `.claude/agent/needs-planning/`. **Do not close it by guessing `t` from
+    /// the device clock** — a card is drawn long after the push that filled it,
+    /// so that trades a bounded one-directional error for an unbounded one and
+    /// makes the drawing move on its own.
+    ///
+    /// Returns `self` unchanged for a target that is not coarser, which is the
+    /// case `AgentCardLayout` hits on every row already at the axis.
+    public func rebucketed(to axis: Span) -> ActivityTrace {
+        let per = axis.bucketSeconds / span.bucketSeconds
+        guard per > 1, axis.bucketSeconds % span.bucketSeconds == 0 else { return self }
+
+        // `UInt32` to add in, `UInt16`/`UInt8` to write out. The producer
+        // saturates on the way to the wire — `farcooler_core::trace::encode`,
+        // "a bucket busier than 65535 lines saturates, which is invisible,
+        // because the bars are scaled per row per half" — and summing six
+        // buckets can reach that where one could not, so the same saturation
+        // has to happen here and must not happen in the accumulator.
+        var code = [UInt32](repeating: 0, count: Self.buckets)
+        var output = [UInt32](repeating: 0, count: Self.buckets)
+        var commits = [UInt32](repeating: 0, count: Self.buckets)
+        for bucket in 0..<Self.buckets {
+            // Counted from the NEWEST end, because that is the end the two rows
+            // have in common. `back / per` is which coarse column back that is,
+            // and it cannot run off the front: `back` is at most 12 and `per` is
+            // at least 2, so the oldest fine bucket lands in column 6 at worst.
+            // A coarse axis always covers more time than a finer one, by
+            // thirteen times the ratio.
+            let back = Self.buckets - 1 - bucket
+            let column = Self.buckets - 1 - back / per
+            code[column] += UInt32(self.code(bucket))
+            output[column] += UInt32(self.output(bucket))
+            commits[column] += UInt32(self.commits(bucket))
+        }
+
+        var bytes = Data(capacity: Self.encodedLength)
+        bytes.append((Self.version << 4) | axis.rawValue)
+        for series in [code, output] {
+            for value in series {
+                let capped = UInt16(min(value, UInt32(UInt16.max)))
+                // Little-endian, the layout's word. See `pair(_:_:)`, which is
+                // the other half of this and the one that would still look
+                // plausible if these two lines were swapped.
+                bytes.append(UInt8(capped & 0xFF))
+                bytes.append(UInt8(capped >> 8))
+            }
+        }
+        for value in commits { bytes.append(UInt8(min(value, UInt32(UInt8.max)))) }
+        return ActivityTrace(bytes: bytes, span: axis)
+    }
 }
 
 // MARK: - What the OTHER runners had

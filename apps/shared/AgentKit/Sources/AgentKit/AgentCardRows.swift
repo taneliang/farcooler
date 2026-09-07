@@ -237,14 +237,31 @@ public struct AgentCardLayout: Sendable, Equatable {
         /// `AgentCardLayout.footnote`.
         public let footnote: String?
 
+        /// The thirteen buckets this row DRAWS, on the axis the card chose.
+        ///
+        /// **Not `row.trace`, and the raw bytes are deliberately not vended
+        /// here.** Every drawn row is re-bucketed onto one window by
+        /// `AgentCardLayout.init` — see `axis(of:)` — and a surface that reached
+        /// past this for `AgentCardRow.trace` would put the card straight back
+        /// to thirteen columns meaning something different on every line. The
+        /// bytes are still on `row` for anything that wants the wire; nothing
+        /// that draws should.
+        ///
+        /// Nil where the runner sent no trace, which is not thirteen quiet
+        /// buckets — see `ActivityTrace.init?`.
+        public let trace: ActivityTrace?
+
         public var id: String { row.terminal }
-        /// The thirteen buckets, straight off the push.
-        public var trace: Data? { row.trace }
         public var terminal: String { row.terminal }
         public var startedAt: Date? { row.startedAt }
     }
 
     public let rows: [Row]
+    /// The one window every drawn row's trace is on, or nil when no drawn row
+    /// carries one. `1h`, `6h` or `24h` beside the traces, if a surface has the
+    /// width to print it — and one label for the card rather than one per row,
+    /// which is the whole point of there being one axis.
+    public let span: ActivityTrace.Span?
     /// Agents with no line: `+6 more`. See `init?`, which is where the two
     /// separate reasons a row has no line are added together.
     public let hidden: Int
@@ -278,14 +295,32 @@ public struct AgentCardLayout: Sendable, Equatable {
         guard !state.rows.isEmpty, state.knowsFleet else { return nil }
 
         let drawn = state.rows.prefix(Self.rowsDrawn)
-        rows = drawn.map { row in
+
+        // The traces are decoded BEFORE the rows are built, because the axis is
+        // a fact about all of them and no row can choose it alone. That is the
+        // card's second rule — one shared time axis down the card, so a column
+        // is comparable across rows — and until this it was not true: each
+        // trace snapped to the shortest window holding its own activity, so two
+        // rows drawn side by side could be showing spans twenty-four times
+        // apart while inviting exactly the cross-row reading that makes a
+        // simultaneous stop mean a runner went away.
+        let read = drawn.map { ActivityTrace($0.trace) }
+        let axis = Self.axis(of: read)
+        span = axis
+
+        rows = zip(drawn, read).map { row, trace in
             Row(
                 row: row,
                 mark: GlanceMark(status: row.status, confidence: row.confidence(at: now)),
                 name: Self.name(of: row),
                 detail: row.detail,
                 diff: Self.diff(insertions: row.insertions, deletions: row.deletions),
-                footnote: Self.footnote(row, at: now))
+                footnote: Self.footnote(row, at: now),
+                // Summed onto the shared axis. A row already there is returned
+                // unchanged; a finer one loses resolution and nothing else. See
+                // `ActivityTrace.rebucketed(to:)`, which also states the one
+                // thing the wire does not carry.
+                trace: axis.flatMap { trace?.rebucketed(to: $0) })
         }
 
         // Two separate populations, added once. `more` is the fleet minus the
@@ -320,6 +355,29 @@ public struct AgentCardLayout: Sendable, Equatable {
             tail.append(totals)
         }
         line = tail.isEmpty ? nil : tail.joined(separator: " · ")
+    }
+
+    /// The one window the card draws every row on: the COARSEST any drawn row
+    /// carries.
+    ///
+    /// **Coarsest and not finest, and the direction is the whole argument.**
+    /// Summing a fine trace onto a coarse axis is exact — the widths are whole
+    /// multiples, so `per` fine buckets tile one coarse bucket and their counts
+    /// add. Going the other way is not arithmetic at all: splitting a two-hour
+    /// bucket into twenty-four five-minute ones would have to decide WHEN
+    /// inside those two hours the work happened, and nothing on the wire knows.
+    /// So the axis is set by the row with the most history, every shorter row is
+    /// summed up to it, and a row with less history than the axis covers fills
+    /// only the newest columns — §04's "absence drawn, not omitted".
+    ///
+    /// Nil when no drawn row carries a trace, which is the case where there is
+    /// no axis to agree on and nothing is drawn anyway.
+    ///
+    /// Rows with no trace are skipped rather than counted as the finest window:
+    /// a terminal that sent nothing has no window, and letting it vote would let
+    /// an absent row narrow an axis it is not on.
+    static func axis(of traces: [ActivityTrace?]) -> ActivityTrace.Span? {
+        traces.compactMap { $0?.span }.max { $0.bucketSeconds < $1.bucketSeconds }
     }
 
     /// What to call this agent.

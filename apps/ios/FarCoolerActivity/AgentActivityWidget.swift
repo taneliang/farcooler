@@ -860,13 +860,14 @@ private struct FleetCard: View {
 /// One agent's line: ring, name and detail, its own thirteen buckets, its
 /// figures.
 ///
-/// **The columns are fixed widths and that is what makes the traces line up.**
-/// §07 gives the row 11 / flex / 52 / 64, so every trace on the card starts at
-/// the same x and is the same width — which is the design's second rule, one
-/// shared time axis down the card, and the reason a simultaneous stop is
-/// readable at all. A trace sized to its row's content would put thirteen
-/// buckets under thirteen other buckets that meant a different thirteen
-/// minutes.
+/// **The columns are fixed widths, and that is only half of what makes the
+/// traces line up.** §07 gives the row 11 / flex / 52 / 64, so every trace on
+/// the card starts at the same x and is the same width. That buys a shared set
+/// of x positions; it does not buy a shared axis, and for a while this comment
+/// claimed the second from the first. The other half is that the rows now share
+/// a WINDOW — `AgentCardLayout` picks the coarsest its drawn rows carry and sums
+/// the rest onto it — without which thirteen buckets sat under thirteen other
+/// buckets that meant a different thirteen minutes.
 ///
 /// **A row with no trace still holds the column open.** `ActivityTrace` refuses
 /// to build from an absent field — a terminal with nothing to show sends no
@@ -924,11 +925,19 @@ private struct CardRow: View {
         // is as fresh as everything else on it and does not depend on this phone
         // having run the app today.
         //
-        // The two drawn rows can disagree about their SPAN — a trace snaps to
-        // the shortest of three windows containing its own activity — and
-        // nothing here can align them, because the buckets were closed on the
-        // runner. See this task's report.
-        if let read = ActivityTrace(row.trace) {
+        // **Already on the card's own axis, which is what changed.** The two
+        // drawn rows used to disagree about their SPAN — a trace snaps to the
+        // shortest of three windows containing its own activity, so column 4 of
+        // a five-minute row and column 4 of a two-hour row were spans
+        // twenty-four times apart under one set of x positions.
+        // `AgentCardLayout` now picks the coarsest window its rows carry and
+        // sums the finer ones onto it, so `row.trace` is the drawn trace and the
+        // raw bytes are not reachable from here on purpose. See
+        // `ActivityTrace.rebucketed(to:)` for the sum, and for the one thing the
+        // wire does not carry: the second a trace's newest bucket starts at,
+        // without which the placement is right to within one column and no
+        // better.
+        if let read = row.trace {
             GlanceTraceView(read, size: .cardRow)
         } else {
             Color.clear
