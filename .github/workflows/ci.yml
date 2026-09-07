@@ -234,13 +234,51 @@ jobs:
       # about widths, runs at -D warnings.
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # Nothing above type-checks `crates/tailcat`'s `linked` backend: clippy
-      # just ran `--workspace`, which builds every crate at DEFAULT features,
-      # and so does `cargo test --workspace` below. `linked` is off by
-      # default on purpose (see that crate's `Cargo.toml`) so a checkout with
-      # no Go toolchain still builds — but that means the only backend that
-      # will ever run in production, every FFI declaration and every errno
-      # mapping in it, was previously checked by nothing in this repo at all.
+      # The line above is `--workspace` at DEFAULT features, and that word is
+      # the whole gap these seven lines close: every `tailcat` feature in this
+      # workspace is off by default, so the code behind them had never been
+      # linted by anything. Not "less often" — never, since the features were
+      # added.
+      #
+      # It was not hypothetical. `cargo clippy -p farcooler-daemon --features
+      # tailcat-helper --all-targets` failed with two `await_holding_lock`
+      # errors in `tests/a_pairing_gives_the_runner_a_tunnel.rs` — a
+      # `std::sync::MutexGuard` held across four `.await`s, which is a deadlock
+      # the moment tokio resumes that task on another thread — and `cargo
+      # clippy -p farcooler-cli --features tailcat --all-targets` failed with a
+      # `dead_code`. Both files are ones CI already BUILDS: the four
+      # `cargo test --features tailcat-helper` lines below run that daemon
+      # test, and `apps/macos/build-app.sh` ships the CLI at `--features
+      # tailcat`. Only the lint was blind.
+      #
+      # `-p` per crate rather than one `--workspace --features …`: clippy lints
+      # only the packages it is asked for, so `-p farcooler-daemon --features
+      # tailcat` says nothing about `farcooler-cli` even though it builds it.
+      # `--all-targets` because all three findings were in test targets, which
+      # is where a feature's `cfg(not(…))` arms live.
+      #
+      # None of these link, so none of them need a Go toolchain — verified with
+      # `go` off PATH, the same standard `cargo check -p farcooler-daemon
+      # --features tailcat` below is held to.
+      - run: cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings
+
+      # The `linked` backend on the target it actually ships on. The clippy
+      # line above now type-checks it too, but only for THIS job's host arch;
+      # the second invocation here is the one that cannot be dropped, and the
+      # first is kept as the plain-`check` baseline the paragraph below is
+      # about. `--workspace` reaches neither: it builds every crate at DEFAULT
+      # features, and so does `cargo test --workspace` below. `linked` is off
+      # by default on purpose (see that crate's `Cargo.toml`) so a checkout
+      # with no Go toolchain still builds — but that meant the only backend
+      # that will ever run in production, every FFI declaration and every
+      # errno mapping in it, was for a long time checked by nothing here at
+      # all.
       # `cargo check` doesn't link, so it needs no Go archive; it still
       # catches a type mismatch in the `extern "C"` block, which is exactly
       # what shipped once before this step existed — `c_char` is `u8` on ARM
