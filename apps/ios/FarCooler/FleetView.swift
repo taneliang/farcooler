@@ -1,18 +1,24 @@
 import SwiftUI
 
-/// One runner, and what stands in front of it until it answers.
+/// The fleet, and what stands in front of it until somebody answers.
 ///
-/// What is left of what this was. It used to be the app's navigation — a
-/// `NavigationStack`, a `[Route]` path, a persisted copy of that path, and the
-/// rules for restoring, truncating and deferring to it. All of that is gone:
-/// the navigation shell is the app's navigation now, and a shell position is a
-/// pair of indices into the fleet this connection is already publishing, so
-/// there is nothing to push, nothing to persist and nothing to resolve.
+/// What is left of what this was, and it is a good deal less than it was
+/// twice over. It used to be the app's navigation — a `NavigationStack`, a
+/// `[Route]` path, a persisted copy of that path, and the rules for restoring,
+/// truncating and deferring to it — and all of that went when the shell became
+/// the app's navigation. Then it used to OWN A CONNECTION, and stand in front
+/// of it in four full-screen phases, one per `Connection.Phase`.
 ///
-/// What remains is the part that was never navigation: OWNING the connection,
-/// and standing in front of it until it answers. The four phases, the ways out
-/// of the three that have no fleet behind them, and the deep link that arrives
-/// before any of it exists.
+/// **That is the half the multi-runner port took.** A screen can only be about
+/// one runner: with several connections a single failing one would blank the
+/// whole app, and a newly added runner needing authorization would show its
+/// screen to nobody whenever any other runner answered — which is the ordinary
+/// case, and the one flow onboarding cannot afford to lose. `FleetStore` owns
+/// every connection, and the phases are `RunnerStatusRow`s.
+///
+/// So what remains is two branches and the plumbing between them: the shell
+/// once anything has a fleet, a list of rows until then, and the deep link that
+/// arrives before either exists.
 ///
 /// What did not change: every state shown here is DERIVED by the daemon at the
 /// moment of asking. The phone never computes a terminal's state, because a
@@ -73,10 +79,10 @@ struct FleetView: View {
         // with a navigation bar this design puts at the BOTTOM of the display
         // as a piece of glass.
         //
-        // What still needs a stack is everything before a fleet exists: the
-        // failure screen pushes `AuthorizeView`, and all four pre-connection
-        // screens are titled. Each of those branches declares its own, which is
-        // also what keeps the shell out of one — see `phases`.
+        // What still needs a stack is the screen before any fleet exists: it
+        // is titled, and a runner row's "Authorize This Device" pushes into it.
+        // That branch declares its own, which is also what keeps the shell out
+        // of one — see `phases`.
         phases
             // `item:` and not a flag: with several runners the sheet has to
             // carry WHICH one a row asked to correct, and a flag plus a
@@ -89,15 +95,12 @@ struct FleetView: View {
                     onRemove: { store.remove($0) })
             }
             // The app coming back is the moment a backoff timer cannot predict.
+            // `.background` is passed on too, so a phone in a pocket stops
+            // polling — which is both a battery question and one plausible way
+            // a session died in the first place.
             //
-            // Here rather than in `RootView`, because this is where the
-            // connection is: the same reason the host switcher moved down out
-            // of the connected screen. `.background` is passed on too, so a
-            // phone in a pocket stops polling — which is both a battery
-            // question and one plausible way the session died in the first
-            // place.
-            // Every runner, not one. One scene phase, N connections — see
-            // `FleetStore.setActive`.
+            // Every runner, not one: one scene phase fans out to N connections.
+            // See `FleetStore.setActive`.
             .onChange(of: scenePhase) { _, phase in
                 fleet.setActive(phase == .active)
             }
@@ -118,8 +121,10 @@ struct FleetView: View {
             // A card tapped at cold launch, arriving as `…://terminal/<id>`.
             //
             // Here rather than on the root view, because this is the screen
-            // that owns the connection whose fleet the id has to be looked up
-            // in. Routing it from the root would mean a second way to choose a
+            // that stands over the fleet the id has to be looked up in — every
+            // runner's, now, which is what makes a card about the machine in
+            // the other room land rather than quietly resolve to nothing.
+            // Routing it from the root would mean a second way to choose a
             // terminal, threaded down through views that know nothing about
             // one.
             //
