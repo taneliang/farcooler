@@ -209,10 +209,13 @@ async fn run() -> Result<(), i32> {
     // Before anything serves, because the URL is read when the tunnel's server
     // is built and a runner that started on the wrong rendezvous stays there
     // until it is restarted.
-    if let Some(url) = configured_derp_map() {
-        tracing::info!(%url, "using a configured DERP map");
-        farcooler_tailcat::set_derp_map_url(&url);
-    }
+    //
+    // The decision is `rendezvous::apply_configured_derp_map` and not these
+    // bytes, for the reason that module's header gives: nothing in this
+    // workspace can reach a line inside `main`, so the version of this that
+    // read the variable and called `set_derp_map_url` here could be deleted
+    // whole with every test still green.
+    farcooler_daemon::rendezvous::apply_configured_derp_map();
 
     let tunnel_service = service.clone();
     tokio::spawn(async move {
@@ -588,87 +591,9 @@ fn acquire_daemon_lock(path: &std::path::Path) -> std::io::Result<Option<DaemonL
     Ok(Some(DaemonLock { file }))
 }
 
-/// The environment variable a runner's DERP map is set through.
-///
-/// tailcat's default map is documented as best-effort and revocable at any
-/// time, and DERP is the rendezvous for every tunneled connection rather than
-/// a fallback for the ones that could not go direct. So the day it is revoked,
-/// a fleet with no way to be pointed elsewhere needs three app releases and a
-/// visit to every runner. This is one string, and it is here so that day costs
-/// a setting instead.
-const DERP_MAP_ENV: &str = "FARCOOLER_DERP_MAP";
-
-/// The DERP map this runner was INSTALLED with, if any.
-///
-/// **An environment variable and not a protocol field, deliberately.** This is
-/// deployment configuration — it is set by whoever installed this runner — and
-/// a client that could tell a runner which DERP map to use could tell it a map
-/// the client controls, which is a rendezvous the client controls. Nothing
-/// about this belongs on the wire. `FARCOOLER_HOME` sets the precedent for
-/// reading a deployment fact here.
-///
-/// Unset and empty are the same answer, and that answer is `None` rather than
-/// the empty string: empty means the LIBRARY's default, and a runner whose
-/// installer wrote `FARCOOLER_DERP_MAP=` into a unit file must land on exactly
-/// the same rendezvous as one that never mentioned it.
-fn configured_derp_map() -> Option<String> {
-    std::env::var(DERP_MAP_ENV).ok().filter(|url| !url.is_empty())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Serializes the tests that move `FARCOOLER_DERP_MAP`. `set_var` is only
-    /// sound while no other thread reads the environment, and `cargo test`
-    /// runs this binary's tests on many threads in one process.
-    static DERP_MAP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// A runner installed with a DERP map uses it, and the tunnel library is
-    /// actually told — read back through the library rather than asserted
-    /// against the string this test just set, which would prove only that
-    /// `std::env` works.
-    ///
-    /// **Spelled out rather than written as `DERP_MAP_ENV`.** The name is the
-    /// interface: it is what somebody's unit file, launchd plist or
-    /// `runner install` invocation already says, so a rename here is a
-    /// breaking change for every runner in the field and not a tidy-up. A test
-    /// that referred to the constant would go on passing through exactly that
-    /// rename, which is the shape of a check that cannot fail.
-    ///
-    /// SAFETY for the `set_var`s: every test that touches this variable holds
-    /// `DERP_MAP_ENV_LOCK`, and nothing else in this binary reads the
-    /// environment while they run.
-    #[test]
-    fn a_runner_installed_with_a_derp_map_uses_it() {
-        let _serial = DERP_MAP_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("FARCOOLER_DERP_MAP", "https://derp.example/derpmap.json") };
-        let configured = configured_derp_map();
-        assert_eq!(configured.as_deref(), Some("https://derp.example/derpmap.json"));
-        farcooler_tailcat::set_derp_map_url(configured.as_deref().unwrap_or(""));
-        assert_eq!(
-            farcooler_tailcat::derp_map_url(),
-            "https://derp.example/derpmap.json",
-            "the runner's DERP map never reached the tunnel"
-        );
-        farcooler_tailcat::set_derp_map_url("");
-        unsafe { std::env::remove_var("FARCOOLER_DERP_MAP") };
-    }
-
-    /// A runner nobody configured is left on the library's own default, and
-    /// so is one whose installer wrote the variable with nothing after the
-    /// `=`. The second half is the one that would rot quietly: a unit file
-    /// with an empty value is a normal thing to write, and a runner that took
-    /// it as a URL would be a runner nobody could reach.
-    #[test]
-    fn an_unconfigured_runner_is_left_on_the_library_default() {
-        let _serial = DERP_MAP_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::remove_var("FARCOOLER_DERP_MAP") };
-        assert_eq!(configured_derp_map(), None, "an unset variable named a DERP map");
-        unsafe { std::env::set_var("FARCOOLER_DERP_MAP", "") };
-        assert_eq!(configured_derp_map(), None, "an empty variable became a URL");
-        unsafe { std::env::remove_var("FARCOOLER_DERP_MAP") };
-    }
 
     /// The two directions have to agree, or a relayed session is granted one
     /// thing here and told another at the far end.

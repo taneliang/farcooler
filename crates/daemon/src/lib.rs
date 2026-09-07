@@ -15,6 +15,7 @@ pub mod pastes;
 pub mod paths;
 pub mod push;
 pub mod reconcile;
+pub mod rendezvous;
 pub mod rpc;
 pub mod review;
 pub mod review_ops;

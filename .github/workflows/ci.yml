@@ -282,6 +282,18 @@ jobs:
       # process, and a fake helper records the commands it was given tagged
       # with its own pid, so two servers are two numbers in a file.
       - run: cargo test -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel
+      # `FARCOOLER_DERP_MAP` end to end, and it is here for the same reason as
+      # the three lines above: a default build's `serve` refuses every call, so
+      # nothing is spawned and nothing is told anything, and "did the runner's
+      # DERP map reach the thing that serves" would be a vacuous assertion.
+      #
+      # What it buys that `rendezvous`'s own unit tests cannot: those prove the
+      # decision is wired to `set_derp_map_url`, and nothing in this workspace
+      # can prove `main` CALLS it — that line is inside `#[tokio::main] async fn
+      # main()`, which no test links. This file spawns the real `farcoolerd`
+      # with the variable set and reads back what the tunnel helper was told, so
+      # deleting the call from `main` turns it red.
+      - run: cargo test -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel
 
       # The end-to-end tunnel test, type-checked and NOT run — and the second
       # half of that sentence is the point of this comment.
