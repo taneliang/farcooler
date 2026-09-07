@@ -168,7 +168,7 @@ Editing an adapter therefore does nothing until the daemon restarts. Run
 built from the same source, which for a config-only edit is just a restart.
 
 The other two tables are read per call, so editing them takes effect on the next
-one. Themes are read that way because a colour is something you tune by looking
+one. Themes are read that way because a color is something you tune by looking
 at it; branches because the runner-settings editor writes that table, and a
 value cached at startup would not reflect its own writes.
 
