@@ -52,6 +52,25 @@ const publicJwk = {
   kid: 'test-key',
 }
 
+/// A key WorkOS has never published, for a token that only LOOKS right.
+///
+/// It signs under the SAME `kid` as the real one on purpose. A forgery naming a
+/// key the JWKS does not carry is refused at the key lookup, before a signature
+/// is ever checked — so it would be refused just as firmly by a route that
+/// checks no signature at all, and would prove nothing about the one thing
+/// these tests are for. This forgery has to reach `crypto.subtle.verify` and be
+/// turned away there.
+const forgery = await crypto.subtle.generateKey(
+  {
+    name: 'RSASSA-PKCS1-v1_5',
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: 'SHA-256',
+  },
+  true,
+  ['sign', 'verify'],
+)
+
 /// The issuer and client id this test environment's tokens carry, taken from
 /// the bindings rather than repeated here: a fixture that hard-coded them would
 /// go on passing after someone changed the configuration the worker reads.
@@ -65,12 +84,15 @@ const seconds = () => Math.floor(Date.now() / 1000)
 /// Separate from `sessionFor` because the verifier's whole job is refusing
 /// tokens with something missing, and a helper that quietly filled the gaps in
 /// could not express a token with a gap in it.
-async function signTestJwt(claims: Record<string, unknown>): Promise<string> {
+async function signTestJwt(
+  claims: Record<string, unknown>,
+  key: CryptoKey = signing.privateKey,
+): Promise<string> {
   const header = base64Url(JSON.stringify({ alg: 'RS256', kid: 'test-key' }))
   const payload = base64Url(JSON.stringify(claims))
   const signature = await crypto.subtle.sign(
     'RSASSA-PKCS1-v1_5',
-    signing.privateKey,
+    key,
     new TextEncoder().encode(`${header}.${payload}`),
   )
   return `${header}.${payload}.${base64Url(new Uint8Array(signature))}`
@@ -87,8 +109,19 @@ async function signTestJwt(claims: Record<string, unknown>): Promise<string> {
 /// richer than the real thing is how a verifier that refuses production traffic
 /// passes its own suite.
 async function sessionFor(userId: string): Promise<string> {
+  return await signTestJwt(claimsFor(userId))
+}
+
+/// The same claims, unsigned, so a test can spoil exactly one of them.
+///
+/// Split out of `sessionFor` because the two halves of the session boundary
+/// need it: the verifier's own tests spoil a claim and expect null, and the
+/// route tests spoil a claim and expect a 401. A second copy of this list would
+/// drift, and the direction it drifts in is a fixture richer than a real token
+/// — which is how a verifier that refuses production traffic passes its suite.
+function claimsFor(userId: string, overrides: Record<string, unknown> = {}) {
   const now = seconds()
-  return await signTestJwt({
+  return {
     sub: userId,
     email: `${userId}@example.test`,
     iss: ISSUER,
@@ -96,7 +129,8 @@ async function sessionFor(userId: string): Promise<string> {
     sid: 'session_test',
     iat: now,
     exp: now + 3600,
-  })
+    ...overrides,
+  }
 }
 
 function base64Url(value: string | Uint8Array): string {
@@ -234,6 +268,80 @@ async function foreignAgent(
       at,
     )
     .run()
+}
+
+/// A card belonging to somebody else's install.
+///
+/// The counterpart of `foreignAgent`, needed for the same reason and for a
+/// sharper one. `install_cards` is `UNIQUE (account_id)`, so a table holding
+/// this account's card holds exactly ONE ROW — and against one row an
+/// account-scoped write and an unscoped one do precisely the same thing. Every
+/// write in this service that touches this table was therefore a `WHERE` that
+/// no test in this file could possibly notice: the two on
+/// `/v1/devices/activity`, the one on `/v1/notify/retire`, and the three on
+/// `/v1/notify`. All six could be dropped together and the suite stayed green.
+///
+/// What they read as in production is worth spelling out, because it is not a
+/// leak of somebody's data but a denial of everybody's card: one person swiping
+/// theirs away sets EVERY account's card to the sentinel, and one runner going
+/// quiet takes down every lock screen in the fleet.
+async function foreignCard(
+  account: string,
+  fields: { updateToken?: string; leaderTerminal?: string; leaderStatus?: string } = {},
+) {
+  const at = Date.now()
+  const card = {
+    update_token: fields.updateToken ?? 'their-update-token',
+    leader_terminal: fields.leaderTerminal ?? 'their-term',
+    leader_status: fields.leaderStatus ?? 'working',
+    dismissed_at: null,
+    updated_at: at,
+    pushed_at: at,
+  }
+  await env.DB.prepare(
+    `INSERT INTO accounts (id, created_at) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`,
+  )
+    .bind(account, at)
+    .run()
+  await env.DB.prepare(
+    `INSERT INTO install_cards
+       (id, account_id, update_token, environment, leader_terminal, leader_status,
+        dismissed_at, updated_at, pushed_at)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      crypto.randomUUID(),
+      account,
+      card.update_token,
+      card.leader_terminal,
+      card.leader_status,
+      card.dismissed_at,
+      card.updated_at,
+      card.pushed_at,
+    )
+    .run()
+  return card
+}
+
+/// One account's card, in every column any write in this service touches.
+///
+/// The whole row rather than the field a given test happened to think of: the
+/// six writes set different columns, and a per-column assertion would have to
+/// be right about which one each of them reaches.
+async function cardOf(account: string) {
+  return await env.DB.prepare(
+    `SELECT update_token, leader_terminal, leader_status, dismissed_at, updated_at, pushed_at
+     FROM install_cards WHERE account_id = ?`,
+  )
+    .bind(account)
+    .first<{
+      update_token: string
+      leader_terminal: string | null
+      leader_status: string | null
+      dismissed_at: number | null
+      updated_at: number
+      pushed_at: number | null
+    }>()
 }
 
 /// The terminals still on one account's roster, in a fixed order.
@@ -383,17 +491,7 @@ describe('the issuer this relay accepts', () => {
 describe('session verification', () => {
   /// The claims a real access token carries, so each test can spoil exactly one.
   function wellFormed(overrides: Record<string, unknown> = {}) {
-    const now = seconds()
-    return {
-      sub: 'user_1',
-      email: 'user_1@example.test',
-      iss: ISSUER,
-      client_id: CLIENT_ID,
-      sid: 'session_test',
-      iat: now,
-      exp: now + 3600,
-      ...overrides,
-    }
+    return claimsFor('user_1', overrides)
   }
 
   it('refuses a token with no expiry', async () => {
@@ -484,6 +582,112 @@ describe('session verification', () => {
     const { client_id, ...claims } = wellFormed()
     const token = await signTestJwt({ ...claims, aud: ['client_other'] })
     expect(await verifySession(token, env as never)).toBeNull()
+  })
+})
+
+// MARK: - That a route actually RUNS the verifier
+
+/// The other half of the session boundary, and the half nothing held.
+///
+/// `verifySession` is exercised as a unit above, exhaustively. What was never
+/// exercised is that a ROUTE runs it. Every signed-in test in this file mints
+/// its token with `sessionFor`, which is always valid, and the only 401 anyone
+/// asserted was for a request carrying no `authorization` header at all — and a
+/// header is not a signature. So `requireAccount` could have base64-decoded the
+/// payload and trusted `sub`, throwing away the signature, the expiry, the
+/// issuer and the `client_id` together, and every test in this file would have
+/// stayed green: the unit tests would have gone on testing `verifySession`, and
+/// nothing at all would have been testing that anything calls it.
+///
+/// These are the tokens that tell the two apart. Each decodes to a perfectly
+/// good `sub`, and each has to be refused for a reason only a checked signature
+/// or a checked claim can supply.
+describe('the session a signed-in route insists on', () => {
+  /// What the attempt was answered with, and what it left behind.
+  ///
+  /// The status alone is the weaker half. `requireAccount` creates the account
+  /// row for whatever `sub` it believed BEFORE the route body runs, so a
+  /// weakened verification leaves a stranger's account in the database even on
+  /// a request that goes on to fail for some other reason — and that row is
+  /// what every other table in this service hangs off.
+  async function attempt(token?: string) {
+    const response = await post(
+      '/v1/devices',
+      { platform: 'apns', pushToken: 'device-token' },
+      token,
+    )
+    const accounts = await env.DB.prepare(`SELECT id FROM accounts`).all<{ id: string }>()
+    const devices = await env.DB.prepare(`SELECT id FROM devices`).all<{ id: string }>()
+    return {
+      status: response.status,
+      accounts: (accounts.results ?? []).map(row => row.id),
+      devices: (devices.results ?? []).length,
+    }
+  }
+
+  const refused = { status: 401, accounts: [] as string[], devices: 0 }
+
+  it('takes a token signed by the key WorkOS publishes', async () => {
+    // The control, and it is not decoration: without it every assertion below
+    // would also be satisfied by a route that refused everything, which is the
+    // other way to make this file green and the one that takes the product
+    // down for every real user at once.
+    watchFetch()
+    expect(await attempt(await sessionFor('user_1'))).toEqual({
+      status: 200,
+      accounts: ['user_1'],
+      devices: 1,
+    })
+  })
+
+  it('refuses a token signed by a key WorkOS never published', async () => {
+    // The forgery: right shape, right claims, right `kid`, and the one thing
+    // that cannot be manufactured is wrong. A route that decodes its payload
+    // rather than verifying it cannot tell this from the control above.
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1'), forgery.privateKey)
+    expect(await attempt(token)).toEqual(refused)
+  })
+
+  it('refuses a token with nothing in its signature at all', async () => {
+    // `header.payload.` — three segments with an empty third. This is what
+    // somebody writes by hand after seeing one real token, and it is exactly
+    // what a payload-decoding route accepts.
+    watchFetch()
+    const [header, payload] = (await sessionFor('user_1')).split('.')
+    expect(await attempt(`${header}.${payload}.`)).toEqual(refused)
+  })
+
+  it('refuses a token that expired an hour ago', async () => {
+    // Genuinely signed by WorkOS, and finished. A stolen token is worth
+    // whatever is left of its lifetime and nothing after it, which is a
+    // property of this check and of no other.
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1', { exp: seconds() - 3600 }))
+    expect(await attempt(token)).toEqual(refused)
+  })
+
+  it('refuses a genuine token from another issuer', async () => {
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1', { iss: 'https://evil.example' }))
+    expect(await attempt(token)).toEqual(refused)
+  })
+
+  it('refuses a genuine token minted for another application', async () => {
+    // The one a key set cannot catch on its own: two applications in one WorkOS
+    // environment are signed with the same keys, so the neighbour's token
+    // verifies here, and the only thing standing between it and this account's
+    // data is the `client_id` comparison.
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1', { client_id: 'client_someone_else' }))
+    expect(await attempt(token)).toEqual(refused)
+  })
+
+  it('refuses a caller carrying no authorization at all', async () => {
+    // The case this file already had, kept here beside the five it could not
+    // tell itself apart from.
+    watchFetch()
+    expect(await attempt()).toEqual(refused)
   })
 })
 
@@ -1035,18 +1239,40 @@ describe('the Android push body', () => {
 })
 
 describe('the signed-in routes', () => {
+  /// Every route that requires a session.
+  ///
+  /// `/v1/daemons/revoke` was missing from this list, which is most of how it
+  /// came to have no test of any kind — the list is the only place in this file
+  /// that names the signed-in routes together, so a route absent from it is a
+  /// route nobody notices is absent.
+  const paths = [
+    '/v1/devices',
+    '/v1/devices/activity',
+    '/v1/devices/lookup',
+    '/v1/devices/verify',
+    '/v1/daemons',
+    '/v1/account',
+    '/v1/devices/revoke',
+    '/v1/daemons/revoke',
+  ]
+
   it('refuse a caller with no session', async () => {
-    const paths = [
-      '/v1/devices',
-      '/v1/devices/activity',
-      '/v1/devices/lookup',
-      '/v1/devices/verify',
-      '/v1/daemons',
-      '/v1/account',
-      '/v1/devices/revoke',
-    ]
     for (const path of paths) {
       expect((await post(path, {})).status, path).toBe(401)
+    }
+  })
+
+  it('refuse a caller holding a token WorkOS did not sign', async () => {
+    // Not the same test as the one above it. A missing header is refused by the
+    // first line of `requireAccount`; a forged one is refused only by the
+    // verification underneath — and it was the verification nothing covered.
+    // Swept over every route rather than proven on one, because the guard is a
+    // single function but the ways to lose it are per-route: an early return, a
+    // route that reads `sub` for itself, a handler added without the call.
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1'), forgery.privateKey)
+    for (const path of paths) {
+      expect((await post(path, {}, token)).status, path).toBe(401)
     }
   })
 })
@@ -3092,6 +3318,379 @@ describe('/v1/notify/retire', () => {
     expect(response.status).toBe(200)
     const left = await env.DB.prepare(`SELECT terminal FROM live_activities`).all<any>()
     expect(left.results).toEqual([])
+  })
+})
+
+// MARK: - The management screen, and what it must not carry
+
+/// What `/v1/account` answers with, which nothing checked the SHAPE of.
+///
+/// The route's own comment says "Never the tokens — not the push tokens, not
+/// the daemon token hashes. A screen that lists devices needs to name them, not
+/// to be able to become them." Nothing enforced that sentence. Adding
+/// `push_token` to the SELECT and the object built from it left the suite
+/// green, and what that ships is every device's push token to anyone holding a
+/// session — which is the ability to notify that person's phone with anything,
+/// from anywhere, for as long as the token lives.
+///
+/// Two assertions, deliberately overlapping. The key sets catch a column that
+/// was added and mapped; the sweep for the secrets themselves catches one that
+/// was mapped under an innocent name.
+describe('/v1/account', () => {
+  it('names the devices and machines without handing back a way to become them', async () => {
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await register('user_1', {
+      label: 'iPhone',
+      version: '1.2.3',
+      pushToken: 'a-push-token-nobody-else-may-have',
+      liveActivityStartToken: 'a-start-token-nobody-else-may-have',
+    })
+    const paired = await (await post('/v1/daemons', { label: 'Studio' }, session)).json<any>()
+
+    const body = await (await post('/v1/account', {}, session)).json<any>()
+
+    expect(Object.keys(body).sort()).toEqual(['devices', 'email', 'machines'])
+    expect(Object.keys(body.devices[0]).sort()).toEqual([
+      'id',
+      'label',
+      'platform',
+      'state',
+      'updatedAt',
+      'version',
+    ])
+    expect(Object.keys(body.machines[0]).sort()).toEqual([
+      'createdAt',
+      'expiresAt',
+      'id',
+      'label',
+      'lastSeenAt',
+      'version',
+    ])
+
+    // And the same thing again over the whole wire, because a token returned
+    // under a field named something else is the same token.
+    const wire = JSON.stringify(body)
+    for (const secret of [
+      'a-push-token-nobody-else-may-have',
+      'a-start-token-nobody-else-may-have',
+      paired.token,
+      await sha256(paired.token),
+    ]) {
+      expect(wire, secret).not.toContain(secret)
+    }
+  })
+
+  it('lists this account and never another', async () => {
+    // Three queries, three account clauses, and one screen. Every other test
+    // that reads this route has a single account in the database, and against
+    // one account a scoped read and an unscoped one return the same two lists
+    // and the same email.
+    //
+    // **The other account is registered FIRST, and that ordering is the whole
+    // test for the email.** The email lookup is a `.first()`, so an unscoped
+    // version returns whichever account row SQLite reaches first — which, with
+    // this account created first, is this account's own email. Written the
+    // obvious way round, dropping that clause changed nothing anyone could see.
+    watchFetch()
+    await register('user_2', { label: 'Their iPhone', pushToken: 'their-device-token' })
+    await post('/v1/daemons', { label: 'Their Studio' }, await sessionFor('user_2'))
+    await register('user_1', { label: 'My iPhone' })
+    await post('/v1/daemons', { label: 'My Studio' }, await sessionFor('user_1'))
+
+    const body = await (await post('/v1/account', {}, await sessionFor('user_1'))).json<any>()
+
+    expect(body.email).toBe('user_1@example.test')
+    expect(body.devices.map((each: any) => each.label)).toEqual(['My iPhone'])
+    expect(body.machines.map((each: any) => each.label)).toEqual(['My Studio'])
+  })
+})
+
+// MARK: - Taking a device or a machine away
+
+/// `/v1/daemons/revoke` had no test of any kind.
+///
+/// Not the account scoping, not the 400, not even the 401 — the list of
+/// signed-in routes did not name it, so nothing in this file ever sent it a
+/// request. It is the route that ends a machine's ability to notify, which is
+/// the only thing a stolen daemon token can do at all, so it is the entire
+/// remedy for a lost runner.
+///
+/// `revokeOwned` serves both tables from one function, so both routes are here:
+/// one copy of the account clause, two routes resting on it, and a clause that
+/// is checked IN the delete rather than before it — a separate ownership query
+/// would leave a window between the check and the write, and there is no reason
+/// to have the window.
+describe('/v1/devices/revoke and /v1/daemons/revoke', () => {
+  /// What one account still holds in a table, read straight from D1.
+  ///
+  /// Not through `/v1/account`: that route has its own scoping, and a test that
+  /// asked it what survived would report a delete as scoped whenever the
+  /// listing was scoped, which is the wrong question answered convincingly.
+  async function idsIn(table: 'devices' | 'daemons', account: string): Promise<string[]> {
+    const rows = await env.DB.prepare(`SELECT id FROM ${table} WHERE account_id = ? ORDER BY id`)
+      .bind(account)
+      .all<{ id: string }>()
+    return (rows.results ?? []).map(row => row.id)
+  }
+
+  it('revokes a machine by the id the account listing gave for it', async () => {
+    // Both halves of the only flow there is. Pairing returns a TOKEN and never
+    // an id, so the one id the app can revoke by is the one `/v1/account`
+    // handed it, and a test that invented an id would not be exercising the
+    // pair of routes anybody uses.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await post('/v1/daemons', { label: 'Studio' }, session)
+    const listed = await (await post('/v1/account', {}, session)).json<any>()
+    expect(listed.machines.map((each: any) => each.label)).toEqual(['Studio'])
+
+    const response = await post('/v1/daemons/revoke', { id: listed.machines[0].id }, session)
+
+    expect(await response.json()).toEqual({ ok: true })
+    expect(await idsIn('daemons', 'user_1')).toEqual([])
+  })
+
+  it('stops a revoked machine notifying, which is the point of the route', async () => {
+    // What revoking is FOR. A runner someone no longer controls holds a bearer
+    // token that is good for a year, and this is the only thing that ends it.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await register('user_1')
+    const paired = await (await post('/v1/daemons', { label: 'Studio' }, session)).json<any>()
+    const [id] = await idsIn('daemons', 'user_1')
+    expect((await post('/v1/notify', { title: 'hi' }, paired.token)).status).toBe(200)
+
+    await post('/v1/daemons/revoke', { id }, session)
+
+    expect((await post('/v1/notify', { title: 'hi' }, paired.token)).status).toBe(401)
+  })
+
+  it('will not revoke a machine belonging to another account', async () => {
+    // A daemon id is a UUID, so this is not a guess anyone makes twice — but it
+    // is a value the other account has SEEN, on its own screen, and the clause
+    // is what makes ownership a fact about the statement rather than a fact
+    // about how hard the id is to come by.
+    watchFetch()
+    await post('/v1/daemons', { label: 'Mine' }, await sessionFor('user_1'))
+    await post('/v1/daemons', { label: 'Theirs' }, await sessionFor('user_2'))
+    const [theirs] = await idsIn('daemons', 'user_2')
+
+    const response = await post('/v1/daemons/revoke', { id: theirs }, await sessionFor('user_1'))
+
+    expect(await response.json()).toEqual({ ok: false })
+    expect(await idsIn('daemons', 'user_2')).toEqual([theirs])
+    // And nothing of this account's went in its place.
+    expect((await idsIn('daemons', 'user_1')).length).toBe(1)
+  })
+
+  it('revokes a device this account registered', async () => {
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await register('user_1')
+    const [mine] = await idsIn('devices', 'user_1')
+
+    expect(await (await post('/v1/devices/revoke', { id: mine }, session)).json()).toEqual({
+      ok: true,
+    })
+    expect(await idsIn('devices', 'user_1')).toEqual([])
+  })
+
+  it('will not revoke a device belonging to another account', async () => {
+    // The one with a phone on the end of it: a device row is where a push token
+    // lives, so deleting somebody else's is silencing their notifications
+    // outright, and nothing in the app would explain why they stopped.
+    watchFetch()
+    await register('user_1')
+    await register('user_2', { pushToken: 'their-device-token' })
+    const [theirs] = await idsIn('devices', 'user_2')
+
+    const response = await post('/v1/devices/revoke', { id: theirs }, await sessionFor('user_1'))
+
+    expect(await response.json()).toEqual({ ok: false })
+    expect(await idsIn('devices', 'user_2')).toEqual([theirs])
+    expect((await idsIn('devices', 'user_1')).length).toBe(1)
+  })
+
+  it('says nothing happened for an id nobody holds', async () => {
+    // `ok` reports whether a row actually went. It used to be `true`
+    // unconditionally, which made revoking nothing indistinguishable from a
+    // real delete — and the app removes the row optimistically on that answer,
+    // so a no-op read as success right up until the list reloaded.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await register('user_1')
+    await post('/v1/daemons', {}, session)
+
+    const missing = crypto.randomUUID()
+    expect(await (await post('/v1/devices/revoke', { id: missing }, session)).json()).toEqual({
+      ok: false,
+    })
+    expect(await (await post('/v1/daemons/revoke', { id: missing }, session)).json()).toEqual({
+      ok: false,
+    })
+    // And the rows that were there are still there.
+    expect((await idsIn('devices', 'user_1')).length).toBe(1)
+    expect((await idsIn('daemons', 'user_1')).length).toBe(1)
+  })
+
+  it('needs an id, and a string one', async () => {
+    // Typed rather than merely present: a non-string id reaches the D1 binder
+    // and throws, which the top-level catch turns into a 500 for what is a bad
+    // request.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    for (const path of ['/v1/devices/revoke', '/v1/daemons/revoke']) {
+      expect((await post(path, {}, session)).status, path).toBe(400)
+      expect((await post(path, { id: '' }, session)).status, path).toBe(400)
+      expect((await post(path, { id: 42 }, session)).status, path).toBe(400)
+    }
+  })
+})
+
+// MARK: - One install's card is never another install's
+
+/// The write half of the card's account scoping, which was held by nothing.
+///
+/// `a00fe5b` did this for `live_activities`, and the shape of the gap is the
+/// same: with one account's rows in the table, a scoped write and an unscoped
+/// one are indistinguishable. It is worse here, because `install_cards` is
+/// `UNIQUE (account_id)` — the table CANNOT hold two accounts' cards unless a
+/// fixture puts a second one there, so no test in this file had ever seen a
+/// second row, and all six `WHERE account_id = ?` clauses could be deleted
+/// together with the suite still green. The read side was already covered and
+/// already goes red without its clause; only the writes were open.
+///
+/// One test per write, and each asserts the same thing about the other
+/// account's card: not merely that it still exists, but that every column a
+/// write in this service touches is exactly as it was left.
+describe("one install's card is never another install's", () => {
+  /// A registered phone, a paired machine called Studio, and a session.
+  async function ready() {
+    await register('user_1', { liveActivityStartToken: 'start-token' })
+    await pair('user_1', 'mine')
+    return await sessionFor('user_1')
+  }
+
+  it('files an update token without touching anybody else', async () => {
+    // `/v1/devices/activity`, the dismissal arm. The person swiped THEIR card
+    // away, and unscoped this sets every account's card to the sentinel with a
+    // dismissal stamp on it — which `pushActivity` then reads as "no card, and
+    // they meant it", so every other install goes silent until something blocks.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    const theirs = await foreignCard('user_2')
+
+    await post('/v1/devices/activity', { updateToken: null, dismissed: true }, session)
+
+    const mine = await cardOf('user_1')
+    expect(mine?.update_token).toBe('')
+    expect(mine?.dismissed_at).toBeGreaterThan(0)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('forgets its own ended card and nobody else\'s', async () => {
+    // `/v1/devices/activity`, the arm for a card that merely ended. Unscoped,
+    // one app reporting that its activity is over deletes the row for every
+    // card the relay is holding.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    const theirs = await foreignCard('user_2')
+
+    await post('/v1/devices/activity', { updateToken: null }, session)
+
+    expect(await cardOf('user_1')).toBe(null)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('retires its own card and nobody else\'s', async () => {
+    // `/v1/notify/retire`. There is a cross-account test for this route
+    // already, and it stops one statement short: this account had no card of
+    // its own there, so the route returned before it ever reached the delete.
+    // A runner that restarts sweeps every terminal it cannot account for, so
+    // this is the ordinary path rather than an exotic one.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    const theirs = await foreignCard('user_2')
+
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+
+    expect(await response.json()).toEqual({ retired: 1 })
+    expect(await cardOf('user_1')).toBe(null)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('ends its own card when its last agent stops, and nobody else\'s', async () => {
+    // `/v1/notify`, the arm for a fleet with nothing left to be about. Unscoped,
+    // the last agent on ONE runner finishing takes down every card in the
+    // service — including the ones with a blocked agent waiting on them, which
+    // is the single push this product exists to deliver.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    const theirs = await foreignCard('user_2')
+
+    await post('/v1/notify', { title: 'claude is done', terminal: 'term-1', status: 'done' }, 'mine')
+
+    expect(await cardOf('user_1')).toBe(null)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('forgets its own stale claim and nobody else\'s', async () => {
+    // `/v1/notify`, the `CLAIM_MEMORY_MS` arm. A card the relay started blind
+    // and never heard about again is dropped so a fresh one can be raised —
+    // and unscoped, every other install's card is dropped with it, including
+    // the addressable ones that were being moved in place quite happily.
+    const calls = watchFetch()
+    await ready()
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+    await env.DB.prepare(`UPDATE install_cards SET updated_at = ? WHERE account_id = ?`)
+      .bind(Date.now() - 2 * 60 * 60 * 1000, 'user_1')
+      .run()
+    const theirs = await foreignCard('user_2')
+
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    // The stale claim was dropped and a second card raised in its place, which
+    // is what makes this the arm it is rather than the coalescing one.
+    expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(2)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('moves its own leader and nobody else\'s', async () => {
+    // `/v1/notify`, the update arm — the write that runs on every push of every
+    // card in the service, so it is the one an unscoped clause reaches most
+    // often. Unscoped, every account's card is recorded as leading with THIS
+    // account's terminal, and the next push on each of them then decides what
+    // it may show against a leader belonging to a stranger.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    const theirs = await foreignCard('user_2')
+
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    const mine = await cardOf('user_1')
+    expect(mine?.leader_terminal).toBe('term-1')
+    expect(mine?.leader_status).toBe('blocked')
+    expect(await cardOf('user_2')).toEqual(theirs)
   })
 })
 

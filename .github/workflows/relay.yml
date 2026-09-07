@@ -121,6 +121,28 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
 
+      # The suite, here as well as in ci.yml, and BEFORE the migration step.
+      #
+      # This workflow is the deploy, and it had no `npm test` and no `needs:` on
+      # ci.yml, so a relay could ship with the suite red — and the relay is the
+      # security boundary of the whole product. Compiling is not the question
+      # these tests answer: they are what says a forged session is refused, that
+      # one account's card is not another's, and that a stolen daemon token
+      # cannot name its own destination.
+      #
+      # Run HERE rather than gated on ci.yml, because a gate would only cover the
+      # push trigger. The other two ways this workflow starts are the ones that
+      # need it most: `workflow_dispatch` puts an arbitrary ref on any relay
+      # including stable, and promote.yml calls this with a tag — neither of them
+      # is a push to main, and neither has a ci.yml run to wait for.
+      #
+      # BEFORE `Apply migrations` for the same reason that step's own comment
+      # gives for refusing `cancel-in-progress`: this job moves the database and
+      # then deploys, so a failure between those two leaves the schema moved with
+      # the old code serving it. A test failure has to happen while nothing has
+      # been touched yet.
+      - run: npm test
+
       # Which relay this run is for.
       #
       # A push to main is always canary — `inputs.environment` is empty for a push
