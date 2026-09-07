@@ -293,12 +293,16 @@ struct SettingsView: View {
         Form {
             Setting("Keeps this Mac available to your other devices while Far Cooler is closed.") {
                 switch service.state {
-                case .registered:
-                    Toggle("Start the daemon at login", isOn: .constant(true))
-                        .onTapGesture { service.unregister() }
-                case .notRegistered:
-                    Toggle("Start the daemon at login", isOn: .constant(false))
-                        .onTapGesture { service.register() }
+                case .registered, .notRegistered:
+                    // One switch for both, through a binding that actually
+                    // moves. It used to be two `.constant` toggles with
+                    // `.onTapGesture`, which a `Toggle` never delivers.
+                    Toggle(
+                        "Start the daemon at login",
+                        isOn: SystemSwitch.binding(
+                            isOn: service.state.isOn,
+                            turnOn: { service.register() },
+                            turnOff: { service.unregister() }))
                 case .awaitingApproval:
                     Button("Approve in System Settings") { service.register() }
                 case .unavailable(let why):
@@ -314,12 +318,15 @@ struct SettingsView: View {
                 "Adds \(CommandLineTools.tools.map(\.link).joined(separator: " and ")) to your PATH for Terminal and SSH sessions."
             ) {
                 switch cliTools.state {
-                case .installed:
-                    Toggle("Command-line tools", isOn: .constant(true))
-                        .onTapGesture { cliTools.uninstall() }
-                case .notInstalled:
-                    Toggle("Command-line tools", isOn: .constant(false))
-                        .onTapGesture { cliTools.install() }
+                case .installed, .notInstalled:
+                    // The same decorative switch as the one above, and fixed
+                    // the same way.
+                    Toggle(
+                        "Command-line tools",
+                        isOn: SystemSwitch.binding(
+                            isOn: cliTools.state == .installed,
+                            turnOn: { cliTools.install() },
+                            turnOff: { cliTools.uninstall() }))
                 case .conflict(let why), .unavailable(let why):
                     Text(why).font(.callout).foregroundStyle(.secondary)
                 }

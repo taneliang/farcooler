@@ -1,5 +1,6 @@
 import Foundation
 import ServiceManagement
+import SwiftUI
 import AgentKit
 
 /// Registering the daemon to start at login.
@@ -182,5 +183,33 @@ enum ServiceProbe {
         print("bundle: \(Bundle.main.bundleURL.path)")
         print("state:  \(service.state)")
         exit(0)
+    }
+}
+
+/// The binding behind a switch that turns something on by asking the system.
+///
+/// **A `Toggle` swallows taps.** It is a control with its own gesture, so
+/// `.onTapGesture` attached to one never fires — which is how both switches on
+/// the startup pane came to be decorative: a `.constant` binding that could not
+/// move, and a tap handler that was never called. Clicking them did nothing at
+/// all, and the switch stayed where it was.
+///
+/// So the state has to travel through the binding itself. `get` reads what the
+/// system says; `set` asks for the change and lets the next `refresh()` decide
+/// what the switch shows. Nothing is written optimistically: registering can
+/// land in `awaitingApproval` rather than `registered`, and a switch that
+/// flipped itself on would be claiming something macOS has not agreed to yet.
+///
+/// Generic over the state because the command-line tools pane had the identical
+/// bug for the identical reason, and one of these is easier to keep honest than
+/// two.
+enum SystemSwitch {
+    /// A live binding: reads `isOn`, and asks on the way in.
+    static func binding(
+        isOn: Bool,
+        turnOn: @escaping () -> Void,
+        turnOff: @escaping () -> Void
+    ) -> Binding<Bool> {
+        Binding(get: { isOn }, set: { wanted in wanted ? turnOn() : turnOff() })
     }
 }
