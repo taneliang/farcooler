@@ -37,6 +37,11 @@ fn tunneled(token: &str) -> String {
 const DIRECT: &str = r#"{"kind":"direct","host":"10.0.0.4","port":22}"#;
 
 struct Ran {
+    /// Read only by the two tests below that `--features tailcat` cfgs away —
+    /// each says in its own doc comment why it cannot run with the archive
+    /// linked. The field is still CAPTURED under that feature, so turning
+    /// either test back on needs no change here.
+    #[cfg_attr(feature = "tailcat", allow(dead_code))]
     stdout: String,
     stderr: String,
     ok: bool,
