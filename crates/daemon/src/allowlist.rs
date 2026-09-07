@@ -140,8 +140,10 @@ pub fn tunnel_plan(key_path: &Path, entries: &[Entry]) -> Result<Allowlist, Tunn
 /// ABOVE every use of `key_path`: `helper.rs` refuses before `spawn`, and the
 /// Go side before `loadOrCreateIdentity`. So this spawns no helper, reaches no
 /// network, and creates no identity file, which is what lets the `NoIdentity`
-/// arm call it with a path that does not exist. `an_empty_allowlist_starts_no_tunnel`'s
-/// `a_runner_with_no_key_file_starts_no_tunnel` asserts that absence directly.
+/// arm call it with a path that does not exist.
+/// `a_runner_with_no_key_file_starts_no_tunnel`, in
+/// `tests/an_empty_allowlist_starts_no_tunnel.rs`, asserts that absence
+/// directly rather than leaving it to this paragraph.
 ///
 /// `key_path` is taken because `serve`'s signature takes one, not because
 /// anything reads it.
