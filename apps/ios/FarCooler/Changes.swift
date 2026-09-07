@@ -1470,7 +1470,14 @@ final class ChangesStore: ObservableObject {
     /// changes: a definite answer that sends you to update software that was
     /// never the problem.
     private static func trouble(for error: Error) -> Trouble {
-        ClientCore.trouble(
+        // This arm keeps a sentence of its own rather than the shared table's,
+        // because this screen knows WHAT the runner is too old for, and "too old
+        // to review changes" says more here than "too old for this" could. Word
+        // for word with Android's `ChangesStore.loadTrouble`.
+        if ClientCore.refusalWord(of: error) == RunnerRefusal.capabilityUnsupported.rawValue {
+            return Trouble(sentence: "This runner’s Far Cooler is too old to review changes.")
+        }
+        return ClientCore.trouble(
             error,
             otherwise: "Couldn’t read this workspace. The request that reads it didn’t finish.")
     }
