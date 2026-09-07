@@ -879,8 +879,15 @@ struct ShellScreen: View {
         // fleet "start some work" has to name a machine, and the honest default
         // is the one whose worktree is on screen — the same answer the overview
         // gives by putting these actions in its own toolbar, over its own
-        // cards. Absent until the shell has come to rest at least once, which
-        // is before the first frame anybody can tap.
+        // cards.
+        //
+        // `acting` and not `resting`, which used to be the same thing and no
+        // longer is. There is one screen with no pane at rest — a runner that
+        // answered with no worktrees, where "New Workspace" is the only move
+        // there is — and `resting` is nil on it, so both of these presented an
+        // empty body: a sheet you can open and cannot use. See `acting`, which
+        // falls back through the same selection that decides where a launch
+        // lands.
         .sheet(isPresented: $showNewWorkspace) {
             if let connection = acting {
                 NewWorkspaceView(
