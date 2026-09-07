@@ -1027,8 +1027,8 @@ struct RemoveWorktreeConfirmSheet: View {
 /// at a merged fleet: the overview's grid holds cards from every connected
 /// runner. Resolving the connection where the flow runs rather than where the
 /// menu was tapped would run `workspace.remove_worktree` against whichever
-/// runner the shell happened to be resting on — with an id that is eight hex
-/// characters and means something different over there.
+/// runner the shell happened to be resting on, with an id that means something
+/// different over there.
 enum RemoveWorktreeRequest {
     /// "Remove worktree for X?", with a Remove and a Cancel.
     case confirming(Workspace, on: Connection)

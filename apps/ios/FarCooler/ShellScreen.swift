@@ -57,9 +57,10 @@ struct ShellPaneRef: Hashable {
     /// would send an RPC down whichever connection the screen happened to be
     /// holding. See `ShellIdentity`.
     var runner: UUID
-    /// The DAEMON's own workspace id, eight hex characters, unique on `runner`
-    /// and nowhere else. Not the shell's composite — this is the string that
-    /// goes on the wire in `changes.*` and `workspace.*` calls.
+    /// The DAEMON's own workspace id — the full UUID it minted, which is what
+    /// goes on the wire in `changes.*` and `workspace.*` calls. Not the shell's
+    /// composite, and not the eight-character `short` field, which is a display
+    /// form nothing here uses as an identity.
     var workspace: String
     var pane: Pane
 }
@@ -74,8 +75,9 @@ struct ShellPaneRef: Hashable {
 /// **It is the whole fleet and not one runner's**, which is the port's central
 /// change. `of(_ store:)` walks `FleetStore.entries` — every workspace on every
 /// connected runner, in the order the runner list is in — and every id it mints
-/// carries the runner, because a workspace id does not. See `ShellIdentity`,
-/// which is where that composition and its test live.
+/// carries the runner, so a tab resolves back to a connection rather than to a
+/// search. See `ShellIdentity`, which is where that composition, its test and
+/// the reason live.
 @MainActor
 struct ShellFleetMap {
     var fleet: ShellFleet
@@ -93,12 +95,10 @@ struct ShellFleetMap {
 
     /// A tab's id: the runner, the workspace it is in, then the pane it is.
     ///
-    /// Composed by `ShellIdentity` rather than here, and the reason is the
-    /// runner. Workspace ids are eight hex characters minted per daemon, so two
-    /// runners can hand back the same one for two unrelated worktrees — and a
-    /// tab id is a SwiftUI identity and the key `ShellPaneTrack` retains a
-    /// mounted pane under. That file is in AgentKit, which `swift test` runs;
-    /// this target's tests are compiled by CI and never executed.
+    /// Composed by `ShellIdentity` rather than here, so the composition sits
+    /// somewhere a test can read it back: that file is in AgentKit, which
+    /// `swift test` runs, and this target's tests are compiled by CI and never
+    /// executed.
     static func tabID(runner: UUID, workspace: String, pane: Pane) -> String {
         ShellIdentity.tab(
             runner: runner.uuidString, workspace: workspace, pane: pane.id)
@@ -206,14 +206,14 @@ struct ShellFleetMap {
 
         return (
             ShellWorkspace(
-                // The COMPOSITE, not the daemon's eight characters. This
-                // string is a SwiftUI identity — the overview gives each
-                // card `.id(_:)` and an accessibility identifier off it,
-                // and `ShellPaneTrack` remembers which workspace a retained
-                // pane belongs to by it — and two runners can mint the same
-                // eight characters. The daemon's own id is on the
-                // `FleetEntry` in `entries`, which is where the wire gets
-                // it back. See `ShellIdentity`.
+                // The COMPOSITE, not the daemon's own id. This string is a
+                // SwiftUI identity — the overview gives each card `.id(_:)`
+                // and an accessibility identifier off it, and
+                // `ShellPaneTrack` remembers which workspace a retained pane
+                // belongs to by it — and it is what a screen resolves a
+                // runner from. The daemon's own id is on the `FleetEntry` in
+                // `entries`, which is where the wire gets it back. See
+                // `ShellIdentity`.
                 id: ShellIdentity.workspace(
                     runner: runner.uuidString, workspace: workspace.id),
                 name: workspace.task,
@@ -878,8 +878,8 @@ struct ShellScreen: View {
         // Through the map's own entry, which carries the runner this card is
         // on. Looking the id up in "the" fleet is what a single-connection
         // screen could do and a merged one cannot: `ShellWorkspace.id` is a
-        // composite now, and the daemon's eight characters are only unique on
-        // the machine that minted them.
+        // composite now, and searching every runner for the daemon's own id
+        // would answer with the first match rather than with the right one.
         guard let entry = map.entries[shell.id],
             let connection = fleet.connection(for: entry.host.id),
             let live = connection.fleet.workspaces.first(where: { $0.id == entry.workspace.id })
@@ -1051,10 +1051,10 @@ struct ShellScreen: View {
                     // Only the workspace at rest gets an answer. A neighbour's
                     // diff header can wait until you land on it; asking for
                     // three is three GitHub round trips per swipe.
-                    // The WHOLE ref's workspace, runner included: two runners
-                    // can mint the same eight characters, and a comparison on
-                    // the daemon's id alone would hand one machine's pull
-                    // request to a worktree on another.
+                    // The WHOLE ref, runner included. What "the same worktree"
+                    // means across a merged fleet is a runner and an id, and a
+                    // comparison on the id alone would rest on cross-daemon
+                    // uniqueness that nothing enforces.
                     pullRequest: ref.workspace == restingRef?.workspace
                         && ref.runner == restingRef?.runner ? pullRequest : nil,
                     onCreated: { createdTerminal = $0 })
@@ -1111,11 +1111,10 @@ struct ShellScreen: View {
         // the self-fulfilling memory `remember(_:leaving:tab:)` refuses for
         // the same reason one paragraph down.
         let workspace = takeCrossing().flatMap { wanted in
-            // Both halves, and the runner is the half that matters now: a
-            // crossing note carries the daemon's own workspace id, which is
-            // eight hex characters unique on ONE machine. Matching on it alone
-            // across a merged fleet is how a crossing lands on the wrong
-            // worktree with the right name.
+            // Both halves. A crossing note names a runner AND a worktree —
+            // that is what `crossingKey` writes — and honoring only the second
+            // over a merged fleet would land on whichever runner's copy the
+            // merge put first.
             map.fleet.workspaces.indices.first {
                 let entry = map.entries[map.fleet.workspaces[$0].id]
                 return entry?.workspace.id == wanted.workspace
@@ -1274,9 +1273,8 @@ struct ShellScreen: View {
         else { return "" }
         let branch = connection.fleet.workspaces.first { $0.id == ref.workspace }?.branch ?? ""
         // The runner is in the key for the reason it is in every other id here:
-        // two runners can hold a worktree with the same eight characters on the
-        // same branch, and a key that could not tell them apart would leave one
-        // machine's pull request on the other's header.
+        // what the key has to change on is "a different worktree", and across a
+        // merged fleet a worktree is a runner and an id rather than an id.
         return "\(ref.runner)|\(ref.workspace)|\(branch)|\(connection.pollGeneration)"
     }
 

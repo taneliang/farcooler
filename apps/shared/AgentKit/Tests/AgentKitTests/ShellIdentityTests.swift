@@ -3,28 +3,33 @@ import Testing
 
 @testable import AgentKit
 
-/// The collision the multi-runner port creates if the runner is left out.
+/// What the shell's ids have to say, now that it holds several runners' fleets.
 ///
 /// Every one of these fails against the composition the shell used before the
 /// port — `"\(workspace)/\(pane.id)"`, with no runner in it — which is the
-/// whole reason they are here. A workspace id is eight hex characters minted
-/// per daemon, so the inputs below are not contrived: two runners handing back
-/// `3f9a1c07` for two unrelated worktrees is an ordinary Tuesday once the phone
-/// holds more than one connection.
+/// whole reason they are here.
+///
+/// **The workspace ids below are written short for readability, and that is a
+/// fixture choice rather than the wire's shape.** The app decodes the daemon's
+/// full UUIDv7; the eight-character form is `Workspace.short`, which nothing
+/// uses as an identity. See `ShellIdentity`, which corrects the premise this
+/// port was scoped on. What these pin is not that a collision happens — it is
+/// that a tab id names the runner, so resolving one back to a connection is a
+/// lookup rather than a search across every runner for a matching id.
 struct ShellIdentityTests {
-    /// Two daemons, one workspace id, two different worktrees.
+    /// One workspace id, two runners, two different worktrees.
     ///
     /// The mutation this exists for is deleting the runner from
     /// `ShellIdentity.workspace`: it leaves every single-runner screen working
-    /// and turns this into a pane on the wrong machine.
+    /// and leaves the merged fleet with two cards under one identity.
     @Test func twoRunnersSharingAWorkspaceIDAreStillTwoWorkspaces() {
         let one = ShellIdentity.workspace(runner: "RUNNER-A", workspace: "3f9a1c07")
         let two = ShellIdentity.workspace(runner: "RUNNER-B", workspace: "3f9a1c07")
         #expect(one != two)
     }
 
-    /// The same, one level down, where it costs a mounted pane rather than a
-    /// card: `ShellPaneTrack` retains by tab id.
+    /// The same, one level down, where it would cost a mounted pane rather than
+    /// a card: `ShellPaneTrack` retains by tab id.
     @Test func twoRunnersSharingAWorkspaceIDAreStillTwoTabs() {
         let one = ShellIdentity.tab(runner: "RUNNER-A", workspace: "3f9a1c07", pane: "changes")
         let two = ShellIdentity.tab(runner: "RUNNER-B", workspace: "3f9a1c07", pane: "changes")

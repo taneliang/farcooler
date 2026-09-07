@@ -7,10 +7,18 @@ import SwiftUI
 /// Android's `FleetEntry`, on a phone that had no equivalent because it never
 /// had more than one runner to merge. The runner is CARRIED rather than looked
 /// up, and that is the whole reason this type exists instead of a bare
-/// `[Workspace]`: a workspace id is the last eight hex characters of a UUID
-/// minted per daemon, so across three runners two of them can hand back the
-/// same id for two unrelated worktrees, and acting on the wrong one is not a
-/// failure anything would report.
+/// `[Workspace]`: a merged list has to get from a workspace back to the session
+/// that can act on it, and looking that up by searching every connection for a
+/// matching id is a search that answers with the FIRST match rather than with
+/// nothing when it is wrong.
+///
+/// **The reason originally recorded here was that ids collide, and that is
+/// wrong about this app.** `Workspace.id` decodes the daemon's full UUIDv7 —
+/// `uuid_of(&w.id).to_string()` in `crates/client/src/session.rs` — and the
+/// eight hex characters are the separate `short` field, which nothing in these
+/// apps uses as an identity. Two daemons' UUIDv7s differ in 62 random bits. The
+/// carrying is right for the reason above; it is not a fix for a collision that
+/// happens. See `ShellIdentity`.
 struct FleetEntry: Identifiable {
     let host: Runner
     let connection: Connection
@@ -22,10 +30,16 @@ struct FleetEntry: Identifiable {
     /// re-key every one of them by runner itself.
     let counts: InboxRow?
 
-    /// Unique across the fleet, which `workspace.id` is not. See the note
-    /// above, and `ShellFleetMap.tabID` — which has exactly this bug waiting
-    /// for it and is step 4 of the port rather than this one.
-    var id: String { "\(host.id.uuidString)/\(workspace.id)" }
+    /// Unique across the fleet, and says which runner it is on — which
+    /// `workspace.id` does not.
+    ///
+    /// The same composition `ShellIdentity.workspace` makes, deliberately: the
+    /// store's merged list and the shell's fleet have to agree on what one
+    /// workspace is called, or a card tapped in the overview and the pane it
+    /// opens are two different lookups.
+    var id: String {
+        ShellIdentity.workspace(runner: host.id.uuidString, workspace: workspace.id)
+    }
 }
 
 /// Every configured runner, connected at once.
@@ -279,9 +293,9 @@ final class FleetStore: ObservableObject {
     /// to — which the battery gate makes an ordinary answer rather than an
     /// error.
     ///
-    /// By runner id and never by workspace id, for `FleetEntry.id`'s reason:
-    /// short ids are minted per daemon and say nothing about which runner they
-    /// are on.
+    /// By runner id and never by workspace id, for `FleetEntry.id`'s reason: a
+    /// workspace id says nothing about which runner it is on, so answering from
+    /// one means searching every connection and taking the first match.
     func connection(for host: UUID) -> Connection? { connections[host] }
 
     func connection(for entry: FleetEntry) -> Connection? { connections[entry.host.id] }
