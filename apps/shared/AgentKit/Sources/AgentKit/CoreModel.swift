@@ -424,6 +424,30 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// bytes were on a pane that is not a tty. See `ChangesView`.
     var isChangesPane: Bool { paneMode == "changes" }
 
+    /// Whether a pane of this mode needs a `TerminalSession` behind it.
+    ///
+    /// **Only the pane that DRAWS a VT grid.** A chat reads its own subscribe
+    /// stream and a diff reads a `ChangesStore`; neither renders a byte of what
+    /// a terminal session carries, and neither has ever had a caller for it.
+    ///
+    /// It is asked because the answer used not to be. `TerminalView` hangs its
+    /// visibility work off one `.task` on the whole `VStack` — outside the
+    /// branch that chooses between the chat, the diff and the grid — so every
+    /// agent pane opened a full session it never drew. `be15838` is what made
+    /// that reachable: the task called `relink()`, which bails on a session
+    /// nothing has started, and it became `resume()`, which starts one. The
+    /// cost is per agent pane, and a workspace can hold several: about 400 KB
+    /// of scrollback, one of the ten concurrent sessions a default `sshd`
+    /// allows this phone across its whole fleet, and a geometry poll every two
+    /// seconds against a pane nobody is looking at.
+    ///
+    /// Read off `paneMode` on every body pass rather than decided once at
+    /// mount, because the mode moves under a mounted pane: the Mac can switch a
+    /// worktree's pane to a chat while this phone is on it, and a session
+    /// nobody re-asked about would be left open behind a screen that has
+    /// stopped drawing it.
+    var needsTerminalSession: Bool { !isAgentPane && !isChangesPane }
+
     /// Whether this pane can be shown as a chat.
     ///
     /// Answered on the host, because identifying an agent takes a screen read —

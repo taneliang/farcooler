@@ -1033,14 +1033,50 @@ struct TerminalView: View {
         // host, so a mounted-but-hidden pane must hold neither. Driven by
         // `isVisible` rather than `onDisappear`, which no longer fires — the
         // pane is hidden, not removed, and that is what keeps its grid.
-        .task(id: isVisible) {
+        // KEYED ON THE MODE AS WELL AS ON VISIBILITY, AND THAT IS THE FIX.
+        //
+        // This modifier is on the whole `VStack` — outside the branch above
+        // that chooses between the chat, the diff and the VT grid — because
+        // what it does about VISIBILITY is true of all three. What it did about
+        // the SESSION was true of one, and it did it for all three anyway: an
+        // agent pane opened a full terminal session, on a second ssh channel,
+        // and never drew a byte of it. Per agent pane, and a workspace can hold
+        // several: about 400 KB of scrollback, one of the ten concurrent
+        // sessions a default `sshd` allows this phone across its whole fleet,
+        // and a geometry poll every two seconds against a pane nobody is
+        // looking at.
+        //
+        // It was harmless until `be15838`. The task called `relink()`, which
+        // guards on `started` and so did nothing at all on a session nothing
+        // had opened; it became `resume()`, which is the call that opens one.
+        //
+        // The mode is in the key rather than read once, because the mode moves
+        // under a mounted pane: the Mac can switch a worktree this phone is
+        // looking at into a chat, and a session nobody re-asked about would be
+        // left running behind a screen that has stopped drawing it. Which panes
+        // need one at all is `Terminal.needsTerminalSession`, in AgentKit,
+        // where `swift test` reads it back.
+        .task(id: PaneDuty(visible: isVisible, drawsGrid: live.needsTerminalSession)) {
             if isVisible {
                 // `resume`, not `relink`. Relinking rebuilt the pane from
                 // nothing every time it won its race with `configure`, which
                 // is the "Loading…" on a tab you had already opened — and the
                 // exact opposite of what mounting hidden panes is for. See
                 // `TerminalSession.resume`.
-                session.resume()
+                //
+                // `stop` on the other side of it, and not simply nothing: a
+                // pane that has just BECOME a chat is a pane with a session
+                // already open behind it, and the branch above has stopped
+                // drawing that session's grid.
+                if live.needsTerminalSession {
+                    session.resume()
+                } else {
+                    session.stop()
+                }
+                // Both of these are about the pane you are LOOKING at rather
+                // than about a tty, so they are outside the branch: a chat is
+                // read on screen exactly as a terminal is, and a banner about
+                // the pane in front of you is the same mistake either way.
                 Notifier.shared.visibleTerminal = terminal.id
                 await connection.markVisibleSeen()
             } else {
@@ -1419,6 +1455,17 @@ struct TerminalView: View {
     /// screen asks the host to resize to should reflect the font actually on
     /// screen, not whatever it was measured at when this screen first
     /// appeared.
+    /// What this pane owes the host: whether anybody is looking at it, and
+    /// whether it is the kind of pane that draws a terminal.
+    ///
+    /// Both halves, so that either one moving re-runs the task. Visibility
+    /// alone was the key and the mode was read inside the body, which is a task
+    /// that never re-runs when a pane changes mode under a finger.
+    private struct PaneDuty: Equatable {
+        var visible: Bool
+        var drawsGrid: Bool
+    }
+
     private struct GridSize: Equatable {
         var width: Double
         var height: Double
