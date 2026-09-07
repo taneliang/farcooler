@@ -3321,6 +3321,148 @@ describe('/v1/notify/retire', () => {
   })
 })
 
+// MARK: - Taking a device or a machine away
+
+/// `/v1/daemons/revoke` had no test of any kind.
+///
+/// Not the account scoping, not the 400, not even the 401 — the list of
+/// signed-in routes did not name it, so nothing in this file ever sent it a
+/// request. It is the route that ends a machine's ability to notify, which is
+/// the only thing a stolen daemon token can do at all, so it is the entire
+/// remedy for a lost runner.
+///
+/// `revokeOwned` serves both tables from one function, so both routes are here:
+/// one copy of the account clause, two routes resting on it, and a clause that
+/// is checked IN the delete rather than before it — a separate ownership query
+/// would leave a window between the check and the write, and there is no reason
+/// to have the window.
+describe('/v1/devices/revoke and /v1/daemons/revoke', () => {
+  /// What one account still holds in a table, read straight from D1.
+  ///
+  /// Not through `/v1/account`: that route has its own scoping, and a test that
+  /// asked it what survived would report a delete as scoped whenever the
+  /// listing was scoped, which is the wrong question answered convincingly.
+  async function idsIn(table: 'devices' | 'daemons', account: string): Promise<string[]> {
+    const rows = await env.DB.prepare(`SELECT id FROM ${table} WHERE account_id = ? ORDER BY id`)
+      .bind(account)
+      .all<{ id: string }>()
+    return (rows.results ?? []).map(row => row.id)
+  }
+
+  it('revokes a machine by the id the account listing gave for it', async () => {
+    // Both halves of the only flow there is. Pairing returns a TOKEN and never
+    // an id, so the one id the app can revoke by is the one `/v1/account`
+    // handed it, and a test that invented an id would not be exercising the
+    // pair of routes anybody uses.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await post('/v1/daemons', { label: 'Studio' }, session)
+    const listed = await (await post('/v1/account', {}, session)).json<any>()
+    expect(listed.machines.map((each: any) => each.label)).toEqual(['Studio'])
+
+    const response = await post('/v1/daemons/revoke', { id: listed.machines[0].id }, session)
+
+    expect(await response.json()).toEqual({ ok: true })
+    expect(await idsIn('daemons', 'user_1')).toEqual([])
+  })
+
+  it('stops a revoked machine notifying, which is the point of the route', async () => {
+    // What revoking is FOR. A runner someone no longer controls holds a bearer
+    // token that is good for a year, and this is the only thing that ends it.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await register('user_1')
+    const paired = await (await post('/v1/daemons', { label: 'Studio' }, session)).json<any>()
+    const [id] = await idsIn('daemons', 'user_1')
+    expect((await post('/v1/notify', { title: 'hi' }, paired.token)).status).toBe(200)
+
+    await post('/v1/daemons/revoke', { id }, session)
+
+    expect((await post('/v1/notify', { title: 'hi' }, paired.token)).status).toBe(401)
+  })
+
+  it('will not revoke a machine belonging to another account', async () => {
+    // A daemon id is a UUID, so this is not a guess anyone makes twice — but it
+    // is a value the other account has SEEN, on its own screen, and the clause
+    // is what makes ownership a fact about the statement rather than a fact
+    // about how hard the id is to come by.
+    watchFetch()
+    await post('/v1/daemons', { label: 'Mine' }, await sessionFor('user_1'))
+    await post('/v1/daemons', { label: 'Theirs' }, await sessionFor('user_2'))
+    const [theirs] = await idsIn('daemons', 'user_2')
+
+    const response = await post('/v1/daemons/revoke', { id: theirs }, await sessionFor('user_1'))
+
+    expect(await response.json()).toEqual({ ok: false })
+    expect(await idsIn('daemons', 'user_2')).toEqual([theirs])
+    // And nothing of this account's went in its place.
+    expect((await idsIn('daemons', 'user_1')).length).toBe(1)
+  })
+
+  it('revokes a device this account registered', async () => {
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await register('user_1')
+    const [mine] = await idsIn('devices', 'user_1')
+
+    expect(await (await post('/v1/devices/revoke', { id: mine }, session)).json()).toEqual({
+      ok: true,
+    })
+    expect(await idsIn('devices', 'user_1')).toEqual([])
+  })
+
+  it('will not revoke a device belonging to another account', async () => {
+    // The one with a phone on the end of it: a device row is where a push token
+    // lives, so deleting somebody else's is silencing their notifications
+    // outright, and nothing in the app would explain why they stopped.
+    watchFetch()
+    await register('user_1')
+    await register('user_2', { pushToken: 'their-device-token' })
+    const [theirs] = await idsIn('devices', 'user_2')
+
+    const response = await post('/v1/devices/revoke', { id: theirs }, await sessionFor('user_1'))
+
+    expect(await response.json()).toEqual({ ok: false })
+    expect(await idsIn('devices', 'user_2')).toEqual([theirs])
+    expect((await idsIn('devices', 'user_1')).length).toBe(1)
+  })
+
+  it('says nothing happened for an id nobody holds', async () => {
+    // `ok` reports whether a row actually went. It used to be `true`
+    // unconditionally, which made revoking nothing indistinguishable from a
+    // real delete — and the app removes the row optimistically on that answer,
+    // so a no-op read as success right up until the list reloaded.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    await register('user_1')
+    await post('/v1/daemons', {}, session)
+
+    const missing = crypto.randomUUID()
+    expect(await (await post('/v1/devices/revoke', { id: missing }, session)).json()).toEqual({
+      ok: false,
+    })
+    expect(await (await post('/v1/daemons/revoke', { id: missing }, session)).json()).toEqual({
+      ok: false,
+    })
+    // And the rows that were there are still there.
+    expect((await idsIn('devices', 'user_1')).length).toBe(1)
+    expect((await idsIn('daemons', 'user_1')).length).toBe(1)
+  })
+
+  it('needs an id, and a string one', async () => {
+    // Typed rather than merely present: a non-string id reaches the D1 binder
+    // and throws, which the top-level catch turns into a 500 for what is a bad
+    // request.
+    watchFetch()
+    const session = await sessionFor('user_1')
+    for (const path of ['/v1/devices/revoke', '/v1/daemons/revoke']) {
+      expect((await post(path, {}, session)).status, path).toBe(400)
+      expect((await post(path, { id: '' }, session)).status, path).toBe(400)
+      expect((await post(path, { id: 42 }, session)).status, path).toBe(400)
+    }
+  })
+})
+
 // MARK: - One install's card is never another install's
 
 /// The write half of the card's account scoping, which was held by nothing.
