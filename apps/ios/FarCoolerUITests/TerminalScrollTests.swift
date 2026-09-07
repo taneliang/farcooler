@@ -1591,6 +1591,24 @@ final class TerminalScrollTests: XCTestCase {
                     + "change")
         }
 
+        // **The SECOND control, and the one this test was wrong without.**
+        //
+        // Reaching another runner goes through the overview: a lift up to the
+        // grid, a tap in the menu, and `Done` back down. The lift is a gesture
+        // that moves the page, and it costs the pane its place all by itself —
+        // measured here, on this runner, with nothing switched. Without this
+        // number the assertion after the switch is comparing against the place
+        // the pane had before a gesture it never made, and would report the
+        // OVERVIEW's cost as the runner change's.
+        //
+        // That is exactly the mistake the test this replaces made in the other
+        // direction: it crossed runners, found the pane at the bottom, and
+        // called the teardown proven.
+        try openOverview(app)
+        let done = app.buttons["Done"]
+        if done.waitForExistence(timeout: 10) { done.tap() }
+        let afterAnOverview = position(app)?.offset
+
         // And now the runner change.
         //
         // The overview is the sharp half, and it is the old test's own evidence
@@ -1612,19 +1630,25 @@ final class TerminalScrollTests: XCTestCase {
                 + "and every mounted pane went with it")
 
         // Out of the grid, back onto the pane that was never unmounted.
-        let done = app.buttons["Done"]
         if done.waitForExistence(timeout: 10) { done.tap() }
 
-        if let scrolled {
+        if scrolled != nil {
+            // **Against the overview's own cost, not against the scroll.** A
+            // change of runner is a trip through the grid, so what this can
+            // honestly claim is that the trip costs no MORE when a runner
+            // changes at the top of it than when nothing does. The place a
+            // pane keeps across the lift itself is the overview's business and
+            // is measured — and asserted — one gesture up.
             XCTAssertEqual(
-                position(app)?.offset, scrolled,
-                "the pane lost its place across a change of runner. Panes are supposed to "
-                    + "survive one now — that is what the port was for, and what the crossing "
-                    + "alert used to warn about instead")
+                position(app)?.offset, afterAnOverview,
+                "a change of runner cost the pane more than the same trip through the overview "
+                    + "with no change at the top of it. Panes are supposed to survive one now — "
+                    + "that is what the port was for, and what the crossing alert used to warn "
+                    + "about instead")
         } else {
             // Said out loud rather than silently skipped: this run proved the
-            // shell survives and did NOT prove the scrollback does, and the two
-            // are different claims.
+            // shell survives and did NOT prove anything about scrollback, and
+            // the two are different claims.
             print(
                 "No pane in this fleet had scrollback, so the position half of this test did "
                     + "not run. The shell-survives half did.")
