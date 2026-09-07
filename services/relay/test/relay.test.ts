@@ -270,6 +270,80 @@ async function foreignAgent(
     .run()
 }
 
+/// A card belonging to somebody else's install.
+///
+/// The counterpart of `foreignAgent`, needed for the same reason and for a
+/// sharper one. `install_cards` is `UNIQUE (account_id)`, so a table holding
+/// this account's card holds exactly ONE ROW — and against one row an
+/// account-scoped write and an unscoped one do precisely the same thing. Every
+/// write in this service that touches this table was therefore a `WHERE` that
+/// no test in this file could possibly notice: the two on
+/// `/v1/devices/activity`, the one on `/v1/notify/retire`, and the three on
+/// `/v1/notify`. All six could be dropped together and the suite stayed green.
+///
+/// What they read as in production is worth spelling out, because it is not a
+/// leak of somebody's data but a denial of everybody's card: one person swiping
+/// theirs away sets EVERY account's card to the sentinel, and one runner going
+/// quiet takes down every lock screen in the fleet.
+async function foreignCard(
+  account: string,
+  fields: { updateToken?: string; leaderTerminal?: string; leaderStatus?: string } = {},
+) {
+  const at = Date.now()
+  const card = {
+    update_token: fields.updateToken ?? 'their-update-token',
+    leader_terminal: fields.leaderTerminal ?? 'their-term',
+    leader_status: fields.leaderStatus ?? 'working',
+    dismissed_at: null,
+    updated_at: at,
+    pushed_at: at,
+  }
+  await env.DB.prepare(
+    `INSERT INTO accounts (id, created_at) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`,
+  )
+    .bind(account, at)
+    .run()
+  await env.DB.prepare(
+    `INSERT INTO install_cards
+       (id, account_id, update_token, environment, leader_terminal, leader_status,
+        dismissed_at, updated_at, pushed_at)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      crypto.randomUUID(),
+      account,
+      card.update_token,
+      card.leader_terminal,
+      card.leader_status,
+      card.dismissed_at,
+      card.updated_at,
+      card.pushed_at,
+    )
+    .run()
+  return card
+}
+
+/// One account's card, in every column any write in this service touches.
+///
+/// The whole row rather than the field a given test happened to think of: the
+/// six writes set different columns, and a per-column assertion would have to
+/// be right about which one each of them reaches.
+async function cardOf(account: string) {
+  return await env.DB.prepare(
+    `SELECT update_token, leader_terminal, leader_status, dismissed_at, updated_at, pushed_at
+     FROM install_cards WHERE account_id = ?`,
+  )
+    .bind(account)
+    .first<{
+      update_token: string
+      leader_terminal: string | null
+      leader_status: string | null
+      dismissed_at: number | null
+      updated_at: number
+      pushed_at: number | null
+    }>()
+}
+
 /// The terminals still on one account's roster, in a fixed order.
 async function roster(account: string): Promise<string[]> {
   const rows = await env.DB.prepare(
@@ -3244,6 +3318,152 @@ describe('/v1/notify/retire', () => {
     expect(response.status).toBe(200)
     const left = await env.DB.prepare(`SELECT terminal FROM live_activities`).all<any>()
     expect(left.results).toEqual([])
+  })
+})
+
+// MARK: - One install's card is never another install's
+
+/// The write half of the card's account scoping, which was held by nothing.
+///
+/// `a00fe5b` did this for `live_activities`, and the shape of the gap is the
+/// same: with one account's rows in the table, a scoped write and an unscoped
+/// one are indistinguishable. It is worse here, because `install_cards` is
+/// `UNIQUE (account_id)` — the table CANNOT hold two accounts' cards unless a
+/// fixture puts a second one there, so no test in this file had ever seen a
+/// second row, and all six `WHERE account_id = ?` clauses could be deleted
+/// together with the suite still green. The read side was already covered and
+/// already goes red without its clause; only the writes were open.
+///
+/// One test per write, and each asserts the same thing about the other
+/// account's card: not merely that it still exists, but that every column a
+/// write in this service touches is exactly as it was left.
+describe("one install's card is never another install's", () => {
+  /// A registered phone, a paired machine called Studio, and a session.
+  async function ready() {
+    await register('user_1', { liveActivityStartToken: 'start-token' })
+    await pair('user_1', 'mine')
+    return await sessionFor('user_1')
+  }
+
+  it('files an update token without touching anybody else', async () => {
+    // `/v1/devices/activity`, the dismissal arm. The person swiped THEIR card
+    // away, and unscoped this sets every account's card to the sentinel with a
+    // dismissal stamp on it — which `pushActivity` then reads as "no card, and
+    // they meant it", so every other install goes silent until something blocks.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    const theirs = await foreignCard('user_2')
+
+    await post('/v1/devices/activity', { updateToken: null, dismissed: true }, session)
+
+    const mine = await cardOf('user_1')
+    expect(mine?.update_token).toBe('')
+    expect(mine?.dismissed_at).toBeGreaterThan(0)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('forgets its own ended card and nobody else\'s', async () => {
+    // `/v1/devices/activity`, the arm for a card that merely ended. Unscoped,
+    // one app reporting that its activity is over deletes the row for every
+    // card the relay is holding.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    const theirs = await foreignCard('user_2')
+
+    await post('/v1/devices/activity', { updateToken: null }, session)
+
+    expect(await cardOf('user_1')).toBe(null)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('retires its own card and nobody else\'s', async () => {
+    // `/v1/notify/retire`. There is a cross-account test for this route
+    // already, and it stops one statement short: this account had no card of
+    // its own there, so the route returned before it ever reached the delete.
+    // A runner that restarts sweeps every terminal it cannot account for, so
+    // this is the ordinary path rather than an exotic one.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    const theirs = await foreignCard('user_2')
+
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+
+    expect(await response.json()).toEqual({ retired: 1 })
+    expect(await cardOf('user_1')).toBe(null)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('ends its own card when its last agent stops, and nobody else\'s', async () => {
+    // `/v1/notify`, the arm for a fleet with nothing left to be about. Unscoped,
+    // the last agent on ONE runner finishing takes down every card in the
+    // service — including the ones with a blocked agent waiting on them, which
+    // is the single push this product exists to deliver.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+    const theirs = await foreignCard('user_2')
+
+    await post('/v1/notify', { title: 'claude is done', terminal: 'term-1', status: 'done' }, 'mine')
+
+    expect(await cardOf('user_1')).toBe(null)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('forgets its own stale claim and nobody else\'s', async () => {
+    // `/v1/notify`, the `CLAIM_MEMORY_MS` arm. A card the relay started blind
+    // and never heard about again is dropped so a fresh one can be raised —
+    // and unscoped, every other install's card is dropped with it, including
+    // the addressable ones that were being moved in place quite happily.
+    const calls = watchFetch()
+    await ready()
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+    await env.DB.prepare(`UPDATE install_cards SET updated_at = ? WHERE account_id = ?`)
+      .bind(Date.now() - 2 * 60 * 60 * 1000, 'user_1')
+      .run()
+    const theirs = await foreignCard('user_2')
+
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    // The stale claim was dropped and a second card raised in its place, which
+    // is what makes this the arm it is rather than the coalescing one.
+    expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(2)
+    expect(await cardOf('user_2')).toEqual(theirs)
+  })
+
+  it('moves its own leader and nobody else\'s', async () => {
+    // `/v1/notify`, the update arm — the write that runs on every push of every
+    // card in the service, so it is the one an unscoped clause reaches most
+    // often. Unscoped, every account's card is recorded as leading with THIS
+    // account's terminal, and the next push on each of them then decides what
+    // it may show against a leader belonging to a stranger.
+    watchFetch()
+    const session = await ready()
+    await post('/v1/devices/activity', { updateToken: 'mine-token' }, session)
+    const theirs = await foreignCard('user_2')
+
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    const mine = await cardOf('user_1')
+    expect(mine?.leader_terminal).toBe('term-1')
+    expect(mine?.leader_status).toBe('blocked')
+    expect(await cardOf('user_2')).toEqual(theirs)
   })
 })
 
