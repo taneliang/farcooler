@@ -24,16 +24,26 @@ import kotlinx.serialization.json.Json
 /**
  * Which worktree, on which runner.
  *
- * **The host is half of the identity, and leaving it out is a real collision
- * rather than a theoretical one.** Workspace ids are minted per daemon, so two
- * runners can hold worktrees with the same id; `df87410` had to solve exactly
- * this for the front door, where [NeedsYouSection.key] is `host/workspace` and
- * never the workspace alone, and `BackstackTest` pins that the two must not be
- * conflated. iOS keys its bookmarks on the workspace alone and is right to,
- * because that app talks to one runner at a time. This one connects to every
- * runner at once — `net/FleetRepository.kt` — so a bookmark keyed on the
- * workspace would let a phone that has read a diff on the laptop resume "where
- * it was" in a different worktree on the desktop.
+ * **The host is half of the identity.** A worktree is a runner and an id, not
+ * an id: `df87410` had to solve exactly this for the front door, where
+ * [NeedsYouSection.key] is `host/workspace` and never the workspace alone, and
+ * `BackstackTest` pins that the two must not be conflated. This app connects to
+ * every runner at once — `net/FleetRepository.kt` — so a bookmark keyed on the
+ * workspace alone would let a phone that has read a diff on the laptop resume
+ * "where it was" in a different worktree on the desktop.
+ *
+ * **The reason recorded here was that ids collide, and that is wrong about
+ * these apps.** A workspace id on the wire is the daemon's full UUIDv7 —
+ * `uuid_of(&w.id).to_string()` in `crates/client/src/session.rs` — and the eight
+ * hex characters are the separate `short` field, a display form for logs and
+ * CLI output. What is true without it is the sentence above: two runners hold
+ * two different worktrees, and a key that names only one of the two halves is
+ * naming half a thing.
+ *
+ * The note about iOS keying its bookmarks on the workspace alone "because that
+ * app talks to one runner at a time" is also out of date -- iOS holds a
+ * connection per runner now. Its review bookmark is still keyed that way, and
+ * survives on the id-shape reason rather than on the one-runner one.
  *
  * Spelled the same way [NeedsYouSection.key] is, so the two never disagree
  * about what identifies a worktree on this phone.

@@ -125,6 +125,29 @@ public enum WatchRequest: Sendable, Equatable {
     /// dropped and which end drops it.
     case transcript(terminal: String)
 
+    /// The pane this request is about.
+    ///
+    /// **Every one of the four names a terminal, and none of them names a
+    /// runner.** That is a fact about the wire rather than an omission: the
+    /// watch holds no SSH identity, reaches no daemon and has never been told
+    /// which machine an agent is on — `FleetSnapshot.Agent.machine` is a label
+    /// for a row, not an address — so a request arrives at the phone as a pane
+    /// id and the phone is what has to resolve it.
+    ///
+    /// It could go without saying while the phone held one connection, because
+    /// there was one place a pane could be. With one connection per runner this
+    /// is the routing key: `WatchLinkHost.connection(forTerminal:)` is what
+    /// turns it into the session that owns the pane, and getting it wrong is an
+    /// answer sent to the wrong agent.
+    public var terminal: String {
+        switch self {
+        case let .prompt(terminal, _): terminal
+        case let .answer(terminal, _, _): terminal
+        case let .pendingPermission(terminal): terminal
+        case let .transcript(terminal): terminal
+        }
+    }
+
     public var dictionary: [String: Any] {
         switch self {
         case let .prompt(terminal, text):

@@ -24,10 +24,10 @@ import WatchConnectivity
 /// exactly one place where a surface without a connection gets one.
 ///
 /// **This object has no connection of its own, and cannot make one.** It holds
-/// a weak reference to whichever `Connection` the app is currently running, and
-/// when there is none it says so in words rather than failing quietly. See
-/// `perform`, and see this task's report for what that leaves unproven about a
-/// phone woken from the background.
+/// a weak reference to the app's `FleetStore` — the merged fleet across every
+/// runner — and when there is none it says so in words rather than failing
+/// quietly. See `perform`, and see this task's report for what that leaves
+/// unproven about a phone woken from the background.
 @MainActor
 final class WatchLinkHost: NSObject {
     /// One per app, for the same reason the watch has one: `WCSession.default`
@@ -38,14 +38,20 @@ final class WatchLinkHost: NSObject {
     private let session = WCSession.default
     private var started = false
 
-    /// The connection the app is currently running, if it is running one.
+    /// The app's merged fleet, if a scene is running one.
     ///
-    /// Weak on purpose. `Connection` is a `@StateObject` owned by `FleetView`,
-    /// and switching runners replaces it; a strong reference here would keep
-    /// the old runner's SSH session alive forever and — far worse — would keep
-    /// answering the watch through a connection to a runner the person has
-    /// already navigated away from.
-    private weak var connection: Connection?
+    /// **It was one `Connection`, and that is what made the watch a mode too.**
+    /// Every request from a wrist or a lock screen names a TERMINAL, and the
+    /// old slot answered "the connection the app is currently running" — so a
+    /// card about an agent on the runner you were not looking at reached the
+    /// wrong daemon, which does not have that terminal, and came back as a
+    /// failure. The store is what turns a terminal id back into the session
+    /// that owns it; see `connection(forTerminal:)`.
+    ///
+    /// Weak on purpose, exactly as the single slot was: `FleetStore` is a
+    /// `@StateObject` owned by `ConnectedRoot`, and a strong reference here
+    /// would keep every runner's SSH session alive for the life of the process.
+    private weak var fleet: FleetStore?
 
     /// The last snapshot actually handed to the system, and when.
     ///
@@ -83,21 +89,45 @@ final class WatchLinkHost: NSObject {
         session.activate()
     }
 
-    /// Point the link at the connection the app is now running.
+    /// Point the link at the app's fleet.
     ///
-    /// Called from `Connection.start`, before it has connected. Deliberately
-    /// before: what the watch needs is a way to reach the runner the person is
-    /// actually looking at, and `perform` checks the phase itself. Registering
-    /// only on success would leave the watch with no connection at all during
-    /// the seconds a reconnect takes, and answer "open the app" to somebody who
+    /// Called from `ConnectedRoot` as soon as there is a scene, and not from a
+    /// connection: what the watch needs is every runner, not the one that
+    /// happened to start last. It is deliberately adopted BEFORE anything has
+    /// connected — `perform` checks each connection's phase itself, and
+    /// registering only on success would leave the watch with nothing during
+    /// the seconds a reconnect takes and answer "open the app" to somebody who
     /// has it open.
-    func adopt(_ connection: Connection) {
-        self.connection = connection
-        // A different runner is a different fleet. Its transcripts are keyed on
-        // terminal ids that mean nothing over there, and answering a permission
-        // against the wrong runner is the one mistake this whole seam exists
-        // to make impossible.
-        replays.removeAll()
+    ///
+    /// **The replay cache is no longer cleared here**, and the reason it was is
+    /// the reason it must not be. It was cleared because a different runner was
+    /// a different fleet whose terminal ids meant nothing over here — the app
+    /// held one connection, so adopting was crossing. Adopting is now a
+    /// once-per-launch handover of the whole fleet, and clearing on it would
+    /// throw away every transcript on every runner each time a scene came back.
+    /// What made the cache safe to keep across runners is that a `Replay` is
+    /// keyed by the daemon's own terminal id and validated against its epoch
+    /// before it is used.
+    func adopt(_ fleet: FleetStore) {
+        self.fleet = fleet
+    }
+
+    /// The connection that owns a terminal, or nil when no runner this app is
+    /// talking to has it.
+    ///
+    /// The whole of what the merged fleet buys this file. A request from a
+    /// wrist or a card carries a terminal id and nothing else — the wire has
+    /// never carried a runner — so the only way to answer "which machine is
+    /// that pane on" is to look, and looking is only possible now that there is
+    /// more than one place to look.
+    ///
+    /// Nil has two causes and one sentence, deliberately: the pane is on a
+    /// runner this phone is not talking to, or it has stopped existing. Neither
+    /// is something a person on a wrist can act on differently.
+    private func connection(forTerminal id: String) -> Connection? {
+        fleet?.entries.first { entry in
+            entry.workspace.terminals.contains { $0.id == id }
+        }?.connection
     }
 
     // MARK: - Pushing the fleet
@@ -192,15 +222,24 @@ final class WatchLinkHost: NSObject {
     /// resolving it keeps ONE spelling of the device across the watch link and
     /// the lock screen card, which `answerFromGlance` also feeds from here.
     private func perform(_ request: WatchRequest) async -> WatchReply {
-        guard let connection else {
-            // No `FleetView` on screen means no `Connection` object at all —
-            // there is no app-wide one to fall back to. Honest, and
-            // actionable. `appName`, not a literal: a canary build is named
-            // "FC Canary" and telling somebody running it to open "Far
-            // Cooler" sends them looking for an app that is not on their
-            // phone, the same mistake already fixed once in the Live
-            // Activity and once in the widget.
+        guard fleet != nil else {
+            // No scene means no `FleetStore` at all — there is no app-wide one
+            // to fall back to. Honest, and actionable. `appName`, not a
+            // literal: a canary build is named "FC Canary" and telling somebody
+            // running it to open "Far Cooler" sends them looking for an app
+            // that is not on their phone, the same mistake already fixed once
+            // in the Live Activity and once in the widget.
             return .failed("Open \(appName) on your \(DeviceKind.current), then try again.")
+        }
+        // The runner the pane is on, which is a question the phone could not
+        // ask while it held one connection: every request names a terminal and
+        // the wire has never carried a runner. See `connection(forTerminal:)`.
+        guard let connection = connection(forTerminal: request.terminal) else {
+            // Two causes, one sentence: the pane is on a runner this phone is
+            // not talking to, or it has stopped existing. Neither is something
+            // somebody on a wrist can act on differently, and a sentence that
+            // guessed between them would be wrong half the time.
+            return .failed("\(appName) isn’t connected to the runner that pane is on.")
         }
         guard await ready(connection, within: Self.connectBudget) else {
             // Named apart because it is the one unreachable state a person can
@@ -649,13 +688,21 @@ final class WatchLinkHost: NSObject {
         }
         GlancePermissionStore.write(claimed)
 
-        guard let connection else {
+        guard fleet != nil else {
             // `appName`, not a literal: a canary build is named "FC Canary" and
             // telling somebody running it to open "Far Cooler" sends them
             // looking for an app that is not on their phone.
             await settle(
                 intent, .nothingSent,
                 "Open \(appName) on your \(DeviceKind.current), then try again.")
+            return
+        }
+        // Word for word the sentence the watch gets, because it is the same
+        // condition and two wordings for one condition read as two problems.
+        guard let connection = connection(forTerminal: terminal) else {
+            await settle(
+                intent, .nothingSent,
+                "\(appName) isn’t connected to the runner that pane is on.")
             return
         }
         guard await ready(connection, within: Self.glanceConnectBudget) else {

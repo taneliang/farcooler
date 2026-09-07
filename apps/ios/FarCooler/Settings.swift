@@ -83,13 +83,11 @@ enum FleetSettings {
     /// extra SSH session in radio wake-ups: somebody with six runners on a
     /// train may want one.
     ///
-    /// **No control writes this yet, on purpose.** The row belongs in
-    /// `SettingsView` beside the notification toggles, and it goes in when
-    /// `FleetStore` is the thing the app connects through — step 8 of the port
-    /// (`.claude/agent/done/the-fifth-cost-of-the-multi-runner-port.md`). A
-    /// switch labeled "Connect every runner at once" in an app that connects to
-    /// one runner at a time would be a control that does nothing, which is the
-    /// same lie as deleting the crossing alert before the crossing is free.
+    /// The row is in `SettingsView`, beside the notification toggles, and it
+    /// went in at the moment the switch became true rather than at the moment
+    /// the key existed: a control labeled "Connect every runner at once" in an
+    /// app that connects to one runner is a control that does nothing, which
+    /// this repo shipped once already on the macOS startup pane (`116d6e7`).
     static var allRunnersAtOnce: Bool {
         UserDefaults.standard.object(forKey: allRunnersAtOnceKey) as? Bool ?? true
     }
@@ -179,6 +177,7 @@ struct SettingsView: View {
     @AppStorage(TerminalSettings.fontSizeKey) private var fontSize: Double = TerminalSettings.defaultFontSize
     @AppStorage(NotificationSettings.onAttentionKey) private var notifyOnAttention = true
     @AppStorage(NotificationSettings.onDoneKey) private var notifyOnDone = true
+    @AppStorage(FleetSettings.allRunnersAtOnceKey) private var allRunnersAtOnce = true
     @Environment(\.dismiss) private var dismiss
     @State private var showAdd = false
 
@@ -237,6 +236,37 @@ struct SettingsView: View {
                 Text("Notifications")
             } footer: {
                 Text("Far Cooler doesn’t send notifications while an agent is working.")
+            }
+
+            // **A real switch over a real behavior**, and it is here only
+            // because that is now true. `FleetSettings.allRunnersAtOnce` has
+            // existed since step 2 of the multi-runner port with nothing
+            // reading it, and putting the row in then would have been a control
+            // labeled "Connect every runner at once" in an app that connected
+            // to one — which is the bug this repo shipped on the macOS startup
+            // pane, where two toggles had never worked in their lives
+            // (`116d6e7`).
+            //
+            // `@AppStorage` on the same bare key `FleetStore` reads through
+            // `UserDefaults`, so flipping this takes effect with nothing in
+            // between to publish it: the store hears `didChangeNotification`,
+            // reconciles, and either dials the rest of the fleet or retires
+            // everything but the selected runner.
+            Section {
+                Toggle("Connect every runner at once", isOn: $allRunnersAtOnce)
+            } header: {
+                Text("Runners")
+            } footer: {
+                // What it costs and what it costs you, in that order. Not
+                // "saves battery", which promises a number nobody measured.
+                Text(
+                    allRunnersAtOnce
+                        ? "Every runner's worktrees are in one grid, and an agent "
+                            + "anywhere can reach you. Each runner is an SSH session "
+                            + "this phone keeps open."
+                        : "Only the runner you've picked is connected. The others "
+                            + "show what Far Cooler last saw, and nothing on them "
+                            + "updates until you switch.")
             }
 
             Section {

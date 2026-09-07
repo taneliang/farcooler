@@ -7,10 +7,18 @@ import SwiftUI
 /// Android's `FleetEntry`, on a phone that had no equivalent because it never
 /// had more than one runner to merge. The runner is CARRIED rather than looked
 /// up, and that is the whole reason this type exists instead of a bare
-/// `[Workspace]`: a workspace id is the last eight hex characters of a UUID
-/// minted per daemon, so across three runners two of them can hand back the
-/// same id for two unrelated worktrees, and acting on the wrong one is not a
-/// failure anything would report.
+/// `[Workspace]`: a merged list has to get from a workspace back to the session
+/// that can act on it, and looking that up by searching every connection for a
+/// matching id is a search that answers with the FIRST match rather than with
+/// nothing when it is wrong.
+///
+/// **The reason originally recorded here was that ids collide, and that is
+/// wrong about this app.** `Workspace.id` decodes the daemon's full UUIDv7 —
+/// `uuid_of(&w.id).to_string()` in `crates/client/src/session.rs` — and the
+/// eight hex characters are the separate `short` field, which nothing in these
+/// apps uses as an identity. Two daemons' UUIDv7s differ in 62 random bits. The
+/// carrying is right for the reason above; it is not a fix for a collision that
+/// happens. See `ShellIdentity`.
 struct FleetEntry: Identifiable {
     let host: Runner
     let connection: Connection
@@ -22,10 +30,16 @@ struct FleetEntry: Identifiable {
     /// re-key every one of them by runner itself.
     let counts: InboxRow?
 
-    /// Unique across the fleet, which `workspace.id` is not. See the note
-    /// above, and `ShellFleetMap.tabID` — which has exactly this bug waiting
-    /// for it and is step 4 of the port rather than this one.
-    var id: String { "\(host.id.uuidString)/\(workspace.id)" }
+    /// Unique across the fleet, and says which runner it is on — which
+    /// `workspace.id` does not.
+    ///
+    /// The same composition `ShellIdentity.workspace` makes, deliberately: the
+    /// store's merged list and the shell's fleet have to agree on what one
+    /// workspace is called, or a card tapped in the overview and the pane it
+    /// opens are two different lookups.
+    var id: String {
+        ShellIdentity.workspace(runner: host.id.uuidString, workspace: workspace.id)
+    }
 }
 
 /// Every configured runner, connected at once.
@@ -36,19 +50,13 @@ struct FleetEntry: Identifiable {
 /// publishes the merge. Views observe this one object rather than a connection
 /// each.
 ///
-/// **Nothing constructs this yet, and that is deliberate.** It is step 1 of a
-/// nine-step port (`.claude/agent/done/the-fifth-cost-of-the-multi-runner-port.md`),
-/// and steps 5 to 7 are what make it safe to wire in. Until they land, this
-/// store starting N connections would have every one of them fight over the
-/// three process-wide slots `Connection.start` still claims:
+/// **This is what the app connects through.** `ConnectedRoot` owns one, every
+/// screen reads it, and nothing else owns a `Connection` at all.
 ///
-/// - `WatchLinkHost.shared.adopt` — the watch would perform everything through
-///   whichever runner happened to start last.
-/// - `Connection.current` — the enrollment ceremony writes `authorized_keys`
-///   through that slot, so the same lottery would decide which runner a device
-///   gets added to.
-/// - the one `fleet.json` — whichever connection polled last would define the
-///   whole lock screen's fleet.
+/// How many runners it dials is `FleetSettings.allRunnersAtOnce`'s answer,
+/// which defaults on: every configured runner, at once. Turned off it is the
+/// selected runner alone, which is the phone on a train paying for one SSH
+/// session instead of six.
 ///
 /// `Reachability` is NOT on that list any more: it holds a list of subscribers
 /// keyed by runner id rather than one slot, so every connection here is woken
@@ -72,6 +80,16 @@ final class FleetStore: ObservableObject {
     @Published private(set) var active: [Connection] = []
 
     private let hosts: RunnerStore
+
+    /// The runners to publish in the order of, which is `hosts` in the app and
+    /// a canned list in the layout harness. See `standIn(on:host:)`.
+    private var runnerOrder: [Runner] {
+        #if DEBUG
+        standInOrder.isEmpty ? hosts.hosts : standInOrder
+        #else
+        hosts.hosts
+        #endif
+    }
 
     private var connections: [UUID: Connection] = [:]
 
@@ -109,10 +127,11 @@ final class FleetStore: ObservableObject {
     /// `UserDefaults.didChangeNotification` fires for every one of them, and
     /// reconciling on each would be harmless but would republish two arrays
     /// per keystroke in the font-size slider.
-    private var everyRunnerAtOnce = FleetSettings.allRunnersAtOnce
+    private var everyRunnerAtOnce: Bool
 
     init(hosts: RunnerStore) {
         self.hosts = hosts
+        self.everyRunnerAtOnce = FleetSettings.allRunnersAtOnce
         reconcile()
         runnersObserver = hosts.objectWillChange.sink { [weak self] _ in
             // `objectWillChange` fires BEFORE the array is updated, so this has
@@ -221,12 +240,27 @@ final class FleetStore: ObservableObject {
     /// both other platforms do, and `RunnerStatusRow` is what explains why those
     /// rows are stale.
     private func publish() {
-        let ordered = FleetMembership.published(order: hosts.hosts.map(\.id), live: connections)
-        active = ordered
+        // Which runner each connection is for is THIS store's own key, and is
+        // deliberately not read back off the connection.
+        //
+        // `Connection.hostId` is nil until `start(host:)` has run, so pairing
+        // by it drops every connection in the window between being brought up
+        // and being dialed — and drops a canned one forever, which is what a
+        // layout harness stands on. Worse than either: it is a second answer to
+        // "which runner is this", and the two can only ever agree.
+        let mine = runnerOrder.compactMap { host in connections[host.id].map { (host, $0) } }
+        active = mine.map(\.1)
 
-        let byID = Dictionary(hosts.hosts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        entries = ordered.flatMap { connection -> [FleetEntry] in
-            guard let id = connection.hostId, let host = byID[id] else { return [] }
+        // Which runners may still contribute to `fleet.json`.
+        //
+        // Here rather than in `retire`, because this is the one place that sees
+        // the whole live set — and what the merge needs is the set, not the
+        // event. A runner nobody is polling with its agents on a lock screen,
+        // forever, is the bug merging creates if this is missing; see
+        // `FleetPublication.keeping(runners:)`.
+        FleetSnapshotWriter.keep(runners: Set(mine.map { $0.0.id.uuidString }))
+
+        entries = mine.flatMap { host, connection -> [FleetEntry] in
             let counts = connection.inbox
             return connection.fleet.workspaces.map { workspace in
                 FleetEntry(
@@ -242,9 +276,9 @@ final class FleetStore: ObservableObject {
     /// to — which the battery gate makes an ordinary answer rather than an
     /// error.
     ///
-    /// By runner id and never by workspace id, for `FleetEntry.id`'s reason:
-    /// short ids are minted per daemon and say nothing about which runner they
-    /// are on.
+    /// By runner id and never by workspace id, for `FleetEntry.id`'s reason: a
+    /// workspace id says nothing about which runner it is on, so answering from
+    /// one means searching every connection and taking the first match.
     func connection(for host: UUID) -> Connection? { connections[host] }
 
     func connection(for entry: FleetEntry) -> Connection? { connections[entry.host.id] }
@@ -288,4 +322,81 @@ final class FleetStore: ObservableObject {
     func setActive(_ active: Bool) {
         for connection in connections.values { connection.setActive(active) }
     }
+
+    // MARK: - What the screens ask
+
+    /// Whether ANY runner has said what it has, at least once.
+    ///
+    /// `Connection.hasFleet`'s question asked of a fleet rather than of a
+    /// runner, and the difference is the whole of why the app no longer blanks
+    /// for one sleeping laptop: the shell opens as soon as there is a pane to
+    /// open on, wherever it is, and a runner still connecting is a row rather
+    /// than a screen. See `RunnerStatusRow`.
+    var hasFleet: Bool { active.contains { $0.hasFleet } }
+
+    /// The runners being talked to, paired with what they are, in list order.
+    ///
+    /// For the screens that draw a row per runner. `active` alone cannot answer
+    /// it — a `Connection` reports an id and this is what turns that back into
+    /// the runner a person named.
+    var runners: [(host: Runner, connection: Connection)] {
+        // `runnerOrder` and not `hosts.hosts`, so this and `publish` give one
+        // answer to "which runners does this store have". They disagreed in the
+        // layout harness, where the store stands on a canned connection and its
+        // `RunnerStore` is empty: `publish` built entries and this reported
+        // none, so the merged fleet on screen and the list of runners over it
+        // were describing two different fleets.
+        runnerOrder.compactMap { host in connections[host.id].map { (host, $0) } }
+    }
+
+    #if DEBUG
+    /// Stand this store on one connection nobody dialed, for
+    /// `AgentLayoutHarness` — the same trick `Connection.standIn(on:)` plays,
+    /// one layer up, and for the same reason.
+    ///
+    /// The harness mounts the shipping shell over a canned fleet, and the shell
+    /// reads a store now rather than a connection. Without this the harness
+    /// would need a real `Runner` in a real `RunnerStore`, which is a harness
+    /// that dials a machine.
+    static func standIn(on connection: Connection, host: Runner) -> FleetStore {
+        FleetStore(standingOn: connection, host: host)
+    }
+
+    /// **Dials nothing, ever**, which is the whole difference from the ordinary
+    /// initializer and the reason it is not one.
+    ///
+    /// Going through `init(hosts:scope:)` would reconcile against a fresh
+    /// `RunnerStore` — and a `RunnerStore` is not empty in the simulator: the
+    /// UI suite launches with a demo runner as an argument, `init` picks it up,
+    /// and the harness would open an SSH session to it before drawing a single
+    /// canned pane. A layout harness that connects to a machine is not a
+    /// fixture.
+    private init(standingOn connection: Connection, host: Runner) {
+        self.hosts = RunnerStore()
+        self.everyRunnerAtOnce = false
+        self.standInOrder = [host]
+        self.connections[host.id] = connection
+        self.dialed[host.id] = host
+        // Watched, so filling the canned fleet in reaches the merge the same
+        // way a poll does. No runner-list or settings observer: neither has
+        // anything to say to a store with one connection nobody dialed.
+        watchers[host.id] = connection.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.publish() }
+        }
+        publish()
+    }
+
+    /// The runner order to publish in when there is no `RunnerStore` behind
+    /// this one. Empty in the app, where `hosts` is the answer.
+    private var standInOrder: [Runner] = []
+
+    /// Publish again, for a harness that has just filled its canned fleet in.
+    ///
+    /// `publish` runs off `Connection.objectWillChange`, which fires on the
+    /// turn BEFORE the value lands — so a fixture written in a `.task` reaches
+    /// the merge one body pass later, and the shell draws an empty fleet in
+    /// between. The app never sees that gap because its first fleet arrives
+    /// after several polls of nothing; a harness's arrives at once.
+    func republish() { publish() }
+    #endif
 }

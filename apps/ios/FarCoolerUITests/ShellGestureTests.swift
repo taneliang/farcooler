@@ -1258,49 +1258,13 @@ final class ShellGestureTests: XCTestCase {
             "opening the hidden section did not reveal the worktree in it")
     }
 
-    /// **Tapping another runner's card says what it costs before it costs it.**
-    ///
-    /// A cross-runner tap is not navigation inside this shell: `RootView` keys
-    /// the whole tree `.id(host)`, so it destroys `FleetView`, the track and
-    /// every mounted pane. `ShellPaneTrack`'s whole design is that a pane must
-    /// never be rebuilt, and the one moment that cannot be kept is the one
-    /// moment it has to be said out loud.
-    ///
-    /// Cancel and not Switch, because the harness has no runner to switch to —
-    /// what is being asserted is that the shell is still exactly where it was
-    /// after somebody says no.
-    func testCrossingToAnotherRunnerAsksFirstAndCancelChangesNothing() throws {
-        let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
-        let before = try state(app)
-
-        let card = app.buttons["shell-elsewhere-spike/watch-sync"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10))
-        card.tap()
-
-        let alert = app.alerts.firstMatch
-        XCTAssertTrue(
-            alert.waitForExistence(timeout: 5),
-            "a cross-runner tap threw the panes away without asking")
-        XCTAssertTrue(
-            alert.staticTexts["Switch to eu-runner-1?"].exists,
-            "the alert does not name the runner it is about: \(alert.debugDescription)")
-        // The cost, in the words the thing is called by. Asserted because the
-        // wording IS the feature here: an alert that does not say what goes is
-        // an alert people learn to dismiss.
-        let body = alert.staticTexts.allElementsBoundByIndex.map { $0.label }.joined(separator: " ")
-        XCTAssertTrue(
-            body.contains("will close"),
-            "the alert never says the open panes close: \(body)")
-        XCTAssertTrue(
-            body.contains("spike/watch-sync"),
-            "the alert never says where it would land: \(body)")
-
-        alert.buttons["Cancel"].tap()
-        XCTAssertFalse(alert.exists, "Cancel did not dismiss")
-        let after = try state(app)
-        XCTAssertEqual(after["ws"], before["ws"], "cancelling moved the shell")
-        XCTAssertEqual(after["overview"], 1, "cancelling closed the grid")
-    }
+    // `testCrossingToAnotherRunnerAsksFirstAndCancelChangesNothing` stood here
+    // and asserted the alert's wording: "the panes open on <runner> will
+    // close." It was true, and it stopped being true. The app holds a
+    // connection per runner, `RootView` no longer keys the tree `.id(host)`,
+    // and a card in the grid is a place to swipe to rather than a reconnect --
+    // so there is no alert to assert and nothing for it to warn about. See
+    // `FarCoolerApp.ConnectedRoot`.
 
     /// Forty workspaces is the number the design was chosen for, so the
     /// harness has to reach it and the overview has to hold it.

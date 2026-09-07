@@ -14,12 +14,66 @@ import WidgetKit
 /// whether the key arrived. A widget listing every terminal on every runner
 /// would be a list nobody can find anything in.
 enum FleetSnapshotWriter {
+    /// Every runner's projection, and the merge across them.
+    ///
+    /// **The file used to be rewritten WHOLE by whichever connection polled
+    /// last**, which was correct with one connection and is the clobbering the
+    /// port had to answer: three runners polling every three seconds would each
+    /// overwrite the other two, and the lock screen would flicker between them
+    /// with nothing in the file to say so. The per-runner pieces are kept here,
+    /// in the app's memory, and only the merge reaches disk — so nothing about
+    /// `FleetSnapshot`'s on-disk shape changes, which four out-of-process
+    /// targets and every already-installed build depend on.
+    ///
+    /// Static because there is one file. `@MainActor` isolation is what makes
+    /// that safe: every writer is a `Connection.refresh` on the main actor, so
+    /// two polls cannot interleave a read and a write of this.
+    @MainActor
+    private static var publication = FleetPublication()
+
+    /// Only these runners contribute, from now on.
+    ///
+    /// Called by `FleetStore.publish` on every reconcile. Without it, merging
+    /// by runner would leave a runner nobody is polling — removed, edited, or
+    /// filtered out by the battery gate — with its agents on the lock screen
+    /// claiming to be working, forever. That is why the merge is step 7 of the
+    /// port and not step 1: it needs something that knows which runners are
+    /// live, and until the store existed nothing did.
+    @MainActor
+    static func keep(runners: Set<String>) {
+        // **Only when the membership actually moved**, and that guard is
+        // load-bearing rather than thrifty. `FleetStore.publish` runs on every
+        // change any connection publishes — several times a second while an
+        // agent is producing — and the write below ends in
+        // `WidgetCenter.reloadAllTimelines()` and a Bluetooth round trip to the
+        // watch. Called unguarded it wedged the main thread badly enough to
+        // time a UI test out. Adding or removing a runner is not a per-poll
+        // event and must not be priced like one.
+        guard runners != kept else { return }
+        kept = runners
+        publication.keeping(runners: runners)
+        // Written here rather than left to the next poll. A retirement is
+        // followed by nothing at all on the retired runner's part, and a store
+        // that has just dropped its last connection has no next poll from
+        // anybody — so without this, agents on a runner nobody is talking to
+        // would stay on the lock screen until some other runner happened to
+        // report.
+        publish(at: Date())
+    }
+
+    /// The membership `keep(runners:)` last acted on. Nil before anyone has
+    /// said, which is what makes the first call always a write.
+    @MainActor
+    private static var kept: Set<String>?
+
     /// `@MainActor` because `WatchLinkHost` is, and because the one caller —
     /// `Connection.refresh` — already is. Nothing here is slow enough to be
     /// worth hopping off it, and hopping would let two polls' snapshots land
     /// out of order.
     @MainActor
-    static func write(fleet: Fleet, inbox: [String: InboxRow]?, machine: String) {
+    static func write(
+        fleet: Fleet, inbox: [String: InboxRow]?, machine: String, runner: String
+    ) {
         // One instant for the whole poll, and it reaches two places: the
         // snapshot's `capturedAt` and every agent's `observedAt`. They are the
         // same moment here and only here — a poll hears about the entire fleet
@@ -30,7 +84,8 @@ enum FleetSnapshotWriter {
         let agents = fleet.workspaces.flatMap(\.terminals).compactMap { terminal in
             snapshotAgent(terminal, machine: machine, at: now)
         }
-        let snapshot = FleetSnapshot(
+        // THIS runner's projection, which used to be the whole file.
+        let mine = FleetSnapshot(
             agents: agents, capturedAt: now, complete: true,
             reviewsWaiting: reviewsWaiting(inbox),
             // The fleet's rows summed at ONE width, as the runner summed them.
@@ -42,6 +97,19 @@ enum FleetSnapshotWriter {
             // every ring and can pick one width across all of them. See
             // `FleetSnapshot.fleetTrace`.
             fleetTrace: fleet.fleetTrace)
+        publication.record(runner: runner, snapshot: mine)
+        publish(at: now)
+    }
+
+    /// Assemble the merge and hand it to everything that renders from it.
+    ///
+    /// One projection and three consumers — the file, the widgets and the watch
+    /// — so a lock screen card, a complication and a wrist cannot disagree
+    /// about the same pane, which they would the moment any of them derived its
+    /// own.
+    @MainActor
+    private static func publish(at now: Date) {
+        let snapshot = publication.merged(at: now)
         SnapshotStore.write(snapshot)
         // The surfaces are out of process and do not poll. Without this they
         // keep drawing the previous snapshot until the system next decides to

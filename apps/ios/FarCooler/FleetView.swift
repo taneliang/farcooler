@@ -1,18 +1,24 @@
 import SwiftUI
 
-/// One runner, and what stands in front of it until it answers.
+/// The fleet, and what stands in front of it until somebody answers.
 ///
-/// What is left of what this was. It used to be the app's navigation — a
-/// `NavigationStack`, a `[Route]` path, a persisted copy of that path, and the
-/// rules for restoring, truncating and deferring to it. All of that is gone:
-/// the navigation shell is the app's navigation now, and a shell position is a
-/// pair of indices into the fleet this connection is already publishing, so
-/// there is nothing to push, nothing to persist and nothing to resolve.
+/// What is left of what this was, and it is a good deal less than it was
+/// twice over. It used to be the app's navigation — a `NavigationStack`, a
+/// `[Route]` path, a persisted copy of that path, and the rules for restoring,
+/// truncating and deferring to it — and all of that went when the shell became
+/// the app's navigation. Then it used to OWN A CONNECTION, and stand in front
+/// of it in four full-screen phases, one per `Connection.Phase`.
 ///
-/// What remains is the part that was never navigation: OWNING the connection,
-/// and standing in front of it until it answers. The four phases, the ways out
-/// of the three that have no fleet behind them, and the deep link that arrives
-/// before any of it exists.
+/// **That is the half the multi-runner port took.** A screen can only be about
+/// one runner: with several connections a single failing one would blank the
+/// whole app, and a newly added runner needing authorization would show its
+/// screen to nobody whenever any other runner answered — which is the ordinary
+/// case, and the one flow onboarding cannot afford to lose. `FleetStore` owns
+/// every connection, and the phases are `RunnerStatusRow`s.
+///
+/// So what remains is two branches and the plumbing between them: the shell
+/// once anything has a fleet, a list of rows until then, and the deep link that
+/// arrives before either exists.
 ///
 /// What did not change: every state shown here is DERIVED by the daemon at the
 /// moment of asking. The phone never computes a terminal's state, because a
@@ -20,24 +26,16 @@ import SwiftUI
 /// the same terminal.
 @MainActor
 struct FleetView: View {
-    let host: Runner
     let store: RunnerStore
-
-    @StateObject private var connection = Connection()
-
-    /// Whether the runner has told us what it has, at least once.
+    /// Every runner this app is talking to.
     ///
-    /// On the connection rather than in a `@State` here, and that is not
-    /// bookkeeping — it is the difference between an honest screen and a
-    /// flickering lie. `phase == .connected` is set BEFORE the first `fleet`
-    /// call is awaited, in both `start` and `reconnect`, so a flag flipped on
-    /// the phase would draw "Nothing needs you" over `Fleet.empty` for a whole
-    /// SSH round trip. And a flag set after `connect(_:)` returns would never
-    /// be set at all for the connection that failed, gave up, and then came
-    /// back through `reconnectNow` — which is the ordinary way out of the
-    /// failure screen. `Connection.hasFleet` is set by the read itself, which
-    /// is the only moment that actually answers the question.
-    private var hasFleet: Bool { connection.hasFleet }
+    /// It used to own a `Connection` of its own — one `@StateObject`, started
+    /// by this view's `.task` and torn down with it. That is what made the
+    /// runner a mode: the connection's lifetime was a screen's lifetime, so
+    /// reaching another runner meant destroying the screen. The store owns
+    /// every connection now, this view owns none, and there is no `host`
+    /// argument any more because there is no one runner this screen is about.
+    @ObservedObject var fleet: FleetStore
 
     /// The terminal a tapped Live Activity card asked for, held until a fleet
     /// arrives that has it.
@@ -56,9 +54,16 @@ struct FleetView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Open when correcting this runner's details, from any phase that has a
-    /// reason to doubt them.
-    @State private var editing = false
+    /// The runner being corrected, from the row that asked.
+    @State private var editing: Runner?
+
+    /// Whether this device's own key is on screen.
+    ///
+    /// A flag here rather than a `NavigationLink` in the row, because a row has
+    /// no idea what it is inside: `RunnerStatusRow` is drawn both here, in a
+    /// stack, and over the shell's overview, which deliberately has none. Where
+    /// "Authorize This Device" goes is the placing screen's decision.
+    @State private var authorizing = false
 
     var body: some View {
         // No `NavigationStack` around the connected app, and that is the whole
@@ -74,28 +79,30 @@ struct FleetView: View {
         // with a navigation bar this design puts at the BOTTOM of the display
         // as a piece of glass.
         //
-        // What still needs a stack is everything before a fleet exists: the
-        // failure screen pushes `AuthorizeView`, and all four pre-connection
-        // screens are titled. Each of those branches declares its own, which is
-        // also what keeps the shell out of one — see `phases`.
+        // What still needs a stack is the screen before any fleet exists: it
+        // is titled, and a runner row's "Authorize This Device" pushes into it.
+        // That branch declares its own, which is also what keeps the shell out
+        // of one — see `phases`.
         phases
-            .sheet(isPresented: $editing) {
+            // `item:` and not a flag: with several runners the sheet has to
+            // carry WHICH one a row asked to correct, and a flag plus a
+            // separate lookup can present an editor for a runner the list has
+            // moved on from.
+            .sheet(item: $editing) { runner in
                 HostEditorView(
-                    existing: host,
+                    existing: runner,
                     onSave: { store.update($0) },
                     onRemove: { store.remove($0) })
             }
-            .task { await connect(host) }
             // The app coming back is the moment a backoff timer cannot predict.
+            // `.background` is passed on too, so a phone in a pocket stops
+            // polling — which is both a battery question and one plausible way
+            // a session died in the first place.
             //
-            // Here rather than in `RootView`, because this is where the
-            // connection is: the same reason the host switcher moved down out
-            // of the connected screen. `.background` is passed on too, so a
-            // phone in a pocket stops polling — which is both a battery
-            // question and one plausible way the session died in the first
-            // place.
+            // Every runner, not one: one scene phase fans out to N connections.
+            // See `FleetStore.setActive`.
             .onChange(of: scenePhase) { _, phase in
-                connection.setActive(phase == .active)
+                fleet.setActive(phase == .active)
             }
             // A workspace leaving the fleet no longer needs anything from this
             // view.
@@ -114,8 +121,10 @@ struct FleetView: View {
             // A card tapped at cold launch, arriving as `…://terminal/<id>`.
             //
             // Here rather than on the root view, because this is the screen
-            // that owns the connection whose fleet the id has to be looked up
-            // in. Routing it from the root would mean a second way to choose a
+            // that stands over the fleet the id has to be looked up in — every
+            // runner's, now, which is what makes a card about the machine in
+            // the other room land rather than quietly resolve to nothing.
+            // Routing it from the root would mean a second way to choose a
             // terminal, threaded down through views that know nothing about
             // one.
             //
@@ -138,51 +147,123 @@ struct FleetView: View {
             // coming. Watched on the fleet's own generation rather than on
             // `hasFleet` alone, because the pane a card names can also be
             // stopped between the tap and the answer.
-            .onChange(of: connection.pollGeneration) { _, _ in dropUnknownTerminal() }
+            // Any runner's poll is a fresh answer to "does anybody have this
+            // pane". `entries` is republished on every one of them.
+            .onChange(of: fleet.entries.count) { _, _ in dropUnknownTerminal() }
+            .onChange(of: fleet.hasFleet) { _, _ in dropUnknownTerminal() }
     }
 
-    /// One branch per connection phase, and the one place a `NavigationStack`
-    /// is still declared.
+    /// Two branches, and the one place a `NavigationStack` is still declared.
     ///
-    /// Split out of `body` rather than written inline, for the compiler's sake:
-    /// a `switch` over an associated-value enum inside a long modifier chain is
-    /// the shape Swift's type checker gives up on, and it did.
+    /// **It was four full-screen phases, one per `Connection.Phase`, and that
+    /// shape is wrong in both directions once the app holds several
+    /// connections.** A single failing runner would blank the whole app,
+    /// because the failure phase owned the screen; and a newly added runner
+    /// needing authorization would show its screen to nobody whenever any other
+    /// runner answered — which is the ordinary case, and the one flow
+    /// onboarding cannot afford to lose. `RunnerStatusRow` is the answer, and
+    /// it is Android's: a row that appears next to the runner it concerns is
+    /// the shape that survives N runners.
     ///
-    /// **The three pre-connected screens are unchanged**, `escapable(_:)` and
-    /// all. That wrapper puts `HostSwitcherBar` under each of them, and the bar
-    /// is the app's only escape hatch before a runner answers: without it,
-    /// "Could not connect" is a room with no doors, because the switcher used
-    /// to live inside the connected screen and the connected screen is the one
-    /// you cannot reach. The stack around them is what gives them a title and
-    /// what `failure`'s "Authorize This Device" pushes into.
+    /// So the branch is no longer a phase. It is whether ANY runner has said
+    /// what it has: with a fleet there is a shell, and the runners in trouble
+    /// are rows over the overview's grid. Without one there is nothing to draw
+    /// a shell from — see `ShellScreen.seed` — and this screen is the rows on
+    /// their own.
     ///
-    /// The shell gets no stack, deliberately, and gets one nowhere else either
-    /// — see `body`. Its own navigation is a gesture, and the only navigation
-    /// bar in it belongs to the overview, which declares a stack of its own.
+    /// The stack is around the second branch only. It is what gives it a title
+    /// and what a row's "Authorize This Device" pushes into; the shell gets
+    /// none, deliberately, because its own navigation is a gesture and the only
+    /// navigation bar in it belongs to the overview, which declares a stack of
+    /// its own.
     @ViewBuilder
     private var phases: some View {
-        switch connection.phase {
-        case .connecting:
-            NavigationStack { escapable { connecting } }
+        if fleet.hasFleet {
+            connected
+        } else {
+            NavigationStack { escapable { waitingForAnyone } }
+        }
+    }
 
-        case .needsApproval(let fingerprint):
-            NavigationStack { escapable { approval(fingerprint) } }
+    /// The runners with something to say, which on this screen is the ones
+    /// that are not simply connected.
+    ///
+    /// The same test `RunnerStatusRow` makes about itself, made once here so
+    /// the list can lay out around it. Re-evaluated on every body pass, which
+    /// is every time any connection publishes — the store republishes on each
+    /// of them, and this view observes the store.
+    private var unanswered: [(host: Runner, connection: Connection)] {
+        fleet.runners.filter { $0.connection.phase != .connected }
+    }
 
-        case .failed(let message):
-            NavigationStack { escapable { failure(message) } }
+    /// Every runner, and what each of them is doing, while none of them has
+    /// answered.
+    ///
+    /// The first-run-after-launch screen, and the failure screen, and the
+    /// approval screen, all at once — because with several runners they are the
+    /// same screen. Each row says only what its own runner is doing and offers
+    /// only that runner's next move; a runner that is merely connecting says
+    /// so, and one that has answered is not here at all because this branch is
+    /// not drawn once anything has a fleet.
+    ///
+    /// A `ScrollView` and not a `List`: these rows are prose and controls, and
+    /// a grouped list would put each one in a card with a chevron's worth of
+    /// inset, which reads as a row you can tap into. There is nothing to tap
+    /// into — the moves are the buttons.
+    private var waitingForAnyone: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Not a per-runner spinner. Every one of these rows says
+                // "Connecting…" on its own; a second spinner over the top would
+                // be the app being anxious about a wait it is already
+                // describing.
+                // Filtered, and the filter is what the DIVIDER needs rather
+                // than what the row needs. `RunnerStatusRow` renders nothing
+                // for a connected runner, so an unfiltered list would be
+                // correct in every row and wrong between them: a rule under
+                // each of three runners with only one of them having anything
+                // to say. A runner can be connected and still have no fleet —
+                // `phase` flips a whole SSH round trip before the first `fleet`
+                // call returns — so this is an ordinary state on this screen
+                // rather than an edge.
+                ForEach(unanswered, id: \.host.id) { runner in
+                    RunnerStatusRow(
+                        connection: runner.connection,
+                        host: runner.host,
+                        // Named on the row, because nothing above it names
+                        // them: this is a list of runners.
+                        showsLabel: true,
+                        onRetry: { fleet.retry(runner.host.id) },
+                        onReconnectNow: { runner.connection.reconnectNow() },
+                        onTrust: { store.trust(runner.host, fingerprint: $0) },
+                        onReviewKey: { store.forgetKey(runner.host) },
+                        onEdit: { editing = runner.host },
+                        onAuthorize: { authorizing = true })
+                    Divider().padding(.leading, 16)
+                }
 
-        // Reconnecting renders exactly what connected renders. The fleet on
-        // screen is the last one this runner sent, and it is a better answer
-        // than a spinner while the link comes back — see
-        // `Connection.Phase.reconnecting`. The status chip in the overview's
-        // toolbar is where the difference shows.
-        case .connected, .reconnecting:
-            if hasFleet {
-                connected
-            } else {
-                NavigationStack { waitingForFleet }
+                // A device with runners, none of them connected yet, and a
+                // stalled one somewhere in the list. Held back for a few
+                // seconds rather than shown at once: a healthy connection
+                // resolves well inside that, and a "Stop Waiting" flashing up
+                // on every launch would read as though something were wrong
+                // every time. After that it is the honest offer, because an
+                // address that routes nowhere takes over a minute to fail on
+                // its own — see `Connection.giveUp(on:)`.
+                if stalled {
+                    Button("Stop Waiting") {
+                        for runner in fleet.runners {
+                            runner.connection.giveUp(on: runner.host)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(16)
+                    .transition(.opacity)
+                }
             }
         }
+        .navigationDestination(isPresented: $authorizing) { AuthorizeView(runners: store) }
+        .task { await waitedLongEnough() }
     }
 
     /// Hand the shell the terminal a card asked for, if this runner has it.
@@ -218,8 +299,15 @@ struct FleetView: View {
     /// Held open, a pane created much later would be jumped to long after
     /// anybody tapped anything.
     private func dropUnknownTerminal() {
-        guard let id = pendingTerminal, connection.phase == .connected, hasFleet else { return }
-        let all = connection.fleet.workspaces.flatMap(\.terminals)
+        // Across every runner, and only once every one of them has answered.
+        // A card carries a terminal id and no host, so "no runner has it" is
+        // the only form the answer can take — and a runner still connecting has
+        // not answered, so dropping the link on the strength of the two that
+        // have would throw away a card about a pane on the third.
+        guard let id = pendingTerminal, !fleet.runners.isEmpty,
+            fleet.runners.allSatisfy({ $0.connection.hasFleet })
+        else { return }
+        let all = fleet.entries.flatMap(\.workspace.terminals)
         guard !all.contains(where: { $0.id == id }) else { return }
         pendingTerminal = nil
     }
@@ -247,35 +335,10 @@ struct FleetView: View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                HostSwitcherBar(hosts: store, connection: connection)
+                HostSwitcherBar(hosts: store, connection: nil)
             }
-            .navigationTitle(host.label)
+            .navigationTitle("Runners")
             .navigationBarTitleDisplayMode(.inline)
-    }
-
-    /// The wait, and a way to end it.
-    ///
-    /// The button is held back for a few seconds rather than shown immediately:
-    /// a healthy connection resolves well inside that, and a "Stop waiting"
-    /// flashing up during every successful launch would read as though something
-    /// were wrong every time. After that it is the honest offer, because an
-    /// address that routes nowhere takes over a minute to fail on its own — see
-    /// `Connection.giveUp(on:)`.
-    private var connecting: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("Connecting to \(host.named)…")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            if stalled {
-                Button("Stop Waiting") { connection.giveUp(on: host) }
-                    .buttonStyle(.bordered)
-                    .padding(.top, 8)
-                    .transition(.opacity)
-            }
-        }
-        .task(id: host.id) { await waitedLongEnough() }
     }
 
     private func waitedLongEnough() async {
@@ -300,292 +363,26 @@ struct FleetView: View {
     /// same question with rows instead of cards was a second thing to keep
     /// true.
     private var connected: some View {
-        ShellScreen(connection: connection, hosts: store, pendingTerminal: $pendingTerminal)
+        ShellScreen(fleet: fleet, hosts: store, pendingTerminal: $pendingTerminal)
     }
 
-    /// The wait for the runner's first answer.
-    ///
-    /// Not an empty shell. Before the first fleet there is no position to open
-    /// on, and a shell with no workspace is a bar naming something that does
-    /// not exist. The runner's own name is the title because there is nothing
-    /// else yet to say what is being waited on.
-    private var waitingForFleet: some View {
-        ProgressView()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle(host.label)
-            .navigationBarTitleDisplayMode(.inline)
-    }
+    // MARK: - What used to stand in front of a runner
 
-    /// Connect, then let the inbox draw whatever fleet that connection
-    /// produced.
-    ///
-    /// Shared by the initial `.task` and every retry below — the approval
-    /// screen's "Trust This Runner" and the failure screen's "Try Again" each
-    /// start a fresh connection of their own, and each one has to end with the
-    /// deep link getting its second look.
-    ///
-    /// What is gone from here is `landing = connection.fleet.landingTerminal`.
-    /// That line chose an agent for you at every connect, and it chose one on
-    /// every reconnection ceremony too — so a phone that lost its tunnel in
-    /// transit could come back on a different pane than the one you were
-    /// reading.
-    private func connect(_ target: Runner) async {
-        await connection.start(host: target)
-        // A card tapped at cold launch delivers its URL before there is a
-        // fleet to look the id up in. Nothing has to be re-run for it now:
-        // `ShellScreen.requestedTab` is derived from this connection's own
-        // fleet, so a fleet arriving IS the second look. What is left is
-        // deciding that an id this runner does not have is never coming — see
-        // `dropUnknownTerminal`.
-        dropUnknownTerminal()
-    }
+    // Four full-screen phases lived here: `connecting`, `approval`, `failure`
+    // and `primaryAction`, one branch per `Connection.Phase`, each owning the
+    // whole display.
+    //
+    // They are `RunnerStatusRow` now, and the move is not a refactor. A screen
+    // can only be about one runner: a single failing runner would have blanked
+    // the whole app, and a newly added runner needing authorization would have
+    // shown its screen to nobody whenever any other runner answered -- which is
+    // the ordinary case, and the one flow onboarding cannot afford to lose.
+    //
+    // Every distinct next move survived the move, including the two Android's
+    // row does not have. Which move a failure gets is `RunnerTrouble.nextMove`'s
+    // decision, in AgentKit, so the row and anything else that ever draws one
+    // cannot come to disagree.
 
-    // MARK: - Phases
-
-    /// First contact. The fingerprint is shown and refused until a human says
-    /// yes, because silently trusting an unknown key is what makes an
-    /// interception invisible.
-    ///
-    /// Built on `failure(_:)`'s skeleton, which is the shape this screen should
-    /// always have had: a mark, a headline, a sentence, and the actions anchored
-    /// at the bottom where a thumb is. What it was instead is the exact layout
-    /// that function's own comment says it was rebuilt to stop being — a
-    /// leading-aligned stack of pill buttons of two different widths floating in
-    /// the middle of the view, a ragged staircase giving the eye no line to
-    /// follow, with the bottom third of a tall screen empty underneath it. Two
-    /// screens one connection apart disagreeing about that shape is bad enough;
-    /// that this is the FIRST screen a newly added runner produces made it the
-    /// worst place in the app to leave the older one standing.
-    ///
-    /// The fingerprint goes in a `DetailBox`, which is where every other piece
-    /// of host output in this app goes — `failure`'s own undiagnosed message
-    /// twenty lines down, the adapter editor's, the task composer's. It was a
-    /// hand-rolled radius-10 rectangle over `secondarySystemBackground`: one
-    /// more invention of a container the app already has, and one that made the
-    /// runner's words look like the app's own prose. `DetailBox` keeps the
-    /// selection, so a fingerprint is still something you can copy and compare.
-    private func approval(_ fingerprint: String) -> some View {
-        VStack(spacing: 0) {
-            Spacer()
-
-            // Neither amber nor red. Nothing has gone wrong and no agent is
-            // waiting on anyone — a runner this device has not met is a
-            // question, which is what the mark and the headline both say.
-            Image(systemName: "questionmark.circle")
-                .font(.system(size: 42, weight: .thin))
-                .foregroundStyle(.tertiary)
-                .padding(.bottom, 22)
-
-            Text("Unrecognized Runner")
-                .font(.title2.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 8)
-
-            Text("\(host.named) presented a key this device hasn’t seen before.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-
-            DetailBox(text: fingerprint)
-                .frame(maxWidth: 320)
-                .padding(.top, 14)
-
-            // The one thing that makes the fingerprint above worth showing:
-            // where to get the other copy of it. Selectable, because it is a
-            // command somebody has to run somewhere else.
-            Text("Check it on the host: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .textSelection(.enabled)
-                .frame(maxWidth: 320)
-                .padding(.top, 14)
-
-            Spacer()
-
-            VStack(spacing: 18) {
-                Button {
-                    store.trust(host, fingerprint: fingerprint)
-                    var trusted = host
-                    trusted.fingerprint = fingerprint
-                    Task { await connect(trusted) }
-                } label: {
-                    Text("Trust This Runner").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                // The other answer. Saying no used to have nowhere to go — this
-                // screen had one button on it — which made "I am not sure about
-                // this fingerprint" and "yes, trust it" the same tap for anyone
-                // who just wanted out. It leaves the host untrusted and lands on
-                // the failure screen, which is where the switcher and the editor
-                // are.
-                //
-                // Plain text rather than a second bordered pill, for the reason
-                // `failure` gives about its own alternatives: two pills give two
-                // things the same weight when only one of them is the answer.
-                Button("Not Now") {
-                    connection.declineHostKey(host)
-                }
-            }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 40)
-        }
-        .padding(.horizontal)
-    }
-
-    /// What went wrong, and the one thing worth doing about it.
-    ///
-    /// The old version of this screen said "Could not connect" and offered "Try
-    /// again" whatever had happened. That is right for a machine that was
-    /// asleep and wrong for everything else: retrying cannot authorize a key the
-    /// host has never seen, cannot install a daemon, and must not be the offered
-    /// response to a host key that changed — the one failure where doing it
-    /// again is guaranteed to fail and the appearance of a glitch hides a
-    /// decision someone needs to make. See `Connection.Failure`.
-    /// Laid out like the first-run screen, because it is the same kind of
-    /// screen: a mark, a headline, a sentence, and the actions anchored at the
-    /// bottom where a thumb is. It used to center three pill buttons of three
-    /// different widths in the middle of the view, which read as a ragged
-    /// staircase and gave the eye no line to follow — and left the bottom third
-    /// of a very tall screen empty while the controls floated in the middle of
-    /// it.
-    ///
-    /// One full-width prominent action, then plain text for the alternatives.
-    /// Three bordered pills gave three things the same visual weight when only
-    /// one of them is the thing to do.
-    private func failure(_ message: String) -> some View {
-        let kind = Connection.Failure(message: message)
-
-        return VStack(spacing: 0) {
-            Spacer()
-
-            // Quiet by default, and red only for the key change. An orange
-            // warning triangle over "Not authorized yet" shouts about a step
-            // you simply have not taken yet; the headline already carries what
-            // this is, and alarm is worth reserving for the one case that
-            // genuinely warrants it.
-            Image(systemName: kind.symbol)
-                .font(.system(size: 42, weight: .thin))
-                .foregroundStyle(kind.isAlarming ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
-                .padding(.bottom, 22)
-
-            Text(kind.headline(host.words))
-                .font(.title2.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 8)
-
-            Text(kind.detail(message: message, words: host.words))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .textSelection(.enabled)
-                .frame(maxWidth: 320)
-
-            // Only where the app has no diagnosis of its own — the same
-            // scoping the Mac's `ChangesPane` uses, and for the same reason: a
-            // transcript under a sentence that already names the cause and the
-            // fix is noise.
-            //
-            // Nothing is discarded. For a runner nobody can reach, this text is
-            // the only diagnosis that exists, and somebody debugging one needs
-            // it. It just goes where output goes rather than where prose does,
-            // so the app stops appearing to have said it.
-            if kind.showsTheRunnersOwnWords, !message.isEmpty {
-                DetailBox(text: message)
-                    .frame(maxWidth: 320)
-                    .padding(.top, 14)
-            }
-
-            Spacer()
-
-            VStack(spacing: 18) {
-                primaryAction(kind)
-
-                if kind.worthRetryingAsAlternative {
-                    Button("Try Again") { Task { await connect(host) } }
-                }
-                if kind.offersEditingTheRunner {
-                    Button("Edit This Runner…") { editing = true }
-                }
-            }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 40)
-        }
-        .padding(.horizontal)
-    }
-
-    /// The one action that fits what happened, full width and prominent.
-    ///
-    /// WHICH action is `RunnerTrouble.nextMove`'s decision and the words are
-    /// `NextMove.label`'s, so this and `RunnerStatusRow` cannot come to offer
-    /// different next moves about the same failure. What is left here is the
-    /// control each one becomes on a screen that has a `NavigationStack` around
-    /// it — the first two push `AuthorizeView`, and the row, which is drawn
-    /// among other rows on a screen that has none, hands them back to whoever
-    /// placed it instead.
-    @ViewBuilder
-    private func primaryAction(_ kind: Connection.Failure) -> some View {
-        switch kind.nextMove {
-        // The fix is on the screen this links to: the public key, and the one
-        // line to paste on the machine. It was already in the app and
-        // unreachable from the only screen that ever sends you looking for it.
-        //
-        // The only push left in the app, and it is a leaf with nothing under
-        // it: reachable from the failure screen alone, which is a phase with no
-        // fleet, so the shell that has replaced every other destination is not
-        // on screen to be pushed over. That is why `phases` gives these three
-        // branches a `NavigationStack` of their own and gives the shell none.
-        case .authorizeThisDevice, .addThisDeviceAgain:
-            NavigationLink {
-                AuthorizeView(runners: store)
-            } label: {
-                Text(kind.nextMove.label).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-        case .reviewTheNewKey:
-            Button(role: .destructive) {
-                store.forgetKey(host)
-                var untrusted = host
-                untrusted.fingerprint = nil
-                Task { await connect(untrusted) }
-            } label: {
-                Text(kind.nextMove.label).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-        case .showTheKeyAgain:
-            Button {
-                var untrusted = host
-                untrusted.fingerprint = nil
-                Task { await connect(untrusted) }
-            } label: {
-                Text(kind.nextMove.label).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-        case .tryAgain:
-            Button {
-                Task { await connect(host) }
-            } label: {
-                Text(kind.nextMove.label).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-        }
-    }
-
-    @ViewBuilder
-    private func retry(_ style: some PrimitiveButtonStyle) -> some View {
-        Button("Try Again") { Task { await connect(host) } }
-            .buttonStyle(style)
-    }
 }
 
 /// Which runner you are looking at, and every way of changing that.
@@ -605,9 +402,13 @@ struct FleetView: View {
 struct HostSwitcherBar: View {
     @ObservedObject var hosts: RunnerStore
     /// The connection whose state the chip shows, and which its tap retries.
-    /// Also how the settings screen names the daemon it is talking to. Absent
-    /// before a connection exists, which is most of the time this bar matters.
-    @ObservedObject var connection: Connection
+    /// Also how the settings screen names the daemon it is talking to.
+    ///
+    /// Optional now that the store owns connections: a runner that has just
+    /// been added has no connection for the frame before the store brings one
+    /// up, and this bar is under exactly the screens that show before one
+    /// exists.
+    var connection: Connection?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -619,7 +420,7 @@ struct HostSwitcherBar: View {
 
             Spacer(minLength: 0)
 
-            LinkStatusChip(connection: connection)
+            if let connection { LinkStatusChip(connection: connection) }
         }
         .padding(.horizontal, 16)
         // The 10 points of vertical padding that used to be here are gone, and
@@ -650,7 +451,14 @@ struct HostSwitcherBar: View {
 /// offering different things.
 struct RunnerMenu: View {
     @ObservedObject var hosts: RunnerStore
-    @ObservedObject var connection: Connection
+    /// The runner this menu is standing over, for the settings sheet it opens.
+    ///
+    /// Optional, and nil is an ordinary answer rather than a gap: the shell
+    /// draws this over a MERGED fleet, so before it has come to rest there is
+    /// no one runner the menu is about. `SettingsView` has taken an optional
+    /// connection since the onboarding screen learned to open it, and for the
+    /// same reason — a screen with no runner behind it still has settings.
+    var connection: Connection?
     /// Called after picking a different runner, for a caller that has something
     /// to close. Nil everywhere it is part of the screen.
     var onSwitch: (() -> Void)?
@@ -993,15 +801,29 @@ struct RemoveWorktreeConfirmSheet: View {
 /// tapped on can be unmounted before the answer comes back — the overview is
 /// mounted from the first point of a lift and gone again when nothing is
 /// touching it — so the presenter has to be something that outlives it.
+/// **The connection is part of the request**, and that is the multi-runner
+/// port's mark on this ceremony. A removal is a call to ONE daemon about a
+/// worktree only that daemon has, and the screen that starts it can be looking
+/// at a merged fleet: the overview's grid holds cards from every connected
+/// runner. Resolving the connection where the flow runs rather than where the
+/// menu was tapped would run `workspace.remove_worktree` against whichever
+/// runner the shell happened to be resting on, with an id that means something
+/// different over there.
 enum RemoveWorktreeRequest {
     /// "Remove worktree for X?", with a Remove and a Cancel.
-    case confirming(Workspace)
+    case confirming(Workspace, on: Connection)
     /// The typed-name ceremony, which is also where a refusal is reported.
-    case typing(Workspace)
+    case typing(Workspace, on: Connection)
 
     var workspace: Workspace {
         switch self {
-        case .confirming(let workspace), .typing(let workspace): return workspace
+        case .confirming(let workspace, _), .typing(let workspace, _): return workspace
+        }
+    }
+
+    var connection: Connection {
+        switch self {
+        case .confirming(_, let connection), .typing(_, let connection): return connection
         }
     }
 }
@@ -1027,7 +849,6 @@ enum RemoveWorktreeRequest {
 /// failure to appear is one of them nobody maintains.
 struct RemoveWorktreeFlow: ViewModifier {
     @Binding var request: RemoveWorktreeRequest?
-    let connection: Connection
 
     /// True only while the first dialog is the step we are on, so advancing to
     /// the sheet takes the dialog down without ending the flow.
@@ -1037,7 +858,7 @@ struct RemoveWorktreeFlow: ViewModifier {
     }
 
     private var typing: Workspace? {
-        if case .typing(let workspace) = request { return workspace }
+        if case .typing(let workspace, _) = request { return workspace }
         return nil
     }
 
@@ -1061,12 +882,16 @@ struct RemoveWorktreeFlow: ViewModifier {
                 presenting: request?.workspace
             ) { workspace in
                 Button("Remove", role: .destructive) {
+                    // Read off the request rather than off the modifier, so the
+                    // call goes to the runner the worktree is on. See
+                    // `RemoveWorktreeRequest`.
+                    guard let connection = request?.connection else { return }
                     Task {
                         switch await connection.removeWorktree(workspace, confirm: "") {
                         case .ok:
                             request = nil
                         case .confirmationRequired, .failed:
-                            request = .typing(workspace)
+                            request = .typing(workspace, on: connection)
                         }
                     }
                 }
@@ -1077,8 +902,20 @@ struct RemoveWorktreeFlow: ViewModifier {
                     get: { typing },
                     set: { workspace in if workspace == nil { request = nil } })
             ) { workspace in
+                // The connection is captured from the request that BUILT this
+                // sheet rather than read at tap time, for the same reason the
+                // dialog's `presenting:` exists one modifier up: the answer
+                // arrives after the request has been cleared.
+                let connection = request?.connection
                 RemoveWorktreeConfirmSheet(workspace: workspace) { typed in
-                    await connection.removeWorktree(workspace, confirm: typed)
+                    // A sheet with no connection behind it cannot happen — the
+                    // request that opened it carried one — and reports the
+                    // runner having gone rather than claiming a removal that
+                    // never left the phone.
+                    guard let connection else {
+                        return .failed("This runner is no longer connected.", word: nil)
+                    }
+                    return await connection.removeWorktree(workspace, confirm: typed)
                 }
             }
     }
@@ -1086,10 +923,8 @@ struct RemoveWorktreeFlow: ViewModifier {
 
 extension View {
     /// Ask about, and carry out, the removal `request` names.
-    func removeWorktreeFlow(
-        _ request: Binding<RemoveWorktreeRequest?>, connection: Connection
-    ) -> some View {
-        modifier(RemoveWorktreeFlow(request: request, connection: connection))
+    func removeWorktreeFlow(_ request: Binding<RemoveWorktreeRequest?>) -> some View {
+        modifier(RemoveWorktreeFlow(request: request))
     }
 }
 

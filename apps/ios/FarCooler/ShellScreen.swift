@@ -47,109 +47,206 @@ private let staleAfter: TimeInterval = 60 * 60
 /// string and parsing it back out at every use, which is a decoder nobody
 /// wrote a test for standing between the fleet and the screen.
 struct ShellPaneRef: Hashable {
+    /// The runner this pane is on.
+    ///
+    /// Carried rather than assumed, and that is the whole of what the port
+    /// changes here. A `ShellFleetMap` used to be one runner's fleet by
+    /// construction — `RootView` keyed the tree `.id(host)`, so the screen was
+    /// destroyed and rebuilt on every change of runner — and every ref in it
+    /// named a workspace on the same machine, so the runner went without
+    /// saying. The merged map holds several, and a ref that did not say which
+    /// would send an RPC down whichever connection the screen happened to be
+    /// holding. See `ShellIdentity`.
+    var runner: UUID
+    /// The DAEMON's own workspace id — the full UUID it minted, which is what
+    /// goes on the wire in `changes.*` and `workspace.*` calls. Not the shell's
+    /// composite, and not the eight-character `short` field, which is a display
+    /// form nothing here uses as an identity.
     var workspace: String
     var pane: Pane
 }
 
 /// The fleet as the shell needs it, plus what each of its tabs is.
 ///
-/// Built whole from a `Connection` on every poll and thrown away. Nothing here
-/// is remembered: the retained set lives in `ShellPaneTrack` and is keyed by
-/// tab id, so this value moving underneath it is exactly the case that was
-/// designed for.
+/// Built whole from the store on every poll and thrown away. Nothing here is
+/// remembered: the retained set lives in `ShellPaneTrack` and is keyed by tab
+/// id, so this value moving underneath it is exactly the case that was designed
+/// for.
+///
+/// **It is the whole fleet and not one runner's**, which is the port's central
+/// change. `of(_ store:)` walks `FleetStore.entries` — every workspace on every
+/// connected runner, in the order the runner list is in — and every id it mints
+/// carries the runner, so a tab resolves back to a connection rather than to a
+/// search. See `ShellIdentity`, which is where that composition, its test and
+/// the reason live.
 @MainActor
 struct ShellFleetMap {
     var fleet: ShellFleet
     var refs: [String: ShellPaneRef]
 
-    /// A tab's id: the workspace it is in, then the pane it is.
+    /// Which runner each shell workspace is on, and what it said, keyed by the
+    /// composite id `ShellWorkspace.id` now carries.
     ///
-    /// The workspace is in it because of the Changes tab. `Pane.changes` has
-    /// one id for the whole app — it is the only pane with no object on the
-    /// runner behind it — and forty workspaces each with a Changes tab would
-    /// otherwise be forty tabs sharing one SwiftUI identity, which resolves by
-    /// drawing one of them. Terminal ids are already unique per runner and
-    /// gain nothing from the prefix except being legible in a probe.
-    static func tabID(workspace: String, pane: Pane) -> String {
-        "\(workspace)/\(pane.id)"
+    /// The side table that makes a merged fleet act-on-able. A screen holding a
+    /// `ShellWorkspace` has a name and a ribbon and nothing to send an RPC
+    /// down; this is where it gets the connection, the runner and the daemon's
+    /// own workspace id back. Keyed rather than searched, because the overview
+    /// asks per card and the shell asks per rest.
+    var entries: [String: FleetEntry] = [:]
+
+    /// A tab's id: the runner, the workspace it is in, then the pane it is.
+    ///
+    /// Composed by `ShellIdentity` rather than here, so the composition sits
+    /// somewhere a test can read it back: that file is in AgentKit, which
+    /// `swift test` runs, and this target's tests are compiled by CI and never
+    /// executed.
+    static func tabID(runner: UUID, workspace: String, pane: Pane) -> String {
+        ShellIdentity.tab(
+            runner: runner.uuidString, workspace: workspace, pane: pane.id)
     }
 
-    /// Read a runner's fleet as the shell's.
+    /// Read the whole fleet — every connected runner's — as the shell's.
+    ///
+    /// Order is the store's, which is the order the runner list is in, so what
+    /// is on screen does not reshuffle when a laptop wakes up. A runner that is
+    /// not answering contributes its last good rows rather than a gap; what
+    /// explains those rows is `RunnerStatusRow`, not their absence.
     ///
     /// `now` is an argument rather than `Date()` so staleness is a pure
     /// function of its inputs.
-    static func of(_ connection: Connection, now: Date = Date()) -> ShellFleetMap {
-        var refs: [String: ShellPaneRef] = [:]
+    static func of(_ store: FleetStore, now: Date = Date()) -> ShellFleetMap {
+        of(store.entries, now: now)
+    }
+
+    /// The merge itself, over the entries rather than the store that published
+    /// them, so the one caller that has a runner instead of a fleet can reach
+    /// it too.
+    static func of(_ entries: [FleetEntry], now: Date = Date()) -> ShellFleetMap {
+        var map = ShellFleetMap(fleet: ShellFleet(workspaces: []), refs: [:])
         var workspaces: [ShellWorkspace] = []
+        // More than one runner in the merge is what makes a card name its
+        // machine. See `server` below.
+        let servers = Set(entries.map(\.host.id)).count
+        for entry in entries {
+            let built = one(entry, naming: servers > 1, now: now)
+            workspaces.append(built.workspace)
+            for (id, ref) in built.refs { map.refs[id] = ref }
+            map.entries[built.workspace.id] = entry
+        }
+        map.fleet = ShellFleet(workspaces: workspaces)
+        return map
+    }
 
-        for workspace in connection.fleet.workspaces {
-            let inbox = connection.inbox[workspace.id]
-            // A host-side `changes` pane is not a tab of its own: it IS the
-            // Changes tab, and both resolve to the same `ChangesStore`. Two
-            // chips for one diff is what `Pane.init(_:)` exists to prevent.
-            let terminals = workspace.terminals.filter { !$0.isChangesPane }
+    /// One runner's fleet, on its own, for the one caller that is about a
+    /// runner rather than about the fleet: `Connection.recordDirectory`, which
+    /// writes down what THIS runner has so a grid can draw it later.
+    ///
+    /// Shares `one(_:naming:now:)` with the merge above rather than mapping a
+    /// fleet a second way, which is the rule `recordDirectory` already states:
+    /// tab order, what a mark means and how a tail is chosen are decided once,
+    /// in the file that draws them, or a cached card and a live one disagree
+    /// about the same worktree.
+    static func of(
+        _ connection: Connection, host: Runner, now: Date = Date()
+    ) -> ShellFleetMap {
+        of(
+            connection.fleet.workspaces.map {
+                FleetEntry(
+                    host: host, connection: connection, workspace: $0,
+                    counts: connection.inbox[$0.id])
+            },
+            now: now)
+    }
 
-            // **Changes leads, then fleet order, and never `sortRank`.**
-            //
-            // The tab strip this replaced made the argument and it is worse
-            // here rather than better: a ribbon is a MAP of the workspace, and
-            // a map whose landmarks move when an agent goes from working to
-            // blocked is not a map — you would have to read it every time
-            // instead of remembering it. The diff leading means the one tab
-            // that is always there is always at the same end.
-            var tabs: [ShellTab] = [
+    /// One entry, as a workspace and the refs of its tabs.
+    private static func one(
+        _ entry: FleetEntry, naming server: Bool, now: Date
+    ) -> (workspace: ShellWorkspace, refs: [String: ShellPaneRef]) {
+        var refs: [String: ShellPaneRef] = [:]
+        let connection = entry.connection
+        let runner = entry.host.id
+        let workspace = entry.workspace
+        let inbox = entry.counts
+        // A host-side `changes` pane is not a tab of its own: it IS the
+        // Changes tab, and both resolve to the same `ChangesStore`. Two
+        // chips for one diff is what `Pane.init(_:)` exists to prevent.
+        let terminals = workspace.terminals.filter { !$0.isChangesPane }
+
+        // **Changes leads, then fleet order, and never `sortRank`.**
+        //
+        // The tab strip this replaced made the argument and it is worse
+        // here rather than better: a ribbon is a MAP of the workspace, and
+        // a map whose landmarks move when an agent goes from working to
+        // blocked is not a map — you would have to read it every time
+        // instead of remembering it. The diff leading means the one tab
+        // that is always there is always at the same end.
+        var tabs: [ShellTab] = [
+            ShellTab(
+                id: tabID(runner: runner, workspace: workspace.id, pane: .changes),
+                title: "Diff",
+                mark: diffMark(inbox))
+        ]
+        var order: [ShellPaneRef] = [
+            ShellPaneRef(runner: runner, workspace: workspace.id, pane: .changes)
+        ]
+
+        for terminal in terminals {
+            let pane = Pane(terminal)
+            tabs.append(
                 ShellTab(
-                    id: tabID(workspace: workspace.id, pane: .changes),
-                    title: "Diff",
-                    mark: diffMark(inbox))
-            ]
-            var order: [ShellPaneRef] = [ShellPaneRef(workspace: workspace.id, pane: .changes)]
-
-            for terminal in terminals {
-                let pane = Pane(terminal)
-                tabs.append(
-                    ShellTab(
-                        id: tabID(workspace: workspace.id, pane: pane),
-                        title: terminal.label,
-                        mark: mark(of: terminal, now: now),
-                        // The sort's own question, kept separate from the
-                        // drawing's. See `ShellTab.wantsAttention`.
-                        wantsAttention: terminal.agent.wantsAttention))
-                order.append(ShellPaneRef(workspace: workspace.id, pane: pane))
-            }
-
-            for (tab, ref) in zip(tabs, order) { refs[tab.id] = ref }
-
-            workspaces.append(
-                ShellWorkspace(
-                    id: workspace.id,
-                    name: workspace.task,
-                    // Nil, still, and now for a sharper reason than "one
-                    // runner". A `Connection` IS one runner — `RootView` keys
-                    // the whole tree `.id(host)` — so every workspace here is
-                    // on the same machine, and the overview names that machine
-                    // once, on the section header over these cards, rather
-                    // than forty times underneath them. The cards that DO
-                    // carry a server are the cached ones from other runners
-                    // (`RunnerDirectory.group`), where the name is the whole
-                    // point: they are somewhere else.
-                    server: nil,
-                    tail: tail(of: workspace),
-                    resume: resume(workspace, connection: connection, tabs: order),
-                    // The daemon's own view preference, carried rather than
-                    // re-derived. iOS had no consumer for it at all, so a
-                    // worktree somebody put away on the Mac came back as an
-                    // ordinary card on the phone. See `ShellFleet.hiddenOrder`.
-                    isHidden: workspace.isHidden,
-                    // The one workspace the overview card's menu must not
-                    // offer to remove. Carried rather than looked up again
-                    // from the connection at menu-build time, so the card and
-                    // the daemon are reading one fact.
-                    isPrimaryCheckout: workspace.isPrimaryCheckout,
-                    tabs: tabs))
+                    id: tabID(runner: runner, workspace: workspace.id, pane: pane),
+                    title: terminal.label,
+                    mark: mark(of: terminal, now: now),
+                    // The sort's own question, kept separate from the
+                    // drawing's. See `ShellTab.wantsAttention`.
+                    wantsAttention: terminal.agent.wantsAttention))
+            order.append(ShellPaneRef(runner: runner, workspace: workspace.id, pane: pane))
         }
 
-        return ShellFleetMap(fleet: ShellFleet(workspaces: workspaces), refs: refs)
+        for (tab, ref) in zip(tabs, order) { refs[tab.id] = ref }
+
+        return (
+            ShellWorkspace(
+                // The COMPOSITE, not the daemon's own id. This string is a
+                // SwiftUI identity — the overview gives each card `.id(_:)`
+                // and an accessibility identifier off it, and
+                // `ShellPaneTrack` remembers which workspace a retained pane
+                // belongs to by it — and it is what a screen resolves a
+                // runner from. The daemon's own id is on the `FleetEntry` in
+                // `entries`, which is where the wire gets it back. See
+                // `ShellIdentity`.
+                id: ShellIdentity.workspace(
+                    runner: runner.uuidString, workspace: workspace.id),
+                name: workspace.task,
+                // The runner's name, but only where the fleet on screen has
+                // more than one runner in it.
+                //
+                // It was unconditionally nil, and the reason it gave was
+                // "a `Connection` IS one runner, so the overview names that
+                // machine once, on the section header over these cards,
+                // rather than forty times underneath them". The first half
+                // stopped being true; the second half is still right when
+                // it applies, which is why this is a condition rather than
+                // a name on every card. One runner: the header says it
+                // once, exactly as before. Several: a card that did not say
+                // where its worktree is would leave the one question a
+                // merged grid raises unanswered.
+                server: server ? entry.host.label : nil,
+                tail: tail(of: workspace),
+                resume: resume(workspace, connection: connection, tabs: order),
+                // The daemon's own view preference, carried rather than
+                // re-derived. iOS had no consumer for it at all, so a
+                // worktree somebody put away on the Mac came back as an
+                // ordinary card on the phone. See `ShellFleet.hiddenOrder`.
+                isHidden: workspace.isHidden,
+                // The one workspace the overview card's menu must not
+                // offer to remove. Carried rather than looked up again
+                // from the connection at menu-build time, so the card and
+                // the daemon are reading one fact.
+                isPrimaryCheckout: workspace.isPrimaryCheckout,
+                tabs: tabs),
+            refs
+        )
     }
 
     /// The Diff tab's mark.
@@ -567,7 +664,15 @@ struct ShellPaneRealView: View {
 ///   the pane AT REST changes and at no other time — never mid-gesture, when
 ///   two panes are on screen and neither has arrived.
 struct ShellScreen: View {
-    @ObservedObject var connection: Connection
+    /// Every runner this app is talking to, and the merged fleet across them.
+    ///
+    /// It was one `Connection`, and the whole screen read that one object: the
+    /// fleet to map, the inbox to mark a diff with, the object to send an RPC
+    /// down. A merged fleet has no such object — a pane on `gpu-box-2` and a
+    /// pane on the laptop are two sessions — so every call site that used to
+    /// reach for `connection` now resolves one from the pane it is about. See
+    /// `connection(_:)`, which is the one place that resolution happens.
+    @ObservedObject var fleet: FleetStore
     /// The runners this device knows, for the menu in the overview's toolbar.
     ///
     /// The app's only way to reach another runner, to correct the one it is on,
@@ -599,8 +704,6 @@ struct ShellScreen: View {
     @State private var restingRef: ShellPaneRef?
     /// What GitHub says about the branch of the workspace at rest.
     @State private var pullRequest: BranchPullRequest?
-    /// The card on another runner somebody tapped, until they say yes or no.
-    @State private var crossing: ShellCrossing?
     /// The other runners' worktrees. See `readElsewhere`.
     @State private var elsewhere: [ShellServerGroup] = []
     /// The tab a deep link was last honored onto, until a rest accounts for it.
@@ -651,10 +754,40 @@ struct ShellScreen: View {
     /// lose the view it is attached to. A removal outlives the card that asked
     /// for it — that is most of the point of asking.
     @State private var removing: RemoveWorktreeRequest?
+    /// The runner a status row asked to correct, and whether this device's own
+    /// key is on screen. Both held HERE rather than in the row for the reason
+    /// the sheets above are: the overview is unmounted when the grid is neither
+    /// showing nor flying, and a presenter that can go away is a sheet nobody
+    /// can close.
+    @State private var editingRunner: Runner?
+    @State private var authorizingDevice = false
 
     @Environment(\.scenePhase) private var scenePhase
 
-    private var map: ShellFleetMap { ShellFleetMap.of(connection) }
+    /// The whole fleet, in the shell's vocabulary, rebuilt every poll.
+    private var map: ShellFleetMap { ShellFleetMap.of(fleet) }
+
+    // MARK: - Which runner a thing is on
+
+    /// The connection a pane is on, or nil for a runner this app has stopped
+    /// talking to.
+    ///
+    /// **The one place the resolution happens.** Nil is an ordinary answer and
+    /// not an error: the battery gate can retire a runner while a pane of its
+    /// is still mounted, and a screen that forced an answer here would be a
+    /// screen sending one runner's RPC down another runner's session — the
+    /// exact mistake `ShellPaneRef` gained a runner to prevent.
+    private func connection(_ ref: ShellPaneRef?) -> Connection? {
+        ref.flatMap { fleet.connection(for: $0.runner) }
+    }
+
+    /// The connection the pane AT REST is on.
+    ///
+    /// What the screen's own furniture reads — the toolbar's link chip, the two
+    /// sheets that start work, the pull request on the Changes tab. Each of
+    /// those is about the runner somebody is looking at, which is what "at
+    /// rest" means, and none of them is about a pane.
+    private var resting: Connection? { connection(restingRef) }
 
     var body: some View {
         Group {
@@ -672,12 +805,20 @@ struct ShellScreen: View {
         }
         .onAppear {
             seed()
-            // Read here rather than in a computed property: see
-            // `readElsewhere`. A `ShellScreen` is destroyed and rebuilt on
-            // every change of runner, so "once per mount" is once per runner.
             elsewhere = readElsewhere()
         }
-        .onChange(of: connection.hasFleet) { _, _ in seed() }
+        // A fleet arriving from ANY runner is a fleet to open on. `seed` runs
+        // once and only once — see it — so this being several runners' answer
+        // rather than one costs nothing beyond the guard it already has.
+        .onChange(of: fleet.hasFleet) { _, _ in seed() }
+        // The runner list changing changes which runners are somewhere else.
+        // It used to be read once per mount and that was correct then: the
+        // screen was destroyed and rebuilt on every change of runner, and
+        // nothing in the process could write another runner's entry. Both
+        // halves have stopped being true — the screen survives a crossing now,
+        // and every live connection writes its own directory — so this is read
+        // again whenever the set of live runners moves. See `readElsewhere`.
+        .onChange(of: liveRunners) { _, _ in elsewhere = readElsewhere() }
         .task(id: pullRequestKey) { await readPullRequest() }
         .onChange(of: scenePhase) { _, phase in
             // Coming back to the app is reading whatever it comes back to.
@@ -695,21 +836,56 @@ struct ShellScreen: View {
         // flying — so a sheet whose presenter lives inside it is a sheet whose
         // presenter can go away underneath it, and a sheet with nobody left to
         // close it is a sheet you cannot close.
+        // On the runner at REST, which is the one being looked at.
+        //
+        // Both sheets used to have no such question to answer: there was one
+        // connection and a new worktree could only go on it. With a merged
+        // fleet "start some work" has to name a machine, and the honest default
+        // is the one whose worktree is on screen — the same answer the overview
+        // gives by putting these actions in its own toolbar, over its own
+        // cards. Absent until the shell has come to rest at least once, which
+        // is before the first frame anybody can tap.
         .sheet(isPresented: $showNewWorkspace) {
-            NewWorkspaceView(
-                repositories: connection.repositories, connection: connection
-            ) { repository, name, branch, adopt in
-                await connection.createWorkspace(
-                    repository: repository, name: name, branch: branch, adopt: adopt)
+            if let connection = resting {
+                NewWorkspaceView(
+                    repositories: connection.repositories, connection: connection
+                ) { repository, name, branch, adopt in
+                    await connection.createWorkspace(
+                        repository: repository, name: name, branch: branch, adopt: adopt)
+                }
             }
         }
         .sheet(isPresented: $showQuickTask) {
-            TaskComposerView(connection: connection)
+            if let connection = resting {
+                TaskComposerView(connection: connection)
+            }
+        }
+        .sheet(item: $editingRunner) { runner in
+            HostEditorView(
+                existing: runner,
+                onSave: { hosts.update($0) },
+                onRemove: { hosts.remove($0) })
+        }
+        // This device's own key, and the one line to paste on the machine.
+        //
+        // A sheet and not a push, unlike the pre-fleet screen's. That screen
+        // declares a `NavigationStack`; the shell deliberately declares none,
+        // and the overview's own stack is inside a view that is unmounted the
+        // moment the grid stops showing — so a push into it is a push whose
+        // stack can vanish under it.
+        .sheet(isPresented: $authorizingDevice) {
+            NavigationStack { AuthorizeView(runners: hosts) }
         }
         // The ceremony a card's menu starts, run from the screen rather than
         // from the card. Shared with the pane's own bar — see
         // `RemoveWorktreeFlow`.
-        .removeWorktreeFlow($removing, connection: connection)
+        //
+        // On the connection the REQUEST carries, not on whatever is at rest: a
+        // long press on a card in another runner's section is a removal on that
+        // runner, and resolving it from the screen's own position would run the
+        // ceremony against the wrong machine. `RemoveWorktreeRequest` carries
+        // the connection for exactly this.
+        .removeWorktreeFlow($removing)
     }
 
     /// The runner's workspace a card names, or nil when the fleet has moved on
@@ -720,8 +896,17 @@ struct ShellScreen: View {
     /// between the long press and the tap can have taken a worktree away, and
     /// an index into a fleet that has changed length names a DIFFERENT
     /// workspace rather than none. `FleetView`'s removed-workspace rule, kept.
-    private func workspace(_ shell: ShellWorkspace) -> Workspace? {
-        connection.fleet.workspaces.first { $0.id == shell.id }
+    private func workspace(_ shell: ShellWorkspace) -> (Workspace, Connection)? {
+        // Through the map's own entry, which carries the runner this card is
+        // on. Looking the id up in "the" fleet is what a single-connection
+        // screen could do and a merged one cannot: `ShellWorkspace.id` is a
+        // composite now, and searching every runner for the daemon's own id
+        // would answer with the first match rather than with the right one.
+        guard let entry = map.entries[shell.id],
+            let connection = fleet.connection(for: entry.host.id),
+            let live = connection.fleet.workspaces.first(where: { $0.id == entry.workspace.id })
+        else { return nil }
+        return (live, connection)
     }
 
     /// Put a worktree away, or take it back out.
@@ -733,7 +918,7 @@ struct ShellScreen: View {
     /// where you ARE changes, because `isHidden` changes where a workspace is
     /// DRAWN and nothing else; see `ShellWorkspace.isHidden`.
     private func toggleHidden(_ shell: ShellWorkspace) {
-        guard let workspace = workspace(shell) else { return }
+        guard let (workspace, connection) = workspace(shell) else { return }
         Task {
             if workspace.isHidden {
                 await connection.unhideWorkspace(workspace)
@@ -769,10 +954,21 @@ struct ShellScreen: View {
     /// this product uses. Each is named for the sheet it opens.
     @ViewBuilder
     private var overviewActions: some View {
-        RunnerMenu(hosts: hosts, connection: connection)
+        // Both are about the runner AT REST — the one whose worktree is on
+        // screen — and both are absent before the shell has come to rest, which
+        // is before there is anything to look at. The chip in particular has to
+        // be one runner's: it says "reconnecting" and offers a reconnect, and a
+        // fleet-wide version of that sentence would be a chip that is amber
+        // whenever any laptop anywhere is asleep. What says the same thing per
+        // runner, next to the runner, is `RunnerStatusRow`.
+        if let resting {
+            RunnerMenu(hosts: hosts, connection: resting)
 
-        if connection.phase != .connected {
-            LinkStatusChip(connection: connection)
+            if resting.phase != .connected {
+                LinkStatusChip(connection: resting)
+            }
+        } else {
+            RunnerMenu(hosts: hosts, connection: nil)
         }
 
         Button { showQuickTask = true } label: { Image(systemName: "sparkle") }
@@ -782,17 +978,34 @@ struct ShellScreen: View {
             .accessibilityLabel("New Workspace")
     }
 
-    /// The other runners' worktrees, read once.
+    /// The runners this app is CURRENTLY talking to.
     ///
-    /// **Once is correct, not thrifty.** This app talks to one runner at a
-    /// time, so nothing in this process can change another runner's entry
-    /// while this screen is mounted — the only writer is
-    /// `Connection.recordDirectory`, and the connection it belongs to is the
-    /// one runner this list excludes. Re-reading it from a `body` that runs
-    /// three times a second would be a JSON decode per poll for an answer that
-    /// cannot have moved.
+    /// The trigger for re-reading the cache, and a value rather than a
+    /// derivation at the point of use so `onChange` has something to compare.
+    private var liveRunners: Set<String> {
+        // Off the STORE's own key and not `Connection.hostId`, which is nil
+        // until `start(host:)` has run. Reading it back off the connection made
+        // a runner look absent for the whole of its bring-up — long enough for
+        // `readElsewhere` to draw its cached worktrees beside its live ones,
+        // and long enough for `takeCrossing` to throw away a crossing note
+        // naming the very runner it was landing on. The same second-answer
+        // mistake `FleetStore.publish` had.
+        Set(fleet.runners.map(\.host.id.uuidString))
+    }
+
+    /// The worktrees on runners this app is NOT talking to.
+    ///
+    /// Read on the runners changing rather than on every body pass — see the
+    /// `onChange` in `body`. It used to be read once per mount, and the reason
+    /// given was that this app talks to one runner at a time so nothing in the
+    /// process could change another runner's entry. That is exactly what
+    /// stopped being true: every live connection writes its own directory now,
+    /// and the screen is no longer destroyed when the runner changes. What has
+    /// not changed is that a JSON decode on a `body` running three times a
+    /// second would be waste — the set of live runners moves when somebody adds
+    /// or removes one, which is not a per-poll event.
     private func readElsewhere() -> [ShellServerGroup] {
-        let live = connection.hostId?.uuidString
+        let live = liveRunners
         let known = Set(hosts.hosts.map(\.id.uuidString))
         return RunnerDirectoryStore.read()
             // The live runner is excluded by ID, not by label: two entries can
@@ -802,7 +1015,7 @@ struct ShellScreen: View {
             //
             // A runner somebody has since removed is excluded too. A card for
             // one would be a card whose tap can do nothing.
-            .filter { $0.runner != live && known.contains($0.runner) }
+            .filter { !live.contains($0.runner) && known.contains($0.runner) }
             .map { $0.group() }
     }
 
@@ -838,49 +1051,101 @@ struct ShellScreen: View {
                 restingRef = arrived
                 markVisible(arrived)
             },
-            liveServer: connection.hostLabel,
+            // The header over the live cards names the runner, but only when
+            // there is one runner for it to name. With several merged into one
+            // grid there is no single answer, and each card carries its own —
+            // see `ShellFleetMap.one`, which is where that condition is
+            // decided. A header saying one machine's name over another
+            // machine's worktrees is the one thing worse than no header.
+            liveServer: fleet.runners.count == 1 ? fleet.runners[0].host.label : nil,
             elsewhere: elsewhere,
+            // A row for every runner that is not simply answering, over the
+            // grid it is about. This is the whole of what replaced four
+            // full-screen phases: a laptop asleep in another room is a line of
+            // text above the cards rather than a screen in front of them, and a
+            // runner that has never been approved shows its fingerprint here
+            // instead of showing it to nobody because some other runner
+            // answered. See `RunnerStatusRow`.
+            runners: {
+                ForEach(fleet.runners, id: \.host.id) { runner in
+                    RunnerStatusRow(
+                        connection: runner.connection,
+                        host: runner.host,
+                        onRetry: { fleet.retry(runner.host.id) },
+                        onReconnectNow: { runner.connection.reconnectNow() },
+                        onTrust: { hosts.trust(runner.host, fingerprint: $0) },
+                        onReviewKey: { hosts.forgetKey(runner.host) },
+                        onEdit: { editingRunner = runner.host },
+                        // The overview has a `NavigationStack` of its own, so
+                        // this one CAN push — unlike the row over the shell's
+                        // pre-fleet screen, which hands the same move back as a
+                        // flag. `RunnerStatusRow` takes a callback rather than
+                        // a link precisely so both placements are possible.
+                        onAuthorize: { authorizingDevice = true })
+                }
+            },
+            // **No alert.** A cached card is only ever drawn for a runner this
+            // app is not connected to, which with "Connect every runner at
+            // once" on is no runner at all: every worktree in the grid is live
+            // and reaching one is a swipe. What remains is the gate turned OFF,
+            // where a tap is a request to talk to that runner instead — the
+            // thing the setting says the app does. `shellCrossingAlert` used to
+            // stand here and was telling the truth while `RootView` keyed the
+            // tree `.id(host)`: the tap destroyed the screen, the track and
+            // every mounted pane. It does not any more, and an alert warning
+            // about a teardown that no longer happens is worse than no alert.
             onCross: { group, workspace in
-                crossing = ShellCrossing(group: group, workspace: workspace)
+                select(runner: group.id, landingOn: workspace.id)
             },
             onToggleHidden: toggleHidden,
             onRemoveWorktree: { shell in
-                guard let workspace = workspace(shell) else { return }
-                removing = .confirming(workspace)
+                guard let (workspace, connection) = workspace(shell) else { return }
+                removing = .confirming(workspace, on: connection)
             },
             overviewActions: { overviewActions }
         ) { slot in
-            if let ref = map.refs[slot.tab.id] {
+            // **The pane resolves its own runner.** A slot names a tab, the map
+            // says which pane that is and which runner it is on, and this is
+            // where the connection to talk to it over comes from. A pane whose
+            // runner has been retired draws nothing rather than borrowing
+            // another runner's session.
+            if let ref = map.refs[slot.tab.id], let connection = connection(ref) {
                 ShellPaneRealView(
                     slot: slot, ref: ref, connection: connection, pastes: pastes,
                     // Only the workspace at rest gets an answer. A neighbour's
                     // diff header can wait until you land on it; asking for
                     // three is three GitHub round trips per swipe.
-                    pullRequest: ref.workspace == restingRef?.workspace ? pullRequest : nil,
+                    // The WHOLE ref, runner included. What "the same worktree"
+                    // means across a merged fleet is a runner and an id, and a
+                    // comparison on the id alone would rest on cross-daemon
+                    // uniqueness that nothing enforces.
+                    pullRequest: ref.workspace == restingRef?.workspace
+                        && ref.runner == restingRef?.runner ? pullRequest : nil,
                     onCreated: { createdTerminal = $0 })
             }
         }
         // Over the panes, above the key row, and gone the moment the path is
         // typed. Nothing about a transfer is ever written into the pane itself.
         .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
-        // The teardown, asked for out loud. See `shellCrossingAlert`.
-        .shellCrossingAlert($crossing, leaving: connection.hostLabel) { cross(to: $0) }
     }
 
-    /// Change runners, carrying the tapped worktree across the rebuild.
+    /// Talk to this runner instead, and land on the worktree that was tapped.
     ///
-    /// `UserDefaults` and not `@State`, and it has to be: this view is one of
-    /// the things the selection destroys, so a note left in its own state
-    /// would go with it. The note is read back by `seed` on the OTHER side —
-    /// a different `ShellScreen`, in a different `FleetView`, on a different
-    /// `Connection` — which is the only place the new runner's fleet is in
-    /// hand to resolve it against.
-    private func cross(to crossing: ShellCrossing) {
-        guard let runner = hosts.hosts.first(where: { $0.id.uuidString == crossing.group.id })
+    /// Only reachable with "Connect every runner at once" turned off, because
+    /// that is the only setting under which a runner's worktrees are in the
+    /// grid as a memory rather than as panes. It is not a teardown of this
+    /// screen any more — `RootView` stopped keying the tree on the selected
+    /// runner — but it IS a teardown of the other runner's connection, which is
+    /// what one-runner-at-a-time means.
+    ///
+    /// `UserDefaults` and not `@State` for the note, and it still has to be:
+    /// the new runner's fleet does not exist yet, so the workspace it names can
+    /// only be resolved on the far side of a connect. `seed` reads it back.
+    private func select(runner: String, landingOn workspace: String) {
+        guard let picked = hosts.hosts.first(where: { $0.id.uuidString == runner })
         else { return }
-        UserDefaults.standard.set(
-            "\(crossing.group.id)/\(crossing.workspace.id)", forKey: Self.crossingKey)
-        hosts.selected = runner
+        UserDefaults.standard.set("\(runner)/\(workspace)", forKey: Self.crossingKey)
+        hosts.selected = picked
     }
 
     /// Which worktree a crossing was aimed at, spelled `runner/workspace`.
@@ -909,10 +1174,39 @@ struct ShellScreen: View {
         // the self-fulfilling memory `remember(_:leaving:tab:)` refuses for
         // the same reason one paragraph down.
         let workspace = takeCrossing().flatMap { wanted in
-            map.fleet.workspaces.firstIndex { $0.id == wanted }
-        } ?? at.workspace
+            // Both halves. A crossing note names a runner AND a worktree —
+            // that is what `crossingKey` writes — and honoring only the second
+            // over a merged fleet would land on whichever runner's copy the
+            // merge put first.
+            map.fleet.workspaces.indices.first {
+                let entry = map.entries[map.fleet.workspaces[$0].id]
+                return entry?.workspace.id == wanted.workspace
+                    && entry?.host.id.uuidString == wanted.runner
+            }
+        } ?? onSelectedRunner(in: map) ?? at.workspace
         initial = ShellPosition(
             workspace: workspace, tab: map.fleet.workspaces[workspace].resumeTab)
+    }
+
+    /// The first workspace on the runner somebody last picked.
+    ///
+    /// **The selection still decides where a launch LANDS, even though it no
+    /// longer decides what is connected.** `RunnerStore.selected` is persisted
+    /// for exactly this — its own comment says landing on whichever runner
+    /// happened to be first in the list "would mean the app forgets where you
+    /// were every time you close it" — and that argument survived the port
+    /// intact. What changed is only that the other runners are on screen too
+    /// rather than absent.
+    ///
+    /// Nil when the selection names a runner with nothing in the merge, which
+    /// is a runner still connecting or one that is down. `ShellFleet.first` is
+    /// the fallback then, because a shell has to open on something and the
+    /// alternative is a spinner over a fleet that is already in hand.
+    private func onSelectedRunner(in map: ShellFleetMap) -> Int? {
+        guard let selected = hosts.selected?.id else { return nil }
+        return map.fleet.workspaces.indices.first {
+            map.entries[map.fleet.workspaces[$0].id]?.host.id == selected
+        }
     }
 
     /// The worktree a crossing was aimed at, if it was aimed at THIS runner.
@@ -920,14 +1214,17 @@ struct ShellScreen: View {
     /// Checked against the runner as well as read, because the note outlives
     /// the tap: an app killed between the alert and the connection would come
     /// back with a note about a runner somebody may no longer be on.
-    private func takeCrossing() -> String? {
+    private func takeCrossing() -> (runner: String, workspace: String)? {
         guard let note = UserDefaults.standard.string(forKey: Self.crossingKey) else { return nil }
         UserDefaults.standard.removeObject(forKey: Self.crossingKey)
         let parts = note.split(separator: "/", maxSplits: 1)
-        guard parts.count == 2, let runner = connection.hostId?.uuidString,
-            parts[0] == runner
-        else { return nil }
-        return String(parts[1])
+        // Checked against the runners that are LIVE rather than against the one
+        // this screen is on, because there is no longer one it is on. An app
+        // killed between the tap and the connection comes back with a note
+        // about a runner it may no longer be talking to, and a note that names
+        // nothing here is spent rather than honored.
+        guard parts.count == 2, liveRunners.contains(String(parts[0])) else { return nil }
+        return (String(parts[0]), String(parts[1]))
     }
 
 
@@ -968,8 +1265,13 @@ struct ShellScreen: View {
         let linked = linkedTab
         linkedTab = nil
         if let tab, tab == linked { return }
-        guard let arrived, arrived.workspace == previous?.workspace else { return }
-        connection.rememberFocus(arrived.pane.focus, in: arrived.workspace)
+        guard let arrived, arrived.workspace == previous?.workspace,
+            arrived.runner == previous?.runner
+        else { return }
+        // On the runner the pane is on. The memory is `Connection.lastFocus`,
+        // which is per runner because a workspace id means nothing off the
+        // machine that minted it.
+        connection(arrived)?.rememberFocus(arrived.pane.focus, in: arrived.workspace)
     }
 
     // MARK: - A card tapped from outside the app
@@ -999,11 +1301,18 @@ struct ShellScreen: View {
     /// shell does not actually have that tab" to be got wrong.
     private func requestedTab(in map: ShellFleetMap) -> String? {
         guard let id = pendingTerminal ?? createdTerminal else { return nil }
-        for workspace in connection.fleet.workspaces {
-            guard let terminal = workspace.terminals.first(where: { $0.id == id }) else {
-                continue
-            }
-            let tab = ShellFleetMap.tabID(workspace: workspace.id, pane: Pane(terminal))
+        // Across every runner, because a card carries a terminal id and no
+        // host: the URL is `…://terminal/<id>` and always has been, so the only
+        // way to answer "which runner is that on" is to look. One connection
+        // made the question invisible rather than answering it — a card about
+        // another runner simply resolved to nothing and the tap opened the app
+        // on whatever it would have opened on anyway. Now it lands.
+        for entry in map.entries.values {
+            guard
+                let terminal = entry.workspace.terminals.first(where: { $0.id == id })
+            else { continue }
+            let tab = ShellFleetMap.tabID(
+                runner: entry.host.id, workspace: entry.workspace.id, pane: Pane(terminal))
             // Only if the shell actually has it. A `changes` pane the host
             // happens to have open is folded into the Changes tab by
             // `Pane.init(_:)` and is not a tab of its own, so an id naming one
@@ -1024,8 +1333,13 @@ struct ShellScreen: View {
     /// `Connection.markVisibleSeen` reads exactly this and reports an empty
     /// watch list for it.
     private func markVisible(_ ref: ShellPaneRef? = nil) {
-        Notifier.shared.visibleTerminal = (ref ?? restingRef)?.pane.terminal?.id
-        Task { await connection.markVisibleSeen() }
+        let at = ref ?? restingRef
+        Notifier.shared.visibleTerminal = at?.pane.terminal?.id
+        // Claimed on the runner the pane is on, and only there. Every other
+        // runner clears its own watch on its own next poll — `Connection.refresh`
+        // has always ended with this call — so fanning out here would be N round
+        // trips to say the same thing the polls are already saying.
+        Task { await connection(at)?.markVisibleSeen() }
     }
 
     // MARK: - The Changes tab's header
@@ -1038,9 +1352,14 @@ struct ShellScreen: View {
     /// including the branch being in the key so a worktree that changes branch
     /// under you re-reads at once.
     private var pullRequestKey: String {
-        guard let ref = restingRef, case .changes = ref.pane else { return "" }
+        guard let ref = restingRef, case .changes = ref.pane,
+            let connection = connection(ref)
+        else { return "" }
         let branch = connection.fleet.workspaces.first { $0.id == ref.workspace }?.branch ?? ""
-        return "\(ref.workspace)|\(branch)|\(connection.pollGeneration)"
+        // The runner is in the key for the reason it is in every other id here:
+        // what the key has to change on is "a different worktree", and across a
+        // merged fleet a worktree is a runner and an id rather than an id.
+        return "\(ref.runner)|\(ref.workspace)|\(branch)|\(connection.pollGeneration)"
     }
 
     /// Read `stack.get` for the resting worktree's branch.
@@ -1051,6 +1370,7 @@ struct ShellScreen: View {
     /// be handed a `Connection` at all.
     private func readPullRequest() async {
         guard let ref = restingRef, case .changes = ref.pane,
+            let connection = connection(ref),
             let workspace = connection.fleet.workspaces.first(where: { $0.id == ref.workspace })
         else { return }
         guard let repository = workspace.repository, !workspace.branch.isEmpty else {
@@ -1065,70 +1385,5 @@ struct ShellScreen: View {
         let mine = reply.links.first { $0.branch == workspace.branch }
         pullRequest = BranchPullRequest(
             pr: mine?.pr, known: reply.prAnswered, repoURL: reply.repoUrl)
-    }
-}
-
-// MARK: - Crossing to another runner
-
-/// A card on another runner, tapped and waiting to be confirmed.
-///
-/// Holds the WORKSPACE as well as the runner, because the tap named one and
-/// landing on whatever the new runner happens to open on would be the app
-/// half-honoring it. See `ShellScreen.crossingKey`.
-struct ShellCrossing: Identifiable {
-    var group: ShellServerGroup
-    var workspace: ShellWorkspace
-    var id: String { "\(group.id)/\(workspace.id)" }
-}
-
-extension View {
-    /// **The teardown is asked for out loud, because it cannot be avoided.**
-    ///
-    /// Crossing to another runner is not navigation inside this shell, it is a
-    /// different connection: `RootView` keys the whole tree `.id(host)`
-    /// (`FarCoolerApp.swift`), so selecting another runner destroys
-    /// `FleetView`, `ShellScreen`, the track and every mounted pane with it.
-    /// That follows from what a `Connection` is — `start` claims four
-    /// process-wide slots (`Connection.current`, `WatchLinkHost.shared.adopt`,
-    /// `Reachability.shared.onShouldRetry`, and the single `fleet.json` every
-    /// glance surface renders from), so two live connections would not cost
-    /// twice as much, they would fight over all four and the last poller to
-    /// land would define the widget's whole fleet.
-    ///
-    /// `ShellPaneTrack`'s entire design is "a pane must never be rebuilt". The
-    /// one moment that promise cannot be kept is the one moment it has to be
-    /// said aloud — so this is an alert naming what goes, and a button
-    /// somebody pressed on purpose, rather than a card tap that quietly costs
-    /// a scrollback.
-    ///
-    /// A modifier rather than an alert written inline, so `ShellHarness` can
-    /// present the same one over a canned fleet. The wording is the thing most
-    /// likely to be wrong here and it is not testable against a fixture that
-    /// has its own.
-    func shellCrossingAlert(
-        _ crossing: Binding<ShellCrossing?>,
-        leaving runner: String,
-        onConfirm: @escaping (ShellCrossing) -> Void
-    ) -> some View {
-        alert(
-            crossing.wrappedValue.map { "Switch to \($0.group.name)?" } ?? "",
-            isPresented: Binding(
-                get: { crossing.wrappedValue != nil },
-                set: { if !$0 { crossing.wrappedValue = nil } }),
-            presenting: crossing.wrappedValue
-        ) { pending in
-            Button("Switch Runner") { onConfirm(pending) }
-            Button("Cancel", role: .cancel) {}
-        } message: { pending in
-            // What actually goes, said in the words the thing is called by.
-            // Not "your session will end" — nothing ends on the runner, and a
-            // warning that overstates gets dismissed unread.
-            Text(
-                "This app talks to one runner at a time, so the panes open on \(runner) "
-                    + "will close. Nothing stops on \(pending.group.name), but anything "
-                    + "you were partway through typing goes with them.\n\n"
-                    + "It'll open on \(pending.workspace.name)."
-            )
-        }
     }
 }

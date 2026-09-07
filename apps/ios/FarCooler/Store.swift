@@ -670,11 +670,20 @@ final class RunnerStore: ObservableObject {
 
     /// Record the fingerprint a user has approved.
     ///
-    /// `selected` is left alone on purpose. `RootView` keys its whole hierarchy
-    /// on the selected host, so writing the fingerprint back there would tear
-    /// down and rebuild the connection at the exact moment approval succeeded —
-    /// the one moment it must not. The caller reconnects with its own approved
-    /// copy, and the next launch reads the saved fingerprint back out of `hosts`.
+    /// **This is the connect.** Writing into `hosts` publishes, `FleetStore`
+    /// reconciles, and the runner's details no longer match the ones its
+    /// connection was dialed with — so the plan puts it in `rebuilt` and the
+    /// store retires the unpinned session and dials a fresh one carrying the
+    /// key. That is the same mechanism Android relies on, and it is why the
+    /// approval screen must not also connect: two connects for one tap, one of
+    /// them racing the other for the same runner id.
+    ///
+    /// `selected` is left alone, and that is a DIFFERENT hazard from the one
+    /// above. `RootView` keys its hierarchy on the selected host, so writing
+    /// the fingerprint back there would rebuild the whole view tree — the
+    /// screen, the shell, every mounted pane — at the exact moment approval
+    /// succeeded. Rebuilding the CONNECTION there is wanted; rebuilding the
+    /// SCREEN is not.
     func trust(_ host: Runner, fingerprint: String) {
         guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
         hosts[index].fingerprint = fingerprint

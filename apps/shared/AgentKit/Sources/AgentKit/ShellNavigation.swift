@@ -1860,21 +1860,24 @@ extension ShellFleet {
 
 /// The worktrees on a runner this app is NOT talking to.
 ///
-/// The owner's ask was "the worktrees grid should list all worktrees across
-/// all servers", and the shape of that answer is decided by what a
-/// `Connection` is. A connection claims four process-wide slots on `start` —
-/// `Connection.current`, `WatchLinkHost.shared.adopt`,
-/// `Reachability.shared.onShouldRetry` and the single `fleet.json` that every
-/// glance surface renders from — so two live connections would not cost twice
-/// as much, they would fight, and the last poller to land would define the
-/// widget's whole fleet. N live connections is worse than N times the cost.
+/// The owner's ask was "the worktrees grid should list all worktrees across all
+/// servers", and this was the shape of that answer while a second live
+/// connection was impossible: a connection claimed process-wide slots on
+/// `start`, so two of them would fight rather than cost twice as much, and the
+/// grid could only show another runner's worktrees as a memory.
 ///
-/// So the other runners are CACHED and say so. This type is that cache as the
-/// grid needs it: a runner's name, when this app last actually saw it, and the
-/// worktrees it had then. Everything in here is a claim about the past, which
-/// is why the marks on its cards are `.stale` — the shell's existing word for
-/// "the answer is old", drawn as the dashed ring `GlanceMark.Link.broken`
-/// already means throughout this app.
+/// **The phone holds a connection per runner now**, so with "Connect every
+/// runner at once" on — the default — every worktree in the grid is a LIVE card
+/// and nothing reaches this type at all: `ShellScreen.readElsewhere` excludes
+/// every runner that is live. What is left for it is the setting turned off,
+/// which is a phone on a train paying for one SSH session. Same job, fewer
+/// days.
+///
+/// So these are CACHED and say so: a runner's name, when this app last actually
+/// saw it, and the worktrees it had then. Everything in here is a claim about
+/// the past, which is why the marks on its cards are `.stale` — the shell's
+/// existing word for "the answer is old", drawn as the dashed ring
+/// `GlanceMark.Link.broken` already means throughout this app.
 ///
 /// **Not a `ShellFleet`, and deliberately not part of one.** A `ShellFleet` is
 /// the NAVIGABLE fleet: `ShellPosition` indexes into it, the bar walks it, and

@@ -143,6 +143,26 @@ AGENTKIT_SOURCES = [
     # only UI tests — and these are the rules with no screen in them. See
     # `ShellNavigationTests`.
     "ShellNavigation.swift",
+    # What a workspace and a tab are CALLED once the shell holds more than one
+    # runner's fleet. A workspace id is eight hex characters minted per daemon,
+    # so two runners can mint the same one — and these strings are SwiftUI
+    # identities and the key a mounted pane is retained under. Here for
+    # `ShellNavigation.swift`'s reason: composing an id has no screen in it, and
+    # the iOS UI suite is compiled by CI and never executed. See
+    # `ShellIdentityTests`.
+    "ShellIdentity.swift",
+    # Which of the runners a ceremony granted this device may write a key into.
+    # Here rather than in `CeremonyStore` because of what the answer is used for
+    # -- appending to `~/.ssh/authorized_keys` -- and because the direction that
+    # costs something, a live runner nobody granted, is a rule no screen can
+    # show you. See `CeremonyReachTests`.
+    "CeremonyReach.swift",
+    # The one `fleet.json`, assembled from every runner rather than overwritten
+    # by whichever polled last. Here for `FleetMembership.swift`'s reason: the
+    # merge has an answer per field -- what `complete` means across N runners,
+    # why a nil review count is not a zero, when a retired runner's agents leave
+    # -- and none of them has a screen in it. See `FleetPublicationTests`.
+    "FleetPublication.swift",
     # Which runners the phone should be talking to, and what changing that list
     # costs. Here for `ShellNavigation.swift`'s reason exactly: the rules a
     # reconcile has to keep have no screen in them, and the iOS UI suite is

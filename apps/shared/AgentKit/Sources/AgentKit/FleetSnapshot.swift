@@ -1020,8 +1020,87 @@ public struct ActivityTrace: Sendable, Equatable {
             commits[column] += UInt32(self.commits(bucket))
         }
 
+        return Self.encoded(code: code, output: output, commits: commits, span: axis)
+    }
+
+    /// The wire's bytes, for a caller that has to put a trace back on one.
+    ///
+    /// `FleetSnapshot.fleetTrace` is `Data`, not an `ActivityTrace` — the
+    /// widget holds a snapshot once per timeline entry and decoding there is
+    /// the cost the byte encoding exists to avoid. So a merge that computes a
+    /// trace needs its bytes back.
+    public var encoded: Data { bytes }
+
+    /// Several runners' fleet traces, on one axis.
+    ///
+    /// # Why this is legitimate and the per-terminal version is not
+    ///
+    /// `FleetSnapshot.fleetTrace` refuses to be summed out of the agents'
+    /// own rows, and the reason is arithmetic: each row snaps to the shortest
+    /// of §04's three windows that holds its OWN activity, so bucket 4 of a
+    /// five-minute row and bucket 4 of a two-hour row are different spans of
+    /// time and adding them adds unlike things. `rebucketed(to:)` is what
+    /// removes that objection — it brings every input onto one window by
+    /// summing whole multiples, which is exact — and it is the same operation
+    /// `AgentCardLayout` already performs across the rows it draws.
+    ///
+    /// What the daemon can do that this cannot is pick a width across every
+    /// ring it holds before encoding. It holds one runner's rings. **No daemon
+    /// holds three runners' rings**, so for a phone with three connections
+    /// there is no such thing as a fleet trace summed at the source, and the
+    /// choice is between this and drawing nothing.
+    ///
+    /// # What it costs, said out loud
+    ///
+    /// `rebucketed`'s phase residual, once per input rather than once. A trace
+    /// carries a shape and not an anchor, so packing from the newest end is too
+    /// NEW by at most one column and never in the other direction. Summing two
+    /// traces can therefore put one runner's column one place ahead of the
+    /// other's. Bounded by one column, one-directional, on a texture that is
+    /// explicitly not an accounting figure — and against the alternative, which
+    /// is the Dynamic Island's history disappearing the day somebody adds a
+    /// second runner.
+    ///
+    /// The coarsest span wins, because that is the only one every input can be
+    /// summed ONTO: `rebucketed` refuses to go finer and returns its input
+    /// unchanged, which would leave two different windows on one axis.
+    ///
+    /// Nil for no inputs. One input is returned unchanged, which is the
+    /// single-runner case and is byte-for-byte what the daemon sent.
+    public static func summing(_ traces: [ActivityTrace]) -> ActivityTrace? {
+        guard let coarsest = traces.map(\.span).max(by: { $0.bucketSeconds < $1.bucketSeconds })
+        else { return nil }
+        guard traces.count > 1 else { return traces[0] }
+
+        var code = [UInt32](repeating: 0, count: Self.buckets)
+        var output = [UInt32](repeating: 0, count: Self.buckets)
+        var commits = [UInt32](repeating: 0, count: Self.buckets)
+        for trace in traces {
+            let axis = trace.rebucketed(to: coarsest)
+            for bucket in 0..<Self.buckets {
+                // `UInt32` to add in, `UInt16`/`UInt8` to write out, for
+                // `rebucketed`'s reason: the producer saturates on the way to
+                // the wire and summing three runners can reach a ceiling one
+                // could not, so the saturation must happen at the encode and
+                // never in the accumulator.
+                code[bucket] += UInt32(axis.code(bucket))
+                output[bucket] += UInt32(axis.output(bucket))
+                commits[bucket] += UInt32(axis.commits(bucket))
+            }
+        }
+        return encoded(code: code, output: output, commits: commits, span: coarsest)
+    }
+
+    /// Three series and a span, as the wire's 66 bytes.
+    ///
+    /// One encoder, shared by `rebucketed` and `summing`, because the layout is
+    /// the half of this file that would still look plausible written wrong —
+    /// see `pair(_:_:)`, which is its inverse.
+    private static func encoded(
+        code: [UInt32], output: [UInt32], commits: [UInt32], span: Span
+    ) -> ActivityTrace {
         var bytes = Data(capacity: Self.encodedLength)
-        bytes.append((Self.version << 4) | axis.rawValue)
+        bytes.append((Self.version << 4) | span.rawValue)
         for series in [code, output] {
             for value in series {
                 let capped = UInt16(min(value, UInt32(UInt16.max)))
@@ -1033,7 +1112,7 @@ public struct ActivityTrace: Sendable, Equatable {
             }
         }
         for value in commits { bytes.append(UInt8(min(value, UInt32(UInt8.max)))) }
-        return ActivityTrace(bytes: bytes, span: axis)
+        return ActivityTrace(bytes: bytes, span: span)
     }
 }
 
@@ -1041,21 +1120,27 @@ public struct ActivityTrace: Sendable, Equatable {
 
 /// One runner's worktrees, as this app last saw them.
 ///
-/// `FleetSnapshot` above cannot answer this and should not be made to. It is
-/// AGENTS-ONLY by design — "a widget listing every terminal on every runner
-/// would be a list nobody can find anything in" — it is a SINGLE file, and it
-/// is rewritten whole on every poll by whichever connection is live. Ask it
-/// "what worktrees does `gpu-box-2` have" and it answers about whatever runner
-/// polled last.
+/// # What this is FOR, now that it is not the only way
 ///
-/// So this is a second, smaller thing with a different shape: keyed by runner,
-/// merged rather than clobbered, and about worktrees rather than agents. It
-/// exists for one screen — the overview's grid, which the owner asked to list
-/// all worktrees across all servers — and for the reason a second live
-/// connection cannot do that job: `Connection.start` claims four process-wide
-/// slots (`Connection.current`, `WatchLinkHost.shared.adopt`,
-/// `Reachability.shared.onShouldRetry`, and the one `fleet.json`), so two live
-/// connections would not cost twice as much, they would fight.
+/// It existed because a second live connection was impossible: `Connection`
+/// claimed process-wide slots on `start`, so two of them would fight rather
+/// than cost twice as much, and the overview's grid could only show another
+/// runner's worktrees as a memory. **That reason is gone.** The phone holds a
+/// connection per runner, every one of their worktrees is in the grid as a live
+/// card, and with "Connect every runner at once" on — the default — this cache
+/// contributes nothing at all, because `ShellScreen.readElsewhere` excludes
+/// every runner that is live.
+///
+/// What it is for is the setting turned OFF. A phone on a train talks to one
+/// runner, and the others still have worktrees somebody wants to see. That is
+/// the same job as before, on a smaller set of days, and it is why this is not
+/// deleted along with the reason it was written.
+///
+/// `FleetSnapshot` still cannot answer it and still should not be made to: that
+/// file is AGENTS-ONLY by design — "a widget listing every terminal on every
+/// runner would be a list nobody can find anything in" — and it is about what
+/// is HAPPENING rather than about what exists. This is keyed by runner and
+/// about worktrees.
 ///
 /// **Everything in here is a claim about the past, and `seenAt` is part of the
 /// value.** Nothing that reads it may draw it as current: see `decayed`, which
@@ -1065,9 +1150,27 @@ struct RunnerDirectory: Codable, Sendable, Equatable {
     /// One worktree, with just enough to draw a card and nothing more.
     ///
     /// No terminal ids, no pane state, no scrollback. A card shows a name, a
-    /// ribbon and a tail, and a cache that held more would be a cache somebody
+    /// ribbon and a tail.
+    ///
+    /// **The reason recorded here has stopped being true and the boundary has
+    /// not.** It said a cache holding more "would be a cache somebody
     /// eventually tried to open a pane from — which is the one thing a
-    /// workspace on a runner you are not connected to cannot do.
+    /// workspace on a runner you are not connected to cannot do", and opening a
+    /// pane on another runner is now the ordinary case: `FleetStore` holds a
+    /// connection to each of them and the shell mounts panes across the merge.
+    ///
+    /// What is still true is narrower and is the whole of what this type is
+    /// now: these cards are drawn only for runners this phone is NOT connected
+    /// to, which happens when "Connect every runner at once" is off. A pane
+    /// there still cannot be opened without connecting first — that is what
+    /// `ShellScreen.select(runner:landingOn:)` does — so the cache would still
+    /// be holding pane state nothing could mount.
+    ///
+    /// The boundary is therefore kept and NOT widened. There is no second
+    /// reader asking for more, and a cache that grew to cover a case the live
+    /// fleet now covers would be a second answer to "what is on that runner" —
+    /// which is the drift a cache beside a live model always threatens, and the
+    /// reason this one is deliberately the smaller of the two.
     struct Workspace: Codable, Sendable, Equatable {
         var id: String
         var name: String
