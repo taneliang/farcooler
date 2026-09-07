@@ -185,6 +185,17 @@ struct FleetView: View {
         }
     }
 
+    /// The runners with something to say, which on this screen is the ones
+    /// that are not simply connected.
+    ///
+    /// The same test `RunnerStatusRow` makes about itself, made once here so
+    /// the list can lay out around it. Re-evaluated on every body pass, which
+    /// is every time any connection publishes — the store republishes on each
+    /// of them, and this view observes the store.
+    private var unanswered: [(host: Runner, connection: Connection)] {
+        fleet.runners.filter { $0.connection.phase != .connected }
+    }
+
     /// Every runner, and what each of them is doing, while none of them has
     /// answered.
     ///
@@ -206,7 +217,16 @@ struct FleetView: View {
                 // "Connecting…" on its own; a second spinner over the top would
                 // be the app being anxious about a wait it is already
                 // describing.
-                ForEach(fleet.runners, id: \.host.id) { runner in
+                // Filtered, and the filter is what the DIVIDER needs rather
+                // than what the row needs. `RunnerStatusRow` renders nothing
+                // for a connected runner, so an unfiltered list would be
+                // correct in every row and wrong between them: a rule under
+                // each of three runners with only one of them having anything
+                // to say. A runner can be connected and still have no fleet —
+                // `phase` flips a whole SSH round trip before the first `fleet`
+                // call returns — so this is an ordinary state on this screen
+                // rather than an edge.
+                ForEach(unanswered, id: \.host.id) { runner in
                     RunnerStatusRow(
                         connection: runner.connection,
                         host: runner.host,
