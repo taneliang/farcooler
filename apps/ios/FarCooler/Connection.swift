@@ -273,6 +273,31 @@ final class Connection: ObservableObject {
     }
 
     func start(host: Runner) async {
+        // A bring-up somebody cancelled does not dial.
+        //
+        // **This is not belt and braces; without it a retired runner comes
+        // back.** `FleetStore.bringUp` wraps this in a `Task` and
+        // `FleetStore.retire` cancels that task — but cancellation in Swift is
+        // cooperative, so a task cancelled before its body ever ran still runs
+        // it. The first two statements below register this connection in
+        // `Connection.registry` and subscribe it to `Reachability`, and both
+        // outlive the retirement:
+        //
+        // - `Connection.retire()` clears the registry entry `if let host`, and
+        //   `host` is still nil here, so it clears nothing. The registration
+        //   then happens AFTER the only code that would have undone it, and
+        //   `Connection.liveRunners` reports a retired runner as one this
+        //   device may write `authorized_keys` on — the exact hazard `retire`'s
+        //   own doc says it exists to prevent.
+        // - The `Reachability` subscriber goes in under the same nil `host`, so
+        //   no later `retire` can find it either. It is woken by every network
+        //   change for the life of the process.
+        //
+        // The rebuild path never showed this: `retire` and `bringUp` run in one
+        // main-actor turn, so the replacement registers second and wins. It is
+        // the retire-with-NO-replacement path that bites — removing a runner,
+        // or turning "Connect every runner at once" off.
+        guard !Task.isCancelled else { return }
         poller?.cancel()
         newsRefresh?.cancel()
         reconnectTask?.cancel()
@@ -318,7 +343,7 @@ final class Connection: ObservableObject {
 
         guard let key = Identity.privateKey() else {
             if mine == attempt {
-                phase = .failed("This device has no SSH key and one could not be generated.")
+                phase = .failed(RunnerTrouble.Said.noIdentity)
             }
             return
         }
@@ -433,15 +458,11 @@ final class Connection: ObservableObject {
 
     /// What a tunneled runner with no node key to dial it with is told.
     ///
-    /// **The dial does not mint one.** A tunneled runner was granted against
-    /// ONE public half, which is now a line in that runner's allowlist; minting
-    /// a fresh pair here would produce a key nobody has authorized, and tailcat
-    /// ignores a client it does not recognize without answering — so the
-    /// symptom would be a spinner, then a timeout, and nothing anywhere saying
-    /// why. `Failure` matches on "no tunnel key".
-    static let noNodeKey =
-        "This runner is reached through the tunnel, and this device has no tunnel key. "
-        + "Add this device again to get one."
+    /// The sentence itself is `RunnerTrouble.Said.noNodeKey`, in AgentKit next
+    /// to the phrase that classifies it and the argument for why the dial does
+    /// not simply mint a key. This name stays because every call site in this
+    /// file already uses it.
+    static let noNodeKey = RunnerTrouble.Said.noNodeKey
 
     /// A call came back saying the link is gone.
     ///
@@ -501,7 +522,7 @@ final class Connection: ObservableObject {
     private func reconnect(attempt: Int) async {
         guard case .reconnecting = phase, let host else { return }
         guard let key = Identity.privateKey() else {
-            phase = .failed("This device has no SSH key and one could not be generated.")
+            phase = .failed(RunnerTrouble.Said.noIdentity)
             return
         }
 
@@ -622,7 +643,7 @@ final class Connection: ObservableObject {
     /// about to succeed, and until this existed the only way out of that was to
     /// kill the app.
     func giveUp(on host: Runner) {
-        abandon("Stopped waiting for \(host.address). It may be asleep or off the network.")
+        abandon(RunnerTrouble.Said.stoppedWaiting(for: host.address))
     }
 
     /// Stop, for good, because nobody wants this runner any more.
@@ -654,7 +675,12 @@ final class Connection: ObservableObject {
     ///
     /// Removing a key nothing registered is explicitly fine — see
     /// `KeyedCallbacks.remove` — so retiring a connection that never got as far
-    /// as `start` is an ordinary thing for a reconcile to do.
+    /// as `start` is an ordinary thing for a reconcile to do. **That is true
+    /// only because `start` checks `Task.isCancelled` before it registers
+    /// anything.** Without that check this method runs first, finds a nil
+    /// `host` and clears nothing, and the bring-up it was meant to stop then
+    /// registers the runner it was meant to forget — with no later `retire`
+    /// able to reach either entry.
     func retire() {
         // Same bump as `abandon`: anything still awaiting the core for this
         // connection stops being able to write a phase on the way out.
@@ -676,13 +702,18 @@ final class Connection: ObservableObject {
 
     /// Back out of the fingerprint question without answering it.
     ///
-    /// Lands on the failure screen rather than the spinner, because that is the
-    /// screen with the runner switcher, the editor and this device's key on it.
-    /// The wording is what `Failure.keyNotTrusted` matches on.
+    /// Lands on the failure row rather than the spinner, because that is where
+    /// the way back to the question is. The wording is
+    /// `RunnerTrouble.Said.declined` — in AgentKit beside the phrase that
+    /// classifies it, so a reword cannot quietly turn a decision somebody made
+    /// into "Can't Connect".
+    ///
+    /// **Had no callers at all for the length of the multi-runner port**, which
+    /// is the same fact as `RunnerStatusRow` having no "Not Now" on it. Both
+    /// call sites pass it now, and `HostKeyQuestion` is what stops the pair
+    /// coming apart again.
     func declineHostKey(_ host: Runner) {
-        abandon(
-            "The key \(host.address) presented has not been trusted on this device. "
-                + "Far Cooler won’t connect until it is.")
+        abandon(RunnerTrouble.Said.declined(runner: host.address))
     }
 
     private func abandon(_ message: String) {
@@ -1077,7 +1108,8 @@ final class Connection: ObservableObject {
             var themes: [Theme]
         }
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data) else { return }
-        Themes.shared.merge(hostThemes: reply.themes)
+        guard let host else { return }
+        Themes.shared.merge(hostThemes: reply.themes, from: host.id)
     }
 
     /// The backstop, not the mechanism.
@@ -1283,7 +1315,8 @@ final class Connection: ObservableObject {
     /// Without this, a theme you just made is missing from the one place you
     /// would go to choose it.
     func reloadThemes() async {
-        Themes.shared.merge(hostThemes: await hostThemes())
+        guard let host else { return }
+        Themes.shared.merge(hostThemes: await hostThemes(), from: host.id)
     }
 
     func adapters() async -> [AdapterInfo] {

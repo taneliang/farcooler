@@ -66,13 +66,23 @@ final class Themes: ObservableObject {
         available = Themes.builtIn()
     }
 
+    /// What each runner defines, keyed by that runner.
+    ///
+    /// **The catalog is a fold over this, and that is the fix.** It used to be
+    /// a single list rebuilt from whichever runner answered last, which on a
+    /// phone holding one connection was the same thing and on a phone holding
+    /// three was a picker that changed under you. Keyed by
+    /// `Runner.id.uuidString` rather than by `UUID`, because the fold is in
+    /// sorted key order and `UUID` is not `Comparable`.
+    private var byRunner: [String: [Theme]] = [:]
+
     /// The theme in force.
     ///
     /// Falls back rather than to nothing when a stored name no longer
     /// resolves: a theme that vanished because a host's config file moved
     /// should cost you your colors, not your terminal.
     var current: Theme {
-        available.first { $0.name == stored } ?? .fallback
+        ThemeCatalog.inForce(named: stored, in: available, fallback: .fallback)
     }
 
     var selectedName: String {
@@ -102,22 +112,43 @@ final class Themes: ObservableObject {
         return (decoded?.isEmpty == false ? decoded! : [.fallback])
     }
 
-    /// Merge in whatever the connected runner defines.
+    /// Record what ONE runner defines, and rebuild the catalog from every
+    /// runner.
     ///
     /// Additive rather than replacing: the built-ins are this phone's and do
     /// not depend on which runner it happens to be talking to, so switching
     /// hosts must not empty the picker. Only the host's own entries move.
-    func merge(hostThemes: [Theme]) {
-        var merged = Themes.builtIn()
-        for theme in hostThemes {
-            // The host wins a name collision — it is the one somebody edited a
-            // file on purpose to make.
-            if let index = merged.firstIndex(where: { $0.name == theme.name }) {
-                merged[index] = theme
-            } else {
-                merged.append(theme)
-            }
-        }
+    ///
+    /// **`from` is not decoration.** Without it this took one runner's list and
+    /// made it the whole catalog, so a second runner answering deleted the
+    /// first runner's themes — and `current` falls back when the stored name no
+    /// longer resolves, which is why the symptom was the app reverting to Nord
+    /// at random. Which themes a fleet offers is `ThemeCatalog.merged`, in
+    /// AgentKit, where `swift test` can read it back; what is left here is the
+    /// bookkeeping and the publish.
+    func merge(hostThemes: [Theme], from runner: UUID) {
+        let key = runner.uuidString
+        guard byRunner[key] != hostThemes else { return }
+        byRunner[key] = hostThemes
+        rebuild()
+    }
+
+    /// Drop a retired runner's themes.
+    ///
+    /// The tear-down half, and the port had nowhere to put it: a catalog that
+    /// belonged to nobody in particular could not forget one runner's share of
+    /// it. Called from `RunnerStore.remove`, which its own doc calls the one
+    /// place that sees a runner stop existing — and deliberately NOT from
+    /// `Connection.retire`, which also fires on an edit and on the battery
+    /// gate, where the runner is still yours and its theme should stay in the
+    /// picker.
+    func forget(runner: UUID) {
+        guard byRunner.removeValue(forKey: runner.uuidString) != nil else { return }
+        rebuild()
+    }
+
+    private func rebuild() {
+        let merged = ThemeCatalog.merged(builtIn: Themes.builtIn(), hostThemes: byRunner)
         guard merged != available else { return }
         available = merged
         revision += 1

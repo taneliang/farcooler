@@ -1075,6 +1075,7 @@ struct ShellScreen: View {
                         onReconnectNow: { runner.connection.reconnectNow() },
                         onTrust: { hosts.trust(runner.host, fingerprint: $0) },
                         onReviewKey: { hosts.forgetKey(runner.host) },
+                        onNotNow: { runner.connection.declineHostKey(runner.host) },
                         onEdit: { editingRunner = runner.host },
                         // The overview has a `NavigationStack` of its own, so
                         // this one CAN push — unlike the row over the shell's

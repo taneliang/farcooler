@@ -121,13 +121,68 @@ final class WatchLinkHost: NSObject {
     /// that pane on" is to look, and looking is only possible now that there is
     /// more than one place to look.
     ///
-    /// Nil has two causes and one sentence, deliberately: the pane is on a
-    /// runner this phone is not talking to, or it has stopped existing. Neither
-    /// is something a person on a wrist can act on differently.
+    /// Nil has THREE causes and the third is the common one on a cold launch,
+    /// which is why nothing here decides what to say about it — see
+    /// `TerminalReach`, in AgentKit, where the sentences can be read back.
+    ///
+    /// This searches `entries`, which is empty until the first poll returns.
+    /// The `fleet != nil` guards above it pass long before that, because the
+    /// store is adopted at SCENE CREATION now rather than when a connection
+    /// succeeds — so a nil from here means "the pane is on a runner this phone
+    /// is not talking to", or "it has stopped existing", or simply "not yet",
+    /// and only the last of those is worth telling somebody about.
     private func connection(forTerminal id: String) -> Connection? {
         fleet?.entries.first { entry in
             entry.workspace.terminals.contains { $0.id == id }
         }?.connection
+    }
+
+    /// The same search, given the fleet a moment to arrive first.
+    ///
+    /// The fix for the cold launch, and a wait rather than a better sentence
+    /// because the pane a person tapped usually IS there — a second later. A
+    /// watch tap and a lock-screen answer both wake a phone that has not
+    /// finished starting, and answering them out of an empty list is answering
+    /// a question nobody has looked at yet.
+    ///
+    /// Shaped like `ready(_:within:)`: poll on the same 200ms, stop early on
+    /// success, and bound the whole thing so a runner that will never answer
+    /// cannot hold a wrist. It stops waiting as soon as EVERY runner has said
+    /// what it has, because at that point the answer will not change.
+    private func connection(forTerminal id: String, within budget: TimeInterval) async
+        -> Connection?
+    {
+        if let found = connection(forTerminal: id) { return found }
+        let deadline = Date().addingTimeInterval(budget)
+        while Date() < deadline, !everyRunnerHasAnswered {
+            try? await Task.sleep(for: .milliseconds(200))
+            if let found = connection(forTerminal: id) { return found }
+        }
+        return connection(forTerminal: id)
+    }
+
+    /// Whether the fleet has finished saying what it has.
+    ///
+    /// EVERY runner, not any: a fleet of three where two have come back cannot
+    /// say a pane does not exist, because it might be on the third.
+    /// `FleetView.dropUnknownTerminal` reaches for the same predicate for the
+    /// same reason. A phone with no runners answers true, which is honest —
+    /// there is nothing coming.
+    private var everyRunnerHasAnswered: Bool {
+        guard let fleet else { return false }
+        return fleet.runners.allSatisfy { $0.connection.hasFleet }
+    }
+
+    /// What a wrist or a card is told when the search came back empty.
+    ///
+    /// Wiring. Which cause it is, and the words for it, are `TerminalReach`'s.
+    private func missed(hasScene: Bool) -> String {
+        let miss =
+            TerminalReach.miss(
+                hasScene: hasScene, everyRunnerHasAnswered: everyRunnerHasAnswered,
+                found: false) ?? .notOnAnyRunner
+        return TerminalReach.sentence(
+            miss, appName: appName, deviceKind: DeviceKind.current)
     }
 
     // MARK: - Pushing the fleet
@@ -224,22 +279,21 @@ final class WatchLinkHost: NSObject {
     private func perform(_ request: WatchRequest) async -> WatchReply {
         guard fleet != nil else {
             // No scene means no `FleetStore` at all — there is no app-wide one
-            // to fall back to. Honest, and actionable. `appName`, not a
-            // literal: a canary build is named "FC Canary" and telling somebody
-            // running it to open "Far Cooler" sends them looking for an app
-            // that is not on their phone, the same mistake already fixed once
-            // in the Live Activity and once in the widget.
-            return .failed("Open \(appName) on your \(DeviceKind.current), then try again.")
+            // to fall back to. Honest, and actionable.
+            return .failed(missed(hasScene: false))
         }
         // The runner the pane is on, which is a question the phone could not
         // ask while it held one connection: every request names a terminal and
-        // the wire has never carried a runner. See `connection(forTerminal:)`.
-        guard let connection = connection(forTerminal: request.terminal) else {
-            // Two causes, one sentence: the pane is on a runner this phone is
-            // not talking to, or it has stopped existing. Neither is something
-            // somebody on a wrist can act on differently, and a sentence that
-            // guessed between them would be wrong half the time.
-            return .failed("\(appName) isn’t connected to the runner that pane is on.")
+        // the wire has never carried a runner.
+        //
+        // Given the fleet a moment to arrive, because this is routinely a phone
+        // that has just been WOKEN by this very request and has a scene before
+        // it has any entries. See `connection(forTerminal:within:)`.
+        guard
+            let connection = await connection(
+                forTerminal: request.terminal, within: Self.fleetBudget)
+        else {
+            return .failed(missed(hasScene: true))
         }
         guard await ready(connection, within: Self.connectBudget) else {
             // Named apart because it is the one unreachable state a person can
@@ -689,20 +743,18 @@ final class WatchLinkHost: NSObject {
         GlancePermissionStore.write(claimed)
 
         guard fleet != nil else {
-            // `appName`, not a literal: a canary build is named "FC Canary" and
-            // telling somebody running it to open "Far Cooler" sends them
-            // looking for an app that is not on their phone.
-            await settle(
-                intent, .nothingSent,
-                "Open \(appName) on your \(DeviceKind.current), then try again.")
+            await settle(intent, .nothingSent, missed(hasScene: false))
             return
         }
-        // Word for word the sentence the watch gets, because it is the same
-        // condition and two wordings for one condition read as two problems.
-        guard let connection = connection(forTerminal: terminal) else {
-            await settle(
-                intent, .nothingSent,
-                "\(appName) isn’t connected to the runner that pane is on.")
+        // Word for word the sentences the watch gets, because these are the same
+        // conditions and two wordings for one condition read as two problems.
+        // The wait is the same too: a lock-screen tap launches the app, so the
+        // fleet is routinely younger than the request. See `TerminalReach`.
+        guard
+            let connection = await connection(
+                forTerminal: terminal, within: Self.glanceFleetBudget)
+        else {
+            await settle(intent, .nothingSent, missed(hasScene: true))
             return
         }
         guard await ready(connection, within: Self.glanceConnectBudget) else {
@@ -967,6 +1019,25 @@ final class WatchLinkHost: NSObject {
     private static let connectBudget: TimeInterval = 8
     private static let actionBudget: TimeInterval = 8
     private static let replayBudget: TimeInterval = 10
+
+    /// How long to let the fleet arrive before deciding a pane is not on it.
+    ///
+    /// A fourth stage on the same clock, and the reason it does not blow the
+    /// budget is that it is not additive with `connectBudget` in the case that
+    /// matters. Waiting for the fleet IS waiting for the runner to answer, one
+    /// step further along: once entries exist the connection is `connected`, so
+    /// `ready` returns on its first line and spends nothing. The only run that
+    /// gets longer is the one where no fleet ever arrives — and that run used to
+    /// return an instant wrong answer, which is what this whole change is
+    /// about.
+    ///
+    /// Shorter than `connectBudget` because a phone that has a scene has
+    /// usually already dialed; this covers the seconds between the scene and
+    /// the first poll, not a cold SSH bring-up. The glance's is shorter again,
+    /// for the reason `glanceConnectBudget` is: a widget button has less of a
+    /// clock than a watch does.
+    private static let fleetBudget: TimeInterval = 4
+    private static let glanceFleetBudget: TimeInterval = 3
 
     private struct Timeout: Error {}
 

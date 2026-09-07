@@ -28,8 +28,14 @@ import SwiftUI
 ///
 /// **Every distinct next move `FleetView` offers survives here**, including the
 /// two Android's row does not have: "Authorize This Device" for a key the runner
-/// has never seen, and "Add This Device Again" for a missing tunnel key. Losing
-/// either would cost somebody the only action that fixes their runner —
+/// has never seen, and "Add This Device Again" for a missing tunnel key. That
+/// sentence was not true when this file was written — "Not Now" was dropped, so
+/// the only ways past a fingerprint were agreeing to it and force-quitting —
+/// which is why neither the list of answers nor the list of moves is a `switch`
+/// in this file any more. Both are tables in AgentKit, under
+/// `HostKeyQuestionTests`, so the next one to go missing goes missing in front
+/// of a test. Losing one would cost somebody the only action that fixes their
+/// runner —
 /// Android answers both with "Try again", which for a missing node key is a
 /// button that can only fail, every time, forever. Neither this nor the
 /// full-screen phase decides which move a failure gets: both read
@@ -72,6 +78,17 @@ struct RunnerStatusRow: View {
     /// question nobody answered.
     var onReviewKey: () -> Void
 
+    /// Back out of the fingerprint question without answering it.
+    ///
+    /// **This is the move the port lost.** The full-screen approval phase this
+    /// row replaced offered it, and without it the only ways past a fingerprint
+    /// somebody does not recognize are agreeing to it and force-quitting —
+    /// "Edit…" is not a third: a person who cannot vouch for a key has nothing
+    /// to correct, because the address is right and that is the point. See
+    /// `HostKeyQuestion`, which is where the list of answers lives so that
+    /// losing one is an edit in front of a test.
+    var onNotNow: () -> Void
+
     /// Correct this runner's details.
     var onEdit: () -> Void
 
@@ -111,10 +128,21 @@ struct RunnerStatusRow: View {
         case .connected:
             EmptyView()
 
+        // A way out, which this phase had none of. A mistyped but ROUTABLE
+        // address reads as "Connecting…" for the length of the OS's TCP
+        // timeout — over a minute — and until this button existed the only
+        // thing to do about it was wait the minute out and then correct it. The
+        // address is exactly what is wrong in that case, so the editor is the
+        // move; there is deliberately no per-row stop, because stopping is a
+        // fleet-level offer and `FleetView` already makes it once, held back
+        // four seconds so it does not flash up on a healthy launch. See
+        // `StopWaiting`.
         case .connecting:
             Text("Connecting…")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            Button("Edit…", action: onEdit)
+                .font(.footnote)
 
         // Not an error, and deliberately not worded as one: the rows above this
         // are this runner's last good answer and are still worth reading.
@@ -146,9 +174,15 @@ struct RunnerStatusRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            // Every answer the question has, drawn FROM the list rather than
+            // written out here. Three `Button`s in a view is how one of them
+            // went missing in the port, and how the loss stayed invisible: this
+            // file lives in the iOS target, which CI compiles and never runs.
             HStack(spacing: 16) {
-                Button("Trust This Runner") { onTrust(fingerprint) }
-                Button("Edit…", action: onEdit)
+                ForEach(HostKeyQuestion.Answer.allCases, id: \.self) { answer in
+                    Button(answer.label) { answered(answer, fingerprint: fingerprint) }
+                        .fontWeight(answer.isTheAnswer ? .semibold : .regular)
+                }
             }
             .font(.footnote)
 
@@ -192,16 +226,40 @@ struct RunnerStatusRow: View {
         .font(.footnote)
     }
 
+    /// One answer to the fingerprint question, as something to call.
+    ///
+    /// Wiring, and nothing more. WHICH answers exist is `HostKeyQuestion`'s.
+    private func answered(_ answer: HostKeyQuestion.Answer, fingerprint: String) {
+        switch answer {
+        case .trustThisRunner: onTrust(fingerprint)
+        case .notNow: onNotNow()
+        case .editTheRunner: onEdit()
+        }
+    }
+
     /// The move, as something to call.
     ///
     /// The mapping from a decision to a callback, and the only place this row
-    /// makes one. Which move a failure gets is not decided here — see
-    /// `RunnerTrouble.nextMove`.
+    /// makes one. Which move a failure gets is not decided here, and neither is
+    /// what carrying it out consists of — see `RunnerTrouble.nextMove` and
+    /// `NextMove.acts`.
+    ///
+    /// A move is a LIST of acts and not one, because of the case that used to
+    /// be silently wrong here: "Show the Key Again" mapped to `onReviewKey`
+    /// alone, and forgetting a key that was never pinned changes nothing, so
+    /// the reconcile kept the connection and the button did nothing at all. It
+    /// dials as well now, and the reason it must is written where a test can
+    /// read it.
     private func action(for move: RunnerTrouble.NextMove) -> () -> Void {
-        switch move {
-        case .authorizeThisDevice, .addThisDeviceAgain: return onAuthorize
-        case .reviewTheNewKey, .showTheKeyAgain: return onReviewKey
-        case .tryAgain: return onRetry
+        let acts = move.acts
+        return {
+            for act in acts {
+                switch act {
+                case .offerThisDevicesKey: onAuthorize()
+                case .forgetThePinnedKey: onReviewKey()
+                case .dialAgain: onRetry()
+                }
+            }
         }
     }
 }

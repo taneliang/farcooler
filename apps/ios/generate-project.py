@@ -168,6 +168,23 @@ AGENTKIT_SOURCES = [
     # reconcile has to keep have no screen in them, and the iOS UI suite is
     # compiled by CI and never executed. See `FleetMembershipTests`.
     "FleetMembership.swift",
+    # Every theme the phone offers, folded from every runner rather than
+    # rebuilt from whichever answered last. Here for `FleetMembership.swift`'s
+    # reason: the merge has no screen in it, and the version that lived inside
+    # the `Themes` singleton reverted the whole app to Nord at random on a fleet
+    # of two. See `ThemeCatalogTests`.
+    "ThemeCatalog.swift",
+    # Why a terminal id a wrist or a lock-screen card named did not resolve to
+    # a runner, and what to say about it. The port made a third cause reachable
+    # -- the fleet has not loaded yet -- and left two sentences for three
+    # causes, so a cold launch answered confidently and wrongly. See
+    # `TerminalReachTests`.
+    "TerminalReach.swift",
+    # Which runners a "Stop Waiting" tap stops, and whether the button belongs
+    # on screen at all. Here for `FleetMembership.swift`'s reason: the port
+    # turned one runner's escape hatch into `for runner in fleet.runners` and
+    # nothing could go red about it. See `StopWaitingTests`.
+    "StopWaiting.swift",
     # What a failure to reach a runner means, and the one thing worth doing
     # about it. `Connection.Failure` is a typealias for it. Here for
     # `AgentFailure.swift`'s reason exactly — two screens draw this copy now and

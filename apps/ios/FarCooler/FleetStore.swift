@@ -301,12 +301,21 @@ final class FleetStore: ObservableObject {
         }
     }
 
-    /// Refresh every runner at once, for pull-to-refresh.
+    /// Refresh every runner at once.
     ///
-    /// The counts come too. Somebody pulling the list down is asking for
-    /// everything on it, and the diff numbers ride a slower cadence than the
-    /// fleet — so without this they are the one thing on screen a pull would
-    /// not update.
+    /// **Nothing calls this.** It was written for a pull-to-refresh on a list
+    /// screen that the shell replaced before either landed, and the doc here
+    /// went on describing the gesture as though it existed — which is how a
+    /// reader comes away believing the app has a manual refresh it does not
+    /// have. Kept rather than deleted because the shape is right and the one
+    /// line that would use it is a `.refreshable` on whatever list comes back;
+    /// said plainly rather than left implied, because a comment that describes
+    /// a caller nobody wrote is the same defect as a test that cannot fail.
+    ///
+    /// The counts come too, and that is the part worth keeping: somebody
+    /// pulling a list down is asking for everything on it, and the diff numbers
+    /// ride a slower cadence than the fleet — so without this they would be the
+    /// one thing on screen a pull did not update.
     func refreshAll() async {
         for connection in active {
             await connection.refresh()

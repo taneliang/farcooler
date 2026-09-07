@@ -665,6 +665,15 @@ final class RunnerStore: ObservableObject {
         // rather than somewhere further in: this is the one place that sees a
         // runner stop existing.
         Reachability.shared.stopWatching(host.id.uuidString)
+        // The theme catalog is a fold over the runners, so a removed one has to
+        // stop contributing to it. Here and NOT in `Connection.retire`, which is
+        // the other place a connection ends and is the wrong one: retiring
+        // happens on an edit and on the battery gate too, and in both of those
+        // the runner still exists. Forgetting there would empty the picker of a
+        // theme you are looking at for the second it takes the rebuilt
+        // connection to send the same list back — which is the flicker this
+        // catalog was made per-runner to stop. See `Themes.forget(runner:)`.
+        Themes.shared.forget(runner: host.id)
         save()
     }
 

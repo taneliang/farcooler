@@ -61,6 +61,49 @@ enum RunnerTrouble {
     case stopped
     case other
 
+    /// The sentences the APP writes, as opposed to the ones the core sends.
+    ///
+    /// Four of the nine kinds above are diagnosed by matching a phrase in a
+    /// message this app composed itself, which is a round trip with a seam in
+    /// the middle: reword the sentence in `Connection` and the classifier
+    /// quietly stops matching it, so a decision the user made turns into
+    /// `.other` — "Can't Connect", the core's own words, and "Try Again" for a
+    /// question nobody answered.
+    ///
+    /// Nothing about that failure is visible in a diff or a build. So the
+    /// sentence and the phrase that recognizes it live in one file, and
+    /// `RunnerTroubleTests` reads each one back through `init(message:)`. That
+    /// test is the only enforcement this rule has, and it is the reason these
+    /// are here rather than beside the code that raises them.
+    enum Said {
+        /// The user was shown a fingerprint and backed out of the question.
+        /// Matches on "has not been trusted".
+        static func declined(runner: String) -> String {
+            "The key \(runner) presented has not been trusted on this device. "
+                + "Far Cooler won’t connect until it is."
+        }
+
+        /// The user stopped waiting out a dial. Matches on "Stopped waiting".
+        static func stoppedWaiting(for runner: String) -> String {
+            "Stopped waiting for \(runner). It may be asleep or off the network."
+        }
+
+        /// No SSH key, and none could be made. Matches on "no SSH key".
+        static let noIdentity = "This device has no SSH key and one could not be generated."
+
+        /// A tunneled runner and no node key. Matches on "no tunnel key".
+        ///
+        /// **The dial does not mint one.** A tunneled runner was granted against
+        /// ONE public half, which is now a line in that runner's allowlist;
+        /// minting a fresh pair would produce a key nobody has authorized, and
+        /// tailcat ignores a client it does not recognize without answering — so
+        /// the symptom would be a spinner, then a timeout, and nothing anywhere
+        /// saying why.
+        static let noNodeKey =
+            "This runner is reached through the tunnel, and this device has no tunnel key. "
+            + "Add this device again to get one."
+    }
+
     init(message: String) {
         if message.contains("rejected this key") { self = .keyRejected }
         else if message.contains("is not the one Far Cooler has recorded") {
@@ -104,6 +147,52 @@ enum RunnerTrouble {
             case .tryAgain: return "Try Again"
             }
         }
+
+        /// What tapping this move has to DO, in order, and all of it.
+        ///
+        /// The label is the intent; this is the mechanism. Here rather than in
+        /// a `switch` inside a view for the table's own reason — two screens
+        /// draw these buttons and neither of them may decide — and for a
+        /// second reason this file did not have before: **one of these answers
+        /// is not the obvious one, and the obvious one is a button that does
+        /// nothing.**
+        ///
+        /// Forgetting a runner's pinned key is not, by itself, a reconnect. It
+        /// works out to one only because clearing the fingerprint CHANGES the
+        /// runner, and `FleetMembership.plan` rebuilds a connection whose
+        /// details no longer match the ones it was dialed with. So:
+        ///
+        /// - `reviewTheNewKey` follows a host key that changed underneath us. A
+        ///   fingerprint really is pinned there, clearing it is a change, and
+        ///   the rebuild fires on its own.
+        /// - `showTheKeyAgain` follows a fingerprint question nobody answered.
+        ///   Nothing was ever pinned, so the fingerprint is ALREADY nil,
+        ///   clearing it changes nothing at all, `plan` files the runner under
+        ///   `kept` and leaves it completely alone. Without an explicit dial
+        ///   this move is a button that cannot work, which is the one thing
+        ///   `nextMove`'s own doc says a failure screen must never offer.
+        var acts: [Act] {
+            switch self {
+            case .authorizeThisDevice, .addThisDeviceAgain: return [.offerThisDevicesKey]
+            case .reviewTheNewKey: return [.forgetThePinnedKey]
+            case .showTheKeyAgain: return [.forgetThePinnedKey, .dialAgain]
+            case .tryAgain: return [.dialAgain]
+            }
+        }
+    }
+
+    /// The mechanisms a move is built out of.
+    ///
+    /// Three, and deliberately no more: a screen that needed a fourth would be
+    /// a screen deciding something, which is what this file is for.
+    enum Act: Sendable, Equatable, Hashable {
+        /// Show this device's public key and the line to paste on the machine.
+        case offerThisDevicesKey
+        /// Clear the pinned fingerprint, so the next dial asks about the key
+        /// instead of refusing it.
+        case forgetThePinnedKey
+        /// Dial this runner again, from the beginning.
+        case dialAgain
     }
 
     var nextMove: NextMove {
@@ -255,4 +344,70 @@ enum RunnerTrouble {
             return "The attempt to reach it didn’t finish."
         }
     }
+}
+
+/// The fingerprint question, and every answer it has.
+///
+/// Not a `RunnerTrouble`. Nothing failed — a runner presented a key this device
+/// has never seen, which is the ordinary first contact — and it is deliberately
+/// not headlined as though something had. It is in this file because of what
+/// one of its answers PRODUCES: declining lands on `RunnerTrouble.keyNotTrusted`,
+/// whose one useful move is back to this same question, and the two halves of
+/// that loop drifting apart is the drift this file exists to stop.
+///
+/// **This list is a recorded ruling, and the multi-runner port lost one of
+/// them.** `RunnerStatusRow` replaced a full-screen approval phase that offered
+/// "Trust This Runner" AND "Not Now"; the row shipped with "Trust This Runner"
+/// and "Edit…", so the only way out of a fingerprint somebody was not sure
+/// about became agreeing to it or force-quitting. The row's own header asserts
+/// that every distinct next move survived, which is what makes this the
+/// expensive kind of defect: the code and its comment disagreed, and nothing
+/// could go red about it because the row lives in the iOS target, which CI
+/// compiles and never runs.
+///
+/// So the answers are a list here rather than three `Button`s in a view, and
+/// the view iterates it. Dropping one is now an edit to this file, in front of
+/// `HostKeyQuestionTests`.
+enum HostKeyQuestion {
+    /// In the order they are offered. Trusting first because it is the answer;
+    /// the other two are the ways out, and a way out that came first would read
+    /// as the recommendation.
+    enum Answer: Sendable, Equatable, Hashable, CaseIterable {
+        /// Record the fingerprint on screen, which is also the connect. See
+        /// `RunnerStore.trust`.
+        case trustThisRunner
+        /// Back out without answering. **Not a synonym for "Edit…".** Somebody
+        /// who does not recognize a fingerprint has nothing to correct — the
+        /// address is right, that is the point — and leaving them only a
+        /// destructive edit and an agreement is leaving them the agreement.
+        case notNow
+        /// Correct this runner's details, for the case where the address really
+        /// is wrong and the key on screen belongs to somebody else's machine.
+        case editTheRunner
+
+        /// Title case, as every button in this app is.
+        var label: String {
+            switch self {
+            case .trustThisRunner: return "Trust This Runner"
+            case .notNow: return "Not Now"
+            case .editTheRunner: return "Edit…"
+            }
+        }
+
+        /// Whether this is the answer, as opposed to a way out of the question.
+        ///
+        /// One of them, and the screens draw it with the weight — the two ways
+        /// out are alternatives, and giving all three the same emphasis gives a
+        /// person three things to weigh when only one of them is the answer.
+        var isTheAnswer: Bool { self == .trustThisRunner }
+    }
+
+    /// Backing out leaves this runner in this state.
+    ///
+    /// Named here so the loop is closed in one place: `Said.declined` is the
+    /// sentence, `RunnerTrouble.keyNotTrusted` is what it classifies to, and
+    /// `showTheKeyAgain` is the move back. `HostKeyQuestionTests` walks the
+    /// whole circle, because every link in it is a string match or a table and
+    /// none of them fails loudly on its own.
+    static let declining = RunnerTrouble.keyNotTrusted
 }
