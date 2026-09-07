@@ -49,6 +49,8 @@ import com.farcooler.model.Trouble
 import com.farcooler.model.Workspace
 import com.farcooler.net.Connection
 import com.farcooler.net.rethrowIfCancellation
+import com.farcooler.core.refusalWord
+import com.farcooler.model.troubleAfter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -376,7 +378,8 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                             // this sheet and that one are the same flow, and
                             // two spellings of one failure is the drift the
                             // whole rule exists to prevent.
-                            failure = Trouble("Couldn’t create the worktree.", it.message)
+                            failure = troubleAfter(
+                                it.refusalWord, it.message, "Couldn’t create the worktree.")
                             phase = null
                             working = false
                             return@launch
@@ -395,9 +398,10 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                             // What DID happen stays in the sentence — the
                             // worktree exists, and somebody who reads only this
                             // line still knows there is one to go back to.
-                            failure = Trouble(
-                                "Created the worktree, but couldn’t start $agentName.",
+                            failure = troubleAfter(
+                                it.refusalWord,
                                 it.message,
+                                "Created the worktree, but couldn’t start $agentName.",
                             )
                             phase = null
                             working = false
@@ -453,9 +457,10 @@ fun QuickTaskSheet(model: AppModel, onDismiss: () -> Unit) {
                             // the same packet as pasted text, not as submit.
                             target.writeRaw(terminalId, "0d")
                         }.onFailure {
-                            failure = Trouble(
-                                "Started $agentName, but couldn’t send the task.",
+                            failure = troubleAfter(
+                                it.refusalWord,
                                 it.message,
+                                "Started $agentName, but couldn’t send the task.",
                             )
                             phase = null
                             working = false
@@ -619,7 +624,8 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                                 // here rather than reported as a failed
                                 // adoption — the sheet closing is not an error.
                                 it.rethrowIfCancellation()
-                                failure = Trouble("Couldn’t resume that branch.", it.message)
+                                failure = troubleAfter(
+                                    it.refusalWord, it.message, "Couldn’t resume that branch.")
                                 working = false
                                 return@launch
                             }
@@ -716,7 +722,8 @@ fun NewWorkspaceSheet(model: AppModel, onDismiss: () -> Unit) {
                             // face this sheet writes its own refusals in — the
                             // two above this button among them. Same sentence
                             // as Quick Task's, because it is the same failure.
-                            failure = Trouble("Couldn’t create the worktree.", it.message)
+                            failure = troubleAfter(
+                                it.refusalWord, it.message, "Couldn’t create the worktree.")
                             working = false
                             return@launch
                         }
@@ -809,7 +816,8 @@ fun AddRepositorySheet(
                         // does not know whether the path was wrong, the folder
                         // was not a repository, or the scope was refused, and
                         // the only account of which is the text that came back.
-                        failure = Trouble("Adding this repository didn’t finish.", it.message)
+                        failure = troubleAfter(
+                            it.refusalWord, it.message, "Adding this repository didn’t finish.")
                         working = false
                         return@launch
                     }

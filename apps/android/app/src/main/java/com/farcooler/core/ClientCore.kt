@@ -19,8 +19,22 @@ import kotlinx.serialization.json.long
 import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
 
-/** What the core refused, in a sentence written for a human. */
-open class CoreException(message: String) : Exception(message)
+/**
+ * What the core refused.
+ *
+ * [word] is the stable machine word the runner named the refusal by — one of
+ * the `ErrorCode` names, spelled in kebab by `farcooler_core::error::word` and
+ * carried on the answer line as `code`. Null where no runner refused anything:
+ * a dropped link, or an argument the boundary rejected before sending, has no
+ * code because nothing on the other side produced one.
+ *
+ * Carried rather than recovered from the message, for the reason
+ * [DisconnectedException] is: Rust still has the type at the moment the error
+ * is produced, and half a dozen screens were reduced to matching substrings of
+ * a Rust `Display` string because nothing brought it across.
+ * [com.farcooler.model.troubleFor] is what turns it into a sentence.
+ */
+open class CoreException(message: String, val word: String? = null) : Exception(message)
 
 /**
  * The link is gone, as opposed to the request being refused.
@@ -32,6 +46,10 @@ open class CoreException(message: String) : Exception(message)
  * A call on a live session need not make it.
  */
 class DisconnectedException(message: String) : CoreException(message)
+
+/** The runner's word for a refusal, or null if this is not one. */
+val Throwable.refusalWord: String?
+    get() = (this as? CoreException)?.word
 
 /**
  * Kotlin's view of the Rust client core.
@@ -287,8 +305,9 @@ class ClientCore {
                 val message =
                     line["error"]?.jsonPrimitive?.contentOrNull ?: "the host refused the request"
                 val lost = line["disconnected"]?.jsonPrimitive?.booleanOrNull == true
+                val word = line["code"]?.jsonPrimitive?.contentOrNull
                 waiter.completeExceptionally(
-                    if (lost) DisconnectedException(message) else CoreException(message)
+                    if (lost) DisconnectedException(message) else CoreException(message, word)
                 )
             }
         }

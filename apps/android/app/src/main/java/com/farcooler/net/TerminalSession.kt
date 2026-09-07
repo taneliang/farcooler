@@ -5,6 +5,9 @@ import com.farcooler.core.ClientCore
 import com.farcooler.core.TerminalGrid
 import com.farcooler.core.Vt
 import com.farcooler.core.VtCore
+import com.farcooler.core.refusalWord
+import com.farcooler.model.RunnerRefusal
+import com.farcooler.model.troubleFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -897,7 +900,23 @@ class TerminalSession(
      */
     private fun report(error: Exception) {
         val message = error.message.orEmpty()
-        _phase.value = if (message == "resource not found") Phase.NotLive else humanFailure(message)
+        // The runner's own word for "there is no such pane", with the string
+        // comparison kept as a second arm — [humanFailure]'s other caller is a
+        // stream end, which is a bare JSON string with no code left on it.
+        if (error.refusalWord == RunnerRefusal.NOT_FOUND.word || message == "resource not found") {
+            _phase.value = Phase.NotLive
+            return
+        }
+        if (message == "not connected") {
+            _phase.value = humanFailure(message)
+            return
+        }
+        // Every other refusal has a word, and the ones this build can read say
+        // more than "the request didn't finish" ever could: tmux missing on the
+        // runner, a device enrolled only to look, a Far Cooler too old.
+        val trouble = troubleFor(
+            error.refusalWord, message, "The request that reads this pane didn’t finish.")
+        _phase.value = Phase.Failed(trouble.sentence, trouble.transcript)
     }
 
     /**

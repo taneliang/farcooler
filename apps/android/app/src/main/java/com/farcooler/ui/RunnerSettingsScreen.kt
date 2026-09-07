@@ -55,6 +55,8 @@ import com.farcooler.model.RepositoryRoot
 import com.farcooler.model.Trouble
 import com.farcooler.net.Connection
 import com.farcooler.net.rethrowIfCancellation
+import com.farcooler.core.refusalWord
+import com.farcooler.model.troubleFor
 import kotlinx.coroutines.launch
 
 /**
@@ -125,7 +127,8 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             connection.repositoryRoots()
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            rootsTrouble = Trouble(deniedSentence("watched folders"), e.message)
+            rootsTrouble = troubleFor(
+                e.refusalWord, e.message, deniedSentence("watched folders"))
             emptyList()
         }
     }
@@ -150,7 +153,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             connection.adapters()
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            adaptersTrouble = Trouble(deniedSentence("agents"), e.message)
+            adaptersTrouble = troubleFor(e.refusalWord, e.message, deniedSentence("agents"))
             emptyList()
         }
         reloadRoots()
@@ -565,6 +568,11 @@ internal fun rootRemovalNote(): String =
  * does not claim a denial, because a runner asleep, a daemon too old and a socket
  * that went away all arrive here looking the same. It says what is missing and
  * lets the runner's own words, in the box underneath, say why.
+ *
+ * Still the fallback, and still for that reason — but no longer the ONLY answer.
+ * A runner that refused for a reason it named now gets that reason's sentence
+ * instead, so the three cases above stop looking the same when the runner has
+ * told us which one it is: see [com.farcooler.model.troubleFor].
  */
 internal fun deniedSentence(what: String): String =
     "Couldn’t read this runner’s $what."

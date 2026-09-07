@@ -18,6 +18,7 @@ import com.farcooler.model.ReviewBookmarks
 import com.farcooler.model.ReviewPosition
 import com.farcooler.model.ReviewRef
 import com.farcooler.model.WorkingTree
+import com.farcooler.model.RunnerRefusal
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -177,7 +178,16 @@ class ChangesStoreTest {
     fun `a failed read is a sentence, not a clean branch`() = runTest {
         val source = FakeSource().apply {
             set = ChangeSet(branch = "feat/x", files = listOf(file("a.rs")))
-            setFails = CoreException("method not found: changes.change_set")
+            // The refusal a runner too old ACTUALLY sends. This said
+            // `CoreException("method not found: changes.change_set")` — a string
+            // no daemon has ever produced, invented by this test to satisfy the
+            // substring the code matched. It could not have caught the real
+            // failure, which arrives as `CapabilityUnsupported` and used to fall
+            // straight through to the generic.
+            setFails = CoreException(
+                "this runner is running an older Far Cooler that can’t do this yet",
+                RunnerRefusal.CAPABILITY_UNSUPPORTED.word,
+            )
         }
         val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())
         store.load()
@@ -824,7 +834,8 @@ class ChangesStoreTest {
         val source = object : ChangesSource by fake {
             override suspend fun setBase(workspace: String, baseRef: String): ChangeSet =
                 throw CoreException(
-                    "the base this branch is compared against could not be resolved"
+                    "the base this branch is compared against could not be resolved",
+                    RunnerRefusal.BASE_UNRESOLVABLE.word,
                 )
         }
         val store = ChangesStore(ref, source, InMemoryReviewStorage(), storeScope())

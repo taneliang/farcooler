@@ -1,6 +1,7 @@
 package com.farcooler.net
 
 import com.farcooler.core.DisconnectedException
+import com.farcooler.core.refusalWord
 import com.farcooler.data.ReviewStorage
 import com.farcooler.model.ChangeSet
 import com.farcooler.model.ChangesState
@@ -15,7 +16,9 @@ import com.farcooler.model.ReviewAgentTarget
 import com.farcooler.model.ReviewCommentQueue
 import com.farcooler.model.ReviewPosition
 import com.farcooler.model.ReviewRef
+import com.farcooler.model.RunnerRefusal
 import com.farcooler.model.Trouble
+import com.farcooler.model.troubleFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -782,13 +785,26 @@ class ChangesStore(
          * over would send somebody looking for a screen that does not exist.
          */
         internal fun loadTrouble(e: Exception): Trouble {
-            val text = (e.message ?: "").lowercase()
-            if (text.contains("not found") || text.contains("unknown method")) {
+            // **Rewritten to read the runner's word rather than guess at its
+            // prose.** The guess was wrong in both directions. "unknown method"
+            // was never a string the daemon sends — an unimplemented method
+            // comes back as `CapabilityUnsupported`, whose message says nothing
+            // of the kind — so that half matched nothing. And "not found"
+            // matched a workspace somebody else had removed, which this then
+            // reported as a runner too old to review changes: a definite answer
+            // sending you to update software that was never the problem.
+            //
+            // This arm keeps a sentence of its own rather than the shared
+            // table's, for [baseTrouble]'s reason: this screen knows WHAT is
+            // too old for, and "too old to review changes" says more here than
+            // "too old for this" could.
+            if (e.refusalWord == RunnerRefusal.CAPABILITY_UNSUPPORTED.word) {
                 return Trouble("This runner’s Far Cooler is too old to review changes.")
             }
-            return Trouble(
-                "Couldn’t read this workspace. The request that reads it didn’t finish.",
+            return troubleFor(
+                e.refusalWord,
                 e.message,
+                "Couldn’t read this workspace. The request that reads it didn’t finish.",
             )
         }
 
@@ -809,14 +825,24 @@ class ChangesStore(
          * that was on screen, and the thing to do is pick a different ref.
          */
         internal fun baseTrouble(e: Exception, baseRef: String): Trouble {
-            val text = (e.message ?: "").lowercase()
-            if (text.contains("resolve")) {
+            // The runner's word, not the substring "resolve" out of its prose.
+            // That matched because `BaseUnresolvable`'s Rust sentence happens to
+            // contain "resolved" — and it would have gone on matching anything
+            // else that ever said the word, while missing the code itself the
+            // moment somebody reworded the Rust.
+            //
+            // This one keeps a sentence of its own rather than the shared table's
+            // because it can NAME THE REF, which the table cannot: the shared
+            // sentence says "pick a base to compare against" and this screen is
+            // already the base picker.
+            if (e.refusalWord == RunnerRefusal.BASE_UNRESOLVABLE.word) {
                 return Trouble(
                     "This runner couldn’t resolve $baseRef, so the base is unchanged. " +
                         "It may have been deleted since this list was read."
                 )
             }
-            return Trouble("Couldn’t change the base, so it’s unchanged.", e.message)
+            return troubleFor(
+                e.refusalWord, e.message, "Couldn’t change the base, so it’s unchanged.")
         }
 
         /**
@@ -835,13 +861,16 @@ class ChangesStore(
                         "Try again once it’s back."
                 )
             }
-            val text = (e.message ?: "").lowercase()
-            if (text.contains("not found") || text.contains("unknown method")) {
+            // The runner's own word. "not found" also matched "invalid
+            // argument: path not found", which is a bug in this app rather than
+            // a pane that has gone away, and "unknown method" matched nothing at
+            // all — see [loadTrouble].
+            if (e.refusalWord == RunnerRefusal.NOT_FOUND.word) {
                 return Trouble(
                     "That pane isn’t running an agent anymore, so there was nothing to send to."
                 )
             }
-            return Trouble("Couldn’t send these. They’re still here.", e.message)
+            return troubleFor(e.refusalWord, e.message, "Couldn’t send these. They’re still here.")
         }
     }
 }

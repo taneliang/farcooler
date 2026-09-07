@@ -8,6 +8,8 @@ import com.farcooler.model.AgentEvent
 import com.farcooler.model.Sequenced
 import com.farcooler.model.Transcript
 import com.farcooler.model.Trouble
+import com.farcooler.core.refusalWord
+import com.farcooler.model.troubleFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -180,7 +182,7 @@ class AgentStream(
                 // cause is unknowable, and a guess sends somebody to change a
                 // setting that was never the problem. See
                 // `Enrollment.note(about:outcome:)` in the Mac app.
-                Trouble("The request that reads it didn’t finish.", e.message)
+                troubleFor(e.refusalWord, e.message, "The request that reads it didn’t finish.")
             }
             _phase.value = phases.read(Poll.Failed(trouble), SystemClock.elapsedRealtime())
         } finally {

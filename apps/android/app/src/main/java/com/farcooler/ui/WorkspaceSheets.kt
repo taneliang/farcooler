@@ -55,6 +55,8 @@ import com.farcooler.model.prReviewWord
 import com.farcooler.model.prStateWord
 import com.farcooler.net.Connection
 import com.farcooler.net.rethrowIfCancellation
+import com.farcooler.core.refusalWord
+import com.farcooler.model.troubleFor
 import kotlinx.coroutines.launch
 
 // What a workspace can become, other than opened: seen, removed, or started
@@ -422,15 +424,18 @@ fun RemoveWorktreeCeremony(
 
                 is Connection.RemoveOutcome.Refused -> {
                     working = false
-                    // Far Cooler's sentence and the runner's words, never
-                    // joined — the rule `Trouble` exists for. This side genuinely
-                    // does not know why: a scope-denied phone, a repository lock
-                    // and a git that would not remove the tree all arrive here
-                    // looking the same, and the only account of which is the text
-                    // that came back.
-                    failure = Trouble(
-                        "Removing this worktree didn’t finish.",
+                    // The runner names why, and the reasons want different
+                    // things done: a pane still running has to be stopped, a
+                    // device with read scope cannot do this at all. This side
+                    // used not to be able to tell those apart — "a scope-denied
+                    // phone, a repository lock and a git that would not remove
+                    // the tree all arrive here looking the same" — and now it
+                    // can. A refusal this build cannot read keeps the sentence
+                    // that was here, with the runner's words in the box.
+                    failure = troubleFor(
+                        outcome.word,
                         outcome.message,
+                        "Removing this worktree didn’t finish.",
                     )
                 }
             }
@@ -582,7 +587,8 @@ fun ResumeBranchSheet(
             branches = connection.branches(repository)
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            failure = Trouble("Couldn’t read this project’s branches.", e.message)
+            failure = troubleFor(
+                e.refusalWord, e.message, "Couldn’t read this project’s branches.")
         }
     }
 

@@ -68,6 +68,8 @@ import com.farcooler.model.ReviewCommentQueue
 import com.farcooler.model.SentReviewBatch
 import com.farcooler.model.Trouble
 import com.farcooler.net.rethrowIfCancellation
+import com.farcooler.core.refusalWord
+import com.farcooler.model.troubleFor
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 
@@ -1049,7 +1051,8 @@ internal fun BaseBranchSheet(
             branches = loadBranches(repository)
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            failure = Trouble("Couldn’t read this project’s branches.", e.message)
+            failure = troubleFor(
+                e.refusalWord, e.message, "Couldn’t read this project’s branches.")
         }
     }
 

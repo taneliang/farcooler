@@ -29,6 +29,7 @@ import com.farcooler.model.StackReply
 import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
 import com.farcooler.model.toJson
+import com.farcooler.core.refusalWord
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -1246,7 +1247,12 @@ class Connection(
         data object NeedsTypedName : RemoveOutcome
 
         /** Anything else the runner said, in its own words. */
-        data class Refused(val message: String?) : RemoveOutcome
+        /**
+         * The message, and the stable word the runner named it by. The word
+         * travels without a sentence because the sentence a screen falls back
+         * to is that screen's, not this type's.
+         */
+        data class Refused(val message: String?, val word: String? = null) : RemoveOutcome
     }
 
     /**
@@ -1300,7 +1306,7 @@ class Connection(
             // about state this phone is holding a stale copy of, and the fleet
             // it draws behind the failure should be the current one.
             refresh()
-            return RemoveOutcome.Refused(e.message)
+            return RemoveOutcome.Refused(e.message, e.refusalWord)
         }
         refresh()
         return if (data["confirmationRequired"]?.jsonPrimitive?.booleanOrNull == true) {
