@@ -120,6 +120,59 @@ class WorkspaceOrderTest {
         assertEquals(WorkspaceOrder.Landing("b", WorkspaceOrder.Edge.BELOW), WorkspaceOrder.landing(cards, 250))
     }
 
+    // The lazy list's own measurements, which is where the extents above come
+    // from in the app: `FleetScreen`'s `visibleItemsInfo` becomes [Laid], and
+    // [WorkspaceOrder.cards] turns that into the list [landing] reads. A
+    // workspace is a header plus its terminal rows, all siblings in one flat
+    // `LazyColumn`, so the arithmetic that groups them is the part with a bug
+    // available in it.
+    private val laid = listOf(
+        WorkspaceOrder.Laid("a", offset = 0, size = 60),
+        WorkspaceOrder.Laid("a/1", offset = 60, size = 70),
+        WorkspaceOrder.Laid("a/2", offset = 130, size = 70),
+        WorkspaceOrder.Laid("b", offset = 200, size = 60),
+        WorkspaceOrder.Laid("c", offset = 260, size = 60),
+        WorkspaceOrder.Laid("c/1", offset = 320, size = 180),
+    )
+    private val headers = setOf("a", "b", "c")
+
+    /**
+     * The hand-written extents above are the ones the code actually produces.
+     *
+     * Everything below [cards] was checked against a list written out by hand,
+     * so the function that builds that list from what the screen measured was
+     * never run by any of it — and building it by measuring the headers alone,
+     * which leaves every terminal row in a dead band, passed the entire file.
+     * 320 of this fixture's 500 pixels are terminal rows, which is the ordinary
+     * shape of the screen.
+     */
+    @Test
+    fun `a card runs from its own header to the next one, terminals included`() {
+        assertEquals(cards, WorkspaceOrder.cards(laid, headers))
+    }
+
+    /** And the two ends: a prefix before the first header, and the last row. */
+    @Test
+    fun `a header-less prefix is ignored and the last row ends the last card`() {
+        val banner = WorkspaceOrder.Laid("banner", offset = -40, size = 40)
+        assertEquals(cards, WorkspaceOrder.cards(listOf(banner) + laid, headers))
+        // The final card ends at the bottom of the LAST item, not the bottom of
+        // its own header — the terminals under the last workspace are as much
+        // of it as the ones under the first.
+        assertEquals(500, WorkspaceOrder.cards(laid, headers).last().bottom)
+        assertEquals(emptyList<WorkspaceOrder.Card>(), WorkspaceOrder.cards(emptyList(), headers))
+    }
+
+    /** The same question as above, asked through what the screen measured. */
+    @Test
+    fun `a finger in a workspace's terminal rows is over that workspace`() {
+        val measured = WorkspaceOrder.cards(laid, headers)
+        assertEquals(WorkspaceOrder.Landing("a", WorkspaceOrder.Edge.ABOVE), WorkspaceOrder.landing(measured, 40))
+        assertEquals(WorkspaceOrder.Landing("a", WorkspaceOrder.Edge.BELOW), WorkspaceOrder.landing(measured, 150))
+        assertEquals(WorkspaceOrder.Landing("c", WorkspaceOrder.Edge.ABOVE), WorkspaceOrder.landing(measured, 300))
+        assertEquals(WorkspaceOrder.Landing("c", WorkspaceOrder.Edge.BELOW), WorkspaceOrder.landing(measured, 450))
+    }
+
     @Test
     fun `dragging past either end means the front or the back of the list`() {
         assertEquals(WorkspaceOrder.Landing("a", WorkspaceOrder.Edge.ABOVE), WorkspaceOrder.landing(cards, -400))
