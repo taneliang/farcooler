@@ -1575,23 +1575,37 @@ final class TerminalScrollTests: XCTestCase {
 
         // And now the runner change.
         //
-        // The probe is `ShellRootView`'s own, so it answering the whole way
-        // through is the shell not being rebuilt. Read AFTER the switch rather
-        // than raced during it: the demo runner is `127.0.0.1`, so anything
-        // that was going to be torn down and stood up again would have been,
-        // inside a poll, well before this reads.
+        // **Read as what SURVIVES it, and the survivor is the same object the
+        // old test watched disappear.** `shell-state` is published by
+        // `ShellRootView` itself, so a `ShellRootView` that goes on answering
+        // is a `ShellRootView` that was not rebuilt.
+        //
+        // The overview is the sharper half, and it is the old test's own
+        // evidence read the other way round. The runner menu is tapped with the
+        // grid OPEN, and nothing in this app closes the overview on a runner
+        // switch — `RunnerMenu` has an `onSwitch` for callers with something to
+        // close and the shell passes none. So the grid still being open is a
+        // `ShellRootView` that is the one the tap happened in. The old test
+        // waited for it to CLOSE and called that the teardown.
+        //
+        // Deliberately not a walk back to the pane by name: both demo entries
+        // point at one daemon, so with every runner connected at once each
+        // worktree is in the merged fleet twice, and "open the terminal called
+        // X" names two panes. What this measures needs no walk — nothing moved.
         try chooseRunner(app, named: "Runner B")
-        XCTAssertTrue(
-            probe.waitForExistence(timeout: 30),
-            "the shell was torn down by a change of runner — `.id(host)` is back on `RootView`, "
+
+        let stayed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                probe.exists && Self.field(probe.value as? String ?? "", "overview") == "1"
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [stayed], timeout: 30), .completed,
+            "the shell the runner menu was tapped in is gone — `.id(host)` is back on `RootView`, "
                 + "and every mounted pane went with it")
 
-        // Back to the runner whose pane was scrolled. The pane was never
-        // rebuilt, so it is where it was left.
-        try chooseRunner(app, named: "Runner A")
-        _ = try openATerminalInTheShell(app)
-        try XCTSkipUnless(
-            waitForHistory(app), "The pane came back with no scrollback at all to have a place in.")
+        // Out of the grid, back onto the pane that was never unmounted.
+        let done = app.buttons["Done"]
+        if done.waitForExistence(timeout: 10) { done.tap() }
         XCTAssertEqual(
             position(app)?.offset, scrolled.offset,
             "the pane lost its place across a change of runner. Panes are supposed to survive "
