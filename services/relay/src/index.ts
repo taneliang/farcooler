@@ -1374,7 +1374,13 @@ export const ALERT_BODY_BUDGET = 512
 /// correct about grapheme clusters and is not worth it here — the worst a code
 /// point boundary can do is separate an emoji from its modifier at the very end
 /// of a line that was already too long to read.
-function cut(text: string, bytes: number): string {
+///
+/// Exported for the same reason the budgets above are: what it does is
+/// arithmetic on a cap APNs enforces, and the only property anything ever
+/// measured was the LENGTH of what came back. A `cut` that returned its input
+/// REVERSED satisfied all three callers and the whole suite with them, which is
+/// not a property anybody would have claimed for it.
+export function cut(text: string, bytes: number): string {
   const encoder = new TextEncoder()
   if (encoder.encode(text).length <= bytes) return text
   let out = ''
@@ -2124,13 +2130,24 @@ async function startCard(
   // card that was refused is exactly the bug above.
   if (!started) return
 
-  // The conflict arm updates only a row that is still unaddressable, which is
-  // what makes it safe. The app can file the real update token while these
-  // pushes are in flight — that is exactly what happens when the phone comes to
-  // the foreground because of the alert they carry — and overwriting it with the
-  // sentinel would throw away the only address the card has. The `WHERE` is what
-  // refuses that, while still letting an escalation record the headline its new
-  // card is showing and clear a dismissal it has just superseded.
+  // The conflict arm's job is the escalation: it records the headline the new
+  // card is showing and clears the dismissal that card has just superseded,
+  // which is what keeps one swipe to exactly one replacement. Without that
+  // clearing, `dismissed_at` stays set and the NEXT blocked push raises a second
+  // card, and the one after that a third.
+  //
+  // The `WHERE` narrows it to a row still holding the sentinel — the row this
+  // start actually claimed. The app can file a real update token while these
+  // pushes are in flight, which is exactly what happens when the phone comes to
+  // the foreground because of the alert they carry, and a row that has been
+  // re-addressed since is no longer the one being started: it keeps what the app
+  // filed and both of its clocks, rather than being re-stamped by a start that
+  // filing has already overtaken.
+  //
+  // It is NOT what saves the address itself. `update_token` is not in the SET
+  // list, so the arm could never have written the sentinel over a real token —
+  // this comment claimed it could until 2026-09-07, and the claim was checked by
+  // nothing because the whole arm was unreachable from the suite.
   //
   // `environment` stays NULL because nothing knows it yet: the start goes to
   // every phone on the account, and whichever one's app runs next reports its

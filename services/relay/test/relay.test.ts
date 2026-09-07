@@ -11,7 +11,8 @@ import wranglerToml from '../wrangler.toml?raw'
 // `spells both channels the way the Android app creates them`.
 import notifierKt from '../../../apps/android/app/src/main/java/com/farcooler/notify/Notifier.kt?raw'
 
-import worker, { ALERT_BODY_BUDGET, ALERT_TITLE_BUDGET, STATE_BUDGET } from '../src/index'
+import worker, { ALERT_BODY_BUDGET, ALERT_TITLE_BUDGET, STATE_BUDGET, cut } from '../src/index'
+import { anonymousId, record } from '../src/analytics'
 import { fingerprintOf, parseEd25519 } from '../src/keys'
 import { androidChannel, sendLiveActivity, topicMismatch } from '../src/push'
 import { verifySession } from '../src/workos'
@@ -181,13 +182,31 @@ function pushes(calls: Call[]): Call[] {
 }
 
 function post(path: string, body: unknown, bearer?: string): Promise<Response> {
+  return postAs({}, path, body, bearer)
+}
+
+/// The same request against a worker whose BINDINGS differ from the suite's.
+///
+/// A misconfigured deployment is not a misconfigured request: the relay reads
+/// `CHANNEL` and `APNS_TOPIC` off `env`, so the only way to express one is to
+/// hand a route a different env. Overridden per call rather than declared in
+/// `vitest.config.ts`, because the bindings there are the CORRECT pairing and
+/// every other test in this file has to keep running against a relay that is
+/// configured properly.
+function postAs(
+  bindings: Record<string, unknown>,
+  path: string,
+  body: unknown,
+  bearer?: string,
+  headers: Record<string, string> = {},
+): Promise<Response> {
   return worker.fetch(
     new Request(`https://relay.test${path}`, {
       method: 'POST',
-      headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+      headers: { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...headers },
       body: JSON.stringify(body),
     }),
-    env as never,
+    { ...env, ...bindings } as never,
     { waitUntil() {}, passThroughOnException() {} } as never,
   )
 }
@@ -760,6 +779,142 @@ describe('/v1/auth/refresh and /v1/auth/logout', () => {
   })
 })
 
+// MARK: - The one protection that only exists in production
+
+/// `withinRate` fails open with no binding, and this suite declares none.
+///
+/// The absence is deliberate and `vitest.config.ts` says so: these tests are
+/// about the routes, and a real limiter in front of every one of them would
+/// throttle the suite rather than the thing being tested. **That decision is
+/// not the same as its consequence.** What followed from it was that nothing
+/// anywhere exercised the throttle at all — the whole `startsWith('/v1/auth/')`
+/// arm could be deleted, or made to gate the wrong routes, or made to refuse
+/// everybody, and 169 tests stayed green while the only unauthenticated surface
+/// this service has went unprotected in production and over-protected nowhere.
+///
+/// The decision stands. The limiter is injected PER REQUEST, so the suite's own
+/// bindings still declare none and every other test in this file runs against a
+/// relay with no throttle, exactly as before.
+describe('the throttle on /v1/auth/*', () => {
+  /// A `RateLimit` binding that answers the same way every time, and remembers
+  /// what it was asked about.
+  function limiter(success: boolean) {
+    const asked: { key: string }[] = []
+    return {
+      asked,
+      async limit(options: { key: string }) {
+        asked.push(options)
+        return { success }
+      },
+    }
+  }
+
+  const AUTH = ['/v1/auth/token', '/v1/auth/refresh', '/v1/auth/logout']
+
+  it('refuses with a 429 and does no work at all', async () => {
+    // Before any work, which is the whole point: two of these three spend the
+    // relay's WorkOS API key per request, so a caller that could make the relay
+    // spend it and only then be refused would still be exhausting the upstream
+    // quota that everybody's sign-in depends on.
+    const calls = watchFetch()
+    const gate = limiter(false)
+
+    const response = await postAs(
+      { AUTH_LIMIT: gate },
+      '/v1/auth/token',
+      { code: 'c', codeVerifier: 'v' },
+    )
+
+    expect(response.status).toBe(429)
+    expect(await response.json()).toEqual({ error: 'slow down' })
+    expect(calls).toEqual([])
+    expect(gate.asked.length).toBe(1)
+  })
+
+  it('gates all three of them, and only them', async () => {
+    // The prefix, said as the set it actually covers. Everything below these
+    // needs a session or a machine token and is throttled by having to have
+    // one; putting them behind the IP limiter as well would let one office
+    // network's notifications throttle each other.
+    const gate = limiter(false)
+    for (const path of AUTH) {
+      watchFetch()
+      expect((await postAs({ AUTH_LIMIT: gate }, path, {})).status, path).toBe(429)
+    }
+    expect(gate.asked.length).toBe(3)
+
+    const open = limiter(false)
+    for (const path of ['/v1/devices', '/v1/daemons', '/v1/notify', '/v1/notify/retire']) {
+      watchFetch()
+      const response = await postAs({ AUTH_LIMIT: open }, path, {})
+      expect(response.status, path).not.toBe(429)
+    }
+    // Not merely a different status: the limiter was never consulted.
+    expect(open.asked).toEqual([])
+  })
+
+  it('keys on the connecting IP, which is all an unauthenticated caller has', async () => {
+    // Not a strong identity — a botnet has many — but it is what stops one
+    // client burning the WorkOS quota, which is the realistic failure. A
+    // constant key would throttle every caller together, and the first person to
+    // hold the button down would lock everyone else out of signing in.
+    const gate = limiter(true)
+    watchFetch()
+    await postAs({ AUTH_LIMIT: gate }, '/v1/auth/logout', {}, undefined, {
+      'cf-connecting-ip': '203.0.113.7',
+    })
+    await postAs({ AUTH_LIMIT: gate }, '/v1/auth/logout', {}, undefined, {
+      'cf-connecting-ip': '198.51.100.9',
+    })
+    // A request with no such header is Cloudflare not having set one, which is
+    // one bucket for all of them rather than a free pass.
+    await postAs({ AUTH_LIMIT: gate }, '/v1/auth/logout', {})
+
+    expect(gate.asked.map(each => each.key)).toEqual(['203.0.113.7', '198.51.100.9', 'unknown'])
+  })
+
+  it('lets a caller under the limit straight through', async () => {
+    // Without this the test above passes against a relay that answers 429 to
+    // everything.
+    watchFetch()
+    const gate = limiter(true)
+    const response = await postAs({ AUTH_LIMIT: gate }, '/v1/auth/logout', { refreshToken: 'r' })
+
+    expect(response.status).toBe(200)
+    expect(gate.asked.length).toBe(1)
+  })
+
+  it('fails OPEN when there is no limiter at all', async () => {
+    // A local `wrangler dev` has no rate-limit binding, and a relay that refused
+    // every sign-in because one was missing would be a worse outage than the one
+    // being prevented. This is the suite's own configuration, so it is also what
+    // every other test in this file relies on.
+    watchFetch()
+    expect((env as any).AUTH_LIMIT).toBeUndefined()
+    const response = await post('/v1/auth/logout', { refreshToken: 'r' })
+    expect(response.status).toBe(200)
+  })
+
+  it('is declared on every channel that is deployed', async () => {
+    // The other half of "a change that disabled it would be invisible". The
+    // code path is held above; this is the binding it needs to exist at all,
+    // and deleting it from one channel's block would leave that relay silently
+    // unthrottled.
+    // `[[unsafe.bindings]]` for stable and `[[env.<channel>.unsafe.bindings]]`
+    // for the other three, which is how wrangler spells a per-environment
+    // binding — and the shape the four blocks of this file already use.
+    const blocks = wranglerToml
+      .split(/^\[\[(?:env\.[a-z]+\.)?unsafe\.bindings\]\]$/m)
+      .slice(1)
+    const limiters = blocks.filter(block => /name = "AUTH_LIMIT"/.test(block))
+    expect(limiters.length).toBe(4)
+    for (const block of limiters) {
+      expect(block).toContain('type = "ratelimit"')
+      expect(block).toMatch(/simple = \{ limit = \d+, period = \d+ \}/)
+    }
+  })
+})
+
 describe('/v1/notify', () => {
   it('refuses a request with no token', async () => {
     expect((await post('/v1/notify', { title: 'hi' })).status).toBe(401)
@@ -1238,6 +1393,130 @@ describe('the Android push body', () => {
   })
 })
 
+// MARK: - What a refused push does
+
+/// Every analytics event a request produced, in order.
+///
+/// Spied on the real binding rather than injected. The wiring being checked is
+/// exactly the wiring an injected fake would replace: a `fetch` the push service
+/// answered with a 400, through `sendPush`'s boolean, to the counter that names
+/// it. `record` puts the event name and the platform in `blobs` and the outcome
+/// in `doubles` — see `analytics.ts`.
+function watchMetrics(): { name: string; platform: string; ok: number }[] {
+  const events: { name: string; platform: string; ok: number }[] = []
+  vi.spyOn((env as any).METRICS, 'writeDataPoint').mockImplementation((point: any) => {
+    events.push({ name: point.blobs[0], platform: point.blobs[1], ok: point.doubles[0] })
+  })
+  return events
+}
+
+/// Refuse the pushes and answer everything else — the JWKS, and Google's token
+/// endpoint — normally.
+///
+/// Selective on purpose. `googleAccessToken` caches its answer for half an hour
+/// in module scope, so a reply function that 400'd every outbound request would
+/// poison that cache for whichever test happened to run next.
+function refusing(host: string): (call: Call) => Response {
+  return call =>
+    call.url.includes(host) ? new Response('{"reason":"BadDeviceToken"}', { status: 400 }) : ok()
+}
+
+/// A push service refusing is the failure this product cannot afford to be
+/// quiet about, and it was the failure nothing observed: all three transports
+/// end `return response.ok`, and two of them could be changed to `return true`
+/// with the whole suite still green. What that boolean feeds is the count the
+/// daemon is answered with and the counter that separates a delivery from a
+/// refusal — so a relay whose pushes were all being rejected reported a healthy
+/// delivery rate and told every machine its notification had landed.
+describe('a push the service refuses', () => {
+  const android = { platform: 'fcm', pushToken: 'android-token' }
+
+  it('is not counted as delivered, and is counted as failed', async () => {
+    const calls = watchFetch(refusing('push.apple.com'))
+    await register('user_1')
+    await pair('user_1', 'mine')
+
+    // Spied here rather than at the top, so what follows is every event the
+    // notification produced and not merely the ones a filter kept.
+    const events = watchMetrics()
+    const response = await post('/v1/notify', { title: 'hi' }, 'mine')
+
+    // It really was attempted — this is not a test of a push that never went.
+    expect(pushes(calls).length).toBe(1)
+    expect(await response.json()).toEqual({ delivered: 0 })
+    expect(events).toEqual([{ name: 'notification_failed', platform: 'apns', ok: 0 }])
+  })
+
+  it('is not counted as delivered on Android either', async () => {
+    // The same boolean on the other transport. `sendFcm` reaches a different
+    // service, over a different credential, and returns into the same counter.
+    const calls = watchFetch(refusing('fcm.googleapis.com'))
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+
+    const events = watchMetrics()
+    const response = await post('/v1/notify', { title: 'hi' }, 'mine')
+
+    expect(pushes(calls).length).toBe(1)
+    expect(await response.json()).toEqual({ delivered: 0 })
+    expect(events).toEqual([{ name: 'notification_failed', platform: 'fcm', ok: 0 }])
+  })
+
+  it('does not take the other phone down with it', async () => {
+    // Per device, inside the loop. One refusal must not stop the loop or spoil
+    // the count for a device that was served — a person with a phone and a watch
+    // loses both to one dead token otherwise.
+    watchFetch(refusing('push.apple.com'))
+    await register('user_1')
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+
+    const events = watchMetrics()
+    const response = await post('/v1/notify', { title: 'hi' }, 'mine')
+
+    expect(await response.json()).toEqual({ delivered: 1 })
+    expect(events.map(event => `${event.platform}:${event.name}`)).toEqual([
+      'apns:notification_failed',
+      'fcm:notification_sent',
+    ])
+  })
+
+  it('counts a refused Live Activity apart from a refused alert', async () => {
+    // The reason `activity_failed` exists at all: these fail for reasons the
+    // alert cannot — an update token that outlived its activity, a payload the
+    // app's ContentState will not decode — and folding them into
+    // `notification_failed` would make the delivery rate that actually matters
+    // look worse than it is. Here the alert is DELIVERED and only the card's
+    // push is refused, which is the case that would be indistinguishable.
+    const calls = watchFetch(call =>
+      call.body?.aps?.event ? new Response('{"reason":"BadDeviceToken"}', { status: 400 }) : ok(),
+    )
+    await register('user_1')
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/devices/activity',
+      { terminal: 'term-1', updateToken: 'update-token' },
+      await sessionFor('user_1'),
+    )
+
+    const events = watchMetrics()
+    const response = await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    // Two pushes went: the alert, which was taken, and the card's update, which
+    // was not.
+    expect(pushes(calls).length).toBe(2)
+    expect(await response.json()).toEqual({ delivered: 1 })
+    expect(events.map(event => event.name)).toEqual(['notification_sent', 'activity_failed'])
+    // And the refusal did not turn a delivered notification into a 500. The
+    // daemon would retry it and interrupt the person twice for one event.
+    expect(response.status).toBe(200)
+  })
+})
+
 describe('the signed-in routes', () => {
   /// Every route that requires a session.
   ///
@@ -1305,6 +1584,47 @@ describe('the APNs environment', () => {
       environment: string | null
     }>()
     expect(row?.environment).toBe(null)
+  })
+
+  it('keeps what a newer build reported when an older one re-registers', async () => {
+    // The COALESCE, and the one place where losing it kills push outright
+    // rather than changing a preference. NULL reads as production — see
+    // `apnsHost` — so a sandbox device whose column was reset by an older
+    // build's registration gets every push posted to the production service,
+    // which answers a sandbox token with BadDeviceToken. Nothing reports that:
+    // the relay counts a failed delivery and the phone simply stays quiet.
+    //
+    // The sibling of `keeps a push-to-start token a later registration does not
+    // repeat` and `keeps its answer when an older build re-registers over it`,
+    // asserted through the HOST as well as the column, because the column is
+    // only worth keeping for what it decides.
+    const calls = watchFetch()
+    await register('user_1', { environment: 'development' })
+    await register('user_1', { label: 'Renamed' })
+    await pair('user_1', 'mine')
+    await post('/v1/notify', { title: 'hi' }, 'mine')
+
+    const row = await env.DB.prepare(`SELECT label, environment FROM devices`).first<{
+      label: string
+      environment: string | null
+    }>()
+    expect(row?.label).toBe('Renamed')
+    expect(row?.environment).toBe('development')
+    expect(pushes(calls)[0].url).toBe('https://api.sandbox.push.apple.com/3/device/device-token')
+  })
+
+  it('takes the new answer when a build that knows the field names one', async () => {
+    // The other direction, which the COALESCE must not swallow: a device really
+    // can move between the two services — a TestFlight build replacing a local
+    // one on the same phone — and a registration that NAMES an environment is
+    // the newer report, not the older one.
+    const calls = watchFetch()
+    await register('user_1', { environment: 'development' })
+    await register('user_1', { environment: 'production' })
+    await pair('user_1', 'mine')
+    await post('/v1/notify', { title: 'hi' }, 'mine')
+
+    expect(pushes(calls)[0].url).toBe('https://api.push.apple.com/3/device/device-token')
   })
 
   it('refuses an environment that is neither', async () => {
@@ -2159,6 +2479,88 @@ describe('/v1/notify and Live Activities', () => {
     expect(starts[0].body.aps['content-state'].status).toBe('blocked')
   })
 
+  it('clears the dismissal it supersedes, so one swipe costs exactly one card', async () => {
+    // `startCard`'s conflict arm, which nothing reached. The test above proves a
+    // card goes up after a dismissal; what it never asked was what the arm wrote
+    // to the row on the way — so `DO UPDATE SET … dismissed_at = NULL …` could
+    // be replaced with `DO NOTHING` and the suite stayed green.
+    //
+    // The consequence is the one the dismissal was written to prevent. A swipe
+    // that is never cleared is a swipe that is answered again by every blocked
+    // push that follows: a second card, then a third, for an agent that has
+    // asked one question. The clearing is what makes it one card per dismissal
+    // rather than one per notice.
+    const calls = watchFetch()
+    const session = await sessionFor('user_1')
+    await ready()
+    await running('term-1')
+    await post('/v1/devices/activity', { updateToken: null, dismissed: true }, session)
+
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+    expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(1)
+
+    // The row now stands for the card that just went up: the refusal is spent,
+    // and the headline is the one the start is showing.
+    const card = await cardOf('user_1')
+    expect(card?.dismissed_at).toBe(null)
+    expect(card?.leader_terminal).toBe('term-1')
+    expect(card?.leader_status).toBe('blocked')
+
+    // So the next blocked push finds nothing dismissed and falls through, which
+    // is the behavior the clearing exists for.
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+    expect(pushes(calls).filter(call => call.body.aps?.event === 'start').length).toBe(1)
+  })
+
+  it('leaves alone a row the app re-addressed while the start was in flight', async () => {
+    // The `WHERE` on that arm. The app files a real update token while the start
+    // pushes are still going out — which is precisely what happens when the
+    // phone comes to the foreground because of the alert they carry — and the
+    // row it files against is no longer the one this start claimed. The arm
+    // declines it, so what the app wrote stands and neither of the row's two
+    // clocks is re-stamped by a start that filing has already overtaken.
+    //
+    // The race is reproduced by filing the token from inside the reply to the
+    // start push, which is the only place it can be made to happen on purpose.
+    const session = await sessionFor('user_1')
+    let filed = false
+    watchFetch(async call => {
+      if (call.body?.aps?.event === 'start' && !filed) {
+        filed = true
+        await post('/v1/devices/activity', { updateToken: 'filed-by-the-app' }, session)
+      }
+      return ok()
+    })
+    await ready()
+    await running('term-9')
+    await post('/v1/notify', { title: 'codex', terminal: 'term-9', status: 'working' }, 'mine')
+    await post('/v1/devices/activity', { updateToken: null, dismissed: true }, session)
+    const dismissed = await cardOf('user_1')
+
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+      'mine',
+    )
+
+    const card = await cardOf('user_1')
+    expect(filed).toBe(true)
+    expect(card?.update_token).toBe('filed-by-the-app')
+    // Untouched by the start: this is the app's row now, and the next notice
+    // through the update branch is what re-composes it.
+    expect(card?.leader_terminal).toBe('term-9')
+    expect(card?.leader_status).toBe('working')
+    expect(card?.pushed_at).toBe(dismissed?.pushed_at ?? null)
+  })
+
   it('forgets a claim that has outlived the card it stands for', async () => {
     // `CLAIM_MEMORY_MS`, and the read that `install_cards.updated_at` never had.
     //
@@ -2592,6 +2994,78 @@ describe('/v1/notify and Live Activities', () => {
       // what produces this order — only the wait can.
       expect(last.rows.map((each: any) => each.terminal)).toEqual(['zeno', 'aria'])
       expect(last.terminal).toBe('zeno')
+    })
+
+    it('restamps a row the moment its tier moves, so a long run is not a long wait', async () => {
+      // The other half of `status_since`, and the half nothing held. The test
+      // above pins it STAYING PUT within a tier; making it never move at all —
+      // `prior ? (prior.status_since ?? now) : now` — left the whole suite
+      // green.
+      //
+      // What that costs is the top line of the card. `status_since` is "how long
+      // this agent has been in the tier it is in", and an agent that has been
+      // WORKING for an hour has been waiting for nothing. Carrying its old stamp
+      // through the change puts it straight to the front of the blocked queue,
+      // ahead of an agent that really has been waiting — so the person taps the
+      // question that arrived last instead of the one that has been open
+      // longest, and the longer the run the worse the placement.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+
+      // `aria` has been working for an hour.
+      await post('/v1/notify', { title: 'aria', terminal: 'aria', status: 'working' }, 'mine')
+      const hourAgo = Date.now() - 60 * 60 * 1000
+      await env.DB.prepare(
+        `UPDATE live_activities SET status_since = ?, updated_at = ? WHERE terminal = 'aria'`,
+      )
+        .bind(hourAgo, hourAgo)
+        .run()
+
+      // `zeno` has been blocked for ten minutes, which is a real wait.
+      await post('/v1/notify', { title: 'zeno needs you', terminal: 'zeno', status: 'blocked' }, 'mine')
+      await env.DB.prepare(
+        `UPDATE live_activities SET status_since = ? WHERE terminal = 'zeno'`,
+      )
+        .bind(Date.now() - 10 * 60 * 1000)
+        .run()
+
+      // And now `aria` asks its first question.
+      await post('/v1/notify', { title: 'aria needs you', terminal: 'aria', status: 'blocked' }, 'mine')
+
+      const updates = pushes(calls).filter(call => call.body.aps?.event === 'update')
+      const last = updates[updates.length - 1].body.aps['content-state']
+      // `aria` sorts first alphabetically and spoke last, so neither the
+      // tiebreak nor recency can be what produces this order.
+      expect(last.rows.map((each: any) => each.terminal)).toEqual(['zeno', 'aria'])
+      expect(last.terminal).toBe('zeno')
+
+      // And the column says it directly. A tier change stamps both clocks
+      // together; a notice within a tier moves only `updated_at`.
+      const moved = await env.DB.prepare(
+        `SELECT status_since, updated_at FROM live_activities WHERE terminal = 'aria'`,
+      ).first<{ status_since: number; updated_at: number }>()
+      expect(moved?.status_since).toBeGreaterThan(hourAgo)
+      expect(moved?.status_since).toBe(moved?.updated_at)
+    })
+
+    it('starts the clock at a first sighting, whatever tier it arrives in', async () => {
+      // A row with no `prior` has not been anywhere else, so the tier it arrives
+      // in is the tier it has always been in and the stamp is now. NULL would
+      // sort it to the front of its tier through `?? updated_at` — an agent the
+      // relay has never heard of jumping ahead of one that has been waiting half
+      // an hour.
+      watchFetch()
+      await ready()
+      await running('term-1')
+      const before = Date.now()
+      await post('/v1/notify', { title: 'aria needs you', terminal: 'aria', status: 'blocked' }, 'mine')
+
+      const row = await env.DB.prepare(
+        `SELECT status_since FROM live_activities WHERE terminal = 'aria'`,
+      ).first<{ status_since: number | null }>()
+      expect(row?.status_since).not.toBe(null)
+      expect(row!.status_since!).toBeGreaterThanOrEqual(before)
     })
 
     it('totals what the whole fleet changed, and says nothing for what nobody measured', async () => {
@@ -3043,6 +3517,107 @@ describe('/v1/notify and Live Activities', () => {
 /// while its card was up, and the daemon restarted with its memory of what each
 /// terminal was doing rebuilt empty. The second means every runner update
 /// orphaned every card that was up.
+// MARK: - Fitting the cap APNs enforces
+
+/// What `cut` is actually for, as opposed to how long its answer is.
+///
+/// Nothing measured anything but the length. `cut` could return its input
+/// REVERSED and every test in this file went on passing, because the three
+/// callers all feed a payload whose size is what gets asserted — so the one
+/// property the function exists for, that what comes back is the beginning of
+/// what went in and is still decodable UTF-8, was guarded by nothing.
+describe('cutting a line to a byte budget', () => {
+  /// Three bytes each in UTF-8, and one UTF-16 unit each. A budget that is not a
+  /// multiple of three therefore cannot be spent exactly, which is the case a
+  /// naive `slice` gets wrong.
+  const wide = 'ながいながいながいながい'
+  /// Four bytes, and a SURROGATE PAIR: two UTF-16 units, so `slice` can halve it
+  /// and produce a lone surrogate — which `JSON.stringify` writes as an escape
+  /// the app decodes to a replacement character.
+  const emoji = '🐟'
+
+  function size(text: string): number {
+    return new TextEncoder().encode(text).length
+  }
+
+  it('gives back exactly what it was given when that already fits', () => {
+    expect(cut('short', 128)).toBe('short')
+    expect(cut('', 0)).toBe('')
+  })
+
+  it('gives back the whole line at exactly the budget, and not a byte less', () => {
+    // The off-by-one on the cheap side. `<=` rather than `<` on the early
+    // return, and `>` rather than `>=` in the loop: a line that fits perfectly
+    // is a line that fits.
+    expect(size(wide)).toBe(36)
+    expect(cut(wide, 36)).toBe(wide)
+    expect(cut('abc', 3)).toBe('abc')
+  })
+
+  it('gives back a PREFIX of its input, never anything else', () => {
+    // The property a reversed return violates, and the one every caller assumes:
+    // a lock screen shows the beginning of what the agent said.
+    const cropped = cut(wide, 20)
+    expect(wide.startsWith(cropped)).toBe(true)
+    expect(cropped.length).toBeLessThan(wide.length)
+    expect(cut('abcdefgh', 3)).toBe('abc')
+  })
+
+  it('never splits a multi-byte character', () => {
+    // Twenty bytes of a three-byte alphabet is six characters and two bytes
+    // left over, and the two bytes are not spent: half a UTF-8 sequence is not
+    // a shorter string, it is a string the app cannot decode.
+    const cropped = cut(wide, 20)
+    expect(cropped).toBe('ながいながい')
+    expect(size(cropped)).toBe(18)
+    expect(size(cropped)).toBeLessThanOrEqual(20)
+  })
+
+  it('never splits a surrogate pair', () => {
+    // `for...of` iterates code points, so the pair is taken or left whole. A
+    // `slice` at the same budget would leave a lone surrogate here.
+    const school = emoji.repeat(4)
+    expect(size(school)).toBe(16)
+    const cropped = cut(school, 10)
+    expect(cropped).toBe(emoji.repeat(2))
+    expect([...cropped].every(character => size(character) === 4)).toBe(true)
+    // Said again as the property, because this is what a lone surrogate breaks:
+    // the payload has to survive the round trip through JSON.
+    expect(JSON.parse(JSON.stringify(cropped))).toBe(cropped)
+    expect(cropped).not.toContain('�')
+  })
+
+  it('drops a whole character rather than overspend by one byte', () => {
+    // One byte under the character's width is the same answer as one byte under
+    // the whole character: the budget is a ceiling and there is no such thing as
+    // paying two thirds of a code point.
+    for (const budget of [17, 18, 19, 20]) {
+      const cropped = cut(wide, budget)
+      expect(size(cropped)).toBeLessThanOrEqual(budget)
+      expect(wide.startsWith(cropped)).toBe(true)
+      expect(size(cropped) % 3).toBe(0)
+    }
+    expect(cut(wide, 2)).toBe('')
+  })
+
+  it('counts bytes and not characters', () => {
+    // The whole reason it exists. Twelve characters of an agent's own words can
+    // be thirty-six bytes, and the cap APNs applies is on the bytes.
+    expect(cut(wide, 12)).toBe('ながいな')
+    expect(cut('abcdefghijkl', 12)).toBe('abcdefghijkl')
+  })
+
+  it('is what the alert budgets are spent through', () => {
+    // The link between the arithmetic above and the two constants the payload
+    // tests add up. Asserted against the exported budgets rather than against
+    // 128 and 512, so raising one moves this with it.
+    const title = 'ながい'.repeat(200)
+    expect(size(cut(title, ALERT_TITLE_BUDGET))).toBeLessThanOrEqual(ALERT_TITLE_BUDGET)
+    expect(size(cut(title, ALERT_BODY_BUDGET))).toBeLessThanOrEqual(ALERT_BODY_BUDGET)
+    expect(title.startsWith(cut(title, ALERT_TITLE_BUDGET))).toBe(true)
+  })
+})
+
 describe('/v1/notify/retire', () => {
   async function ready() {
     await register('user_1', { liveActivityStartToken: 'start-token' })
@@ -3174,6 +3749,57 @@ describe('/v1/notify/retire', () => {
     expect(left.results).toEqual([{ terminal: 'term-2' }])
   })
 
+  it('leaves the card alone while an agent it was not asked about is still BLOCKED', async () => {
+    // The same rule as above and the case that actually matters, which every
+    // fixture in this block missed: the survivor was always `working`, so the
+    // `blocked` half of `left.some(...)` decided nothing and could be deleted
+    // with the suite still green.
+    //
+    // A blocked agent is a person waiting for a question they have been asked.
+    // Taking its card down because a DIFFERENT agent's terminal went away is the
+    // single worst thing this route can do — it deletes the one notification the
+    // whole product exists to deliver, and it does it silently.
+    const calls = watchFetch()
+    await ready()
+    await running('term-2', 'second-token')
+    await post('/v1/notify', { title: 'codex', terminal: 'term-1', status: 'working' }, 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-2', status: 'blocked' },
+      'mine',
+    )
+    const before = pushes(calls).length
+
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+    expect(await response.json()).toEqual({ retired: 0 })
+
+    expect(pushes(calls).length).toBe(before)
+    expect(await cardOf('user_1')).toBeTruthy()
+    expect(await roster('user_1')).toEqual(['term-2'])
+  })
+
+  it('takes the card down when the last agent left was merely to review', async () => {
+    // The other side of the same clause, and the reason it names two tiers
+    // rather than "anything at all". A `done` row stays on the roster and keeps
+    // being counted as "to review" — that is what the header's middle number
+    // means — but it cannot on its own keep a card on the lock screen. So a
+    // sweep that leaves nothing but finished agents behind ends the card, and
+    // this is the case that separates `blocked || working` from `left.length`.
+    const calls = watchFetch()
+    await ready()
+    await running('term-2', 'second-token')
+    await post('/v1/notify', { title: 'codex', terminal: 'term-1', status: 'working' }, 'mine')
+    await post('/v1/notify', { title: 'claude finished', terminal: 'term-2', status: 'done' }, 'mine')
+
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+    expect(await response.json()).toEqual({ retired: 1 })
+
+    const ends = pushes(calls).filter(call => call.body.aps?.event === 'end')
+    expect(ends.length).toBe(1)
+    expect(ends[0].url).toContain('second-token')
+    expect(await cardOf('user_1')).toBe(null)
+  })
+
   it('ends a card the relay knows nothing about, because nothing is left to be about', async () => {
     // The app filed an update token for a card this relay holds no roster for —
     // an `end` that raced the report, a card left over from an older build, or
@@ -3240,6 +3866,42 @@ describe('/v1/notify/retire', () => {
     expect(calls.every(call => !call.url.includes('their-update-token'))).toBe(true)
     const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(1)
+    expect(await roster('user_2')).toEqual(['term-1'])
+  })
+
+  it("takes its own card down while another account's fleet is still working", async () => {
+    // The test above stops one statement short and always did: the account it
+    // sweeps for holds no card, so the route returns at `if (!running)` and
+    // never reaches the question this one is about.
+    //
+    // That question is "is anybody still going", and it is asked of a FLEET.
+    // `readFleet` is handed an account id, and nothing anywhere noticed if it
+    // stopped being handed one: another person's busy agent would answer for
+    // this person's card and hold it on the lock screen for as long as that
+    // stranger kept working. Every other account clause in this route was
+    // reachable; this one needed a card on THIS side of it to get to.
+    const calls = watchFetch()
+    await ready()
+    await running('term-1')
+    await post('/v1/notify', { title: 'claude', terminal: 'term-1', status: 'working' }, 'mine')
+
+    // Somebody else, mid-run, on a terminal that happens to carry the same name.
+    const theirs = await foreignCard('user_2')
+    await foreignAgent('user_2', 'term-1', { status: 'working' })
+
+    const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
+    expect(await response.json()).toEqual({ retired: 1 })
+
+    // Its own card, ended at its own address, and nothing sent to theirs.
+    const ends = pushes(calls).filter(call => call.body.aps?.event === 'end')
+    expect(ends.length).toBe(1)
+    expect(ends[0].url).toContain('update-token')
+    expect(calls.every(call => !call.url.includes('their-update-token'))).toBe(true)
+
+    // And the other account is exactly as it was, in every column any write in
+    // this service touches.
+    expect(await cardOf('user_1')).toBe(null)
+    expect(await cardOf('user_2')).toEqual(theirs)
     expect(await roster('user_2')).toEqual(['term-1'])
   })
 
@@ -3708,6 +4370,9 @@ async function deviceKey() {
   ])) as CryptoKeyPair
   const raw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey))
   return {
+    /// The 32 bytes on their own, so a test can put this same key inside a blob
+    /// of its own making and still sign with it.
+    raw,
     keyA: `ssh-ed25519 ${base64(sshBlob(raw))} test@example`,
     async sign(message: string): Promise<string> {
       const signature = await crypto.subtle.sign(
@@ -3720,17 +4385,32 @@ async function deviceKey() {
   }
 }
 
-/// The SSH wire encoding of an ed25519 public key: two length-prefixed strings,
-/// the algorithm name and the 32 bytes. This is what the fingerprint is over,
+/// The SSH wire encoding of a public key: two length-prefixed strings, the
+/// algorithm name and the key bytes. This is what the fingerprint is over,
 /// which is why the test builds it rather than hashing the key alone.
-function sshBlob(raw: Uint8Array): Uint8Array {
-  const name = new TextEncoder().encode('ssh-ed25519')
+///
+/// The algorithm and the body are both arguments, because the checks in
+/// `parseEd25519` are about the BYTES: a blob that names another algorithm
+/// inside itself, or carries the wrong number of bytes, cannot be written any
+/// other way.
+function sshBlob(raw: Uint8Array, algorithm = 'ssh-ed25519'): Uint8Array {
+  const name = new TextEncoder().encode(algorithm)
   const out = new Uint8Array(4 + name.length + 4 + raw.length)
   new DataView(out.buffer).setUint32(0, name.length)
   out.set(name, 4)
   new DataView(out.buffer).setUint32(4 + name.length, raw.length)
   out.set(raw, 8 + name.length)
   return out
+}
+
+/// The 32 bytes of a fresh ed25519 public key, with no wire encoding around
+/// them, so a test can put them inside a blob of its own choosing.
+async function ed25519Raw(): Promise<Uint8Array> {
+  const pair = (await crypto.subtle.generateKey('Ed25519', true, [
+    'sign',
+    'verify',
+  ])) as CryptoKeyPair
+  return new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey))
 }
 
 function base64(bytes: Uint8Array): string {
@@ -3803,11 +4483,73 @@ describe('proof of possession at registration', () => {
     expect(await fingerprintOf(parseEd25519(line)!)).toBe(
       'SHA256:yjZGaYPt6bVurNagcMgxNBH8z8ldaacgkwyQoKhR430',
     )
-    // The algorithm inside the blob, not the label in front of it. Text anyone
-    // can write is not what a verifier goes by.
+    // A line whose LABEL names another algorithm, refused at the text before
+    // anything is decoded, so that the error is about the key and not about
+    // base64. This says nothing about the structural check — the comment here
+    // used to claim it did — and what does is the block below.
     expect(parseEd25519(line.replace('ssh-ed25519 ', 'ssh-rsa '))).toBe(null)
     expect(parseEd25519('ssh-ed25519 not-base64')).toBe(null)
     expect(parseEd25519('')).toBe(null)
+  })
+
+  it('goes by the algorithm inside the blob, not the label in front of it', async () => {
+    // The check the two tests that claimed it never reached. Both sent
+    // `ssh-rsa AAAA…`, which is refused by the TEXT branch four lines into
+    // `parseEd25519` — so the structural comparison could be deleted outright
+    // and the whole suite stayed green.
+    //
+    // What it is for is the other shape: a line labelled `ssh-ed25519` whose
+    // bytes name something else. The label is text anyone can write and the
+    // wire encoding is what a verifier goes by, so a relay that trusted the
+    // label would fingerprint an RSA blob as an ed25519 key and hand its 32
+    // leading bytes to `importKey`.
+    const raw = await ed25519Raw()
+    expect(parseEd25519(`ssh-ed25519 ${base64(sshBlob(raw))}`)).not.toBe(null)
+    expect(parseEd25519(`ssh-ed25519 ${base64(sshBlob(raw, 'ssh-rsa'))}`)).toBe(null)
+    // And with no label at all, which is the form this function also accepts —
+    // so the refusal above is about the bytes and not about the two words
+    // disagreeing.
+    expect(parseEd25519(base64(sshBlob(raw)))).not.toBe(null)
+    expect(parseEd25519(base64(sshBlob(raw, 'ssh-rsa')))).toBe(null)
+    expect(parseEd25519(base64(sshBlob(raw, 'ssh-ed25519-v2')))).toBe(null)
+  })
+
+  it('refuses a blob carrying anything but exactly 32 bytes, and nothing after them', async () => {
+    // An ed25519 public key is 32 bytes. A blob with fewer, more, or trailing
+    // bytes after the key is one two readers could disagree about — and they
+    // would disagree about its FINGERPRINT too, which is the string a person
+    // compares by eye at the confirmation and the only thing standing between
+    // them and enrolling somebody else's key.
+    const raw = await ed25519Raw()
+    expect(parseEd25519(base64(sshBlob(raw)))).not.toBe(null)
+    expect(parseEd25519(base64(sshBlob(raw.subarray(0, 31))))).toBe(null)
+    expect(parseEd25519(base64(sshBlob(new Uint8Array([...raw, 0]))))).toBe(null)
+
+    // Trailing bytes: a well-formed key with junk appended after it. The length
+    // prefixes still parse, so only `key.next !== blob.length` catches this.
+    const padded = new Uint8Array([...sshBlob(raw), 7, 7, 7])
+    expect(parseEd25519(base64(padded))).toBe(null)
+  })
+
+  it('refuses a registration whose key is ed25519 only in its label', async () => {
+    // The same confusion arriving through the route, which is where it would
+    // matter: the fingerprint this stores is what a ceremony compares, and a
+    // blob nobody else parses the same way is a fingerprint nobody else
+    // computes the same way.
+    watchFetch()
+    // The SAME key inside the mislabelled blob and behind the signature, so the
+    // signature really does verify and the structural check is the only thing
+    // left standing between this and a 200. Signing with a different key would
+    // make the route 400 for a reason that has nothing to do with the blob.
+    const key = await deviceKey()
+    const response = await register('user_1', {
+      deviceId: 'device-1',
+      keyA: `ssh-ed25519 ${base64(sshBlob(key.raw, 'ssh-rsa'))} test@example`,
+      signature: await key.sign('device-1'),
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'keyA' })
+    expect(await deviceRow()).toBe(null)
   })
 
   it('refuses a registration whose own fingerprint disagrees with its key', async () => {
@@ -4095,6 +4837,133 @@ describe('/v1/devices/verify', () => {
   })
 })
 
+// MARK: - Counting without knowing who
+
+/// `analytics.ts` had no tests at all, and the property it was written for is
+/// the one nothing could have noticed losing.
+///
+/// The whole argument for Analytics Engine over a table in D1 is that no account
+/// id lands here, so a deletion request has nothing to sweep — and that only
+/// holds because the hash is MONTHLY SALTED. Pin the month and the id becomes
+/// permanent: the series turns into a per-user history by accumulation, which is
+/// exactly the thing the design says it cannot become. `${salt}:${month}` could
+/// be shortened to `${salt}` and nothing anywhere would have failed.
+describe('the anonymous id', () => {
+  /// Run something with the clock parked in a given month.
+  ///
+  /// `anonymousId` reads the month off `new Date()`, which is the only way to
+  /// observe the rotation the design depends on. Real timers are restored on the
+  /// way out however it ends, because every other test in this file reads the
+  /// real clock.
+  async function inMonth<T>(when: string, body: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(when))
+    try {
+      return await body()
+    } finally {
+      vi.useRealTimers()
+    }
+  }
+
+  it('is the same all month, which is what DAU and MAU are counted from', async () => {
+    // `count(distinct index1)` over a day or a month is the whole query. It
+    // needs one account to produce ONE id for the length of the window and it
+    // needs nothing else.
+    const first = await inMonth('2026-03-01T00:00:00Z', () => anonymousId('user_1', 'salt'))
+    const later = await inMonth('2026-03-28T23:59:59Z', () => anonymousId('user_1', 'salt'))
+    expect(later).toBe(first)
+  })
+
+  it('is a different id next month, which is what makes it forgettable', async () => {
+    // The property the whole storage decision rests on. Once the salt rotates,
+    // last month's hashes cannot be matched to this month's — so the counters
+    // survive a deletion request and the history cannot accumulate into a
+    // per-user one. An id that outlived the month would be an account id in
+    // everything but name.
+    const march = await inMonth('2026-03-31T23:59:59Z', () => anonymousId('user_1', 'salt'))
+    const april = await inMonth('2026-04-01T00:00:00Z', () => anonymousId('user_1', 'salt'))
+    expect(april).not.toBe(march)
+    // A YEAR is not a month. Rounding the key to `YYYY` would keep the id for
+    // twelve months and still pass the test above.
+    const nextJanuary = await inMonth('2027-01-01T00:00:00Z', () => anonymousId('user_1', 'salt'))
+    expect(nextJanuary).not.toBe(march)
+    expect(nextJanuary).not.toBe(april)
+  })
+
+  it('separates two accounts, and separates two salts', async () => {
+    await inMonth('2026-03-15T00:00:00Z', async () => {
+      const mine = await anonymousId('user_1', 'salt')
+      expect(await anonymousId('user_2', 'salt')).not.toBe(mine)
+      // The salt is a secret and rotating it is the break-glass. An id that
+      // ignored it could not be revoked at all.
+      expect(await anonymousId('user_1', 'another salt')).not.toBe(mine)
+    })
+  })
+
+  it('carries nothing of the account it stands for', async () => {
+    const id = await anonymousId('user_01JQZX4N8V9WQKPS', 'salt')
+    expect(id).not.toContain('user_')
+    expect(id).not.toContain('01JQZX4N8V9WQKPS')
+    // Twelve bytes of the MAC, hex. Enough to count distinct users and short
+    // enough that it is not a place to hide anything else.
+    expect(id).toMatch(/^[0-9a-f]{24}$/)
+  })
+})
+
+describe('what one recorded event carries', () => {
+  /// The binding, as an object that keeps what it was handed.
+  function collector(): { points: any[]; writeDataPoint(point: any): void } {
+    const points: any[] = []
+    return { points, writeDataPoint: (point: any) => points.push(point) }
+  }
+
+  it('indexes on the anonymous id, because that is what the query groups by', async () => {
+    const metrics = collector()
+    await record(metrics, 'salt', 'signed_in', 'user_1', {})
+
+    expect(metrics.points.length).toBe(1)
+    expect(metrics.points[0].indexes).toEqual([await anonymousId('user_1', 'salt')])
+    // Said as the property as well as the value: nothing in the point is the
+    // account id, so there is nothing here for a deletion request to sweep.
+    expect(JSON.stringify(metrics.points[0])).not.toContain('user_1')
+  })
+
+  it('names the event and the platform, and nothing else', async () => {
+    const metrics = collector()
+    await record(metrics, 'salt', 'notification_sent', 'user_1', { platform: 'apns', ok: true })
+    await record(metrics, 'salt', 'device_registered', 'user_1', {})
+
+    expect(metrics.points[0].blobs).toEqual(['notification_sent', 'apns'])
+    // An absent platform is the empty string rather than a hole, because the
+    // blobs are positional and a shorter one would shift every column after it.
+    expect(metrics.points[1].blobs).toEqual(['device_registered', ''])
+  })
+
+  it('counts a failure as 0 and everything else as 1', async () => {
+    // `ok === false` and not `!ok`. Most events carry no outcome at all —
+    // `signed_in`, `daemon_paired` — and reading an absent one as a failure
+    // would put the whole product's success rate at zero.
+    const metrics = collector()
+    await record(metrics, 'salt', 'notification_failed', 'user_1', { platform: 'apns', ok: false })
+    await record(metrics, 'salt', 'notification_sent', 'user_1', { platform: 'apns', ok: true })
+    await record(metrics, 'salt', 'signed_in', 'user_1')
+
+    expect(metrics.points.map(point => point.doubles)).toEqual([[0], [1], [1]])
+  })
+
+  it('gives one account one index however many events it produces', async () => {
+    // The half that makes `count(distinct index1)` a user count rather than an
+    // event count.
+    const metrics = collector()
+    await record(metrics, 'salt', 'signed_in', 'user_1')
+    await record(metrics, 'salt', 'device_registered', 'user_1', { platform: 'apns' })
+    await record(metrics, 'salt', 'daemon_paired', 'user_2')
+
+    expect(metrics.points[0].indexes).toEqual(metrics.points[1].indexes)
+    expect(metrics.points[2].indexes).not.toEqual(metrics.points[0].indexes)
+  })
+})
+
 // MARK: - The one secret whose wrongness is invisible
 
 /// A relay holding another channel's APNs topic.
@@ -4138,5 +5007,102 @@ describe('topic and channel must agree', () => {
     expect(topicMismatch({ APNS_TOPIC: 'com.farcooler.ios' })).toBeNull()
     expect(topicMismatch({ CHANNEL: 'stable' })).toBeNull()
     expect(topicMismatch({})).toBeNull()
+  })
+
+  // MARK: - And what the route does about it
+
+  /// The function above was tested and the ARM that calls it never ran.
+  ///
+  /// `topicMismatch` returns early when either half is absent, and this suite
+  /// declared no `CHANNEL` at all — so every request through every route in this
+  /// file went past `notify`'s misconfiguration check without evaluating it, and
+  /// the 500 could be deleted with all 169 tests green. The binding is declared
+  /// now, at the correct pairing, and the wrong one is handed in per request.
+  describe('and the notify route says so out loud', () => {
+    async function fleet() {
+      await register('user_1', { liveActivityStartToken: 'start-token' })
+      await pair('user_1', 'mine')
+    }
+
+    it('refuses to deliver, with a 500 that names what is wrong', async () => {
+      // The canary relay provisioned by copying the stable secrets, which is how
+      // this actually happens.
+      watchFetch()
+      await fleet()
+
+      const response = await postAs(
+        { CHANNEL: 'canary' },
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+        'mine',
+      )
+
+      // 500 and not 400: nothing is wrong with what the machine asked for.
+      expect(response.status).toBe(500)
+      const body = await response.json<any>()
+      expect(body.error).toBe('relay misconfigured')
+      expect(body.detail).toContain('canary')
+      expect(body.detail).toContain('com.farcooler.ios')
+    })
+
+    it('refuses before it has read a single device', async () => {
+      // Delivering to none of them and calling it a delivery is the failure this
+      // is preventing, so nothing may go out and nothing may be recorded: no
+      // push, no roster row, and no `delivered` count for the daemon to believe.
+      const calls = watchFetch()
+      await fleet()
+      const events = watchMetrics()
+
+      const response = await postAs(
+        { CHANNEL: 'preview' },
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked' },
+        'mine',
+      )
+
+      expect(response.status).toBe(500)
+      expect(await response.json<any>()).not.toHaveProperty('delivered')
+      expect(pushes(calls)).toEqual([])
+      expect(events).toEqual([])
+      expect(await roster('user_1')).toEqual([])
+      expect(await cardOf('user_1')).toBe(null)
+    })
+
+    it('delivers on a relay whose topic does belong to its channel', async () => {
+      // The other half, without which the test above passes against a route that
+      // refuses everything. Both channels here are wrong for THIS suite's
+      // `APNS_TOPIC` and right for their own.
+      const calls = watchFetch()
+      await fleet()
+
+      for (const [channel, topic] of [
+        ['canary', 'com.farcooler.ios.canary'],
+        ['stable', 'com.farcooler.ios'],
+      ]) {
+        const response = await postAs(
+          { CHANNEL: channel, APNS_TOPIC: topic },
+          '/v1/notify',
+          { title: 'hi' },
+          'mine',
+        )
+        expect(await response.json()).toEqual({ delivered: 1 })
+      }
+      expect(pushes(calls).length).toBe(2)
+      expect(pushes(calls)[0].headers['apns-topic']).toBe('com.farcooler.ios.canary')
+    })
+
+    it('is not what a deployment made before the check gets', async () => {
+      // Every relay deployed without a channel is the stable one, and refusing
+      // on absence would take push down on the one channel that must never lose
+      // it. The unit test above says the function stays quiet; this says the
+      // route does.
+      const calls = watchFetch()
+      await fleet()
+
+      const response = await postAs({ CHANNEL: undefined }, '/v1/notify', { title: 'hi' }, 'mine')
+
+      expect(await response.json()).toEqual({ delivered: 1 })
+      expect(pushes(calls).length).toBe(1)
+    })
   })
 })

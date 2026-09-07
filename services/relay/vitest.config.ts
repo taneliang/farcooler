@@ -74,6 +74,19 @@ export default defineWorkersConfig(async () => {
               APNS_KEY_ID: 'KEYID00000',
               APNS_TEAM_ID: 'TEAMID0000',
               APNS_TOPIC: 'com.farcooler.ios',
+              // Which channel this deployment IS, and the CORRECT pairing with
+              // the topic above: stable's bundle id carries no suffix.
+              //
+              // Unlike the absences described here it was simply missing, and
+              // that made `notify`'s misconfiguration arm unreachable rather
+              // than merely unexercised — `topicMismatch` returns early when
+              // either half is absent, so no request through any route in this
+              // suite could produce the 500 it guards. Every deployed
+              // environment declares one; see the four blocks of wrangler.toml.
+              // A test that wants the WRONG pairing overrides this per request,
+              // because it is a fact about the deployment and not about the
+              // call. See `postAs`.
+              CHANNEL: 'stable',
               // A throwaway service account, generated for this file and used
               // nowhere else — there is no Firebase project in this repository and
               // this names none. It was the empty string until now, so `sendFcm`
