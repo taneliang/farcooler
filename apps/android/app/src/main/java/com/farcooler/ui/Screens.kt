@@ -606,6 +606,17 @@ private fun RendezvousSection(settings: Settings) {
             contentDescription = if (expanded) "Hide rendezvous" else "Show rendezvous",
         )
     }
+
+    // Outside the disclosure, so it is readable without opening it. This is the
+    // sentence that makes the setting hard to phish somebody through, and a
+    // warning only visible to people who already went looking is no warning at
+    // all. The Apple apps put it in the section footer for the same reason,
+    // where it also shows beside a closed disclosure.
+    Text(
+        RENDEZVOUS_FOOTER,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     if (!expanded) return
 
     // The mechanism, in one sentence, because the alternative is a field whose
@@ -673,11 +684,6 @@ private fun RendezvousSection(settings: Settings) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    Text(
-        RENDEZVOUS_FOOTER,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 /**
