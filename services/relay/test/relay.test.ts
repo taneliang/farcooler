@@ -52,6 +52,25 @@ const publicJwk = {
   kid: 'test-key',
 }
 
+/// A key WorkOS has never published, for a token that only LOOKS right.
+///
+/// It signs under the SAME `kid` as the real one on purpose. A forgery naming a
+/// key the JWKS does not carry is refused at the key lookup, before a signature
+/// is ever checked — so it would be refused just as firmly by a route that
+/// checks no signature at all, and would prove nothing about the one thing
+/// these tests are for. This forgery has to reach `crypto.subtle.verify` and be
+/// turned away there.
+const forgery = await crypto.subtle.generateKey(
+  {
+    name: 'RSASSA-PKCS1-v1_5',
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: 'SHA-256',
+  },
+  true,
+  ['sign', 'verify'],
+)
+
 /// The issuer and client id this test environment's tokens carry, taken from
 /// the bindings rather than repeated here: a fixture that hard-coded them would
 /// go on passing after someone changed the configuration the worker reads.
@@ -65,12 +84,15 @@ const seconds = () => Math.floor(Date.now() / 1000)
 /// Separate from `sessionFor` because the verifier's whole job is refusing
 /// tokens with something missing, and a helper that quietly filled the gaps in
 /// could not express a token with a gap in it.
-async function signTestJwt(claims: Record<string, unknown>): Promise<string> {
+async function signTestJwt(
+  claims: Record<string, unknown>,
+  key: CryptoKey = signing.privateKey,
+): Promise<string> {
   const header = base64Url(JSON.stringify({ alg: 'RS256', kid: 'test-key' }))
   const payload = base64Url(JSON.stringify(claims))
   const signature = await crypto.subtle.sign(
     'RSASSA-PKCS1-v1_5',
-    signing.privateKey,
+    key,
     new TextEncoder().encode(`${header}.${payload}`),
   )
   return `${header}.${payload}.${base64Url(new Uint8Array(signature))}`
@@ -87,8 +109,19 @@ async function signTestJwt(claims: Record<string, unknown>): Promise<string> {
 /// richer than the real thing is how a verifier that refuses production traffic
 /// passes its own suite.
 async function sessionFor(userId: string): Promise<string> {
+  return await signTestJwt(claimsFor(userId))
+}
+
+/// The same claims, unsigned, so a test can spoil exactly one of them.
+///
+/// Split out of `sessionFor` because the two halves of the session boundary
+/// need it: the verifier's own tests spoil a claim and expect null, and the
+/// route tests spoil a claim and expect a 401. A second copy of this list would
+/// drift, and the direction it drifts in is a fixture richer than a real token
+/// — which is how a verifier that refuses production traffic passes its suite.
+function claimsFor(userId: string, overrides: Record<string, unknown> = {}) {
   const now = seconds()
-  return await signTestJwt({
+  return {
     sub: userId,
     email: `${userId}@example.test`,
     iss: ISSUER,
@@ -96,7 +129,8 @@ async function sessionFor(userId: string): Promise<string> {
     sid: 'session_test',
     iat: now,
     exp: now + 3600,
-  })
+    ...overrides,
+  }
 }
 
 function base64Url(value: string | Uint8Array): string {
@@ -383,17 +417,7 @@ describe('the issuer this relay accepts', () => {
 describe('session verification', () => {
   /// The claims a real access token carries, so each test can spoil exactly one.
   function wellFormed(overrides: Record<string, unknown> = {}) {
-    const now = seconds()
-    return {
-      sub: 'user_1',
-      email: 'user_1@example.test',
-      iss: ISSUER,
-      client_id: CLIENT_ID,
-      sid: 'session_test',
-      iat: now,
-      exp: now + 3600,
-      ...overrides,
-    }
+    return claimsFor('user_1', overrides)
   }
 
   it('refuses a token with no expiry', async () => {
@@ -484,6 +508,112 @@ describe('session verification', () => {
     const { client_id, ...claims } = wellFormed()
     const token = await signTestJwt({ ...claims, aud: ['client_other'] })
     expect(await verifySession(token, env as never)).toBeNull()
+  })
+})
+
+// MARK: - That a route actually RUNS the verifier
+
+/// The other half of the session boundary, and the half nothing held.
+///
+/// `verifySession` is exercised as a unit above, exhaustively. What was never
+/// exercised is that a ROUTE runs it. Every signed-in test in this file mints
+/// its token with `sessionFor`, which is always valid, and the only 401 anyone
+/// asserted was for a request carrying no `authorization` header at all — and a
+/// header is not a signature. So `requireAccount` could have base64-decoded the
+/// payload and trusted `sub`, throwing away the signature, the expiry, the
+/// issuer and the `client_id` together, and every test in this file would have
+/// stayed green: the unit tests would have gone on testing `verifySession`, and
+/// nothing at all would have been testing that anything calls it.
+///
+/// These are the tokens that tell the two apart. Each decodes to a perfectly
+/// good `sub`, and each has to be refused for a reason only a checked signature
+/// or a checked claim can supply.
+describe('the session a signed-in route insists on', () => {
+  /// What the attempt was answered with, and what it left behind.
+  ///
+  /// The status alone is the weaker half. `requireAccount` creates the account
+  /// row for whatever `sub` it believed BEFORE the route body runs, so a
+  /// weakened verification leaves a stranger's account in the database even on
+  /// a request that goes on to fail for some other reason — and that row is
+  /// what every other table in this service hangs off.
+  async function attempt(token?: string) {
+    const response = await post(
+      '/v1/devices',
+      { platform: 'apns', pushToken: 'device-token' },
+      token,
+    )
+    const accounts = await env.DB.prepare(`SELECT id FROM accounts`).all<{ id: string }>()
+    const devices = await env.DB.prepare(`SELECT id FROM devices`).all<{ id: string }>()
+    return {
+      status: response.status,
+      accounts: (accounts.results ?? []).map(row => row.id),
+      devices: (devices.results ?? []).length,
+    }
+  }
+
+  const refused = { status: 401, accounts: [] as string[], devices: 0 }
+
+  it('takes a token signed by the key WorkOS publishes', async () => {
+    // The control, and it is not decoration: without it every assertion below
+    // would also be satisfied by a route that refused everything, which is the
+    // other way to make this file green and the one that takes the product
+    // down for every real user at once.
+    watchFetch()
+    expect(await attempt(await sessionFor('user_1'))).toEqual({
+      status: 200,
+      accounts: ['user_1'],
+      devices: 1,
+    })
+  })
+
+  it('refuses a token signed by a key WorkOS never published', async () => {
+    // The forgery: right shape, right claims, right `kid`, and the one thing
+    // that cannot be manufactured is wrong. A route that decodes its payload
+    // rather than verifying it cannot tell this from the control above.
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1'), forgery.privateKey)
+    expect(await attempt(token)).toEqual(refused)
+  })
+
+  it('refuses a token with nothing in its signature at all', async () => {
+    // `header.payload.` — three segments with an empty third. This is what
+    // somebody writes by hand after seeing one real token, and it is exactly
+    // what a payload-decoding route accepts.
+    watchFetch()
+    const [header, payload] = (await sessionFor('user_1')).split('.')
+    expect(await attempt(`${header}.${payload}.`)).toEqual(refused)
+  })
+
+  it('refuses a token that expired an hour ago', async () => {
+    // Genuinely signed by WorkOS, and finished. A stolen token is worth
+    // whatever is left of its lifetime and nothing after it, which is a
+    // property of this check and of no other.
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1', { exp: seconds() - 3600 }))
+    expect(await attempt(token)).toEqual(refused)
+  })
+
+  it('refuses a genuine token from another issuer', async () => {
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1', { iss: 'https://evil.example' }))
+    expect(await attempt(token)).toEqual(refused)
+  })
+
+  it('refuses a genuine token minted for another application', async () => {
+    // The one a key set cannot catch on its own: two applications in one WorkOS
+    // environment are signed with the same keys, so the neighbour's token
+    // verifies here, and the only thing standing between it and this account's
+    // data is the `client_id` comparison.
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1', { client_id: 'client_someone_else' }))
+    expect(await attempt(token)).toEqual(refused)
+  })
+
+  it('refuses a caller carrying no authorization at all', async () => {
+    // The case this file already had, kept here beside the five it could not
+    // tell itself apart from.
+    watchFetch()
+    expect(await attempt()).toEqual(refused)
   })
 })
 
@@ -1035,18 +1165,40 @@ describe('the Android push body', () => {
 })
 
 describe('the signed-in routes', () => {
+  /// Every route that requires a session.
+  ///
+  /// `/v1/daemons/revoke` was missing from this list, which is most of how it
+  /// came to have no test of any kind — the list is the only place in this file
+  /// that names the signed-in routes together, so a route absent from it is a
+  /// route nobody notices is absent.
+  const paths = [
+    '/v1/devices',
+    '/v1/devices/activity',
+    '/v1/devices/lookup',
+    '/v1/devices/verify',
+    '/v1/daemons',
+    '/v1/account',
+    '/v1/devices/revoke',
+    '/v1/daemons/revoke',
+  ]
+
   it('refuse a caller with no session', async () => {
-    const paths = [
-      '/v1/devices',
-      '/v1/devices/activity',
-      '/v1/devices/lookup',
-      '/v1/devices/verify',
-      '/v1/daemons',
-      '/v1/account',
-      '/v1/devices/revoke',
-    ]
     for (const path of paths) {
       expect((await post(path, {})).status, path).toBe(401)
+    }
+  })
+
+  it('refuse a caller holding a token WorkOS did not sign', async () => {
+    // Not the same test as the one above it. A missing header is refused by the
+    // first line of `requireAccount`; a forged one is refused only by the
+    // verification underneath — and it was the verification nothing covered.
+    // Swept over every route rather than proven on one, because the guard is a
+    // single function but the ways to lose it are per-route: an early return, a
+    // route that reads `sub` for itself, a handler added without the call.
+    watchFetch()
+    const token = await signTestJwt(claimsFor('user_1'), forgery.privateKey)
+    for (const path of paths) {
+      expect((await post(path, {}, token)).status, path).toBe(401)
     }
   })
 })
