@@ -273,6 +273,31 @@ final class Connection: ObservableObject {
     }
 
     func start(host: Runner) async {
+        // A bring-up somebody cancelled does not dial.
+        //
+        // **This is not belt and braces; without it a retired runner comes
+        // back.** `FleetStore.bringUp` wraps this in a `Task` and
+        // `FleetStore.retire` cancels that task — but cancellation in Swift is
+        // cooperative, so a task cancelled before its body ever ran still runs
+        // it. The first two statements below register this connection in
+        // `Connection.registry` and subscribe it to `Reachability`, and both
+        // outlive the retirement:
+        //
+        // - `Connection.retire()` clears the registry entry `if let host`, and
+        //   `host` is still nil here, so it clears nothing. The registration
+        //   then happens AFTER the only code that would have undone it, and
+        //   `Connection.liveRunners` reports a retired runner as one this
+        //   device may write `authorized_keys` on — the exact hazard `retire`'s
+        //   own doc says it exists to prevent.
+        // - The `Reachability` subscriber goes in under the same nil `host`, so
+        //   no later `retire` can find it either. It is woken by every network
+        //   change for the life of the process.
+        //
+        // The rebuild path never showed this: `retire` and `bringUp` run in one
+        // main-actor turn, so the replacement registers second and wins. It is
+        // the retire-with-NO-replacement path that bites — removing a runner,
+        // or turning "Connect every runner at once" off.
+        guard !Task.isCancelled else { return }
         poller?.cancel()
         newsRefresh?.cancel()
         reconnectTask?.cancel()
@@ -650,7 +675,12 @@ final class Connection: ObservableObject {
     ///
     /// Removing a key nothing registered is explicitly fine — see
     /// `KeyedCallbacks.remove` — so retiring a connection that never got as far
-    /// as `start` is an ordinary thing for a reconcile to do.
+    /// as `start` is an ordinary thing for a reconcile to do. **That is true
+    /// only because `start` checks `Task.isCancelled` before it registers
+    /// anything.** Without that check this method runs first, finds a nil
+    /// `host` and clears nothing, and the bring-up it was meant to stop then
+    /// registers the runner it was meant to forget — with no later `retire`
+    /// able to reach either entry.
     func retire() {
         // Same bump as `abandon`: anything still awaiting the core for this
         // connection stops being able to write a phase on the way out.
