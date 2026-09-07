@@ -340,9 +340,13 @@ final class FleetStore: ObservableObject {
     /// it — a `Connection` reports an id and this is what turns that back into
     /// the runner a person named.
     var runners: [(host: Runner, connection: Connection)] {
-        hosts.hosts.compactMap { host in
-            connections[host.id].map { (host, $0) }
-        }
+        // `runnerOrder` and not `hosts.hosts`, so this and `publish` give one
+        // answer to "which runners does this store have". They disagreed in the
+        // layout harness, where the store stands on a canned connection and its
+        // `RunnerStore` is empty: `publish` built entries and this reported
+        // none, so the merged fleet on screen and the list of runners over it
+        // were describing two different fleets.
+        runnerOrder.compactMap { host in connections[host.id].map { (host, $0) } }
     }
 
     #if DEBUG
