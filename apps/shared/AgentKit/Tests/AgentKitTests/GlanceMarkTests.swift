@@ -637,7 +637,7 @@ private let barDiameters: [CGFloat] = [5, 6, 7]
 
 /// One mark's pixels, at the scale a phone draws them, as a short fingerprint.
 ///
-/// Rendered into a fixed box with an opaque ground and an explicit colour
+/// Rendered into a fixed box with an opaque ground and an explicit color
 /// scheme, so the only thing that can move the bytes is the mark.
 ///
 /// **A digest and not the buffer, because of what a failure PRINTS.** Swift

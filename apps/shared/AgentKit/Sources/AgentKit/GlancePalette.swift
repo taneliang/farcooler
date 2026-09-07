@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-// The glance surfaces' twelve colours, written once, in the notation the spec
+// The glance surfaces' twelve colors, written once, in the notation the spec
 // wrote them in.
 //
 // **This file is the only place in the codebase where any of these values may
@@ -19,7 +19,7 @@ import SwiftUI
 // `glanceTint` in `FleetWidget.swift`, its acknowledged copy in
 // `WatchFleetWidget.swift`, and `ShellMarkView`'s four literals in
 // `ShellBar.swift` — and the comment beside each of the first two said, in
-// so many words, that a colour is a SwiftUI type and `FleetSnapshot.swift` has
+// so many words, that a color is a SwiftUI type and `FleetSnapshot.swift` has
 // no business importing SwiftUI. That is still true (see
 // `FleetSnapshot.swift:466-470`); this file is where the SwiftUI half goes
 // instead, so the wire's shape stays free of views and the tint still lives in
@@ -36,11 +36,11 @@ import SwiftUI
 // AgentKit one file at a time and never the package
 // (`apps/ios/generate-project.py:274-281`), so nothing here may reach for a
 // type the watch does not have: no `UIColor`, no `NSColor`, no asset catalog,
-// no dynamic colour provider. That is the reason the conversion below is plain
+// no dynamic color provider. That is the reason the conversion below is plain
 // arithmetic on `Double` and the reason light mode is a second literal rather
 // than a system trait lookup.
 
-/// One colour, in the co-ordinates the spec uses.
+/// One color, in the co-ordinates the spec uses.
 ///
 /// OKLCH is kept as the stored form rather than converted by hand into sRGB
 /// components, and that is the whole point of this type. The spec's §09 review
@@ -66,7 +66,7 @@ public struct OKLCH: Sendable, Equatable {
         self.alpha = alpha
     }
 
-    /// The sRGB colour, converted here rather than at any call site.
+    /// The sRGB color, converted here rather than at any call site.
     ///
     /// Björn Ottosson's Oklab matrices, in the order the transform runs:
     /// polar → Oklab, Oklab → cone responses, cubed, cone responses → linear
@@ -77,10 +77,10 @@ public struct OKLCH: Sendable, Equatable {
     ///
     /// **Out-of-gamut components are clamped, not gamut-mapped**, which is a
     /// deliberate simplification and safe for exactly these twelve values: all
-    /// sixteen colours in this file (twelve dark, four light) were checked to
+    /// sixteen colors in this file (twelve dark, four light) were checked to
     /// land inside sRGB with no component beyond ±0.0005, so no clamp fires
     /// today. It is here so that a value edited in the design document to
-    /// something sRGB cannot hold degrades to the nearest displayable colour
+    /// something sRGB cannot hold degrades to the nearest displayable color
     /// instead of to whatever a negative component renders as.
     public var color: Color {
         let a = chroma * cos(hue * .pi / 180)
@@ -111,16 +111,16 @@ public struct OKLCH: Sendable, Equatable {
     }
 }
 
-/// One colour of the system, in both appearances.
+/// One color of the system, in both appearances.
 ///
-/// Two literals rather than one colour and a filter, because §01 is explicit
+/// Two literals rather than one color and a filter, because §01 is explicit
 /// that light mode is "Not a filter flip": amber DARKENS on a pale backdrop to
 /// hold its contrast, the surfaces invert to translucent black, and the two
 /// trace tones swap ends of the scale. A single value adjusted at draw time
 /// cannot express any of that.
 ///
 /// Resolved against `ColorScheme` at the call site rather than by a dynamic
-/// colour provider, because the provider APIs are `UIColor`/`NSColor` and the
+/// color provider, because the provider APIs are `UIColor`/`NSColor` and the
 /// watch has neither. `@Environment(\.colorScheme)` is the one mechanism all
 /// three platforms share.
 public struct GlanceInk: Sendable, Equatable {
@@ -150,18 +150,18 @@ public struct GlanceInk: Sendable, Equatable {
 }
 
 /// §01, transcribed. Twelve values, and nothing else in the product may hold a
-/// colour that belongs to a glance surface.
+/// color that belongs to a glance surface.
 public enum GlancePalette {
     // MARK: - The one saturated hue, and the one that is not allowed to be loud
 
     /// Needs you. **Nothing else in the product may be amber, at any opacity.**
     ///
-    /// This is the whole colour system: one reserved hue, so that "does this
+    /// This is the whole color system: one reserved hue, so that "does this
     /// need me" is answered before a word is read. `FleetSnapshot.Glance`
     /// (`FleetSnapshot.swift:471-477`) is the enum that decides which surface
     /// earns it; this is the value.
     ///
-    /// The light value is a genuinely different colour rather than the same one
+    /// The light value is a genuinely different color rather than the same one
     /// dimmed — §01: "amber darkens to oklch(0.62 0.13 68) to hold contrast on
     /// a pale backdrop."
     public static let amber = GlanceInk(
@@ -275,7 +275,7 @@ public enum GlancePalette {
     /// prompt" — two of §03's three axes' worth of difference — become the same
     /// drawing.
     ///
-    /// **So light mode defers to the system's own label colours rather than
+    /// **So light mode defers to the system's own label colors rather than
     /// inventing two numbers.** `Color.primary` and `Color.secondary` are
     /// correct on any appearance by construction and are the same deferral the
     /// working rung already makes with `HierarchicalShapeStyle.tertiary`. Dark
@@ -304,7 +304,7 @@ public enum GlancePalette {
     /// axis and reads as a HOLE punched in the rule. A gap means "nothing here";
     /// a commit is the opposite of nothing.
     ///
-    /// So this defers to the system's own label colour in light mode and keeps
+    /// So this defers to the system's own label color in light mode and keeps
     /// the spec's figure in dark, which is the same trade `ink1` makes two
     /// declarations up and for the same stated reason: inventing a thirteenth
     /// oklch here is the mistake §01 forbids, and `Color.primary` is correct on
@@ -324,14 +324,14 @@ public enum GlancePalette {
     /// **The single replacement for the two `glanceTint` functions** that used
     /// to live in `FleetWidget.swift` and `WatchFleetWidget.swift`, each of
     /// which carried a comment explaining that it had to be a copy because a
-    /// colour is a SwiftUI type. It does not have to be a copy any more; it has
+    /// color is a SwiftUI type. It does not have to be a copy any more; it has
     /// to be in a SwiftUI file, and this is one.
     ///
-    /// `AnyShapeStyle` because the three tints are not all colours: the working
+    /// `AnyShapeStyle` because the three tints are not all colors: the working
     /// rung stays a hierarchical style, which is what lets the all-clear case
     /// recede against whatever wallpaper or watch face is behind it rather than
     /// sitting at a fixed grey that vanishes on one and shouts on the other.
-    /// That reasoning survives the palette — §01 has no colour for "getting on
+    /// That reasoning survives the palette — §01 has no color for "getting on
     /// with it", and it should not, because the answer is "whatever is behind
     /// this, slightly".
     public static func tint(_ glance: FleetSnapshot.Glance, _ scheme: ColorScheme) -> AnyShapeStyle

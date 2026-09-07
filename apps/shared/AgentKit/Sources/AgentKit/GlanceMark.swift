@@ -20,7 +20,7 @@ import SwiftUI
 // down is the one that turns up on a phone.
 //
 // **What this replaced.** Four surfaces drew four different things and shared
-// nothing but the colour orange: `ShellMarkView` drew a capsule with four
+// nothing but the color orange: `ShellMarkView` drew a capsule with four
 // hard-coded states, the widget rows printed `agent.glyph` — a literal
 // character off the wire — the circular accessory stacked an SF Symbol over a
 // count, and the Live Activity and the watch complication each had their own
@@ -360,7 +360,7 @@ public struct GlanceMarkView: View {
     /// Light mode is a different palette rather than the same one dimmed —
     /// §01 is explicit that it is "Not a filter flip" — so the mark has to know
     /// which appearance it is in. `@Environment(\.colorScheme)` rather than a
-    /// dynamic colour provider because those are `UIColor`/`NSColor` and the
+    /// dynamic color provider because those are `UIColor`/`NSColor` and the
     /// watch has neither. See `GlanceInk`.
     @Environment(\.colorScheme) private var scheme
 
@@ -477,7 +477,7 @@ public struct GlanceMarkView: View {
                 .strokeBorder(ringColor, style: strokeStyle)
             if let coreDiameter {
                 // Never amber. §03 reserves the ring for the person's side and
-                // the core for the agent's, and amber is the person's colour:
+                // the core for the agent's, and amber is the person's color:
                 // an amber core would say "this needs you" about the half of
                 // the mark that is only ever saying what the agent is doing.
                 // The brightest neutral instead, which is what "present" looks
@@ -623,7 +623,7 @@ public struct GlanceTraceLayout: Sendable, Equatable {
     /// The shortest a bar may be drawn.
     ///
     /// **The one figure here §04 does not give**, and it is forced by two of the
-    /// ones it does. "A bucket with no activity" has a colour of its own in §01
+    /// ones it does. "A bucket with no activity" has a color of its own in §01
     /// and §04 says it is "Drawn, not omitted", so a silent bucket has to be
     /// something rather than nothing — and a scaled height can be a hundredth of
     /// a point, which is nothing. 1pt, matching §03's hairline, is the smallest
@@ -860,7 +860,7 @@ extension ActivityTrace.Span {
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach([false, true], id: \.self) { mono in
-                    Text(mono ? "monochrome" : "colour").font(.footnote)
+                    Text(mono ? "monochrome" : "color").font(.footnote)
                     ForEach(Array(states.enumerated()), id: \.offset) { _, mark in
                         HStack(spacing: 0) {
                             Text(mark.phrase)

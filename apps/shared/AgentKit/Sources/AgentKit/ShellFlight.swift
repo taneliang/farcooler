@@ -75,7 +75,7 @@ enum ShellMotion {
     /// How far the ground behind the cards is darkened while they are crossing.
     ///
     /// Without it the shrink is invisible: the page's ground and the ground
-    /// behind it are the same colour, so a card that pulls in from the edges
+    /// behind it are the same color, so a card that pulls in from the edges
     /// reveals more of exactly what it was already covering. The dim is what
     /// turns the gap into a gap.
     static let deskDim: CGFloat = 0.45
