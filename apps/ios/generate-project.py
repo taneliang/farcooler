@@ -157,6 +157,12 @@ AGENTKIT_SOURCES = [
     # costs something, a live runner nobody granted, is a rule no screen can
     # show you. See `CeremonyReachTests`.
     "CeremonyReach.swift",
+    # The one `fleet.json`, assembled from every runner rather than overwritten
+    # by whichever polled last. Here for `FleetMembership.swift`'s reason: the
+    # merge has an answer per field -- what `complete` means across N runners,
+    # why a nil review count is not a zero, when a retired runner's agents leave
+    # -- and none of them has a screen in it. See `FleetPublicationTests`.
+    "FleetPublication.swift",
     # Which runners the phone should be talking to, and what changing that list
     # costs. Here for `ShellNavigation.swift`'s reason exactly: the rules a
     # reconcile has to keep have no screen in them, and the iOS UI suite is

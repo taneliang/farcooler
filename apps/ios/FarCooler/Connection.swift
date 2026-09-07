@@ -816,8 +816,13 @@ final class Connection: ObservableObject {
             // seconds, behind the agents beside it; the count is latched and
             // these surfaces are minutes to hours old by construction, so three
             // seconds buys nothing worth that.
+            // The runner is what makes this a contribution rather than a
+            // rewrite: the writer keeps a projection per runner and merges
+            // across them, so this poll no longer erases what the other two
+            // runners said. See `FleetPublication`.
             FleetSnapshotWriter.write(
-                fleet: fleet, inbox: inboxRead ? inbox : nil, machine: hostLabel)
+                fleet: fleet, inbox: inboxRead ? inbox : nil, machine: hostLabel,
+                runner: host?.id.uuidString ?? "")
 
             // And the same fleet again, in the one shape a runner you are NOT
             // looking at can still be drawn from. See `RunnerDirectory`, and

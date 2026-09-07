@@ -1020,8 +1020,87 @@ public struct ActivityTrace: Sendable, Equatable {
             commits[column] += UInt32(self.commits(bucket))
         }
 
+        return Self.encoded(code: code, output: output, commits: commits, span: axis)
+    }
+
+    /// The wire's bytes, for a caller that has to put a trace back on one.
+    ///
+    /// `FleetSnapshot.fleetTrace` is `Data`, not an `ActivityTrace` — the
+    /// widget holds a snapshot once per timeline entry and decoding there is
+    /// the cost the byte encoding exists to avoid. So a merge that computes a
+    /// trace needs its bytes back.
+    public var encoded: Data { bytes }
+
+    /// Several runners' fleet traces, on one axis.
+    ///
+    /// # Why this is legitimate and the per-terminal version is not
+    ///
+    /// `FleetSnapshot.fleetTrace` refuses to be summed out of the agents'
+    /// own rows, and the reason is arithmetic: each row snaps to the shortest
+    /// of §04's three windows that holds its OWN activity, so bucket 4 of a
+    /// five-minute row and bucket 4 of a two-hour row are different spans of
+    /// time and adding them adds unlike things. `rebucketed(to:)` is what
+    /// removes that objection — it brings every input onto one window by
+    /// summing whole multiples, which is exact — and it is the same operation
+    /// `AgentCardLayout` already performs across the rows it draws.
+    ///
+    /// What the daemon can do that this cannot is pick a width across every
+    /// ring it holds before encoding. It holds one runner's rings. **No daemon
+    /// holds three runners' rings**, so for a phone with three connections
+    /// there is no such thing as a fleet trace summed at the source, and the
+    /// choice is between this and drawing nothing.
+    ///
+    /// # What it costs, said out loud
+    ///
+    /// `rebucketed`'s phase residual, once per input rather than once. A trace
+    /// carries a shape and not an anchor, so packing from the newest end is too
+    /// NEW by at most one column and never in the other direction. Summing two
+    /// traces can therefore put one runner's column one place ahead of the
+    /// other's. Bounded by one column, one-directional, on a texture that is
+    /// explicitly not an accounting figure — and against the alternative, which
+    /// is the Dynamic Island's history disappearing the day somebody adds a
+    /// second runner.
+    ///
+    /// The coarsest span wins, because that is the only one every input can be
+    /// summed ONTO: `rebucketed` refuses to go finer and returns its input
+    /// unchanged, which would leave two different windows on one axis.
+    ///
+    /// Nil for no inputs. One input is returned unchanged, which is the
+    /// single-runner case and is byte-for-byte what the daemon sent.
+    public static func summing(_ traces: [ActivityTrace]) -> ActivityTrace? {
+        guard let coarsest = traces.map(\.span).max(by: { $0.bucketSeconds < $1.bucketSeconds })
+        else { return nil }
+        guard traces.count > 1 else { return traces[0] }
+
+        var code = [UInt32](repeating: 0, count: Self.buckets)
+        var output = [UInt32](repeating: 0, count: Self.buckets)
+        var commits = [UInt32](repeating: 0, count: Self.buckets)
+        for trace in traces {
+            let axis = trace.rebucketed(to: coarsest)
+            for bucket in 0..<Self.buckets {
+                // `UInt32` to add in, `UInt16`/`UInt8` to write out, for
+                // `rebucketed`'s reason: the producer saturates on the way to
+                // the wire and summing three runners can reach a ceiling one
+                // could not, so the saturation must happen at the encode and
+                // never in the accumulator.
+                code[bucket] += UInt32(axis.code(bucket))
+                output[bucket] += UInt32(axis.output(bucket))
+                commits[bucket] += UInt32(axis.commits(bucket))
+            }
+        }
+        return encoded(code: code, output: output, commits: commits, span: coarsest)
+    }
+
+    /// Three series and a span, as the wire's 66 bytes.
+    ///
+    /// One encoder, shared by `rebucketed` and `summing`, because the layout is
+    /// the half of this file that would still look plausible written wrong —
+    /// see `pair(_:_:)`, which is its inverse.
+    private static func encoded(
+        code: [UInt32], output: [UInt32], commits: [UInt32], span: Span
+    ) -> ActivityTrace {
         var bytes = Data(capacity: Self.encodedLength)
-        bytes.append((Self.version << 4) | axis.rawValue)
+        bytes.append((Self.version << 4) | span.rawValue)
         for series in [code, output] {
             for value in series {
                 let capped = UInt16(min(value, UInt32(UInt16.max)))
@@ -1033,7 +1112,7 @@ public struct ActivityTrace: Sendable, Equatable {
             }
         }
         for value in commits { bytes.append(UInt8(min(value, UInt32(UInt8.max)))) }
-        return ActivityTrace(bytes: bytes, span: axis)
+        return ActivityTrace(bytes: bytes, span: span)
     }
 }
 

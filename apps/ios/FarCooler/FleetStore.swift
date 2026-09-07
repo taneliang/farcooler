@@ -272,12 +272,27 @@ final class FleetStore: ObservableObject {
     /// both other platforms do, and `RunnerStatusRow` is what explains why those
     /// rows are stale.
     private func publish() {
-        let ordered = FleetMembership.published(order: runnerOrder.map(\.id), live: connections)
-        active = ordered
+        // Which runner each connection is for is THIS store's own key, and is
+        // deliberately not read back off the connection.
+        //
+        // `Connection.hostId` is nil until `start(host:)` has run, so pairing
+        // by it drops every connection in the window between being brought up
+        // and being dialed — and drops a canned one forever, which is what a
+        // layout harness stands on. Worse than either: it is a second answer to
+        // "which runner is this", and the two can only ever agree.
+        let mine = runnerOrder.compactMap { host in connections[host.id].map { (host, $0) } }
+        active = mine.map(\.1)
 
-        let byID = Dictionary(runnerOrder.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        entries = ordered.flatMap { connection -> [FleetEntry] in
-            guard let id = connection.hostId, let host = byID[id] else { return [] }
+        // Which runners may still contribute to `fleet.json`.
+        //
+        // Here rather than in `retire`, because this is the one place that sees
+        // the whole live set — and what the merge needs is the set, not the
+        // event. A runner nobody is polling with its agents on a lock screen,
+        // forever, is the bug merging creates if this is missing; see
+        // `FleetPublication.keeping(runners:)`.
+        FleetSnapshotWriter.keep(runners: Set(mine.map { $0.0.id.uuidString }))
+
+        entries = mine.flatMap { host, connection -> [FleetEntry] in
             let counts = connection.inbox
             return connection.fleet.workspaces.map { workspace in
                 FleetEntry(
@@ -372,12 +387,32 @@ final class FleetStore: ObservableObject {
     /// would need a real `Runner` in a real `RunnerStore`, which is a harness
     /// that dials a machine.
     static func standIn(on connection: Connection, host: Runner) -> FleetStore {
-        let store = FleetStore(hosts: RunnerStore(), scope: .oneRunner)
-        store.connections[host.id] = connection
-        store.dialed[host.id] = host
-        store.standInOrder = [host]
-        store.publish()
-        return store
+        FleetStore(standingOn: connection, host: host)
+    }
+
+    /// **Dials nothing, ever**, which is the whole difference from the ordinary
+    /// initializer and the reason it is not one.
+    ///
+    /// Going through `init(hosts:scope:)` would reconcile against a fresh
+    /// `RunnerStore` — and a `RunnerStore` is not empty in the simulator: the
+    /// UI suite launches with a demo runner as an argument, `init` picks it up,
+    /// and the harness would open an SSH session to it before drawing a single
+    /// canned pane. A layout harness that connects to a machine is not a
+    /// fixture.
+    private init(standingOn connection: Connection, host: Runner) {
+        self.hosts = RunnerStore()
+        self.scope = .oneRunner
+        self.everyRunnerAtOnce = false
+        self.standInOrder = [host]
+        self.connections[host.id] = connection
+        self.dialed[host.id] = host
+        // Watched, so filling the canned fleet in reaches the merge the same
+        // way a poll does. No runner-list or settings observer: neither has
+        // anything to say to a store with one connection nobody dialed.
+        watchers[host.id] = connection.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.publish() }
+        }
+        publish()
     }
 
     /// The runner order to publish in when there is no `RunnerStore` behind
