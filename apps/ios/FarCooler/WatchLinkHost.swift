@@ -803,13 +803,18 @@ final class WatchLinkHost: NSObject {
                     .nothingSent,
                     "Your \(DeviceKind.current) couldn’t start its connection. Nothing was sent."
                 )
-            case let .rejected(message):
+            case let .rejected(_, word):
                 // The daemon answers `NotFound` for a terminal it no longer has,
                 // which is worth its own sentence: nothing is wrong with the
                 // link and trying again will not help.
+                //
+                // The runner's own word rather than a substring of its prose.
+                // The guess this replaces also matched "invalid argument: path
+                // not found", which is a bug in this app and not a pane that
+                // has closed — and told a watch face the wrong one of those.
                 return (
                     .nothingSent,
-                    message.lowercased().contains("not found")
+                    word == RunnerRefusal.notFound.rawValue
                         ? "That agent isn’t running anymore."
                         : "That runner turned it down, so nothing was sent."
                 )
@@ -960,8 +965,15 @@ final class WatchLinkHost: NSObject {
             return "Your \(DeviceKind.current) took too long. It may still have gone through — "
                 + "check before trying again."
         }
-        let text = error.localizedDescription.lowercased()
-        if text.contains("not found") { return "That agent isn’t running anymore." }
+        // The runner's word, not a substring of its prose: "invalid argument:
+        // path not found" is a bug in this app rather than a pane that closed,
+        // and the two are opposite things for a watch to say.
+        if let core = error as? ClientCore.CoreError,
+            case let .rejected(_, word) = core,
+            word == RunnerRefusal.notFound.rawValue
+        {
+            return "That agent isn’t running anymore."
+        }
         return "Couldn’t \(what). Your \(DeviceKind.current) lost touch with the runner."
     }
 }

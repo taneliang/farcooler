@@ -206,14 +206,15 @@ extension ReviewCommentQueue {
                 sentence: "The connection to this runner dropped, so these are still here. "
                     + "Try again once it\u{2019}s back.")
         }
-        let text = error.localizedDescription.lowercased()
-        if text.contains("not found") || text.contains("unknown method") {
+        // The runner's own word rather than a substring of its prose. "unknown
+        // method" was never a string the daemon sends, and "not found" also
+        // matched refusals that have nothing to do with a pane going away.
+        if ClientCore.refusalWord(of: error) == RunnerRefusal.notFound.rawValue {
             return ReviewTrouble(
                 sentence:
                     "That pane isn\u{2019}t running an agent anymore, so there was nothing to send to.")
         }
-        return ReviewTrouble(
-            sentence: "Couldn\u{2019}t send these. They\u{2019}re still here.",
-            transcript: error.localizedDescription)
+        return ClientCore.trouble(
+            error, otherwise: "Couldn\u{2019}t send these. They\u{2019}re still here.")
     }
 }

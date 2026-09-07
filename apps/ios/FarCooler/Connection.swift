@@ -1164,7 +1164,9 @@ final class Connection: ObservableObject {
     enum RemoveRootResult {
         case ok
         case nameDidNotMatch
-        case failed(String)
+        /// The message, and the stable word the runner named it by. See
+        /// `RemoveWorktreeResult.failed` for why the word travels alone.
+        case failed(String, word: String?)
     }
 
     /// Stop watching a directory. The repositories already registered under it
@@ -1188,7 +1190,7 @@ final class Connection: ObservableObject {
             data = try await core.call(
                 "repository_root.remove", ["root": id, "confirm": confirm])
         } catch {
-            return .failed(error.localizedDescription)
+            return .failed(error.localizedDescription, word: ClientCore.refusalWord(of: error))
         }
         struct Reply: Decodable {
             var ok: Bool?
@@ -1524,7 +1526,10 @@ final class Connection: ObservableObject {
     enum RemoveWorktreeResult {
         case ok
         case confirmationRequired
-        case failed(String)
+        /// The message, and the stable word the runner named it by. The word
+        /// travels without a sentence because the sentence a screen falls back
+        /// to is that screen's, not this type's.
+        case failed(String, word: String?)
     }
 
     /// `confirm` must be the workspace's exact name, unless the worktree is
@@ -1536,7 +1541,7 @@ final class Connection: ObservableObject {
                 "workspace.remove_worktree", ["workspace": workspace.id, "confirm": confirm])
         } catch {
             await refresh()
-            return .failed(error.localizedDescription)
+            return .failed(error.localizedDescription, word: ClientCore.refusalWord(of: error))
         }
         struct Reply: Decodable {
             var ok: Bool?

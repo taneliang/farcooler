@@ -1461,14 +1461,18 @@ final class ChangesStore: ObservableObject {
     /// "command" because the mechanisms genuinely differ — that side shells
     /// out to `farcooler changes … --json` and this one makes an FFI call —
     /// and `AgentStream` already spells the phone's half of that sentence.
+    /// **Rewritten to read the runner's word rather than guess at its prose.**
+    /// The guess was wrong in both directions. "unknown method" was never a
+    /// string the daemon sent — an unimplemented method comes back as
+    /// `CapabilityUnsupported`, whose message says nothing of the kind — so
+    /// that half matched nothing. And "not found" matched a workspace somebody
+    /// else had removed, which this then reported as a runner too old to review
+    /// changes: a definite answer that sends you to update software that was
+    /// never the problem.
     private static func trouble(for error: Error) -> Trouble {
-        let text = error.localizedDescription.lowercased()
-        if text.contains("not found") || text.contains("unknown method") {
-            return Trouble(sentence: "This runner’s Far Cooler is too old to review changes.")
-        }
-        return Trouble(
-            sentence: "Couldn’t read this workspace. The request that reads it didn’t finish.",
-            transcript: error.localizedDescription)
+        ClientCore.trouble(
+            error,
+            otherwise: "Couldn’t read this workspace. The request that reads it didn’t finish.")
     }
 }
 

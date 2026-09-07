@@ -26,10 +26,13 @@ final class AgentStream: ObservableObject {
     /// there was no way to read it as anything but Far Cooler talking. Kept,
     /// because for a runner that cannot be reached it is the only diagnosis
     /// there is — it goes in a `DetailBox` now, where output goes.
-    struct Trouble: Equatable {
-        let sentence: String
-        var transcript: String?
-    }
+    ///
+    /// `ReviewTrouble` rather than a third declaration of the same pair.
+    /// `ChangesStore.Trouble` is already a typealias for it and Android's
+    /// `Model.Trouble` is the same shape again; a chat pane is the third screen
+    /// to want it, and three structs with identical fields is how two of them
+    /// end up rendering the same failure differently.
+    typealias Trouble = ReviewTrouble
 
     @Published private(set) var connectionError: Trouble?
 
@@ -344,9 +347,8 @@ final class AgentStream: ObservableObject {
                 // here would be inventing one: from this side of an ssh link
                 // the cause is unknowable, and a guess sends somebody to change
                 // a setting that was never the problem. See `Enrollment.note`.
-                connectionError = Trouble(
-                    sentence: "The request that reads it didn’t finish.",
-                    transcript: error.localizedDescription)
+                connectionError = ClientCore.trouble(
+                    error, otherwise: "The request that reads it didn’t finish.")
             }
         }
     }
@@ -398,14 +400,19 @@ final class AgentStream: ObservableObject {
 
     /// The core's answer, as something worth putting on a phone screen.
     private static func message(for error: Error) -> String {
+        // The size ceiling is still read off the prose. It is refused inside
+        // the client core, before anything crosses to a runner, so there is no
+        // code to read — see `paste_file` in `crates/client/src/actions.rs`.
         let text = error.localizedDescription.lowercased()
         if text.contains("too large") || text.contains("payload") {
             return "That was too large to send. Try a smaller image."
         }
-        if text.contains("not found") {
-            return "That agent isn’t running anymore."
-        }
-        return "Couldn’t reach this runner. Your message wasn’t sent."
+        // Everything a runner refuses does have one, and this banner has room
+        // for exactly one sentence — so it takes the table's and falls back to
+        // its own, which is what it always showed.
+        return ClientCore.trouble(
+            error, otherwise: "Couldn’t reach this runner. Your message wasn’t sent."
+        ).sentence
     }
 
     /// Rewrite a message that has not gone out yet.

@@ -220,9 +220,8 @@ struct TaskComposerView: View {
                 workspaceID = try await connection.createWorkspace(
                     repository: repository.id, name: name, branch: branch, base: "")
             } catch {
-                phase = .failed(
-                    "Couldn’t create the worktree.",
-                    transcript: error.localizedDescription)
+                let why = ClientCore.trouble(error, after: "Couldn’t create the worktree.")
+                phase = .failed(why.sentence, transcript: why.transcript)
                 return
             }
             await connection.refresh()
@@ -233,9 +232,8 @@ struct TaskComposerView: View {
                 terminalID = try await connection.createTerminal(
                     workspace: workspaceID, title: agentID, preset: preset)
             } catch {
-                phase = .failed(
-                    "Created the worktree, but couldn’t start \(agentName).",
-                    transcript: error.localizedDescription)
+                let why = ClientCore.trouble(error, after: "Created the worktree, but couldn’t start \(agentName).")
+                phase = .failed(why.sentence, transcript: why.transcript)
                 return
             }
 
@@ -289,9 +287,8 @@ struct TaskComposerView: View {
                 // Mac makes the same two calls for the same reason.
                 try await connection.writeRaw(terminal: terminalID, hex: "0d")
             } catch {
-                phase = .failed(
-                    "Started \(agentName), but couldn’t send the task.",
-                    transcript: error.localizedDescription)
+                let why = ClientCore.trouble(error, after: "Started \(agentName), but couldn’t send the task.")
+                phase = .failed(why.sentence, transcript: why.transcript)
                 return
             }
 

@@ -31,7 +31,7 @@ final class TerminalSession: ObservableObject {
         case connecting
         case notLive
         /// A sentence this app wrote, and — where it has none of its own — the
-        /// host's answer to put under it. See `humanFailure(_:)`.
+        /// host's answer to put under it. See `report(_:)`.
         case failed(String, transcript: String?)
         case live
     }
@@ -1680,12 +1680,11 @@ final class TerminalSession: ObservableObject {
     /// currently a live pane — restarted, stopped, never started. Everything
     /// else is a real failure, and the two must read differently: one is
     /// "come back later", the other is "something is wrong".
-    private func report(_ error: Error) {
-        let message = error.localizedDescription
-        phase = message == "resource not found" ? .notLive : Self.humanFailure(message)
-    }
-
-    /// What actually goes under "Could not load".
+    /// **The runner's own word for "there is no such pane", not a comparison
+    /// against its prose.** `"resource not found"` stays as a second arm, and
+    /// deliberately: a STREAM reports its end as a bare JSON string with no
+    /// code and no type left on it (see `farcooler_client_stream_start`), so
+    /// that path has only prose to go on and both must reach the same phase.
     ///
     /// The core's word for a dead link is "not connected", which is right for a
     /// log and wrong for a screen: it is lowercase, it is a fragment, and it
@@ -1693,33 +1692,37 @@ final class TerminalSession: ObservableObject {
     /// the phone did or can do about it. It is also the line they saw — one ssh
     /// hiccup anywhere empties that slot and every call afterwards is answered
     /// with it, so this is the most common failure text there is, not an edge.
+    /// It carries no code either, for the same reason: nothing refused it.
     ///
-    /// Matched on the string rather than on `ClientCore.CoreError`, which the
-    /// call path could have offered, because the OTHER caller could not: a
-    /// stream reports its end as a bare JSON string with no type left on it
-    /// (see `farcooler_client_stream_start`). One rule both paths can use beats
-    /// a typed check here and an untyped one six lines away that drift apart.
+    /// Everything else DOES carry one, and the ones this build can read say
+    /// more than "the request didn't finish" ever could — tmux missing on the
+    /// runner, a device enrolled only to look, a Far Cooler too old for this
+    /// pane. A refusal this build cannot read keeps the sentence that was here
+    /// before, with the runner's words in a `DetailBox` beneath it rather than
+    /// standing in the sentence's place: passing the host's fragment through as
+    /// the phase's only string put it under a headline this app wrote, in the
+    /// app's own face, with nothing to mark where Far Cooler stopped speaking.
+    /// The Mac's `ChangesPane` made the same move for the same string.
     ///
-    /// Everything else is KEPT, whole. A message from the host is the host's
-    /// to word, and rewriting all of them into one apology would throw away
-    /// the only clue a real failure carries.
-    ///
-    /// It is no longer kept in the sentence's place, though. Passing it through
-    /// as the phase's only string put the host's fragment under a headline this
-    /// app wrote, in the app's own face, with nothing to mark where Far Cooler
-    /// stopped speaking — see `TerminalView.phaseContent`, which now draws the
-    /// sentence as prose and the transcript in a `DetailBox`. The Mac's
-    /// `ChangesPane` made the same move for the same string.
-    ///
-    /// The sentence says only what this side knows: the read did not finish. No
-    /// cause is named, because from here the cause is unknowable and a guess
-    /// sends somebody to change a setting that was never the problem — see
-    /// `Enrollment.note(about:outcome:)` — and no retry is promised, because
-    /// nothing here performs one.
-    private static func humanFailure(_ message: String) -> Phase {
-        message == "not connected"
-            ? .failed("The connection to this runner dropped. Reconnecting…", transcript: nil)
-            : .failed("The request that reads this pane didn’t finish.", transcript: message)
+    /// No cause is invented and no retry is promised: from here the cause is
+    /// unknowable, a guess sends somebody to change a setting that was never
+    /// the problem — see `Enrollment.note(about:outcome:)` — and nothing here
+    /// performs a retry.
+    private func report(_ error: Error) {
+        let message = error.localizedDescription
+        if ClientCore.refusalWord(of: error) == RunnerRefusal.notFound.rawValue
+            || message == "resource not found"
+        {
+            phase = .notLive
+            return
+        }
+        if message == "not connected" {
+            phase = .failed("The connection to this runner dropped. Reconnecting…", transcript: nil)
+            return
+        }
+        let trouble = ClientCore.trouble(
+            error, otherwise: "The request that reads this pane didn’t finish.")
+        phase = .failed(trouble.sentence, transcript: trouble.transcript)
     }
 
     /// Send typed text. Each scalar is encoded on its own so a Ctrl modifier —

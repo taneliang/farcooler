@@ -44,7 +44,21 @@ actor ClientCore {
 
     enum CoreError: LocalizedError {
         case notStarted
-        case rejected(String)
+        /// The runner understood and said no.
+        ///
+        /// `word` is the stable machine word it named the refusal by — one of
+        /// the `ErrorCode` names, spelled in kebab by
+        /// `farcooler_core::error::word` and carried on the answer line as
+        /// `code`. Nil where no runner refused anything: an argument this
+        /// boundary rejected before sending has no code because nothing on the
+        /// other side produced one.
+        ///
+        /// Carried rather than recovered from the message, for the reason
+        /// `disconnected` is: Rust still has the type at the moment the error
+        /// is produced, and the six screens below were reduced to matching
+        /// substrings of a Rust `Display` string because nothing brought it
+        /// across.
+        case rejected(String, word: String?)
         /// The link is gone, as opposed to the request being refused.
         ///
         /// Answered by the core rather than worked out from the message here:
@@ -58,11 +72,57 @@ actor ClientCore {
         var errorDescription: String? {
             switch self {
             case .notStarted: return "The client core could not be started."
-            case .rejected(let message): return message
+            case .rejected(let message, _): return message
             case .disconnected(let message): return message
             case .malformed: return "The client core returned something unreadable."
             }
         }
+    }
+
+    /// What a screen says about a call that failed.
+    ///
+    /// **One entry point, so the seven screens that draw a failed call cannot
+    /// disagree about which refusals this app can explain.** That is the same
+    /// argument `RunnerTrouble` makes for the connect path, and the same one
+    /// that put `AgentFailure`'s copy in AgentKit: the iOS UI suite is compiled
+    /// by CI and never executed, so a decision made inside a `View` is a
+    /// decision nothing reads back.
+    ///
+    /// Two lines here and the whole table in `RunnerRefusal`, deliberately:
+    /// AgentKit cannot see `CoreError` — the Mac imports it as a real module —
+    /// so this is the only part that has to live in the app target, and it is
+    /// the part with nothing in it to get wrong. `swift test --package-path
+    /// apps/shared/AgentKit` runs the part that does.
+    ///
+    /// `generic` is what this screen said before any of this existed, and it is
+    /// still what an unrecognized code falls back to, with the runner's words
+    /// in the box beneath it.
+    static func trouble(_ error: Error, otherwise generic: String) -> ReviewTrouble {
+        RunnerRefusal.trouble(
+            forWord: refusalWord(of: error),
+            message: error.localizedDescription,
+            otherwise: generic)
+    }
+
+    /// The same, with this screen's own sentence about the step in front of it.
+    /// See `RunnerRefusal.trouble(forWord:message:after:)`.
+    static func trouble(_ error: Error, after context: String) -> ReviewTrouble {
+        RunnerRefusal.trouble(
+            forWord: refusalWord(of: error),
+            message: error.localizedDescription,
+            after: context)
+    }
+
+    /// The runner's word for a refusal, for the few callers that carry it
+    /// somewhere before anybody draws it.
+    ///
+    /// `Connection`'s three-way outcomes are the reason this is separate: they
+    /// cross from the model to a sheet as a value, and the sheet is where the
+    /// generic sentence for that particular screen lives, so the word has to
+    /// travel without the sentence being chosen yet.
+    static func refusalWord(of error: Error) -> String? {
+        guard let core = error as? CoreError, case let .rejected(_, word) = core else { return nil }
+        return word
     }
 
     init() {
@@ -280,7 +340,8 @@ actor ClientCore {
                 if object["disconnected"] as? Bool == true {
                     continuation.resume(throwing: CoreError.disconnected(message))
                 } else {
-                    continuation.resume(throwing: CoreError.rejected(message))
+                    continuation.resume(
+                        throwing: CoreError.rejected(message, word: object["code"] as? String))
                 }
             }
         }

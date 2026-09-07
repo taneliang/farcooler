@@ -686,15 +686,22 @@ private struct RemoveRootConfirmSheet: View {
                                 working = false
                                 failure = SheetFailure(
                                     sentence: "That name didn’t match — try again.")
-                            // `message` is whatever the call came back with, and
-                            // this side has no idea why. In the box rather than
-                            // in the red line, so a runner's words don't read as
-                            // Far Cooler's — same as `RemoveWorktreeConfirmSheet`.
-                            case .failed(let message):
+                            // The two refusals this control actually produces
+                            // are "workspaces still exist under it" and
+                            // "something is still running in one", and they need
+                            // opposite things done about them. The sentence this
+                            // replaces said neither: "That folder is still being
+                            // watched." restates the failure and names no way
+                            // out of it. It survives as the fallback for a
+                            // refusal this build cannot read, with the runner's
+                            // words in the box rather than in the red line.
+                            case .failed(let message, let word):
                                 working = false
                                 failure = SheetFailure(
-                                    sentence: "That folder is still being watched.",
-                                    transcript: message)
+                                    RunnerRefusal.trouble(
+                                        forWord: word,
+                                        message: message,
+                                        otherwise: "That folder is still being watched."))
                             }
                         }
                     }

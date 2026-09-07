@@ -856,6 +856,20 @@ struct LinkStatusChip: View {
 struct SheetFailure {
     let sentence: String
     var transcript: String?
+
+    init(sentence: String, transcript: String? = nil) {
+        self.sentence = sentence
+        self.transcript = transcript
+    }
+
+    /// The same two fields, decided by the shared table.
+    ///
+    /// `RunnerRefusal` already speaks in exactly this pair — our sentence, the
+    /// runner's words, never spliced — and it lives in AgentKit because that is
+    /// the only Swift CI actually runs. This is the seam, not a second opinion.
+    init(_ trouble: ReviewTrouble) {
+        self.init(sentence: trouble.sentence, transcript: trouble.transcript)
+    }
 }
 
 /// One failure, drawn the way this codebase already draws them: a written
@@ -948,11 +962,13 @@ struct RemoveWorktreeConfirmSheet: View {
                             // uses, which made a runner's words read as Far
                             // Cooler's. Kept — it is the only account of what
                             // happened — and put in the box instead.
-                            case .failed(let message):
+                            case .failed(let message, let word):
                                 working = false
                                 failure = SheetFailure(
-                                    sentence: "Removing this worktree didn’t finish.",
-                                    transcript: message)
+                                    RunnerRefusal.trouble(
+                                        forWord: word,
+                                        message: message,
+                                        otherwise: "Removing this worktree didn’t finish."))
                             }
                         }
                     }
@@ -1127,14 +1143,21 @@ struct AddRepositorySheet: View {
                                 dismiss()
                             } catch {
                                 // Either of the two calls, and this side cannot
-                                // tell which — nor what the runner made of the
-                                // path. So one sentence about the step, and the
+                                // tell which — but the runner names WHY, and on
+                                // this screen the reasons want opposite moves:
+                                // a system folder is never addable and wants a
+                                // narrower one, a folder overlapping a root you
+                                // already have wants a different folder, and a
+                                // duplicate wants nothing at all. A refusal we
+                                // cannot read still falls back to the sentence
+                                // this sheet has always shown, with the
                                 // runner's answer below it rather than in place
                                 // of it.
                                 working = false
                                 failure = SheetFailure(
-                                    sentence: "Adding this repository didn’t finish.",
-                                    transcript: error.localizedDescription)
+                                    ClientCore.trouble(
+                                        error,
+                                        otherwise: "Adding this repository didn’t finish."))
                             }
                         }
                     }

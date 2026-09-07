@@ -154,6 +154,12 @@ AGENTKIT_SOURCES = [
     # the iOS UI suite is compiled by CI and never executed. See
     # `RunnerTroubleTests`.
     "RunnerTrouble.swift",
+    # The other half of that story: what a runner that ANSWERED and said no
+    # says. `RunnerTrouble` is the connect path and matches prose; this one is
+    # a live session's refusal and switches on the stable code the runner sends
+    # — seven surfaces draw one, which is why the table is not in any of them.
+    # See `RunnerRefusalTests`.
+    "RunnerRefusal.swift",
     # The other half of the same argument: what the shell MOVES by, and the
     # flying page's geometry. Here rather than beside the views because the
     # iOS target has no unit tests — a transform inside a `View` can be checked
