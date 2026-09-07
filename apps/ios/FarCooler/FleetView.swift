@@ -237,6 +237,7 @@ struct FleetView: View {
                         onReconnectNow: { runner.connection.reconnectNow() },
                         onTrust: { store.trust(runner.host, fingerprint: $0) },
                         onReviewKey: { store.forgetKey(runner.host) },
+                        onNotNow: { runner.connection.declineHostKey(runner.host) },
                         onEdit: { editing = runner.host },
                         onAuthorize: { authorizing = true })
                     Divider().padding(.leading, 16)

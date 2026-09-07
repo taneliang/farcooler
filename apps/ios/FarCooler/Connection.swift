@@ -318,7 +318,7 @@ final class Connection: ObservableObject {
 
         guard let key = Identity.privateKey() else {
             if mine == attempt {
-                phase = .failed("This device has no SSH key and one could not be generated.")
+                phase = .failed(RunnerTrouble.Said.noIdentity)
             }
             return
         }
@@ -433,15 +433,11 @@ final class Connection: ObservableObject {
 
     /// What a tunneled runner with no node key to dial it with is told.
     ///
-    /// **The dial does not mint one.** A tunneled runner was granted against
-    /// ONE public half, which is now a line in that runner's allowlist; minting
-    /// a fresh pair here would produce a key nobody has authorized, and tailcat
-    /// ignores a client it does not recognize without answering — so the
-    /// symptom would be a spinner, then a timeout, and nothing anywhere saying
-    /// why. `Failure` matches on "no tunnel key".
-    static let noNodeKey =
-        "This runner is reached through the tunnel, and this device has no tunnel key. "
-        + "Add this device again to get one."
+    /// The sentence itself is `RunnerTrouble.Said.noNodeKey`, in AgentKit next
+    /// to the phrase that classifies it and the argument for why the dial does
+    /// not simply mint a key. This name stays because every call site in this
+    /// file already uses it.
+    static let noNodeKey = RunnerTrouble.Said.noNodeKey
 
     /// A call came back saying the link is gone.
     ///
@@ -501,7 +497,7 @@ final class Connection: ObservableObject {
     private func reconnect(attempt: Int) async {
         guard case .reconnecting = phase, let host else { return }
         guard let key = Identity.privateKey() else {
-            phase = .failed("This device has no SSH key and one could not be generated.")
+            phase = .failed(RunnerTrouble.Said.noIdentity)
             return
         }
 
@@ -622,7 +618,7 @@ final class Connection: ObservableObject {
     /// about to succeed, and until this existed the only way out of that was to
     /// kill the app.
     func giveUp(on host: Runner) {
-        abandon("Stopped waiting for \(host.address). It may be asleep or off the network.")
+        abandon(RunnerTrouble.Said.stoppedWaiting(for: host.address))
     }
 
     /// Stop, for good, because nobody wants this runner any more.
@@ -681,13 +677,18 @@ final class Connection: ObservableObject {
 
     /// Back out of the fingerprint question without answering it.
     ///
-    /// Lands on the failure screen rather than the spinner, because that is the
-    /// screen with the runner switcher, the editor and this device's key on it.
-    /// The wording is what `Failure.keyNotTrusted` matches on.
+    /// Lands on the failure row rather than the spinner, because that is where
+    /// the way back to the question is. The wording is
+    /// `RunnerTrouble.Said.declined` — in AgentKit beside the phrase that
+    /// classifies it, so a reword cannot quietly turn a decision somebody made
+    /// into "Can't Connect".
+    ///
+    /// **Had no callers at all for the length of the multi-runner port**, which
+    /// is the same fact as `RunnerStatusRow` having no "Not Now" on it. Both
+    /// call sites pass it now, and `HostKeyQuestion` is what stops the pair
+    /// coming apart again.
     func declineHostKey(_ host: Runner) {
-        abandon(
-            "The key \(host.address) presented has not been trusted on this device. "
-                + "Far Cooler won’t connect until it is.")
+        abandon(RunnerTrouble.Said.declined(runner: host.address))
     }
 
     private func abandon(_ message: String) {
