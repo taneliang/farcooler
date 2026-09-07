@@ -33,8 +33,17 @@ class AgentEmptyStateTest {
         AgentPhase.Live,
         AgentPhase.Failing(dropped, Waited.A_MOMENT),
         AgentPhase.Failing(dropped, Waited.A_WHILE),
+        // Both failures at full width, not just the one that has host output to
+        // show. A dropped link carries this app's sentence and nothing else,
+        // which makes it the failure drawn most often and — until it was listed
+        // here — the only `TOO_LONG` state no property below ever reached.
+        AgentPhase.Failing(dropped, Waited.TOO_LONG),
         AgentPhase.Failing(timedOut, Waited.TOO_LONG),
     )
+
+    /** Every state above that has been failing long enough to be called one. */
+    private fun isLongFailure(phase: AgentPhase) =
+        phase is AgentPhase.Failing && phase.waited == Waited.TOO_LONG
 
     /**
      * The report itself: only a real failure that has been failing for thirty
@@ -44,18 +53,14 @@ class AgentEmptyStateTest {
     fun `only a long failure gets the alarm`() {
         for (phase in everyState) {
             val alarming = agentEmptyState(phase).mark == AgentEmptyState.Mark.ALARM
-            assertEquals(
-                phase.toString(),
-                phase == AgentPhase.Failing(timedOut, Waited.TOO_LONG),
-                alarming,
-            )
+            assertEquals(phase.toString(), isLongFailure(phase), alarming)
         }
     }
 
     /** Its converse: nothing that is still starting up says it could not load. */
     @Test
     fun `no waiting state wears a dead session's sentence`() {
-        val stillTrying = everyState.filter { it != AgentPhase.Failing(timedOut, Waited.TOO_LONG) }
+        val stillTrying = everyState.filter { !isLongFailure(it) }
         for (phase in stillTrying) {
             val state = agentEmptyState(phase)
             for (word in listOf("could not", "couldn’t", "failed", "unable")) {
@@ -146,6 +151,30 @@ class AgentEmptyStateTest {
         assertEquals("Could not load this session", state.title)
         assertEquals(timedOut.sentence, state.message)
         assertEquals(timedOut.transcript, state.transcript)
+    }
+
+    /**
+     * The failure with nothing to quote, which is the ordinary one.
+     *
+     * A dropped link is [com.farcooler.net.Connection]'s own sentence and
+     * nothing else: no command ran on the runner, so there is no host output to
+     * put under the headline. That is what made this state the untested one —
+     * the [everyState] list named the timed-out request as its only `TOO_LONG`
+     * case, and the single question anybody asked of this one was whether it
+     * had stopped spinning. A build that answered "Still trying", forever, to a
+     * link that has been down for thirty seconds passed the whole file.
+     *
+     * A missing transcript is not a missing failure. The headline, the alarm
+     * and the sentence are the same ones the timed-out request gets; only the
+     * box underneath is absent, because there is nothing true to put in it.
+     */
+    @Test
+    fun `a link down this long is a failure even with no host output to show`() {
+        val state = agentEmptyState(AgentPhase.Failing(dropped, Waited.TOO_LONG))
+        assertEquals(AgentEmptyState.Mark.ALARM, state.mark)
+        assertEquals("Could not load this session", state.title)
+        assertEquals(dropped.sentence, state.message)
+        assertNull(state.transcript)
     }
 
     /** A first poll claims nothing about whether a session exists. */
