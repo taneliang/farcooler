@@ -105,10 +105,43 @@ jobs:
         run: |
           unformatted="$(gofmt -l .)"
           [ -z "$unformatted" ] || { echo "gofmt wants: $unformatted"; exit 1; }
-      - run: go vet ./...
+      # BOTH cgo settings, and that is not belt-and-braces — it is the only way
+      # every file in this package is type-checked by anything.
+      #
+      # The package has two entry points and they are mutually exclusive by
+      # construction: `exports_cgo.go` imports "C", which Go excludes whenever
+      # cgo is off, and `main_helper.go` carries `//go:build !cgo`, which Go
+      # excludes whenever cgo is on. A runner has a C toolchain, so
+      # `CGO_ENABLED` defaults to 1 and `go list` puts `main_helper.go` in
+      # `IgnoredGoFiles` — an ignored file is not compiled, not vetted and not
+      # tested. That is the file that starts the tunnel helper on Linux, which
+      # is how every Linux runner serves a tunnel at all, and until this line it
+      # was compiled by nothing in CI.
+      #
+      # Measured rather than reasoned: dropping an argument from its one call to
+      # `runHelper` left `gofmt -l .`, `CGO_ENABLED=1 go vet ./...` and
+      # `CGO_ENABLED=1 go test -count=1 ./...` all at exit 0, and
+      # `CGO_ENABLED=0 go vet ./...` at exit 1 naming the line. gofmt is the
+      # exception that proves the rule — it reads every `.go` file regardless of
+      # build tags, so formatting was never the gap; type-checking was.
+      #
+      # Running only at 0 would swap one hole for the other, since that is the
+      # setting that ignores `exports_cgo.go` — the archive the Apple and
+      # Android apps link. Neither setting alone covers this package.
+      #
       # `-count=1` so a cached result from a previous run is never mistaken for
       # this commit passing.
-      - run: go test -count=1 ./...
+      - name: Vet and test with cgo, which is what the apps link
+        run: |
+          CGO_ENABLED=1 go vet ./...
+          CGO_ENABLED=1 go test -count=1 ./...
+      # And without it, which is what a Linux runner actually ships: the helper
+      # is built `CGO_ENABLED=0` precisely because a Go c-archive inside a musl
+      # binary segfaults in Go's runtime startup. This is that build.
+      - name: Vet and test without cgo, which is what Linux ships
+        run: |
+          CGO_ENABLED=0 go vet ./...
+          CGO_ENABLED=0 go test -count=1 ./...
 
   rust:
     name: Rust (${{ matrix.os }})
