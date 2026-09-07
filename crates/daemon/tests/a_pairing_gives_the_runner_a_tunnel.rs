@@ -33,7 +33,6 @@
 #![cfg(feature = "tailcat-helper")]
 
 use std::path::Path;
-use std::sync::Mutex;
 
 use farcooler_daemon::{enrollment, service::Service};
 use farcooler_protocol::v1::{ClientEnroll, Scope};
@@ -62,7 +61,14 @@ const TOKEN: &str = "tc-fake-token";
 /// which says which script a helper is, and `farcooler_tailcat`'s own
 /// one-helper-per-process slot. A test that starts a tunnel and one that
 /// asserts none is running would otherwise take turns failing.
-static SERIAL: Mutex<()> = Mutex::new(());
+///
+/// `tokio`'s mutex and not `std`'s, the same as the one in
+/// `revocation_closes_what_it_revoked.rs`, because what is being serialized is
+/// a whole `#[tokio::test]` body and every one of them awaits inside the
+/// section. A `std` guard held across an `.await` is what
+/// `clippy::await_holding_lock` refuses, and it is right to: the runtime may
+/// resume the task on another thread, which is where a `std` mutex deadlocks.
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// A helper that is a shell script.
 ///
@@ -174,7 +180,7 @@ fn pairing(public_key: &str, client_id: &str, node_key: &str) -> ClientEnroll {
 /// one. The steps are labeled so a failure says which one broke.
 #[tokio::test]
 async fn a_first_pairing_starts_the_tunnel_and_a_second_never_replaces_it() {
-    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = SERIAL.lock().await;
     stop_any_tunnel();
 
     let root = tempfile::tempdir().expect("a scratch root");
@@ -266,7 +272,7 @@ async fn a_first_pairing_starts_the_tunnel_and_a_second_never_replaces_it() {
 /// pairing failed outright has lost the device.
 #[tokio::test]
 async fn a_tunnel_that_will_not_start_still_pairs_the_device() {
-    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = SERIAL.lock().await;
     stop_any_tunnel();
 
     let root = tempfile::tempdir().expect("a scratch root");
