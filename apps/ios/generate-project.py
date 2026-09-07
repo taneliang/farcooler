@@ -151,6 +151,13 @@ AGENTKIT_SOURCES = [
     # the iOS UI suite is compiled by CI and never executed. See
     # `ShellIdentityTests`.
     "ShellIdentity.swift",
+    # What the shell draws before anybody has swiped it, and what an empty grid
+    # says. Here for `ShellNavigation.swift`'s reason and for one of its own:
+    # the branch this replaces chose a permanent spinner for a connected runner
+    # with no worktrees, which is a defect that looks exactly like a slow
+    # network from a screenshot and can only be told apart by asking the rule.
+    # See `ShellBringUpTests`.
+    "ShellBringUp.swift",
     # Which of the runners a ceremony granted this device may write a key into.
     # Here rather than in `CeremonyStore` because of what the answer is used for
     # -- appending to `~/.ssh/authorized_keys` -- and because the direction that
