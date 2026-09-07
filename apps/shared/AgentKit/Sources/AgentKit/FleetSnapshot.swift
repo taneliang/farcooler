@@ -1120,21 +1120,27 @@ public struct ActivityTrace: Sendable, Equatable {
 
 /// One runner's worktrees, as this app last saw them.
 ///
-/// `FleetSnapshot` above cannot answer this and should not be made to. It is
-/// AGENTS-ONLY by design — "a widget listing every terminal on every runner
-/// would be a list nobody can find anything in" — it is a SINGLE file, and it
-/// is rewritten whole on every poll by whichever connection is live. Ask it
-/// "what worktrees does `gpu-box-2` have" and it answers about whatever runner
-/// polled last.
+/// # What this is FOR, now that it is not the only way
 ///
-/// So this is a second, smaller thing with a different shape: keyed by runner,
-/// merged rather than clobbered, and about worktrees rather than agents. It
-/// exists for one screen — the overview's grid, which the owner asked to list
-/// all worktrees across all servers — and for the reason a second live
-/// connection cannot do that job: `Connection.start` claims four process-wide
-/// slots (`Connection.current`, `WatchLinkHost.shared.adopt`,
-/// `Reachability.shared.onShouldRetry`, and the one `fleet.json`), so two live
-/// connections would not cost twice as much, they would fight.
+/// It existed because a second live connection was impossible: `Connection`
+/// claimed process-wide slots on `start`, so two of them would fight rather
+/// than cost twice as much, and the overview's grid could only show another
+/// runner's worktrees as a memory. **That reason is gone.** The phone holds a
+/// connection per runner, every one of their worktrees is in the grid as a live
+/// card, and with "Connect every runner at once" on — the default — this cache
+/// contributes nothing at all, because `ShellScreen.readElsewhere` excludes
+/// every runner that is live.
+///
+/// What it is for is the setting turned OFF. A phone on a train talks to one
+/// runner, and the others still have worktrees somebody wants to see. That is
+/// the same job as before, on a smaller set of days, and it is why this is not
+/// deleted along with the reason it was written.
+///
+/// `FleetSnapshot` still cannot answer it and still should not be made to: that
+/// file is AGENTS-ONLY by design — "a widget listing every terminal on every
+/// runner would be a list nobody can find anything in" — and it is about what
+/// is HAPPENING rather than about what exists. This is keyed by runner and
+/// about worktrees.
 ///
 /// **Everything in here is a claim about the past, and `seenAt` is part of the
 /// value.** Nothing that reads it may draw it as current: see `decayed`, which
@@ -1144,9 +1150,27 @@ struct RunnerDirectory: Codable, Sendable, Equatable {
     /// One worktree, with just enough to draw a card and nothing more.
     ///
     /// No terminal ids, no pane state, no scrollback. A card shows a name, a
-    /// ribbon and a tail, and a cache that held more would be a cache somebody
+    /// ribbon and a tail.
+    ///
+    /// **The reason recorded here has stopped being true and the boundary has
+    /// not.** It said a cache holding more "would be a cache somebody
     /// eventually tried to open a pane from — which is the one thing a
-    /// workspace on a runner you are not connected to cannot do.
+    /// workspace on a runner you are not connected to cannot do", and opening a
+    /// pane on another runner is now the ordinary case: `FleetStore` holds a
+    /// connection to each of them and the shell mounts panes across the merge.
+    ///
+    /// What is still true is narrower and is the whole of what this type is
+    /// now: these cards are drawn only for runners this phone is NOT connected
+    /// to, which happens when "Connect every runner at once" is off. A pane
+    /// there still cannot be opened without connecting first — that is what
+    /// `ShellScreen.select(runner:landingOn:)` does — so the cache would still
+    /// be holding pane state nothing could mount.
+    ///
+    /// The boundary is therefore kept and NOT widened. There is no second
+    /// reader asking for more, and a cache that grew to cover a case the live
+    /// fleet now covers would be a second answer to "what is on that runner" —
+    /// which is the drift a cache beside a live model always threatens, and the
+    /// reason this one is deliberately the smaller of the two.
     struct Workspace: Codable, Sendable, Equatable {
         var id: String
         var name: String
