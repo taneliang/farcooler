@@ -94,6 +94,56 @@ struct FleetPublicationTests {
         #expect(publication.merged(at: now).agents.map(\.id) == ["t1"])
     }
 
+    // MARK: - The launch that used to clobber the file
+
+    /// **The regression this answers.** `FleetStore.publish` settles the
+    /// membership before any runner has been polled, so the first call of every
+    /// launch has nothing recorded and nothing to forget — and the merge it
+    /// would produce is an empty fleet stamped with a real `capturedAt`, which
+    /// every surface reads as a look at the fleet rather than as the absence of
+    /// one. Answering false is what keeps that off the disk the widget and the
+    /// watch read.
+    @Test func aMembershipSettledBeforeAnybodyPolledSaysNothing() {
+        var publication = FleetPublication()
+        #expect(publication.keeping(runners: ["a", "b"]) == false)
+        #expect(publication.isEmpty)
+    }
+
+    /// And it goes on saying nothing for as long as the first poll never lands
+    /// — which is the whole of an offline launch. A runner added, then edited,
+    /// then filtered out by the battery gate is three membership changes and
+    /// still not one observation.
+    @Test func everyMembershipChangeBeforeTheFirstPollSaysNothing() {
+        var publication = FleetPublication()
+        _ = publication.keeping(runners: ["a"])
+        #expect(publication.keeping(runners: ["a", "b"]) == false)
+        #expect(publication.keeping(runners: ["b"]) == false)
+        #expect(publication.keeping(runners: []) == false)
+    }
+
+    /// A runner retiring IS an observation, and it is the one the surfaces
+    /// would otherwise never hear: a store that has just dropped its last
+    /// connection has no next poll from anybody, so the rows would stay on the
+    /// lock screen claiming to be working forever.
+    @Test func retiringTheLastRunnerIsWorthTelling() {
+        var publication = FleetPublication()
+        publication.record(runner: "a", snapshot: snapshot([agent("t1", machine: "l")]))
+
+        #expect(publication.keeping(runners: []) == true)
+        #expect(publication.merged(at: now).agents.isEmpty)
+    }
+
+    /// So is a membership change over a publication that still holds rows: what
+    /// `live` says decides whether the merge is `complete`, and that is a
+    /// sentence on the widget.
+    @Test func aMembershipChangeOverRecordedRowsIsWorthTelling() {
+        var publication = FleetPublication()
+        publication.record(runner: "a", snapshot: snapshot([agent("t1", machine: "l")]))
+
+        #expect(publication.keeping(runners: ["a", "b"]) == true)
+        #expect(publication.merged(at: now).complete == false)
+    }
+
     // MARK: - complete
 
     /// `complete` says "these are all the agents there are". Two runners live

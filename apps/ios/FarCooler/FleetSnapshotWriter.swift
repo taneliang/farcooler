@@ -51,13 +51,27 @@ enum FleetSnapshotWriter {
         // event and must not be priced like one.
         guard runners != kept else { return }
         kept = runners
-        publication.keeping(runners: runners)
         // Written here rather than left to the next poll. A retirement is
         // followed by nothing at all on the retired runner's part, and a store
         // that has just dropped its last connection has no next poll from
         // anybody — so without this, agents on a runner nobody is talking to
         // would stay on the lock screen until some other runner happened to
         // report.
+        //
+        // **And NOT written when the publication has heard nothing.** The
+        // membership is settled before the first poll — this store reconciles
+        // as soon as it has runners, and `fleet` comes back an SSH round trip
+        // later — so the first call of every launch used to assemble an empty
+        // merge and put it on disk. That is not "no agents": it is the absence
+        // of an observation wearing a real `capturedAt`, which is the one thing
+        // `FleetEntry.hasSnapshot` cannot tell from a real look at the fleet.
+        // The widget then says "No agents" and the watch a confident 0, over
+        // the last good snapshot the write had just destroyed — and it stays
+        // that way for as long as the first poll never lands, which is every
+        // offline launch and every foreground somebody backs straight out of.
+        // `keeping` is what answers this, in AgentKit where the answer is
+        // tested; see `FleetPublication.keeping(runners:)`.
+        guard publication.keeping(runners: runners) else { return }
         publish(at: Date())
     }
 

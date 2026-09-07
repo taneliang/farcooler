@@ -79,13 +79,42 @@ public struct FleetPublication {
     /// on a lock screen would go on claiming to be working, forever, with
     /// nothing left to correct them. `FleetMembership.published` refuses the
     /// same thing one layer up and for the same reason.
-    public mutating func keeping(runners: Set<String>) {
+    ///
+    /// - Returns: whether the surfaces have anything to be told about this.
+    ///   **False is the LAUNCH, and it is the whole of why this answers at
+    ///   all.** The membership is settled before any runner has been polled —
+    ///   `FleetStore.publish` reconciles first and the first `fleet` call
+    ///   returns an SSH round trip later — so the first call of every launch
+    ///   arrives with nothing recorded and nothing to forget. A merge assembled
+    ///   there is an empty fleet carrying a REAL `capturedAt`, which is not
+    ///   "no agents observed" but "no observation", and the two are the same
+    ///   bytes on disk: `FleetEntry.hasSnapshot` reads a real date as a real
+    ///   look at the fleet, so the widget answers "No agents" and the watch a
+    ///   confident 0 — over the last good snapshot, which the write destroyed.
+    ///   Durable for as long as the first poll never lands, which is every
+    ///   offline launch and every foreground the person backs straight out of.
+    ///
+    ///   True in both of the other cases, and both are observations. Something
+    ///   was dropped, so the fleet on the lock screen has genuinely lost rows
+    ///   and must be told even when what is left is nothing at all — a store
+    ///   that has just retired its last runner has no next poll from anybody.
+    ///   Or something is still recorded, and `live` moving changes whether that
+    ///   merge is `complete`.
+    @discardableResult
+    public mutating func keeping(runners: Set<String>) -> Bool {
+        let held = !isEmpty
         live = runners
         byRunner = byRunner.filter { runners.contains($0.key) }
         order = order.filter { runners.contains($0) }
+        return held || !isEmpty
     }
 
     /// Whether anything has been recorded at all.
+    ///
+    /// The difference between an empty fleet and the absence of one, asked of
+    /// the merge before it is assembled — `merged(at:)` cannot be asked it,
+    /// because the snapshot it returns spells both the same way. See
+    /// `keeping(runners:)`, which is the reader.
     public var isEmpty: Bool { byRunner.isEmpty }
 
     /// The one snapshot every out-of-process surface renders from.
