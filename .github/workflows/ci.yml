@@ -182,6 +182,49 @@ jobs:
       - name: Install the agents the native backends spawn
         run: npm install -g opencode-ai @anthropic-ai/claude-code @openai/codex
 
+      # `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` stands up a real
+      # loopback sshd, and `cargo test --workspace` below runs it. It is the
+      # closest thing this repository has to a security guard: sshd, not the
+      # daemon, is what makes a `read` device unable to ask for `host_admin`,
+      # and only a real sshd can be asked whether that is true.
+      #
+      # It was `#[ignore]`d for four months behind a reason that named a
+      # scheduled lane, and no workflow here has ever had a `schedule:`
+      # trigger. Nothing ran it. The attribute is gone; this step is the one
+      # thing the runner has to supply that is not universal.
+      #
+      # NOT root, and that was the open question — `scripts/tunnel-e2e.sh` says
+      # in its header that whether a non-root sshd starts on a GitHub runner
+      # "has never been tried". It was tried before this line was written, on
+      # macOS 26.6 (OpenSSH 10.3p1) and Ubuntu 26.04 (OpenSSH 10.2p1):
+      # `restrict`, `command=` and `environment=` all behave, and OpenSSH skips
+      # privilege separation outright when `getuid()` is not 0, which is the
+      # only part that would have wanted a privileged runner.
+      #
+      # `command -v` first for the same reason the tmux step does it: the
+      # Ubuntu image ships `openssh-server` already and the macOS one ships
+      # sshd with the OS, so this is normally free. The test asserts on
+      # `/usr/sbin/sshd` by absolute path — it will not take one off PATH,
+      # because a runner is entitled to know which sshd it authenticated
+      # against — so that is the path this checks.
+      - name: Make sure there is an sshd to test the fence against
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+              sudo apt-get $APT_OPTS update
+              sudo apt-get $APT_OPTS install -y openssh-server
+            else
+              echo "no /usr/sbin/sshd on a macOS runner, which ships one with the OS" >&2
+              exit 1
+            fi
+          fi
+          /usr/sbin/sshd -V 2>&1 | head -1
+
       # No `cargo fmt --check`, deliberately, and it is worth saying why rather
       # than leaving it looking forgotten. This workspace predates any
       # formatter, and default rustfmt wants to reformat sixty files — mostly by

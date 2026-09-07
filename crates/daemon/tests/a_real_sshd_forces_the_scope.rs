@@ -20,12 +20,37 @@
 //! line would be this file asserting against its own idea of the format, which
 //! is the one thing it must not do: the format is what is on trial.
 //!
-//! **Scheduled lane, not per-commit.** `docs/farcooler-design.md` puts the
+//! **Per-commit, on both runners.** These tests carry no `#[ignore]`, so
+//! `cargo test --workspace` — the last step of `ci.yml`'s `rust` job, which
+//! runs on `ubuntu-latest` and `macos-latest` — runs them on every commit,
+//! and so does a plain `cargo test` on a developer's machine.
+//!
+//! They were `#[ignore]`d for four months, with a reason naming a scheduled
+//! lane that was never built: `docs/farcooler-design.md` puts the
 //! loopback-sshd conformance suite in the same scheduled environment as the
-//! authenticated agent tests, and per-commit CI on the stdio pipe. Each test
-//! here is therefore `#[ignore]`d, and Rust reports an ignored test as
-//! "ignored" — a test that detected a missing sshd and printed "ok" would be a
-//! lie told to a release gate.
+//! authenticated agent tests, and no workflow in `.github/workflows/` has ever
+//! had a `schedule:` trigger. So the closest thing this repository has to a
+//! security guard ran nowhere, behind a sentence that read as temporary.
+//!
+//! What the ignore was really protecting against was never named, and turned
+//! out not to exist. **A non-root sshd is all this needs**, and it was measured
+//! on both platforms before the attribute came off: `restrict`, `command=` and
+//! `environment=` behave identically under OpenSSH 10.3p1 on macOS 26.6 and
+//! OpenSSH 10.2p1 on Ubuntu 26.04, the forced command overrides the client's own,
+//! and `PermitUserEnvironment` reaches it. Privilege separation is the thing
+//! that would have needed root, and OpenSSH skips it outright when `getuid()`
+//! is not 0 — so nothing here ever wanted a privileged runner. Three tests, a
+//! real sshd each, in 0.9 seconds wall clock with `cargo test`'s default
+//! parallelism.
+//!
+//! What a runner must supply is therefore small, and `ci.yml` has a step that
+//! makes sure of the only part that is not universal: an `sshd` binary at
+//! `/usr/sbin/sshd`. `ssh` and `ssh-keygen` come with any Unix that has a
+//! developer toolchain, and the rest is a loopback port.
+//!
+//! A missing sshd fails loudly rather than skipping — see `start`. A test that
+//! detected one and printed "ok" would be a lie told to a release gate, and
+//! that half of the original reasoning was right and is unchanged.
 //!
 //! **A defect this file found.** `fence::render` used to name the daemon as a
 //! bare `farcoolerd`, resolved out of whatever PATH the account's login shell
@@ -55,18 +80,12 @@ use tokio::process::{ChildStdin, ChildStdout, Command};
 mod common;
 use common::DaemonChild;
 
-// Every test below carries the same `#[ignore]` reason, spelled out each time
-// rather than shared through a constant: the attribute takes a string LITERAL,
-// and the reason has to say how to run the thing it is switching off.
-
 /// A read-scoped line in `authorized_keys` produces a read session.
 ///
 /// The whole chain in one assertion pair: `fence::render` wrote the line,
 /// OpenSSH parsed it, sshd ran the forced command in it, the daemon read its own
 /// argv, and the scope reached the dispatcher. Break any link and this fails.
 #[tokio::test]
-#[ignore = "drives a real loopback sshd, so the scheduled lane only: \
-    cargo test -p farcooler-daemon --test a_real_sshd_forces_the_scope -- --ignored"]
 async fn a_read_scoped_forced_command_yields_a_read_session() {
     let runner = start("phone-7", Scope::Read).await;
     // What the product's own client asks for, so nothing in the request is
@@ -104,8 +123,6 @@ async fn a_read_scoped_forced_command_yields_a_read_session() {
 /// `SSH_ORIGINAL_COMMAND`, in this session's environment, next to the argv that
 /// won. So this also asserts that nothing in the daemon reads that variable.
 #[tokio::test]
-#[ignore = "drives a real loopback sshd, so the scheduled lane only: \
-    cargo test -p farcooler-daemon --test a_real_sshd_forces_the_scope -- --ignored"]
 async fn the_client_cannot_upgrade_its_own_scope() {
     let runner = start("phone-7", Scope::Read).await;
     // Asking for the whole runner, and for somebody else's device id while it is
@@ -146,8 +163,6 @@ async fn the_client_cannot_upgrade_its_own_scope() {
 /// The local caller is checked afterwards on purpose. A daemon that closed every
 /// connection on any revoke would pass every other assertion here.
 #[tokio::test]
-#[ignore = "drives a real loopback sshd, so the scheduled lane only: \
-    cargo test -p farcooler-daemon --test a_real_sshd_forces_the_scope -- --ignored"]
 async fn the_daemon_learns_the_client_id_from_the_forced_command() {
     let runner = start("phone-7", Scope::Read).await;
     let (_ssh, mut phone) = connect(&runner, "farcoolerd --stdio").await;
