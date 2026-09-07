@@ -1107,8 +1107,8 @@ struct ShellScreen: View {
             // **The pane resolves its own runner.** A slot names a tab, the map
             // says which pane that is and which runner it is on, and this is
             // where the connection to talk to it over comes from. A pane whose
-            // runner has been retired draws nothing rather than borrowing a
-            // neighbour's session.
+            // runner has been retired draws nothing rather than borrowing
+            // another runner's session.
             if let ref = map.refs[slot.tab.id], let connection = connection(ref) {
                 ShellPaneRealView(
                     slot: slot, ref: ref, connection: connection, pastes: pastes,
