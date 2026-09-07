@@ -699,6 +699,99 @@ mod tests {
     }
 
     /// The fleet trace adds rings slot for slot, in phase.
+    /// **Constraint: the row's commit count is the axis, summed.**
+    ///
+    /// `Trace::commits` is the number a card row puts beside `+142 -37` and it
+    /// had no test of any kind. Three separate buckets here, so this is a sum
+    /// over the window rather than one bucket read once.
+    #[test]
+    fn commits_sum_the_axis_marks_inside_the_window() {
+        let mut trace = Trace::new();
+        let now = (AFTERNOON / BASE_WIDTH) * BASE_WIDTH;
+        trace.record(now - 2 * BASE_WIDTH, Sample::commits(2));
+        trace.record(now - BASE_WIDTH, Sample::commits(1));
+        trace.record(now, Sample::commits(4));
+
+        assert_eq!(trace.commits(now), 7);
+
+        // The same marks `encode` draws, which is the whole claim: the number
+        // beside the row and the ticks under it are one measurement of one
+        // ring, not two counts that could disagree on a card.
+        let bytes = trace.encode(now);
+        let axis: u32 = bytes[1 + BUCKETS * 4..].iter().map(|mark| *mark as u32).sum();
+        assert_eq!(axis, 7, "the axis and the row's number disagree");
+    }
+
+    /// Zero for a ring with nothing in it and zero for a busy ring with nothing
+    /// on its axis, which the doc comment says outright: nothing distinguishes
+    /// them and nothing needs to, because a row draws no count either way.
+    #[test]
+    fn a_trace_with_no_commits_counts_none() {
+        assert_eq!(Trace::new().commits(AFTERNOON), 0);
+
+        let mut trace = Trace::new();
+        trace.record(AFTERNOON, Sample { output: 400, code: 90, commits: 0 });
+        assert_eq!(trace.commits(AFTERNOON), 0);
+    }
+
+    /// **The documented divergence, pinned rather than corrected.**
+    ///
+    /// This counts what landed inside the TRACE's window, not what is on the
+    /// branch: `git log base..HEAD` would be a git call per notification on the
+    /// sampling loop's path, and this ring is already in memory. So the two
+    /// halves of a card row measure different spans — `+142 -37` is the whole
+    /// branch against its base and this is the afternoon. That is deliberate;
+    /// the argument is on `Trace::commits` itself. This test is what the
+    /// sentence means in numbers, and it tests what the function does.
+    #[test]
+    fn commits_measure_the_traces_window_and_not_the_branch() {
+        let mut trace = Trace::new();
+        // A commit this morning and work happening now. The window snaps to the
+        // two-hour width, which is twenty-six hours wide, so the morning's
+        // commit is still inside what the card draws.
+        trace.record(AFTERNOON - 20 * 3600, Sample::commits(1));
+        trace.record(AFTERNOON, Sample::output(30));
+        assert_eq!(trace.encode(AFTERNOON)[0] & 0x0f, 2, "this trace should be at the 2h width");
+        assert_eq!(trace.commits(AFTERNOON), 1);
+
+        // A day and a bit later that commit has left the ring. It is still on
+        // the branch and `git log` would still count it; this says none.
+        let tomorrow = AFTERNOON + 27 * 3600;
+        trace.record(tomorrow, Sample::output(30));
+        assert_eq!(trace.commits(tomorrow), 0, "a commit off the window was still counted");
+    }
+
+    /// Counted at the width the trace SNAPPED to, which is the width the card
+    /// is drawn at — so a wide window keeps marks a base-width read would have
+    /// lost off the left-hand edge.
+    #[test]
+    fn commits_are_counted_at_the_width_the_trace_snapped_to() {
+        let mut trace = Trace::new();
+        // Old enough to force the two-hour width. Thirteen of those is
+        // twenty-six hours, where thirteen base buckets is sixty-five minutes.
+        trace.record(AFTERNOON - 20 * 3600, Sample::output(1));
+        let now = (AFTERNOON / 7200) * 7200 + 7000;
+        // Six marks over two and a half hours, so a read at the base width
+        // would see only the three inside the last hour.
+        for back in 0..6 {
+            trace.record(now - back * 1800, Sample::commits(1));
+        }
+
+        assert_eq!(trace.encode(now)[0] & 0x0f, 2, "this trace should be at the 2h width");
+        assert_eq!(trace.commits(now), 6);
+    }
+
+    /// The axis mark is a `u8` on the wire and saturates. The row's number is
+    /// not the axis and does not, which is the one place the two measurements
+    /// of this ring legitimately differ.
+    #[test]
+    fn commits_do_not_saturate_the_way_the_axis_byte_does() {
+        let mut trace = Trace::new();
+        trace.record(AFTERNOON, Sample::commits(300));
+        assert_eq!(trace.commits(AFTERNOON), 300);
+        assert_eq!(trace.encode(AFTERNOON)[1 + BUCKETS * 4 + BUCKETS - 1], u8::MAX);
+    }
+
     #[test]
     fn absorbing_adds_the_same_wall_clock_slot() {
         let mut one = Trace::new();

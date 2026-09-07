@@ -1335,7 +1335,15 @@ const ROWS_SHOWN = 4
 /// Three kilobytes rather than four: the state is the largest part of the
 /// payload and not all of it, and the headroom is the envelope, the alert and the
 /// attributes a start also carries.
-const STATE_BUDGET = 3 * 1024
+///
+/// Exported because that last sentence is arithmetic and nothing was checking
+/// it. `STATE_BUDGET` bounds the state; the cap APNs applies is on the whole
+/// payload, and a budget raised to fill the cap on its own would put every
+/// alerting push over it — silently, since a refused push is indistinguishable
+/// from a relay that sent nothing. See `leaves room in the payload for the alert
+/// and the envelope` in `test/relay.test.ts`, which measures the envelope off a
+/// real start and adds it up.
+export const STATE_BUDGET = 3 * 1024
 
 /// The most an activity push's alert may spend of that headroom.
 ///
@@ -1352,8 +1360,11 @@ const STATE_BUDGET = 3 * 1024
 /// what would break the cap. A banner shows a title on one line and a body on
 /// about two, so 128 and 512 bytes are past the point where iOS is already
 /// eliding — a cut here can only remove text the person was never shown.
-const ALERT_TITLE_BUDGET = 128
-const ALERT_BODY_BUDGET = 512
+///
+/// Exported for the same reason `STATE_BUDGET` is: these are the other half of
+/// the payload arithmetic, and the sum of the two halves is what has to fit.
+export const ALERT_TITLE_BUDGET = 128
+export const ALERT_BODY_BUDGET = 512
 
 /// `text`, cut to at most `bytes` of UTF-8, never mid-character.
 ///
