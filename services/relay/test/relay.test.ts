@@ -11,7 +11,7 @@ import wranglerToml from '../wrangler.toml?raw'
 // `spells both channels the way the Android app creates them`.
 import notifierKt from '../../../apps/android/app/src/main/java/com/farcooler/notify/Notifier.kt?raw'
 
-import worker from '../src/index'
+import worker, { ALERT_BODY_BUDGET, ALERT_TITLE_BUDGET, STATE_BUDGET } from '../src/index'
 import { fingerprintOf, parseEd25519 } from '../src/keys'
 import { androidChannel, sendLiveActivity, topicMismatch } from '../src/push'
 import { verifySession } from '../src/workos'
@@ -186,6 +186,69 @@ async function register(account: string, fields: Record<string, unknown> = {}) {
     await sessionFor(account),
   )
   return response
+}
+
+/// A roster row belonging to somebody else.
+///
+/// Every account clause on `live_activities` was a `WHERE` nothing in this file
+/// could notice. With one account's rows in the table, a query that dropped its
+/// scoping returned exactly the same rows, deleted exactly the same rows, and
+/// every assertion below went on passing — so the three clauses that keep one
+/// person's fleet off another person's lock screen were guarded by nothing.
+/// This is the second account. The tests that call it assert its rows are
+/// neither read, drawn, counted, nor deleted.
+async function foreignAgent(
+  account: string,
+  terminal: string,
+  fields: { status?: string; updatedAt?: number } = {},
+) {
+  const at = fields.updatedAt ?? Date.now()
+  await env.DB.prepare(
+    `INSERT INTO accounts (id, created_at) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`,
+  )
+    .bind(account, Date.now())
+    .run()
+  // Written through SQL rather than through `/v1/notify`, because a notice
+  // needs a paired machine and a session, and what is wanted here is only the
+  // row: the point is what this account's request does to somebody else's
+  // table, not how that row got there.
+  await env.DB.prepare(
+    `INSERT INTO live_activities
+       (id, account_id, terminal, update_token, environment, updated_at,
+        label, machine, status, detail, insertions, deletions, commits,
+        started_at, status_since)
+     VALUES (?, ?, ?, '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+  )
+    .bind(
+      crypto.randomUUID(),
+      account,
+      terminal,
+      at,
+      'theirs',
+      'Their Mac',
+      fields.status ?? 'blocked',
+      'Not your question',
+      7,
+      3,
+      2,
+      at,
+    )
+    .run()
+}
+
+/// The terminals still on one account's roster, in a fixed order.
+async function roster(account: string): Promise<string[]> {
+  const rows = await env.DB.prepare(
+    `SELECT terminal FROM live_activities WHERE account_id = ? ORDER BY terminal`,
+  )
+    .bind(account)
+    .all<{ terminal: string }>()
+  return (rows.results ?? []).map(row => row.terminal)
+}
+
+/// What one value costs on the wire, which is the only unit either cap is in.
+function bytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length
 }
 
 beforeEach(async () => {
@@ -2440,13 +2503,28 @@ describe('/v1/notify and Live Activities', () => {
       // triggers in this relay. Twenty-four hours is the design's own widest
       // trace window: past it a row cannot contribute to anything the card can
       // draw, so it has nothing left to say.
+      //
+      // **Per ACCOUNT, and that half was guarded by nothing.** The purge is a
+      // `DELETE` this account's own notice runs, so it is the one write in the
+      // service that reaches every row in the table if its scoping goes: one
+      // busy account would forget every other account's history on its way past.
+      // With a single account's rows in the table the clause made no difference
+      // to any assertion here, so the second account below is what makes it
+      // observable — equally old, equally quiet, and none of this account's
+      // business.
       const calls = watchFetch()
       await ready()
       await running('term-1')
       await post('/v1/notify', { title: 'old', terminal: 'yesterday', status: 'working' }, 'mine')
-      await env.DB.prepare(`UPDATE live_activities SET updated_at = ? WHERE terminal = 'yesterday'`)
-        .bind(Date.now() - 25 * 60 * 60 * 1000)
+      await env.DB.prepare(
+        `UPDATE live_activities SET updated_at = ? WHERE terminal = 'yesterday' AND account_id = ?`,
+      )
+        .bind(Date.now() - 25 * 60 * 60 * 1000, 'user_1')
         .run()
+      await foreignAgent('user_2', 'their-yesterday', {
+        status: 'working',
+        updatedAt: Date.now() - 25 * 60 * 60 * 1000,
+      })
       await post('/v1/notify', { title: 'new', terminal: 'today', status: 'working' }, 'mine')
 
       const updates = pushes(calls).filter(call => call.body.aps?.event === 'update')
@@ -2454,8 +2532,61 @@ describe('/v1/notify and Live Activities', () => {
       expect(last.rows.map((each: any) => each.terminal)).toEqual(['today'])
       expect(last.working).toBe(1)
       expect(last.more).toBe(0)
-      const left = await env.DB.prepare(`SELECT terminal FROM live_activities`).all<any>()
-      expect(left.results).toEqual([{ terminal: 'today' }])
+      expect(await roster('user_1')).toEqual(['today'])
+      // Somebody else's day-old row is still somebody else's.
+      expect(await roster('user_2')).toEqual(['their-yesterday'])
+    })
+
+    it('draws and counts this account\'s fleet, and never another account\'s', async () => {
+      // The read half of the account scoping, and the half with a lock screen
+      // on the end of it. `readFleet` is where every row a card is composed
+      // from comes from — the lines, the header's three counts, the totals and
+      // `+N more` — so a `SELECT` that lost its `WHERE` would put a stranger's
+      // agents, their runner names and their composed question, on this
+      // person's phone.
+      //
+      // Nothing here could see that. Every other test in this file has exactly
+      // one account's rows in `live_activities`, and against one account's rows
+      // a scoped read and an unscoped read return the same thing. The second
+      // account is what makes the clause load-bearing in a test rather than
+      // only in a review.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      // Two of theirs, in two different tiers, each carrying counts — so an
+      // unscoped read shows up in the lines, in the header AND in the totals
+      // rather than in only one of the three.
+      await foreignAgent('user_2', 'theirs-blocked', { status: 'blocked' })
+      await foreignAgent('user_2', 'theirs-working', { status: 'working' })
+
+      await post(
+        '/v1/notify',
+        {
+          title: 'claude needs you',
+          terminal: 'term-1',
+          status: 'blocked',
+          insertions: 5,
+          deletions: 1,
+          commits: 4,
+        },
+        'mine',
+      )
+
+      const updates = pushes(calls).filter(call => call.body.aps?.event === 'update')
+      const last = updates[updates.length - 1].body.aps['content-state']
+      expect(last.rows.map((each: any) => each.terminal)).toEqual(['term-1'])
+      expect(last.blocked).toBe(1)
+      expect(last.working).toBe(0)
+      expect(last.review).toBe(0)
+      expect(last.more).toBe(0)
+      // The totals are summed over EVERY row the read returned, not only the
+      // ones that got a line, so they are the assertion an unscoped read cannot
+      // survive even when `ROWS_SHOWN` would have hidden the extra lines.
+      expect(last.insertions).toBe(5)
+      expect(last.deletions).toBe(1)
+      expect(last.commits).toBe(4)
+      // And their rows are still theirs afterwards.
+      expect(await roster('user_2')).toEqual(['theirs-blocked', 'theirs-working'])
     })
 
     it('drops a quiet row to the tail without dropping it from the count', async () => {
@@ -2524,6 +2655,152 @@ describe('/v1/notify and Live Activities', () => {
       // And the whole payload, which is the cap APNs itself applies. The state
       // is the largest part of it and not all of it.
       expect(new TextEncoder().encode(JSON.stringify(last.body)).length).toBeLessThan(4096)
+
+      // **What this test actually measures, written down.** Every row here is
+      // near three kilobytes on its own, so the first one crosses the budget
+      // and the card goes out with NO lines at all — which is the right answer
+      // and is the degenerate end of the cut. It means the row arithmetic is
+      // not exercised anywhere above: this is a card with an enormous headline
+      // and an empty roster, and it would still fit if the per-row measurement
+      // were wrong in every direction. Pinned so that a change which starts
+      // letting rows through is visible here rather than silently turning this
+      // into a different test.
+      //
+      // The case where rows SURVIVE the cut is the one below, and the START —
+      // the larger payload, and the push whose refusal means no card ever
+      // appears — is the two after it. This assertion is an update.
+      expect(last.body.aps.event).toBe('update')
+      expect(last.body.aps['content-state'].rows).toEqual([])
+      expect(last.body.aps['content-state'].more).toBe(8)
+    })
+
+    /// A fleet of `count` agents, and then the card that names them all.
+    ///
+    /// The order is the only way this route produces a maximal START, and it is
+    /// not contrived: a card starts on the FIRST block it sees, so a fleet built
+    /// on a phone that already offered a push-to-start token raises a card about
+    /// one agent and never starts another. A phone that has not offered one
+    /// accumulates the roster in silence — `startCard` returns before pushing
+    /// when nothing on the account can raise a card — and the registration that
+    /// follows is the app coming to the foreground, which is exactly the moment
+    /// this happens in the field.
+    async function startWithFleet(
+      calls: Call[],
+      count: number,
+      notice: (terminal: string) => object,
+    ) {
+      await register('user_1')
+      await pair('user_1', 'mine')
+      const terminals = Array.from({ length: count }, () => crypto.randomUUID())
+      for (const terminal of terminals) await post('/v1/notify', notice(terminal), 'mine')
+      await register('user_1', { liveActivityStartToken: 'start-token' })
+      // The same agent again rather than a new one, so the fleet is exactly
+      // `count` and `+N more` can be checked against it.
+      await post('/v1/notify', notice(terminals[0]), 'mine')
+      return pushes(calls).filter(call => call.body.aps?.event === 'start')
+    }
+
+    /// The widest row a COMPLIANT runner can send.
+    ///
+    /// `detail` is cut on the host at `farcooler_core::feed::SAID_WIDTH` — a
+    /// hundred and twenty CHARACTERS — and an agent's own words are routinely
+    /// three bytes a character, which is where the wire parts company with the
+    /// arithmetic behind `ROWS_SHOWN`: its 341-typical and 399-worst are ASCII
+    /// rows. Nothing here exceeds a bound the runner enforces; it just spends
+    /// each one in the units the cap is actually in.
+    const SAID = '請'.repeat(120)
+    const maximal = (terminal: string) => ({
+      title: 'claude needs you',
+      subtitle: SAID,
+      terminal,
+      status: 'blocked',
+      label: 'claude-code-opus-5-x000',
+      startedAt: 1_755_000_000_000,
+      insertions: 999999,
+      deletions: 999999,
+      commits: 255,
+      trace: 'A'.repeat(88),
+    })
+
+    it('starts a card for a maximal fleet inside the payload APNs will accept', async () => {
+      // **The start is the push that has to fit, and nothing measured one.**
+      // It carries everything an update does plus `attributes-type`,
+      // `attributes` and `stale-date`, and APNs refuses rather than truncates —
+      // so a start over the cap is not a card missing a row, it is no card at
+      // all, for the whole run, reported as a 200.
+      const calls = watchFetch()
+      const starts = await startWithFleet(calls, 8, maximal)
+      expect(starts.length).toBe(1)
+      const state = starts[0].body.aps['content-state']
+
+      // The cap APNs applies, on the whole payload.
+      expect(bytes(starts[0].body)).toBeLessThan(4096)
+      // And ActivityKit's separate one, on the state alone.
+      expect(bytes(state)).toBeLessThan(4096)
+
+      // **It fits WITH lines on it**, which is the half the maximal-card test
+      // above cannot check: there the rows are so far past anything a runner
+      // can send that every one of them is dropped, and a card with no roster
+      // fits whatever the row arithmetic says. Here the rows are real, so the
+      // cut is being asked the question it exists for.
+      expect(state.rows.length).toBeGreaterThan(0)
+      expect(state.rows.length).toBeLessThanOrEqual(4)
+      // Nobody is lost. A row dropped for bytes is still an agent this card is
+      // not naming, and the header has to say so.
+      expect(state.more).toBe(8 - state.rows.length)
+      // The cut drops whole rows and never truncates one. Half a question on a
+      // lock screen is worse than a row that was not drawn.
+      for (const row of state.rows) expect(row.detail).toBe(SAID)
+    })
+
+    it('drops rows rather than starting a card APNs would refuse', async () => {
+      // The same deliberately-impossible fields as the maximal-card test above,
+      // on the start path. Every bound in the row arithmetic belongs to a
+      // runner that ships separately from this worker, so this is the case
+      // `STATE_BUDGET` exists for: a build that widened one of them must cost
+      // the card its rows and never cost the person the card.
+      const calls = watchFetch()
+      const starts = await startWithFleet(calls, 8, (terminal: string) => ({
+        title: '✳'.repeat(300),
+        subtitle: '✳'.repeat(600),
+        terminal,
+        status: 'blocked',
+        label: '✳'.repeat(300),
+        startedAt: 1_755_000_000_000,
+        insertions: 999999,
+        deletions: 999999,
+        commits: 255,
+        trace: 'A'.repeat(88),
+      }))
+      expect(starts.length).toBe(1)
+      expect(bytes(starts[0].body)).toBeLessThan(4096)
+      expect(bytes(starts[0].body.aps['content-state'])).toBeLessThan(4096)
+      expect(starts[0].body.aps['content-state'].more).toBe(8)
+    })
+
+    it('leaves room in the payload for the alert and the envelope', async () => {
+      // `STATE_BUDGET` bounds the state and nothing bounded the sum. APNs caps
+      // the WHOLE payload, so a budget widened to fill the cap on its own puts
+      // every alerting push over it — and a refused push is indistinguishable,
+      // from every side, from a relay that sent nothing.
+      //
+      // The envelope is MEASURED off a real start rather than reasoned about,
+      // and off a start because that is the largest one: `attributes-type`,
+      // `attributes` and `stale-date` ride only on it.
+      const calls = watchFetch()
+      const starts = await startWithFleet(calls, 8, maximal)
+      expect(starts.length).toBe(1)
+      const start = starts[0]
+      const envelope = bytes(start.body) - bytes(start.body.aps['content-state']) -
+        bytes(start.body.aps.alert)
+      expect(envelope).toBeGreaterThan(0)
+
+      // The worst alert either kind of push can carry. A start's title is the
+      // fleet header, which is short; an update's is cut to
+      // `ALERT_TITLE_BUDGET`, which is not — so the update's is the one the
+      // budget has to survive, and both bodies are cut to `ALERT_BODY_BUDGET`.
+      const worstAlert = ALERT_TITLE_BUDGET + ALERT_BODY_BUDGET + bytes({ title: '', body: '' })
+      expect(STATE_BUDGET + worstAlert + envelope).toBeLessThanOrEqual(4096)
     })
   })
 })
@@ -2705,6 +2982,14 @@ describe('/v1/notify/retire', () => {
     // The same rule as the alert: a machine says which terminals, never whose.
     // Two runners cannot mint the same UUID, but the account clause is what
     // makes that a fact about the query rather than a fact about UUIDs.
+    //
+    // **The other account needs a ROSTER ROW, not only a card.** This test had
+    // one card and no rows, so the `DELETE FROM live_activities` this route
+    // runs first never had another account's row in front of it: dropping
+    // `account_id = ?` from that statement deleted nothing extra and the test
+    // stayed green. A sweep is a list of terminal UUIDs from a runner that
+    // cannot see this table, and the clause is the entire reason it cannot
+    // reach across an account — so the row it must not reach has to be there.
     const calls = watchFetch()
     await ready()
     await env.DB.prepare(
@@ -2719,12 +3004,17 @@ describe('/v1/notify/retire', () => {
     )
       .bind(crypto.randomUUID(), 'user_2', 'their-update-token', 'term-1', 'blocked', Date.now())
       .run()
+    // Deliberately the SAME terminal name the sweep below asks about, because
+    // that is the only case the account clause decides: a name this account can
+    // legitimately ask to retire, on a row it may not touch.
+    await foreignAgent('user_2', 'term-1', { status: 'working' })
 
     const response = await post('/v1/notify/retire', { terminals: ['term-1'] }, 'mine')
     expect(await response.json()).toEqual({ retired: 0 })
     expect(calls.every(call => !call.url.includes('their-update-token'))).toBe(true)
     const rows = await env.DB.prepare(`SELECT id FROM install_cards`).all<any>()
     expect(rows.results?.length).toBe(1)
+    expect(await roster('user_2')).toEqual(['term-1'])
   })
 
   it('says nothing happened for terminals that never had a card', async () => {
