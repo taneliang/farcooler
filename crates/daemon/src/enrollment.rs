@@ -626,12 +626,26 @@ pub async fn revoke(svc: &Service, request: &ClientRevoke) -> Result<ClientList>
     // Answering first and rebuilding after would report a containment that had
     // not happened yet — the same mistake as closing the sessions afterwards,
     // and this is the half of it a person is most likely to be acting on.
+    //
+    // The outcome is not checked here, and that is deliberate rather than an
+    // omission: there is no outcome that means the route survived. Every path
+    // through `start_tunnel` reaches `serve`, and `serve` tears the running
+    // server down before it validates anything — so `NoIdentity`,
+    // `FenceUnreadable` and `NobodyAdmitted` all end with this runner serving
+    // nothing, which contains the revoked device by the only means available.
+    // A check here would be the wrong place for it anyway: the containment has
+    // to happen, not be reported on, and `start_tunnel` is where it happens.
+    // See its doc comment for the invariant, and `allowlist::withdraw` for why
+    // an empty `serve` is safe on a runner with no identity file.
     if was_tunneled {
         let outcome = crate::allowlist::start_tunnel(svc).await;
+        // "Rebuilt" is only true of `Serving`; the rest withdrew the tunnel
+        // rather than rebuilding one, and a log line that says the wrong one is
+        // how a person reading it afterwards reconstructs the wrong story.
         tracing::info!(
             client = %closing,
             ?outcome,
-            "rebuilt this runner's tunnel without the revoked device"
+            "made this runner's tunnel match the file the revocation just wrote"
         );
     }
 

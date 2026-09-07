@@ -13,10 +13,10 @@
 //! changes, and `enrollment::revoke` then calls `start_tunnel` to make the
 //! running server match — which means REPLACING it, because a key cannot be
 //! subtracted from a live one. See `enrollment::revoke` for what that costs
-//! every other device, and `start_tunnel` for why the empty case has to go
-//! through `serve` too.
+//! every other device, and `start_tunnel` for why EVERY case has to go through
+//! `serve` — including the three that have nothing to start.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use farcooler_fence::Entry;
 
@@ -129,16 +129,66 @@ pub fn tunnel_plan(key_path: &Path, entries: &[Entry]) -> Result<Allowlist, Tunn
     from_entries(entries).ok_or(TunnelOutcome::NobodyAdmitted)
 }
 
+/// Take down whatever tunnel this process is running, and start none.
+///
+/// **The empty allowlist IS the instruction, and it is safe on every path
+/// through `start_tunnel` — including the ones that have no identity and no
+/// readable file.** Both backends tear the running server down on their FIRST
+/// statement and only then look at what they were handed: `helper.rs`'s `serve`
+/// clears its slot before either refusal, and `tailcat.go`'s calls `stopServer`
+/// before `parseAllowed`. Both then refuse an empty allowlist — `EINVAL` —
+/// ABOVE every use of `key_path`: `helper.rs` refuses before `spawn`, and the
+/// Go side before `loadOrCreateIdentity`. So this spawns no helper, reaches no
+/// network, and creates no identity file, which is what lets the `NoIdentity`
+/// arm call it with a path that does not exist. `an_empty_allowlist_starts_no_tunnel`'s
+/// `a_runner_with_no_key_file_starts_no_tunnel` asserts that absence directly.
+///
+/// `key_path` is taken because `serve`'s signature takes one, not because
+/// anything reads it.
+///
+/// The refusal is the expected answer rather than a failure — nothing was meant
+/// to start — so it is logged at `debug` and never as a tunnel that did not
+/// start. The one line a reader would take as a broken runner is the line this
+/// must never write.
+async fn withdraw(key_path: PathBuf, ssh_port: u16) {
+    let stopped =
+        tokio::task::spawn_blocking(move || farcooler_tailcat::serve(&key_path, ssh_port, &[]))
+            .await;
+    match stopped {
+        Ok(Err(error)) => tracing::debug!(
+            code = error.code(),
+            "the empty allowlist was refused, as it is meant to be"
+        ),
+        Err(error) => tracing::warn!(
+            %error,
+            "the task withdrawing this runner's tunnel did not finish; a device \
+             revoked just now may still hold a route to this host's sshd"
+        ),
+        Ok(Ok(())) => {}
+    }
+}
+
 /// Make this runner's running tunnel match its `authorized_keys`.
 ///
 /// Named `start_tunnel` for the caller it was written for — `main.rs`, at boot,
 /// where there is nothing running and "start" is the whole of it — but what it
-/// means is the wider thing, because `enrollment::revoke` calls it too. Every
-/// path through it ends with `farcooler_tailcat::serve` having been handed the
-/// allowlist the file currently says, INCLUDING the path where the file admits
-/// nobody. `serve` tears down whatever was running before it validates anything
-/// it was given, so the empty call is what stops a server rather than a call
-/// that was skipped for having nothing to start.
+/// means is the wider thing, because `enrollment::revoke` calls it too.
+///
+/// **Every path through it reaches `farcooler_tailcat::serve`, and that is the
+/// invariant the whole function is built around rather than a description of
+/// the happy path.** `serve` tears down whatever was running before it
+/// validates anything it was given, so a call is the only thing that stops a
+/// server and a `return` is the only thing that leaves one up. There are four
+/// paths with nothing to start — the file admits nobody, the file will not
+/// read, the read task did not finish, this runner has no identity — and all
+/// four go through `withdraw`, which makes the same call with an allowlist that
+/// admits nobody. Three of them used to `return` instead, and each one was the
+/// same bug wearing a different reason: `revoke` deletes a device's line,
+/// `start_tunnel` declines to replace the server, and the operator is told the
+/// device is out while it still holds a peered route to this host's sshd.
+///
+/// The only remaining way out without a `serve` is a `spawn_blocking` that
+/// never finished, which `withdraw` warns about by name.
 ///
 /// `tunnel_plan` makes the admit/refuse decision; this function is only the
 /// effect of it — reading `authorized_keys`, and then reaching into
@@ -158,31 +208,63 @@ pub fn tunnel_plan(key_path: &Path, entries: &[Entry]) -> Result<Allowlist, Tunn
 /// all if they do. See the call site in `main.rs`.
 pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
     let key_path = service.tailcat_key();
+    let ssh_port = service.ssh_port();
 
     let auth_path = service.authorized_keys().to_path_buf();
     let entries = tokio::task::spawn_blocking(move || {
         farcooler_fence::read(&auth_path, farcooler_fence::AUTHORIZED_KEYS)
     })
     .await;
+    // The two ways a read fails differ only in the line they log, and they are
+    // folded into one `None` on purpose rather than each returning for itself.
+    // Two arms means two `withdraw` calls, and the second — a `spawn_blocking`
+    // that did not finish — is not reachable from any input a test can supply,
+    // so deleting it would leave every test in the tree green. That is the
+    // shape of a check that cannot fail. One call site, reached by both, is
+    // what makes `an_unreadable_fence_withdraws_the_running_tunnel` a guard on
+    // the whole path instead of on half of it.
     let entries = match entries {
-        Ok(Ok(entries)) => entries,
+        Ok(Ok(entries)) => Some(entries),
         Ok(Err(error)) => {
             tracing::warn!(
                 %error,
                 "authorized_keys could not be read; this runner serves no tunnel"
             );
-            return TunnelOutcome::FenceUnreadable;
+            None
         }
         Err(error) => {
             tracing::warn!(%error, "the authorized_keys read task did not finish");
-            return TunnelOutcome::FenceUnreadable;
+            None
         }
+    };
+    let Some(entries) = entries else {
+        // Through `withdraw` for the same reason `NobodyAdmitted` is: a file
+        // that cannot be read is a file that cannot be checked, and the running
+        // server is still admitting the set it copied at `Start`. Returning
+        // here — which is what this path used to do — leaves a device `revoke`
+        // just deleted from that file peered to this host's sshd, while
+        // `revoke` answers that it is out. Not knowing who is admitted is a
+        // reason to admit nobody.
+        withdraw(key_path.clone(), ssh_port).await;
+        return TunnelOutcome::FenceUnreadable;
     };
 
     let allowed = match tunnel_plan(&key_path, &entries) {
         Ok(allowed) => allowed,
         Err(TunnelOutcome::NoIdentity) => {
+            // And through `withdraw` too, which is the arm least likely to
+            // look like it needs one. A runner with no identity file cannot
+            // START a tunnel — but it can be RUNNING one, because the file is
+            // only consulted here and a server keeps serving after its key
+            // file is gone. `revoke` is exactly when that matters: this arm
+            // returning early left the old server up with the revoked node key
+            // still in the set it copied at `Start`.
+            //
+            // The call cannot create the identity it just refused to find:
+            // both backends reject an empty allowlist above every use of the
+            // path. See `withdraw`.
             tracing::debug!("no tailcat identity; this runner serves no tunnel");
+            withdraw(key_path.clone(), ssh_port).await;
             return TunnelOutcome::NoIdentity;
         }
         Err(TunnelOutcome::NobodyAdmitted) => {
@@ -199,22 +281,7 @@ pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
             // why it belongs here rather than in `enrollment::revoke`: the
             // function means "make the running tunnel match the file", and
             // that is the same sentence in both callers.
-            let key_path = key_path.clone();
-            let ssh_port = service.ssh_port();
-            let stopped =
-                tokio::task::spawn_blocking(move || farcooler_tailcat::serve(&key_path, ssh_port, &[]))
-                    .await;
-            // The refusal is the expected answer, not a failure: `EINVAL` from
-            // either real backend, `no_tailcat` from a build carrying no
-            // tunnel. Nothing was meant to start, so this must not be logged
-            // as a tunnel that did not start — the one line a reader would
-            // take as a broken runner is the line this arm must never write.
-            if let Ok(Err(error)) = stopped {
-                tracing::debug!(
-                    code = error.code(),
-                    "the empty allowlist was refused, as it is meant to be"
-                );
-            }
+            withdraw(key_path.clone(), ssh_port).await;
             tracing::info!("no enrolled device carries a node key; this runner serves no tunnel");
             return TunnelOutcome::NobodyAdmitted;
         }
@@ -223,7 +290,6 @@ pub async fn start_tunnel(service: &crate::service::Service) -> TunnelOutcome {
         Err(other) => return other,
     };
 
-    let ssh_port = service.ssh_port();
     let serve_key_path = key_path.clone();
     let allowed_keys = allowed.keys().to_vec();
     let served = tokio::task::spawn_blocking(move || {

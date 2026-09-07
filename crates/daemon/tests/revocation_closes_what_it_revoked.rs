@@ -511,4 +511,125 @@ done
         );
         assert!(serving(), "the phone's tunnel went down with a revocation that was not its own");
     }
+
+    /// A revocation on a runner whose identity file has gone still takes the
+    /// route with it.
+    ///
+    /// **The hole this covers is the shape of the one fixed for the empty
+    /// allowlist, one arm along.** `start_tunnel` decides three things before
+    /// it can serve — the fence reads, the identity exists, somebody is
+    /// admitted — and each `no` was a `return`. Only the third was made to go
+    /// through `serve` anyway. This is the second: a runner CAN be serving with
+    /// no `tailcat.key` on disk, because that file is read when a server is
+    /// built and never again, so the answer `NoIdentity` describes what cannot
+    /// be STARTED and says nothing about what is still RUNNING. Revoking here
+    /// deleted the phone's line, closed its sessions, answered `Ok` — and left
+    /// the server up holding the phone's node key in the set it copied at
+    /// `Start`. The operator is told the phone is out; the phone still has a
+    /// TCP path to this host's sshd.
+    ///
+    /// Deleting the key file is not an exotic fixture. It is what a restore
+    /// from a backup that predates the tunnel does, what a `FARCOOLER_HOME`
+    /// tidy-up does, and what any operator who reads `tailcat.key` as a cache
+    /// does — and every one of them leaves a daemon running.
+    ///
+    /// The assertion is on `serving()`, not on the command log: what matters is
+    /// that nothing is left serving, and a test that only read the log would
+    /// pass on an implementation that sent `serve` a fresh allowlist and got a
+    /// server back.
+    #[tokio::test]
+    async fn revoking_a_device_withdraws_the_tunnel_when_the_identity_is_gone() {
+        let _serial = TUNNEL.lock().await;
+        let h = start().await;
+        let log = fake_helper(&h);
+        let _tunnel = Tunnel(h.service.tailcat_key());
+
+        line(&h, PHONE_KEY, "phone", Some(NODE_A)).await;
+        line(&h, LAPTOP_KEY, "laptop", Some(NODE_B)).await;
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert!(
+            matches!(outcome, TunnelOutcome::Serving(_)),
+            "the fixture's own tunnel never started: {outcome:?}"
+        );
+        assert!(serving(), "the fixture's own tunnel is not serving");
+
+        std::fs::remove_file(h.service.tailcat_key()).expect("the identity file was removed");
+        std::fs::write(&log, "").unwrap();
+        revoke_directly(&h, "phone").await;
+
+        assert!(
+            !serving(),
+            "the tunnel kept running through a revocation on a runner with no \
+             identity file, so the revoked device still has a route to this \
+             sshd while `client.revoke` answered that it was out: {}",
+            commands(&log)
+        );
+        // The other half, and the one a fix could most plausibly get wrong by
+        // being helpful: the withdrawal must not CREATE the identity it just
+        // refused to find. Go's `serve` writes this file when it is absent, and
+        // a runner that got one here would clear `tunnel_plan`'s only guard on
+        // the next call.
+        assert!(
+            !h.service.tailcat_key().exists(),
+            "withdrawing the tunnel created the identity file it had none of"
+        );
+    }
+
+    /// The third arm: a fence that will not read withdraws the tunnel rather
+    /// than leaving the running one alone.
+    ///
+    /// Not knowing who is admitted is a reason to admit nobody. The running
+    /// server holds the set it copied at `Start`, and a file that cannot be
+    /// read cannot say that set is still right — so the same `return` that left
+    /// a revoked device peered under `NoIdentity` does it here, for a reason
+    /// that reads even more like a good one.
+    ///
+    /// Driven through `start_tunnel` rather than `revoke`, and the difference
+    /// is worth stating. `revoke` writes `authorized_keys` under a lock and
+    /// then reads it back for its answer, so a fixture that broke the file
+    /// early would fail the write instead and never reach the tunnel at all.
+    /// The guard is in `start_tunnel`, so that is where it is asserted. `revoke`
+    /// reaches this arm on a real runner the same way it reaches any other: it
+    /// calls `start_tunnel`, and whatever happened to the file in between is
+    /// not something a revocation gets to assume.
+    #[tokio::test]
+    async fn an_unreadable_fence_withdraws_the_running_tunnel() {
+        let _serial = TUNNEL.lock().await;
+        let h = start().await;
+        let log = fake_helper(&h);
+        let _tunnel = Tunnel(h.service.tailcat_key());
+
+        line(&h, PHONE_KEY, "phone", Some(NODE_A)).await;
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert!(
+            matches!(outcome, TunnelOutcome::Serving(_)),
+            "the fixture's own tunnel never started: {outcome:?}"
+        );
+        assert!(serving(), "the fixture's own tunnel is not serving");
+
+        // A directory where the file was: `fence::read` opens the name inside
+        // its parent and gets EISDIR, which is a read failure and not an empty
+        // file. Chosen over a permission bit because a test run as root would
+        // read a 0000 file perfectly and the assertion below would then be
+        // about nothing.
+        let auth = h.service.authorized_keys().to_path_buf();
+        std::fs::remove_file(&auth).expect("the fence file was removed");
+        std::fs::create_dir(&auth).expect("a directory stands where the fence was");
+
+        std::fs::write(&log, "").unwrap();
+        let outcome = allowlist::start_tunnel(&h.service).await;
+        assert_eq!(
+            outcome,
+            TunnelOutcome::FenceUnreadable,
+            "the fixture did not make the fence unreadable, so this test proves \
+             nothing: {outcome:?}"
+        );
+
+        assert!(
+            !serving(),
+            "a runner that cannot read who it admits kept serving the set it \
+             copied at Start: {}",
+            commands(&log)
+        );
+    }
 }
