@@ -168,6 +168,12 @@ AGENTKIT_SOURCES = [
     # reconcile has to keep have no screen in them, and the iOS UI suite is
     # compiled by CI and never executed. See `FleetMembershipTests`.
     "FleetMembership.swift",
+    # Every theme the phone offers, folded from every runner rather than
+    # rebuilt from whichever answered last. Here for `FleetMembership.swift`'s
+    # reason: the merge has no screen in it, and the version that lived inside
+    # the `Themes` singleton reverted the whole app to Nord at random on a fleet
+    # of two. See `ThemeCatalogTests`.
+    "ThemeCatalog.swift",
     # What a failure to reach a runner means, and the one thing worth doing
     # about it. `Connection.Failure` is a typealias for it. Here for
     # `AgentFailure.swift`'s reason exactly — two screens draw this copy now and

@@ -671,6 +671,11 @@ final class Connection: ObservableObject {
             // object can outlive the retirement by however long the last view
             // holding it takes to go away.
             Connection.registry[host.id] = nil
+            // And out of the theme catalog. A runner nobody is talking to
+            // should not still be defining what "Nord" looks like — the catalog
+            // is a fold over the runners, and this is the one place that sees
+            // one leave. See `Themes.forget(runner:)`.
+            Themes.shared.forget(runner: host.id)
         }
     }
 
@@ -1077,7 +1082,8 @@ final class Connection: ObservableObject {
             var themes: [Theme]
         }
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data) else { return }
-        Themes.shared.merge(hostThemes: reply.themes)
+        guard let host else { return }
+        Themes.shared.merge(hostThemes: reply.themes, from: host.id)
     }
 
     /// The backstop, not the mechanism.
@@ -1283,7 +1289,8 @@ final class Connection: ObservableObject {
     /// Without this, a theme you just made is missing from the one place you
     /// would go to choose it.
     func reloadThemes() async {
-        Themes.shared.merge(hostThemes: await hostThemes())
+        guard let host else { return }
+        Themes.shared.merge(hostThemes: await hostThemes(), from: host.id)
     }
 
     func adapters() async -> [AdapterInfo] {
