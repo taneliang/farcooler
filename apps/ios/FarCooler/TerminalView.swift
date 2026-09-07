@@ -1033,14 +1033,50 @@ struct TerminalView: View {
         // host, so a mounted-but-hidden pane must hold neither. Driven by
         // `isVisible` rather than `onDisappear`, which no longer fires — the
         // pane is hidden, not removed, and that is what keeps its grid.
-        .task(id: isVisible) {
+        // KEYED ON THE MODE AS WELL AS ON VISIBILITY, AND THAT IS THE FIX.
+        //
+        // This modifier is on the whole `VStack` — outside the branch above
+        // that chooses between the chat, the diff and the VT grid — because
+        // what it does about VISIBILITY is true of all three. What it did about
+        // the SESSION was true of one, and it did it for all three anyway: an
+        // agent pane opened a full terminal session, on a second ssh channel,
+        // and never drew a byte of it. Per agent pane, and a workspace can hold
+        // several: about 400 KB of scrollback, one of the ten concurrent
+        // sessions a default `sshd` allows this phone across its whole fleet,
+        // and a geometry poll every two seconds against a pane nobody is
+        // looking at.
+        //
+        // It was harmless until `be15838`. The task called `relink()`, which
+        // guards on `started` and so did nothing at all on a session nothing
+        // had opened; it became `resume()`, which is the call that opens one.
+        //
+        // The mode is in the key rather than read once, because the mode moves
+        // under a mounted pane: the Mac can switch a worktree this phone is
+        // looking at into a chat, and a session nobody re-asked about would be
+        // left running behind a screen that has stopped drawing it. Which panes
+        // need one at all is `Terminal.needsTerminalSession`, in AgentKit,
+        // where `swift test` reads it back.
+        .task(id: PaneDuty(visible: isVisible, drawsGrid: live.needsTerminalSession)) {
             if isVisible {
                 // `resume`, not `relink`. Relinking rebuilt the pane from
                 // nothing every time it won its race with `configure`, which
                 // is the "Loading…" on a tab you had already opened — and the
                 // exact opposite of what mounting hidden panes is for. See
                 // `TerminalSession.resume`.
-                session.resume()
+                //
+                // `stop` on the other side of it, and not simply nothing: a
+                // pane that has just BECOME a chat is a pane with a session
+                // already open behind it, and the branch above has stopped
+                // drawing that session's grid.
+                if live.needsTerminalSession {
+                    session.resume()
+                } else {
+                    session.stop()
+                }
+                // Both of these are about the pane you are LOOKING at rather
+                // than about a tty, so they are outside the branch: a chat is
+                // read on screen exactly as a terminal is, and a banner about
+                // the pane in front of you is the same mistake either way.
                 Notifier.shared.visibleTerminal = terminal.id
                 await connection.markVisibleSeen()
             } else {
@@ -1081,6 +1117,35 @@ struct TerminalView: View {
             session.reassertSize()
             Task { await connection.markVisibleSeen() }
         }
+        // THE PANE CAME BACK.
+        //
+        // `.notLive` stops the poll loop on purpose, so this screen has no way
+        // of its own to find out that the runner is running this pane again —
+        // and it does happen: a tmux pane restarted from the Mac, an agent
+        // relaunched into the same slot, a `starting` pane that had not
+        // finished starting when this phone looked. The fleet poll has carried
+        // the word for all three every three seconds all along, and nothing
+        // read it, so the screen said "Not live" for the life of the process
+        // over a pane that had been running for an hour.
+        //
+        // On the CHANGE and not on the value, which is what bounds the cost to
+        // one re-attach per thing that actually happened: the state is
+        // re-derived on every poll, so a rule read as a level would re-attach
+        // every three seconds for as long as the host and the FFI disagreed —
+        // exactly the round trip a second `.notLive` exists to refuse. Which
+        // transitions are worth it is `NotLivePane.revives(from:to:)`, in
+        // AgentKit.
+        //
+        // Guarded on the phase as well, because this fires for every pane: a
+        // LIVE pane whose state moves is a pane that is working, and relinking
+        // one of those would throw its screen away to rebuild what is already
+        // on it.
+        .onChange(of: live.state) { was, now in
+            guard isVisible, session.phase == .notLive else { return }
+            guard NotLivePane.revives(from: StateKind.parse(was), to: StateKind.parse(now))
+            else { return }
+            session.askAgain()
+        }
         // The link under this pane was replaced.
         //
         // A stream is a second ssh channel on the session that just died, so
@@ -1104,9 +1169,18 @@ struct TerminalView: View {
             // ordinary end of a pane. Amber on this screen said "an agent is
             // waiting on you", which is the one thing it means everywhere else
             // in the product and is not what this is.
+            //
+            // It used to be the end of the SCREEN too. `.notLive` is
+            // deliberately not polled — see `TerminalSession.open`, which
+            // cancels the poller rather than spend a round trip a second being
+            // told the same true thing — so nothing here ever asked again, and
+            // the pane can come back: restarted from the Mac, or relaunched
+            // into the same slot by whoever owns it. The two ways out are the
+            // fleet's own word, below, and this button.
             status(
-                symbol: "moon.zzz", mark: .secondary, title: "Not live",
-                message: "\(currentName) has no running pane right now.")
+                symbol: "moon.zzz", mark: .secondary, title: NotLivePane.title,
+                message: NotLivePane.message(for: currentName),
+                actionTitle: NotLivePane.action, action: { session.askAgain() })
         case .failed(let message, let transcript):
             status(
                 symbol: "exclamationmark.triangle", mark: .red, title: "Could not load",
@@ -1143,7 +1217,8 @@ struct TerminalView: View {
     /// title standing in for a full-screen one.
     private func status(
         spinner: Bool = false, symbol: String? = nil, mark: Color = .secondary, title: String,
-        message: String? = nil, transcript: String? = nil
+        message: String? = nil, transcript: String? = nil,
+        actionTitle: String? = nil, action: (() -> Void)? = nil
     ) -> some View {
         VStack(spacing: 0) {
             if spinner {
@@ -1173,6 +1248,15 @@ struct TerminalView: View {
                 DetailBox(text: transcript)
                     .frame(maxWidth: 320)
                     .padding(.top, 14)
+            }
+            // Under the sentence that explains it, which is where a screen full
+            // of prose puts its one move. Bordered rather than prominent: this
+            // is a way out of a state that is not an error, and an accented
+            // button would read as the app asking to be tapped.
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.bordered)
+                    .padding(.top, 22)
             }
         }
         .padding(.horizontal, 32)
@@ -1419,6 +1503,17 @@ struct TerminalView: View {
     /// screen asks the host to resize to should reflect the font actually on
     /// screen, not whatever it was measured at when this screen first
     /// appeared.
+    /// What this pane owes the host: whether anybody is looking at it, and
+    /// whether it is the kind of pane that draws a terminal.
+    ///
+    /// Both halves, so that either one moving re-runs the task. Visibility
+    /// alone was the key and the mode was read inside the body, which is a task
+    /// that never re-runs when a pane changes mode under a finger.
+    private struct PaneDuty: Equatable {
+        var visible: Bool
+        var drawsGrid: Bool
+    }
+
     private struct GridSize: Equatable {
         var width: Double
         var height: Double

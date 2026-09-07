@@ -563,6 +563,56 @@ struct ShellFleet: Hashable {
         return nil
     }
 
+    /// Where a shell holding `tab` sits in THIS fleet.
+    ///
+    /// **A `ShellPosition` is a pair of INDICES, and the fleet it indexes into
+    /// is re-merged from N daemons on every poll.** `ShellFleetMap.of` walks
+    /// the store's entries in runner-list order, so a second runner answering —
+    /// which on a cold launch happens seconds after the first — inserts its
+    /// worktrees into the middle of that array and renumbers everything after
+    /// them. The value `(workspace: 0, tab: 1)` did not change; what it names
+    /// did. The pane on screen becomes a different runner's worktree with no
+    /// gesture, and because the VALUE held still nothing downstream can notice:
+    /// `onRest` never fires, so `markVisible` goes on claiming the old pane on
+    /// the old daemon and Quick Task starts work on the wrong runner.
+    ///
+    /// It was unreachable while the whole tree was keyed `.id(host)` — a runner
+    /// arriving destroyed and rebuilt the screen, position included — and
+    /// `b104e6b` removed that key on purpose, to stop a crossing throwing away
+    /// every mounted pane. This is the half of that change that was missing:
+    /// the position has to be anchored to something the merge cannot renumber,
+    /// and a tab id is that thing. `ShellIdentity.tab` composes it out of the
+    /// runner, the workspace and the pane, so it survives every reordering the
+    /// merge can perform and is not reused by anything else.
+    ///
+    /// Falling back to a CLAMP rather than to `first` when the tab is gone.
+    /// The tab going away is the ordinary shrink — a terminal exited, a
+    /// worktree was removed — and the neighbouring pane is where a person
+    /// already was; sending them to the front of the fleet would be the app
+    /// moving them somewhere they never asked to go. An empty fleet has nothing
+    /// to clamp to and gets the position back unchanged, for
+    /// `tabCount(ofWorkspace:)`'s reason: every caller here is holding a
+    /// position a poll could have invalidated a moment ago, and a fleet that
+    /// shrinks under a finger is ordinary.
+    ///
+    /// Nil `tab` is a shell that has not come to rest on anything yet, which
+    /// clamps for the same reason.
+    func reseat(_ position: ShellPosition, holding tab: String?) -> ShellPosition {
+        if let tab, let found = self.position(ofTab: tab) { return found }
+        return clamping(position)
+    }
+
+    /// The nearest position this fleet actually has, or the one handed in when
+    /// it has none at all.
+    func clamping(_ position: ShellPosition) -> ShellPosition {
+        guard !workspaces.isEmpty else { return position }
+        let workspace = min(max(position.workspace, 0), workspaces.count - 1)
+        let tabs = workspaces[workspace].tabs
+        guard !tabs.isEmpty else { return ShellPosition(workspace: workspace, tab: 0) }
+        return ShellPosition(
+            workspace: workspace, tab: min(max(position.tab, 0), tabs.count - 1))
+    }
+
     /// The first position in the fleet, or nil for a fleet with nothing in it.
     var first: ShellPosition? {
         for (i, workspace) in workspaces.enumerated() where !workspace.tabs.isEmpty {

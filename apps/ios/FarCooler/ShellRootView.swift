@@ -156,7 +156,35 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     private let onRest: ((ShellPosition) -> Void)?
 
     /// Where the shell is. The one thing a commit re-seats.
+    ///
+    /// **A pair of INDICES, which is not an identity, and the fleet it indexes
+    /// into is re-merged from every runner on every poll.** Kept honest by
+    /// `anchor` below — read that first — because the failure has no symptom
+    /// on its own: the number holds still while what it names changes.
     @State var position: ShellPosition
+
+    /// The tab `position` is ON, by id, and the thing `onRest` announces.
+    ///
+    /// **The identity behind the index.** `ShellFleetMap.of` merges the
+    /// runners in list order, so a second runner answering on a cold launch
+    /// inserts its worktrees ahead of the ones already on screen and renumbers
+    /// everything after them: the pane under a finger becomes a different
+    /// runner's worktree with no gesture, and `position` — unchanged — cannot
+    /// say so. Nothing downstream then notices either, because everything
+    /// downstream is hung off `onChange(of: position)`: `markVisible` goes on
+    /// claiming the old pane on the old daemon, and Quick Task opens on the
+    /// runner the shell used to be on.
+    ///
+    /// It was covered up by `RootView` keying the whole tree `.id(host)` — a
+    /// runner arriving destroyed and rebuilt this view, `position` included —
+    /// and `b104e6b` removed that key deliberately, because the teardown cost
+    /// every mounted pane. This is what has to replace it. The rule itself is
+    /// `ShellFleet.reseat(_:holding:)`, in AgentKit, where `swift test` reads
+    /// it back.
+    ///
+    /// Nil before the shell has come to rest on anything, which is one body
+    /// pass at most: `onAppear` settles it.
+    @State private var anchor: String?
 
     // MARK: The drag channel
     //
@@ -931,7 +959,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // because the first pane the shell opens on is one nobody moved to and
         // is still the pane being read.
         .onAppear {
-            onRest?(position)
+            settle(position, in: fleet)
             // On appear as well as on change, and the difference is a cold
             // launch. A card tapped before this app was running delivers its
             // URL, the connection answers, and the shell is mounted with the
@@ -941,8 +969,56 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
             // remove. See `FleetView.dropUnknownTerminal`.
             honorRequest()
         }
-        .onChange(of: position) { _, at in onRest?(at) }
+        .onChange(of: position) { _, at in settle(at, in: fleet) }
+        // THE FLEET MOVED UNDER THE SHELL.
+        //
+        // Every poll, from every runner, rebuilds `fleet` whole — so this fires
+        // whenever a worktree appears, a terminal exits, or a runner that was
+        // still dialing at launch finally answers and its worktrees go in ahead
+        // of the ones on screen. `position` is re-seated onto whatever index
+        // the tab it is anchored to occupies NOW, which for the ordinary poll
+        // is the index it already had.
+        //
+        // Silently, and that is the same silence a commit re-seats in: nothing
+        // has moved as far as anybody holding the phone is concerned, and an
+        // animation here would be the shell sliding sideways because a laptop
+        // in another room woke up. `settle` is what decides whether a pane
+        // genuinely arrived, and it decides it on the tab id rather than on the
+        // number.
+        .onChange(of: fleet) { _, now in
+            let seated = now.reseat(position, holding: anchor)
+            if seated != position {
+                var silent = Transaction()
+                silent.disablesAnimations = true
+                withTransaction(silent) { position = seated }
+            }
+            settle(seated, in: now)
+        }
         .onChange(of: request) { _, _ in honorRequest() }
+    }
+
+    /// A pane has come to rest — if a DIFFERENT one has.
+    ///
+    /// The single writer of `anchor` and the single caller of `onRest`, and it
+    /// asks its question of the tab rather than of the index. Both halves are
+    /// the point:
+    ///
+    ///   - A position that changed while the tab did not is a re-merge, not an
+    ///     arrival. Announcing it would re-claim the runner's ten-second watch
+    ///     and rewrite `Notifier.visibleTerminal` on every poll that reordered
+    ///     the fleet, for a pane nobody moved to.
+    ///   - A tab that changed while the position did not is the bug this file
+    ///     exists to close: another runner's worktree slid under the index and
+    ///     `onChange(of: position)` saw nothing to report, so `markVisible`
+    ///     kept naming a pane on a daemon the shell had left.
+    ///
+    /// The fleet is passed rather than read off `self` because the caller that
+    /// matters is `onChange(of: fleet)`, which is holding the new one.
+    private func settle(_ at: ShellPosition, in fleet: ShellFleet) {
+        let arrived = fleet.tab(at: at)?.id
+        guard arrived != anchor else { return }
+        anchor = arrived
+        onRest?(at)
     }
 
     /// The screen's frame, which is also the page's: everything in here is

@@ -789,28 +789,64 @@ struct ShellScreen: View {
     /// rest" means, and none of them is about a pane.
     private var resting: Connection? { connection(restingRef) }
 
+    /// The runner an action starts work ON.
+    ///
+    /// The one at rest — the runner whose worktree is on screen, which is the
+    /// honest default and the answer the overview gives by putting these
+    /// actions over its own cards. Falling back to the selection and then to
+    /// the first runner that answered, for the one screen where there is no
+    /// pane to rest on: a runner with no worktrees has nothing to look at and
+    /// "New Workspace" is the only move on it. Without a fallback both sheets
+    /// presented an empty body there — a sheet you can open and cannot use.
+    ///
+    /// `RunnerStore.selected` before list order, because it is persisted for
+    /// exactly this question: `onSelectedRunner` uses it to decide where a
+    /// launch LANDS, and the two must not answer differently.
+    private var acting: Connection? {
+        if let resting { return resting }
+        if let selected = hosts.selected?.id,
+            let picked = fleet.runners.first(where: { $0.host.id == selected })
+        {
+            return picked.connection
+        }
+        return fleet.runners.first { $0.connection.hasFleet }?.connection
+    }
+
     var body: some View {
         Group {
-            if let initial {
+            switch opening {
+            case .pane(let initial):
                 shell(map, from: initial)
-            } else {
+            case .waiting:
                 // Before the first fleet there is no position to open on, and
                 // an empty shell would be a bar naming a workspace that does
                 // not exist. The same gap `FleetView`'s connected branch
-                // covers with a spinner.
+                // covers with a spinner — and a spinner is honest here only
+                // because `opening` has already ruled out the case where
+                // nothing is coming. See `ShellBringUp`.
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Themes.shared.current.backgroundColor.ignoresSafeArea())
+            case .noWorkspaces:
+                bringUp
             }
         }
         .onAppear {
             seed()
             elsewhere = readElsewhere()
         }
-        // A fleet arriving from ANY runner is a fleet to open on. `seed` runs
-        // once and only once — see it — so this being several runners' answer
-        // rather than one costs nothing beyond the guard it already has.
-        .onChange(of: fleet.hasFleet) { _, _ in seed() }
+        // A fleet with a PANE in it is a fleet to open on, and that is not the
+        // same question as whether a runner has answered.
+        //
+        // It used to be `fleet.hasFleet`, which is set by the first successful
+        // refresh regardless of what came back and is never cleared. So a
+        // runner with no worktrees flipped it, `seed` ran against an empty
+        // merge and found nothing, and there was no second edge to fire on —
+        // creating the first worktree changed nothing this screen was
+        // watching, and the spinner stayed up for the life of the process.
+        // `seed` runs once and only once on its own guard, so watching the
+        // stronger signal costs nothing beyond the guard it already has.
+        .onChange(of: openable) { _, _ in seed() }
         // The runner list changing changes which runners are somewhere else.
         // It used to be read once per mount and that was correct then: the
         // screen was destroyed and rebuilt on every change of runner, and
@@ -843,10 +879,17 @@ struct ShellScreen: View {
         // fleet "start some work" has to name a machine, and the honest default
         // is the one whose worktree is on screen — the same answer the overview
         // gives by putting these actions in its own toolbar, over its own
-        // cards. Absent until the shell has come to rest at least once, which
-        // is before the first frame anybody can tap.
+        // cards.
+        //
+        // `acting` and not `resting`, which used to be the same thing and no
+        // longer is. There is one screen with no pane at rest — a runner that
+        // answered with no worktrees, where "New Workspace" is the only move
+        // there is — and `resting` is nil on it, so both of these presented an
+        // empty body: a sheet you can open and cannot use. See `acting`, which
+        // falls back through the same selection that decides where a launch
+        // lands.
         .sheet(isPresented: $showNewWorkspace) {
-            if let connection = resting {
+            if let connection = acting {
                 NewWorkspaceView(
                     repositories: connection.repositories, connection: connection
                 ) { repository, name, branch, adopt in
@@ -856,7 +899,7 @@ struct ShellScreen: View {
             }
         }
         .sheet(isPresented: $showQuickTask) {
-            if let connection = resting {
+            if let connection = acting {
                 TaskComposerView(connection: connection)
             }
         }
@@ -1017,6 +1060,109 @@ struct ShellScreen: View {
             // one would be a card whose tap can do nothing.
             .filter { !live.contains($0.runner) && known.contains($0.runner) }
             .map { $0.group() }
+    }
+
+    /// What this screen is: a pane, a wait, or a runner with nothing on it.
+    ///
+    /// The decision is `ShellBringUp.opening`, in AgentKit, and it is there
+    /// because the branch it replaces was wrong for as long as it existed and
+    /// looked exactly like a slow network. A connected runner with zero
+    /// worktrees is an ordinary daemon state — a machine set up this morning
+    /// and not used yet — and it used to be a full-bleed `ProgressView` with no
+    /// navigation bar, no host switcher and no end: no way to reach settings,
+    /// add a second runner, read this device's key, or make the first worktree.
+    private var opening: ShellOpening {
+        ShellBringUp.opening(
+            seated: initial, workspaces: openableCount,
+            reports: fleet.runners.map { report($0) })
+    }
+
+    /// How many worktrees the merge has to open on, counted without building
+    /// the merge.
+    ///
+    /// `ShellFleetMap.of` walks every terminal of every workspace of every
+    /// runner and this is read on every body pass, so it asks the connections
+    /// directly. The two agree by construction: `of` appends one workspace per
+    /// entry and gives each of them a Diff tab, so a workspace in the fleet is
+    /// always a position in the shell.
+    private var openableCount: Int {
+        fleet.runners.reduce(0) { $0 + $1.connection.fleet.workspaces.count }
+    }
+
+    /// The same question as a flag, for the one place that only needs the edge.
+    private var openable: Bool { openableCount > 0 }
+
+    /// What one runner has said, in the bring-up rule's vocabulary.
+    ///
+    /// Wiring, and the only place this screen turns a `Phase` into one — the
+    /// same seam `FleetView.standing` is for `StopWaiting`.
+    ///
+    /// `hasFleet` FIRST, because a connection is `.connected` a whole SSH round
+    /// trip before its first `fleet` call returns and the answer is what this
+    /// rule is about. After that the phase decides only whether anything more
+    /// is coming: a runner holding a fingerprint question is waiting on a
+    /// person, and a person cannot answer it from behind a spinner.
+    private func report(_ runner: (host: Runner, connection: Connection))
+        -> ShellBringUp.Report
+    {
+        if runner.connection.hasFleet { return .answered }
+        switch runner.connection.phase {
+        case .connecting, .reconnecting, .connected: return .pending
+        case .needsApproval, .failed: return .stalled
+        }
+    }
+
+    /// A runner that answered and has nothing on it.
+    ///
+    /// The rows first, then the sentence, then the ways out — which is the
+    /// shape `FleetView.waitingForAnyone` already has, for the same reason: a
+    /// screen you cannot leave is the defect, not the empty fleet. The copy is
+    /// the overview's own, out of `ShellEmptyCopy`, so the two cannot drift.
+    private var bringUp: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                ForEach(fleet.runners, id: \.host.id) { runner in
+                    RunnerStatusRow(
+                        connection: runner.connection,
+                        host: runner.host,
+                        showsLabel: true,
+                        onRetry: { fleet.retry(runner.host.id) },
+                        onReconnectNow: { runner.connection.reconnectNow() },
+                        onTrust: { hosts.trust(runner.host, fingerprint: $0) },
+                        onReviewKey: { hosts.forgetKey(runner.host) },
+                        onNotNow: { runner.connection.declineHostKey(runner.host) },
+                        onEdit: { editingRunner = runner.host },
+                        onAuthorize: { authorizingDevice = true })
+                }
+
+                ContentUnavailableView {
+                    Label(ShellEmptyCopy.title, systemImage: ShellEmptyCopy.symbol)
+                } description: {
+                    Text(ShellEmptyCopy.description(matching: ""))
+                } actions: {
+                    // The next move, and the only one this screen has: there is
+                    // no card to open and no pane to swipe to. Offered against
+                    // the runner the two sheets already resolve to — see
+                    // `acting`, which is what lets them work before the shell
+                    // has come to rest on anything.
+                    Button("New Workspace") { showNewWorkspace = true }
+                        .disabled(acting == nil)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Themes.shared.current.backgroundColor.ignoresSafeArea())
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HostSwitcherBar(hosts: hosts, connection: acting)
+            }
+            // "Runners", because that is what this screen is a list of, and
+            // the same title `FleetView.escapable` gives the screen before it.
+            // The device-key sheet is presented on the `Group` above and
+            // therefore already reaches this branch; a second presenter here
+            // would be two of them for one flow.
+            .navigationTitle("Runners")
+            .navigationBarTitleDisplayMode(.inline)
+        }
     }
 
     private func shell(_ map: ShellFleetMap, from initial: ShellPosition) -> some View {
