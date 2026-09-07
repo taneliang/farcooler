@@ -25,8 +25,22 @@ struct DurationTests {
         return t
     }
 
+    /// A fixed instant, because the arithmetic here has to be exact.
+    ///
+    /// `working(startedSecondsAgo:)` sends the timestamp through milliseconds
+    /// and `brief` brings it back — `((t - 30) * 1000) / 1000` — and with a
+    /// `Date()` carrying a fractional second that round trip can land on
+    /// `30 - epsilon`, which `Int(seconds)` truncates to 29. This test failed
+    /// in CI exactly once that way. A whole second is exactly representable, so
+    /// the round trip is lossless and the boundary is the boundary.
+    ///
+    /// The truncation itself is right and stays: elapsed time reads down, so a
+    /// turn 29.9 seconds old says 29s. And nothing outside a test builds
+    /// `turnStartedAt` this way — the daemon sends whole milliseconds.
+    private static let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+
     @Test func aWorkingRowsDurationAdvancesWithTheTimeItIsGiven() {
-        let now = Date()
+        let now = Self.fixedNow
         let terminal = working(startedSecondsAgo: 30, at: now)
         #expect(terminal.displayDuration(at: now) == "30s")
         #expect(terminal.displayDuration(at: now.addingTimeInterval(31)) == "1m")
@@ -37,7 +51,7 @@ struct DurationTests {
     /// alone — and the row does not flicker a `0s` into existence the instant
     /// a turn begins.
     @Test func aTurnTooYoungToMeasureShowsNoDuration() {
-        let now = Date()
+        let now = Self.fixedNow
         #expect(working(startedSecondsAgo: 2, at: now).displayDuration(at: now) == nil)
     }
 }
