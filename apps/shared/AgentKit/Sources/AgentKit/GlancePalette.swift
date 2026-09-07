@@ -196,13 +196,13 @@ public enum GlancePalette {
     public static let chat = GlanceInk(
         dark: OKLCH(0.62, 0.002, 250), light: OKLCH(0.5, 0.002, 250))
 
-    /// Commit marks on the trace axis.
+    /// Commit marks on the trace axis. Resolved by `commitInk`.
     public static let commit = GlanceInk(OKLCH(0.96, 0.002, 250))
 
-    /// The trace centre rule. Continuous, never dotted.
+    /// The trace centre rule. Continuous, never dotted. Resolved by `axisInk`.
     public static let axis = GlanceInk(OKLCH(0.44, 0.002, 250))
 
-    /// A bucket with no activity. Drawn, not omitted.
+    /// A bucket with no activity. Drawn, not omitted. Resolved by `emptyInk`.
     public static let empty = GlanceInk(OKLCH(0.42, 0.002, 250))
 
     // MARK: - The card's own rules
@@ -218,10 +218,10 @@ public enum GlancePalette {
     // ground and states no light value for either rule; when it draws light
     // mode these take a second literal like `amber` and `review` did.
 
-    /// Under the header and above the tail.
+    /// Under the header and above the tail. Resolved by `ruleInk`.
     public static let rule = GlanceInk(OKLCH(0.32, 0.004, 250))
 
-    /// Between two rows.
+    /// Between two rows. Resolved by `rowRuleInk`.
     public static let rowRule = GlanceInk(OKLCH(0.28, 0.004, 250))
 
     // MARK: - Ink
@@ -315,6 +315,92 @@ public enum GlancePalette {
     /// every other value in this file.
     public static func commitInk(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? commit.darkColor : .primary
+    }
+
+    /// The card's heavier rule — under the header, above the tail — resolved.
+    ///
+    /// **`rule` and `rowRule` above are two DARK figures each declared once for
+    /// both appearances**, and their own comment says why that is provisional:
+    /// "The design draws the card on a dark ground and states no light value for
+    /// either rule; when it draws light mode these take a second literal."
+    /// Drawing the card on a pale ground is what made the gap visible. L 0.32
+    /// against the L 0.22 card is a quiet division; the same L 0.32 against a
+    /// system material at roughly L 0.80 is a near-black bar, and the card came
+    /// out looking like three boxed lists rather than one card with structure.
+    ///
+    /// So light mode defers, exactly as `ink1` and `commitInk` do and for the
+    /// stated reason: two more oklch literals here would be two more of the
+    /// thirteenth color §01 forbids. `HierarchicalShapeStyle` is the same
+    /// deferral `tint` already makes for the working rung, it is correct on any
+    /// appearance by construction, and — unlike a single `Color.secondary` for
+    /// both — it keeps the card's two weights two weights, which is the whole
+    /// point of there being two values.
+    ///
+    /// `AnyShapeStyle` for that reason and no other: a hierarchical style is
+    /// not a `Color`, and the two arms have to have one type.
+    ///
+    /// When the design document draws light mode, both of these become literals
+    /// like every other value in this file.
+    public static func ruleInk(_ scheme: ColorScheme) -> AnyShapeStyle {
+        scheme == .dark
+            ? AnyShapeStyle(rule.darkColor) : AnyShapeStyle(HierarchicalShapeStyle.tertiary)
+    }
+
+    /// The card's lighter rule — between two agents — on exactly the argument
+    /// `ruleInk` makes, one rung quieter in both appearances.
+    public static func rowRuleInk(_ scheme: ColorScheme) -> AnyShapeStyle {
+        scheme == .dark
+            ? AnyShapeStyle(rowRule.darkColor) : AnyShapeStyle(HierarchicalShapeStyle.quaternary)
+    }
+
+    /// The trace's centre rule, resolved.
+    ///
+    /// **`axis` above is ONE figure — L 0.44 — and it is a quiet rule on a dark
+    /// card and a loud one on a pale material.** The whole trace is a ladder of
+    /// four tones and the order is its meaning: a silent bucket under the rule,
+    /// the rule under the talk, the talk under the code. On §01's dark card that
+    /// order holds by arithmetic — 1.7, 1.8, 3.8, 9.7 against the L 0.22
+    /// surface. Against the system's pale material the same four figures come
+    /// out 4.4, 4.0, 3.1, 7.6, and TWO rungs have swapped: the rule and the
+    /// silence are both louder than the talk they are supposed to sit behind.
+    /// That is the arithmetic half of "it looks like a bunch of random shapes" —
+    /// the eye is offered a barcode of structure with the data hidden inside it.
+    ///
+    /// So this defers where `emptyInk` and the two rules defer, one rung
+    /// louder: `tertiary` against `quaternary`, which restores the ladder in
+    /// light mode without a fourteenth number. It is also what makes the commit
+    /// mark work again — a near-black block inside a quiet grey rule is the
+    /// brightest thing in the trace, which is §04's own description of it.
+    ///
+    /// When the design document draws light mode, this becomes a literal like
+    /// every other value in this file.
+    public static func axisInk(_ scheme: ColorScheme) -> AnyShapeStyle {
+        scheme == .dark
+            ? AnyShapeStyle(axis.darkColor) : AnyShapeStyle(HierarchicalShapeStyle.tertiary)
+    }
+
+    /// A bucket with no activity, resolved.
+    ///
+    /// **`empty` above is ONE figure — L 0.42 — and §01 gives it as a quiet tone
+    /// on a dark card**, where it sits below `chat` (L 0.62) and well below
+    /// `code` (L 0.88): thirteen faint rectangles that say "drawn, not omitted"
+    /// without competing with the bars that carry a number. Light mode inverts
+    /// the two lit tones — `code` to L 0.28, `chat` to L 0.5 — and leaves this
+    /// one where it was, which puts the SILENT tone at L 0.42, between the two
+    /// lit ones. On a pale ground an empty bucket then reads as loud as a busy
+    /// one, and thirteen of them read as a barcode; it is half of why the trace
+    /// was reported as "a bunch of random shapes".
+    ///
+    /// The scale it has to stay under in light mode is `chat` at L 0.5, so this
+    /// defers the way the rules above do rather than inventing a fourteenth
+    /// number: `quaternary` is the quietest rung the system has, and quieter
+    /// than any ink the trace draws beside it in either appearance.
+    ///
+    /// When the design document draws light mode, this becomes a literal like
+    /// every other value in this file.
+    public static func emptyInk(_ scheme: ColorScheme) -> AnyShapeStyle {
+        scheme == .dark
+            ? AnyShapeStyle(empty.darkColor) : AnyShapeStyle(HierarchicalShapeStyle.quaternary)
     }
 
     // MARK: - What a surface with room for one thing is about

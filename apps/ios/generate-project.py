@@ -256,6 +256,14 @@ AGENTKIT_SOURCES = [
     # reason exactly: the state decodes into these types, so the extension that
     # draws the card has to compile them too.
     "AgentCardRows.swift",
+    # And the drawing of them, in this list AND in `activity_build_ids` below
+    # for exactly the reason above. It moved out of the extension because a
+    # `View` that only the extension compiles is a drawing no test can read
+    # back: `swift test --package-path apps/shared/AgentKit` runs on every push
+    # and the iOS UI suite is compiled and never executed, and the card spent a
+    # release forcing the dark palette onto a light system material with every
+    # assertion above the pixels passing. See `GlanceCardContrastTests`.
+    "GlanceCard.swift",
     "AgentEvent.swift",
     # What a chat with no agent in it says. Here rather than in
     # `AgentView.body` for `AdapterTest.swift`'s reason and for
@@ -649,6 +657,7 @@ activity_build_ids = {
     + [
         "AgentActivityAttributes.swift",
         "AgentCardRows.swift",
+        "GlanceCard.swift",
         "FleetSnapshot.swift",
         "SnapshotStore.swift",
         # The card's buttons. `AnswerPermissionIntent` is what a button is wired

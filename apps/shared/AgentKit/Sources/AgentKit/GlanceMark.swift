@@ -640,8 +640,44 @@ public struct GlanceTraceLayout: Sendable, Equatable {
         self.size = size
     }
 
-    /// Half the drawable height, either side of the axis. §04's `(h−3)/2`.
-    public var band: CGFloat { max(0, (size.height - Self.axis) / 2) }
+    /// §04's specimen, as a height.
+    ///
+    /// The design draws the trace once, 156 points wide, and every other figure
+    /// in this type is stated against that drawing. Its height by the same rule
+    /// the four shipping sizes derive theirs by — `axis + 2·round(w·19/156)` —
+    /// is `3 + 38`. It is here so `axisHeight` below can say what 3 points MEANT
+    /// rather than repeat the number.
+    private static let specimen: CGFloat = 41
+
+    /// The rule's thickness, which is §04's 3 points **as a proportion of the
+    /// drawing it was stated about**.
+    ///
+    /// **This is a deliberate divergence from §04 and the owner asked for it.**
+    /// The spec's 3pt axis sits inside a 41pt specimen, where it is 7% of the
+    /// height and reads as a horizon. Held at 3pt it is 16% of a card row and
+    /// 23% of the Island's 13, and at those sizes the drawing stops being a
+    /// profile around a line and becomes a bar with lumps on it — which, with
+    /// two more tones sitting on the wrong side of it, is what the owner
+    /// reported as "a bunch of random shapes". Scaled, the rule is 1pt at three
+    /// of the four sizes and 2pt on a widget, exactly the 7% the design drew.
+    ///
+    /// **The BOXES do not move.** `GlanceTraceSize.height` still derives from
+    /// the constant, so all four shipping sizes are the 13 / 13 / 19 / 21 they
+    /// have always been and no surface that reserves room for a trace changes.
+    /// What changes is the split inside the box: a card row is 9 / 1 / 9 where
+    /// it was 8 / 3 / 8, so the bars are a point taller as well as the rule
+    /// being two points thinner.
+    ///
+    /// Floored at a point, which is §03's hairline and the smallest thing this
+    /// system draws anywhere: the rule is "continuous, never dotted" and a
+    /// sub-point rule is a dotted one after rasterisation.
+    public var axisHeight: CGFloat {
+        max(Self.minimumBar, (size.height * Self.axis / Self.specimen).rounded())
+    }
+
+    /// Half the drawable height, either side of the rule. §04's `(h−3)/2`, with
+    /// the 3 read as `axisHeight` for the reason stated there.
+    public var band: CGFloat { max(0, (size.height - axisHeight) / 2) }
 
     /// §04's floor, applied. Below it "commit marks stop separating and come
     /// off" — they are not shrunk, they are removed.
@@ -704,27 +740,45 @@ public struct GlanceTraceLayout: Sendable, Equatable {
             return CGRect(x: column.x, y: band - height, width: column.width, height: height)
         case .output:
             return CGRect(
-                x: column.x, y: band + Self.axis, width: column.width, height: height)
+                x: column.x, y: band + axisHeight, width: column.width, height: height)
         }
     }
 
     /// The centre rule. §01: "The trace centre rule. Continuous, never dotted."
     public var axisRect: CGRect {
-        CGRect(x: 0, y: band, width: size.width, height: Self.axis)
+        CGRect(x: 0, y: band, width: size.width, height: axisHeight)
     }
 
     /// A commit mark, or nil where this bucket has none or this size has no
     /// room for any.
     ///
     /// §04: "Commits 3pt block. On the axis. Unlit buckets get height 0 — an
-    /// unset height stretches." The block is the column's own width and sits in
-    /// the axis rather than beside it, so a commit reads as the rule brightening
-    /// under that bucket. §01 gives it the lightest neutral in the table, which
-    /// is what makes it visible against the axis it replaces.
+    /// unset height stretches." A commit reads as the rule brightening under
+    /// that bucket, which is why it is drawn IN the rule rather than beside it,
+    /// and §01 gives it the lightest neutral in the table so that it does.
+    ///
+    /// **Three points wide, and that is the spec's own word rather than a
+    /// divergence from it.** This used to draw the block at the column's full
+    /// width, which is 3.1 at the Island and 5.9 on a widget, and the cost was
+    /// not the width: a full-width block has no rule showing on either side of
+    /// it, so it fuses with whatever bar is above it — and `commit` and `code`
+    /// are the two brightest neutrals in §01, half a rung apart. A commit under
+    /// a busy bucket simply became a taller code bar. At three points the rule
+    /// shows either side and the mark is a mark.
+    ///
+    /// **Centred on the rule rather than started at its top edge.** With the
+    /// rule scaled (see `axisHeight`) a 3pt block hung from the top of a 1pt
+    /// rule would sit almost entirely in the lower half and read as a chat bar.
+    /// Centred, it straddles the rule by a point either side, which is the
+    /// drawing §04 describes.
     public func commitRect(_ bucket: Int, in trace: ActivityTrace) -> CGRect? {
         guard drawsCommits, trace.commits(bucket) > 0 else { return nil }
         let column = column(bucket)
-        return CGRect(x: column.x, y: band, width: column.width, height: Self.commitBlock)
+        let width = min(Self.commitBlock, column.width)
+        return CGRect(
+            x: column.x + (column.width - width) / 2,
+            y: band + (axisHeight - Self.commitBlock) / 2, width: width,
+            height: Self.commitBlock)
     }
 }
 
@@ -770,11 +824,11 @@ public struct GlanceTraceView: View {
             // first, then the axis over them so a bar that reaches the rule does
             // not eat it, then the commits over the axis because a commit is
             // drawn IN the rule rather than beside it.
-            layer(.bars(.code, lit: false)).fill(GlancePalette.empty(scheme))
+            layer(.bars(.code, lit: false)).fill(GlancePalette.emptyInk(scheme))
             layer(.bars(.code, lit: true)).fill(GlancePalette.code(scheme))
-            layer(.bars(.output, lit: false)).fill(GlancePalette.empty(scheme))
+            layer(.bars(.output, lit: false)).fill(GlancePalette.emptyInk(scheme))
             layer(.bars(.output, lit: true)).fill(GlancePalette.chat(scheme))
-            layer(.axis).fill(GlancePalette.axis(scheme))
+            layer(.axis).fill(GlancePalette.axisInk(scheme))
             layer(.commits).fill(GlancePalette.commitInk(scheme))
         }
         .frame(width: size.width, height: size.height)

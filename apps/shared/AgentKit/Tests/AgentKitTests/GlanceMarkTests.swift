@@ -515,7 +515,7 @@ struct ActivityTraceTests {
         let upper = layout.barRect(6, .code, in: trace)
         let lower = layout.barRect(6, .output, in: trace)
         #expect(upper.maxY == layout.band, "the code half ends where the axis begins")
-        #expect(lower.minY == layout.band + GlanceTraceLayout.axis, "and chat begins after it")
+        #expect(lower.minY == layout.band + layout.axisHeight, "and chat begins after it")
         #expect(upper.minY == 0, "a full bar reaches the top edge")
         #expect(lower.maxY == 23, "and the other reaches the bottom")
     }
@@ -547,6 +547,13 @@ struct ActivityTraceTests {
     /// §04: "Commits 3pt block. On the axis. Unlit buckets get height 0 — an
     /// unset height stretches." And the floor: "36pt wide — Below this, commit
     /// marks stop separating and come off."
+    ///
+    /// **A 3pt block means 3pt in BOTH directions**, which is a correction and
+    /// not a reading of the spec against itself. This drew the block at the
+    /// column's full width, so the rule never showed either side of it and a
+    /// commit under a busy bucket fused with the code bar above — `commit` and
+    /// `code` being the two brightest neutrals §01 has. The width assertion
+    /// below is the one that would have caught it.
     @Test func commitsAreThreePointBlocksThatComeOffBelowTheFloor() throws {
         var commits = Array(repeating: UInt8(0), count: 13)
         commits[3] = 2
@@ -558,8 +565,13 @@ struct ActivityTraceTests {
         #expect(wide.drawsCommits)
         let mark = try #require(wide.commitRect(3, in: trace))
         #expect(mark.height == 3)
-        #expect(mark.minY == wide.band, "on the axis")
-        #expect(mark.width == wide.column(3).width, "the bucket's own column")
+        #expect(mark.midY == wide.axisRect.midY, "centred on the rule")
+        #expect(mark.width == 3, "3pt across, not the bucket's whole column")
+        #expect(mark.width < wide.column(3).width, "so the rule shows either side of it")
+        let column = wide.column(3)
+        #expect(
+            column.x < mark.minX && mark.maxX < column.x + column.width,
+            "and it stays inside the bucket it belongs to")
         #expect(wide.commitRect(4, in: trace) == nil, "an unlit bucket gets no block")
 
         // One point under the floor and every mark comes off — removed, not
@@ -578,16 +590,21 @@ struct ActivityTraceTests {
     /// is the whole reason this case is exempt rather than a rounding of it. The
     /// other three still come from one rule rather than three guesses: the
     /// specimen's own proportion, 19pt of band at 156pt wide.
+    ///
+    /// **The BOX is still 19 and the split inside it is now 9 / 1 / 9**, which
+    /// is the one place this file and §02 disagree. `GlanceTraceLayout.axisHeight`
+    /// carries the argument; what matters here is that the outer figure did not
+    /// move, so nothing that reserves room for a trace has to be re-measured.
     @Test func thereAreFourShippingSizesAndNoOthers() {
         #expect(GlanceTraceSize.allCases.count == 4)
         #expect(GlanceTraceSize.allCases.map(\.width) == [40, 44, 52, 76])
-        #expect(GlanceTraceSize.cardRow.height == 19, "§02 draws the card row as 8 / 3 / 8")
+        #expect(GlanceTraceSize.cardRow.height == 19, "§02 draws the card row 19 tall")
         #expect(
             GlanceTraceLayout(
                 size: CGSize(
                     width: GlanceTraceSize.cardRow.width,
                     height: GlanceTraceSize.cardRow.height)
-            ).band == 8, "and the band is the half of it either side of the rule")
+            ).band == 9, "and the band is the half of it either side of the rule")
         for size in GlanceTraceSize.allCases where size != .cardRow {
             let band = (size.width * 19 / 156).rounded()
             #expect(size.height == GlanceTraceLayout.axis + 2 * band)
@@ -598,6 +615,42 @@ struct ActivityTraceTests {
             GlanceTraceSize.allCases.allSatisfy {
                 GlanceTraceLayout(size: CGSize(width: $0.width, height: $0.height)).drawsCommits
             })
+    }
+
+    /// The centre rule is §04's 3 points **as a proportion of the drawing §04
+    /// states them about**, and this is the assertion that says so.
+    ///
+    /// §04 draws the trace once at 156 wide, which by its own derivation is 41
+    /// tall, and puts a 3pt rule down it — 7% of the height, a horizon. Held at
+    /// a literal 3 points it is 16% of a card row and 23% of the Island's 13,
+    /// and at those sizes the drawing is a bar with lumps rather than a profile
+    /// around a line. So the rule scales and the bars take back what it gives
+    /// up.
+    ///
+    /// Stated as the two things that can go wrong with that: the rule must not
+    /// grow back to the specimen's literal figure at a shipping size, and it
+    /// must never round away to nothing.
+    @Test func theCentreRuleIsSevenPercentOfTheBoxAndNeverLessThanAPoint() {
+        for size in GlanceTraceSize.allCases {
+            let layout = GlanceTraceLayout(
+                size: CGSize(width: size.width, height: size.height))
+            #expect(
+                layout.axisHeight >= GlanceTraceLayout.minimumBar,
+                "the rule is continuous, never dotted — \(size) rounded it away")
+            #expect(
+                layout.axisHeight < GlanceTraceLayout.axis,
+                """
+                the rule is \(layout.axisHeight)pt in a box \(size.height)pt tall, which is \
+                §04's literal figure rather than §04's proportion — at this size that reads \
+                as a bar with lumps on it rather than as a profile
+                """)
+            #expect(
+                layout.band * 2 + layout.axisHeight == size.height,
+                "the two halves and the rule fill the box exactly")
+        }
+        // The specimen itself is the one drawing where the literal figure and
+        // the proportion are the same number, which is the whole argument.
+        #expect(GlanceTraceLayout(size: CGSize(width: 156, height: 41)).axisHeight == 3)
     }
 }
 

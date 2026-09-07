@@ -17,10 +17,16 @@ import WidgetKit
 /// picking between them with no rule anybody wrote.
 ///
 /// **So the card draws a LINE EACH for two agents and counts the rest**, which
-/// is `FleetCard` below and what the design asks for. It leads with the top of
+/// is `GlanceCardView` in AgentKit and what the design asks for. It leads with
+/// the top of
 /// the relay's own ordering — blocked first, then to-review, then working, the
 /// precedence the rest of this product uses — and the tail says how many agents
-/// have no line and what the whole fleet has changed.
+/// have no line and what the whole fleet has changed. The drawing is in AgentKit
+/// rather than here because `swift test --package-path apps/shared/AgentKit` is
+/// the suite that runs on every push and the iOS UI suite is compiled and never
+/// executed; a `View` in this file is a drawing nothing reads back, which is how
+/// the card came to force the dark palette onto a light material for a whole
+/// release. See `GlanceCard.swift`.
 ///
 /// **Every figure on that card comes off the push**, and the last of them only
 /// now:
@@ -733,7 +739,7 @@ private struct LockScreenCard: View {
 
     var body: some View {
         if let layout {
-            FleetCard(layout: layout)
+            GlanceCardView(layout: layout)
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 LeaderRow(state: state, ask: ask, trace: tail.leaderTrace)
@@ -747,203 +753,6 @@ private struct LockScreenCard: View {
                 }
             }
             .padding(16)
-        }
-    }
-}
-
-/// The card the design draws: header, two rows, tail.
-///
-/// **Every word and every figure on it is composed in `AgentCardLayout`**, which
-/// is in AgentKit and has a test suite. Nothing below decides what to say; it
-/// decides where things go. That split is the only way any of this is checkable
-/// without a device — the iOS UI suite is compiled in CI and never executed —
-/// and it is the same arrangement `GlanceTraceLayout` has with the trace it
-/// draws.
-///
-/// **The geometry is the design's, quoted.** 12/14 padding, a 9pt gap
-/// everywhere, columns of 11 / flex / 52 / 64, and a body whose rows divide
-/// whatever height the system gives the presentation. The two rules are two
-/// weights on purpose: the heavier one separates the card's three parts and the
-/// lighter one separates two agents, and drawn at one weight the card reads as a
-/// list of five things.
-///
-/// **Forced dark.** A Live Activity is drawn over the lock screen's wallpaper
-/// on a dark material whatever the phone's appearance is set to, which is the
-/// same fact `AgentStatus.tint` already states in as many words: §01's light
-/// palette answers "what does this look like on a pale backdrop", and there is
-/// no pale backdrop here. The card's own background stays the system's material
-/// — `.activityBackgroundTint(nil)` — because a flat fill of ours sits on top of
-/// somebody's photograph like a sticker.
-private struct FleetCard: View {
-    let layout: AgentCardLayout
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.bottom, 9)
-            hairline(GlancePalette.rule)
-            // `flex: 1` — the rows take whatever is left of the card, which is
-            // the only figure in the design that is not a number: the
-            // presentation's height belongs to the system.
-            VStack(spacing: 0) {
-                ForEach(Array(layout.rows.enumerated()), id: \.element.id) { index, row in
-                    if index > 0 { hairline(GlancePalette.rowRule) }
-                    CardRow(row: row)
-                        .frame(maxHeight: .infinity)
-                }
-            }
-            .frame(maxHeight: .infinity)
-            hairline(GlancePalette.rule)
-            tail
-                .padding(.top, 8)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .environment(\.colorScheme, .dark)
-    }
-
-    private var header: some View {
-        HStack(spacing: 9) {
-            // §03's header diameter, and the one place on this card where the
-            // ring is about the whole fleet rather than one agent.
-            GlanceMarkView(layout.mark, size: .header)
-            Text(layout.title)
-                .glanceType(.cardHeader)
-                .foregroundStyle(GlancePalette.ink1(.dark))
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            if let counts = layout.counts {
-                // Mono, because these are figures a machine counted. §02's test
-                // is exactly that: if it came off a machine it is mono.
-                Text(counts)
-                    .glanceType(.monoFigures)
-                    .foregroundStyle(GlancePalette.ink2(.dark))
-                    .lineLimit(1)
-            }
-        }
-    }
-
-    private var tail: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 4) {
-                ForEach(Array(layout.rings.enumerated()), id: \.offset) { _, mark in
-                    GlanceMarkView(mark, size: .ribbon, decorative: true)
-                }
-            }
-            // Decorative as a group and not only one ring at a time: twelve
-            // marks each announcing "Nothing wanted" is a screen reader reading
-            // a texture aloud, and the header above says the same three numbers
-            // in words that were written to be heard.
-            .accessibilityHidden(true)
-            Spacer(minLength: 4)
-            if let line = layout.line {
-                Text(line)
-                    .glanceType(.monoFigures)
-                    .foregroundStyle(GlancePalette.ink2(.dark))
-                    .lineLimit(1)
-            }
-        }
-    }
-
-    /// One of the card's two rules, at the width it was given.
-    ///
-    /// A `Rectangle` and not a `Divider`: the two weights are the design's and
-    /// `Divider` draws the system's separator, which is one weight and a color
-    /// nobody chose.
-    private func hairline(_ ink: GlanceInk) -> some View {
-        Rectangle()
-            .fill(ink.darkColor)
-            .frame(height: 1)
-    }
-}
-
-/// One agent's line: ring, name and detail, its own thirteen buckets, its
-/// figures.
-///
-/// **The columns are fixed widths, and that is only half of what makes the
-/// traces line up.** §07 gives the row 11 / flex / 52 / 64, so every trace on
-/// the card starts at the same x and is the same width. That buys a shared set
-/// of x positions; it does not buy a shared axis, and for a while this comment
-/// claimed the second from the first. The other half is that the rows now share
-/// a WINDOW — `AgentCardLayout` picks the coarsest its drawn rows carry and sums
-/// the rest onto it — without which thirteen buckets sat under thirteen other
-/// buckets that meant a different thirteen minutes.
-///
-/// **A row with no trace still holds the column open.** `ActivityTrace` refuses
-/// to build from an absent field — a terminal with nothing to show sends no
-/// bytes, deliberately, and that is not the same as thirteen quiet buckets — so
-/// this draws nothing in a box of exactly the same size rather than letting the
-/// figures beside it slide left. The row that HAS a trace and has touched no
-/// files is the other case, and it draws itself: an empty upper half against a
-/// visible center rule, absence drawn rather than omitted.
-private struct CardRow: View {
-    let row: AgentCardLayout.Row
-
-    var body: some View {
-        HStack(spacing: 9) {
-            // §07's first column. The ring is where state lives on this card;
-            // the trace two columns along never carries amber or blue, because
-            // history is not urgent.
-            GlanceMarkView(row.mark, size: .row)
-                .frame(width: 11)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(row.name)
-                    .glanceType(.rowName)
-                    .foregroundStyle(GlancePalette.ink1(.dark))
-                    .lineLimit(1)
-                if !row.detail.isEmpty {
-                    Text(row.detail)
-                        .glanceType(.secondary)
-                        .foregroundStyle(GlancePalette.ink2(.dark))
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            trace
-            VStack(alignment: .trailing, spacing: 0) {
-                if let diff = row.diff {
-                    Text(diff)
-                        .glanceType(.monoFigures)
-                        .foregroundStyle(GlancePalette.ink1(.dark))
-                        .lineLimit(1)
-                }
-                if let footnote = row.footnote {
-                    Text(footnote)
-                        .glanceType(.monoFigures)
-                        .foregroundStyle(GlancePalette.ink2(.dark))
-                        .lineLimit(1)
-                }
-            }
-            .frame(width: 64, alignment: .trailing)
-        }
-    }
-
-    @ViewBuilder private var trace: some View {
-        // Off the PUSH, which is what changed. The trace used to be read out of
-        // the App Group snapshot because the push had never carried one; the
-        // relay sends 66 bytes of base64 per row now, so the history on the card
-        // is as fresh as everything else on it and does not depend on this phone
-        // having run the app today.
-        //
-        // **Already on the card's own axis, which is what changed.** The two
-        // drawn rows used to disagree about their SPAN — a trace snaps to the
-        // shortest of three windows containing its own activity, so column 4 of
-        // a five-minute row and column 4 of a two-hour row were spans
-        // twenty-four times apart under one set of x positions.
-        // `AgentCardLayout` now picks the coarsest window its rows carry and
-        // sums the finer ones onto it, so `row.trace` is the drawn trace and the
-        // raw bytes are not reachable from here on purpose. See
-        // `ActivityTrace.rebucketed(to:)` for the sum, and for the one thing the
-        // wire does not carry: the second a trace's newest bucket starts at,
-        // without which the placement is right to within one column and no
-        // better.
-        if let read = row.trace {
-            GlanceTraceView(read, size: .cardRow)
-        } else {
-            Color.clear
-                .frame(
-                    width: GlanceTraceSize.cardRow.width,
-                    height: GlanceTraceSize.cardRow.height)
         }
     }
 }
