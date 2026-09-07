@@ -77,4 +77,20 @@ class RendezvousSettingTest {
         assertEquals("", Settings.derpMapSetting("https://derp.example/a b.json"))
         assertEquals("", Settings.derpMapSetting("https://derp.example/a\tb.json"))
     }
+
+    /**
+     * A value that will not parse as a URL at all comes back empty.
+     *
+     * The branch this covers has no other way in. Every other refusal above is
+     * decided by reading a URL that parsed — a scheme that is not `https`, a
+     * missing host — so without an input the parser itself throws on, the
+     * "could not read this" arm would never run and could be changed to keep
+     * whatever was typed with every test still green. It was, and they were,
+     * which is why this case is here: `|` is not a character a URI may carry.
+     */
+    @Test
+    fun aValueThatIsNotAUrlAtAllIsRefused() {
+        assertEquals("", Settings.derpMapSetting("https://derp.example/a|b.json"))
+        assertEquals("", Settings.derpMapSetting("https://[not-an-address/derpmap.json"))
+    }
 }
