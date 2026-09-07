@@ -29,6 +29,27 @@ class BackoffTest {
         }
     }
 
+    /**
+     * Each rung is longer than the one before it, up to the ceiling.
+     *
+     * The bands above imply this and never state it, and a band checked on its
+     * own is happy with a schedule that does not grow at all. Consecutive rungs
+     * cannot overlap — 120% of one is 60% of the next — so this is a property
+     * of the schedule and not of the random number generator, the same way the
+     * bands are.
+     */
+    @Test
+    fun it_waits_longer_after_every_attempt_up_to_the_ceiling() {
+        for (attempt in 1..4) {
+            val wait = Connection.backoffMs(attempt)
+            val next = Connection.backoffMs(attempt + 1)
+            assertTrue(
+                "attempt $attempt waited ${wait}ms and attempt ${attempt + 1} waited ${next}ms",
+                next > wait,
+            )
+        }
+    }
+
     @Test
     fun it_stops_growing_at_thirty_seconds() {
         // Without a ceiling this reaches hours, which on a phone means a
@@ -36,6 +57,14 @@ class BackoffTest {
         for (attempt in 5..20) {
             val wait = Connection.backoffMs(attempt)
             assertTrue("attempt $attempt waited ${wait}ms", wait <= 30_000 * 1.2)
+            // And the ceiling is REACHED, not merely never exceeded. A bound
+            // asserted on one side only is happy with a schedule that collapses
+            // to a fraction of a second here, which is the whole of what this
+            // number is for: past the fourth attempt is where every runner on a
+            // link that stays down spends the rest of its life, and 300 ms
+            // there is the whole fleet handshaking three times a second on
+            // somebody's cellular data instead of twice a minute.
+            assertTrue("attempt $attempt waited ${wait}ms", wait >= 30_000 * 0.8)
         }
     }
 
