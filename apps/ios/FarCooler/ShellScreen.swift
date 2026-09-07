@@ -1183,9 +1183,30 @@ struct ShellScreen: View {
                 return entry?.workspace.id == wanted.workspace
                     && entry?.host.id.uuidString == wanted.runner
             }
-        } ?? at.workspace
+        } ?? onSelectedRunner(in: map) ?? at.workspace
         initial = ShellPosition(
             workspace: workspace, tab: map.fleet.workspaces[workspace].resumeTab)
+    }
+
+    /// The first workspace on the runner somebody last picked.
+    ///
+    /// **The selection still decides where a launch LANDS, even though it no
+    /// longer decides what is connected.** `RunnerStore.selected` is persisted
+    /// for exactly this — its own comment says landing on whichever runner
+    /// happened to be first in the list "would mean the app forgets where you
+    /// were every time you close it" — and that argument survived the port
+    /// intact. What changed is only that the other runners are on screen too
+    /// rather than absent.
+    ///
+    /// Nil when the selection names a runner with nothing in the merge, which
+    /// is a runner still connecting or one that is down. `ShellFleet.first` is
+    /// the fallback then, because a shell has to open on something and the
+    /// alternative is a spinner over a fleet that is already in hand.
+    private func onSelectedRunner(in map: ShellFleetMap) -> Int? {
+        guard let selected = hosts.selected?.id else { return nil }
+        return map.fleet.workspaces.indices.first {
+            map.entries[map.fleet.workspaces[$0].id]?.host.id == selected
+        }
     }
 
     /// The worktree a crossing was aimed at, if it was aimed at THIS runner.
