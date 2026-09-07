@@ -30,6 +30,10 @@ SOURCES = [
     # used to be the front door — and is gone: the shell's overview is the
     # fleet screen, sorted by what needs you.
     "FleetView.swift",
+    # One `Connection` per runner, keyed by runner id, and the merge across
+    # them. Nothing constructs it yet — see its header for the three
+    # process-wide slots that have to gain owners before anything can.
+    "FleetStore.swift",
     # `Model.swift` was here. It is `CoreModel.swift` in `AGENTKIT_SOURCES`
     # below now — moved so the AgentKit test target can decode a fixture into
     # `Fleet`, `Workspace` and `Terminal`, which nothing could while they sat in
@@ -135,6 +139,11 @@ AGENTKIT_SOURCES = [
     # only UI tests — and these are the rules with no screen in them. See
     # `ShellNavigationTests`.
     "ShellNavigation.swift",
+    # Which runners the phone should be talking to, and what changing that list
+    # costs. Here for `ShellNavigation.swift`'s reason exactly: the rules a
+    # reconcile has to keep have no screen in them, and the iOS UI suite is
+    # compiled by CI and never executed. See `FleetMembershipTests`.
+    "FleetMembership.swift",
     # The other half of the same argument: what the shell MOVES by, and the
     # flying page's geometry. Here rather than beside the views because the
     # iOS target has no unit tests — a transform inside a `View` can be checked

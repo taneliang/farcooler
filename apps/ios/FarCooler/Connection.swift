@@ -654,6 +654,39 @@ final class Connection: ObservableObject {
         abandon("Stopped waiting for \(host.address). It may be asleep or off the network.")
     }
 
+    /// Stop, for good, because nobody wants this runner any more.
+    ///
+    /// Not `giveUp` and not `abandon`: both of those end an ATTEMPT and leave a
+    /// connection sitting on the failure screen, which is a screen with a "Try
+    /// Again" on it. This ends the object. It is what a reconcile calls on a
+    /// runner that was deleted, edited into a different runner, or filtered out
+    /// by `FleetSettings.allRunnersAtOnce`, and there is no phase for it
+    /// because nothing will render this again.
+    ///
+    /// Three things have to stop, and dropping the last reference only handles
+    /// the first two. `ClientCore.deinit` frees the native session and cancels
+    /// its pump, and the two slots this claimed in `start` — `WatchLinkHost`'s
+    /// and `Connection.current` — are both weak, so they empty themselves. What
+    /// does NOT is the `Reachability` subscription: that list holds a closure
+    /// under a runner's id, and a closure is not the connection, so a retired
+    /// connection would be woken by every door the phone walked through for the
+    /// life of the process. `RunnerStore.remove` already unsubscribes for the
+    /// one case it can see; this covers the three it cannot.
+    ///
+    /// Removing a key nothing registered is explicitly fine — see
+    /// `KeyedCallbacks.remove` — so retiring a connection that never got as far
+    /// as `start` is an ordinary thing for a reconcile to do.
+    func retire() {
+        // Same bump as `abandon`: anything still awaiting the core for this
+        // connection stops being able to write a phase on the way out.
+        attempt += 1
+        poller?.cancel()
+        newsRefresh?.cancel()
+        newsRefresh = nil
+        reconnectTask?.cancel()
+        if let host { Reachability.shared.stopWatching(host.id.uuidString) }
+    }
+
     /// Back out of the fingerprint question without answering it.
     ///
     /// Lands on the failure screen rather than the spinner, because that is the
