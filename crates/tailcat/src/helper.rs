@@ -484,6 +484,10 @@ mod tests {
     #[test]
     fn admitting_one_more_device_reaches_the_running_tunnel() {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        // Spawning a helper now consults the recorded DERP map, so this test
+        // depends on it even though it never sets one. Both locks, in the order
+        // `DERP_MAP_SETTING`'s own doc states.
+        let _setting = super::super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().expect("a scratch directory");
         let log = dir.path().join("commands");
         fake_helper(dir.path(), &log);
@@ -523,6 +527,10 @@ mod tests {
     #[test]
     fn creating_an_identity_asks_a_helper_and_leaves_none_running() {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        // Spawning a helper now consults the recorded DERP map, so this test
+        // depends on it even though it never sets one. Both locks, in the order
+        // `DERP_MAP_SETTING`'s own doc states.
+        let _setting = super::super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
         *helper().lock().expect("the tunnel helper lock") = None;
         let dir = tempfile::tempdir().expect("a scratch directory");
         let log = dir.path().join("commands");
@@ -550,6 +558,10 @@ mod tests {
     #[test]
     fn a_serving_runner_is_asked_rather_than_a_second_helper_started() {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        // Spawning a helper now consults the recorded DERP map, so this test
+        // depends on it even though it never sets one. Both locks, in the order
+        // `DERP_MAP_SETTING`'s own doc states.
+        let _setting = super::super::DERP_MAP_SETTING.lock().unwrap_or_else(|e| e.into_inner());
         *helper().lock().expect("the tunnel helper lock") = None;
         let dir = tempfile::tempdir().expect("a scratch directory");
         let log = dir.path().join("commands");
