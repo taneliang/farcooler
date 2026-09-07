@@ -1,6 +1,7 @@
 package com.farcooler.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -45,7 +49,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -542,10 +549,176 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            // Last, under the version, because the two answer the same shape of
+            // question — "what is this build actually talking to" — and this one
+            // is the rarer by far. It is for the day the rendezvous the app
+            // ships with stops answering, which is the only day anybody should
+            // open it. The Apple apps put it in the same place, for the same
+            // reason (`RendezvousSection.swift`).
+            HorizontalDivider()
+            RendezvousSection(model.settings)
+
             Spacer(Modifier.height(24.dp))
         }
     }
 }
+
+/**
+ * Where tunneled runners and this device meet, and a way to change it.
+ *
+ * **This is a recovery valve, not a feature.** A runner reached through the
+ * tunnel has no address; a device and a runner find each other through a
+ * rendezvous service, and every tunneled connection goes through it rather than
+ * only the ones that could not go direct. The service the app ships with is
+ * documented as best-effort and revocable at any time. Without this field, the
+ * day it stops answering costs a Play release, an App Store review, a Mac
+ * release and a visit to every runner in the fleet; with it, it costs a setting.
+ *
+ * So the copy says what to do — leave it alone — rather than what could be
+ * done. **Nothing in this product says anyone should run their own rendezvous,
+ * and this screen must not become the place that implies it.**
+ *
+ * Collapsed until asked for, like the Apple apps' disclosure and for the same
+ * reason: somebody who has never heard of a rendezvous has no business being
+ * shown a field for one.
+ *
+ * Both ends have their own copy of the setting and both have to agree, which is
+ * the one thing a person changing this has to know. A runner's is an
+ * environment variable its installer sets (`FARCOOLER_DERP_MAP`), because a
+ * runner must not be moved onto a rendezvous by whoever is dialing it.
+ */
+@Composable
+private fun RendezvousSection(settings: Settings) {
+    val current by settings.derpMap.collectAsStateWithLifecycle()
+    var expanded by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    var changed by remember { mutableStateOf(false) }
+
+    Row(
+        Modifier.fillMaxWidth().clickable { expanded = !expanded },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SectionTitle("Rendezvous")
+        Spacer(Modifier.weight(1f))
+        Icon(
+            if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            contentDescription = if (expanded) "Hide rendezvous" else "Show rendezvous",
+        )
+    }
+    if (!expanded) return
+
+    // The mechanism, in one sentence, because the alternative is a field whose
+    // effect nobody can predict. It says what a rendezvous does and why this is
+    // here — not how to stand one up.
+    Text(
+        RENDEZVOUS_EXPLANATION,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    if (current.isNotEmpty()) {
+        Mono(current)
+        // Said out loud, because a runner still on the default meets nothing
+        // this device is looking for, and no other screen would explain the
+        // silence. Tunneled runners fail by timing out rather than by refusing.
+        Text(
+            RENDEZVOUS_BOTH_ENDS,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.tertiary,
+        )
+    }
+
+    OutlinedTextField(
+        value = draft,
+        onValueChange = { draft = it },
+        placeholder = { Text("https://example.com/derpmap.json") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Uri,
+            autoCorrectEnabled = false,
+            capitalization = KeyboardCapitalization.None,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Disabled until the value would actually be kept, rather than after it
+        // is pressed. A rendezvous this app cannot read is stored as empty, so a
+        // button that accepted one would save nothing and say nothing — and a
+        // tunnel that meets nowhere times out rather than refusing, which leaves
+        // no screen anywhere reporting the mistake.
+        Button(
+            onClick = {
+                settings.setDerpMap(draft)
+                draft = ""
+                changed = true
+            },
+            enabled = Settings.derpMapSetting(draft).let { it.isNotEmpty() && it != current },
+        ) { Text("Use rendezvous") }
+        TextButton(
+            onClick = {
+                settings.setDerpMap("")
+                draft = ""
+                changed = true
+            },
+            enabled = current.isNotEmpty(),
+        ) { Text("Reset") }
+    }
+    if (changed) {
+        // The setting is read when a connection is opened, so a session already
+        // running is still meeting at the old place.
+        Text(
+            RENDEZVOUS_RECONNECT,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Text(
+        RENDEZVOUS_FOOTER,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * What a rendezvous is and why the field exists, in the fewest words that leave
+ * nothing to guess.
+ *
+ * Held out here rather than inlined so [com.farcooler.ui.RendezvousCopyTest] can
+ * read it. It has one job it must not drift from: explain the mechanism without
+ * ever suggesting the reader stand one up.
+ */
+internal const val RENDEZVOUS_EXPLANATION =
+    "Runners reached through the tunnel have no address. They and this phone meet at a " +
+        "rendezvous service, and this is which one. It’s here so a service that goes away " +
+        "can be replaced without an app update."
+
+/**
+ * The one thing somebody changing this has to know.
+ *
+ * A runner's own rendezvous is an environment variable its installer sets,
+ * `FARCOOLER_DERP_MAP` — deliberately, so a runner cannot be moved onto a
+ * rendezvous by whoever is dialing it. A phone pointed somewhere a runner is not
+ * simply never meets it, and the symptom is a connection that times out saying
+ * nothing.
+ */
+internal const val RENDEZVOUS_BOTH_ENDS =
+    "Using a custom rendezvous. Runners have to be set to the same one or they won’t be " +
+        "reachable."
+
+/** Shown after a change, because a live session is still meeting at the old place. */
+internal const val RENDEZVOUS_RECONNECT = "Rendezvous changed. Reconnect your runners."
+
+/**
+ * The whole point of the section, said last and plainly.
+ *
+ * Someone talked through changing this by a caller claiming to be support has
+ * been phished, not helped — so the sentence that says so is not optional and is
+ * held to that by [com.farcooler.ui.RendezvousCopyTest].
+ */
+internal const val RENDEZVOUS_FOOTER =
+    "Leave this empty unless Far Cooler has told you to change it. Far Cooler Support will " +
+        "never ask you to change it."
 
 private fun diagnostics(model: AppModel, connections: List<Connection>): String = buildString {
     appendLine("Far Cooler for Android ${AppVersion.display} (build ${AppVersion.build})")
