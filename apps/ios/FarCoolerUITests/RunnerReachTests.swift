@@ -18,9 +18,9 @@ import XCTest
 /// Needs no runner and no daemon, deliberately. The address it seeds is in
 /// 10.255.255.0/24 and answers nothing, so what is asserted is the screen the
 /// app puts up BEFORE any connection resolves — which is the screen that names
-/// the runner it decoded. A test that needed a live daemon would skip itself
-/// green on a machine where the demo host is down, and a suite that cannot fail
-/// is worse than no suite.
+/// every runner it decoded, one row each. A test that needed a live daemon
+/// would skip itself green on a machine where the demo host is down, and a
+/// suite that cannot fail is worse than no suite.
 final class RunnerReachTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -50,17 +50,26 @@ final class RunnerReachTests: XCTestCase {
         app.launchArguments += ["-hosts", "<\(hex)>", "-hosts.last", id]
         app.launch()
 
-        // `FleetView.connecting` says "Connecting to <name>…" the moment a
-        // runner is selected, and `Runner.named` is the address for a direct
-        // one — so this asserts both halves at once: the entry decoded, and it
-        // decoded as `.direct` with its address intact rather than as some
-        // default that would leave the sentence blank.
+        // **The subject has not changed; the sentence carrying it has.**
+        //
+        // This used to read `FleetView.connecting`'s "Connecting to <name>…",
+        // a full-screen line about the one runner the app was standing in front
+        // of. There is no such screen any more: a runner that is not answering
+        // is a `RunnerStatusRow`, which names the runner on its own line and
+        // says "Connecting…" under it — because with several runners the name
+        // is a heading over a list rather than a clause in a sentence.
+        //
+        // What is asserted is the same thing it always was, and `Runner.named`
+        // is still the half that makes it worth asserting: for a direct runner
+        // it is the ADDRESS, so this proves both halves at once — the entry
+        // decoded, and it decoded as `.direct` with its address intact rather
+        // than as some default that would leave the row blank.
         //
         // A decoder that threw would leave `hosts` empty and put onboarding on
         // screen instead, where this text does not exist at all.
-        let connecting = app.staticTexts["Connecting to 10.255.255.1…"]
+        let named = app.staticTexts["10.255.255.1"]
         XCTAssertTrue(
-            connecting.waitForExistence(timeout: 30),
+            named.waitForExistence(timeout: 30),
             "the app never named the seeded runner — a runner saved in the old shape was lost")
     }
 }
