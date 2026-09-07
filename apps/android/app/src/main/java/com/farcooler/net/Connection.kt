@@ -305,6 +305,47 @@ class Connection(
                 -> Retry.ON_THE_BACKOFF
             }
 
+        /**
+         * The sentences this app writes itself, as opposed to the ones the core
+         * hands back.
+         *
+         * Two, and exactly the two [Connection.abandon] produces. Everywhere
+         * else this app composes its own failure text it states the kind beside
+         * it — `Phase.Failed(NO_NODE_KEY_SENTENCE, Failure.NO_NODE_KEY)` and the
+         * [NO_IDENTITY] arm of [Connection.start] both do — so those words are
+         * read by a person and by nothing else. These two are different:
+         * `abandon` files them under `Phase.Failed(message)`, which asks [of]
+         * what they mean, so the sentence and the phrase below it have to keep
+         * agreeing. Reword one and a decision somebody made turns into
+         * [OTHER] — "Can't connect", the core's own headline, with "Try again"
+         * under it for a question nobody answered.
+         *
+         * That is a round trip with a seam in the middle, and nothing about the
+         * seam is visible in a diff or a build. So the sentences live here, next
+         * to the phrases that classify them, rather than at the methods that
+         * raise them: a [Connection] holds a
+         * [com.farcooler.core.ClientCore] and a coroutine scope, so no JVM test
+         * can call [Connection.declineHostKey] or [Connection.giveUp] at all,
+         * and copy nothing reads back is copy that drifts. `HostKeyQuestionTest`
+         * reads each one back through [of].
+         */
+        object Said {
+            /**
+             * A fingerprint was shown and the person backed out of the question
+             * without answering it. Matches on "has not been trusted".
+             */
+            fun declined(runner: String): String =
+                "The key $runner presented has not been trusted on this device. " +
+                    "Far Cooler won’t connect until it is."
+
+            /**
+             * Somebody stopped waiting out a dial. Matches on "Stopped
+             * waiting".
+             */
+            fun stoppedWaiting(runner: String): String =
+                "Stopped waiting for $runner. It may be asleep or off the network."
+        }
+
         companion object {
             /**
              * What `SshError::Tunnel`'s `Display` puts in front of the word.
@@ -742,21 +783,30 @@ class Connection(
      * about to succeed.
      */
     fun giveUp() {
-        abandon("Stopped waiting for ${host.named}. It may be asleep or off the network.")
+        abandon(Failure.Said.stoppedWaiting(host.named))
     }
 
     /**
      * Back out of the fingerprint question without answering it.
      *
-     * Lands on the failure screen rather than the spinner, because that is the
-     * screen with the runner switcher, the editor and this device's key on it.
-     * The wording is what [Failure.KEY_NOT_TRUSTED] matches on.
+     * Lands on the failure row rather than the spinner, because that is where
+     * the way back to the question is: "Show the key again", whose DIAL is what
+     * puts the fingerprint back on screen. Forgetting the pinned key would not
+     * — nothing was ever pinned here, which is the half iOS shipped as a button
+     * that ran and did nothing — and both of this app's call sites already fire
+     * the retry beside the forget.
+     *
+     * The wording is [Failure.Said.declined], next to the phrase
+     * [Failure.KEY_NOT_TRUSTED] matches it on, so a reword cannot quietly
+     * reclassify a decision somebody made.
+     *
+     * **Had no callers at all until the answer that calls it was put back**, on
+     * either surface, which is the same fact as `RunnerStatusRow` offering only
+     * "Trust it" and "Edit". [HostKeyQuestion] is what stops that pair coming
+     * apart again.
      */
     fun declineHostKey() {
-        abandon(
-            "The key ${host.named} presented has not been trusted on this device. " +
-                "Far Cooler won’t connect until it is."
-        )
+        abandon(Failure.Said.declined(host.named))
     }
 
     private fun abandon(message: String) {

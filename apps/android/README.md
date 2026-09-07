@@ -56,10 +56,17 @@ an `UnsatisfiedLinkError` on the first screen.
 ```sh
 ./gradlew testInstrumentedUnitTest           # the ported logic, on the JVM
 ./gradlew connectedInstrumentedAndroidTest   # the JNI bridge, on a device
+./gradlew assembleAndroidTest                # compiles that suite, no device
 ```
 
-Both say `Instrumented` because both build against that build type, which has
-its own application id. AGP uninstalls the app under test when a connected run
+The third is what CI runs. The device suite was compiled by nothing at all
+until it was added — not by `testInstrumentedUnitTest`, which builds
+`src/test/` only, and not by `assembleDebug` — so it could stop compiling with
+every check still green. CI still does not RUN it; that needs an emulator, and
+`.github/workflows/ci.yml` says why the two halves are worth keeping apart.
+
+The first two say `Instrumented` because both build against that build type,
+which has its own application id. AGP uninstalls the app under test when a connected run
 finishes, and against `debug` that is the build someone is actually using — the
 uninstall takes its data with it, which here means the machine list *and* the
 device's SSH identity, since the Keystore key goes when the app does. The phone

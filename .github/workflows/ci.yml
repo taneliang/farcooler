@@ -735,9 +735,53 @@ jobs:
         working-directory: apps/android
         run: ./gradlew testInstrumentedUnitTest
 
-      - name: Build
+      # Both, in one invocation, and the second half is new.
+      #
+      # `app/src/androidTest/` was neither run nor COMPILED by this job.
+      # `testInstrumentedUnitTest` above builds `app/src/test/` and nothing
+      # else, `assembleDebug` builds the app, and no workflow in this
+      # repository mentioned `androidTest` anywhere — so 348 lines, including
+      # the `NativeBridgeTest` case that exists to catch
+      # `libfarcooler_jni.so` failing to load at all, could stop compiling
+      # while this job stayed green. That is this repository's own defining
+      # failure: a check that cannot fail. The iOS job above had the identical
+      # hole and closed it the identical way, with `build-for-testing`.
+      #
+      # `assembleAndroidTest` and not `assembleInstrumentedAndroidTest`: the
+      # variant task's name is spelled out of `testBuildType`, which
+      # `app/build.gradle.kts` sets to `instrumented` for a reason of its own
+      # and could set differently tomorrow. The lifecycle task is the name AGP
+      # keeps, and a job that named the variant would fail with
+      # `Task '…' not found`, which reads like the build breaking rather than
+      # like a rename.
+      #
+      # It does NOT run them. See the note below.
+      - name: Build, including the instrumented test bundle
         working-directory: apps/android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug assembleAndroidTest
+
+      # NOT run here: everything under `app/src/androidTest/`. The suite is
+      # COMPILED by the step above and executed by none, and the two halves of
+      # that are worth keeping apart: a test that does not build is a defect
+      # this job can catch for nothing, and a test that does not run is a
+      # guarantee this job cannot give at all.
+      #
+      # Running it needs an emulator, and unlike the iOS suite there is no
+      # subset that would not — `NativeBridgeTest` exists precisely because
+      # there is no `libfarcooler_jni.so` on a desktop JVM's library path, and
+      # mocking it would test the mock. Booting one in CI is a real option and
+      # deliberately not taken here, so CI's silence about that suite is
+      # absence of evidence rather than evidence of absence. Run it against a
+      # connected device or emulator before landing anything that touches the
+      # JNI boundary:
+      #
+      #   ./scripts/build-android-libs.sh --emulator
+      #   ./gradlew connectedInstrumentedAndroidTest
+      #
+      # That task, and not `connectedAndroidTest`: `testBuildType` is
+      # `instrumented`, and the separate application id is what keeps a test
+      # run from uninstalling the debug app someone is using — which would take
+      # its Keystore SSH identity with it.
 
       # The only build that reads `proguard-rules.pro` or runs `lintVital`, and
       # neither had ever run at all.

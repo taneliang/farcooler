@@ -186,6 +186,10 @@ fun NeedsYouScreen(
                                 connection.host.copy(fingerprint = fingerprint),
                             )
                         },
+                        // Both halves, for the reason `FleetScreen`'s copy of
+                        // this states: forgetting a key that was never pinned
+                        // changes nothing, and the dial is what puts the
+                        // fingerprint back on screen.
                         onReviewKey = {
                             model.hosts.forgetKey(connection.host)
                             model.fleet.retry(
@@ -193,6 +197,7 @@ fun NeedsYouScreen(
                                 connection.host.copy(fingerprint = null),
                             )
                         },
+                        onNotNow = { connection.declineHostKey() },
                         onEdit = { editingRunner = connection.host },
                     )
                 }
