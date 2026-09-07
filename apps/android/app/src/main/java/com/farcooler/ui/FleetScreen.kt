@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Reach
+import com.farcooler.data.Runner
 import com.farcooler.model.AgentActivity
 import com.farcooler.model.GlanceMarkSize
 import com.farcooler.model.WorkspaceOrder
@@ -631,7 +632,7 @@ internal fun RunnerStatusRow(
                 // headline names what happened either way; it does not need the
                 // color to do it.
                 Text(
-                    failureHeadline(kind, connection),
+                    failureHeadline(kind, connection.host),
                     style = MaterialTheme.typography.bodySmall,
                     color =
                         if (kind == Connection.Failure.HOST_KEY_CHANGED)
@@ -639,7 +640,7 @@ internal fun RunnerStatusRow(
                         else MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    failureDetail(kind, connection, current.message),
+                    failureDetail(kind, connection.host, current.message),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -680,15 +681,38 @@ internal fun RunnerStatusRow(
     }
 }
 
-private fun failureHeadline(kind: Connection.Failure, connection: Connection): String = when (kind) {
+/**
+ * The headline over a failed runner.
+ *
+ * Takes the [Runner] rather than the [Connection] so a JVM unit test can call
+ * it: a `Connection` holds a `ClientCore` and a coroutine scope and cannot be
+ * built off a device, and copy nothing reads back is copy that drifts. The two
+ * things a sentence here needs — what to call this runner, and how it is
+ * reached — are both on the runner. `TunnelCopyTest` is what reads it.
+ */
+internal fun failureHeadline(kind: Connection.Failure, runner: Runner): String = when (kind) {
     Connection.Failure.KEY_REJECTED -> "Not authorized yet"
     Connection.Failure.HOST_KEY_CHANGED -> "This host’s key changed"
-    Connection.Failure.UNREACHABLE -> "Can’t reach ${connection.host.named}"
+    Connection.Failure.UNREACHABLE -> "Can’t reach ${runner.named}"
     Connection.Failure.DAEMON_MISSING -> "Far Cooler isn’t installed"
     Connection.Failure.NO_IDENTITY -> "This device has no key"
     Connection.Failure.NO_NODE_KEY -> "This device has no tunnel key"
     Connection.Failure.KEY_NOT_TRUSTED -> "Key not trusted"
     Connection.Failure.STOPPED -> "Stopped waiting"
+
+    // Named the way [Connection.Failure.UNREACHABLE] names it, because it is
+    // the same fact about the same runner: nothing answered. `Runner.named` is
+    // what makes that a label rather than the empty address a tunneled runner
+    // has.
+    Connection.Failure.TUNNEL_NO_ANSWER -> "Can’t reach ${runner.named}"
+
+    // Not the runner's name: what could not be reached is the rendezvous, and
+    // blaming the runner would send somebody to go and wake a machine that was
+    // awake the whole time.
+    Connection.Failure.TUNNEL_RENDEZVOUS -> "Can’t reach the tunnel"
+    Connection.Failure.TUNNEL_NOT_IN_THIS_BUILD -> "No tunnel in this build"
+    Connection.Failure.TUNNEL_UNSPECIFIED -> "The tunnel didn’t open"
+
     Connection.Failure.OTHER -> "Can’t connect"
 }
 
@@ -699,25 +723,31 @@ private fun failureHeadline(kind: Connection.Failure, connection: Connection): S
  * front of someone who just wants their runner back is asking them to
  * translate.
  *
- * The `else` arm is not raw text. Four of its five cases are sentences somebody
- * wrote — the changed host key's carries the two fingerprints being compared
- * and comes from `crates/client/src/ssh.rs`, the other three from `Connection`
- * and `Identity` — and they are the core's words only in the sense that the
- * core is where they are stored.
+ * There is deliberately no `else` arm. Five kinds pass [message] through and
+ * every one of them is a sentence somebody wrote — the changed host key's
+ * carries the two fingerprints being compared and comes from
+ * `crates/client/src/ssh.rs`, the other four from `Connection` and `Identity` —
+ * and they are the core's words only in the sense that the core is where they
+ * are stored. An `else` here is what would let a kind added later pass the
+ * core's own text through instead, silently, which is exactly how
+ * `cannot open the tunnel: no_answer` used to reach a screen. Naming all
+ * thirteen makes a fourteenth a compile error.
+ *
+ * Takes the [Runner] rather than the [Connection] for [failureHeadline]'s
+ * reason: so a test can read this copy back.
  */
-private fun failureDetail(
+internal fun failureDetail(
     kind: Connection.Failure,
-    connection: Connection,
+    runner: Runner,
     message: String,
 ): String = when (kind) {
     Connection.Failure.KEY_REJECTED ->
-        connection.host.reach.detail(connection.host.user) +
-            " hasn’t been given this device’s key."
+        runner.reach.detail(runner.user) + " hasn’t been given this device’s key."
 
     // No port to name and no address to have got wrong for a tunneled runner:
     // it is reached by token, so the two things a person could check are whether
     // the runner is awake and whether it is on the tunnel.
-    Connection.Failure.UNREACHABLE -> when (val reach = connection.host.reach) {
+    Connection.Failure.UNREACHABLE -> when (val reach = runner.reach) {
         is Reach.Direct ->
             "Nothing answered on port ${reach.port}. The runner may be asleep, " +
                 "or the address may be wrong."
@@ -727,6 +757,35 @@ private fun failureDetail(
 
     Connection.Failure.DAEMON_MISSING ->
         "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
+
+    // The app's own sentences for the tunnel's four stable words. Never
+    // [message]: that is `cannot open the tunnel: <word>`, and the word is the
+    // thing this table exists to keep off a screen.
+    //
+    // `crates/cli/src/runner_pipe.rs`'s `sentence` says the same four things to
+    // whoever is reading a terminal, and `RunnerTrouble` in
+    // `apps/shared/AgentKit` says them on the Apple apps. Reword one and the
+    // other two are where to look.
+    //
+    // Both causes named for the first, because from here they are
+    // indistinguishable — a revoked device is ignored silently and times out
+    // exactly as a sleeping runner does — and naming only one would send half
+    // the people who read this to the wrong place.
+    Connection.Failure.TUNNEL_NO_ANSWER ->
+        "It didn’t answer. The runner may be asleep, or this device’s access " +
+            "to it may have been revoked."
+
+    Connection.Failure.TUNNEL_RENDEZVOUS ->
+        "The service that introduces this device to the runner didn’t answer. " +
+            "Check this device’s own network."
+
+    Connection.Failure.TUNNEL_NOT_IN_THIS_BUILD ->
+        "This build of Far Cooler has no tunnel it can dial."
+
+    // No cause named, for OTHER's reason: `io` is deliberately generic upstream,
+    // so a guess here would send somebody to fix something that was never the
+    // problem.
+    Connection.Failure.TUNNEL_UNSPECIFIED -> "The tunnel couldn’t be opened."
 
     // The undiagnosed arm, and the only one where `message` is whatever came
     // back rather than something written to be read. Those words go in a
@@ -740,7 +799,12 @@ private fun failureDetail(
     // business, and the button below is the only offer this row makes.
     Connection.Failure.OTHER -> "The attempt to reach it didn’t finish."
 
-    else -> message
+    Connection.Failure.HOST_KEY_CHANGED,
+    Connection.Failure.NO_IDENTITY,
+    Connection.Failure.NO_NODE_KEY,
+    Connection.Failure.KEY_NOT_TRUSTED,
+    Connection.Failure.STOPPED,
+    -> message
 }
 
 /**

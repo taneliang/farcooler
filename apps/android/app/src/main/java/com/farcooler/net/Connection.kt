@@ -152,17 +152,51 @@ class Connection(
      * A failure screen that offers the same button for every failure is one
      * that is wrong most of the time: "Try again" fixes a runner that was
      * asleep and fixes nothing at all about a key this device was never
-     * authorised with, or a host key that changed underneath us. Each of these
+     * authorized with, or a host key that changed underneath us. Each of these
      * has exactly one useful next move and they are not the same move.
      *
      * Read off the message rather than a typed error because the message is all
-     * that crosses the FFI boundary — the core hands back Rust's `Display`
-     * output as a string and there is no code to switch on. The substrings are
-     * the ones in `crates/client/src/ssh.rs` and `session.rs`; each is a
-     * distinctive phrase from the middle of its message rather than a prefix,
-     * so wrapping the error in more context does not stop it matching.
+     * that crosses the FFI boundary on the connect path — `SessionError::Ssh`
+     * is `#[error(transparent)]` and `farcooler_client_connect` hands back
+     * `e.to_string()`, so what arrives here is a Rust `Display` string with
+     * nothing beside it. The substrings are the ones in
+     * `crates/client/src/ssh.rs` and `session.rs`; each is a distinctive phrase
+     * from the middle of its message rather than a prefix, so wrapping the
+     * error in more context does not stop it matching.
+     *
+     * **One of them is not a phrase, and must not be read as one.**
+     * `SshError::Tunnel` renders as `cannot open the tunnel: <word>`, and the
+     * word is `farcooler_tailcat::TunnelError::code` — a stable machine word
+     * that already crosses the FFI on purpose, wrapped in a sentence for a log.
+     * So the tunnel failures are classified by READING THAT WORD ([tunnelWord]
+     * and [TUNNEL_MARKER]), never by matching the English around it. That prose
+     * can be reworded; the word is the thing whose own doc promises it will not
+     * be. `RunnerTrouble.TunnelWord` in `apps/shared/AgentKit` is the same
+     * table for the Apple apps and `crates/cli/src/runner_pipe.rs`'s `sentence`
+     * is the same table for the terminal — one dialect, three readers.
+     *
+     * **The FFI is deliberately not widened to carry a code beside the message
+     * here.** [com.farcooler.core.CoreException] already does exactly that for
+     * a call on a live session, and says why the connect path is the exception:
+     * a connect failure genuinely arrives as prose, because two of these have
+     * nothing but the message to show — a changed host key, whose text carries
+     * the two fingerprints being compared and must not be paraphrased, and the
+     * undiagnosed failure, where the core's account is the only account there
+     * is. A code cannot replace those. What a code CAN do is stop a code being
+     * recovered from the sentence printed around it, and that is the whole of
+     * the change this seam needed.
      */
-    enum class Failure {
+    enum class Failure(
+        /**
+         * The stable word `farcooler_tailcat::TunnelError::code` sends for this
+         * failure, or null where this failure is not a tunnel failure.
+         *
+         * On the constants rather than in a table beside them so there is one
+         * place a fifth word gets added, and so the compiler is the thing that
+         * keeps the word and the sentence for it together.
+         */
+        val tunnelWord: String? = null,
+    ) {
         /** The runner answered but does not know this device's key. */
         KEY_REJECTED,
 
@@ -202,28 +236,153 @@ class Connection(
         /** The user stopped waiting. Also not a fault. */
         STOPPED,
 
+        /**
+         * The tunnel never opened and the runner did not answer through it.
+         *
+         * Tailcat ignores a client it does not recognize SILENTLY, so a device
+         * removed from a runner's allowlist gets no refusal — it gets a
+         * timeout. This is that timeout, and it is also what a runner that is
+         * simply asleep looks like. The sentence has to say both.
+         */
+        TUNNEL_NO_ANSWER("no_answer"),
+
+        /**
+         * The rendezvous service that introduces this device to the runner
+         * could not be reached. That is this device's own network, not the
+         * runner's, which is why this is not [UNREACHABLE].
+         */
+        TUNNEL_RENDEZVOUS("derp"),
+
+        /**
+         * This build links no tunnel at all. An APK whose ABI shipped without
+         * `libtailcat.so`; never a runner's fault, and never something a retry
+         * can change.
+         */
+        TUNNEL_NOT_IN_THIS_BUILD("no_tailcat"),
+
+        /**
+         * Deliberately generic upstream — a malformed token, a dead sshd whose
+         * errno differs by platform, and `EMFILE` all wear it — so the sentence
+         * claims nothing about which. Also where a word this build has never
+         * seen lands, so a fifth word added in Rust reaches a screen as a
+         * sentence somebody wrote instead of as itself.
+         */
+        TUNNEL_UNSPECIFIED("io"),
+
         OTHER;
 
         /**
-         * Whether "Try Again" belongs below the primary action as a second
+         * Whether "Try again" belongs below the primary action as a second
          * option. False where retrying is already the primary action (it would
          * then appear twice) and false where it cannot work at all.
          */
         val worthRetryingAsAlternative: Boolean get() = this == KEY_REJECTED
 
+        /**
+         * Whether to dial again without being asked, and how soon.
+         *
+         * Here rather than in [retryOrGiveUp] for this enum's own reason, and
+         * it took a tunnel failure to make the reason bite: the schedule is a
+         * decision about what a failure MEANS, [Connection] holds a
+         * [com.farcooler.core.ClientCore] and a coroutine scope so no JVM unit
+         * test can build one, and a `when` in a private method is a decision
+         * nothing reads back. `TunnelWordTest` reads this one.
+         */
+        val retry: Retry
+            get() = when (this) {
+                KEY_REJECTED, HOST_KEY_CHANGED, NO_IDENTITY, NO_NODE_KEY, KEY_NOT_TRUSTED ->
+                    Retry.NEVER
+
+                // A dial cannot put the Go library into an APK that shipped
+                // without one, so the schedule would be a timeout every thirty
+                // seconds, forever, for an answer that cannot change.
+                TUNNEL_NOT_IN_THIS_BUILD -> Retry.NEVER
+
+                DAEMON_MISSING -> Retry.AFTER_A_WHILE
+
+                UNREACHABLE, STOPPED, OTHER,
+                TUNNEL_NO_ANSWER, TUNNEL_RENDEZVOUS, TUNNEL_UNSPECIFIED,
+                -> Retry.ON_THE_BACKOFF
+            }
+
         companion object {
-            fun of(message: String): Failure = when {
-                message.contains("rejected this key") -> KEY_REJECTED
-                message.contains("is not the one Far Cooler has recorded") -> HOST_KEY_CHANGED
-                message.contains("cannot reach") -> UNREACHABLE
-                message.contains("did not answer") -> DAEMON_MISSING
-                message.contains("no SSH key") -> NO_IDENTITY
-                message.contains("no tunnel key") -> NO_NODE_KEY
-                message.contains("has not been trusted") -> KEY_NOT_TRUSTED
-                message.contains("Stopped waiting") -> STOPPED
-                else -> OTHER
+            /**
+             * What `SshError::Tunnel`'s `Display` puts in front of the word.
+             *
+             * The one string in this file that has to match Rust exactly.
+             * `crates/client/src/ssh.rs`'s
+             * `the_tunnel_message_carries_the_word_the_apps_read` is the other
+             * half of that pair, and it names the Apple copy of this constant —
+             * because a reword on either side is silent everywhere else.
+             */
+            const val TUNNEL_MARKER = "cannot open the tunnel: "
+
+            fun of(message: String): Failure =
+                // First, and by the machine word rather than by a phrase. See
+                // the header: the word is what the core promises to keep
+                // stable, and the sentence printed around it is not.
+                tunnelWordIn(message) ?: when {
+                    message.contains("rejected this key") -> KEY_REJECTED
+                    message.contains("is not the one Far Cooler has recorded") -> HOST_KEY_CHANGED
+                    message.contains("cannot reach") -> UNREACHABLE
+                    message.contains("did not answer") -> DAEMON_MISSING
+                    message.contains("no SSH key") -> NO_IDENTITY
+                    message.contains("no tunnel key") -> NO_NODE_KEY
+                    message.contains("has not been trusted") -> KEY_NOT_TRUSTED
+                    message.contains("Stopped waiting") -> STOPPED
+                    else -> OTHER
+                }
+
+            /**
+             * The failure named by the word inside a tunnel message, or null if
+             * this is not a tunnel message at all.
+             *
+             * The marker is looked for anywhere in the message rather than at
+             * the front, for the reason every phrase above is: wrapping the
+             * error in more context must not stop it matching. The word runs to
+             * the first space or the end, so trailing context does not become
+             * part of it.
+             */
+            private fun tunnelWordIn(message: String): Failure? {
+                val marker = message.indexOf(TUNNEL_MARKER)
+                if (marker < 0) return null
+                val word = message.substring(marker + TUNNEL_MARKER.length)
+                    .takeWhile { !it.isWhitespace() }
+                // Never null past this point: an unknown word is a sentence
+                // this app wrote, never the word itself on a screen.
+                return entries.firstOrNull { it.tunnelWord == word } ?: TUNNEL_UNSPECIFIED
             }
         }
+    }
+
+    /**
+     * Whether a failed attempt is dialed again on a schedule, and how soon.
+     *
+     * A sibling of [Failure] rather than a `when` inside [retryOrGiveUp], so
+     * the decision sits where a test can read it. See [Failure.retry].
+     */
+    enum class Retry {
+        /**
+         * Nothing is scheduled. The failure needs a person — a key to
+         * authorize, a fingerprint to answer, a build that has a tunnel in it —
+         * and a spinner returning every thirty seconds says the opposite.
+         *
+         * Not a dead end: the row's button, the app coming back to the
+         * foreground and the network returning all still reach [reconnectNow].
+         */
+        NEVER,
+
+        /**
+         * [SLOW_RETRY_MS], at the same rung. No amount of retrying installs a
+         * daemon.
+         */
+        AFTER_A_WHILE,
+
+        /**
+         * The exponential schedule, one rung up. For the failures that are
+         * genuinely transient often enough to be worth chasing.
+         */
+        ON_THE_BACKOFF,
     }
 
     enum class Action { RESTART, STOP, DISMISS_LOST }
@@ -559,21 +718,18 @@ class Connection(
             return
         }
 
-        when (next.kind) {
-            Failure.KEY_REJECTED,
-            Failure.HOST_KEY_CHANGED,
-            Failure.NO_IDENTITY,
-            Failure.NO_NODE_KEY,
-            Failure.KEY_NOT_TRUSTED,
-            -> _phase.value = next
+        // Which of the three, per failure, is [Failure.retry] — a table a JVM
+        // unit test reads, rather than a `when` in here, which nothing can
+        // build. What is left here is only the mechanism for each.
+        when (next.kind.retry) {
+            Retry.NEVER -> _phase.value = next
 
             // Kept at the same rung: `attempt` drives the fast schedule, means
             // nothing at this cadence, and letting it climb would leave a
             // later, genuinely transient failure starting at the ceiling.
-            Failure.DAEMON_MISSING -> scheduleReconnect(attempt, SLOW_RETRY_MS)
+            Retry.AFTER_A_WHILE -> scheduleReconnect(attempt, SLOW_RETRY_MS)
 
-            Failure.UNREACHABLE, Failure.STOPPED, Failure.OTHER ->
-                scheduleReconnect(attempt + 1, backoffMs(attempt + 1))
+            Retry.ON_THE_BACKOFF -> scheduleReconnect(attempt + 1, backoffMs(attempt + 1))
         }
     }
 
