@@ -983,7 +983,14 @@ struct ShellScreen: View {
     /// The trigger for re-reading the cache, and a value rather than a
     /// derivation at the point of use so `onChange` has something to compare.
     private var liveRunners: Set<String> {
-        Set(fleet.active.compactMap { $0.hostId?.uuidString })
+        // Off the STORE's own key and not `Connection.hostId`, which is nil
+        // until `start(host:)` has run. Reading it back off the connection made
+        // a runner look absent for the whole of its bring-up — long enough for
+        // `readElsewhere` to draw its cached worktrees beside its live ones,
+        // and long enough for `takeCrossing` to throw away a crossing note
+        // naming the very runner it was landing on. The same second-answer
+        // mistake `FleetStore.publish` had.
+        Set(fleet.runners.map(\.host.id.uuidString))
     }
 
     /// The worktrees on runners this app is NOT talking to.
@@ -1050,7 +1057,7 @@ struct ShellScreen: View {
             // see `ShellFleetMap.one`, which is where that condition is
             // decided. A header saying one machine's name over another
             // machine's worktrees is the one thing worse than no header.
-            liveServer: fleet.active.count == 1 ? fleet.active[0].hostLabel : nil,
+            liveServer: fleet.runners.count == 1 ? fleet.runners[0].host.label : nil,
             elsewhere: elsewhere,
             // A row for every runner that is not simply answering, over the
             // grid it is about. This is the whole of what replaced four
