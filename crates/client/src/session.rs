@@ -854,7 +854,7 @@ impl Session {
         }
     }
 
-    /// The colour schemes this runner defines.
+    /// The color schemes this runner defines.
     ///
     /// Only the runner's own — the built-ins are compiled into every client, so
     /// sending eleven fixed palettes down an ssh link on every connection

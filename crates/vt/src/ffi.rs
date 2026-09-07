@@ -233,7 +233,7 @@ pub unsafe extern "C" fn farcooler_vt_scroll_to_bottom(handle: *mut c_void) {
     h.revision = h.revision.wrapping_add(1);
 }
 
-/// Recolour the terminal.
+/// Recolor the terminal.
 ///
 /// `colors` is nineteen packed `0x00RRGGBB` values: sixteen ANSI, then
 /// foreground, background, cursor. Positional rather than a struct, because
@@ -242,11 +242,11 @@ pub unsafe extern "C" fn farcooler_vt_scroll_to_bottom(handle: *mut c_void) {
 /// produces exactly this array.
 ///
 /// Any other length is refused rather than padded: a caller that sent eighteen
-/// has a bug, and a nineteenth colour invented here would show up on screen
+/// has a bug, and a nineteenth color invented here would show up on screen
 /// with nothing in any theme file to explain it.
 ///
 /// Bumps the revision, so the next frame redraws — including scrollback, since
-/// colours are resolved when a snapshot is taken rather than when bytes
+/// colors are resolved when a snapshot is taken rather than when bytes
 /// arrive. That is what makes switching themes instant instead of a repaint of
 /// history the terminal no longer has.
 #[unsafe(no_mangle)]

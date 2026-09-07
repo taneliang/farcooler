@@ -91,7 +91,7 @@ enum Command {
     /// Manage registered repositories.
     #[command(subcommand)]
     Repo(RepoCmd),
-    /// List the colour schemes available on this runner.
+    /// List the color schemes available on this runner.
     #[command(subcommand)]
     Theme(ThemeCmd),
     /// Read and change what this runner's config.toml holds.
@@ -386,9 +386,9 @@ enum ThemeCmd {
     },
     /// Write one `[themes.<name>]` table, from JSON on stdin.
     ///
-    /// stdin rather than nineteen positional colours: nineteen of anything on a
+    /// stdin rather than nineteen positional colors: nineteen of anything on a
     /// command line is a contract nobody can read and one transposition away
-    /// from a colour nobody chose. This is the apps' channel, not a hand-typed
+    /// from a color nobody chose. This is the apps' channel, not a hand-typed
     /// one — `$EDITOR ~/.config/farcooler/config.toml` is better at that.
     Set {
         #[arg(long, required = true)]
@@ -1471,7 +1471,7 @@ async fn theme(runner: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
             ansi: match <[u32; 16]>::try_from(one.ansi.as_slice()) {
                 Ok(a) => a,
                 // The daemon drops these before sending, so reaching here means
-                // an older runner. Skipping beats padding a colour nobody chose.
+                // an older runner. Skipping beats padding a color nobody chose.
                 Err(_) => continue,
             },
         };

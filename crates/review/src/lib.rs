@@ -15,7 +15,7 @@
 //!
 //! Both live in one crate, in Rust, behind one C ABI, because three clients
 //! render this and three implementations would disagree about what a hunk is —
-//! the same reason colour resolution sits in `farcooler-vt` rather than in each
+//! the same reason color resolution sits in `farcooler-vt` rather than in each
 //! renderer.
 //!
 //! ```text

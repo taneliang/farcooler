@@ -52,7 +52,7 @@ pub struct ConfigAdapter {
 ///
 /// Everything but the ground and the text is optional, so a file that only
 /// wants a different background says only that and inherits the rest. A theme
-/// is much more often a tweak to one that already works than sixteen colours
+/// is much more often a tweak to one that already works than sixteen colors
 /// chosen from nothing.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ConfigTheme {
@@ -65,7 +65,7 @@ pub struct ConfigTheme {
     #[serde(default)]
     pub cursor: Option<String>,
     /// ANSI 0-7. Fewer or more than eight is a mistake worth reporting rather
-    /// than padding out into colours nobody chose.
+    /// than padding out into colors nobody chose.
     #[serde(default)]
     pub normal: Option<Vec<String>>,
     /// ANSI 8-15.
@@ -365,9 +365,9 @@ pub fn write_branch_prefix(path: &Path, prefix: &str) -> std::io::Result<()> {
 
 /// Write one `[themes.<name>]` table, replacing it if it is already there.
 ///
-/// Every colour is written, including the sixteen ANSI ones, even though the
+/// Every color is written, including the sixteen ANSI ones, even though the
 /// reader treats `normal` and `bright` as optional. An editor that omitted them
-/// would produce a theme whose ANSI colours silently follow whatever the
+/// would produce a theme whose ANSI colors silently follow whatever the
 /// default theme's are — including through a future change to that default.
 pub fn write_theme(path: &Path, theme: &crate::theme::Theme) -> std::io::Result<()> {
     let Some(mut doc) = document_for_edit(path)? else { return Err(malformed(path)) };
@@ -377,8 +377,8 @@ pub fn write_theme(path: &Path, theme: &crate::theme::Theme) -> std::io::Result<
     table.insert("background", toml_edit::value(hex(theme.background)));
     table.insert("foreground", toml_edit::value(hex(theme.foreground)));
     table.insert("cursor", toml_edit::value(hex(theme.cursor)));
-    table.insert("normal", colours(&theme.ansi[..8]));
-    table.insert("bright", colours(&theme.ansi[8..]));
+    table.insert("normal", colors(&theme.ansi[..8]));
+    table.insert("bright", colors(&theme.ansi[8..]));
 
     themes_table(&mut doc, path)?.insert(&theme.name, toml_edit::Item::Table(table));
     save(path, &doc)
@@ -512,7 +512,7 @@ fn hex(rgb: u32) -> String {
     format!("#{:06x}", rgb & 0xFF_FF_FF)
 }
 
-fn colours(rgb: &[u32]) -> toml_edit::Item {
+fn colors(rgb: &[u32]) -> toml_edit::Item {
     strings(&rgb.iter().map(|c| hex(*c)).collect::<Vec<_>>())
 }
 
@@ -524,7 +524,7 @@ fn strings(values: &[String]) -> toml_edit::Item {
     toml_edit::value(array)
 }
 
-/// Turn one table into a theme, or `None` if any colour in it is unreadable.
+/// Turn one table into a theme, or `None` if any color in it is unreadable.
 ///
 /// Anything unspecified comes from the default theme rather than from black:
 /// a file that sets only a background should look like the default with a
@@ -556,7 +556,7 @@ fn resolve_theme(name: &str, spec: &ConfigTheme) -> Option<crate::theme::Theme> 
         dark: spec.dark,
         background: parse_hex(&spec.background)?,
         foreground,
-        // A theme that names no cursor gets its own text colour, which is what
+        // A theme that names no cursor gets its own text color, which is what
         // every built-in but two does anyway.
         cursor: match &spec.cursor {
             Some(text) => parse_hex(text)?,
@@ -662,9 +662,9 @@ mod tests {
     }
 
     #[test]
-    fn a_short_colour_list_is_refused_rather_than_padded() {
-        // Seven colours is a mistake, and quietly filling the eighth would put
-        // a colour on screen that nobody chose and nobody can find in the file.
+    fn a_short_color_list_is_refused_rather_than_padded() {
+        // Seven colors is a mistake, and quietly filling the eighth would put
+        // a color on screen that nobody chose and nobody can find in the file.
         let dir = scratch("theme-short");
         let path = dir.join("config.toml");
         std::fs::write(

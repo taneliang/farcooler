@@ -8,7 +8,7 @@
  *
  * That used to be computed in Swift, which left one app holding two diff
  * implementations with two line models. It lives here now for the same reason
- * colour resolution lives in the terminal core: three renderers cannot be
+ * color resolution lives in the terminal core: three renderers cannot be
  * trusted to agree, and these two diffs describe the same file.
  *
  * Lifetime: every char* returned is owned by the CALLER and must be passed to

@@ -8,7 +8,7 @@
 //! That computation used to live in Swift, which meant the same app held two
 //! diff implementations — the transcript's and review's — with two line models
 //! and two ideas of what a hunk is, sometimes on screen at once. It lives here
-//! now for the same reason colour resolution lives in `farcooler-vt`: three
+//! now for the same reason color resolution lives in `farcooler-vt`: three
 //! renderers cannot be trusted to agree, and these two describe the same file.
 //!
 //! ## Safety, once rather than per function

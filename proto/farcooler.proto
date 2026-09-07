@@ -596,12 +596,12 @@ message Repository {
 
 message RepositoryList { repeated Repository items = 1; }
 
-// A colour scheme this host defines, from `[themes.<name>]` in config.toml.
+// A color scheme this host defines, from `[themes.<name>]` in config.toml.
 //
 // Sent as packed 0x00RRGGBB integers rather than as the "#rrggbb" strings the
 // file is written in: the client hands these straight to the VT core, and
 // re-parsing hex on three platforms is three chances to disagree about a
-// colour the daemon has already read correctly.
+// color the daemon has already read correctly.
 message Theme {
   string name = 1;
   // Whether the app's own surfaces go dark. Carried rather than derived from

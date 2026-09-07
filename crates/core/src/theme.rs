@@ -1,15 +1,15 @@
-//! What a terminal and the app around it are coloured with.
+//! What a terminal and the app around it are colored with.
 //!
-//! One definition, shared by the VT core that resolves cell colours and by
-//! three apps that colour their own surfaces. The alternative — a palette in
+//! One definition, shared by the VT core that resolves cell colors and by
+//! three apps that color their own surfaces. The alternative — a palette in
 //! `vt` and a separate idea of "dark" in each client — is how a light terminal
 //! ends up inside black chrome, which is the "two applications" failure both
 //! phone apps forced dark to avoid in the first place.
 
-/// A packed `0x00RRGGBB` colour, the same form `vt`'s snapshot uses.
+/// A packed `0x00RRGGBB` color, the same form `vt`'s snapshot uses.
 pub type Rgb = u32;
 
-/// A complete colouring: the terminal's palette, plus which way the app's own
+/// A complete coloring: the terminal's palette, plus which way the app's own
 /// surfaces should go.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
@@ -19,12 +19,12 @@ pub struct Theme {
     /// Carried rather than derived from the background's luminance. A theme
     /// author picking a mid-grey ground gets to say which way the chrome
     /// should go, and a computed answer would flip the entire app across a
-    /// one-point change in one colour.
+    /// one-point change in one color.
     pub dark: bool,
     pub background: Rgb,
     pub foreground: Rgb,
     pub cursor: Rgb,
-    /// The sixteen ANSI colours in the order `SGR 30-37` and `90-97` name
+    /// The sixteen ANSI colors in the order `SGR 30-37` and `90-97` name
     /// them: eight normal, then eight bright. Everything above 16 is the xterm
     /// cube, computed rather than stored — no theme hand-picks 240 shades.
     pub ansi: [Rgb; 16],
@@ -84,7 +84,7 @@ fn relative_luminance(color: Rgb) -> f64 {
 /// without the glare of white on true black.
 ///
 /// The old palette stays as a built-in named "Far Cooler", so anyone who liked
-/// it keeps it one tap away. Existing terminals DO change colour on upgrade;
+/// it keeps it one tap away. Existing terminals DO change color on upgrade;
 /// that is the point of the request rather than a side effect of it.
 pub const DEFAULT_THEME: &str = "Nord";
 
@@ -101,7 +101,7 @@ pub fn built_in() -> Vec<Theme> {
         // pairing measures 4.13:1 — under AA, which the readability test
         // caught. `base01` is Solarized's own "emphasized content" tone on the
         // same ground and clears it, so this stays inside the palette rather
-        // than inventing a colour for it. A deviation, recorded: this is
+        // than inventing a color for it. A deviation, recorded: this is
         // Solarized Light one step darker on the text.
         theme("Solarized Light", false, 0xFD_F6_E3, 0x58_6E_75, 0x58_6E_75, SOLARIZED),
         theme("GitHub Light", false, 0xFF_FF_FF, 0x24_29_2F, 0x24_29_2F, [
@@ -147,7 +147,7 @@ pub fn built_in() -> Vec<Theme> {
         //
         // Ours rather than borrowed. Every well-known theme above is tuned for
         // taste and lands somewhere between 4.5:1 and 12:1; these two exist to
-        // clear AAA (7:1) on the body text and to keep every ANSI colour
+        // clear AAA (7:1) on the body text and to keep every ANSI color
         // legible on their own ground, which is a different goal and not one
         // any of them was designed for.
         theme("High Contrast Dark", true, 0x00_00_00, 0xFF_FF_FF, 0xFF_FF_00, [
@@ -164,12 +164,12 @@ pub fn built_in() -> Vec<Theme> {
 }
 
 /// Solarized's sixteen, shared by its light and dark variants — which is the
-/// whole idea of that palette: one set of accent colours over two grounds.
+/// whole idea of that palette: one set of accent colors over two grounds.
 ///
 /// `mistyped_literal_suffixes` is silenced for one entry's sake: clippy reads
 /// the `_16` ending `0xCB_4B_16` — Solarized's orange — as a mistyped `u16`
-/// suffix and offers to "fix" it into a different colour. Every literal in this
-/// file is grouped `RR_GG_BB`, which is what makes a table of sixteen colours
+/// suffix and offers to "fix" it into a different color. Every literal in this
+/// file is grouped `RR_GG_BB`, which is what makes a table of sixteen colors
 /// readable at a glance, and regrouping one of them to dodge a false positive
 /// would cost that for nothing. Newer clippy releases fire this where the
 /// toolchain CI pins does not, so the allow is what keeps the lint gate usable
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn the_old_palette_is_still_available_unchanged() {
         // Changing the default changes what people are looking at. That was
-        // asked for; taking the old colours away was not, so they keep their
+        // asked for; taking the old colors away was not, so they keep their
         // exact values under a name. These are the constants that were in
         // `vt`'s `grid.rs`.
         let old = built_in_named("Far Cooler").expect("the old palette is still offered");

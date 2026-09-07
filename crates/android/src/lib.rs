@@ -10,7 +10,7 @@
 //! **It adds no behaviour.** Every function here calls straight through to
 //! `farcooler_client::ffi` or `farcooler_vt::ffi`, which is the whole point:
 //! the SSH transport, the protocol, the emulator, the key encoder and the
-//! colour resolution are the same code the Mac and the phone run, not a second
+//! color resolution are the same code the Mac and the phone run, not a second
 //! implementation that agrees with them today. The only judgement calls made in
 //! this file are about how a value crosses into the JVM — a JSON string, a byte
 //! array, one flat `int[]` for a screen — and those are stated where they are
@@ -586,7 +586,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeBuiltinThemes(
     _class: JClass,
 ) -> jstring {
     // Asked for the size first rather than guessing a buffer: eleven themes of
-    // nineteen colours is a few kilobytes today and is exactly the sort of
+    // nineteen colors is a few kilobytes today and is exactly the sort of
     // number that grows without anyone revisiting a constant.
     let needed = unsafe { client::farcooler_client_builtin_themes(std::ptr::null_mut(), 0) };
     if needed == 0 {
@@ -650,7 +650,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeResize(
     unsafe { vt::farcooler_vt_resize(handle_of(handle), clamp_u16(columns), clamp_u16(rows)) }
 }
 
-/// Recolour the terminal. Nineteen packed values: sixteen ANSI, then
+/// Recolor the terminal. Nineteen packed values: sixteen ANSI, then
 /// foreground, background, cursor. False if the array is any other length.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeSetPalette(
@@ -666,7 +666,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeSetPalette(
     if env.get_int_array_region(&colors, 0, &mut values).is_err() {
         return 0;
     }
-    // Kotlin has no unsigned int, so the colours arrive as a signed bit
+    // Kotlin has no unsigned int, so the colors arrive as a signed bit
     // pattern. The bits are the same; only the interpretation differs.
     let packed: Vec<u32> = values.into_iter().map(|v| v as u32).collect();
     let ok = unsafe {
@@ -700,7 +700,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeRevision(
 /// garbage that makes a scrolling terminal stutter. One `int[]` is one
 /// allocation and one bulk copy.
 ///
-/// Colours arrive already resolved to 0xRRGGBB by the core, so the palette is
+/// Colors arrive already resolved to 0xRRGGBB by the core, so the palette is
 /// decided once in Rust rather than a third time in Kotlin.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeSnapshot(

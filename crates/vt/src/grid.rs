@@ -44,7 +44,7 @@ pub struct Snapshot {
     pub history_size: u32,
 }
 
-/// The nineteen colours a theme decides for a terminal.
+/// The nineteen colors a theme decides for a terminal.
 ///
 /// Held here rather than taken from `farcooler-core`, which is where a `Theme`
 /// lives: this crate is a leaf, and it is compiled into a shared library that
@@ -82,7 +82,7 @@ impl Palette {
     /// foreground, background, cursor.
     ///
     /// `None` for any other length, rather than filling the gap. A caller that
-    /// sent eighteen has a bug, and a nineteenth colour invented here would
+    /// sent eighteen has a bug, and a nineteenth color invented here would
     /// appear on screen with nothing in any theme file to explain it.
     pub fn from_packed(values: &[u32]) -> Option<Self> {
         if values.len() != 19 {
@@ -115,7 +115,7 @@ pub fn snapshot(term: &Terminal) -> Snapshot {
             let c = &grid[Line(line as i32 - offset)][Column(col)];
             let flags = c.flags;
             let background = resolve(c.bg, false, palette);
-            // Intensity is resolved here, with colour, and for the same stated
+            // Intensity is resolved here, with color, and for the same stated
             // reason: three renderers that each decided how dim a dim is would
             // be three different answers to one question.
             //
@@ -211,7 +211,7 @@ fn pack(r: u8, g: u8, b: u8) -> u32 {
     ((r as u32) << 16) | ((g as u32) << 8) | b as u32
 }
 
-/// `\e[2m`: the same colour, at two thirds intensity.
+/// `\e[2m`: the same color, at two thirds intensity.
 ///
 /// Scaled per channel rather than blended toward the background, which keeps the
 /// hue — a dim red stays red instead of drifting grey — and works the same on a
@@ -274,7 +274,7 @@ mod tests {
         // Every renderer must agree, so this is resolved once here. Above 15
         // the answer is arithmetic no theme file specifies, so it must come
         // out identical whatever palette is in force — otherwise a theme would
-        // silently redefine 240 colours it never mentions.
+        // silently redefine 240 colors it never mentions.
         let a = Palette::default();
         let b = Palette::from_packed(&[0x11_22_33; 19]).expect("nineteen values");
         for i in [16u8, 231, 232, 255] {
@@ -287,17 +287,17 @@ mod tests {
     }
 
     #[test]
-    fn a_new_palette_recolours_indexed_cells_but_not_truecolor_ones() {
-        // The distinction a theme exists to draw: it colours what the program
+    fn a_new_palette_recolors_indexed_cells_but_not_truecolor_ones() {
+        // The distinction a theme exists to draw: it colors what the program
         // left to the terminal to decide, and never overrules a program that
-        // named an exact colour.
+        // named an exact color.
         let mut t = Terminal::new(10, 2);
         t.feed(b"\x1b[31mA\x1b[38;2;18;52;86mB");
         let before = snapshot(&t);
 
-        let mut recoloured = Palette::default();
-        recoloured.ansi[1] = 0xAB_CD_EF;
-        t.set_palette(recoloured);
+        let mut recolored = Palette::default();
+        recolored.ansi[1] = 0xAB_CD_EF;
+        t.set_palette(recolored);
         let after = snapshot(&t);
 
         assert_ne!(before.rows[0].cells[0].fg, after.rows[0].cells[0].fg);
@@ -321,11 +321,11 @@ mod tests {
     }
 
     #[test]
-    fn dim_text_is_dimmer_than_the_same_colour_at_full_strength() {
+    fn dim_text_is_dimmer_than_the_same_color_at_full_strength() {
         // `\e[2m` is the most common attribute in a coding agent's output —
         // "? for shortcuts", hints, spinners, every piece of secondary text —
         // and dropping it made every screen uniformly bright. That reads as
-        // "the colours are wrong" rather than as a missing attribute, which is
+        // "the colors are wrong" rather than as a missing attribute, which is
         // how it was reported.
         let mut plain = Terminal::new(10, 2);
         plain.feed(b"\x1b[31mX");
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn dim_applies_to_the_default_foreground_too() {
-        // The commonest case of all: `\e[2m` with no colour at all.
+        // The commonest case of all: `\e[2m` with no color at all.
         let mut plain = Terminal::new(10, 2);
         plain.feed(b"X");
         let mut dim = Terminal::new(10, 2);
@@ -380,22 +380,22 @@ mod tests {
         t.feed(b"\x1b[8msecret");
         let snap = snapshot(&t);
         let cell = &snap.rows[0].cells[0];
-        assert_eq!(cell.fg, cell.bg, "hidden text must be the colour of the ground it sits on");
+        assert_eq!(cell.fg, cell.bg, "hidden text must be the color of the ground it sits on");
     }
 
     #[test]
     fn dimming_is_resolved_here_rather_than_left_to_a_renderer() {
         // The property this whole module exists for, applied to one more
         // attribute: three renderers cannot disagree about how dim a dim is if
-        // none of them decides. A theme change recolours it too, because this
+        // none of them decides. A theme change recolors it too, because this
         // runs when a snapshot is taken.
         let mut t = Terminal::new(10, 2);
         t.feed(b"\x1b[2;32mX");
         let first = snapshot(&t).rows[0].cells[0].fg;
 
-        let mut recoloured = Palette::default();
-        recoloured.ansi[2] = 0x00_FF_00;
-        t.set_palette(recoloured);
+        let mut recolored = Palette::default();
+        recolored.ansi[2] = 0x00_FF_00;
+        t.set_palette(recolored);
         let after = snapshot(&t).rows[0].cells[0].fg;
         assert_ne!(first, after, "a dim cell follows the palette like any other");
         assert!(after < 0x00_FF_00, "and is dimmer than the palette's own green");

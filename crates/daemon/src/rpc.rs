@@ -583,8 +583,8 @@ impl Rpc {
 
     /// A wire theme, validated.
     ///
-    /// Exactly sixteen ANSI colours, and a name. The reader refuses a short list
-    /// rather than padding it — "a colour on screen that nobody chose and nobody
+    /// Exactly sixteen ANSI colors, and a name. The reader refuses a short list
+    /// rather than padding it — "a color on screen that nobody chose and nobody
     /// can find in the file" — so the writer refuses one too, before it can
     /// produce a table the reader will then silently drop.
     fn theme_from_wire(
@@ -2206,7 +2206,7 @@ mod tests {
         // And the READ, which is the one worth stating on its own: it reports
         // `program`, `args` and `env` — local paths, and an API key for any
         // agent that needs one. `theme.list` next to it is `read` because a
-        // colour is not a secret; an adapter's environment is.
+        // color is not a secret; an adapter's environment is.
         assert_eq!(required_scope("adapter.list"), Some(Scope::HostAdmin));
         assert_eq!(required_scope("theme.list"), Some(Scope::Read));
     }

@@ -42,8 +42,8 @@ extern "C" {
 #define FARCOOLER_VT_FLAG_WIDE      (1u << 4)
 
 /*
- * One character cell. Colours arrive already resolved to packed 0xRRGGBB, so
- * the named and 256-colour palettes are decided once in the core rather than
+ * One character cell. Colors arrive already resolved to packed 0xRRGGBB, so
+ * the named and 256-color palettes are decided once in the core rather than
  * three times in three renderers.
  */
 typedef struct {
@@ -135,7 +135,7 @@ void farcooler_vt_scroll(void *handle, int32_t lines);
  */
 void farcooler_vt_scroll_to_bottom(void *handle);
 
-/// Recolour the terminal. `colors` is 19 packed 0x00RRGGBB values: 16 ANSI,
+/// Recolor the terminal. `colors` is 19 packed 0x00RRGGBB values: 16 ANSI,
 /// then foreground, background, cursor. False if the length is not 19.
 bool farcooler_vt_set_palette(void *handle, const uint32_t *colors, size_t len);
 

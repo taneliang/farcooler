@@ -77,7 +77,7 @@ pub struct Terminal {
     term: Term<Collector>,
     parser: Processor<StdSyncHandler>,
     collector: Collector,
-    /// What indexed and named colours resolve to. Runtime state rather than
+    /// What indexed and named colors resolve to. Runtime state rather than
     /// the constants this used to be, because a theme is a thing the person
     /// looking at the screen chooses. See `grid::Palette`.
     palette: grid::Palette,
@@ -111,9 +111,9 @@ impl Terminal {
         &self.palette
     }
 
-    /// Recolour every cell the next snapshot reads.
+    /// Recolor every cell the next snapshot reads.
     ///
-    /// Nothing is repainted here and nothing needs to be: colours are resolved
+    /// Nothing is repainted here and nothing needs to be: colors are resolved
     /// when a snapshot is taken, not when bytes arrive, so the scrollback a
     /// program wrote an hour ago comes back in the new theme too. That is the
     /// property that makes switching themes instant rather than a redraw of
