@@ -1502,161 +1502,55 @@ final class TerminalScrollTests: XCTestCase {
         choice.tap()
     }
 
-    /// **A runner you have visited turns up in the next runner's grid, and
-    /// tapping one of its worktrees takes you there.**
+    // `testAVisitedRunnersWorktreesAppearInTheGridAndCanBeCrossedTo` stood
+    // here. It tapped a cached card, confirmed the crossing alert, and waited
+    // for the bar to name the worktree the card named.
+    //
+    // Both halves are gone. There is no alert -- see `ShellScreen.onCross` --
+    // and with "Connect every runner at once" on, which is the default, there
+    // are no cached cards either: every runner's worktrees are LIVE in one
+    // grid, and reaching one is a swipe rather than a crossing. What the test
+    // was really about, that a worktree on another runner can be opened, is
+    // what `testAPaneOnAnotherRunnerKeepsItsPlace` below now measures against
+    // the panes themselves.
+    //
+    // It was also failing on `main` before any of this, for a fixture reason
+    // its own skip message names: both demo runners point at one daemon with
+    // two workspaces, so the "workspace name changed" wait could not be
+    // satisfied.
+
+
+    /// **A pane on one runner keeps its place while you look at another, and
+    /// this is the measurement rather than the argument.**
     ///
-    /// The whole of the cross-server grid, end to end against a real daemon:
-    /// `Connection.recordDirectory` writes what a runner had,
-    /// `RunnerDirectoryStore` keeps it per runner, `ShellScreen.readElsewhere`
-    /// reads back every runner but the live one, `ShellOverview` draws them
-    /// under their own heading, and `ShellScreen.cross(to:)` selects the
-    /// runner a card belongs to.
+    /// The inverse of the test that stood here, and deliberately the same
+    /// measurement. That one asserted the teardown: `RootView` keyed the whole
+    /// tree `.id(host)`, so changing the selected runner destroyed `FleetView`,
+    /// `ShellScreen`, `ShellRootView`, the track and every mounted pane, and
+    /// `shell-state` disappearing was that teardown observed. The key is gone
+    /// and the store holds a connection per runner, so the same probe answering
+    /// throughout is the port's central claim, made in the one place a person
+    /// would notice it: a scrollback position.
     ///
-    /// The harness tests beside this one drive the grid over a CANNED set of
-    /// groups, which is the right way to pin the layout and the wording — and
-    /// which would go on passing if nothing ever wrote the cache at all. This
-    /// is the one that needs a runner.
+    /// The control is the first half and it is what makes the second half mean
+    /// anything. Inside one runner the pane keeps its place across a workspace
+    /// swipe — it always did — so a control that failed would say this test
+    /// cannot tell the two apart.
     ///
-    /// Both runners point at the same daemon, so the worktrees are the same
-    /// worktrees. That is what makes the assertion about the SECTION rather
-    /// than about a name: what is being checked is that a card exists which
-    /// belongs to a runner this app is not connected to.
-    func testAVisitedRunnersWorktreesAppearInTheGridAndCanBeCrossedTo() throws {
-        let app = launchTwoRunners()
-        _ = try openATerminalInTheShell(app)
-        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 60), "the first runner never rendered")
-
-        // Runner B, so that it writes a directory of its own, and back.
-        //
-        // Each switch is WAITED for on the bar's own name changing, not on the
-        // bar existing. The bar of the tree being torn down exists too, and
-        // reading it is how the first version of this decided that Runner B
-        // "opens on" the workspace Runner A happened to be standing in.
-        var standingOn = Self.workspaceName(bar.label)
-        try chooseRunner(app, named: "Runner B")
-        standingOn = try waitForWorkspaceToChange(app, bar: bar, from: standingOn, what: "Runner B")
-
-        // Where a runner lands when nothing carries it, which is what makes
-        // the assertion at the end mean anything.
-        let opensOn = standingOn
-        _ = try openATerminalInTheShell(app)
-        standingOn = Self.workspaceName(bar.label)
-
-        // Back to Runner A, and NOT walked to a terminal this time.
-        //
-        // The walk is what made the first version of the landing assertion
-        // unfalsifiable. `openATerminalInTheShell` swipes along the flat
-        // sequence until it finds a terminal, and on this fixture the
-        // workspace a runner opens on has none — so the walk itself always
-        // ended on the other workspace, which is the one the card names. With
-        // the crossing deliberately made to carry nothing, the test still
-        // passed. The negative control caught it.
-        try chooseRunner(app, named: "Runner A")
-        standingOn = try waitForWorkspaceToChange(app, bar: bar, from: standingOn, what: "Runner A")
-        XCTAssertEqual(try currentRunner(app), "Runner A", "never came back to the first runner")
-
-        // The overview is already open — `currentRunner` opened it — and
-        // Runner B's worktrees are in it, under a heading of their own.
-        let heading = app.descendants(matching: .any)
-            .matching(identifier: "shell-section-Runner B").firstMatch
-        XCTAssertTrue(
-            heading.waitForExistence(timeout: 20),
-            "the runner we just came back from is not in the grid: \(app.debugDescription)")
-
-        // **A card naming a worktree that is neither of the two answers a
-        // broken crossing could give.**
-        //
-        // `opensOn` is where Runner B lands when nothing carries — so a card
-        // naming it could not tell a working crossing from a dead one. And
-        // `standingOn` is the worktree showing RIGHT NOW, behind this grid, on
-        // Runner A — so a card naming that one would satisfy the wait below
-        // before the crossing had even happened, off the bar that is about to
-        // be destroyed. Excluding both is what makes the wait a measurement.
-        let cards = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "shell-elsewhere-"))
-        XCTAssertGreaterThan(cards.count, 0, "the heading has no cards under it")
-        var wanted: (element: XCUIElement, name: String)?
-        for i in 0..<cards.count {
-            let element = cards.element(boundBy: i)
-            guard element.exists else { continue }
-            let name = Self.workspaceName(element.label)
-            if name != opensOn, name != standingOn, !name.isEmpty {
-                wanted = (element, name)
-                break
-            }
-        }
-        let card = try unwrapOrSkip(
-            wanted,
-            "Every worktree on this runner is either the one it opens on (\(opensOn)) or the "
-                + "one already on screen (\(standingOn)), so no tap here could be told from a "
-                + "crossing that carried nothing. Give the demo host a third workspace.")
-        card.element.tap()
-
-        let alert = app.alerts.firstMatch
-        XCTAssertTrue(
-            alert.waitForExistence(timeout: 5), "the card crossed runners without asking")
-        alert.buttons["Switch Runner"].tap()
-
-        // **The landing, read off the bar before anything walks anywhere.**
-        //
-        // A positive wait rather than a settle-then-read: the bar can only
-        // come to name this worktree by the crossing having carried it, since
-        // the card was chosen to name neither the workspace Runner B opens on
-        // nor the one that was on screen when it was tapped.
-        let landed = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in
-                bar.exists && Self.workspaceName(bar.label) == card.name
-            }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [landed], timeout: 90), .completed,
-            "the crossing did not land on \(card.name) — the bar says "
-                + "\(bar.exists ? Self.workspaceName(bar.label) : "nothing") and this runner "
-                + "opens on \(opensOn) when nothing carries")
-
-        // And it is the other runner it landed on, not this one showing that
-        // worktree's namesake.
-        XCTAssertEqual(
-            try currentRunner(app), "Runner B",
-            "tapping a card on Runner B did not take us to Runner B")
-    }
-
-    /// **Does crossing to another runner preserve the panes? No — and this is
-    /// the measurement rather than the argument.**
-    ///
-    /// `RootView` keys the whole tree `.id(host)` (`FarCoolerApp.swift`), so
-    /// changing the selected runner destroys `FleetView`, `ShellScreen`,
-    /// `ShellRootView`, the track and every mounted pane. `shell-state` is
-    /// published by `ShellRootView` itself, so its DISAPPEARANCE is that
-    /// teardown, observed: a shell that survived would go on answering
-    /// throughout.
-    ///
-    /// The control is the first half, and it is what makes the second half
-    /// mean anything. Inside one runner the same measurement says the opposite
-    /// — the probe never goes away across a workspace swipe, and the pane
-    /// keeps the scrollback position it was left on — so "the probe went away"
-    /// is a fact about crossing runners and not about this test's ability to
-    /// notice.
-    ///
-    /// This is why `ShellScreen` asks before it crosses. See
-    /// `View.shellCrossingAlert`.
-    func testCrossingRunnersThrowsAwayPanesThatAWorkspaceSwipeKeeps() throws {
+    /// **This is the test that would go red if `.id(host)` came back**, which
+    /// is why it is worth more than the alert it replaces.
+    func testAPaneOnAnotherRunnerKeepsItsPlace() throws {
         let app = launchTwoRunners()
         // The pane with scrollback, not merely the first pane. A place is only
-        // lost by something that had one, and on a two-line pane "came back at
+        // kept by something that had one, and on a two-line pane "came back at
         // the bottom" and "came back where it was" are the same observation.
         let surface = try openAPaneWithScrollback(app)
 
         // **Where the swipe ENDED, not where it was when the finger left.**
-        //
-        // `position(app)` straight after a swipe used to be the same thing;
-        // it stopped being the same thing when the terminal grew momentum. Even
-        // `velocity: .slow` leaves the recognizer with a couple of hundred
-        // points a second, so this read caught the pane mid-coast at offset 21,
-        // the two page turns below took a couple of seconds, and the control
-        // compared 21 against the 27 the pane had actually coasted to — a test
-        // failing because the app now does something, on an assertion about
-        // something else entirely.
+        // `position(app)` straight after a swipe stopped being the same thing
+        // when the terminal grew momentum: even `velocity: .slow` leaves the
+        // recognizer coasting, so this read caught the pane mid-flight and the
+        // comparison below failed on an assertion about something else.
         surface.swipeDown(velocity: .slow)
         let scrolled = try XCTUnwrap(settledOffset(app).map { (offset: $0, history: 0) })
         try XCTSkipUnless(
@@ -1665,7 +1559,7 @@ final class TerminalScrollTests: XCTestCase {
 
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
 
-        // CONTROL — inside one runner, none of this happens.
+        // CONTROL — inside one runner, the place survives a workspace swipe.
         let y = 0.42
         for direction in [(0.78, 0.22), (0.22, 0.78)] {
             app.coordinate(withNormalizedOffset: CGVector(dx: direction.0, dy: y)).press(
@@ -1677,47 +1571,34 @@ final class TerminalScrollTests: XCTestCase {
         XCTAssertEqual(
             position(app)?.offset, scrolled.offset,
             "leaving a pane and coming back inside one runner lost its place — the control for "
-                + "this test does not hold, so what it measures below is not the crossing")
+                + "this test does not hold, so what it measures below is not the runner change")
 
-        // And now the crossing.
+        // And now the runner change.
         //
-        // **Observed by what is left afterwards, not by catching the moment.**
-        // The first version of this waited for `shell-state` to stop existing,
-        // and that is a race it loses: the demo runner is `127.0.0.1`, so the
-        // shell is torn down and standing again inside a poll. What is not a
-        // race is the STATE the new shell comes up in, and there are two
-        // independent pieces of it.
+        // The probe is `ShellRootView`'s own, so it answering the whole way
+        // through is the shell not being rebuilt. Read AFTER the switch rather
+        // than raced during it: the demo runner is `127.0.0.1`, so anything
+        // that was going to be torn down and stood up again would have been,
+        // inside a poll, well before this reads.
         try chooseRunner(app, named: "Runner B")
+        XCTAssertTrue(
+            probe.waitForExistence(timeout: 30),
+            "the shell was torn down by a change of runner — `.id(host)` is back on `RootView`, "
+                + "and every mounted pane went with it")
 
-        // One: the runner menu was tapped with the overview OPEN, and nothing
-        // in this app closes the overview on a runner switch — `RunnerMenu`
-        // has an `onSwitch` for callers with something to close and the shell
-        // passes none. So an overview that is shut is a `ShellRootView` that
-        // is not the one the tap happened in.
-        let fresh = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        let closed = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in
-                Self.field(fresh.value as? String ?? "", "overview") == "0"
-            }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [closed], timeout: 30), .completed,
-            "the overview the runner menu was tapped in is still open, so the shell holding it "
-                + "was never replaced")
-
-        // Two, and this is the one the owner asked about: the pane. Back on
-        // the runner we scrolled, the walk lands on a terminal again and it is
-        // at the bottom — the scrollback position that survived a workspace
-        // swipe ten lines above did not survive this.
+        // Back to the runner whose pane was scrolled. The pane was never
+        // rebuilt, so it is where it was left.
         try chooseRunner(app, named: "Runner A")
         _ = try openATerminalInTheShell(app)
         try XCTSkipUnless(
             waitForHistory(app), "The pane came back with no scrollback at all to have a place in.")
         XCTAssertEqual(
-            position(app)?.offset, 0,
-            "the pane kept its place across a change of runner. If that is now true, panes "
-                + "survive a crossing and `shellCrossingAlert` is warning about something that "
-                + "no longer happens")
+            position(app)?.offset, scrolled.offset,
+            "the pane lost its place across a change of runner. Panes are supposed to survive "
+                + "one now — that is what the port was for, and what the crossing alert used to "
+                + "warn about instead")
     }
+
 
     // MARK: - What the pane reserves at the bottom
 

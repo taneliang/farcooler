@@ -109,54 +109,45 @@ struct RootView: View {
 /// makes the dependency an argument instead of an ordering problem.
 ///
 /// **The store is owned HERE and not inside `FleetView`**, and that is the
-/// whole point of the split. `FleetView` is keyed `.id(host)` and is destroyed
-/// when the selected runner changes; a store that went with it would tear down
-/// every connection on every crossing, which is the mode the port exists to
-/// remove. The store outlives the screen and reconciles instead.
+/// whole point of the split. It has to outlive any one screen: connections come
+/// up and down as the runner list changes, not as a view appears and
+/// disappears, and a store owned by a screen would make a connection's lifetime
+/// a screen's lifetime again — which is the mode this whole port exists to
+/// remove.
 struct ConnectedRoot: View {
     @ObservedObject var hosts: RunnerStore
     @StateObject private var fleet: FleetStore
 
     init(hosts: RunnerStore) {
         self.hosts = hosts
-        // `.oneRunner` while the port is unfinished, and it is deliberately not
-        // the `allRunnersAtOnce` setting. Steps 5 to 7 rewire the screens, the
-        // watch and `fleet.json` to a merged fleet and are each meant to change
-        // no behavior; what makes that a guarantee is this argument. Step 8 is
-        // where it becomes `.theWholeFleet` and the setting starts meaning
-        // something. See `FleetStore.Scope`.
-        _fleet = StateObject(wrappedValue: FleetStore(hosts: hosts, scope: .oneRunner))
+        _fleet = StateObject(wrappedValue: FleetStore(hosts: hosts))
     }
 
     var body: some View {
         Group {
-            if let host = hosts.selected {
-                // Keyed on the host, so switching runners rebuilds everything
-                // below rather than handing one host's screen the other's
-                // connection. The same rule the Mac follows for a pane whose
-                // terminal changes underneath it.
+            if !hosts.hosts.isEmpty {
+                // **No `.id(host)`.** It keyed the whole tree on the selected
+                // runner, so picking another one destroyed `FleetView`,
+                // `ShellScreen`, the pane track and every mounted pane —
+                // against `ShellPaneTrack`'s entire design, which is "a pane
+                // must never be rebuilt". That teardown is what
+                // `shellCrossingAlert` existed to warn about, and both are gone
+                // together: the store holds a connection per runner, the fleet
+                // on screen is the merge across them, and reaching another
+                // runner's worktree is a swipe rather than a reconnect.
                 //
-                // On the whole VALUE, not just its id: correcting a mistyped
-                // address is as much a change of runner as picking a different
-                // one from the list, and keying on the id alone left the old
-                // connection running while the screen showed the new details.
-                // `RunnerStore.trust` deliberately does not write through to
-                // `selected`, so approving a host key is not mistaken for one.
+                // The condition is the runner LIST rather than the selection,
+                // because there is no longer one runner this screen is about.
+                // A selection still exists and still means something — it is
+                // what the battery gate falls back to when somebody turns
+                // "Connect every runner at once" off — but it does not decide
+                // whether there is an app to draw.
                 //
-                // The `NavigationStack` used to be here, wrapped around this.
-                // The reason it was needed has not changed — `FleetView` was
-                // previously PUSHED from the host list and inherited that
-                // screen's stack, so opening straight onto it left no stack at
-                // all: no navigation bar, so no title, no terminal/chat switch,
-                // and nothing for a `navigationDestination` to push into. What
-                // changed is that the stack now has an explicit path, and that
-                // path is a list of ids that only this runner's fleet can
-                // resolve. So the stack moved DOWN into `FleetView`, beside the
-                // `Connection` it has to be read against; see the comment on
-                // `FleetView.body`. This `.id` still rebuilds it, along with
-                // everything else, when the runner changes.
-                FleetView(host: host, store: hosts, fleet: fleet)
-                    .id(host)
+                // The `NavigationStack` moved DOWN into `FleetView` when the
+                // shell replaced the pushed screens, and stays there: the shell
+                // has none on purpose, and the screen that stands in for it
+                // before anything has answered declares its own.
+                FleetView(store: hosts, fleet: fleet)
             } else {
                 HostOnboardingView(hosts: hosts)
             }

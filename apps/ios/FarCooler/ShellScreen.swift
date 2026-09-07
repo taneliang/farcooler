@@ -51,8 +51,9 @@ struct ShellPaneRef: Hashable {
     ///
     /// Carried rather than assumed, and that is the whole of what the port
     /// changes here. A `ShellFleetMap` used to be one runner's fleet by
-    /// construction — `RootView` keyed the tree `.id(host)` — so every ref in
-    /// it named a workspace on the same machine and the runner went without
+    /// construction — `RootView` keyed the tree `.id(host)`, so the screen was
+    /// destroyed and rebuilt on every change of runner — and every ref in it
+    /// named a workspace on the same machine, so the runner went without
     /// saying. The merged map holds several, and a ref that did not say which
     /// would send an RPC down whichever connection the screen happened to be
     /// holding. See `ShellIdentity`.
@@ -703,8 +704,6 @@ struct ShellScreen: View {
     @State private var restingRef: ShellPaneRef?
     /// What GitHub says about the branch of the workspace at rest.
     @State private var pullRequest: BranchPullRequest?
-    /// The card on another runner somebody tapped, until they say yes or no.
-    @State private var crossing: ShellCrossing?
     /// The other runners' worktrees. See `readElsewhere`.
     @State private var elsewhere: [ShellServerGroup] = []
     /// The tab a deep link was last honored onto, until a rest accounts for it.
@@ -755,6 +754,13 @@ struct ShellScreen: View {
     /// lose the view it is attached to. A removal outlives the card that asked
     /// for it — that is most of the point of asking.
     @State private var removing: RemoveWorktreeRequest?
+    /// The runner a status row asked to correct, and whether this device's own
+    /// key is on screen. Both held HERE rather than in the row for the reason
+    /// the sheets above are: the overview is unmounted when the grid is neither
+    /// showing nor flying, and a presenter that can go away is a sheet nobody
+    /// can close.
+    @State private var editingRunner: Runner?
+    @State private var authorizingDevice = false
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -853,6 +859,22 @@ struct ShellScreen: View {
             if let connection = resting {
                 TaskComposerView(connection: connection)
             }
+        }
+        .sheet(item: $editingRunner) { runner in
+            HostEditorView(
+                existing: runner,
+                onSave: { hosts.update($0) },
+                onRemove: { hosts.remove($0) })
+        }
+        // This device's own key, and the one line to paste on the machine.
+        //
+        // A sheet and not a push, unlike the pre-fleet screen's. That screen
+        // declares a `NavigationStack`; the shell deliberately declares none,
+        // and the overview's own stack is inside a view that is unmounted the
+        // moment the grid stops showing — so a push into it is a push whose
+        // stack can vanish under it.
+        .sheet(isPresented: $authorizingDevice) {
+            NavigationStack { AuthorizeView(runners: hosts) }
         }
         // The ceremony a card's menu starts, run from the screen rather than
         // from the card. Shared with the pane's own bar — see
@@ -1030,8 +1052,43 @@ struct ShellScreen: View {
             // machine's worktrees is the one thing worse than no header.
             liveServer: fleet.active.count == 1 ? fleet.active[0].hostLabel : nil,
             elsewhere: elsewhere,
+            // A row for every runner that is not simply answering, over the
+            // grid it is about. This is the whole of what replaced four
+            // full-screen phases: a laptop asleep in another room is a line of
+            // text above the cards rather than a screen in front of them, and a
+            // runner that has never been approved shows its fingerprint here
+            // instead of showing it to nobody because some other runner
+            // answered. See `RunnerStatusRow`.
+            runners: {
+                ForEach(fleet.runners, id: \.host.id) { runner in
+                    RunnerStatusRow(
+                        connection: runner.connection,
+                        host: runner.host,
+                        onRetry: { fleet.retry(runner.host.id) },
+                        onReconnectNow: { runner.connection.reconnectNow() },
+                        onTrust: { hosts.trust(runner.host, fingerprint: $0) },
+                        onReviewKey: { hosts.forgetKey(runner.host) },
+                        onEdit: { editingRunner = runner.host },
+                        // The overview has a `NavigationStack` of its own, so
+                        // this one CAN push — unlike the row over the shell's
+                        // pre-fleet screen, which hands the same move back as a
+                        // flag. `RunnerStatusRow` takes a callback rather than
+                        // a link precisely so both placements are possible.
+                        onAuthorize: { authorizingDevice = true })
+                }
+            },
+            // **No alert.** A cached card is only ever drawn for a runner this
+            // app is not connected to, which with "Connect every runner at
+            // once" on is no runner at all: every worktree in the grid is live
+            // and reaching one is a swipe. What remains is the gate turned OFF,
+            // where a tap is a request to talk to that runner instead — the
+            // thing the setting says the app does. `shellCrossingAlert` used to
+            // stand here and was telling the truth while `RootView` keyed the
+            // tree `.id(host)`: the tap destroyed the screen, the track and
+            // every mounted pane. It does not any more, and an alert warning
+            // about a teardown that no longer happens is worse than no alert.
             onCross: { group, workspace in
-                crossing = ShellCrossing(group: group, workspace: workspace)
+                select(runner: group.id, landingOn: workspace.id)
             },
             onToggleHidden: toggleHidden,
             onRemoveWorktree: { shell in
@@ -1063,26 +1120,25 @@ struct ShellScreen: View {
         // Over the panes, above the key row, and gone the moment the path is
         // typed. Nothing about a transfer is ever written into the pane itself.
         .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
-        // The teardown, asked for out loud. See `shellCrossingAlert`.
-        .shellCrossingAlert($crossing, leaving: resting?.hostLabel ?? "this runner") {
-            cross(to: $0)
-        }
     }
 
-    /// Change runners, carrying the tapped worktree across the rebuild.
+    /// Talk to this runner instead, and land on the worktree that was tapped.
     ///
-    /// `UserDefaults` and not `@State`, and it has to be: this view is one of
-    /// the things the selection destroys, so a note left in its own state
-    /// would go with it. The note is read back by `seed` on the OTHER side —
-    /// a different `ShellScreen`, in a different `FleetView`, on a different
-    /// `Connection` — which is the only place the new runner's fleet is in
-    /// hand to resolve it against.
-    private func cross(to crossing: ShellCrossing) {
-        guard let runner = hosts.hosts.first(where: { $0.id.uuidString == crossing.group.id })
+    /// Only reachable with "Connect every runner at once" turned off, because
+    /// that is the only setting under which a runner's worktrees are in the
+    /// grid as a memory rather than as panes. It is not a teardown of this
+    /// screen any more — `RootView` stopped keying the tree on the selected
+    /// runner — but it IS a teardown of the other runner's connection, which is
+    /// what one-runner-at-a-time means.
+    ///
+    /// `UserDefaults` and not `@State` for the note, and it still has to be:
+    /// the new runner's fleet does not exist yet, so the workspace it names can
+    /// only be resolved on the far side of a connect. `seed` reads it back.
+    private func select(runner: String, landingOn workspace: String) {
+        guard let picked = hosts.hosts.first(where: { $0.id.uuidString == runner })
         else { return }
-        UserDefaults.standard.set(
-            "\(crossing.group.id)/\(crossing.workspace.id)", forKey: Self.crossingKey)
-        hosts.selected = runner
+        UserDefaults.standard.set("\(runner)/\(workspace)", forKey: Self.crossingKey)
+        hosts.selected = picked
     }
 
     /// Which worktree a crossing was aimed at, spelled `runner/workspace`.
@@ -1301,70 +1357,5 @@ struct ShellScreen: View {
         let mine = reply.links.first { $0.branch == workspace.branch }
         pullRequest = BranchPullRequest(
             pr: mine?.pr, known: reply.prAnswered, repoURL: reply.repoUrl)
-    }
-}
-
-// MARK: - Crossing to another runner
-
-/// A card on another runner, tapped and waiting to be confirmed.
-///
-/// Holds the WORKSPACE as well as the runner, because the tap named one and
-/// landing on whatever the new runner happens to open on would be the app
-/// half-honoring it. See `ShellScreen.crossingKey`.
-struct ShellCrossing: Identifiable {
-    var group: ShellServerGroup
-    var workspace: ShellWorkspace
-    var id: String { "\(group.id)/\(workspace.id)" }
-}
-
-extension View {
-    /// **The teardown is asked for out loud, because it cannot be avoided.**
-    ///
-    /// Crossing to another runner is not navigation inside this shell, it is a
-    /// different connection: `RootView` keys the whole tree `.id(host)`
-    /// (`FarCoolerApp.swift`), so selecting another runner destroys
-    /// `FleetView`, `ShellScreen`, the track and every mounted pane with it.
-    /// That follows from what a `Connection` is — `start` claims four
-    /// process-wide slots (`Connection.current`, `WatchLinkHost.shared.adopt`,
-    /// `Reachability.shared.onShouldRetry`, and the single `fleet.json` every
-    /// glance surface renders from), so two live connections would not cost
-    /// twice as much, they would fight over all four and the last poller to
-    /// land would define the widget's whole fleet.
-    ///
-    /// `ShellPaneTrack`'s entire design is "a pane must never be rebuilt". The
-    /// one moment that promise cannot be kept is the one moment it has to be
-    /// said aloud — so this is an alert naming what goes, and a button
-    /// somebody pressed on purpose, rather than a card tap that quietly costs
-    /// a scrollback.
-    ///
-    /// A modifier rather than an alert written inline, so `ShellHarness` can
-    /// present the same one over a canned fleet. The wording is the thing most
-    /// likely to be wrong here and it is not testable against a fixture that
-    /// has its own.
-    func shellCrossingAlert(
-        _ crossing: Binding<ShellCrossing?>,
-        leaving runner: String,
-        onConfirm: @escaping (ShellCrossing) -> Void
-    ) -> some View {
-        alert(
-            crossing.wrappedValue.map { "Switch to \($0.group.name)?" } ?? "",
-            isPresented: Binding(
-                get: { crossing.wrappedValue != nil },
-                set: { if !$0 { crossing.wrappedValue = nil } }),
-            presenting: crossing.wrappedValue
-        ) { pending in
-            Button("Switch Runner") { onConfirm(pending) }
-            Button("Cancel", role: .cancel) {}
-        } message: { pending in
-            // What actually goes, said in the words the thing is called by.
-            // Not "your session will end" — nothing ends on the runner, and a
-            // warning that overstates gets dismissed unread.
-            Text(
-                "This app talks to one runner at a time, so the panes open on \(runner) "
-                    + "will close. Nothing stops on \(pending.group.name), but anything "
-                    + "you were partway through typing goes with them.\n\n"
-                    + "It'll open on \(pending.workspace.name)."
-            )
-        }
     }
 }

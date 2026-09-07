@@ -140,8 +140,8 @@ final class Connection: ObservableObject {
     /// Here rather than in a view because of what has to outlive what. A pane
     /// host is torn down whenever it leaves the screen, so a memory inside it
     /// would be gone by the time anyone came back to read it — the same
-    /// argument `ChangesStores` makes above. `Connection` is a `@StateObject`
-    /// on `FleetView`, which `RootView` keys `.id(host)`, so this is created
+    /// argument `ChangesStores` makes above. A `Connection` is one per runner,
+    /// owned by `FleetStore` and retired with the runner, so this is created
     /// once per runner and dies with it: workspace and terminal ids are
     /// per-runner, and a memory that outlived the runner would name nothing on
     /// the next one.

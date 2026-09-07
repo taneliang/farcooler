@@ -50,13 +50,13 @@ struct FleetEntry: Identifiable {
 /// publishes the merge. Views observe this one object rather than a connection
 /// each.
 ///
-/// **This is what the app connects through.** `RootView` owns one, every screen
-/// reads it, and `FleetView` no longer owns a `Connection` of its own.
+/// **This is what the app connects through.** `ConnectedRoot` owns one, every
+/// screen reads it, and nothing else owns a `Connection` at all.
 ///
-/// How MANY runners it dials is `Scope`'s answer, and while the port is
-/// unfinished that answer is deliberately one — see `Scope.oneRunner`, which is
-/// the whole of what keeps this app single-connection until the slots
-/// `Connection.start` still claims have owners.
+/// How many runners it dials is `FleetSettings.allRunnersAtOnce`'s answer,
+/// which defaults on: every configured runner, at once. Turned off it is the
+/// selected runner alone, which is the phone on a train paying for one SSH
+/// session instead of six.
 ///
 /// `Reachability` is NOT on that list any more: it holds a list of subscribers
 /// keyed by runner id rather than one slot, so every connection here is woken
@@ -73,31 +73,6 @@ struct FleetEntry: Identifiable {
 /// why" to live. That somewhere is `RunnerStatusRow`.
 @MainActor
 final class FleetStore: ObservableObject {
-    /// How many runners this store may dial.
-    ///
-    /// **A step in the port wearing a type, and it is meant to be deleted.**
-    /// Steps 5 to 7 rewire every screen, the watch and `fleet.json` to a merged
-    /// fleet, and each of them is meant to be behavior-neutral: with one
-    /// connection in the store, the app does exactly what it did. What makes
-    /// that a guarantee rather than a hope is this — not the `allRunnersAtOnce`
-    /// setting, which defaults ON and would make the app multi-connection the
-    /// moment the store went live, with the watch, the ceremony and the lock
-    /// screen still fighting over the one slot each of them holds.
-    enum Scope: Equatable {
-        /// Every runner the battery gate allows. What the app becomes at step
-        /// 8, and what the setting means anything for.
-        case theWholeFleet
-        /// The selected runner, whatever the setting says.
-        ///
-        /// Not "one connection" as a policy — the runner list is still watched,
-        /// and selecting another one retires this connection and dials that
-        /// one, which is what `RootView` used to do by rebuilding its whole
-        /// tree.
-        case oneRunner
-    }
-
-    let scope: Scope
-
     /// Every workspace on every connected runner, in runner order.
     @Published private(set) var entries: [FleetEntry] = []
 
@@ -154,12 +129,9 @@ final class FleetStore: ObservableObject {
     /// per keystroke in the font-size slider.
     private var everyRunnerAtOnce: Bool
 
-    init(hosts: RunnerStore, scope: Scope = .theWholeFleet) {
+    init(hosts: RunnerStore) {
         self.hosts = hosts
-        self.scope = scope
-        // Read once here rather than at every reconcile, so `oneRunner` is not
-        // a filter that a `UserDefaults` write could step around.
-        self.everyRunnerAtOnce = scope == .theWholeFleet && FleetSettings.allRunnersAtOnce
+        self.everyRunnerAtOnce = FleetSettings.allRunnersAtOnce
         reconcile()
         runnersObserver = hosts.objectWillChange.sink { [weak self] _ in
             // `objectWillChange` fires BEFORE the array is updated, so this has
@@ -185,10 +157,6 @@ final class FleetStore: ObservableObject {
     }
 
     private func gateChanged() {
-        // Nothing to change while the port has this store pinned to one runner.
-        // A setting nobody can reach cannot move, but reading it here anyway
-        // would make `oneRunner` depend on that being true.
-        guard scope == .theWholeFleet else { return }
         let now = FleetSettings.allRunnersAtOnce
         guard now != everyRunnerAtOnce else { return }
         everyRunnerAtOnce = now
@@ -401,7 +369,6 @@ final class FleetStore: ObservableObject {
     /// fixture.
     private init(standingOn connection: Connection, host: Runner) {
         self.hosts = RunnerStore()
-        self.scope = .oneRunner
         self.everyRunnerAtOnce = false
         self.standInOrder = [host]
         self.connections[host.id] = connection

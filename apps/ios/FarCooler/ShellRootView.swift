@@ -80,7 +80,7 @@ import SwiftUI
 /// panes that both think they are visible are two composers fighting over
 /// first responder, and mid-gesture there are always two panes partly on
 /// screen.
-struct ShellRootView<Pane: View, Actions: View>: View {
+struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     let fleet: ShellFleet
     /// What to call the runner `fleet` is on, and the worktrees on the others.
     ///
@@ -103,6 +103,9 @@ struct ShellRootView<Pane: View, Actions: View>: View {
     /// What the overview puts in its navigation bar. See
     /// `ShellOverview.actions`.
     private let overviewActions: () -> Actions
+    /// A row per runner that is not answering, drawn over the overview's grid.
+    /// See `ShellOverview.runners`.
+    private let runners: () -> Trouble
     /// A tab to go to, by id, honored once and cleared.
     ///
     /// **The one way in from outside, and deliberately not a binding to
@@ -536,6 +539,7 @@ struct ShellRootView<Pane: View, Actions: View>: View {
         onRest: ((ShellPosition) -> Void)? = nil,
         liveServer: String? = nil,
         elsewhere: [ShellServerGroup] = [],
+        @ViewBuilder runners: @escaping () -> Trouble = { EmptyView() },
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
         onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
         onRemoveWorktree: @escaping (ShellWorkspace) -> Void = { _ in },
@@ -550,6 +554,7 @@ struct ShellRootView<Pane: View, Actions: View>: View {
         self.onRemoveWorktree = onRemoveWorktree
         self.pane = pane
         self.overviewActions = overviewActions
+        self.runners = runners
         _request = request
         self.onRest = onRest
         _position = State(initialValue: initial)
@@ -866,6 +871,7 @@ struct ShellRootView<Pane: View, Actions: View>: View {
                     chrome: overview,
                     liveServer: liveServer,
                     elsewhere: elsewhere,
+                    runners: runners,
                     search: $overviewSearch,
                     onOpen: open(workspace:),
                     onCross: onCross,
@@ -1353,7 +1359,9 @@ struct ShellRootView<Pane: View, Actions: View>: View {
 /// no runner to switch to and no work to start — every one of the controls
 /// `ShellScreen` contributes would be a button that could not do anything. The
 /// grid, the search and `Done` are the platform's and are there either way.
-extension ShellRootView where Actions == EmptyView {
+/// The same is true of the runner rows: a fixture has no `FleetStore` to ask,
+/// and nothing is ever wrong with a canned runner.
+extension ShellRootView where Actions == EmptyView, Trouble == EmptyView {
     init(
         fleet: ShellFleet,
         initial: ShellPosition,
@@ -1370,6 +1378,7 @@ extension ShellRootView where Actions == EmptyView {
         self.init(
             fleet: fleet, initial: initial, openingOnOverview: openingOnOverview,
             request: request, onRest: onRest, liveServer: liveServer, elsewhere: elsewhere,
+            runners: { EmptyView() },
             onCross: onCross, onToggleHidden: onToggleHidden,
             onRemoveWorktree: onRemoveWorktree,
             overviewActions: { EmptyView() }, pane: pane)

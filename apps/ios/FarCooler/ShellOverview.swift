@@ -463,7 +463,7 @@ private struct ShellElsewhereCard: View {
 /// and some dots, it is rebuilt from the fleet every time the fleet changes
 /// anyway, and forty of them realized at once is forty views' worth of layout
 /// for a surface somebody is about to leave.
-struct ShellOverview<Actions: View>: View {
+struct ShellOverview<Actions: View, Trouble: View>: View {
     let fleet: ShellFleet
     let current: Int
     /// Whether the current workspace's cell is a hole rather than a card,
@@ -502,6 +502,25 @@ struct ShellOverview<Actions: View>: View {
     /// for why they are cached rather than live. Empty is the ordinary case —
     /// one runner, one section, no headings at all.
     var elsewhere: [ShellServerGroup] = []
+    /// A row for each runner that is not simply answering, drawn above the
+    /// grid.
+    ///
+    /// **The one place a failing runner is visible while the others work.** The
+    /// app used to put that on a full screen, one branch per `Connection.Phase`
+    /// — which with several connections would blank everything for one sleeping
+    /// laptop, and would show a newly added runner's approval screen to nobody
+    /// whenever any other runner answered. `RunnerStatusRow` is the shape that
+    /// survives N runners, and this is where a list of them goes: over the
+    /// fleet they are about.
+    ///
+    /// A closure and not a `[Runner]`, for the reason `actions` is one: the
+    /// grid stands on `ShellHarness`'s canned fleet, where there is no
+    /// `FleetStore` to ask and nothing is wrong with anything.
+    ///
+    /// It draws nothing on the ordinary day. `RunnerStatusRow` renders
+    /// `EmptyView` for a connected runner, so a fleet that is all answering
+    /// costs this section no height at all.
+    @ViewBuilder var runners: () -> Trouble
     @Binding var search: String
     let onOpen: (Int) -> Void
     /// A card on another runner, tapped. The grid does not know what crossing
@@ -929,6 +948,12 @@ struct ShellOverview<Actions: View>: View {
         let cardWidth = ShellGrid.cardWidth(
             width: width, margin: PaneMetrics.edge, gutter: PaneMetrics.card)
         return ScrollView {
+            // Above the grid rather than inside it, and above the SEARCH
+            // results too: a runner that is not answering is not a card and
+            // must not be filtered away by typing a worktree's name. It is the
+            // reason the grid under it may be missing things.
+            runners()
+
             LazyVGrid(
                 // `.fixed` at the computed width, and not `.flexible`.
                 //

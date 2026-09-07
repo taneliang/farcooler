@@ -39,13 +39,6 @@ struct ShellHarness: View {
     /// the sake of the store hanging off it.
     @StateObject private var connection = Connection()
 
-    /// A card on another runner, tapped. The harness cannot actually cross —
-    /// there is no `RunnerStore` behind a fixture and nothing to connect to —
-    /// but the ALERT is the half worth driving, because the wording is what
-    /// somebody reads before they lose a scrollback and a fixture cannot
-    /// contradict it.
-    @State private var crossing: ShellCrossing?
-
     var body: some View {
         let fleet = Self.fleet
         ZStack {
@@ -68,14 +61,11 @@ struct ShellHarness: View {
                 openingOnOverview: CommandLine.arguments.contains("-shell-overview"),
                 liveServer: "this-mac",
                 elsewhere: Self.elsewhere,
-                onCross: { group, workspace in
-                    crossing = ShellCrossing(group: group, workspace: workspace)
-                }
+                onCross: { _, _ in }
             ) { slot in
                 ShellPanePlaceholder(slot: slot, changes: changesStore)
             }
         }
-        .shellCrossingAlert($crossing, leaving: "this-mac") { _ in }
         .preferredColorScheme(.dark)
     }
 

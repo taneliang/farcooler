@@ -16,12 +16,15 @@ import SwiftUI
 /// (`unhealthyHosts`, `staleHosts`); iOS takes Android's answer for the reason
 /// the battery toggle already did, which is that both of them are phones.
 ///
-/// **Nothing draws this yet.** It is step 3 of the port recorded in
-/// `.claude/agent/done/the-fifth-cost-of-the-multi-runner-port.md`, and the
-/// screen that will draw a list of these is the shell overview once
-/// `FleetStore` is what the app connects through. Placing it today would put a
-/// second thing beside `LinkStatusChip` saying the same sentence about the one
-/// runner there is, which is the drift it exists to prevent.
+/// **Two screens draw a list of these**, and each decides for itself what
+/// "Authorize This Device" means: the shell overview, over the grid the rows
+/// are about, where the overview's own `NavigationStack` can push
+/// `AuthorizeView`; and `FleetView`'s pre-fleet screen, which is these rows and
+/// nothing else because there is nothing else to draw yet. That is why the
+/// moves are callbacks rather than links — a row has no idea what it is inside.
+///
+/// It renders nothing at all for a connected runner, so a list of these over a
+/// healthy fleet costs no height.
 ///
 /// **Every distinct next move `FleetView` offers survives here**, including the
 /// two Android's row does not have: "Authorize This Device" for a key the runner
