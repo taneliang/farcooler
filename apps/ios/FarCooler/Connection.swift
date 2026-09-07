@@ -35,75 +35,14 @@ final class Connection: ObservableObject {
 
     /// What a failure MEANS, as opposed to what it says.
     ///
-    /// A failure screen that offers the same button for every failure is a
-    /// failure screen that is wrong most of the time: "Try again" fixes a host
-    /// that was asleep and fixes nothing at all about a key this device was
-    /// never authorized with, or a host key that changed underneath us. Each of
-    /// these has exactly one useful next move and they are not the same move.
-    ///
-    /// Read off the message rather than a typed error because the message is
-    /// all that crosses the FFI boundary — the core hands back Rust's `Display`
-    /// output as a string and there is no code to switch on. The substrings are
-    /// the ones in `crates/client/src/ssh.rs` and `session.rs`; each is a
-    /// distinctive phrase from the middle of its message rather than a prefix,
-    /// so wrapping the error in more context does not stop it matching.
-    enum Failure {
-        /// The host answered but does not know this device's key.
-        /// `SshError::AuthRejected` — fixed by authorizing, not by retrying.
-        case keyRejected
-        /// The key presented is not the one we pinned. `SshError::HostKeyChanged`.
-        /// Retrying is guaranteed to fail, and offering it would suggest this is
-        /// a glitch rather than a decision someone has to make.
-        case hostKeyChanged
-        /// Nothing answered: wrong address, host asleep, off the network.
-        /// `SshError::Connect` — the one case where retrying is the right move.
-        case unreachable
-        /// SSH worked; Far Cooler is not installed over there.
-        /// `SessionError::DaemonMissing`.
-        case daemonMissing
-        /// This device has no usable key, so no host will ever accept it.
-        case noIdentity
-        /// This runner is reached through the tunnel and this device holds no
-        /// node key. Its own kind rather than ``noIdentity``, because the
-        /// remedy is different: an SSH key this app can generate for itself,
-        /// and a node key it cannot — the public half is a line in a runner's
-        /// allowlist, written by the device that granted the runner, so the
-        /// way to a working one is the ceremony again.
-        case noNodeKey
-        /// The user was shown a fingerprint and did not say yes. Not a fault at
-        /// all — a decision that has been deferred — and the way back is the
-        /// same screen again, not a retry that pretends something broke.
-        case keyNotTrusted
-        /// The user stopped waiting. Also not a fault, and it must not be
-        /// headlined as one.
-        case stopped
-        case other
-
-        init(message: String) {
-            if message.contains("rejected this key") { self = .keyRejected }
-            else if message.contains("is not the one Far Cooler has recorded") {
-                self = .hostKeyChanged
-            } else if message.contains("cannot reach") { self = .unreachable }
-            else if message.contains("did not answer") { self = .daemonMissing }
-            else if message.contains("no SSH key") { self = .noIdentity }
-            else if message.contains("no tunnel key") { self = .noNodeKey }
-            else if message.contains("has not been trusted") { self = .keyNotTrusted }
-            else if message.contains("Stopped waiting") { self = .stopped }
-            else { self = .other }
-        }
-
-        /// Whether "Try Again" belongs BELOW the primary action as a second
-        /// option. False where retrying is already the primary action (it would
-        /// then appear twice) and false where it cannot work at all.
-        var worthRetryingAsAlternative: Bool {
-            switch self {
-            case .keyRejected: return true
-            case .hostKeyChanged, .keyNotTrusted: return false
-            case .unreachable, .daemonMissing, .noIdentity, .noNodeKey, .stopped, .other:
-                return false
-            }
-        }
-    }
+    /// `RunnerTrouble`, under the name every call site in this app already
+    /// uses. It lives in AgentKit rather than here because two screens draw it
+    /// now — the full-screen failure phase and `RunnerStatusRow` — and because
+    /// the iOS UI suite is compiled by CI and never executed, so the classifier
+    /// and the copy it chooses need somewhere `swift test` can reach them. The
+    /// typealias is what keeps that move from being a rename: `Connection`
+    /// still owns the failure, and nothing had to learn a second word for it.
+    typealias Failure = RunnerTrouble
 
     enum Action {
         case restart, stop, dismissLost

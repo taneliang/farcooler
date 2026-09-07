@@ -462,6 +462,20 @@ struct Runner: Codable, Identifiable, Hashable {
         }
     }
 
+    /// This runner, as a sentence about a failure needs to name it.
+    ///
+    /// `RunnerTrouble` writes those sentences and lives in AgentKit, which
+    /// cannot see `Runner` or `Reach` — they are declared here, in the iOS
+    /// target. Three strings is the whole of what the copy needs, and the nil
+    /// port is how it tells a tunnel from an address: a tunneled runner is
+    /// reached by token, so there is no port to name and no address to have got
+    /// wrong.
+    var words: RunnerTrouble.Words {
+        RunnerTrouble.Words(
+            name: named, reachDetail: reach.detail(user: user),
+            port: { if case .direct(_, let port) = reach { return port } else { return nil } }())
+    }
+
     /// The JSON the client core expects.
     ///
     /// A tunneled runner names its `token` and this DEVICE's node private key

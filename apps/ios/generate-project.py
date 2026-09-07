@@ -34,6 +34,10 @@ SOURCES = [
     # them. Nothing constructs it yet — see its header for the three
     # process-wide slots that have to gain owners before anything can.
     "FleetStore.swift",
+    # What one runner is doing, when that is not simply "answering" — Android's
+    # `RunnerStatusRow`, which is the shape that survives N runners where a
+    # full-screen failure phase does not. Nothing draws it yet; see its header.
+    "RunnerStatusRow.swift",
     # `Model.swift` was here. It is `CoreModel.swift` in `AGENTKIT_SOURCES`
     # below now — moved so the AgentKit test target can decode a fixture into
     # `Fleet`, `Workspace` and `Terminal`, which nothing could while they sat in
@@ -144,6 +148,12 @@ AGENTKIT_SOURCES = [
     # reconcile has to keep have no screen in them, and the iOS UI suite is
     # compiled by CI and never executed. See `FleetMembershipTests`.
     "FleetMembership.swift",
+    # What a failure to reach a runner means, and the one thing worth doing
+    # about it. `Connection.Failure` is a typealias for it. Here for
+    # `AgentFailure.swift`'s reason exactly — two screens draw this copy now and
+    # the iOS UI suite is compiled by CI and never executed. See
+    # `RunnerTroubleTests`.
+    "RunnerTrouble.swift",
     # The other half of the same argument: what the shell MOVES by, and the
     # flying page's geometry. Here rather than beside the views because the
     # iOS target has no unit tests — a transform inside a `View` can be checked

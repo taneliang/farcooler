@@ -467,17 +467,17 @@ struct FleetView: View {
             // you simply have not taken yet; the headline already carries what
             // this is, and alarm is worth reserving for the one case that
             // genuinely warrants it.
-            Image(systemName: symbol(kind))
+            Image(systemName: kind.symbol)
                 .font(.system(size: 42, weight: .thin))
-                .foregroundStyle(kind == .hostKeyChanged ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(kind.isAlarming ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
                 .padding(.bottom, 22)
 
-            Text(headline(kind))
+            Text(kind.headline(host.words))
                 .font(.title2.weight(.semibold))
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 8)
 
-            Text(detail(kind, message))
+            Text(kind.detail(message: message, words: host.words))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -493,7 +493,7 @@ struct FleetView: View {
             // the only diagnosis that exists, and somebody debugging one needs
             // it. It just goes where output goes rather than where prose does,
             // so the app stops appearing to have said it.
-            if kind == .other, !message.isEmpty {
+            if kind.showsTheRunnersOwnWords, !message.isEmpty {
                 DetailBox(text: message)
                     .frame(maxWidth: 320)
                     .padding(.top, 14)
@@ -507,7 +507,7 @@ struct FleetView: View {
                 if kind.worthRetryingAsAlternative {
                     Button("Try Again") { Task { await connect(host) } }
                 }
-                if kind != .noIdentity {
+                if kind.offersEditingTheRunner {
                     Button("Edit This Runner…") { editing = true }
                 }
             }
@@ -518,156 +518,66 @@ struct FleetView: View {
     }
 
     /// The one action that fits what happened, full width and prominent.
+    ///
+    /// WHICH action is `RunnerTrouble.nextMove`'s decision and the words are
+    /// `NextMove.label`'s, so this and `RunnerStatusRow` cannot come to offer
+    /// different next moves about the same failure. What is left here is the
+    /// control each one becomes on a screen that has a `NavigationStack` around
+    /// it — the first two push `AuthorizeView`, and the row, which is drawn
+    /// among other rows on a screen that has none, hands them back to whoever
+    /// placed it instead.
     @ViewBuilder
     private func primaryAction(_ kind: Connection.Failure) -> some View {
-        switch kind {
-        case .keyRejected:
-            // The fix is on the screen this links to: the public key, and the
-            // one line to paste on the machine. It was already in the app and
-            // unreachable from the only screen that ever sends you looking for
-            // it.
-            //
-            // The only push left in the app, and it is a leaf with nothing
-            // under it: reachable from the failure screen alone, which is a
-            // phase with no fleet, so the shell that has replaced every other
-            // destination is not on screen to be pushed over. That is why
-            // `phases` gives these three branches a `NavigationStack` of their
-            // own and gives the shell none.
+        switch kind.nextMove {
+        // The fix is on the screen this links to: the public key, and the one
+        // line to paste on the machine. It was already in the app and
+        // unreachable from the only screen that ever sends you looking for it.
+        //
+        // The only push left in the app, and it is a leaf with nothing under
+        // it: reachable from the failure screen alone, which is a phase with no
+        // fleet, so the shell that has replaced every other destination is not
+        // on screen to be pushed over. That is why `phases` gives these three
+        // branches a `NavigationStack` of their own and gives the shell none.
+        case .authorizeThisDevice, .addThisDeviceAgain:
             NavigationLink {
                 AuthorizeView(runners: store)
             } label: {
-                Text("Authorize This Device").frame(maxWidth: .infinity)
+                Text(kind.nextMove.label).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-        case .hostKeyChanged:
+        case .reviewTheNewKey:
             Button(role: .destructive) {
                 store.forgetKey(host)
                 var untrusted = host
                 untrusted.fingerprint = nil
                 Task { await connect(untrusted) }
             } label: {
-                Text("Review the New Key").frame(maxWidth: .infinity)
+                Text(kind.nextMove.label).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-        case .keyNotTrusted:
-            // Straight back to the fingerprint. Deliberately not "Try again":
-            // nothing failed, the question is simply still open.
+        case .showTheKeyAgain:
             Button {
                 var untrusted = host
                 untrusted.fingerprint = nil
                 Task { await connect(untrusted) }
             } label: {
-                Text("Show the Key Again").frame(maxWidth: .infinity)
+                Text(kind.nextMove.label).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-        case .noNodeKey:
-            // The same screen `.keyRejected` links to, because the remedy is
-            // the same road: this device asks to be added again, and the offer
-            // it shows carries a node key a runner can admit. Deliberately not
-            // "Try Again" — the dial would use the key that is missing, so the
-            // button could only fail, every time, forever.
-            NavigationLink {
-                AuthorizeView(runners: store)
-            } label: {
-                Text("Add This Device Again").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-        case .unreachable, .daemonMissing, .noIdentity, .stopped, .other:
+        case .tryAgain:
             Button {
                 Task { await connect(host) }
             } label: {
-                Text("Try Again").frame(maxWidth: .infinity)
+                Text(kind.nextMove.label).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-        }
-    }
-
-    private func symbol(_ kind: Connection.Failure) -> String {
-        switch kind {
-        case .keyRejected, .noIdentity, .noNodeKey: return "key.slash"
-        case .hostKeyChanged: return "exclamationmark.shield"
-        case .keyNotTrusted: return "key"
-        case .unreachable: return "network.slash"
-        case .daemonMissing: return "square.and.arrow.down"
-        case .stopped: return "clock"
-        case .other: return "exclamationmark.triangle"
-        }
-    }
-
-    /// The sentence under the headline.
-    ///
-    /// Ours wherever we know what happened, the core's own text only where we
-    /// do not. The raw string crossing up from Rust is written for whoever is
-    /// reading a log — lowercase, and ending in things like "(os error 61)" —
-    /// and putting that in front of someone who just wants their runner back
-    /// is asking them to translate. Two cases keep it deliberately: the changed
-    /// host key, whose message carries the two fingerprints being compared and
-    /// must not be paraphrased, and the unclassified failure, where the core's
-    /// account is the only account there is.
-    /// Deliberately does not repeat the headline. The address is already up
-    /// there in most of these, and "Not Authorized Yet" over "…doesn't have
-    /// this device's key yet" said "yet" twice in two lines.
-    private func detail(_ kind: Connection.Failure, _ message: String) -> String {
-        switch kind {
-        case .keyRejected:
-            return "\(host.reach.detail(user: host.user)) hasn’t been given this device’s key."
-        case .unreachable:
-            switch host.reach {
-            case .direct(_, let port):
-                return
-                    "Nothing answered on port \(port). The runner may be asleep, "
-                    + "or the address may be wrong."
-            // No port to name and no address to have got wrong: a tunnel is
-            // reached by token, so the two things a person could check are
-            // whether the runner is awake and whether it is on the tunnel.
-            case .tailcat:
-                return
-                    "The tunnel didn’t reach it. The runner may be asleep, "
-                    + "or off the tunnel."
-            }
-        case .daemonMissing:
-            return "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
-        // Sentences somebody wrote, each naming both what happened and what to
-        // do about it — three of them in `Connection`, `hostKeyChanged` in
-        // `crates/client/src/ssh.rs`. They are the core's words only in the
-        // sense that the core is where they are stored.
-        case .hostKeyChanged, .noIdentity, .noNodeKey, .keyNotTrusted, .stopped:
-            return message
-        // The undiagnosed arm, and the only one where `message` is whatever
-        // came back rather than something written to be read. Those words go
-        // into a `DetailBox` in `failure(_:)` instead of standing here as the
-        // app's own account of the runner.
-        //
-        // No cause named, deliberately: from this side the cause is unknowable,
-        // and a guess sends somebody to loosen an sshd setting that was never
-        // the problem. See `Enrollment.note(about:outcome:)`. Nor any retry
-        // promised — whether one is under way is `retryOrGiveUp`'s business,
-        // and the button below is the only offer this screen makes.
-        case .other:
-            return "The attempt to reach it didn’t finish."
-        }
-    }
-
-    private func headline(_ kind: Connection.Failure) -> String {
-        switch kind {
-        case .keyRejected: return "Not Authorized Yet"
-        case .hostKeyChanged: return "This Host’s Key Changed"
-        case .unreachable: return "Can’t Reach \(host.named)"
-        case .daemonMissing: return "Far Cooler Isn’t Installed"
-        case .noIdentity: return "This Device Has No Key"
-        case .noNodeKey: return "This Device Has No Tunnel Key"
-        case .keyNotTrusted: return "Key Not Trusted"
-        case .stopped: return "Stopped Waiting"
-        case .other: return "Can’t Connect"
         }
     }
 
