@@ -251,9 +251,19 @@ struct FleetView: View {
                 // every time. After that it is the honest offer, because an
                 // address that routes nowhere takes over a minute to fail on
                 // its own — see `Connection.giveUp(on:)`.
-                if stalled {
+                //
+                // Offered only when a tap would do something, and it stops only
+                // the runners that are genuinely waiting on the network. It used
+                // to call `giveUp` on EVERY runner in every phase: the one
+                // holding a fingerprint lost the question, the one that had
+                // connected and not yet returned its first fleet — the ordinary
+                // occupant of this screen — lost a working session, and the one
+                // already failed had its diagnosis overwritten with "Stopped
+                // waiting". Which runners those are is `StopWaiting`, in
+                // AgentKit, and so is whether the button belongs here at all.
+                if stalled, StopWaiting.isOffered(fleet.runners, standing: standing) {
                     Button("Stop Waiting") {
-                        for runner in fleet.runners {
+                        for runner in StopWaiting.stopping(fleet.runners, standing: standing) {
                             runner.connection.giveUp(on: runner.host)
                         }
                     }
@@ -340,6 +350,22 @@ struct FleetView: View {
             }
             .navigationTitle("Runners")
             .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// What a runner is doing, in the vocabulary the stop rule speaks.
+    ///
+    /// Wiring, and the only place this screen turns a `Phase` into one. The
+    /// decision it feeds is `StopWaiting`'s.
+    private func standing(_ runner: (host: Runner, connection: Connection))
+        -> StopWaiting.Standing
+    {
+        switch runner.connection.phase {
+        case .connecting: return .dialing
+        case .reconnecting: return .reconnecting
+        case .needsApproval: return .asking
+        case .failed: return .stopped
+        case .connected: return .answering
+        }
     }
 
     private func waitedLongEnough() async {

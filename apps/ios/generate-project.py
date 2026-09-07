@@ -174,6 +174,11 @@ AGENTKIT_SOURCES = [
     # the `Themes` singleton reverted the whole app to Nord at random on a fleet
     # of two. See `ThemeCatalogTests`.
     "ThemeCatalog.swift",
+    # Which runners a "Stop Waiting" tap stops, and whether the button belongs
+    # on screen at all. Here for `FleetMembership.swift`'s reason: the port
+    # turned one runner's escape hatch into `for runner in fleet.runners` and
+    # nothing could go red about it. See `StopWaitingTests`.
+    "StopWaiting.swift",
     # What a failure to reach a runner means, and the one thing worth doing
     # about it. `Connection.Failure` is a typealias for it. Here for
     # `AgentFailure.swift`'s reason exactly — two screens draw this copy now and
