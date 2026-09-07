@@ -2,6 +2,7 @@ package com.farcooler.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.net.URI
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,6 +83,31 @@ class Settings(context: Context) {
     private val _reshapePanes = MutableStateFlow(preferences.getBoolean(KEY_RESHAPE, true))
     val reshapePanes: StateFlow<Boolean> = _reshapePanes.asStateFlow()
 
+    /**
+     * Where tunneled runners and this device meet, or empty for the one the app
+     * ships with.
+     *
+     * A tunneled runner is not reachable by address — a device and a runner find
+     * each other through a rendezvous service, and EVERY tunneled connection
+     * goes through it rather than only the ones that could not go direct. The
+     * service this app ships with is documented as best-effort and revocable at
+     * any time, so this exists for one day: the day it stops answering. Without
+     * it, that day costs a Play release, an App Store review, a Mac release and
+     * a visit to every runner in the fleet. With it, it costs a setting.
+     *
+     * **Empty is the answer, for almost everybody, forever.** Nothing in this
+     * product says anyone should run their own, and the screen that shows this
+     * says so rather than implying otherwise.
+     *
+     * Normalized on the way in AND on the way out — see [derpMapSetting] — so a
+     * value that arrived some other way, from an older build or a restored
+     * backup, still cannot become a rendezvous nobody chose. This is the same
+     * setting the Apple apps keep in `Account.derpMap`, held to the same rules.
+     */
+    private val _derpMap =
+        MutableStateFlow(derpMapSetting(preferences.getString(KEY_DERP_MAP, null)))
+    val derpMap: StateFlow<String> = _derpMap.asStateFlow()
+
     fun setFont(choice: TerminalFontChoice) {
         _font.value = choice
         preferences.edit().putString(KEY_FONT, choice.wire).apply()
@@ -113,6 +139,21 @@ class Settings(context: Context) {
         preferences.edit().putBoolean(KEY_RESHAPE, on).apply()
     }
 
+    /**
+     * Take a rendezvous, or go back to the one the app ships with.
+     *
+     * What is stored is what [derpMapSetting] answered, not what was typed:
+     * anything it refuses is stored as empty, and empty means the default. A
+     * value that saved and then silently did nothing would be worse than one
+     * that would not save, because a tunnel meeting nowhere times out rather
+     * than refusing — there would be nothing on any screen to read.
+     */
+    fun setDerpMap(url: String) {
+        val usable = derpMapSetting(url)
+        _derpMap.value = usable
+        preferences.edit().putString(KEY_DERP_MAP, usable).apply()
+    }
+
     companion object {
         /**
          * Matches the size the Apple apps render at, so the same terminal on
@@ -129,5 +170,44 @@ class Settings(context: Context) {
         /** The stored spelling stays, so an existing install keeps its answer. */
         private const val KEY_ALL_RUNNERS = "allMachinesAtOnce"
         private const val KEY_RESHAPE = "reshapePanes"
+        private const val KEY_DERP_MAP = "derpMap"
+
+        /**
+         * The DERP map worth using, out of whatever somebody typed.
+         *
+         * Anything that is not an `https` URL comes back empty, and empty means
+         * the tunnel library's own default. Refused rather than repaired: a
+         * rendezvous is where a device and a runner agree to meet, and a value
+         * this could not read is a value nobody deliberately chose. A scheme
+         * typed in capitals is refused for that reason too, rather than being
+         * quietly rewritten into one nobody looked at.
+         *
+         * `https` and not merely on principle. A map fetched over cleartext is
+         * a map anybody on the path can rewrite, and rewriting it moves both
+         * ends of a tunnel onto a rendezvous of the attacker's choosing — the
+         * one thing this whole setting must not make possible.
+         *
+         * Whitespace is refused rather than trimmed out of the middle. The
+         * tunnel library refuses a URL carrying a space — one of its backends
+         * sends it to a subprocess over a line protocol whose fields are
+         * separated by spaces, so a second field would arrive as a command
+         * nobody issued — and this side refusing first is what keeps such a
+         * value from being saved, ignored, and never mentioned again.
+         *
+         * The same answer `Account.derpMapSetting` gives on the Apple apps.
+         * Two implementations of one rule, because there is no shared code
+         * between a Kotlin `SharedPreferences` and a Swift `UserDefaults`; the
+         * rule itself is enforced once more underneath, in
+         * `farcooler_tailcat::set_derp_map_url`, which is what actually holds
+         * the line for every platform.
+         */
+        fun derpMapSetting(typed: String?): String {
+            val trimmed = typed?.trim() ?: return ""
+            if (trimmed.isEmpty() || trimmed.any { it.isWhitespace() }) return ""
+            val url = runCatching { URI(trimmed) }.getOrNull() ?: return ""
+            if (url.scheme != "https") return ""
+            if (url.host.isNullOrEmpty()) return ""
+            return trimmed
+        }
     }
 }
