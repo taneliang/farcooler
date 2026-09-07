@@ -136,8 +136,16 @@ data class Runner(
      * and `parse_destination` refuses to hold both. [nodeKey] is per device
      * rather than per runner and never travelled in the manifest — whoever dials
      * supplies the key it already holds.
+     *
+     * [derpMap] is this DEVICE's rendezvous setting, and it has no default here
+     * on purpose: a parameter somebody can forget is a rendezvous that is
+     * silently the old one on the day the old one stopped answering. Empty is
+     * the normal value and means the rendezvous the app ships with; it is sent
+     * even then, because absent and blank must land on the same place — which
+     * is what `parse_destination` promises and what the field is read against.
+     * See [com.farcooler.data.Settings.derpMap].
      */
-    fun config(privateKey: String, nodeKey: String?): JsonObject = JsonObject(
+    fun config(privateKey: String, nodeKey: String?, derpMap: String): JsonObject = JsonObject(
         buildMap {
             put("user", JsonPrimitive(user))
             put("private_key", JsonPrimitive(privateKey))
@@ -156,6 +164,11 @@ data class Runner(
                 }
             }
             fingerprint?.let { put("host_fingerprint", JsonPrimitive(it)) }
+            // Sent for a direct runner too. It costs one ignored field there,
+            // and the alternative is a config whose shape depends on the reach
+            // in a second place — which is how one of the two paths comes to be
+            // the one nobody remembered to change.
+            put("derp_map", JsonPrimitive(derpMap))
         }
     )
 

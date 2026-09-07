@@ -116,7 +116,7 @@ class RunnerReachTest {
     @Test
     fun aDirectRunnerNamesAHostAndAPortAndNoToken() {
         val config = Runner(label = "Studio", reach = Reach.Direct("10.0.0.4", 2222), user = "me")
-            .config(privateKey = "PRIVATE", nodeKey = "node-private")
+            .config(privateKey = "PRIVATE", nodeKey = "node-private", derpMap = "")
         assertEquals(JsonPrimitive("10.0.0.4"), config["host"])
         assertEquals(JsonPrimitive(2222), config["port"])
         assertEquals(JsonPrimitive("me"), config["user"])
@@ -140,7 +140,7 @@ class RunnerReachTest {
     @Test
     fun aTunneledRunnerNamesATokenAndThisDevicesNodeKeyAndNoHost() {
         val config = Runner(label = "Attic", reach = Reach.Tailcat("tc-x"), user = "me")
-            .config(privateKey = "PRIVATE", nodeKey = "node-private")
+            .config(privateKey = "PRIVATE", nodeKey = "node-private", derpMap = "")
         assertEquals(JsonPrimitive("tc-x"), config["token"])
         assertEquals(JsonPrimitive("node-private"), config["node_key"])
         assertNull("a tunneled runner named a host: $config", config["host"])
@@ -196,5 +196,52 @@ class RunnerReachTest {
         assertNull("a pair with no private half was accepted", NodeIdentity.split("\nPUB"))
         assertNull("a single line was accepted as a pair", NodeIdentity.split("PRIV"))
         assertNull("three lines were accepted as a pair", NodeIdentity.split("A\nB\nC"))
+    }
+
+    /**
+     * The rendezvous crosses into the core under the name the core reads.
+     *
+     * `parse_destination` in `crates/client/src/ffi.rs` reads `derp_map`, and
+     * `Session::connect_ssh` hands it to `farcooler_tailcat::set_derp_map_url`
+     * before the dial that needs it. Nothing between here and there checks the
+     * spelling — a JSON object is passed opaquely through
+     * `Java_com_farcooler_core_NativeClient_nativeConnect` — so a key typed
+     * `derpMap` here would be dropped in silence and the phone would keep
+     * meeting at the rendezvous somebody just replaced. The failure would look
+     * like a connection that times out saying nothing.
+     *
+     * Spelled out as a literal rather than referenced through a constant, on
+     * purpose: a constant would rename with the field and leave this green.
+     */
+    @Test
+    fun aTunneledRunnersConfigNamesTheRendezvousTheCoreReads() {
+        val config = Runner(label = "Attic", reach = Reach.Tailcat("tc-x"), user = "me")
+            .config(privateKey = "PRIVATE", nodeKey = "node-private", derpMap = "https://r.example/derpmap.json")
+        assertEquals(JsonPrimitive("https://r.example/derpmap.json"), config["derp_map"])
+    }
+
+    /**
+     * The default rendezvous is sent as an empty string, not left out.
+     *
+     * `parse_destination` promises that absent and blank land on the same
+     * place, and they do — but only one of the two proves this side is passing
+     * the setting at all. A config that omitted the field would be
+     * indistinguishable from one whose plumbing was never connected, right up
+     * until the day somebody typed a URL and nothing happened.
+     */
+    @Test
+    fun theDefaultRendezvousIsSentAsEmptyRatherThanOmitted() {
+        val config = Runner(label = "Attic", reach = Reach.Tailcat("tc-x"), user = "me")
+            .config(privateKey = "PRIVATE", nodeKey = "node-private", derpMap = "")
+        assertTrue("no rendezvous was sent at all: $config", config.containsKey("derp_map"))
+        assertEquals(JsonPrimitive(""), config["derp_map"])
+    }
+
+    /** A direct runner carries the field too, so one shape serves both reaches. */
+    @Test
+    fun aDirectRunnersConfigCarriesTheRendezvousToo() {
+        val config = Runner(label = "Studio", reach = Reach.Direct("10.0.0.4", 22), user = "me")
+            .config(privateKey = "PRIVATE", nodeKey = null, derpMap = "https://r.example/derpmap.json")
+        assertEquals(JsonPrimitive("https://r.example/derpmap.json"), config["derp_map"])
     }
 }

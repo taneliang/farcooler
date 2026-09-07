@@ -139,7 +139,10 @@ class FleetRepository(
 
         for (host in wanted) {
             if (connections.containsKey(host.id)) continue
-            val connection = Connection(host, review, scope)
+            // `settings.derpMap` rather than its value: a rendezvous changed
+            // after this connection exists has to reach its next attempt. See
+            // [Connection.rendezvous].
+            val connection = Connection(host, review, settings.derpMap, scope)
             connection.onFleet = { fleet -> onFleet?.invoke(host, fleet) }
             connections[host.id] = connection
             starts[host.id] = scope.launch { connection.start() }

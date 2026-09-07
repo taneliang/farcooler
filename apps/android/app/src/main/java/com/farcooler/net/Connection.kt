@@ -75,6 +75,21 @@ class Connection(
      * stays constructible without a `Context`.
      */
     private val review: com.farcooler.data.ReviewStorage,
+    /**
+     * Where this device and a tunneled runner meet, or empty for the rendezvous
+     * the app ships with.
+     *
+     * A flow rather than a string, because it is read at each connect rather
+     * than captured once: a rendezvous changed in settings has to reach the next
+     * attempt on a connection that already exists, and the day anyone changes it
+     * is the day the old one stopped answering — a connection holding a stale
+     * copy would go on failing with nothing on screen to explain it.
+     *
+     * Handed in, like [review], so this object stays constructible without a
+     * `Context`. [com.farcooler.data.Settings] publishes exactly this flow and
+     * [FleetRepository] passes it along.
+     */
+    private val rendezvous: StateFlow<String>,
     private val scope: CoroutineScope,
 ) : ChangesSource {
 
@@ -401,7 +416,7 @@ class Connection(
         }
 
         try {
-            core.connect(withHost.config(key, nodeKey))
+            core.connect(withHost.config(key, nodeKey, rendezvous.value))
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             if (mine == attempt) _phase.value = classify(e.message.orEmpty())
@@ -493,7 +508,7 @@ class Connection(
         }
 
         try {
-            core.connect(current.config(key, nodeKey))
+            core.connect(current.config(key, nodeKey, rendezvous.value))
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             // A start, or a second reconnectNow, landed while this attempt was
