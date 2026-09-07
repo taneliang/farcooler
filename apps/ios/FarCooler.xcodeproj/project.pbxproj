@@ -55,6 +55,7 @@
 		903A067BB0315217B1D9924C /* AddDeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0098346163395806AEC3FD69; };
 		AD203D9E12D156FD86A3CFF5 /* JoinView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568B0A4C91045518933A26B3; };
 		1D2E1EBB71985A1CBA44AEEC /* ShellNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A109ED1973485D5680C3F889; };
+		3BAAD065CACA537284F18061 /* ShellIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F685DE2F091F550EAD8F687F; };
 		A53D685077E05276BE850197 /* FleetMembership.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF8FD509234D55C3A614DFAB; };
 		050223E974B35D0A945738BA /* RunnerTrouble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130A121572BF5E3BA6A34A73; };
 		EF64A27A00F956618401E600 /* RunnerRefusal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131E79556BDF5CDF8DA3992F; };
@@ -200,6 +201,7 @@
 		0098346163395806AEC3FD69 /* AddDeviceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddDeviceView.swift; sourceTree = "<group>"; };
 		568B0A4C91045518933A26B3 /* JoinView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JoinView.swift; sourceTree = "<group>"; };
 		A109ED1973485D5680C3F889 /* ShellNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellNavigation.swift; sourceTree = "<group>"; };
+		F685DE2F091F550EAD8F687F /* ShellIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellIdentity.swift; sourceTree = "<group>"; };
 		BF8FD509234D55C3A614DFAB /* FleetMembership.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetMembership.swift; sourceTree = "<group>"; };
 		130A121572BF5E3BA6A34A73 /* RunnerTrouble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTrouble.swift; sourceTree = "<group>"; };
 		131E79556BDF5CDF8DA3992F /* RunnerRefusal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerRefusal.swift; sourceTree = "<group>"; };
@@ -444,6 +446,7 @@
 			isa = PBXGroup;
 			children = (
 				A109ED1973485D5680C3F889 /* ShellNavigation.swift */,
+				F685DE2F091F550EAD8F687F /* ShellIdentity.swift */,
 				BF8FD509234D55C3A614DFAB /* FleetMembership.swift */,
 				130A121572BF5E3BA6A34A73 /* RunnerTrouble.swift */,
 				131E79556BDF5CDF8DA3992F /* RunnerRefusal.swift */,
@@ -811,6 +814,7 @@
 				903A067BB0315217B1D9924C /* AddDeviceView.swift in Sources */,
 				AD203D9E12D156FD86A3CFF5 /* JoinView.swift in Sources */,
 				1D2E1EBB71985A1CBA44AEEC /* ShellNavigation.swift in Sources */,
+				3BAAD065CACA537284F18061 /* ShellIdentity.swift in Sources */,
 				A53D685077E05276BE850197 /* FleetMembership.swift in Sources */,
 				050223E974B35D0A945738BA /* RunnerTrouble.swift in Sources */,
 				EF64A27A00F956618401E600 /* RunnerRefusal.swift in Sources */,

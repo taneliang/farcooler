@@ -1626,9 +1626,19 @@ final class Connection: ObservableObject {
         // Before the mapping, not after it: the point of the throttle is to
         // not do this work either.
         if let last = lastDirectory, now.timeIntervalSince(last.seenAt) < 60 { return }
-        let workspaces = ShellFleetMap.of(self, now: now).fleet.workspaces.map { workspace in
+        let map = ShellFleetMap.of(self, host: host, now: now)
+        let workspaces = map.fleet.workspaces.map { workspace in
             RunnerDirectory.Workspace(
-                id: workspace.id, name: workspace.name, isHidden: workspace.isHidden,
+                // The DAEMON's own id, read back off the entry the map carries.
+                // `ShellWorkspace.id` is the shell's composite —
+                // `"\(runner)/\(workspace)"`, see `ShellIdentity` — and the
+                // cache must hold what the wire holds: `RunnerDirectory.group()`
+                // composes its own ids from these, and a crossing note names
+                // one. Falls back to the shell's, which cannot happen — the map
+                // built this workspace from that very entry — and would be a
+                // stale grid rather than a wrong RPC if it did.
+                id: map.entries[workspace.id]?.workspace.id ?? workspace.id,
+                name: workspace.name, isHidden: workspace.isHidden,
                 tabs: workspace.tabs.map {
                     RunnerDirectory.Tab(
                         title: $0.title, mark: RunnerDirectory.word(for: $0.mark))

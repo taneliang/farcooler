@@ -143,6 +143,14 @@ AGENTKIT_SOURCES = [
     # only UI tests — and these are the rules with no screen in them. See
     # `ShellNavigationTests`.
     "ShellNavigation.swift",
+    # What a workspace and a tab are CALLED once the shell holds more than one
+    # runner's fleet. A workspace id is eight hex characters minted per daemon,
+    # so two runners can mint the same one — and these strings are SwiftUI
+    # identities and the key a mounted pane is retained under. Here for
+    # `ShellNavigation.swift`'s reason: composing an id has no screen in it, and
+    # the iOS UI suite is compiled by CI and never executed. See
+    # `ShellIdentityTests`.
+    "ShellIdentity.swift",
     # Which runners the phone should be talking to, and what changing that list
     # costs. Here for `ShellNavigation.swift`'s reason exactly: the rules a
     # reconcile has to keep have no screen in them, and the iOS UI suite is

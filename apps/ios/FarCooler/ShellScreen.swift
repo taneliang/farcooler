@@ -47,109 +47,205 @@ private let staleAfter: TimeInterval = 60 * 60
 /// string and parsing it back out at every use, which is a decoder nobody
 /// wrote a test for standing between the fleet and the screen.
 struct ShellPaneRef: Hashable {
+    /// The runner this pane is on.
+    ///
+    /// Carried rather than assumed, and that is the whole of what the port
+    /// changes here. A `ShellFleetMap` used to be one runner's fleet by
+    /// construction — `RootView` keyed the tree `.id(host)` — so every ref in
+    /// it named a workspace on the same machine and the runner went without
+    /// saying. The merged map holds several, and a ref that did not say which
+    /// would send an RPC down whichever connection the screen happened to be
+    /// holding. See `ShellIdentity`.
+    var runner: UUID
+    /// The DAEMON's own workspace id, eight hex characters, unique on `runner`
+    /// and nowhere else. Not the shell's composite — this is the string that
+    /// goes on the wire in `changes.*` and `workspace.*` calls.
     var workspace: String
     var pane: Pane
 }
 
 /// The fleet as the shell needs it, plus what each of its tabs is.
 ///
-/// Built whole from a `Connection` on every poll and thrown away. Nothing here
-/// is remembered: the retained set lives in `ShellPaneTrack` and is keyed by
-/// tab id, so this value moving underneath it is exactly the case that was
-/// designed for.
+/// Built whole from the store on every poll and thrown away. Nothing here is
+/// remembered: the retained set lives in `ShellPaneTrack` and is keyed by tab
+/// id, so this value moving underneath it is exactly the case that was designed
+/// for.
+///
+/// **It is the whole fleet and not one runner's**, which is the port's central
+/// change. `of(_ store:)` walks `FleetStore.entries` — every workspace on every
+/// connected runner, in the order the runner list is in — and every id it mints
+/// carries the runner, because a workspace id does not. See `ShellIdentity`,
+/// which is where that composition and its test live.
 @MainActor
 struct ShellFleetMap {
     var fleet: ShellFleet
     var refs: [String: ShellPaneRef]
 
-    /// A tab's id: the workspace it is in, then the pane it is.
+    /// Which runner each shell workspace is on, and what it said, keyed by the
+    /// composite id `ShellWorkspace.id` now carries.
     ///
-    /// The workspace is in it because of the Changes tab. `Pane.changes` has
-    /// one id for the whole app — it is the only pane with no object on the
-    /// runner behind it — and forty workspaces each with a Changes tab would
-    /// otherwise be forty tabs sharing one SwiftUI identity, which resolves by
-    /// drawing one of them. Terminal ids are already unique per runner and
-    /// gain nothing from the prefix except being legible in a probe.
-    static func tabID(workspace: String, pane: Pane) -> String {
-        "\(workspace)/\(pane.id)"
+    /// The side table that makes a merged fleet act-on-able. A screen holding a
+    /// `ShellWorkspace` has a name and a ribbon and nothing to send an RPC
+    /// down; this is where it gets the connection, the runner and the daemon's
+    /// own workspace id back. Keyed rather than searched, because the overview
+    /// asks per card and the shell asks per rest.
+    var entries: [String: FleetEntry] = [:]
+
+    /// A tab's id: the runner, the workspace it is in, then the pane it is.
+    ///
+    /// Composed by `ShellIdentity` rather than here, and the reason is the
+    /// runner. Workspace ids are eight hex characters minted per daemon, so two
+    /// runners can hand back the same one for two unrelated worktrees — and a
+    /// tab id is a SwiftUI identity and the key `ShellPaneTrack` retains a
+    /// mounted pane under. That file is in AgentKit, which `swift test` runs;
+    /// this target's tests are compiled by CI and never executed.
+    static func tabID(runner: UUID, workspace: String, pane: Pane) -> String {
+        ShellIdentity.tab(
+            runner: runner.uuidString, workspace: workspace, pane: pane.id)
     }
 
-    /// Read a runner's fleet as the shell's.
+    /// Read the whole fleet — every connected runner's — as the shell's.
+    ///
+    /// Order is the store's, which is the order the runner list is in, so what
+    /// is on screen does not reshuffle when a laptop wakes up. A runner that is
+    /// not answering contributes its last good rows rather than a gap; what
+    /// explains those rows is `RunnerStatusRow`, not their absence.
     ///
     /// `now` is an argument rather than `Date()` so staleness is a pure
     /// function of its inputs.
-    static func of(_ connection: Connection, now: Date = Date()) -> ShellFleetMap {
-        var refs: [String: ShellPaneRef] = [:]
+    static func of(_ store: FleetStore, now: Date = Date()) -> ShellFleetMap {
+        of(store.entries, now: now)
+    }
+
+    /// The merge itself, over the entries rather than the store that published
+    /// them, so the one caller that has a runner instead of a fleet can reach
+    /// it too.
+    static func of(_ entries: [FleetEntry], now: Date = Date()) -> ShellFleetMap {
+        var map = ShellFleetMap(fleet: ShellFleet(workspaces: []), refs: [:])
         var workspaces: [ShellWorkspace] = []
+        // More than one runner in the merge is what makes a card name its
+        // machine. See `server` below.
+        let servers = Set(entries.map(\.host.id)).count
+        for entry in entries {
+            let built = one(entry, naming: servers > 1, now: now)
+            workspaces.append(built.workspace)
+            for (id, ref) in built.refs { map.refs[id] = ref }
+            map.entries[built.workspace.id] = entry
+        }
+        map.fleet = ShellFleet(workspaces: workspaces)
+        return map
+    }
 
-        for workspace in connection.fleet.workspaces {
-            let inbox = connection.inbox[workspace.id]
-            // A host-side `changes` pane is not a tab of its own: it IS the
-            // Changes tab, and both resolve to the same `ChangesStore`. Two
-            // chips for one diff is what `Pane.init(_:)` exists to prevent.
-            let terminals = workspace.terminals.filter { !$0.isChangesPane }
+    /// One runner's fleet, on its own, for the one caller that is about a
+    /// runner rather than about the fleet: `Connection.recordDirectory`, which
+    /// writes down what THIS runner has so a grid can draw it later.
+    ///
+    /// Shares `one(_:naming:now:)` with the merge above rather than mapping a
+    /// fleet a second way, which is the rule `recordDirectory` already states:
+    /// tab order, what a mark means and how a tail is chosen are decided once,
+    /// in the file that draws them, or a cached card and a live one disagree
+    /// about the same worktree.
+    static func of(
+        _ connection: Connection, host: Runner, now: Date = Date()
+    ) -> ShellFleetMap {
+        of(
+            connection.fleet.workspaces.map {
+                FleetEntry(
+                    host: host, connection: connection, workspace: $0,
+                    counts: connection.inbox[$0.id])
+            },
+            now: now)
+    }
 
-            // **Changes leads, then fleet order, and never `sortRank`.**
-            //
-            // The tab strip this replaced made the argument and it is worse
-            // here rather than better: a ribbon is a MAP of the workspace, and
-            // a map whose landmarks move when an agent goes from working to
-            // blocked is not a map — you would have to read it every time
-            // instead of remembering it. The diff leading means the one tab
-            // that is always there is always at the same end.
-            var tabs: [ShellTab] = [
+    /// One entry, as a workspace and the refs of its tabs.
+    private static func one(
+        _ entry: FleetEntry, naming server: Bool, now: Date
+    ) -> (workspace: ShellWorkspace, refs: [String: ShellPaneRef]) {
+        var refs: [String: ShellPaneRef] = [:]
+        let connection = entry.connection
+        let runner = entry.host.id
+        let workspace = entry.workspace
+        let inbox = entry.counts
+        // A host-side `changes` pane is not a tab of its own: it IS the
+        // Changes tab, and both resolve to the same `ChangesStore`. Two
+        // chips for one diff is what `Pane.init(_:)` exists to prevent.
+        let terminals = workspace.terminals.filter { !$0.isChangesPane }
+
+        // **Changes leads, then fleet order, and never `sortRank`.**
+        //
+        // The tab strip this replaced made the argument and it is worse
+        // here rather than better: a ribbon is a MAP of the workspace, and
+        // a map whose landmarks move when an agent goes from working to
+        // blocked is not a map — you would have to read it every time
+        // instead of remembering it. The diff leading means the one tab
+        // that is always there is always at the same end.
+        var tabs: [ShellTab] = [
+            ShellTab(
+                id: tabID(runner: runner, workspace: workspace.id, pane: .changes),
+                title: "Diff",
+                mark: diffMark(inbox))
+        ]
+        var order: [ShellPaneRef] = [
+            ShellPaneRef(runner: runner, workspace: workspace.id, pane: .changes)
+        ]
+
+        for terminal in terminals {
+            let pane = Pane(terminal)
+            tabs.append(
                 ShellTab(
-                    id: tabID(workspace: workspace.id, pane: .changes),
-                    title: "Diff",
-                    mark: diffMark(inbox))
-            ]
-            var order: [ShellPaneRef] = [ShellPaneRef(workspace: workspace.id, pane: .changes)]
-
-            for terminal in terminals {
-                let pane = Pane(terminal)
-                tabs.append(
-                    ShellTab(
-                        id: tabID(workspace: workspace.id, pane: pane),
-                        title: terminal.label,
-                        mark: mark(of: terminal, now: now),
-                        // The sort's own question, kept separate from the
-                        // drawing's. See `ShellTab.wantsAttention`.
-                        wantsAttention: terminal.agent.wantsAttention))
-                order.append(ShellPaneRef(workspace: workspace.id, pane: pane))
-            }
-
-            for (tab, ref) in zip(tabs, order) { refs[tab.id] = ref }
-
-            workspaces.append(
-                ShellWorkspace(
-                    id: workspace.id,
-                    name: workspace.task,
-                    // Nil, still, and now for a sharper reason than "one
-                    // runner". A `Connection` IS one runner — `RootView` keys
-                    // the whole tree `.id(host)` — so every workspace here is
-                    // on the same machine, and the overview names that machine
-                    // once, on the section header over these cards, rather
-                    // than forty times underneath them. The cards that DO
-                    // carry a server are the cached ones from other runners
-                    // (`RunnerDirectory.group`), where the name is the whole
-                    // point: they are somewhere else.
-                    server: nil,
-                    tail: tail(of: workspace),
-                    resume: resume(workspace, connection: connection, tabs: order),
-                    // The daemon's own view preference, carried rather than
-                    // re-derived. iOS had no consumer for it at all, so a
-                    // worktree somebody put away on the Mac came back as an
-                    // ordinary card on the phone. See `ShellFleet.hiddenOrder`.
-                    isHidden: workspace.isHidden,
-                    // The one workspace the overview card's menu must not
-                    // offer to remove. Carried rather than looked up again
-                    // from the connection at menu-build time, so the card and
-                    // the daemon are reading one fact.
-                    isPrimaryCheckout: workspace.isPrimaryCheckout,
-                    tabs: tabs))
+                    id: tabID(runner: runner, workspace: workspace.id, pane: pane),
+                    title: terminal.label,
+                    mark: mark(of: terminal, now: now),
+                    // The sort's own question, kept separate from the
+                    // drawing's. See `ShellTab.wantsAttention`.
+                    wantsAttention: terminal.agent.wantsAttention))
+            order.append(ShellPaneRef(runner: runner, workspace: workspace.id, pane: pane))
         }
 
-        return ShellFleetMap(fleet: ShellFleet(workspaces: workspaces), refs: refs)
+        for (tab, ref) in zip(tabs, order) { refs[tab.id] = ref }
+
+        return (
+            ShellWorkspace(
+                // The COMPOSITE, not the daemon's eight characters. This
+                // string is a SwiftUI identity — the overview gives each
+                // card `.id(_:)` and an accessibility identifier off it,
+                // and `ShellPaneTrack` remembers which workspace a retained
+                // pane belongs to by it — and two runners can mint the same
+                // eight characters. The daemon's own id is on the
+                // `FleetEntry` in `entries`, which is where the wire gets
+                // it back. See `ShellIdentity`.
+                id: ShellIdentity.workspace(
+                    runner: runner.uuidString, workspace: workspace.id),
+                name: workspace.task,
+                // The runner's name, but only where the fleet on screen has
+                // more than one runner in it.
+                //
+                // It was unconditionally nil, and the reason it gave was
+                // "a `Connection` IS one runner, so the overview names that
+                // machine once, on the section header over these cards,
+                // rather than forty times underneath them". The first half
+                // stopped being true; the second half is still right when
+                // it applies, which is why this is a condition rather than
+                // a name on every card. One runner: the header says it
+                // once, exactly as before. Several: a card that did not say
+                // where its worktree is would leave the one question a
+                // merged grid raises unanswered.
+                server: server ? entry.host.label : nil,
+                tail: tail(of: workspace),
+                resume: resume(workspace, connection: connection, tabs: order),
+                // The daemon's own view preference, carried rather than
+                // re-derived. iOS had no consumer for it at all, so a
+                // worktree somebody put away on the Mac came back as an
+                // ordinary card on the phone. See `ShellFleet.hiddenOrder`.
+                isHidden: workspace.isHidden,
+                // The one workspace the overview card's menu must not
+                // offer to remove. Carried rather than looked up again
+                // from the connection at menu-build time, so the card and
+                // the daemon are reading one fact.
+                isPrimaryCheckout: workspace.isPrimaryCheckout,
+                tabs: tabs),
+            refs
+        )
     }
 
     /// The Diff tab's mark.
@@ -654,7 +750,17 @@ struct ShellScreen: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    private var map: ShellFleetMap { ShellFleetMap.of(connection) }
+    /// This runner's fleet, in the shell's vocabulary.
+    ///
+    /// Resolved through the runner list rather than off the connection, because
+    /// every id the map mints now carries the runner and a `Connection` reports
+    /// only an id. One runner still, at this step: the store is what makes it
+    /// several.
+    private var map: ShellFleetMap {
+        guard let host = hosts.hosts.first(where: { $0.id == connection.hostId })
+        else { return ShellFleetMap(fleet: ShellFleet(workspaces: []), refs: [:]) }
+        return ShellFleetMap.of(connection, host: host)
+    }
 
     var body: some View {
         Group {
@@ -721,7 +827,8 @@ struct ShellScreen: View {
     /// an index into a fleet that has changed length names a DIFFERENT
     /// workspace rather than none. `FleetView`'s removed-workspace rule, kept.
     private func workspace(_ shell: ShellWorkspace) -> Workspace? {
-        connection.fleet.workspaces.first { $0.id == shell.id }
+        guard let daemonID = map.entries[shell.id]?.workspace.id else { return nil }
+        return connection.fleet.workspaces.first { $0.id == daemonID }
     }
 
     /// Put a worktree away, or take it back out.
@@ -909,7 +1016,12 @@ struct ShellScreen: View {
         // the self-fulfilling memory `remember(_:leaving:tab:)` refuses for
         // the same reason one paragraph down.
         let workspace = takeCrossing().flatMap { wanted in
-            map.fleet.workspaces.firstIndex { $0.id == wanted }
+            // Against the DAEMON's id, which is what a crossing note carries.
+            // `ShellWorkspace.id` is the shell's composite now — see
+            // `ShellIdentity` — and comparing the two would never match.
+            map.fleet.workspaces.indices.first {
+                map.entries[map.fleet.workspaces[$0].id]?.workspace.id == wanted
+            }
         } ?? at.workspace
         initial = ShellPosition(
             workspace: workspace, tab: map.fleet.workspaces[workspace].resumeTab)
@@ -1003,7 +1115,9 @@ struct ShellScreen: View {
             guard let terminal = workspace.terminals.first(where: { $0.id == id }) else {
                 continue
             }
-            let tab = ShellFleetMap.tabID(workspace: workspace.id, pane: Pane(terminal))
+            guard let runner = connection.hostId else { return nil }
+            let tab = ShellFleetMap.tabID(
+                runner: runner, workspace: workspace.id, pane: Pane(terminal))
             // Only if the shell actually has it. A `changes` pane the host
             // happens to have open is folded into the Changes tab by
             // `Pane.init(_:)` and is not a tab of its own, so an id naming one
