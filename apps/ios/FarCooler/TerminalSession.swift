@@ -545,6 +545,23 @@ final class TerminalSession: ObservableObject {
         }
     }
 
+    /// Ask the host about this pane again, from a screen that had stopped
+    /// asking.
+    ///
+    /// The one caller is the button on the `.notLive` screen, and it exists
+    /// rather than a bare `relink()` there because `relink` guards on `started`
+    /// and `resume` guards on the opposite — a labeled button wired to either
+    /// one alone is a button that silently does nothing on whichever side of
+    /// the guard the pane happens to be, which is the same defect as the "Show
+    /// the Key Again" that forgot a key nobody had pinned.
+    ///
+    /// Both paths end in `open()`, which is the call that decides: it begins
+    /// with the screen read that reports a pane that is no longer running, and
+    /// it is what sets `.notLive` in the first place.
+    func askAgain() {
+        if started { relink() } else { resume() }
+    }
+
     func relink() {
         guard started else { return }
         teardown()

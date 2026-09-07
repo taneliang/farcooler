@@ -158,6 +158,13 @@ AGENTKIT_SOURCES = [
     # network from a screenshot and can only be told apart by asking the rule.
     # See `ShellBringUpTests`.
     "ShellBringUp.swift",
+    # The one terminal phase with no way out of it: a pane the runner says is
+    # not running, which is deliberately not polled and could therefore never
+    # find out that it was running again. Here because the decision is an EDGE
+    # on a value the fleet re-derives every three seconds, and reading it as a
+    # level costs a round trip a second — a bound no screen can show you. See
+    # `NotLivePaneTests`.
+    "NotLivePane.swift",
     # Which of the runners a ceremony granted this device may write a key into.
     # Here rather than in `CeremonyStore` because of what the answer is used for
     # -- appending to `~/.ssh/authorized_keys` -- and because the direction that

@@ -1117,6 +1117,35 @@ struct TerminalView: View {
             session.reassertSize()
             Task { await connection.markVisibleSeen() }
         }
+        // THE PANE CAME BACK.
+        //
+        // `.notLive` stops the poll loop on purpose, so this screen has no way
+        // of its own to find out that the runner is running this pane again —
+        // and it does happen: a tmux pane restarted from the Mac, an agent
+        // relaunched into the same slot, a `starting` pane that had not
+        // finished starting when this phone looked. The fleet poll has carried
+        // the word for all three every three seconds all along, and nothing
+        // read it, so the screen said "Not live" for the life of the process
+        // over a pane that had been running for an hour.
+        //
+        // On the CHANGE and not on the value, which is what bounds the cost to
+        // one re-attach per thing that actually happened: the state is
+        // re-derived on every poll, so a rule read as a level would re-attach
+        // every three seconds for as long as the host and the FFI disagreed —
+        // exactly the round trip a second `.notLive` exists to refuse. Which
+        // transitions are worth it is `NotLivePane.revives(from:to:)`, in
+        // AgentKit.
+        //
+        // Guarded on the phase as well, because this fires for every pane: a
+        // LIVE pane whose state moves is a pane that is working, and relinking
+        // one of those would throw its screen away to rebuild what is already
+        // on it.
+        .onChange(of: live.state) { was, now in
+            guard isVisible, session.phase == .notLive else { return }
+            guard NotLivePane.revives(from: StateKind.parse(was), to: StateKind.parse(now))
+            else { return }
+            session.askAgain()
+        }
         // The link under this pane was replaced.
         //
         // A stream is a second ssh channel on the session that just died, so
@@ -1140,9 +1169,18 @@ struct TerminalView: View {
             // ordinary end of a pane. Amber on this screen said "an agent is
             // waiting on you", which is the one thing it means everywhere else
             // in the product and is not what this is.
+            //
+            // It used to be the end of the SCREEN too. `.notLive` is
+            // deliberately not polled — see `TerminalSession.open`, which
+            // cancels the poller rather than spend a round trip a second being
+            // told the same true thing — so nothing here ever asked again, and
+            // the pane can come back: restarted from the Mac, or relaunched
+            // into the same slot by whoever owns it. The two ways out are the
+            // fleet's own word, below, and this button.
             status(
-                symbol: "moon.zzz", mark: .secondary, title: "Not live",
-                message: "\(currentName) has no running pane right now.")
+                symbol: "moon.zzz", mark: .secondary, title: NotLivePane.title,
+                message: NotLivePane.message(for: currentName),
+                actionTitle: NotLivePane.action, action: { session.askAgain() })
         case .failed(let message, let transcript):
             status(
                 symbol: "exclamationmark.triangle", mark: .red, title: "Could not load",
@@ -1179,7 +1217,8 @@ struct TerminalView: View {
     /// title standing in for a full-screen one.
     private func status(
         spinner: Bool = false, symbol: String? = nil, mark: Color = .secondary, title: String,
-        message: String? = nil, transcript: String? = nil
+        message: String? = nil, transcript: String? = nil,
+        actionTitle: String? = nil, action: (() -> Void)? = nil
     ) -> some View {
         VStack(spacing: 0) {
             if spinner {
@@ -1209,6 +1248,15 @@ struct TerminalView: View {
                 DetailBox(text: transcript)
                     .frame(maxWidth: 320)
                     .padding(.top, 14)
+            }
+            // Under the sentence that explains it, which is where a screen full
+            // of prose puts its one move. Bordered rather than prominent: this
+            // is a way out of a state that is not an error, and an accented
+            // button would read as the app asking to be tapped.
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.bordered)
+                    .padding(.top, 22)
             }
         }
         .padding(.horizontal, 32)
