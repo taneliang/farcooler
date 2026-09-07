@@ -697,11 +697,6 @@ final class Connection: ObservableObject {
             // object can outlive the retirement by however long the last view
             // holding it takes to go away.
             Connection.registry[host.id] = nil
-            // And out of the theme catalog. A runner nobody is talking to
-            // should not still be defining what "Nord" looks like — the catalog
-            // is a fold over the runners, and this is the one place that sees
-            // one leave. See `Themes.forget(runner:)`.
-            Themes.shared.forget(runner: host.id)
         }
     }
 

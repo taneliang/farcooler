@@ -137,8 +137,11 @@ final class Themes: ObservableObject {
     ///
     /// The tear-down half, and the port had nowhere to put it: a catalog that
     /// belonged to nobody in particular could not forget one runner's share of
-    /// it. Called from `Connection.retire`, which is the one place that sees a
-    /// runner stop being talked to.
+    /// it. Called from `RunnerStore.remove`, which its own doc calls the one
+    /// place that sees a runner stop existing — and deliberately NOT from
+    /// `Connection.retire`, which also fires on an edit and on the battery
+    /// gate, where the runner is still yours and its theme should stay in the
+    /// picker.
     func forget(runner: UUID) {
         guard byRunner.removeValue(forKey: runner.uuidString) != nil else { return }
         rebuild()
