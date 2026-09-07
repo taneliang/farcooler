@@ -174,6 +174,12 @@ AGENTKIT_SOURCES = [
     # the `Themes` singleton reverted the whole app to Nord at random on a fleet
     # of two. See `ThemeCatalogTests`.
     "ThemeCatalog.swift",
+    # Why a terminal id a wrist or a lock-screen card named did not resolve to
+    # a runner, and what to say about it. The port made a third cause reachable
+    # -- the fleet has not loaded yet -- and left two sentences for three
+    # causes, so a cold launch answered confidently and wrongly. See
+    # `TerminalReachTests`.
+    "TerminalReach.swift",
     # Which runners a "Stop Waiting" tap stops, and whether the button belongs
     # on screen at all. Here for `FleetMembership.swift`'s reason: the port
     # turned one runner's escape hatch into `for runner in fleet.runners` and
