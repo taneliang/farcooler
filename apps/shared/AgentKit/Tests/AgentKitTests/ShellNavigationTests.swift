@@ -271,6 +271,92 @@ struct ShellNavigationTests {
         #expect(fleet.position(ofTab: "b-new") == ShellPosition(workspace: 1, tab: 0))
     }
 
+    // MARK: - Where the shell sits when the fleet is re-merged
+
+    /// **The bug: a later-arriving runner re-indexes the pane on screen.**
+    ///
+    /// Two runners on a cold launch. The first answers, the shell opens on its
+    /// second worktree, and seconds later the second runner answers — its
+    /// worktrees go in ahead, in runner-list order, and `(workspace: 1)` is now
+    /// somebody else's checkout. The value did not move, so nothing downstream
+    /// can see that everything under it did.
+    @Test func aRunnerArrivingAheadDoesNotTakeTheShellWithIt() {
+        let before = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 2)
+        #expect(before.tab(at: at)?.id == "b2")
+
+        var after = before
+        after.workspaces.insert(
+            ShellWorkspace(id: "z", name: "zulu", tabs: [Self.tab("z0", .working)]), at: 0)
+
+        // The index alone is now a different runner's worktree.
+        #expect(after.tab(at: at)?.id != "b2")
+        // Anchored to the tab, the shell stays on the pane somebody is reading.
+        #expect(after.reseat(at, holding: "b2") == ShellPosition(workspace: 2, tab: 2))
+        #expect(after.tab(at: after.reseat(at, holding: "b2"))?.id == "b2")
+    }
+
+    /// A tab inserted before this one inside the same workspace moves it too.
+    @Test func aTabInsertedAheadMovesTheAnchoredPosition() {
+        var fleet = Self.crossing()
+        fleet.workspaces[1].tabs.insert(Self.tab("b-new", .working), at: 0)
+        #expect(
+            fleet.reseat(ShellPosition(workspace: 1, tab: 1), holding: "b1")
+                == ShellPosition(workspace: 1, tab: 2))
+    }
+
+    /// Nothing moved, so nothing moves. The anchored position is the position.
+    @Test func anUnchangedFleetSeatsTheShellWhereItAlreadyIs() {
+        let fleet = Self.crossing()
+        let at = ShellPosition(workspace: 1, tab: 2)
+        #expect(fleet.reseat(at, holding: "b2") == at)
+    }
+
+    /// The tab is gone — a terminal exited, a worktree was removed — and the
+    /// answer is the NEAREST position rather than the front of the fleet.
+    /// Somebody reading `beta` should not be moved to `alpha` because a pane
+    /// they were not looking at went away.
+    @Test func aVanishedTabClampsRatherThanGoingBackToTheStart() {
+        var fleet = Self.crossing()
+        fleet.workspaces[1].tabs.removeLast()
+        #expect(
+            fleet.reseat(ShellPosition(workspace: 1, tab: 2), holding: "b2")
+                == ShellPosition(workspace: 1, tab: 1))
+    }
+
+    /// A whole workspace gone clamps to the last one there is, not to nothing.
+    /// The TAB clamps within it too, and independently: `beta` is three tabs
+    /// long, so tab 0 stays tab 0 rather than being carried to the end.
+    @Test func aVanishedWorkspaceClampsToTheEndOfTheFleet() {
+        var fleet = Self.crossing()
+        fleet.workspaces.removeLast()
+        #expect(
+            fleet.reseat(ShellPosition(workspace: 2, tab: 0), holding: "c0")
+                == ShellPosition(workspace: 1, tab: 0))
+        #expect(
+            fleet.reseat(ShellPosition(workspace: 2, tab: 7), holding: "c0")
+                == ShellPosition(workspace: 1, tab: 2))
+    }
+
+    /// A fleet with nothing in it hands the position back untouched. There is
+    /// nothing to clamp to, and a fleet that empties under a finger is ordinary
+    /// — the same reason `tabCount(ofWorkspace:)` answers 0 rather than
+    /// trapping.
+    @Test func anEmptyFleetLeavesThePositionAlone() {
+        let fleet = ShellFleet(workspaces: [])
+        let at = ShellPosition(workspace: 1, tab: 2)
+        #expect(fleet.reseat(at, holding: "b2") == at)
+    }
+
+    /// A shell that has not come to rest on anything yet clamps, the same as
+    /// one whose tab has gone.
+    @Test func noAnchorClamps() {
+        let fleet = Self.crossing()
+        #expect(
+            fleet.reseat(ShellPosition(workspace: 9, tab: 9), holding: nil)
+                == ShellPosition(workspace: 2, tab: 0))
+    }
+
     // MARK: - Rubber banding
 
     /// The rubber band engages at the two true ends of the FLEET and nowhere
