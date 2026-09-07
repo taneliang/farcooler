@@ -962,8 +962,8 @@ public struct ActivityTrace: Sendable, Equatable {
     /// A row with less history than the axis covers therefore fills only the
     /// newest columns and leaves the rest EMPTY, which is §04's own case: "an
     /// agent that has touched no files shows an empty upper half against a
-    /// visible centre rule — absence drawn, not omitted." Nothing here pads,
-    /// stretches or centres a short trace to fill the axis; that would be this
+    /// visible center rule — absence drawn, not omitted." Nothing here pads,
+    /// stretches or centers a short trace to fill the axis; that would be this
     /// client inventing history it was not sent.
     ///
     /// # The one thing this CANNOT do, stated rather than hidden

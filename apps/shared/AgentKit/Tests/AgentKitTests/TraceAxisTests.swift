@@ -96,11 +96,11 @@ struct TraceAxisTests {
     }
 
     /// **§04's rule 4, on the shared axis.** "An agent that has touched no files
-    /// shows an empty upper half against a visible centre rule — absence drawn,
+    /// shows an empty upper half against a visible center rule — absence drawn,
     /// not omitted."
     ///
     /// A row with less history than the axis covers fills only the newest
-    /// columns and leaves the rest EMPTY. Nothing pads, stretches or centres a
+    /// columns and leaves the rest EMPTY. Nothing pads, stretches or centers a
     /// short trace to fill the axis, because a filled column is a claim that
     /// something happened in it and the wire made no such claim.
     @Test func aShortTraceLeavesTheOlderColumnsEmpty() throws {
