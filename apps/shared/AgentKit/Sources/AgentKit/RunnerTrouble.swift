@@ -24,12 +24,32 @@ import Foundation
 /// useful next move and they are not the same move.
 ///
 /// Read off the message rather than a typed error because the message is all
-/// that crosses the FFI boundary — the core hands back Rust's `Display` output
-/// as a string and there is no code to switch on. The substrings are the ones in
-/// `crates/client/src/ssh.rs` and `session.rs`; each is a distinctive phrase
+/// that crosses the FFI boundary on the connect path — the core hands back
+/// Rust's `Display` output as a string, with nothing beside it. The substrings
+/// are the ones in `crates/client/src/ssh.rs` and `session.rs`; each is a
+/// distinctive phrase
 /// from the middle of its message rather than a prefix, so wrapping the error in
 /// more context does not stop it matching.
-enum RunnerTrouble {
+///
+/// **One of them is not a phrase, and must not be read as one.**
+/// `SshError::Tunnel` renders as `cannot open the tunnel: <word>`, and the word
+/// is `farcooler_tailcat::TunnelError::code` — a stable machine word that
+/// already crosses the FFI on purpose, wrapped in a sentence for a log. So the
+/// tunnel failures are classified by READING THAT WORD (``TunnelWord``), never
+/// by matching the English around it. That prose can be reworded; the word is
+/// the thing whose own doc promises it will not be.
+///
+/// **The FFI is deliberately not widened to carry a code beside the message
+/// here.** `push_call` already does exactly that for a call on a live session,
+/// and `ClientCore.CoreError` states why the connect path is the exception: a
+/// connect failure genuinely arrives as prose, because two of these have
+/// nothing but the message to show — a changed host key, whose text carries the
+/// two fingerprints being compared and must not be paraphrased, and the
+/// undiagnosed failure, where the core's account is the only account there is.
+/// A code cannot replace those. What a code can do is stop a code being
+/// recovered from the sentence printed around it, and that is the whole of the
+/// change this seam needed.
+enum RunnerTrouble: Equatable {
     /// The host answered but does not know this device's key.
     /// `SshError::AuthRejected` — fixed by authorizing, not by retrying.
     case keyRejected
@@ -59,11 +79,81 @@ enum RunnerTrouble {
     /// The user stopped waiting. Also not a fault, and it must not be
     /// headlined as one.
     case stopped
+    /// The tunnel never opened, named by the stable word the core sent.
+    /// `SshError::Tunnel` — see ``TunnelWord``.
+    ///
+    /// Its own kind rather than ``other``, and this is the bug that made it
+    /// one: `tunnel_error` renders everything but a refused port as
+    /// `cannot open the tunnel: <word>`, which matches no phrase below, so a
+    /// revoked device fell through to ``other`` and read
+    /// `cannot open the tunnel: no_answer` off its own screen — a raw machine
+    /// word in front of a person, in the one situation where a clear sentence
+    /// matters most.
+    case tunnelFailed(TunnelWord)
     case other
+
+    /// The four stable words `farcooler_tailcat::TunnelError::code` sends, and
+    /// nothing else.
+    ///
+    /// These are not English and they are not a message: they are the machine
+    /// words the tunnel crate documents as "the stable word that crosses the
+    /// FFI. The apps own the sentence a person reads." This type is this app
+    /// owning them. `crates/cli/src/runner_pipe.rs`'s `sentence` is the same
+    /// table for the CLI, and the two say the same things in the two registers
+    /// their readers are in — one dialect, two readers.
+    ///
+    /// A word this build has never seen becomes ``unspecified`` rather than
+    /// nothing, so a fifth word added in Rust reaches a screen as a sentence
+    /// somebody wrote instead of as itself. That is the same rule
+    /// `farcooler_core::error::word_for` follows for a code it has not seen.
+    enum TunnelWord: String, Sendable, Equatable, Hashable, CaseIterable {
+        /// Tailcat ignores a client it does not recognize SILENTLY, so a
+        /// device removed from a runner's allowlist gets no refusal — it gets
+        /// a timeout. This is that timeout, and it is also what a runner that
+        /// is simply asleep looks like. The sentence has to say both.
+        case noAnswer = "no_answer"
+        /// The rendezvous service that introduces this device to the runner
+        /// could not be reached. That is this device's own network, not the
+        /// runner's.
+        case rendezvous = "derp"
+        /// This build links no tunnel at all. On iOS that is the Simulator:
+        /// `build-ios-frameworks.sh` links the archive into the device slice
+        /// only. A device build always has one.
+        case notInThisBuild = "no_tailcat"
+        /// Deliberately generic upstream — a malformed token, a dead sshd
+        /// whose errno differs by platform, and `EMFILE` all wear it — so the
+        /// sentence claims nothing about which. Also where an unrecognized
+        /// word lands.
+        case unspecified = "io"
+
+        /// What `SshError::Tunnel`'s `Display` puts in front of the word.
+        ///
+        /// The one string in this file that has to match Rust exactly.
+        /// `crates/client/src/ssh.rs`'s
+        /// `the_tunnel_message_carries_the_word_the_apps_read` is the other
+        /// half of that pair, and it names this file — because a reword on
+        /// either side is silent everywhere else.
+        static let marker = "cannot open the tunnel: "
+
+        /// The word inside a tunnel failure's message, or nil if this is not
+        /// one.
+        ///
+        /// Looked for anywhere in the message rather than at the front, for
+        /// the reason every phrase below is: wrapping the error in more
+        /// context must not stop it matching. The word runs to the first
+        /// space or the end, so trailing context does not become part of it.
+        static func inside(_ message: String) -> TunnelWord? {
+            guard let start = message.range(of: marker)?.upperBound else { return nil }
+            let word = message[start...].prefix { !$0.isWhitespace }
+            // Never nil past this point: an unknown word is a sentence this
+            // app wrote, never the word itself on a screen.
+            return TunnelWord(rawValue: String(word)) ?? .unspecified
+        }
+    }
 
     /// The sentences the APP writes, as opposed to the ones the core sends.
     ///
-    /// Four of the nine kinds above are diagnosed by matching a phrase in a
+    /// Four of the ten kinds above are diagnosed by matching a phrase in a
     /// message this app composed itself, which is a round trip with a seam in
     /// the middle: reword the sentence in `Connection` and the classifier
     /// quietly stops matching it, so a decision the user made turns into
@@ -105,7 +195,11 @@ enum RunnerTrouble {
     }
 
     init(message: String) {
-        if message.contains("rejected this key") { self = .keyRejected }
+        // First, and by the machine word rather than by a phrase. See the
+        // header: the word is what the core promises to keep stable, and the
+        // sentence printed around it is not.
+        if let word = TunnelWord.inside(message) { self = .tunnelFailed(word) }
+        else if message.contains("rejected this key") { self = .keyRejected }
         else if message.contains("is not the one Far Cooler has recorded") {
             self = .hostKeyChanged
         } else if message.contains("cannot reach") { self = .unreachable }
@@ -203,7 +297,51 @@ enum RunnerTrouble {
         // Deliberately not "Try Again": the dial would use the key that is
         // missing, so the button could only fail, every time, forever.
         case .noNodeKey: return .addThisDeviceAgain
-        case .unreachable, .daemonMissing, .noIdentity, .stopped, .other: return .tryAgain
+        // Including every tunnel word. A tunnel that did not open is the
+        // tunnel's version of a runner nobody could reach, and dialing again
+        // is what fixes a runner that was asleep. `notInThisBuild` is the
+        // exception on paper — no dial changes which archive a build links —
+        // but it is the Simulator's answer and never a shipped device's, so
+        // the alternative would be a button nobody will ever tap either way.
+        // What it must not do is retry on a SCHEDULE; see `retry`.
+        case .unreachable, .daemonMissing, .noIdentity, .stopped, .other, .tunnelFailed:
+            return .tryAgain
+        }
+    }
+
+    /// Whether to dial again without being asked, and how soon.
+    ///
+    /// Here rather than in `Connection`'s reconnect for this file's own reason,
+    /// and it took a tunnel failure to make the reason bite: the schedule is a
+    /// decision about what a failure MEANS, the iOS UI suite is compiled by CI
+    /// and never executed, and a `switch` in the app target is a decision
+    /// nothing reads back. `RunnerTroubleTests` reads this one.
+    enum Retry: Sendable, Equatable, Hashable {
+        /// Nothing is scheduled. The failure needs a person — a key to
+        /// authorize, a fingerprint to answer, a build that has a tunnel in it
+        /// — and a spinner returning every thirty seconds says the opposite.
+        case never
+        /// Five minutes, at the same rung. No amount of retrying installs a
+        /// daemon or wakes a build.
+        case afterAWhile
+        /// The exponential schedule, one rung up. For the failures that are
+        /// genuinely transient often enough to be worth chasing.
+        case onTheBackoff
+    }
+
+    var retry: Retry {
+        switch self {
+        case .keyRejected, .hostKeyChanged, .noIdentity, .noNodeKey, .keyNotTrusted:
+            return .never
+        // A dial cannot put the Go archive into a build that was linked
+        // without one, so the schedule would be a timeout every thirty
+        // seconds, forever, for an answer that cannot change.
+        case .tunnelFailed(.notInThisBuild):
+            return .never
+        case .daemonMissing:
+            return .afterAWhile
+        case .unreachable, .stopped, .other, .tunnelFailed:
+            return .onTheBackoff
         }
     }
 
@@ -214,7 +352,8 @@ enum RunnerTrouble {
         switch self {
         case .keyRejected: return true
         case .hostKeyChanged, .keyNotTrusted: return false
-        case .unreachable, .daemonMissing, .noIdentity, .noNodeKey, .stopped, .other:
+        case .unreachable, .daemonMissing, .noIdentity, .noNodeKey, .stopped, .other,
+            .tunnelFailed:
             return false
         }
     }
@@ -253,6 +392,11 @@ enum RunnerTrouble {
         case .unreachable: return "network.slash"
         case .daemonMissing: return "square.and.arrow.down"
         case .stopped: return "clock"
+        // A build with no tunnel in it is not a network problem and must not
+        // wear the network's mark: nothing about this device's connection
+        // changes the answer.
+        case .tunnelFailed(.notInThisBuild): return "exclamationmark.triangle"
+        case .tunnelFailed: return "network.slash"
         case .other: return "exclamationmark.triangle"
         }
     }
@@ -290,6 +434,17 @@ enum RunnerTrouble {
         case .noNodeKey: return "This Device Has No Tunnel Key"
         case .keyNotTrusted: return "Key Not Trusted"
         case .stopped: return "Stopped Waiting"
+        // Named the same way ``unreachable`` names it, because it is the same
+        // fact about the same runner: nothing answered. `Runner.named` is
+        // what makes that a label rather than the empty address a tunneled
+        // runner has.
+        case .tunnelFailed(.noAnswer): return "Can’t Reach \(words.name)"
+        // Not the runner's name: what could not be reached is the rendezvous,
+        // and blaming the runner would send somebody to go and wake a machine
+        // that was awake the whole time.
+        case .tunnelFailed(.rendezvous): return "Can’t Reach the Tunnel"
+        case .tunnelFailed(.notInThisBuild): return "No Tunnel in This Build"
+        case .tunnelFailed(.unspecified): return "The Tunnel Didn’t Open"
         case .other: return "Can’t Connect"
         }
     }
@@ -324,6 +479,32 @@ enum RunnerTrouble {
                 + "or the address may be wrong."
         case .daemonMissing:
             return "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
+        // The app's own sentences for the tunnel's four stable words. Never
+        // `message`: `message` is `cannot open the tunnel: <word>`, and the
+        // word is the thing this table exists to keep off a screen.
+        //
+        // `crates/cli/src/runner_pipe.rs`'s `sentence` says the same four
+        // things to whoever is reading a terminal. Reword one and the other
+        // is where to look.
+        case .tunnelFailed(.noAnswer):
+            // Both causes, because from here they are indistinguishable — a
+            // revoked device is ignored silently and times out exactly as a
+            // sleeping runner does — and naming only one would send half the
+            // people who read this to the wrong place.
+            return
+                "It didn’t answer. The runner may be asleep, or this device’s access "
+                + "to it may have been revoked."
+        case .tunnelFailed(.rendezvous):
+            return
+                "The service that introduces this device to the runner didn’t answer. "
+                + "Check this device’s own network."
+        case .tunnelFailed(.notInThisBuild):
+            return "This build of Far Cooler has no tunnel it can dial."
+        // No cause named, for ``other``'s reason: `io` is deliberately generic
+        // upstream, so a guess here would send somebody to fix something that
+        // was never the problem.
+        case .tunnelFailed(.unspecified):
+            return "The tunnel couldn’t be opened."
         // Sentences somebody wrote, each naming both what happened and what to
         // do about it — three of them in `Connection`, `hostKeyChanged` in
         // `crates/client/src/ssh.rs`. They are the core's words only in the

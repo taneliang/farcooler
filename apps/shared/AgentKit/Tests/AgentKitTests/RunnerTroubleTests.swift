@@ -52,6 +52,113 @@ struct RunnerTroubleTests {
         #expect(RunnerTrouble(message: "").showsTheRunnersOwnWords)
     }
 
+    /// **The bug this case exists for.** `tunnel_error` renders every tunnel
+    /// failure but a refused port as `cannot open the tunnel: <word>`, which
+    /// matches none of the phrases above — so a revoked device fell through to
+    /// `other`, and `other` is the one kind that puts the core's own words on
+    /// screen. The person read `cannot open the tunnel: no_answer`: a raw
+    /// machine word, in the situation where a clear sentence matters most.
+    @Test(arguments: [
+        ("cannot open the tunnel: no_answer", RunnerTrouble.TunnelWord.noAnswer),
+        ("cannot open the tunnel: derp", RunnerTrouble.TunnelWord.rendezvous),
+        ("cannot open the tunnel: no_tailcat", RunnerTrouble.TunnelWord.notInThisBuild),
+        ("cannot open the tunnel: io", RunnerTrouble.TunnelWord.unspecified),
+    ])
+    func aTunnelFailureIsClassifiedByItsStableWord(
+        message: String, word: RunnerTrouble.TunnelWord
+    ) {
+        #expect(RunnerTrouble(message: message) == .tunnelFailed(word))
+    }
+
+    /// Every word `farcooler_tailcat::TunnelError::code` can send is one this
+    /// app has a case for. A word added in Rust with no case here would land on
+    /// `unspecified`, which is a sentence — never on `other`, which is the raw
+    /// text.
+    @Test func aWordThisBuildHasNeverSeenIsStillASentence() {
+        #expect(
+            RunnerTrouble(message: "cannot open the tunnel: quic")
+                == .tunnelFailed(.unspecified))
+        // Not even an empty one gets through as itself.
+        #expect(RunnerTrouble(message: "cannot open the tunnel: ") == .tunnelFailed(.unspecified))
+    }
+
+    /// The word is read out of the middle of a wrapped message too, and it ends
+    /// at the first space rather than swallowing whatever follows it.
+    @Test func theWordIsReadOutOfAWrappedMessage() {
+        #expect(
+            RunnerTrouble(message: "While connecting: cannot open the tunnel: derp (attempt 3)")
+                == .tunnelFailed(.rendezvous))
+    }
+
+    /// **The rule, stated as a test.** No tunnel failure may put the core's
+    /// text on screen, and no sentence any of them draws may contain the
+    /// machine word — which is what the person actually read before this
+    /// existed.
+    @Test func noTunnelFailurePutsAMachineWordOnAScreen() {
+        for word in RunnerTrouble.TunnelWord.allCases {
+            let kind = RunnerTrouble.tunnelFailed(word)
+            let message = "cannot open the tunnel: \(word.rawValue)"
+            #expect(
+                !kind.showsTheRunnersOwnWords,
+                "\(word.rawValue) would print the core's own words in a box")
+            for line in [kind.headline(tunneled), kind.detail(message: message, words: tunneled)] {
+                #expect(!line.contains(word.rawValue), "the stable word leaked into the copy: \(line)")
+                #expect(!line.contains("cannot open the tunnel"), "the core's log line: \(line)")
+            }
+            #expect(kind.detail(message: message, words: tunneled).hasSuffix("."), "not a sentence")
+        }
+    }
+
+    /// A tunneled runner has no address, so the one headline that names it has
+    /// to name it the way `Runner.named` does. `words.name` is that; the empty
+    /// string a tunneled runner's `address` returns would read as
+    /// "Can’t Reach ".
+    @Test func theTunnelHeadlineNamesTheRunnerTheWayASentenceDoes() {
+        #expect(
+            RunnerTrouble.tunnelFailed(.noAnswer).headline(tunneled)
+                == "Can’t Reach the spare room")
+        // The rendezvous is not the runner, and blaming the runner would send
+        // somebody to wake a machine that was awake the whole time.
+        #expect(
+            RunnerTrouble.tunnelFailed(.rendezvous).headline(tunneled) == "Can’t Reach the Tunnel")
+    }
+
+    /// The one thing a person can act on when their access was revoked is
+    /// knowing that it might have been. A sentence naming only a sleeping
+    /// runner sends half the people who read it to the wrong place.
+    @Test func theUnansweredTunnelNamesBothCauses() {
+        let detail = RunnerTrouble.tunnelFailed(.noAnswer).detail(message: "", words: tunneled)
+        #expect(detail.contains("asleep"))
+        #expect(detail.contains("revoked"))
+    }
+
+    // MARK: - Retrying, and not
+
+    /// **A dial cannot put the Go archive into a build that was linked without
+    /// one**, so a schedule would be a ten-second timeout every thirty seconds
+    /// forever for an answer that cannot change. Every other tunnel word is
+    /// worth chasing: a runner that was asleep is exactly what the backoff is
+    /// for.
+    ///
+    /// Read back here rather than left in `Connection`'s reconnect, because
+    /// the iOS UI suite is compiled by CI and never executed — a `switch` in
+    /// the app target is a decision nothing reads.
+    @Test func theScheduleMatchesWhatTheFailureMeans() {
+        for kind: RunnerTrouble in [
+            .keyRejected, .hostKeyChanged, .noIdentity, .noNodeKey, .keyNotTrusted,
+            .tunnelFailed(.notInThisBuild),
+        ] {
+            #expect(kind.retry == .never, "\(kind) must not dial again on a schedule")
+        }
+        #expect(RunnerTrouble.daemonMissing.retry == .afterAWhile)
+        for kind: RunnerTrouble in [
+            .unreachable, .stopped, .other, .tunnelFailed(.noAnswer),
+            .tunnelFailed(.rendezvous), .tunnelFailed(.unspecified),
+        ] {
+            #expect(kind.retry == .onTheBackoff, "\(kind) should be chased on the backoff")
+        }
+    }
+
     // MARK: - The next move
 
     /// **The whole table, in one assertion.** Every one of these was a case in
@@ -68,6 +175,9 @@ struct RunnerTroubleTests {
         #expect(RunnerTrouble.noIdentity.nextMove == .tryAgain)
         #expect(RunnerTrouble.stopped.nextMove == .tryAgain)
         #expect(RunnerTrouble.other.nextMove == .tryAgain)
+        for word in RunnerTrouble.TunnelWord.allCases {
+            #expect(RunnerTrouble.tunnelFailed(word).nextMove == .tryAgain)
+        }
     }
 
     /// A key the runner has never seen is not fixed by dialing again, and a
@@ -87,7 +197,7 @@ struct RunnerTroubleTests {
         for kind: RunnerTrouble in [
             .hostKeyChanged, .keyNotTrusted, .unreachable, .daemonMissing, .noIdentity,
             .noNodeKey, .stopped, .other,
-        ] {
+        ] + RunnerTrouble.TunnelWord.allCases.map(RunnerTrouble.tunnelFailed) {
             #expect(!kind.worthRetryingAsAlternative, "\(kind) should not offer retry twice")
         }
     }
@@ -100,7 +210,7 @@ struct RunnerTroubleTests {
         for kind: RunnerTrouble in [
             .keyRejected, .hostKeyChanged, .unreachable, .daemonMissing, .noNodeKey,
             .keyNotTrusted, .stopped, .other,
-        ] {
+        ] + RunnerTrouble.TunnelWord.allCases.map(RunnerTrouble.tunnelFailed) {
             #expect(kind.offersEditingTheRunner, "\(kind) should offer the editor")
         }
     }
@@ -124,7 +234,7 @@ struct RunnerTroubleTests {
         for kind: RunnerTrouble in [
             .keyRejected, .unreachable, .daemonMissing, .noIdentity, .noNodeKey,
             .keyNotTrusted, .stopped, .other,
-        ] {
+        ] + RunnerTrouble.TunnelWord.allCases.map(RunnerTrouble.tunnelFailed) {
             #expect(!kind.isAlarming, "\(kind) should not be painted as alarming")
         }
     }
@@ -137,7 +247,7 @@ struct RunnerTroubleTests {
         for kind: RunnerTrouble in [
             .keyRejected, .hostKeyChanged, .unreachable, .daemonMissing, .noIdentity,
             .noNodeKey, .keyNotTrusted, .stopped,
-        ] {
+        ] + RunnerTrouble.TunnelWord.allCases.map(RunnerTrouble.tunnelFailed) {
             #expect(!kind.showsTheRunnersOwnWords, "\(kind) has a diagnosis of its own")
         }
     }
@@ -222,6 +332,12 @@ struct RunnerTroubleTests {
         #expect(RunnerTrouble.unreachable.symbol == "network.slash")
         #expect(RunnerTrouble.daemonMissing.symbol == "square.and.arrow.down")
         #expect(RunnerTrouble.stopped.symbol == "clock")
+        #expect(RunnerTrouble.tunnelFailed(.noAnswer).symbol == "network.slash")
+        #expect(RunnerTrouble.tunnelFailed(.rendezvous).symbol == "network.slash")
+        #expect(RunnerTrouble.tunnelFailed(.unspecified).symbol == "network.slash")
+        // Not the network's mark: nothing about this device's connection
+        // changes which archive a build linked.
+        #expect(RunnerTrouble.tunnelFailed(.notInThisBuild).symbol == "exclamationmark.triangle")
         #expect(RunnerTrouble.other.symbol == "exclamationmark.triangle")
     }
 }

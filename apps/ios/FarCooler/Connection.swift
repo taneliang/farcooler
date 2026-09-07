@@ -575,15 +575,20 @@ final class Connection: ObservableObject {
             return
         }
 
-        switch Failure(message: message) {
-        case .keyRejected, .hostKeyChanged, .noIdentity, .noNodeKey, .keyNotTrusted:
+        // WHICH failure gets which schedule is `RunnerTrouble.retry`, in
+        // AgentKit, for the reason every other decision about a failure moved
+        // there: this file is in the iOS target, CI compiles it and never runs
+        // it, and a table nothing reads back is a table that drifts. This is
+        // the mechanism only.
+        switch Failure(message: message).retry {
+        case .never:
             phase = next
-        case .daemonMissing:
+        case .afterAWhile:
             // Kept at the same rung: `attempt` drives the fast schedule, means
             // nothing at this cadence, and letting it climb would leave a
             // later, genuinely transient failure starting at the ceiling.
             scheduleReconnect(attempt: attempt, after: Self.slowRetrySeconds)
-        case .unreachable, .stopped, .other:
+        case .onTheBackoff:
             scheduleReconnect(attempt: attempt + 1, after: Self.backoff(attempt: attempt + 1))
         }
     }

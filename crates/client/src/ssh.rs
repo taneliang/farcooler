@@ -680,6 +680,33 @@ mod tests {
         assert!(!message.contains("os error"), "leaked the raw OS error text: {message}");
     }
 
+    /// The exact line the apps take a word OUT of, pinned whole.
+    ///
+    /// `apps/shared/AgentKit/Sources/AgentKit/RunnerTrouble.swift` classifies a
+    /// tunnel failure by finding `"cannot open the tunnel: "` in this message
+    /// and reading the stable word that follows it — the word, not the prose,
+    /// because the word is the thing `TunnelError::code` promises to keep
+    /// stable. Nothing else connects the two files.
+    ///
+    /// So this is the other half of that pair. Reword the `#[error]` attribute
+    /// and every tunnel failure on both phones falls back to "undiagnosed",
+    /// which is the one kind that prints the core's own text on a screen — so
+    /// the symptom of a reword is `cannot open the tunnel: no_answer` in front
+    /// of somebody whose access was just revoked. That is invisible in a diff,
+    /// in a build, and in every other test in either language.
+    #[test]
+    fn the_tunnel_message_carries_the_word_the_apps_read() {
+        for error in [TunnelError::NoTailcatLinked, TunnelError::Derp, TunnelError::NoAnswer] {
+            let word = error.code();
+            let message = tunnel_error(error).to_string();
+            assert_eq!(
+                message,
+                format!("cannot open the tunnel: {word}"),
+                "RunnerTrouble.TunnelWord.marker no longer finds the word in this message"
+            );
+        }
+    }
+
     /// Every other tunnel failure — including `NoAnswer`, whose entire
     /// reason for existing is that a revoked device looks like a timeout
     /// rather than a refusal, and every other `io::Error`, whose kind might
