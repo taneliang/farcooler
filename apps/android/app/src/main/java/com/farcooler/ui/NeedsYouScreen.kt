@@ -314,7 +314,7 @@ private fun AgentRow(
  * they read as things inside this worktree without an indent having to say so.
  * Sticky, so the worktree stays named while you read down its agents.
  *
- * Deliberately no amber up here, and no counts. That colour is reserved across
+ * Deliberately no amber up here, and no counts. That color is reserved across
  * this app for an agent waiting on you and [TerminalRow] already spends it on
  * exactly those, inside; a second mark here would say the same thing twice and
  * weaken it both times. The counts moved down to the row that opens them.
@@ -410,7 +410,7 @@ private fun ChangesRow(
         },
         trailingContent = {
             // The counts, drawn by the one composable that knows what those
-            // two colours mean — the workspace's Changes chip shows the same
+            // two colors mean — the workspace's Changes chip shows the same
             // pair for the same worktree, and they must not be able to come out
             // different. See [DiffCounts].
             if (counts != null && counts.hasDiff) DiffCounts(counts)

@@ -226,7 +226,7 @@ internal object NativeVt {
     external fun nativeScrollToBottom(handle: Long)
 
     /**
-     * Recolour the terminal. Nineteen packed 0xRRGGBB values: sixteen ANSI,
+     * Recolor the terminal. Nineteen packed 0xRRGGBB values: sixteen ANSI,
      * then foreground, background, cursor.
      */
     external fun nativeSetPalette(handle: Long, colors: IntArray): Boolean

@@ -416,12 +416,12 @@ private fun FleetBody(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // "tmux unavailable" was set in exactly the typography and
-                // exactly the colour of "3 live · 2 runners" — the one sentence
+                // exactly the color of "3 live · 2 runners" — the one sentence
                 // on this screen that means every pane on every runner is
                 // unreadable, drawn as though it were a healthy count. Both the
-                // Mac and iOS give the same three words a coloured mark; this
+                // Mac and iOS give the same three words a colored mark; this
                 // one already has a mark of its own, so the mark takes the
-                // colour rather than a second dot being added beside it.
+                // color rather than a second dot being added beside it.
                 //
                 // Red rather than the Mac's amber. Amber means an agent is
                 // waiting on you, and nobody is waiting here: the runtime every
@@ -429,7 +429,7 @@ private fun FleetBody(
                 // settled that in `7e4a4f7` and the Mac is now the one surface
                 // out of step.
                 //
-                // "No runners" is deliberately not coloured. An app nobody has
+                // "No runners" is deliberately not colored. An app nobody has
                 // added a runner to yet is empty, not broken.
                 val down = runtimeIsDown(connections)
                 val tint =
@@ -510,7 +510,7 @@ private fun FleetBody(
  * Whether every runner this app knows about has an unreadable tmux.
  *
  * The same condition [liveSummary] turns into "tmux unavailable", asked
- * separately so the row can colour itself without parsing its own sentence.
+ * separately so the row can color itself without parsing its own sentence.
  */
 private fun runtimeIsDown(connections: List<Connection>): Boolean =
     connections.isNotEmpty() && connections.none { it.fleet.value.runtimeHealthy }
@@ -621,15 +621,15 @@ internal fun RunnerStatusRow(
                 // runner that has never had `host install` run on it — and
                 // KEY_NOT_TRUSTED and STOPPED, both of which this file's own
                 // comments call "not a fault". Red on a step somebody simply has
-                // not taken yet shouts about the wrong thing, and a colour spent
-                // on everything is a colour that says nothing about the one case
+                // not taken yet shouts about the wrong thing, and a color spent
+                // on everything is a color that says nothing about the one case
                 // that warrants it: a host key that changed underneath us.
                 //
                 // The same rule iOS's full-screen failure already follows, and
                 // the same call the Mac makes for `notInstalled`, which it
                 // paints `.secondary` in both `HostDot` and `troubleColor`. The
                 // headline names what happened either way; it does not need the
-                // colour to do it.
+                // color to do it.
                 Text(
                     failureHeadline(kind, connection),
                     style = MaterialTheme.typography.bodySmall,
@@ -1019,8 +1019,8 @@ internal fun TerminalRow(
                                 // iOS made in the other direction, drawing those
                                 // words in the ordinal's tier. Material has no
                                 // tertiary text role, so the step down is an
-                                // alpha on the same colour rather than a second
-                                // colour nobody defined.
+                                // alpha on the same color rather than a second
+                                // color nobody defined.
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                     .copy(alpha = 0.6f),
                             )
@@ -1045,7 +1045,7 @@ internal fun TerminalRow(
                     // six things where the row says three: `rowStatus` already
                     // prints "Needs you 2m", "Working 12m" and "Failed", so the
                     // glyph was restating a string beside it in a channel — hue
-                    // — that a colourblind reader, a greyscale screenshot and a
+                    // — that a colorblind reader, a greyscale screenshot and a
                     // phone in sunlight all lose. §03's mark keeps the
                     // distinction that survives all three: stroke weight for
                     // whether you are wanted, a filled centre for whether it is
@@ -1098,7 +1098,7 @@ internal fun TerminalRow(
             //
             // The part of the row that answers "what did it do", which is most
             // of what reviewing an agent's work is — so they are drawn in the
-            // ordinary supporting colour, not the faint one the ordinal gets.
+            // ordinary supporting color, not the faint one the ordinal gets.
             //
             // Guarded as a group rather than left loose: an empty column would
             // still take the step of spacing above it and leave a gap under

@@ -5,7 +5,7 @@ package com.farcooler.core
  *
  * A thin, safe wrapper: it owns the handle's lifetime, converts between Kotlin
  * and the flat arrays the JNI layer hands back, and nothing else. Every
- * decision about what bytes mean — what colour an escape sequence produces,
+ * decision about what bytes mean — what color an escape sequence produces,
  * what an arrow key encodes to under the program's current mode — lives on the
  * other side of this boundary. That is what lets this renderer and the Mac's
  * answer to the same core without agreeing on a single line of emulator logic.
@@ -45,10 +45,10 @@ class VtCore(columns: Int, rows: Int) {
      * scrolled-back view would show the user nothing of what they typed.
      */
     /**
-     * Recolour every cell the next snapshot produces.
+     * Recolor every cell the next snapshot produces.
      *
-     * Colours resolve when a snapshot is taken rather than when bytes arrive,
-     * so this recolours scrollback too — switching themes is instant, not a
+     * Colors resolve when a snapshot is taken rather than when bytes arrive,
+     * so this recolors scrollback too — switching themes is instant, not a
      * repaint of history the terminal no longer holds.
      */
     fun setPalette(colors: IntArray): Boolean {
@@ -262,16 +262,16 @@ class TerminalGrid(
 }
 
 /**
- * Colours the core did not resolve, because they belong to this screen rather
+ * Colors the core did not resolve, because they belong to this screen rather
  * than to any program running on the host: the fill behind a short last row and
  * the cursor block. Values mirror the Mac and iOS apps' so the same terminal
  * looks like the same terminal on all three.
  */
 /**
- * The colours the renderer owns, read from the theme in force.
+ * The colors the renderer owns, read from the theme in force.
  *
  * These were constants, which is what made the palette unchangeable without
- * reinstalling. Cell colours still come from the core already resolved; this is
+ * reinstalling. Cell colors still come from the core already resolved; this is
  * the chrome around them.
  */
 object TerminalPalette {

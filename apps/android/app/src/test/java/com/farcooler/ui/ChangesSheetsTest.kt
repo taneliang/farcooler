@@ -19,7 +19,7 @@ import org.junit.Test
  * function beside its sheet and read here, which is the same shape
  * `ChangesScreenTest` and `NeedsYouScreen`'s reassurance copy already take.
  *
- * What is deliberately NOT here: anything about layout, keyboard, colour or hit
+ * What is deliberately NOT here: anything about layout, keyboard, color or hit
  * targets. None of it can be asserted from the JVM and pretending otherwise
  * would be worse than saying so.
  */

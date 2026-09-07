@@ -47,7 +47,7 @@ import com.farcooler.model.Terminal
  * Material You survives for the dark case. Android hands every app a palette
  * derived from the wallpaper, and an app that declines it reads as ported
  * rather than native — accents around a dark terminal do not fight it. A light
- * theme takes its own colours instead: picking Solarized Light and getting
+ * theme takes its own colors instead: picking Solarized Light and getting
  * wallpaper-derived dark surfaces would be the app ignoring what it was just
  * told.
  *
@@ -70,7 +70,7 @@ fun FarCoolerTheme(content: @Composable () -> Unit) {
         val theme = Themes.current
         // Material You survives, for the DARK case only.
         //
-        // Wallpaper-derived colour is the platform-native behaviour this file
+        // Wallpaper-derived color is the platform-native behaviour this file
         // argues for at length, and it is still right when the chosen theme is
         // dark — the accents sit around a terminal, they do not fight it. It
         // yields entirely once a LIGHT theme is chosen: picking Solarized
@@ -80,7 +80,7 @@ fun FarCoolerTheme(content: @Composable () -> Unit) {
             if (theme.dark) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
         base.copy(
-            // The one colour that is not the platform's to choose: it is
+            // The one color that is not the platform's to choose: it is
             // shared with the Mac and iOS so the same terminal looks like the
             // same terminal on all three.
             surfaceContainerLowest = Color(Themes.opaque(theme.background)),
@@ -93,7 +93,7 @@ fun FarCoolerTheme(content: @Composable () -> Unit) {
     ) {
         // Inside, not outside: [glanceInk1] and [glanceInk2] fall back to the
         // scheme's own on-surface roles in light mode, so the glance vocabulary
-        // has to be able to see the colours Material just resolved.
+        // has to be able to see the colors Material just resolved.
         ProvideGlanceAppearance(dark, content)
     }
 }
@@ -120,7 +120,7 @@ object TerminalFonts {
 }
 
 /**
- * The dot colour for "is the process alive" — shared by the fleet list and the
+ * The dot color for "is the process alive" — shared by the fleet list and the
  * terminal tab strip, so the same terminal cannot read one way in one screen
  * and another way in the other.
  *
@@ -136,7 +136,7 @@ object TerminalFonts {
  * stepping in and out as panes start and stop.
  *
  * **Not amber for STARTING.** A pane is starting for well under a second, and
- * a colour nobody has time to read is a colour spent for nothing. It was worse
+ * a color nobody has time to read is a color spent for nothing. It was worse
  * than spent here: Material amber 500 (`FFC107`) sat one step from the orange
  * 500 (`FF9800`) that means an agent is waiting on you, on an 8dp dot, so the
  * two most different pieces of news this list carries — "give it a moment" and
@@ -166,7 +166,7 @@ fun processColor(kind: StateKind): Color = when (kind) {
     StateKind.LOST, StateKind.ERROR -> MaterialTheme.colorScheme.error
     // Not an error: the runner did not answer, which is a claim about the
     // reading and not about the pane. Painting the whole fleet red every time
-    // tmux is busy is how a colour stops meaning anything.
+    // tmux is busy is how a color stops meaning anything.
     StateKind.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
@@ -177,8 +177,8 @@ val PROCESS_DOT = 8.dp
  * That dot, drawn — one shape, one size, and a hollow one where something is
  * missing.
  *
- * **Shape before colour.** Hollow says "something is not there" before the hue
- * does, which is the half of this vocabulary that survives a colourblind
+ * **Shape before color.** Hollow says "something is not there" before the hue
+ * does, which is the half of this vocabulary that survives a colorblind
  * reader, a greyscale screenshot and a phone in bright sun. The phones had
  * dropped it entirely and drew every state as a filled disc, leaving hue as
  * the only channel; `StatusGlyph.mark` on the Mac has carried it all along,
@@ -192,16 +192,16 @@ val PROCESS_DOT = 8.dp
  */
 @Composable
 fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
-    val colour = processColor(kind)
+    val color = processColor(kind)
     val hollow = kind == StateKind.LOST || kind == StateKind.ERROR || kind == StateKind.UNKNOWN
     Box(
         modifier
             .size(PROCESS_DOT)
             .then(
-                if (hollow) Modifier.border(1.5.dp, colour, CircleShape)
+                if (hollow) Modifier.border(1.5.dp, color, CircleShape)
                 // A transparent fill still claims the box, which is the point:
                 // the column is reserved whether or not anything occupies it.
-                else Modifier.clip(CircleShape).background(colour)
+                else Modifier.clip(CircleShape).background(color)
             )
     )
 }
@@ -212,7 +212,7 @@ fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
  *
  * It gave Material orange 500 to a blocked agent, Material green 500 to a
  * finished one and the scheme's error red to a turn that died, and every one of
- * those was a colour this file mixed by hand. §01 of the glance spec reserves
+ * those was a color this file mixed by hand. §01 of the glance spec reserves
  * ONE saturated hue for "does this need me" and forbids any other loud thing;
  * three hues answering that one question is the failure the rule names. The
  * replacement is `model/Glance.kt` — `GlancePalette.amber` for the tier and
@@ -228,7 +228,7 @@ fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
  */
 
 /**
- * `+82 -13`: how much a worktree has changed, in the two colours those signs
+ * `+82 -13`: how much a worktree has changed, in the two colors those signs
  * have everywhere in this app.
  *
  * One copy, not one per surface. The front door's review row wrote this out and
@@ -236,7 +236,7 @@ fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
  * shape `df87410` already had to pull the landing ordering back from: three
  * copies of one rule is three chances for a phone to disagree with itself.
  *
- * The green is a literal because it is the one colour Material's scheme has no
+ * The green is a literal because it is the one color Material's scheme has no
  * role for — there is no "positive" slot in a `ColorScheme` the way there is an
  * `error` one. It used to match `attentionColor`'s green to the byte and was
  * written out separately so that a change to what a FINISHED AGENT looks like
@@ -247,7 +247,7 @@ fun ProcessDot(kind: StateKind, modifier: Modifier = Modifier) {
  * this constant. Red IS the scheme's error role, because "removed" and "went
  * wrong" want the same red under every theme.
  *
- * **This is NOT a glance colour and must not become one.** §01's palette is
+ * **This is NOT a glance color and must not become one.** §01's palette is
  * about what an agent is doing; a diff's signs are about what a patch says, and
  * they sit inside a review surface a person is already reading rather than on a
  * mark they are meant to catch at a glance.
@@ -282,11 +282,11 @@ internal val DIFF_ADDED = Color(0xFF4CAF50)
 
 /**
  * How much of an ink a full-width wash gets, where a row is TINTED rather than
- * drawn in a colour.
+ * drawn in a color.
  *
  * The added and removed backgrounds behind a patch's lines. It was `0x26` baked
  * into two ARGB literals — 38/255, which is this — and written as part of the
- * colour rather than as a property of the wash, so the two could not be changed
+ * color rather than as a property of the wash, so the two could not be changed
  * together and neither could follow a theme's own error red.
  */
 internal const val WASH = 0.15f

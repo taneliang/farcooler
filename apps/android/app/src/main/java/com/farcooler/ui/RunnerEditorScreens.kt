@@ -53,15 +53,15 @@ import com.farcooler.model.transcript
 import kotlinx.coroutines.launch
 
 /**
- * Nineteen colours, over a terminal actually rendering them.
+ * Nineteen colors, over a terminal actually rendering them.
  *
  * All nineteen on a phone, which was the deliberate choice rather than the easy
- * one: the config format treats the sixteen ANSI colours as optional, so a
+ * one: the config format treats the sixteen ANSI colors as optional, so a
  * grounds-only editor would have been a first-class config and less work — and
  * would have sent you back to ssh for the other sixteen.
  *
- * Each colour is three sliders rather than a picker, because Android ships no
- * colour picker and a hand-rolled wheel is a lot of surface to get subtly wrong.
+ * Each color is three sliders rather than a picker, because Android ships no
+ * color picker and a hand-rolled wheel is a lot of surface to get subtly wrong.
  * Sliders are dull and exact, and the preview above answers the only question
  * that actually matters.
  */
@@ -179,7 +179,7 @@ private fun ansiRow(
     }
 }
 
-/** One colour: a swatch and its hex, which opens three channel sliders. */
+/** One color: a swatch and its hex, which opens three channel sliders. */
 @Composable
 private fun ColorRow(
     label: String,
@@ -235,19 +235,19 @@ private fun Channel(name: String, value: Int, onChange: (Int) -> Unit) {
     }
 }
 
-/** Opaque alpha, since the grid's colours carry none. */
+/** Opaque alpha, since the grid's colors carry none. */
 private const val OPAQUE = 0xFF000000.toInt()
 
 /**
  * A terminal rendering a fixture in the theme being edited.
  *
  * Through the same [VtCore] a live pane uses, fed the same kind of bytes. Cell
- * colours are resolved inside that core precisely so three renderers cannot
+ * colors are resolved inside that core precisely so three renderers cannot
  * drift; a hand-drawn preview here would be a fourth drifting from all of them.
  */
 @Composable
 private fun ThemePreview(theme: Theme, modifier: Modifier = Modifier) {
-    // Rebuilt on every change rather than recoloured in place: the fixture is a
+    // Rebuilt on every change rather than recolored in place: the fixture is a
     // few hundred bytes, and a fresh core cannot carry state from a palette that
     // is no longer chosen. Freed immediately — this core outlives nothing.
     val grid = remember(theme) {
@@ -264,10 +264,10 @@ private fun ThemePreview(theme: Theme, modifier: Modifier = Modifier) {
 }
 
 /**
- * The grid as coloured blocks.
+ * The grid as colored blocks.
  *
  * Backgrounds only, deliberately: at this size a glyph is four pixels tall and
- * unreadable, and what the eye is actually judging is whether these colours sit
+ * unreadable, and what the eye is actually judging is whether these colors sit
  * together. The fixture's last two rows are solid blocks of all sixteen for
  * exactly that reason.
  */
@@ -279,7 +279,7 @@ private fun PreviewCanvas(grid: TerminalGrid) {
         val cellHeight = size.height / grid.rows
         for (row in 0 until grid.rows) {
             for (column in 0 until grid.columns) {
-                // A written cell shows its text colour; a blank one shows the
+                // A written cell shows its text color; a blank one shows the
                 // ground. Without that, every row would be one flat rectangle.
                 val packed =
                     if (grid.character(row, column) > 32) grid.foreground(row, column)
@@ -295,7 +295,7 @@ private fun PreviewCanvas(grid: TerminalGrid) {
 }
 
 /**
- * Output chosen to exercise what a theme has to get right: every colour, bold, a
+ * Output chosen to exercise what a theme has to get right: every color, bold, a
  * prompt, a diff, and an agent waiting on you.
  */
 private val PREVIEW_FIXTURE: String = buildString {

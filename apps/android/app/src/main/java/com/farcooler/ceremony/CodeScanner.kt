@@ -251,7 +251,7 @@ private fun CameraPreview(scanner: CodeScanner, modifier: Modifier = Modifier) {
  * One QR code out of one camera frame, with ZXing.
  *
  * The luminance plane is used as it arrives — a QR decoder wants brightness and
- * nothing else, so there is no colour conversion and no bitmap in the middle of
+ * nothing else, so there is no color conversion and no bitmap in the middle of
  * this. The buffer is reused across frames because this runs thirty times a
  * second and a fresh two-megabyte array each time is thirty a second for the
  * collector.

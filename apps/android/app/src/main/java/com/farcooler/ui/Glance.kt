@@ -42,7 +42,7 @@ import com.farcooler.model.agentInk
  * turns those answers into pixels and does not add to them.
  *
  * That split is the same one `model/NeedsYou.kt` and `ui/PaneDeck.kt` already
- * make, and it exists here for a sharper reason than testability: a colour
+ * make, and it exists here for a sharper reason than testability: a color
  * system's bugs are almost all in the arithmetic, and arithmetic that lives
  * inside a composable can only be checked by looking at it.
  */
@@ -160,7 +160,7 @@ fun GlanceMarkView(
         GlanceMark.Attention.QUIET -> glanceInk2()
     }
     // Never amber. §03 reserves the ring for the person's side and the core for
-    // the agent's, and amber is the person's colour: an amber core would say
+    // the agent's, and amber is the person's color: an amber core would say
     // "this needs you" about the half of the mark that is only ever saying what
     // the agent is doing.
     val core = glanceInk1()
@@ -184,7 +184,7 @@ fun GlanceMarkView(
  * **This is `Status.tint` from the Mac**, and it is one function for the same
  * reason it is one there: the glyph was not the only thing painting a status.
  * A tab-strip chip's ring and the fleet row it names must not be able to come
- * out different colours, and before the Mac fused this, a failed agent was
+ * out different colors, and before the Mac fused this, a failed agent was
  * orange collapsed and red expanded.
  *
  * **The decision is not here; only the resolution is.** Which ink an agent wears
@@ -208,7 +208,7 @@ fun GlanceMarkView(
  * now: `GlanceMark.Attention.TO_REVIEW` stopped meaning "a finished diff nobody
  * has read" and started meaning "a finished thing nobody has looked at", `done`
  * maps onto it on all three platforms, and this is the Android half of that.
- * The chip and the fleet row a person actually looks at visibly change colour;
+ * The chip and the fleet row a person actually looks at visibly change color;
  * that is the intended outcome and not a regression. [FINISHED] itself stays
  * exactly where it is — it has two other users that are not about agents.
  */

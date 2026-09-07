@@ -174,7 +174,7 @@ class TerminalSession(
 
     /**
      * The pane's scrollback, as bytes ready to feed straight into an emulator:
-     * CRLF-repaired, colour-reset and terminated by the host, with the
+     * CRLF-repaired, color-reset and terminated by the host, with the
      * alternate-screen case already decided there. See [HISTORY_LINES] for why
      * this is held rather than re-fetched, and [render] for where it goes.
      *
@@ -1305,7 +1305,7 @@ internal object CapturedPane {
      * The same order, and for the same reasons, that the daemon's own `replay`
      * writes down a stream — see `replay` in `crates/daemon/src/runtime.rs`.
      * The host has already done the parts that need tmux to answer for them:
-     * repairing the history's bare line feeds, resetting the colour its last
+     * repairing the history's bare line feeds, resetting the color its last
      * line left set, and deciding that an alternate screen has no history worth
      * sending. What is left here is the clear, and the repair the SCREEN still
      * needs.

@@ -105,7 +105,7 @@ you do constantly.
 the reasoning transfers exactly: half the app is a terminal, a terminal is dark
 whatever the device is set to, and a light list handing off to a black screen
 looked like two applications. What does not transfer is declining the platform's
-own colour, so the scheme is the system's *dark* dynamic palette — accents and
+own color, so the scheme is the system's *dark* dynamic palette — accents and
 surfaces from the wallpaper — with only the terminal's own background pinned,
 because that value is shared with the Mac and iOS.
 

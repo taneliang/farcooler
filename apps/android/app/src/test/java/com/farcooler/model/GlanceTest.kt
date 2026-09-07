@@ -12,7 +12,7 @@ import org.junit.Test
 /**
  * The glance vocabulary, pinned.
  *
- * ## Where the expected colours come from
+ * ## Where the expected colors come from
  *
  * **Not from this file's own arithmetic.** A test that re-implemented
  * [Oklch.toArgb]'s matrices to check [Oklch.toArgb] would pass with both copies
@@ -57,7 +57,7 @@ class GlanceTest {
     // MARK: - §01, against Chrome
 
     @Test
-    fun `the twelve colours match Chrome's own oklch conversion`() {
+    fun `the twelve colors match Chrome's own oklch conversion`() {
         assertRgb(Triple(247, 162, 36), GlancePalette.amber.dark.toArgb(), "amber dark")
         assertRgb(Triple(185, 117, 21), GlancePalette.amber.light.toArgb(), "amber light")
         assertRgb(Triple(144, 183, 207), GlancePalette.review.dark.toArgb(), "review dark")
@@ -412,7 +412,7 @@ class GlanceTest {
      * well, two facts that are not about an agent at all, and this fails if
      * somebody does. The rule itself is pinned one test up, in [agentInk].
      *
-     * The second half is that the two are genuinely different colours, so the
+     * The second half is that the two are genuinely different colors, so the
      * change is one a person can see: Material green 500 against §01's
      * low-chroma review ink.
      */

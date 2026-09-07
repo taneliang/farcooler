@@ -99,12 +99,12 @@ import kotlinx.serialization.json.Json
 // a bottom sheet, which also puts the content where the thumb already is rather
 // than under a navigation bar at the far end of the phone.
 //
-// **A sheet gets Material's own ground, and that is why accent colour is allowed
+// **A sheet gets Material's own ground, and that is why accent color is allowed
 // here and forbidden ten feet away.** `ChangesScreen`'s rule — no accent text
 // anywhere — is about the diff pane sitting on the TERMINAL's theme-chosen
 // background, where how well eleven points of blue can be read depends on which
 // palette is in force. `FarCoolerTheme` pins only `surfaceContainerLowest` to
-// the terminal's colour; a `ModalBottomSheet` draws on `surfaceContainerLow`,
+// the terminal's color; a `ModalBottomSheet` draws on `surfaceContainerLow`,
 // which is the platform's own surface under the platform's own scheme. So a
 // `TextButton` in here is a `TextButton` on the ground Material chose for it,
 // exactly like every other sheet in this app.
@@ -124,7 +124,7 @@ import kotlinx.serialization.json.Json
 // **Nothing in this file has drawn a frame.** There is no emulator and no device
 // for any part of phase 5. Every sentence worth being sure about is a pure
 // function at the bottom of this file where `ChangesScreenTest` can read it;
-// everything about layout, keyboard and colour is reasoning, and is marked as
+// everything about layout, keyboard and color is reasoning, and is marked as
 // such in the report rather than claimed here.
 
 // ---- which sheet is up ----
@@ -1135,7 +1135,7 @@ internal fun BranchRow(
     onClick: () -> Unit,
 ) {
     // Not `alpha` on the row: a translucent row dims the ground it sits on as
-    // well as the text, and this app's own disabled colour is the one Material
+    // well as the text, and this app's own disabled color is the one Material
     // resolved against the sheet's surface.
     val ink =
         if (enabled) MaterialTheme.colorScheme.onSurface

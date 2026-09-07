@@ -77,8 +77,8 @@ class NativeBridgeTest {
     }
 
     @Test
-    fun coloursArriveAlreadyResolved() {
-        // The core resolves the named and 256-colour palettes so a renderer
+    fun colorsArriveAlreadyResolved() {
+        // The core resolves the named and 256-color palettes so a renderer
         // never has to. Which red is the core's business; that it changed and
         // that it is drawable is this test's.
         val vt = VtCore(10, 2)

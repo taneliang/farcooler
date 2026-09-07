@@ -179,7 +179,7 @@ fun TerminalTabStrip(
                     // app's own ink, for the one outcome the glance vocabulary
                     // still has no mark for.
                     //
-                    // **A finished turn is visibly a different colour on this
+                    // **A finished turn is visibly a different color on this
                     // chip than it was.** It was green until `done` joined the
                     // review tier; the tier is what a person is being told, and
                     // green was saying "it worked" where the useful fact is "you
@@ -198,7 +198,7 @@ fun TerminalTabStrip(
                     // vocabulary would put an `AgentMarkView` at
                     // `GlanceMarkSize.RIBBON` in this chip's leading slot — the
                     // slot [ProcessDot] currently holds — and that is a change
-                    // to what the strip IS rather than to what it is coloured.
+                    // to what the strip IS rather than to what it is colored.
                     // The strip is the surface iOS replaced wholesale with the
                     // shell's bar; restructuring it here would be work thrown
                     // away twice. So this pass takes the hue only, which is the

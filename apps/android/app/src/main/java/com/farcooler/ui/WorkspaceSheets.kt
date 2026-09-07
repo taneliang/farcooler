@@ -86,7 +86,7 @@ import kotlinx.coroutines.launch
 // for this phase. The sentences worth being sure about are pure functions in
 // `model/Stack.kt` and at the bottom of this file, where `StackTest`,
 // `RemoveWorktreeTest` and `ResumeBranchTest` can read them; everything about
-// layout and colour is reasoning, and is marked as such in the report rather
+// layout and color is reasoning, and is marked as such in the report rather
 // than claimed here.
 
 // ---- where a branch sits ----
@@ -254,13 +254,13 @@ private fun PullRequestRows(pr: PullRequest) {
     FactRow(
         "Checks",
         prChecksWord(pr.checks),
-        // Colour is spent on the reading that is NEWS. A failing check is news;
+        // Color is spent on the reading that is NEWS. A failing check is news;
         // a passing one is the ordinary outcome and says enough in the word
         // itself. This is `processColor`'s rule — "a running process is the
         // ordinary case and now says nothing at all" — and it is why this
         // deliberately does not follow the Mac and iOS, which tint passing green
         // and pending orange. Green here would be the third meaning of green in
-        // this app and orange would be the second meaning of the one colour that
+        // this app and orange would be the second meaning of the one color that
         // has exactly one.
         tint = if (pr.checks == "failing") MaterialTheme.colorScheme.error else null,
     )
@@ -319,7 +319,7 @@ private fun SheetNoteText(text: String) {
     )
 }
 
-/** Something that may be wrong, in the app's one colour for that. */
+/** Something that may be wrong, in the app's one color for that. */
 @Composable
 private fun WarningLine(text: String) {
     Row(verticalAlignment = Alignment.Top) {

@@ -19,7 +19,7 @@ import org.junit.Test
  * test rather than by a screenshot nobody took. That is the shape
  * `changesDescription` and `NeedsYouScreen`'s reassurance copy already use.
  *
- * What is deliberately NOT here: anything about layout, colour, scrolling or
+ * What is deliberately NOT here: anything about layout, color, scrolling or
  * hit targets. None of it can be asserted from the JVM and pretending otherwise
  * would be worse than saying so.
  */

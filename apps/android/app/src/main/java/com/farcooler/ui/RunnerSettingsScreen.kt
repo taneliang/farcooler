@@ -160,7 +160,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     LaunchedEffect(connection) { reload() }
 
     // The editors take the whole screen rather than a bottom sheet: nineteen
-    // colour rows and seven fields do not fit one, and a sheet that scrolls
+    // color rows and seven fields do not fit one, and a sheet that scrolls
     // behind the keyboard is worse than a screen that does not have to.
     editingTheme?.let { theme ->
         ThemeEditorScreen(
@@ -620,7 +620,7 @@ private fun RestrictedNote() {
  * version — but nothing carried the daemon's account of WHY, and the fleet
  * footer's three words ("tmux unavailable") are the whole of what this app could
  * previously say about a degraded runner. They are also fleet-wide: that footer
- * only colours when EVERY runner is down, so one bad runner out of three said
+ * only colors when EVERY runner is down, so one bad runner out of three said
  * nothing at all anywhere. This screen is per-runner by construction.
  *
  * The reasons are printed one to a line, unsummarized and in the runner's own
@@ -683,11 +683,11 @@ private fun HealthFact(label: String, value: String) {
     }
 }
 
-/** A theme's colours as one strip, for a list row. */
+/** A theme's colors as one strip, for a list row. */
 @Composable
 fun ThemeStrip(theme: Theme) {
     Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-        // The ground, the text, and the eight normal colours. Enough to tell two
+        // The ground, the text, and the eight normal colors. Enough to tell two
         // themes apart at a glance, which is all a row has to do.
         val preview = listOf(theme.background, theme.foreground) + theme.ansi.take(8)
         for (packed in preview) {
@@ -695,7 +695,7 @@ fun ThemeStrip(theme: Theme) {
                 Modifier
                     .width(5.dp)
                     .height(18.dp)
-                    // Opaque alpha, since the grid's colours carry none.
+                    // Opaque alpha, since the grid's colors carry none.
                     .background(Color(0xFF000000.toInt() or packed)))
         }
     }

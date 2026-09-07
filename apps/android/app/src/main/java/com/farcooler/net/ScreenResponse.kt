@@ -45,7 +45,7 @@ data class ScreenResponse(
      * Present only when it was asked for — see `TerminalSession.HISTORY_LINES`
      * — and empty for a pane that has none, or one on the alternate screen,
      * which has no history of its own. The host has already repaired the bare
-     * line feeds, appended the colour reset the last history line left set, and
+     * line feeds, appended the color reset the last history line left set, and
      * decided the alternate-screen case, so what arrives here needs no repair:
      * it is the same assembly the daemon writes down a stream (`replay` in
      * `crates/daemon/src/runtime.rs`).

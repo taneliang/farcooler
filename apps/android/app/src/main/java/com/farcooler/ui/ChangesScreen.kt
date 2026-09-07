@@ -167,10 +167,10 @@ import kotlinx.coroutines.launch
  * themselves keep their wash and are never opaque, so no card gets a step across
  * its middle and no gap between two of them becomes a stripe.
  *
- * ## Colour
+ * ## Color
  *
  * No accent text anywhere on this screen. Every control that could have been
- * accent-coloured words is a button with a FILL of its own, which is the fix
+ * accent-colored words is a button with a FILL of its own, which is the fix
  * `b6e3114` had to make three times on iOS and the finding
  * `.claude/agent/done/ios-fleet-visual-critique.md` opens with: this pane sits
  * on the terminal's theme-chosen background rather than on a system one, so how
@@ -190,7 +190,7 @@ import kotlinx.coroutines.launch
  * **That rule stops at a sheet, and `ChangesSheets.kt` says why.** A
  * `ModalBottomSheet` draws on `surfaceContainerLow`, which `FarCoolerTheme`
  * leaves to the platform — only `surfaceContainerLowest` is pinned to the
- * terminal's colour — so a sheet is on Material's own ground under Material's
+ * terminal's color — so a sheet is on Material's own ground under Material's
  * own scheme, and accent there is accent the way every other sheet in this app
  * already uses it. What is forbidden is accent on THIS pane.
  *
@@ -1517,7 +1517,7 @@ private fun CommitBody(text: String, sha: String) {
         )
         if (long) {
             Spacer(Modifier.height(2.dp))
-            // A real button style rather than accent-coloured words. This is one
+            // A real button style rather than accent-colored words. This is one
             // of the three places `b6e3114` had to fix on iOS: a card here sits
             // on the terminal's theme-chosen ground rather than on a system
             // background, so accent text with nothing behind it reads differently
@@ -1901,7 +1901,7 @@ private fun ReviewMenu(
  * background, and a `surfaceContainer` grey beside a Nord or Gruvbox ground is
  * the "cards read as recessed wells" finding the iOS critique files under
  * global. Only "slightly lighter than whatever is behind" holds for both
- * polarities, which is why it is a wash and not a colour.
+ * polarities, which is why it is a wash and not a color.
  *
  * The same six and four percent iOS's `ChangesSurface.card` uses, so the two
  * apps' cards sit at the same distance from the same palette.
@@ -1950,9 +1950,9 @@ internal fun Counts(insertions: Int, deletions: Int) {
 }
 
 /**
- * The colour of a file's status letter.
+ * The color of a file's status letter.
  *
- * Deliberately only two of the eight get a colour of their own, and they are the
+ * Deliberately only two of the eight get a color of their own, and they are the
  * two the diff's own green and red already mean: a file that appeared and a file
  * that went. Everything else is the neutral. Spending a third hue on `R` or `T`
  * would be spending it on the rarest rows in the list, and the letter itself

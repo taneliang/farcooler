@@ -50,7 +50,7 @@ import com.farcooler.model.GlanceType
  * distinguishes states by stroke weight, fill and dash, so hue was always
  * redundant reinforcement." There is deliberately no greyscale block in here —
  * desaturating the SCREENSHOT is the same test and is one command, where a
- * `saveLayer` and a colour matrix inside the composable would be twenty lines of
+ * `saveLayer` and a color matrix inside the composable would be twenty lines of
  * scaffolding that could itself be wrong:
  *
  * ```

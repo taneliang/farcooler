@@ -45,7 +45,7 @@ class TerminalScrollbackTest {
     @Test
     fun aResponsesScrollbackIsRead() {
         // "hi\r\n" base64'd. The host sends bytes that are already ready to
-        // feed: line feeds repaired, colour reset appended.
+        // feed: line feeds repaired, color reset appended.
         val response = decode("""{"columns":80,"rows":24,"history":"aGkNCg=="}""")
         assertEquals("aGkNCg==", response.history)
     }

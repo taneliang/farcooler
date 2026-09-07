@@ -10,15 +10,15 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * A colour scheme: the terminal's palette, and which way the app around it
+ * A color scheme: the terminal's palette, and which way the app around it
  * goes.
  *
  * The same shape the Mac and the iPhone decode, from the same source — the
- * built-in table in `farcooler_core::theme`. No client defines a colour of its
+ * built-in table in `farcooler_core::theme`. No client defines a color of its
  * own, which is what stops "Nord" meaning three different things on three
  * screens.
  *
- * Colours are signed `Int` because Kotlin's `Int` is what Compose and the JNI
+ * Colors are signed `Int` because Kotlin's `Int` is what Compose and the JNI
  * bridge both take; the bit pattern is the packed `0xRRGGBB` the core sends.
  */
 @Serializable
@@ -46,7 +46,7 @@ private data class ThemeList(val themes: List<Theme> = emptyList())
  * whatever a connected runner defines is merged on top, the runner winning a
  * name collision because it is the more specific statement.
  *
- * What is STORED is the name, never the colours: a host theme can be edited,
+ * What is STORED is the name, never the colors: a host theme can be edited,
  * and a client that had cached its values would go on showing the old ones
  * forever.
  */
@@ -79,7 +79,7 @@ object Themes {
     val available: StateFlow<List<Theme>> = _available.asStateFlow()
 
     /**
-     * Bumped whenever the colours in force change, so a live terminal
+     * Bumped whenever the colors in force change, so a live terminal
      * repaints. The same shape the font size setting already uses.
      */
     private val _revision = MutableStateFlow(0)
@@ -102,7 +102,7 @@ object Themes {
      *
      * Falls back rather than to nothing when a stored name no longer resolves:
      * a theme that vanished because a host's config file moved should cost you
-     * your colours, not your terminal.
+     * your colors, not your terminal.
      */
     val current: Theme
         get() = _available.value.firstOrNull { it.name == _selected.value } ?: fallback

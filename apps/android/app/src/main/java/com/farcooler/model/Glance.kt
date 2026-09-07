@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /*
- * The glance vocabulary: one mark, twelve colours, six type styles.
+ * The glance vocabulary: one mark, twelve colors, six type styles.
  *
  * A port of `apps/shared/AgentKit/Sources/AgentKit/GlanceMark.swift`,
  * `GlancePalette.swift` and `GlanceType.swift`, which are themselves a
@@ -32,7 +32,7 @@ import kotlin.math.sin
  * Everything here is arithmetic on `Double` and plain data, so it runs under
  * `testInstrumentedUnitTest` on the JVM with no device and no Robolectric. The
  * conversion from OKLCH to sRGB is sixteen constants and a transfer function;
- * it is the one part of a colour system that can be WRONG rather than merely
+ * it is the one part of a color system that can be WRONG rather than merely
  * ugly, and a wrong matrix is invisible on a screenshot and obvious in a test.
  *
  * `ui/Glance.kt` is the thin Compose layer that turns an [Int] ARGB into a
@@ -53,7 +53,7 @@ import kotlin.math.sin
  */
 
 /**
- * One colour, in the co-ordinates the spec uses.
+ * One color, in the co-ordinates the spec uses.
  *
  * OKLCH is the stored form rather than a hand-converted hex table, and that is
  * the whole point of this type. The spec's §09 review pass records what
@@ -73,7 +73,7 @@ data class Oklch(
     val alpha: Double = 1.0,
 ) {
     /**
-     * The sRGB colour, as a packed ARGB `Int`, converted here rather than at any
+     * The sRGB color, as a packed ARGB `Int`, converted here rather than at any
      * call site.
      *
      * Björn Ottosson's Oklab matrices, in the order the transform runs: polar →
@@ -83,11 +83,11 @@ data class Oklch(
      * read — and cheaper to test — than a library's version.
      *
      * **Out-of-gamut components are clamped, not gamut-mapped**, which is a
-     * deliberate simplification and safe for exactly these values: every colour
+     * deliberate simplification and safe for exactly these values: every color
      * in [GlancePalette] was checked against Chrome's own CSS Color 4
      * implementation and lands inside sRGB, so no clamp fires today. It is here
      * so that a value edited in the design document to something sRGB cannot
-     * hold degrades to the nearest displayable colour rather than to whatever a
+     * hold degrades to the nearest displayable color rather than to whatever a
      * negative component rounds to.
      */
     fun toArgb(): Int {
@@ -123,9 +123,9 @@ data class Oklch(
 }
 
 /**
- * One colour of the system, in both appearances.
+ * One color of the system, in both appearances.
  *
- * Two literals rather than one colour and a filter, because §01 is explicit
+ * Two literals rather than one color and a filter, because §01 is explicit
  * that light mode is "Not a filter flip": amber DARKENS on a pale backdrop to
  * hold its contrast, the surfaces invert to translucent black, and the two
  * trace tones swap ends of the scale. A single value adjusted at draw time
@@ -148,7 +148,7 @@ data class GlanceInk(val dark: Oklch, val light: Oklch) {
 
 /**
  * §01, transcribed. Twelve values, and nothing else in the product may hold a
- * colour that belongs to a glance surface.
+ * color that belongs to a glance surface.
  */
 object GlancePalette {
     // The one saturated hue, and the one that is not allowed to be loud.
@@ -156,13 +156,13 @@ object GlancePalette {
     /**
      * Needs you. **Nothing else in the product may be amber, at any opacity.**
      *
-     * This is the whole colour system: one reserved hue, so that "does this need
+     * This is the whole color system: one reserved hue, so that "does this need
      * me" is answered before a word is read. It replaces `attentionColor`'s
      * `Color(0xFFFF9800)` — Material orange 500, which was one step from the
      * Material amber 500 that `ui/Theme.kt` had already argued had to be kept
      * off the process dot for being indistinguishable from it.
      *
-     * The light value is a genuinely different colour rather than the same one
+     * The light value is a genuinely different color rather than the same one
      * dimmed — §01: "amber darkens to oklch(0.62 0.13 68) to hold contrast on a
      * pale backdrop."
      */
@@ -572,7 +572,7 @@ data class GlanceMark(
  * became the review tier on all three platforms, and a finished turn is now a
  * middle-weight hollow ring drawn by [GlanceMark.of] like any other mark. Hue
  * agreement was never the whole of it: the Mac and the phone draw a RING, and a
- * recoloured disc would have been this app agreeing about the colour and not
+ * recolored disc would have been this app agreeing about the color and not
  * about the vocabulary.
  *
  * **So this type is now a single axis: the turn died.** It is deliberately still
@@ -656,7 +656,7 @@ enum class AgentInk(val glance: GlanceInk?) {
     /**
      * The turn ended and nobody has looked yet — the same low-chroma ink
      * `GlanceMarkView` strokes a [GlanceMark.Attention.TO_REVIEW] ring in, so a
-     * tab chip's border and the ring inside it cannot come out two colours.
+     * tab chip's border and the ring inside it cannot come out two colors.
      */
     REVIEW(GlancePalette.review),
 

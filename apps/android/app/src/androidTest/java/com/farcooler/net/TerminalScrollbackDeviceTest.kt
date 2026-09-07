@@ -101,7 +101,7 @@ class TerminalScrollbackDeviceTest {
     fun theHostsScrollbackArrivesBase64AndIsReadyToFeed() {
         // What actually crosses the wire, decoded the way `TerminalSession`
         // decodes it. The host has already repaired the line feeds and appended
-        // the colour reset, so nothing here repairs anything — that is the
+        // the color reset, so nothing here repairs anything — that is the
         // point of the field.
         val encoded = Base64.encodeToString(scrollback, Base64.NO_WRAP)
         val decoded = Base64.decode(encoded, Base64.DEFAULT)

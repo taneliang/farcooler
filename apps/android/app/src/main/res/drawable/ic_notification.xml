@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    A notification icon is a silhouette: Android throws away every colour and
+    A notification icon is a silhouette: Android throws away every color and
     keeps the alpha, so this is drawn as solid white on nothing rather than as a
     small copy of the launcher icon. The bear would arrive as a filled circle.
 

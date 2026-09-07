@@ -248,7 +248,7 @@ private fun ToolRowView(
         }
 
         // The question, on the thing being asked about. No heading and no
-        // coloured panel: the ring around this row already says which call is
+        // colored panel: the ring around this row already says which call is
         // waiting, and repeating it in words inside the row it is drawn on is
         // the same fact twice.
         if (pending != null && onAnswer != null) {
@@ -432,7 +432,7 @@ private fun GapRow(reason: GapReason) {
  *
  * Ordered by what the question actually is. ACP hands back a flat list —
  * `allow_once`, `allow_always`, `reject_once`, … — and rendering it flat gives
- * three identical full-width buttons, two of them the same colour, with the
+ * three identical full-width buttons, two of them the same color, with the
  * longest and loudest being a restatement of the command already shown above. A
  * stack of equal-weight options is not a decision; it is a menu.
  *
@@ -441,7 +441,7 @@ private fun GapRow(reason: GapReason) {
  * than an answer to this question — sits under it in small type.
  *
  * Reject is NOT red. Red is for destructive; declining a command destroys
- * nothing, and spending the alarm colour here leaves none for when it matters.
+ * nothing, and spending the alarm color here leaves none for when it matters.
  */
 @Composable
 fun ApprovalControls(
@@ -676,7 +676,7 @@ fun DiffView(diff: Diff) {
                                 // above, at a wash. They were two more literals
                                 // here — and the red was `F44336` rather than
                                 // the scheme's error role, so under any theme
-                                // that moved its error colour a removed line's
+                                // that moved its error color a removed line's
                                 // background and the `−N` beside it were already
                                 // two different reds.
                                 when (line.kind) {
@@ -732,7 +732,7 @@ private fun Gutter(number: Int?) {
 
 /**
  * The vocabulary for "something is happening": green finished, red missing,
- * secondary for everything in between. The attention colour is reserved for
+ * secondary for everything in between. The attention color is reserved for
  * "needs you", which a tool call never is.
  */
 @Composable
