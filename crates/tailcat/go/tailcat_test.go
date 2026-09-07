@@ -119,6 +119,48 @@ func TestClosingOurEndTearsDownTheFarSide(t *testing.T) {
 	}
 }
 
+// A failed adoption must leave the near end alone, and close only the far one.
+//
+// pumpToSocketpair used to close BOTH ends here, and fdConn had already closed
+// the near one — it owns the descriptor it is handed either way, which is what
+// its doc now says. The second close does not land on nothing: descriptor
+// numbers are reused, so it lands on whatever the runtime opened in the
+// meantime. In this process that is a tunnel socket or the runner's key file,
+// and the symptom is a tunnel that dies with no error anywhere.
+//
+// The arm is unreachable through a real socketpair — net.FileConn refuses only
+// something that is not a socket, and Socketpair returns nothing else — so no
+// input this suite can supply reaches it, which is why the bug sat here with
+// every test green. The stub is the only way in, and it deliberately does NOT
+// close the descriptor, because a descriptor still open is the only way a
+// second close is observable at all.
+func TestAFailedAdoptionDoesNotCloseTheNearEndTwice(t *testing.T) {
+	real := fdConn
+	t.Cleanup(func() { fdConn = real })
+	handed := -1
+	fdConn = func(fd int) (net.Conn, error) {
+		handed = fd
+		return nil, errors.New("not a socket")
+	}
+
+	far, near := net.Pipe()
+	defer far.Close()
+	defer near.Close()
+	if _, err := pumpToSocketpair(far); err == nil {
+		t.Fatal("pumpToSocketpair reported success for an adoption that failed")
+	}
+	if handed < 0 {
+		t.Fatal("pumpToSocketpair never reached fdConn")
+	}
+	// Fstat rather than a close that reports EBADF: a close that guessed wrong
+	// would itself destroy the descriptor it was asking about.
+	var st syscall.Stat_t
+	if err := syscall.Fstat(handed, &st); err != nil {
+		t.Fatalf("pumpToSocketpair closed a descriptor fdConn already owns: %v", err)
+	}
+	syscall.Close(handed)
+}
+
 // The refusal is checked by its exact errno rather than by "rc is negative",
 // because a serve that got past this guard would go on to Start a real server
 // and could fail there for an unrelated reason — leaving the test green where

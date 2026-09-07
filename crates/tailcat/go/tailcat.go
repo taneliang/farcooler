@@ -168,7 +168,10 @@ func pumpToSocketpair(conn net.Conn) (int, error) {
 	}
 	ours, err := fdConn(fds[0])
 	if err != nil {
-		syscall.Close(fds[0])
+		// The FAR end only. fdConn owns fds[0] whether or not it could adopt
+		// it — see its doc — and a second close here would not be closing a
+		// descriptor that is already gone: it would be closing whatever number
+		// the runtime handed out in its place.
 		syscall.Close(fds[1])
 		return -1, err
 	}
@@ -179,14 +182,30 @@ func pumpToSocketpair(conn net.Conn) (int, error) {
 	return fds[1], nil
 }
 
-// fdConn adopts a raw descriptor as a net.Conn. os.NewFile takes ownership, so
-// the descriptor must not be closed separately.
-func fdConn(fd int) (net.Conn, error) {
+// fdConn adopts a raw descriptor as a net.Conn, and it OWNS that descriptor
+// EITHER WAY: on success the returned conn holds it; on failure os.NewFile has
+// already taken it and the deferred Close has already run. A caller that closes
+// it again on the failure path is not closing something that is merely gone —
+// descriptor numbers are reused, so it closes whatever the runtime handed out
+// in the meantime, which in this process is a live tunnel socket, the runner's
+// key file, or a log. Nothing reports that; it surfaces later as a tunnel that
+// died for no reason.
+//
+// A var, and only so that pumpToSocketpair's failure path is reachable from a
+// test. Through a real socketpair it is not reachable at all: net.FileConn
+// refuses only something that is not a socket, and syscall.Socketpair returns
+// nothing else — which is exactly why the double close above sat here
+// unnoticed and why no test could have gone red on it.
+var fdConn = func(fd int) (net.Conn, error) {
 	if fd < 0 {
 		return nil, errors.New("not a file descriptor")
 	}
 	file := os.NewFile(uintptr(fd), "tailcat")
 	if file == nil {
+		// The one path where the descriptor is still ours: os.NewFile refused
+		// it, so it adopted nothing, and returning here without closing would
+		// leak it for the life of the process.
+		syscall.Close(fd)
 		return nil, errors.New("not a file descriptor")
 	}
 	defer file.Close() // FileConn dups; this closes our copy, not the peer's.
