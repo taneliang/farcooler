@@ -4408,4 +4408,170 @@ mod hook_wiring_tests {
             "the listener is assembling into a `HookIngress` nothing can evict from"
         );
     }
+
+    /// Codex's prose, from the transcript it names, over the SAME production
+    /// path as the test above -- `resume_agent_listeners`, the real socket,
+    /// `HookIngress::serve`'s own `start_transcript_tail` -- rather than
+    /// against `transcript_tail`'s or `hook_ingress`'s pieces in isolation.
+    /// Without this the whole feature could be exactly the shape task 8's own
+    /// tests already proved and still be unreachable, which is precisely how
+    /// the shim path spent its first week: `listen` "was written, tested and
+    /// never called" (`resume_agent_listeners`'s own doc, quoting
+    /// `agent_supervisor::ensure_listening`'s note).
+    #[tokio::test]
+    async fn a_codex_hooks_own_transcript_reaches_the_terminals_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+        let root = service
+            .store
+            .create_repository_root(service.host_id, "/tmp/codex-transcript-tests", now_millis())
+            .unwrap();
+        let repository = service
+            .store
+            .create_repository(service.host_id, root.id, "repo", "/tmp/codex-transcript-tests/.git", "")
+            .unwrap();
+        let workspace = service
+            .store
+            .create_workspace(repository.id, "main", "/tmp/codex-transcript-tests", true)
+            .unwrap();
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "codex", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        // The session-id join alone, exactly like the claude test above --
+        // codex's OWN binding path (`announced_terminal`) is a different
+        // task's surface, and this test's subject is what happens once a
+        // terminal is bound, not how it got that way.
+        let term = service
+            .store
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Terminal,
+                Some("a-codex-session".to_string()),
+            )
+            .unwrap();
+
+        // The rollout file codex would have opened on its first turn
+        // (`docs/agent-session-logs.md`), named by `transcript_path` in every
+        // payload below -- nothing here reads the real `~/.codex/sessions`.
+        let rollout = dir.path().join("rollout.jsonl");
+        std::fs::write(&rollout, "").unwrap();
+
+        service.resume_agent_listeners();
+
+        let socket = hook_ingress::HookIngress::socket_path(&service.root);
+        let mut stream = None;
+        for _ in 0..200 {
+            if let Ok(s) = tokio::net::UnixStream::connect(&socket).await {
+                stream = Some(s);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let mut stream = stream.unwrap_or_else(|| {
+            panic!("nothing is listening on {} — no live session can report anything", socket.display())
+        });
+
+        // One ordinary hook payload, carrying `transcript_path` the way
+        // every real one does (`Facts`'s own doc) -- this alone is what
+        // `start_transcript_tail` needs to begin.
+        let frame = serde_json::to_string(&serde_json::json!({
+            "agent": "codex",
+            "event": "UserPromptSubmit",
+            "payload": {
+                "session_id": "a-codex-session",
+                "prompt": "explain TCP slow start",
+                "transcript_path": rollout.to_string_lossy(),
+            },
+        }))
+        .unwrap();
+        stream.write_all(format!("{frame}\n").as_bytes()).await.unwrap();
+        stream.flush().await.unwrap();
+
+        // Wait for the prompt to actually land before writing a single byte
+        // of commentary. `start_transcript_tail` starts its tail at the
+        // rollout's length AT THE MOMENT this hook is processed -- correct
+        // for its real job, not replaying a session's history into a chat
+        // that just attached -- but it means appending before that moment is
+        // reached races the tail's own catch-up read and can be skipped as
+        // "already there" even though nothing had actually read it yet. A
+        // real codex never faces this: `UserPromptSubmit` fires before the
+        // model has produced a single word of commentary for the turn it
+        // opens, so the two can never be this close together outside a test
+        // that removes the model generation time in between.
+        let mut prompt_landed = false;
+        for _ in 0..240 {
+            if !service.agents.replay(term.id, 0, 0).1.is_empty() {
+                prompt_landed = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        assert!(prompt_landed, "the hook above must have reached the terminal's transcript by now");
+
+        // The prose no hook payload carries, appended to the file the hook
+        // above just named -- codex's `item_completed`/`AgentMessage`
+        // shape, mid-turn commentary rather than the closing line `Stop`
+        // already sends (`transcript_tail`'s own doc on why the closing
+        // line is dropped there).
+        use std::io::Write as _;
+        let mut rollout_file = std::fs::OpenOptions::new().append(true).open(&rollout).unwrap();
+        writeln!(
+            rollout_file,
+            "{}",
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "item_completed",
+                    "item": {
+                        "type": "AgentMessage",
+                        "phase": "commentary",
+                        "content": [{ "text": "Reading the congestion window first." }],
+                    },
+                },
+            })
+        )
+        .unwrap();
+
+        let mut events = Vec::new();
+        for _ in 0..240 {
+            events = service.agents.replay(term.id, 0, 0).1;
+            if events.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+
+        assert_eq!(
+            events.len(),
+            2,
+            "the prompt from the hook and the commentary from the transcript, and nothing else: {events:?}"
+        );
+        assert!(
+            matches!(
+                &events[0].event,
+                farcooler_agent::event::AgentEvent::Message {
+                    role: farcooler_agent::event::Role::User,
+                    text,
+                    ..
+                } if text == "explain TCP slow start"
+            ),
+            "got {:?}",
+            events[0].event
+        );
+        assert!(
+            matches!(
+                &events[1].event,
+                farcooler_agent::event::AgentEvent::Message {
+                    role: farcooler_agent::event::Role::Agent,
+                    text,
+                    parent: None,
+                } if text == "Reading the congestion window first."
+            ),
+            "codex's own commentary, read out of the transcript its hook named, must reach the terminal's \
+             transcript through the same `record` every other event goes through: got {:?}",
+            events[1].event
+        );
+    }
 }

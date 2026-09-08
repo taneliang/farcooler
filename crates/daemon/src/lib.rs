@@ -28,6 +28,7 @@ pub mod session_discovery;
 pub mod task_ops;
 #[cfg(test)]
 pub(crate) mod test_support;
+pub mod transcript_tail;
 pub mod watch;
 pub mod wire;
 

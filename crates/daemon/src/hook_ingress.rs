@@ -35,9 +35,10 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use farcooler_agent::event::AgentEvent;
+use farcooler_agent::event::{AgentEvent, Role};
 use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::assemble::MessageAssembler;
 use farcooler_agent_hooks::facts::{Facts, facts};
@@ -49,6 +50,8 @@ use farcooler_store::{Store, Terminal};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
+
+use crate::transcript_tail::TranscriptTail;
 
 /// How long a connection may say nothing at all before it is dropped.
 ///
@@ -158,11 +161,47 @@ pub struct HookIngress {
     /// message it ever displayed — a leak that grows with uptime and that
     /// nothing else in the process is positioned to notice.
     assemblers: Arc<Mutex<HashMap<Uuid, MessageAssembler>>>,
+    /// One `TranscriptTail` per terminal whose agent is codex or cursor —
+    /// started once, the first time a hook payload names a `transcript_path`
+    /// for that terminal, and never again. Starting a second on the same path
+    /// would double every answer, the same failure `MessageAssembler` exists
+    /// to avoid for claude's own streamed deltas.
+    ///
+    /// The value is not the tail itself — nothing here needs to stop the
+    /// underlying watch, only to stop ACTING on what it finds — so this holds
+    /// an `AtomicBool` the tail's own sink closure checks before calling
+    /// `on_events`. `forget` flips it to `false`; the background thread
+    /// `TranscriptTail::follow` owns keeps running past that (nothing in its
+    /// own interface offers a way to stop it), but every delivery after
+    /// `forget` becomes a no-op rather than an event for a terminal whose row
+    /// is gone.
+    tails: Arc<Mutex<HashMap<Uuid, Arc<AtomicBool>>>>,
+    /// The erased sink `listen` was started with, kept so a transcript tail
+    /// can call it long after the hook connection that started the tail has
+    /// closed. `serve`'s own `on_events: &F` is borrowed from the ONE
+    /// connection it is handling and does not outlive it — `farcooler hook`
+    /// bounds a whole conversation at 400ms — while a tail must keep
+    /// delivering for as long as the terminal exists. `None` until `listen`
+    /// has run once; a hook connection reached any other way (a test calling
+    /// `accept` directly, say) starts no tail rather than spawning one with
+    /// nowhere to deliver to.
+    sink: Arc<Mutex<Option<EventSink>>>,
 }
+
+/// The erased shape of a `listen`/`start_transcript_tail` sink. Named so
+/// neither call site spells out the `Arc<dyn Fn(...) + Send + Sync>` clippy's
+/// `type_complexity` lint (CI's `-D warnings`) refuses inline.
+type EventSink = Arc<dyn Fn(Uuid, Vec<AgentEvent>) + Send + Sync>;
 
 impl HookIngress {
     pub fn new(store: Arc<Store>, inventory: Arc<dyn RuntimeInventory>) -> Self {
-        Self { store, inventory, assemblers: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            store,
+            inventory,
+            assemblers: Arc::new(Mutex::new(HashMap::new())),
+            tails: Arc::new(Mutex::new(HashMap::new())),
+            sink: Arc::new(Mutex::new(None)),
+        }
     }
 
     /// Short, for `agent_supervisor::socket_path`'s reason.
@@ -353,20 +392,103 @@ impl HookIngress {
         events
     }
 
-    /// Drop the assembly state held for a terminal whose record is gone.
+    /// Drop the assembly state held for a terminal whose record is gone, and
+    /// silence any transcript tail running for it.
     ///
     /// Called from `Service`'s one delete path. A terminal that has been
     /// deleted can never be routed to again — `terminal_for` reads the same
     /// rows — so nothing here is reachable afterwards, and everything here is
     /// a partly-assembled message that will never be finished.
+    ///
+    /// The tail's own background thread is not stopped — `TranscriptTail`
+    /// offers no way to, and it is not asked to here — only its `AtomicBool`
+    /// is flipped, so a delivery that lands after this becomes a no-op
+    /// instead of an event for a terminal `agents.record` would otherwise
+    /// have to invent a fresh entry for.
     pub fn forget(&self, terminal: Uuid) {
         self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+        if let Some(alive) = self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal) {
+            alive.store(false, Ordering::Relaxed);
+        }
     }
 
     /// Whether any assembly state is held for a terminal. For tests and for
     /// logs.
     pub fn is_tracking(&self, terminal: Uuid) -> bool {
         self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&terminal)
+    }
+
+    /// Whether a transcript tail has been started for a terminal. For tests
+    /// and for logs — the same reason `is_tracking` exists.
+    pub fn is_tailing(&self, terminal: Uuid) -> bool {
+        self.tails.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&terminal)
+    }
+
+    /// Install the erased sink `listen` was started with, so a transcript
+    /// tail — whose deliveries outlive any one hook connection — has
+    /// somewhere to call long after `serve`'s own `on_events: &F` has gone
+    /// out of scope. Returns the same `Arc` `listen`'s own accept loop clones
+    /// per connection, so there is exactly one sink behind both paths.
+    ///
+    /// Split out of `listen` so a test can populate `self.sink` without
+    /// binding a real socket — `listen` never returns except on a broken
+    /// listener, which makes it an awkward thing to run inline in a test that
+    /// only wants `start_transcript_tail` reachable.
+    fn install_sink<F>(&self, on_events: F) -> EventSink
+    where
+        F: Fn(Uuid, Vec<AgentEvent>) + Send + Sync + 'static,
+    {
+        let sink: EventSink = Arc::new(on_events);
+        *self.sink.lock().unwrap_or_else(|e| e.into_inner()) = Some(sink.clone());
+        sink
+    }
+
+    /// Start reading a codex or cursor session's own transcript for the
+    /// prose no hook payload carries — see `transcript_tail`'s module doc for
+    /// why codex and cursor need this and claude does not.
+    ///
+    /// A no-op past the first call for a given `terminal`: `self.tails`'
+    /// entry for it is what says a tail already exists, and starting a
+    /// second on the same path would double every answer this one already
+    /// delivers. Also a no-op when `listen` has not run — `self.sink` is
+    /// `None` — since a tail with nowhere to deliver would be a background
+    /// thread doing work for nobody, forever.
+    fn start_transcript_tail(&self, terminal: Uuid, agent: Agent, f: &Facts) {
+        if !matches!(agent, Agent::Codex | Agent::Cursor) {
+            return;
+        }
+        let Some(path) = f.transcript_path.clone() else { return };
+        let mut tails = self.tails.lock().unwrap_or_else(|e| e.into_inner());
+        if tails.contains_key(&terminal) {
+            return;
+        }
+        let Some(sink) = self.sink.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+            return;
+        };
+        let alive = Arc::new(AtomicBool::new(true));
+        tails.insert(terminal, alive.clone());
+        drop(tails);
+
+        // The length of the file at THIS moment, not 0: a session's own
+        // history is not this feature's to replay. `terminal_for` may bind a
+        // session that already has several turns behind it — a daemon
+        // restart mid-conversation, or an `announced_terminal` match on a
+        // pane that was already running — and starting at 0 would draw every
+        // one of those turns into the live transcript as if they had all
+        // just happened, in one burst, the moment the tail catches up.
+        let from = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        tracing::info!(
+            terminal = %terminal,
+            agent = agent.as_str(),
+            path = %path.display(),
+            "tailing this session's own transcript for its prose"
+        );
+        TranscriptTail::new().follow(path, from, move |text| {
+            if !alive.load(Ordering::Relaxed) {
+                return;
+            }
+            sink(terminal, vec![AgentEvent::Message { role: Role::Agent, text, parent: None }]);
+        });
     }
 
     /// Bind this daemon's one hook socket and serve it until something goes
@@ -391,7 +513,7 @@ impl HookIngress {
                 "could not bind the hook socket; no live session will report anything"
             );
         })?;
-        let on_events = Arc::new(on_events);
+        let on_events = self.install_sink(on_events);
         let mut refusals = Refusals::default();
 
         loop {
@@ -451,7 +573,14 @@ impl HookIngress {
 
     async fn serve<F>(&self, stream: UnixStream, on_events: &F) -> std::io::Result<()>
     where
-        F: Fn(Uuid, Vec<AgentEvent>),
+        // `?Sized`, because `listen` now hands this the SAME erased sink
+        // `start_transcript_tail` reaches through `self.sink` — a trait
+        // object behind a reference, not a concrete closure — rather than
+        // `Arc::new`-ing a fresh one of the generic `F` this function used to
+        // be instantiated with. One sink behind both paths is the whole
+        // point: `install_sink`'s own doc says why a tail cannot borrow the
+        // one `serve` gets for the length of a single 400ms connection.
+        F: Fn(Uuid, Vec<AgentEvent>) + ?Sized,
     {
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
@@ -503,6 +632,7 @@ impl HookIngress {
                 tracing::debug!(session = ?f.session_id, "a hook from a session no terminal claims");
                 continue;
             };
+            self.start_transcript_tail(terminal, hook.agent, &f);
 
             let events =
                 self.accept(terminal, hook.agent, &hook.event, &hook.payload, f.session_id.as_deref());
@@ -662,5 +792,190 @@ mod tests {
             path.as_os_str().len(),
             crate::agent_supervisor::MAX_SOCKET_PATH
         );
+    }
+
+    // -- start_transcript_tail: the side effect `serve` reaches for codex
+    // and cursor -- exercised directly against `install_sink`, without a
+    // real socket, since `listen` never returns except on a broken listener.
+
+    fn ingress_for_test() -> HookIngress {
+        let store = Arc::new(Store::open_in_memory().expect("store"));
+        let inventory: Arc<dyn RuntimeInventory> =
+            Arc::new(farcooler_core::inventory::FakeInventory::default());
+        HookIngress::new(store, inventory)
+    }
+
+    /// Poll rather than a fixed sleep: both the initial catch-up read and the
+    /// fallback poll inside `TranscriptTail::follow` (`WAIT_POLL_FALLBACK`)
+    /// deliver on their own schedule, not this test's.
+    async fn until_len(events: &Arc<Mutex<Vec<(Uuid, AgentEvent)>>>, n: usize, deadline_ms: u64) {
+        let start = std::time::Instant::now();
+        loop {
+            if events.lock().unwrap().len() >= n
+                || start.elapsed() > std::time::Duration::from_millis(deadline_ms)
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }
+
+    /// The nearest wrong implementation starts a fresh `TranscriptTail` on
+    /// every payload, which would deliver one appended line as two events —
+    /// the exact doubling this module's own doc on `tails` warns about.
+    #[tokio::test]
+    async fn a_second_payload_for_the_same_terminal_does_not_start_a_second_tail() {
+        let ingress = ingress_for_test();
+        let events: Arc<Mutex<Vec<(Uuid, AgentEvent)>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = events.clone();
+        ingress.install_sink(move |terminal, batch| {
+            let mut events = sink_events.lock().unwrap();
+            for event in batch {
+                events.push((terminal, event));
+            }
+        });
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, "").expect("seed");
+        let f = Facts { transcript_path: Some(path.clone()), ..Facts::default() };
+        let terminal = Uuid::from_u128(101);
+
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+        assert!(ingress.is_tailing(terminal), "the first call must have started one");
+
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).expect("open");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "agent_message", "phase": "commentary", "message": "checking" },
+            })
+        )
+        .expect("append");
+
+        until_len(&events, 1, 3_000).await;
+        let seen = events.lock().unwrap();
+        assert_eq!(
+            seen.len(),
+            1,
+            "one append must reach the sink once, however many times start_transcript_tail was called: {seen:?}"
+        );
+        assert!(
+            matches!(
+                &seen[0],
+                (t, AgentEvent::Message { role: Role::Agent, text, parent: None })
+                    if *t == terminal && text == "checking"
+            ),
+            "got {seen:?}"
+        );
+    }
+
+    /// `forget` must silence a running tail, not merely leave `is_tracking`
+    /// (the assembler map) looking clean. The nearest wrong implementation
+    /// removes only the assembler entry, which is `forget`'s OLD body — a
+    /// tail started after that would keep delivering into a transcript whose
+    /// terminal no longer exists.
+    #[tokio::test]
+    async fn forget_silences_a_running_tail() {
+        let ingress = ingress_for_test();
+        let events: Arc<Mutex<Vec<(Uuid, AgentEvent)>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = events.clone();
+        ingress.install_sink(move |terminal, batch| {
+            let mut events = sink_events.lock().unwrap();
+            for event in batch {
+                events.push((terminal, event));
+            }
+        });
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, "").expect("seed");
+        let f = Facts { transcript_path: Some(path.clone()), ..Facts::default() };
+        let terminal = Uuid::from_u128(102);
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+
+        use std::io::Write;
+        let append = |text: &str| {
+            let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+            writeln!(
+                file,
+                "{}",
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": { "type": "agent_message", "phase": "commentary", "message": text },
+                })
+            )
+            .unwrap();
+        };
+
+        append("before forget");
+        until_len(&events, 1, 3_000).await;
+        assert_eq!(events.lock().unwrap().len(), 1, "the tail must be delivering before forget");
+
+        ingress.forget(terminal);
+        assert!(!ingress.is_tailing(terminal), "forget must clear the tracked tail");
+
+        append("after forget");
+        // Longer than `transcript_tail::WAIT_POLL_FALLBACK` (1s): if the
+        // background thread is still delivering, its own periodic fallback
+        // alone would have picked this up well within this wait.
+        tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+        assert_eq!(
+            events.lock().unwrap().len(),
+            1,
+            "a line appended after forget must never reach the sink, however long this waits"
+        );
+    }
+
+    /// Claude already streams through `MessageDisplay` — starting a tail for
+    /// it too would draw its answers a second time from the transcript.
+    #[tokio::test]
+    async fn claude_never_gets_a_transcript_tail() {
+        let ingress = ingress_for_test();
+        ingress.install_sink(|_, _| {});
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("session.jsonl");
+        std::fs::write(&path, "").expect("seed");
+        let f = Facts { transcript_path: Some(path), ..Facts::default() };
+        let terminal = Uuid::from_u128(103);
+
+        ingress.start_transcript_tail(terminal, Agent::Claude, &f);
+        assert!(!ingress.is_tailing(terminal), "claude's own MessageDisplay already streams its prose");
+    }
+
+    /// A payload naming no transcript at all — every real one does
+    /// (`Facts`'s own doc), but nothing here should assume it.
+    #[tokio::test]
+    async fn no_transcript_path_starts_no_tail() {
+        let ingress = ingress_for_test();
+        ingress.install_sink(|_, _| {});
+
+        let terminal = Uuid::from_u128(104);
+        ingress.start_transcript_tail(terminal, Agent::Codex, &Facts::default());
+        assert!(!ingress.is_tailing(terminal));
+    }
+
+    /// Before `listen` (or, here, `install_sink`) has run, `self.sink` is
+    /// `None`. A tail started anyway would be a background thread doing work
+    /// for a sink that will never exist — reachable only from a test that
+    /// calls `accept` or `start_transcript_tail` directly, since `serve` is
+    /// only ever reached through `listen`, but worth refusing rather than
+    /// assuming.
+    #[tokio::test]
+    async fn no_sink_installed_starts_no_tail() {
+        let ingress = ingress_for_test();
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, "").expect("seed");
+        let f = Facts { transcript_path: Some(path), ..Facts::default() };
+        let terminal = Uuid::from_u128(105);
+
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+        assert!(!ingress.is_tailing(terminal), "nothing was installed to deliver to");
     }
 }
