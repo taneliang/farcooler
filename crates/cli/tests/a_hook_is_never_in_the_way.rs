@@ -27,7 +27,24 @@ use tokio::process::Command;
 /// is here to tell "bounded" from "never", not to measure the bound. Anything
 /// under it passes, so it can be loosened for a slow CI box without weakening
 /// what these tests prove.
+///
+/// This is the assertion for a test about TIMELINESS. See `NEVER_FINISHED`,
+/// which is the bound for the one test here that is not.
 const WEDGED: Duration = Duration::from_secs(3);
+
+/// The same wait, for a test that is about INTEGRITY rather than timeliness.
+///
+/// Deliberately far beyond anything ordinary parallel test load can reach,
+/// because for the test that uses it the clock is not the assertion: it asks
+/// whether half a megabyte of verdict survives the exit intact, and the answer
+/// is no different at 200 ms than at four seconds. Bounding that tightly buys
+/// nothing and costs the thing a guard is for — a red that means "the machine
+/// was busy" trains the next reader to disbelieve a red that means "the flush
+/// race is back".
+///
+/// So the two numbers are not a tidy-up waiting to happen. They are two
+/// different assertions that happen to be spelled the same way.
+const NEVER_FINISHED: Duration = Duration::from_secs(60);
 
 /// Big enough that the frame it becomes overruns a Unix socket's send buffer.
 ///
@@ -55,8 +72,20 @@ fn a_payload_of(size: usize) -> Vec<u8> {
     .expect("a payload")
 }
 
-/// Run the real binary the way an agent runs it, under a wall-clock bound.
+/// Run the real binary the way an agent runs it, under `WEDGED`.
 async fn run_the_hook(
+    event: &str,
+    gating: bool,
+    socket: &Path,
+    payload: Vec<u8>,
+    pipe: Pipe,
+) -> Output {
+    run_the_hook_within(WEDGED, event, gating, socket, payload, pipe).await
+}
+
+/// The same, for a test whose bound is not the thing it is asserting.
+async fn run_the_hook_within(
+    bound: Duration,
     event: &str,
     gating: bool,
     socket: &Path,
@@ -92,14 +121,14 @@ async fn run_the_hook(
     });
 
     let started = Instant::now();
-    let Ok(finished) = tokio::time::timeout(WEDGED, child.wait_with_output()).await else {
+    let Ok(finished) = tokio::time::timeout(bound, child.wait_with_output()).await else {
         panic!(
-            "the hook was still running after {WEDGED:?} on `{event}`. An agent that \
+            "the hook was still running after {bound:?} on `{event}`. An agent that \
              forked it is stopped mid-turn, and nothing it can do will free it."
         );
     };
     assert!(
-        started.elapsed() < WEDGED,
+        started.elapsed() < bound,
         "the hook took {:?}, which is the agent sitting still for no reason",
         started.elapsed()
     );
@@ -272,7 +301,6 @@ async fn a_gating_hook_hands_the_verdict_to_the_agent_on_stdout() {
     );
 }
 
-
 /// The verdict is not lost to the exit that follows it.
 ///
 /// tokio's stdout hands the real write to the blocking pool and returns before
@@ -289,6 +317,16 @@ async fn a_gating_hook_hands_the_verdict_to_the_agent_on_stdout() {
 /// and 3 of 200 lose it at a realistic one; with the flush, 0 of 100 and 0 of
 /// 200. Nothing about the program is bent to suit the test — the only thing
 /// made unusual is the length of a string the daemon chose to send.
+///
+/// It waits under `NEVER_FINISHED` rather than `WEDGED`, and the difference is
+/// deliberate. Every other test in this file asserts TIMELINESS — taking too
+/// long against a socket nobody reads is itself the failure, so a tight bound
+/// is the assertion. This one asserts INTEGRITY, and does not care whether the
+/// verdict takes 200 ms or four seconds to arrive whole. Bounding it tightly
+/// only lets a loaded machine redden it for a reason unrelated to what it
+/// tests — and a reader who sees that red will reasonably conclude the flush
+/// race is back. It flaked exactly that way once under a full workspace run
+/// before the bounds were split.
 #[tokio::test]
 async fn a_big_verdict_is_not_lost_to_the_exit_that_follows_it() {
     /// Comfortably past the point where the blocking pool cannot finish the
@@ -315,8 +353,17 @@ async fn a_big_verdict_is_not_lost_to_the_exit_that_follows_it() {
             .expect("write");
     });
 
-    let out = run_the_hook("PermissionRequest", true, &socket, a_payload_of(64), Pipe::Closed)
-        .await;
+    // `NEVER_FINISHED`, not `WEDGED`. Half a megabyte through a socket, a pipe
+    // and a JSON parse is not fast, and how fast it is proves nothing here.
+    let out = run_the_hook_within(
+        NEVER_FINISHED,
+        "PermissionRequest",
+        true,
+        &socket,
+        a_payload_of(64),
+        Pipe::Closed,
+    )
+    .await;
 
     assert_eq!(out.status.code(), Some(0), "a hook exits 0 even with a lot to say");
     let printed = String::from_utf8_lossy(&out.stdout);
