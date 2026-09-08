@@ -54,6 +54,25 @@ const CLAUDE_CODEX_EVENTS: &[(&str, bool)] = &[
     ("Stop", false),
 ];
 
+/// Claude's alone, fix round 2: `MessageDisplay` is claude's streaming-prose
+/// event, the entire subject of `MessageAssembler` (Task 4) and the thing
+/// that makes claude the richest of the three agents per the spec's
+/// capability table — and round 1's cut, in registering only what
+/// `CLAUDE_CODEX_EVENTS` shared, dropped it without anything noticing,
+/// because nothing here checked the direction "is every event the
+/// assembler CONSUMES actually registered." `ASSEMBLER_CONSUMES` in this
+/// module's tests is that check now.
+///
+/// Not folded into `CLAUDE_CODEX_EVENTS`: codex has no streaming-prose hook
+/// at all (capability table: "streaming prose: none" for codex), so
+/// registering `MessageDisplay` there would install a hook for an event
+/// codex never fires — harmless, since an unfired hook simply never runs,
+/// but untrue, and it would make `CLAUDE_CODEX_EVENTS`'s claim that claude
+/// and codex are "both registered against" every entry in it a small lie.
+/// `claude_settings` unions this with `CLAUDE_CODEX_EVENTS`; `merge_codex`
+/// deliberately does not.
+const CLAUDE_ONLY_EVENTS: &[(&str, bool)] = &[("MessageDisplay", false)];
+
 /// Cursor's own vocabulary for the same three moments, camelCase. Its tool
 /// gates — `beforeShellExecution` and `beforeMCPExecution`, where claude and
 /// codex both say `PreToolUse` — are cut for the same reason and by the same
@@ -118,10 +137,12 @@ fn hook_command(agent: &str, event: &str, socket: &Path, gating: bool) -> String
 ///
 /// Never merged with anything: claude never has a user file touched at all,
 /// so there is nothing to preserve and every call with the same socket
-/// produces the same value.
+/// produces the same value. Registers `CLAUDE_CODEX_EVENTS` (shared with
+/// codex) union `CLAUDE_ONLY_EVENTS` (`MessageDisplay`, claude's alone) —
+/// see that constant's doc for why the two are not one table.
 pub fn claude_settings(socket: &Path) -> Value {
     let mut hooks = serde_json::Map::new();
-    for (event, gating) in CLAUDE_CODEX_EVENTS {
+    for (event, gating) in CLAUDE_CODEX_EVENTS.iter().chain(CLAUDE_ONLY_EVENTS) {
         hooks.insert(
             (*event).to_string(),
             json!([{
@@ -324,12 +345,34 @@ mod tests {
     }
 
     /// `CURSORS_ELSES`, cursor's own flat shape holding somebody else's real
-    /// hook, the way `~/.cursor/hooks.json` on this machine actually reads.
+    /// hooks — six entries across six event keys, two of them under
+    /// `sessionStart` alone, matching how `~/.cursor/hooks.json` on this
+    /// machine actually reads (fix round 2: the single-entry, single-event
+    /// version this fixture used to be could not tell "merge" from
+    /// "wholesale replace" or "keep only the first entry" on a real,
+    /// multi-entry array — `merge_event` is genuinely element-wise, but
+    /// nothing here had proven it).
     const CURSORS_ELSES: &str = r#"{
       "version": 1,
       "hooks": {
         "sessionStart": [
-          { "command": "bash /Users/x/.cursor/herdr-agent-state.sh session" }
+          { "command": "bash /Users/x/.cursor/herdr-agent-state.sh session" },
+          { "command": "/Users/x/.superset/hooks/cursor-hook.sh SessionStart" }
+        ],
+        "sessionEnd": [
+          { "command": "/Users/x/.superset/hooks/cursor-hook.sh SessionEnd" }
+        ],
+        "beforeSubmitPrompt": [
+          { "command": "/Users/x/.superset/hooks/cursor-hook.sh Start" }
+        ],
+        "stop": [
+          { "command": "/Users/x/.superset/hooks/cursor-hook.sh Stop" }
+        ],
+        "beforeShellExecution": [
+          { "command": "/Users/x/.superset/hooks/cursor-hook.sh PermissionRequest" }
+        ],
+        "beforeMCPExecution": [
+          { "command": "/Users/x/.superset/hooks/cursor-hook.sh PermissionRequest" }
         ]
       }
     }"#;
@@ -341,14 +384,34 @@ mod tests {
     /// (the `entry.get("command")` path, reached only by cursor) was only
     /// ever proven to return `false` — never proven to return `true` on a
     /// real cursor entry. These three give cursor the same coverage codex
-    /// already had.
+    /// already had, against a fixture with two entries under one event and
+    /// entries under events we never touch at all (fix round 2).
     #[test]
     fn cursor_merging_keeps_every_hook_that_was_already_there() {
         let merged = merge_cursor(CURSORS_ELSES, Path::new("/tmp/h.sock"));
-        assert!(
-            merged.contains("herdr-agent-state.sh"),
-            "another tool's hook survives ours being added"
-        );
+        let v: Value = serde_json::from_str(&merged).expect("json");
+
+        // Events CURSOR_EVENTS does not touch: exactly the one foreign
+        // entry each already had, nothing of ours.
+        assert_eq!(v["hooks"]["sessionEnd"].as_array().unwrap().len(), 1);
+        assert_eq!(v["hooks"]["beforeShellExecution"].as_array().unwrap().len(), 1);
+        assert_eq!(v["hooks"]["beforeMCPExecution"].as_array().unwrap().len(), 1);
+
+        // sessionStart: both foreign entries survive, plus ours -- the
+        // element-wise-ness a single-entry fixture could never have shown.
+        let session_start = v["hooks"]["sessionStart"].as_array().unwrap();
+        assert_eq!(session_start.len(), 3, "two foreign entries plus ours: {session_start:?}");
+
+        for needle in [
+            "herdr-agent-state.sh",
+            "cursor-hook.sh SessionStart",
+            "cursor-hook.sh SessionEnd",
+            "cursor-hook.sh Start",
+            "cursor-hook.sh Stop",
+            "cursor-hook.sh PermissionRequest",
+        ] {
+            assert!(merged.contains(needle), "another tool's hook ({needle}) survives ours being added");
+        }
         assert!(merged.contains("farcooler"), "and ours is there too");
     }
 
@@ -365,6 +428,7 @@ mod tests {
         let twice = merge_cursor(&once, Path::new("/tmp/other.sock"));
         let v: Value = serde_json::from_str(&twice).expect("json");
         let arr = v["hooks"]["sessionStart"].as_array().expect("sessionStart is an array");
+        assert_eq!(arr.len(), 3, "both foreign entries plus exactly one of ours: {arr:?}");
         let ours: Vec<&Value> = arr.iter().filter(|e| entry_is_ours(e)).collect();
         assert_eq!(ours.len(), 1, "a re-merge with a new socket replaces, not accompanies: {arr:?}");
         let command = ours[0]["command"].as_str().unwrap();
@@ -376,7 +440,20 @@ mod tests {
     fn cursor_removing_ours_leaves_theirs_alone() {
         let merged = merge_cursor(CURSORS_ELSES, Path::new("/tmp/h.sock"));
         let cleaned = remove_ours(&merged);
-        assert!(cleaned.contains("herdr-agent-state.sh"));
+        let v: Value = serde_json::from_str(&cleaned).expect("json");
+        let session_start = v["hooks"]["sessionStart"].as_array().unwrap();
+        assert_eq!(session_start.len(), 2, "both foreign sessionStart entries survive, ours is gone");
+
+        for needle in [
+            "herdr-agent-state.sh",
+            "cursor-hook.sh SessionStart",
+            "cursor-hook.sh SessionEnd",
+            "cursor-hook.sh Start",
+            "cursor-hook.sh Stop",
+            "cursor-hook.sh PermissionRequest",
+        ] {
+            assert!(cleaned.contains(needle), "another tool's hook ({needle}) must not be touched by remove_ours");
+        }
         assert!(!cleaned.contains("farcooler"));
     }
 
@@ -413,6 +490,8 @@ mod tests {
     }
 
     /// The shape `claude_settings` hands Task 10 for `--settings <file>`.
+    /// Covers `CLAUDE_CODEX_EVENTS` union `CLAUDE_ONLY_EVENTS` — including
+    /// `MessageDisplay`, fix round 2.
     ///
     /// This test checks that shape only. The other half of the "claude
     /// never has a file touched" promise — that no `merge_*`/`remove_ours`
@@ -425,12 +504,81 @@ mod tests {
     #[test]
     fn claude_settings_carries_every_event() {
         let settings = claude_settings(Path::new("/tmp/h.sock"));
-        for (event, gating) in CLAUDE_CODEX_EVENTS {
+        for (event, gating) in CLAUDE_CODEX_EVENTS.iter().chain(CLAUDE_ONLY_EVENTS) {
             let command = settings["hooks"][event][0]["hooks"][0]["command"]
                 .as_str()
                 .unwrap_or_else(|| panic!("claude settings carries a command for {event}"));
             assert!(command.contains(&format!("--agent claude --event {event}")), "{event}: {command}");
             assert_eq!(command.contains("--gating"), *gating, "{event}: {command}");
+        }
+    }
+
+    /// codex has no streaming-prose hook at all (spec capability table:
+    /// "streaming prose: none"), so `MessageDisplay` must never be
+    /// registered for it — the deliberate reason `CLAUDE_ONLY_EVENTS` is a
+    /// separate table from `CLAUDE_CODEX_EVENTS` rather than folded in.
+    #[test]
+    fn codex_never_gets_a_messagedisplay_hook() {
+        let merged = merge_codex("{}", Path::new("/tmp/h.sock"));
+        assert!(
+            !merged.contains("MessageDisplay"),
+            "codex has no event to receive this hook: {merged}"
+        );
+    }
+
+    /// What `MessageAssembler::accept` (`crates/agent-hooks/src/assemble.rs`)
+    /// matches on for each agent, copied here by hand as the source of
+    /// truth for the direction fix round 1's cut never checked: round 1
+    /// verified "every REGISTERED event is consumed by something" (its own
+    /// whole point) and never checked "every event the assembler CONSUMES
+    /// is registered" — which is exactly how `MessageDisplay` went missing
+    /// from claude's table without any test noticing, since an unregistered
+    /// event fails silently: a well-formed hooks file with a missing key
+    /// just never fires that hook.
+    ///
+    /// A generic check against `assemble.rs`'s match arms from this crate
+    /// isn't practical (they're a private `match` inside another crate, not
+    /// a table this module can import and compare against) — so this list
+    /// is asserted literally, by hand, against this module's own output.
+    /// Keep it in sync with `assemble.rs::accept` by eye; a stale list here
+    /// fails exactly as silently as an unregistered event does.
+    const ASSEMBLER_CONSUMES: &[(&str, &str)] = &[
+        ("claude", "MessageDisplay"),
+        ("claude", "UserPromptSubmit"),
+        ("claude", "Stop"),
+        ("codex", "UserPromptSubmit"),
+        ("codex", "Stop"),
+        ("cursor", "beforeSubmitPrompt"),
+        ("cursor", "stop"),
+    ];
+
+    #[test]
+    fn every_event_the_assembler_consumes_is_registered_for_that_agent() {
+        let claude = claude_settings(Path::new("/tmp/h.sock"));
+        let claude_keys: Vec<String> =
+            claude["hooks"].as_object().expect("claude settings has a hooks object").keys().cloned().collect();
+
+        let codex = merge_codex("{}", Path::new("/tmp/h.sock"));
+        let codex_v: Value = serde_json::from_str(&codex).expect("json");
+        let codex_keys: Vec<String> =
+            codex_v["hooks"].as_object().expect("codex hooks.json has a hooks object").keys().cloned().collect();
+
+        let cursor = merge_cursor("{}", Path::new("/tmp/h.sock"));
+        let cursor_v: Value = serde_json::from_str(&cursor).expect("json");
+        let cursor_keys: Vec<String> =
+            cursor_v["hooks"].as_object().expect("cursor hooks.json has a hooks object").keys().cloned().collect();
+
+        for (agent, event) in ASSEMBLER_CONSUMES {
+            let registered = match *agent {
+                "claude" => claude_keys.iter().any(|k| k == event),
+                "codex" => codex_keys.iter().any(|k| k == event),
+                "cursor" => cursor_keys.iter().any(|k| k == event),
+                other => panic!("ASSEMBLER_CONSUMES names an agent this test doesn't know: {other}"),
+            };
+            assert!(
+                registered,
+                "assemble.rs consumes {agent}'s {event}, so this installer must register it — it does not"
+            );
         }
     }
 
