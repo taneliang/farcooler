@@ -29,6 +29,7 @@ use clap::{Parser, Subcommand};
 
 mod changes;
 mod clients;
+mod tasks;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_client::actions::RemoveRootOutcome;
 use farcooler_daemon::runtime::Runtime;
@@ -113,6 +114,18 @@ enum Command {
     /// What a worktree changed.
     #[command(subcommand)]
     Changes(changes::ChangesCmd),
+    /// The repository's board: what is being worked on, and why it is like that.
+    ///
+    /// Two halves that must not be collapsed into one. `task set` revises what
+    /// is currently understood; `task note` appends to the record of how that
+    /// understanding was reached, and nothing here edits an entry already
+    /// written. A dispatched pane is MEANT to carry its own key in
+    /// `FARCOOLER_TASK` and its own name in `FARCOOLER_ACTOR`, so that an agent
+    /// working its own ticket never types either — but nothing in this tree
+    /// sets them yet, so today a key is typed and an unnamed write files as a
+    /// person. See `tasks::TASK_ENV`.
+    #[command(subcommand)]
+    Task(tasks::TaskCmd),
     /// Search a workspace's worktree files, for an agent chat's @-mention.
     #[command(subcommand)]
     Worktree(WorktreeCmd),
@@ -814,6 +827,7 @@ async fn run() -> Fallible {
         Command::Workspace(c) => workspace(runner, c, cli.json).await,
         Command::Terminal(c) => terminal(runner, c, cli.json).await,
         Command::Changes(c) => changes::changes(runner, c, cli.json).await,
+        Command::Task(c) => tasks::task(runner, c, cli.json).await,
         Command::Worktree(c) => worktree(runner, c, cli.json).await,
         Command::Layout(c) => layout(runner, c, cli.json).await,
         Command::Attach { workspace } => attach(runner, &workspace).await,

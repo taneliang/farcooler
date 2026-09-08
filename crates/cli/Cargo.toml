@@ -33,6 +33,11 @@ farcooler-core.workspace = true
 farcooler-fence.workspace = true
 farcooler-protocol.workspace = true
 farcooler-daemon.workspace = true
+# The board's own vocabulary: `Actor`, `NoteKind` and `TaskStatus`, with the
+# `Display` and `parse` that wrote and read the columns. Types only — durable
+# state still has exactly one owner and this CLI reaches it over the socket —
+# but a second stringifier for `agent:<uuid>` is a second thing to drift.
+farcooler-store.workspace = true
 farcooler-transport.workspace = true
 # The tunnel, for `runner pipe`. Stubbed by default — see the `tailcat`
 # feature above.
