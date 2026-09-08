@@ -984,6 +984,7 @@ dependencies = [
  "bytes",
  "directories",
  "farcooler-agent",
+ "farcooler-agent-hooks",
  "farcooler-client",
  "farcooler-core",
  "farcooler-fence",

@@ -19,7 +19,7 @@ use farcooler_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
 use crate::runtime::Runtime;
-use crate::{agent_supervisor, git, paths, session_discovery};
+use crate::{agent_supervisor, git, hook_ingress, paths, session_discovery};
 
 /// Launch presets. Coding agents run through the user's configured shell so
 /// startup files, version managers, direnv, and aliases behave like a
@@ -358,7 +358,11 @@ const SKIP_DIRS: &[&str] = &[
 ];
 
 pub struct Service {
-    pub store: Store,
+    /// Behind an `Arc` so `hooks` can read the same database through the same
+    /// connection. `Store` is not `Clone` — it owns a `Connection` behind a
+    /// mutex — so the alternative is a second connection to the same file:
+    /// another handle to open, migrate and keep in step, for no gain.
+    pub store: Arc<Store>,
     pub tmux: TmuxServer,
     pub inventory: LiveInventory,
     pub host_id: Uuid,
@@ -413,6 +417,13 @@ pub struct Service {
     /// event window. See `agent_supervisor` for why the transcript itself is
     /// not here.
     agents: agent_supervisor::AgentSupervisor,
+    /// The hook path's per-terminal assembly state.
+    ///
+    /// Held here rather than made where the listener is spawned, because the
+    /// state has to outlive any one listener and because deleting a terminal
+    /// has to be able to drop it. A `HookIngress` nobody holds is one nothing
+    /// can ever tell that a terminal went away.
+    hooks: hook_ingress::HookIngress,
     /// Change sets, cached behind a two-syscall gate.
     ///
     /// Not in the store: nothing here is durable. It is a derivation of git, and
@@ -502,7 +513,7 @@ impl Service {
     /// depends on a process-global that another thread can change.
     pub async fn open_in(root: PathBuf) -> Result<Self> {
         let install_id = paths::load_or_create_install_id_in(&root)?;
-        let store = Store::open(root.join("farcooler.db"))?;
+        let store = Arc::new(Store::open(root.join("farcooler.db"))?);
 
         // The daemon identity is stable per install, so tags written by a prior
         // run of this same daemon remain provable after a restart.
@@ -514,7 +525,7 @@ impl Service {
         let registry = std::sync::RwLock::new(Arc::new(farcooler_core::config::load_registry()));
 
         Ok(Self {
-            store,
+            store: store.clone(),
             tmux,
             inventory,
             host_id,
@@ -524,6 +535,7 @@ impl Service {
             sessions: crate::sessions::Sessions::new(),
             registry,
             agents: agent_supervisor::AgentSupervisor::new(),
+            hooks: hook_ingress::HookIngress::new(store.clone()),
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             pr_fills: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -1134,7 +1146,26 @@ impl Service {
         // model needed a separate step here to stop a stored group pointing at a
         // terminal that no longer existed.
         let _ = self.kill_pane(id).await;
-        self.store.delete_terminal(id, record.resource_version)
+        self.delete_terminal_record(id, record.resource_version)
+    }
+
+    /// Delete a terminal's row, and drop the hook assembly state held for it.
+    ///
+    /// One function for both delete paths, because the second half is easy to
+    /// leave out of one of them and nothing would report it: an orphaned
+    /// assembler still answers every question correctly, it is simply never
+    /// asked one again. It holds a partly-accumulated message per open
+    /// message and a marker per message the terminal ever displayed, so a
+    /// daemon that kept them would grow for as long as it stayed up.
+    ///
+    /// After the delete, never before. A delete that is refused — a live pane,
+    /// a version conflict — leaves a conversation that is still running, and
+    /// discarding its half-assembled message would make the agent's next
+    /// answer render as its tail alone.
+    fn delete_terminal_record(&self, id: Uuid, expected_version: u64) -> Result<()> {
+        self.store.delete_terminal(id, expected_version)?;
+        self.hooks.forget(id);
+        Ok(())
     }
 
     /// Bring a hidden workspace back into the main list.
@@ -1716,7 +1747,7 @@ impl Service {
             return Err(DomainError::InvalidArgument { what: "terminal is not lost" });
         }
 
-        self.store.delete_terminal(id, term.resource_version)
+        self.delete_terminal_record(id, term.resource_version)
     }
 
     /// Restart a lost or exited terminal as a NEW epoch from the same preset.
@@ -3621,6 +3652,119 @@ mod remove_root_tests {
             Err(DomainError::RunningProcesses) => {}
             other => panic!("expected RunningProcesses for a starting terminal, got {other:?}"),
         }
+    }
+
+    /// Put some hook assembly state on a terminal, the way an arriving hook
+    /// would.
+    fn assemble_something(service: &Service, terminal: Uuid) {
+        service.hooks.accept(
+            terminal,
+            farcooler_agent_hooks::Agent::Claude,
+            "UserPromptSubmit",
+            &serde_json::json!({ "prompt": "hello" }),
+        );
+        assert!(
+            service.hooks.is_tracking(terminal),
+            "this fixture is only worth anything if state was actually accumulated"
+        );
+    }
+
+    /// A terminal's assembler goes when the terminal does.
+    ///
+    /// Nothing else in the process is positioned to notice if it does not.
+    /// `HookIngress` keeps one assembler per terminal and each keeps a marker
+    /// per message ever displayed, so a daemon that never evicted would grow
+    /// for as long as it stayed up — and every single hook would still arrive
+    /// correctly the whole time, which is what makes this the kind of leak
+    /// that ships.
+    #[tokio::test]
+    async fn removing_a_terminal_drops_the_hook_assembler_it_accumulated() {
+        let (service, _root, workspace) = fixture_with_workspace().await;
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
+            .unwrap();
+        assert_eq!(
+            service.derive_one(&term).state,
+            TerminalState::Exited,
+            "a stopped terminal must be removable for this test to reach the delete"
+        );
+        assemble_something(&service, term.id);
+
+        service.remove_terminal(term.id).await.expect("an exited terminal's record is removable");
+
+        assert!(
+            !service.hooks.is_tracking(term.id),
+            "the assembler outlived the terminal it belonged to"
+        );
+    }
+
+    /// The other delete path, which is a separate function and would be a
+    /// separate omission.
+    #[tokio::test]
+    async fn dismissing_a_lost_terminal_drops_its_hook_assembler_too() {
+        let (service, _root, workspace) = fixture_with_workspace().await;
+        assert!(
+            service.inventory_snapshot().inventory_healthy,
+            "this test needs a healthy inventory to derive `lost` rather than `unknown`"
+        );
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        // Confirmed alive once and now claimed by no pane, which is what
+        // `lost` means and the only state `dismiss_lost` accepts.
+        let term = service
+            .store
+            .update_terminal(
+                term.id,
+                term.resource_version,
+                terminal_update(&term, |u| u.runtime_confirmed = true),
+            )
+            .unwrap();
+        assert_eq!(service.derive_one(&term).state, TerminalState::Lost);
+        assemble_something(&service, term.id);
+
+        service.dismiss_lost(term.id).await.expect("a lost terminal is dismissable");
+
+        assert!(!service.hooks.is_tracking(term.id), "dismissal deletes the record; the \
+                assembler must go with it");
+    }
+
+    /// A removal the daemon REFUSES must leave the conversation alone.
+    ///
+    /// The nearest wrong wiring is not a missing `forget` but an early one —
+    /// dropping the assembler at the top of `remove_terminal`, before the
+    /// guard that refuses a live pane. That passes the test above and loses
+    /// the half-assembled message of a session that is still running, which
+    /// then draws only its tail.
+    #[tokio::test]
+    async fn a_refused_removal_leaves_a_live_terminals_assembler_alone() {
+        let (service, _root, workspace) = fixture_with_workspace().await;
+        assert!(
+            service.inventory_snapshot().inventory_healthy,
+            "this test needs a healthy inventory to derive `starting` rather than `unknown`"
+        );
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        assert_eq!(
+            service.derive_one(&term).state,
+            TerminalState::Starting,
+            "an unconfirmed terminal with no pane must derive as starting for the refusal below"
+        );
+        assemble_something(&service, term.id);
+
+        match service.remove_terminal(term.id).await {
+            Err(DomainError::RunningProcesses) => {}
+            other => panic!("expected RunningProcesses for a starting terminal, got {other:?}"),
+        }
+
+        assert!(
+            service.hooks.is_tracking(term.id),
+            "a removal that did not happen must not discard a message half assembled"
+        );
     }
 }
 

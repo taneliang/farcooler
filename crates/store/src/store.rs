@@ -665,6 +665,37 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
+    /// Every terminal claiming this agent session.
+    ///
+    /// The join a live agent session arrives on: a hook process knows its own
+    /// `session_id`, its worktree and nothing else about Far Cooler, so this is
+    /// the only question it can be answered by.
+    ///
+    /// Keyed on the column, so the caller is handed the claimants rather than
+    /// every terminal on the runner to sift for itself. That is about where
+    /// the filtering lives and what crosses the boundary, not about the query
+    /// plan: there is no index on `agent_session_id`, so SQLite still walks
+    /// the table — a handful of rows for a fleet of panes.
+    ///
+    /// A `Vec` rather than an `Option`, because nothing constrains the column
+    /// to be unique and two rows really can carry one id — a split pane copies
+    /// it, and an adoption can write one somebody else already has. Resolving
+    /// that here would be this layer guessing which pane a conversation belongs
+    /// to; the caller refuses instead.
+    pub fn terminals_with_agent_session(&self, agent_session_id: &str) -> Result<Vec<Terminal>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
+                          exit_code, exit_signal, lease_generation, epoch,
+                          "columns", "rows", resource_version, pane_mode, agent_session_id
+                   FROM terminals WHERE agent_session_id = ?1"#,
+            )
+            .map_err(map_err)?;
+        let rows = stmt.query_map(params![agent_session_id], row_to_terminal).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
     /// Feeds the daemon's derivation rule directly: durable intent, nothing
     /// tmux would have to have told us first.
     pub fn load_terminal_records(&self, workspace_id: Uuid) -> Result<Vec<TerminalRecord>> {
@@ -1296,6 +1327,67 @@ mod tests {
 
         let reopened = s.get_terminal(t.id).unwrap();
         assert_eq!(reopened.agent_session_id.as_deref(), Some("abc-123"));
+    }
+
+    /// The join a live agent session arrives on.
+    ///
+    /// A hook knows its own `session_id` and nothing else about Far Cooler, so
+    /// this is the only question it can be answered by. Two rows may hold the
+    /// same id — nothing constrains the column — so every claimant comes back
+    /// and the caller decides; picking one here would be this layer guessing
+    /// which pane somebody's conversation belongs to.
+    #[test]
+    fn a_session_id_finds_every_terminal_that_claims_it_and_no_others() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
+        let ws = s.create_workspace(repo.id, "feature/x", "/wt/sessions", false).unwrap();
+
+        let mine = s.create_terminal(ws.id, "a", "claude", TerminalIntent::Running, 80, 24).unwrap();
+        let mine =
+            s.set_pane_mode(mine.id, mine.resource_version, PaneMode::Terminal, Some("s-1".into()))
+                .unwrap();
+        let other = s.create_terminal(ws.id, "b", "claude", TerminalIntent::Running, 80, 24).unwrap();
+        s.set_pane_mode(other.id, other.resource_version, PaneMode::Terminal, Some("s-2".into()))
+            .unwrap();
+        // A terminal that has declared nothing must never be swept up by a
+        // lookup for a session, which is what `agent_session_id = NULL`
+        // matching a bound parameter would do under the wrong comparison.
+        s.create_terminal(ws.id, "c", "shell", TerminalIntent::Running, 80, 24).unwrap();
+
+        let found = s.terminals_with_agent_session("s-1").unwrap();
+        assert_eq!(found.len(), 1, "one claimant, and not the other two rows");
+        assert_eq!(found[0].id, mine.id);
+        assert_eq!(found[0].agent_session_id.as_deref(), Some("s-1"), "the whole row comes back");
+
+        assert!(
+            s.terminals_with_agent_session("s-3").unwrap().is_empty(),
+            "a session nobody declared has no claimant"
+        );
+    }
+
+    /// Two rows on one id is the case the caller has to be able to see.
+    #[test]
+    fn two_terminals_claiming_one_session_both_come_back() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
+        let ws = s.create_workspace(repo.id, "feature/x", "/wt/ambiguous", false).unwrap();
+
+        for title in ["a", "b"] {
+            let t =
+                s.create_terminal(ws.id, title, "claude", TerminalIntent::Running, 80, 24).unwrap();
+            s.set_pane_mode(t.id, t.resource_version, PaneMode::Terminal, Some("shared".into()))
+                .unwrap();
+        }
+
+        assert_eq!(
+            s.terminals_with_agent_session("shared").unwrap().len(),
+            2,
+            "the ambiguity reaches the caller rather than being resolved here"
+        );
     }
 
     // ---- optimistic concurrency ----
