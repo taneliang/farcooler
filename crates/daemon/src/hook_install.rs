@@ -60,8 +60,11 @@ const CLAUDE_CODEX_EVENTS: &[(&str, bool)] = &[
 /// capability table — and round 1's cut, in registering only what
 /// `CLAUDE_CODEX_EVENTS` shared, dropped it without anything noticing,
 /// because nothing here checked the direction "is every event the
-/// assembler CONSUMES actually registered." `ASSEMBLER_CONSUMES` in this
-/// module's tests is that check now.
+/// assembler CONSUMES actually registered." `every_event_the_assembler_
+/// consumes_is_registered_for_that_agent` in this module's tests is that
+/// check now, against `farcooler_agent_hooks::assemble::CONSUMED` — a
+/// constant that crate itself proves matches `accept`'s match arms, rather
+/// than a hand-mirror kept here that could drift the same way again.
 ///
 /// Not folded into `CLAUDE_CODEX_EVENTS`: codex has no streaming-prose hook
 /// at all (capability table: "streaming prose: none" for codex), so
@@ -527,31 +530,24 @@ mod tests {
     }
 
     /// What `MessageAssembler::accept` (`crates/agent-hooks/src/assemble.rs`)
-    /// matches on for each agent, copied here by hand as the source of
-    /// truth for the direction fix round 1's cut never checked: round 1
-    /// verified "every REGISTERED event is consumed by something" (its own
-    /// whole point) and never checked "every event the assembler CONSUMES
-    /// is registered" — which is exactly how `MessageDisplay` went missing
-    /// from claude's table without any test noticing, since an unregistered
-    /// event fails silently: a well-formed hooks file with a missing key
-    /// just never fires that hook.
+    /// matches on for each agent — the direction fix round 1's cut never
+    /// checked: round 1 verified "every REGISTERED event is consumed by
+    /// something" (its own whole point) and never checked "every event the
+    /// assembler CONSUMES is registered", which is exactly how
+    /// `MessageDisplay` went missing from claude's table without any test
+    /// noticing, since an unregistered event fails silently: a well-formed
+    /// hooks file with a missing key just never fires that hook.
     ///
-    /// A generic check against `assemble.rs`'s match arms from this crate
-    /// isn't practical (they're a private `match` inside another crate, not
-    /// a table this module can import and compare against) — so this list
-    /// is asserted literally, by hand, against this module's own output.
-    /// Keep it in sync with `assemble.rs::accept` by eye; a stale list here
-    /// fails exactly as silently as an unregistered event does.
-    const ASSEMBLER_CONSUMES: &[(&str, &str)] = &[
-        ("claude", "MessageDisplay"),
-        ("claude", "UserPromptSubmit"),
-        ("claude", "Stop"),
-        ("codex", "UserPromptSubmit"),
-        ("codex", "Stop"),
-        ("cursor", "beforeSubmitPrompt"),
-        ("cursor", "stop"),
-    ];
-
+    /// Fix round 2 closed that with a hand-copied local list and said so in
+    /// its own doc comment: "keep it in sync with `assemble.rs::accept` by
+    /// eye; a stale list here fails exactly as silently as an unregistered
+    /// event does." Fix round 3 replaces the copy with the thing itself:
+    /// `farcooler_agent_hooks::assemble::CONSUMED` lives beside `accept` in
+    /// the crate that owns the match, and that crate's own
+    /// `consumed_matches_accepts_own_match_arms` test reads `accept`'s
+    /// source text and asserts `CONSUMED` matches it exactly, in both
+    /// directions. This test below no longer has to trust a mirror; it
+    /// imports the checked original.
     #[test]
     fn every_event_the_assembler_consumes_is_registered_for_that_agent() {
         let claude = claude_settings(Path::new("/tmp/h.sock"));
@@ -568,16 +564,16 @@ mod tests {
         let cursor_keys: Vec<String> =
             cursor_v["hooks"].as_object().expect("cursor hooks.json has a hooks object").keys().cloned().collect();
 
-        for (agent, event) in ASSEMBLER_CONSUMES {
+        for (agent, event) in farcooler_agent_hooks::assemble::CONSUMED {
             let registered = match *agent {
-                "claude" => claude_keys.iter().any(|k| k == event),
-                "codex" => codex_keys.iter().any(|k| k == event),
-                "cursor" => cursor_keys.iter().any(|k| k == event),
-                other => panic!("ASSEMBLER_CONSUMES names an agent this test doesn't know: {other}"),
+                farcooler_agent_hooks::Agent::Claude => claude_keys.iter().any(|k| k == event),
+                farcooler_agent_hooks::Agent::Codex => codex_keys.iter().any(|k| k == event),
+                farcooler_agent_hooks::Agent::Cursor => cursor_keys.iter().any(|k| k == event),
             };
             assert!(
                 registered,
-                "assemble.rs consumes {agent}'s {event}, so this installer must register it — it does not"
+                "assemble.rs consumes {}'s {event}, so this installer must register it — it does not",
+                agent.as_str(),
             );
         }
     }

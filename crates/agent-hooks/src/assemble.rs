@@ -169,6 +169,31 @@ impl MessageAssembler {
     }
 }
 
+/// The registration contract `accept`'s match arms make: every `(agent,
+/// event)` pair here is one `accept` actually reads a payload for. An event
+/// listed here that whoever launches that agent does not register a hook for
+/// is a dead arm — the assembler will never see it fire. Conversely, an arm
+/// added to `accept` above without a matching entry here is a `MessageDisplay`
+/// repeat waiting to happen: registered by nobody, consumed by something,
+/// and nothing that runs today would notice (`crates/daemon/src/hook_install.rs`
+/// went months missing exactly this event before a fix round caught it by
+/// hand).
+///
+/// `assemble::tests::consumed_matches_accepts_own_match_arms`, below, reads
+/// this file's own source text and checks this list against `accept`'s match
+/// arms directly, in both directions, so the two cannot drift apart silently
+/// the way the hand-written mirror that used to live in `hook_install.rs`
+/// could.
+pub const CONSUMED: &[(Agent, &str)] = &[
+    (Agent::Claude, "MessageDisplay"),
+    (Agent::Claude, "UserPromptSubmit"),
+    (Agent::Claude, "Stop"),
+    (Agent::Codex, "UserPromptSubmit"),
+    (Agent::Codex, "Stop"),
+    (Agent::Cursor, "beforeSubmitPrompt"),
+    (Agent::Cursor, "stop"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +422,115 @@ mod tests {
             out,
             vec![AgentEvent::Message { role: Role::Agent, text: "one two".to_string(), parent: None }],
             "the late final flush still carries the full text accumulated before Stop, not just its own tail"
+        );
+    }
+
+    /// The text of `accept`'s own `match (agent, event) { ... }` block, and
+    /// nothing else in this file — not the arms' bodies past their `=>`, not
+    /// `claude_display`, and pointedly not this very `mod tests`, which is
+    /// full of `Agent::Claude, "MessageDisplay"` call-site arguments that
+    /// are NOT match-arm heads and must never be counted as one.
+    ///
+    /// Isolated by balanced-brace counting from the `match (agent, event) {`
+    /// marker rather than by a fixed line range, so a reordering of the
+    /// arms, or a comment added between them, does not change what gets
+    /// scanned.
+    fn accept_match_body(source: &str) -> &str {
+        const MARKER: &str = "match (agent, event) {";
+        let start = source.find(MARKER).expect(
+            "assemble.rs must still contain accept's `match (agent, event) {` -- \
+             if this fails, the marker itself moved or was reworded and the \
+             extraction below needs to move with it",
+        ) + MARKER.len();
+        let rest = &source[start..];
+        let mut depth = 1usize;
+        for (i, ch) in rest.char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &rest[..i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unbalanced braces scanning from `match (agent, event) {{` -- extraction cannot find the close");
+    }
+
+    /// Every `Agent::X, "Literal"` pair in `body` — the shape every match
+    /// arm head in `accept` takes, whether it is the only pattern in its arm
+    /// (`(Agent::Claude, "MessageDisplay")`) or one of several joined by `|`
+    /// (`(Agent::Cursor, "beforeSubmitPrompt")`). A plain substring scan
+    /// rather than a regex crate: `Agent::Codex` also appears in this same
+    /// block as `if agent == Agent::Codex {` (inside the `Stop` arm's body),
+    /// which this correctly skips because nothing there is a `,` followed by
+    /// a `"` — the one thing every real arm head has and that one line does
+    /// not.
+    fn extract_pairs(body: &str) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+        for (needle, label) in
+            [("Agent::Claude", "claude"), ("Agent::Codex", "codex"), ("Agent::Cursor", "cursor")]
+        {
+            let mut cursor = body;
+            while let Some(pos) = cursor.find(needle) {
+                let after = &cursor[pos + needle.len()..];
+                if let Some(comma_on) = after.trim_start().strip_prefix(',') {
+                    if let Some(quoted) = comma_on.trim_start().strip_prefix('"') {
+                        if let Some(end) = quoted.find('"') {
+                            out.push((label, quoted[..end].to_string()));
+                        }
+                    }
+                }
+                cursor = &cursor[pos + needle.len()..];
+            }
+        }
+        out
+    }
+
+    /// The trap this test exists to avoid: a pattern that has stopped
+    /// matching anything compares empty-set to empty-set and passes. So the
+    /// extracted count is checked against a literal BEFORE it is compared to
+    /// `CONSUMED` at all -- a scraper reading nothing fails here, loudly,
+    /// rather than at a silently-vacuous equality below.
+    ///
+    /// `accept`'s match has exactly seven `(agent, event)` heads as of this
+    /// writing: `MessageDisplay`/`UserPromptSubmit`/`Stop` for claude,
+    /// `UserPromptSubmit`/`Stop` for codex, `beforeSubmitPrompt`/`stop` for
+    /// cursor. Update this literal by hand, deliberately, the one time this
+    /// test SHOULD need editing: when an arm is added or removed. Every
+    /// other time it goes red, the arms and `CONSUMED` have drifted and that
+    /// drift is the bug.
+    #[test]
+    fn consumed_matches_accepts_own_match_arms() {
+        const EXPECTED_ARM_COUNT: usize = 7;
+
+        let source = include_str!("assemble.rs");
+        let body = accept_match_body(source);
+        let mut extracted = extract_pairs(body);
+        extracted.sort();
+        extracted.dedup();
+
+        assert_eq!(
+            extracted.len(),
+            EXPECTED_ARM_COUNT,
+            "extraction found {} pair(s), not the {EXPECTED_ARM_COUNT} accept's match is known to \
+             have -- a count of 0 here means the pattern stopped matching anything and the \
+             comparison below would have been comparing nothing to nothing: {extracted:?}",
+            extracted.len(),
+        );
+
+        let mut consumed: Vec<(&str, String)> =
+            CONSUMED.iter().map(|(agent, event)| (agent.as_str(), (*event).to_string())).collect();
+        consumed.sort();
+        consumed.dedup();
+
+        assert_eq!(
+            extracted, consumed,
+            "CONSUMED must name exactly the (agent, event) pairs accept's match arms handle, in both \
+             directions: an arm with no entry here is a registration nobody knows to add; an entry \
+             here with no arm is a registration nobody needs"
         );
     }
 }
