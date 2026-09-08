@@ -180,6 +180,11 @@ struct SettingsView: View {
     @AppStorage(FleetSettings.allRunnersAtOnceKey) private var allRunnersAtOnce = true
     @Environment(\.dismiss) private var dismiss
     @State private var showAdd = false
+    /// Whether this device can offer a tunnel key, established once when the
+    /// screen appears rather than read in `body` — ``NodeIdentity/status()``
+    /// touches the Keychain and can mint, and a `body` runs whenever SwiftUI
+    /// feels like it.
+    @State private var tunnelKey: NodeKeyStatus?
 
     var body: some View {
         Form {
@@ -353,10 +358,36 @@ struct SettingsView: View {
             // day the tunnel's rendezvous service stops answering, which is
             // the only day anybody should open it.
             RendezvousSection()
+
+            // Under the rendezvous because it is the same subject one layer
+            // down: that section says where a tunneled runner and this device
+            // MEET, and this says whether this device can be one of them at
+            // all. It is outside the disclosure group on purpose — that one is
+            // closed by default and stays closed for everybody who has never
+            // heard of a rendezvous, and this is a fact that has to be legible
+            // without opening anything.
+            //
+            // A fact, and only a fact. Nothing here refuses, retries or offers
+            // a repair, because there is no repair a phone can perform — see
+            // `NodeKeyStatus`, which owns the sentence and the decision to show
+            // one at all. `RendezvousSection`'s header asks exactly that
+            // restraint of everything in this neighborhood.
+            //
+            // Nil until the check has run, and nil forever on a device whose
+            // key is fine, so a healthy phone gets no extra section here.
+            if let sentence = tunnelKey?.sentence {
+                Section { Text(sentence).font(.caption).foregroundStyle(.secondary) }
+            }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .task { await connection?.loadDaemonBuild() }
+        // Its own task, and not in the one above: that one needs a connection
+        // and this asks a question about this device that has an answer with
+        // no runner in the room at all — including on the onboarding screen,
+        // where `connection` is nil and where a phone that cannot mint is
+        // about to add its first runner as a direct one.
+        .task { tunnelKey = NodeIdentity.status() }
         // A sheet rather than a push, because `AddView` brings its own
         // `NavigationStack`: its wizard has to skip steps, which needs a path
         // it owns, and pushing it would leave two stacks fighting over the

@@ -195,18 +195,53 @@ enum NodeIdentity {
     /// to report.** The answer to it is an offer carrying no node key, which is
     /// the `v=1` shape the core has always accepted, and an enrolment that
     /// produces direct runners exactly as it did before any of this existed.
+    ///
+    /// It is still not a failure to report, and this still reports nothing. It
+    /// is a FACT, though, and one nobody could see: ``status()`` below is where
+    /// the same question is asked for a person rather than for an offer.
     static func mintIfNeeded() -> (privateKey: String, publicKey: String)? {
         lock.lock()
         defer { lock.unlock() }
         // Re-read inside the lock: whoever held it may have just minted one.
         if let existing = read() { return existing }
-        guard let pair = mint() else { return nil }
-        write(pair)
-        return pair
+        guard case .pair(let priv, let pub) = mint() else { return nil }
+        write((priv, pub))
+        return (priv, pub)
     }
 
     /// The public half to put in an offer, or nil when this device has none.
     static var offeredPublicKey: String? { mintIfNeeded()?.publicKey }
+
+    /// The same question ``mintIfNeeded()`` asks, with the ANSWER kept.
+    ///
+    /// The defect this exists for: a phone whose mint refuses enrolls happily,
+    /// pairs a runner that falls back to its address, and says nothing about
+    /// any of it — `grep -c -- "--node-key" ~/.ssh/authorized_keys` was `0` on
+    /// every device the owner had ever enrolled, and no screen and no shipping
+    /// log line named the reason. ``mintIfNeeded()`` cannot report it without
+    /// becoming a second thing, and it must not become one: `showOffer` reads
+    /// it, and an offer must keep degrading to the `v=1` shape in silence.
+    ///
+    /// **It mints, and that is on purpose.** "Can this device mint one" has no
+    /// answer that does not involve trying, and there is no record to consult:
+    /// a build with no tunnel has never written anything anywhere. The mint it
+    /// performs is the one the next pairing would have performed — once per
+    /// device, not once per runner — so a device that can mint simply arrives
+    /// at its pairing already holding the key it would have made there.
+    ///
+    /// **Three answers rather than two**, because a Keychain that refuses the
+    /// write is a different fault from a mint that never happened, and it is
+    /// the worse one: ``mintIfNeeded()`` above returns the pair either way, so
+    /// the offer carries a public half, the runner IS granted a tunnel, and
+    /// what breaks is the later dial. See ``NodeKeyStatus/notStored(status:)``.
+    static func status() -> NodeKeyStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        if read() != nil { return .held }
+        // The two effects are here and the decision between the three answers
+        // is in AgentKit, where CI runs it.
+        return NodeKeyStatus.after(mint(), store: { write(($0, $1)) })
+    }
 
     /// The private half a dial needs — read, never minted.
     ///
@@ -222,23 +257,30 @@ enum NodeIdentity {
         return read()?.privateKey
     }
 
-    private static func mint() -> (privateKey: String, publicKey: String)? {
+    /// Ask the core for a pair, and keep what it said.
+    ///
+    /// This used to answer `nil` and it now answers ``NodeKeyMint``. Nothing
+    /// about WHEN it refuses has changed — the pair guard below is the one it
+    /// always had, for `crates/client/src/ffi.rs`'s reason — only that the
+    /// refusal now carries the stable word the core sent instead of losing it.
+    /// That word was the only diagnosis of this fault that ever existed, and
+    /// this was the one layer of five that could have kept it.
+    ///
+    /// The reading itself is in AgentKit, where CI runs it: `apps/ios` has no
+    /// unit-test target, so a key name mistyped here is a mistake nothing
+    /// catches, and its symptom would be the silence this whole change exists
+    /// to end. See ``NodeKeyMint/read(_:)``.
+    private static func mint() -> NodeKeyMint {
         var buffer = [UInt8](repeating: 0, count: 256)
         let written = buffer.withUnsafeMutableBufferPointer {
             farcooler_client_mint_node_key($0.baseAddress, $0.count)
         }
-        guard written > 0, written <= buffer.count else { return nil }
-        guard
-            let object = try? JSONSerialization.jsonObject(
-                with: Data(buffer[0..<written])) as? [String: Any]
-        else { return nil }
-        // `{"error":"no_tailcat"}` has no `private_key`, so this one guard
-        // covers both shapes the entry point can answer with.
-        guard
-            let priv = object["private_key"] as? String, !priv.isEmpty,
-            let pub = object["public_key"] as? String, !pub.isEmpty
-        else { return nil }
-        return (priv, pub)
+        // A zero, a negative, or a length the buffer could not hold — the
+        // buffer contract, not an answer. `read(nil)` calls it `unspecified`,
+        // which is what `linked.rs` calls the same two errors on its own side.
+        guard written > 0, written <= buffer.count else { return .refused(.unspecified) }
+        let object = try? JSONSerialization.jsonObject(with: Data(buffer[0..<written]))
+        return NodeKeyMint.read(object as? [String: Any])
     }
 
     private static func read() -> (privateKey: String, publicKey: String)? {

@@ -91,6 +91,11 @@ struct TunnelE2EHarness: View {
             "mint-again public=\(again?.publicKey ?? "<none>") "
                 + "same=\(again?.publicKey == pair?.publicKey)")
         say("keychain-write-status=\(UserDefaults.standard.object(forKey: "nodeKeychainWriteStatus") ?? "none")")
+        // The same answer Settings now shows, in the machine form, so a run of
+        // this harness and a screenshot from a TestFlight build can be compared
+        // without either being translated by hand. It carries the stable word
+        // and never key material — `.held` has no payload at all.
+        say("mint-status=\(NodeIdentity.status())")
 
         // 2. The offer, built by the app's own ceremony store.
         //

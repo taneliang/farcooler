@@ -353,6 +353,15 @@ AGENTKIT_SOURCES = [
     # at. Only in THIS list — the watch speaks HTTPS to the relay and never
     # dials a tunnel, so it has no rendezvous to choose.
     "RendezvousSection.swift",
+    # Whether this device can offer a tunnel key, and the sentence a phone
+    # shows under the rendezvous when it cannot. Here rather than beside
+    # `SettingsView` for this list's usual reason and one sharper one: it is
+    # `internal`, and that is what keeps it off the Mac. `RendezvousSection`
+    # above is `public` and IS drawn on macOS, where nothing reads `derpMap`
+    # at all; this sits beside it and must not inherit that. The phone
+    # compiles these sources into its own module and sees `internal`;
+    # `apps/macos` imports AgentKit as a module and cannot.
+    "NodeKeyStatus.swift",
     # The review comment queue, which the phone wrote and the Mac's diff pane
     # now shares. Only in THIS list: it holds unsent notes keyed by workspace,
     # and the watch and the two extensions neither review a diff nor have a
