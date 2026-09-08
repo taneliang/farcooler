@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use farcooler_agent_core::event::{AgentEvent, Role};
+use farcooler_agent_core::event::{AgentEvent, EndReason, Role};
 
 use crate::Agent;
 
@@ -71,6 +71,44 @@ impl MessageAssembler {
     ) -> Vec<AgentEvent> {
         match (agent, event) {
             (Agent::Claude, "MessageDisplay") => self.claude_display(payload),
+
+            // The three spellings of one event. Cursor lowercases; claude and
+            // codex do not. Matching on the agent's own word rather than
+            // normalizing first keeps the payload untouched all the way here.
+            (Agent::Claude, "UserPromptSubmit")
+            | (Agent::Codex, "UserPromptSubmit")
+            | (Agent::Cursor, "beforeSubmitPrompt") => {
+                let Some(text) = payload.get("prompt").and_then(|v| v.as_str()) else {
+                    return Vec::new();
+                };
+                vec![AgentEvent::Message { role: Role::User, text: text.to_string(), parent: None }]
+            }
+
+            (Agent::Claude, "Stop") | (Agent::Codex, "Stop") | (Agent::Cursor, "stop") => {
+                let mut out = Vec::new();
+                // Codex only. Claude has already emitted this message through
+                // its final `MessageDisplay` flush, and repeating it here
+                // would draw every answer twice; cursor carries no prose at
+                // all and waits for its transcript (Task 8).
+                if agent == Agent::Codex {
+                    if let Some(text) = payload.get("last_assistant_message").and_then(|v| v.as_str()) {
+                        if !text.is_empty() {
+                            out.push(AgentEvent::Message {
+                                role: Role::Agent,
+                                text: text.to_string(),
+                                parent: None,
+                            });
+                        }
+                    }
+                }
+                // Nothing in a `Stop`/`stop` payload distinguishes an ordinary
+                // end of turn from a cancellation, a refusal, or a
+                // max-tokens cutoff, so every one of these three hooks is
+                // read as an ordinary end for now.
+                out.push(AgentEvent::TurnEnded { reason: EndReason::EndTurn });
+                out
+            }
+
             _ => Vec::new(),
         }
     }
@@ -134,7 +172,7 @@ impl MessageAssembler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use farcooler_agent_core::event::{AgentEvent, Role};
+    use farcooler_agent_core::event::{AgentEvent, EndReason, Role};
 
     fn display(message_id: &str, index: u64, final_flush: bool, delta: &str) -> serde_json::Value {
         serde_json::json!({
@@ -237,5 +275,66 @@ mod tests {
         let out = a.accept(Agent::Claude, "MessageDisplay", &display("m1", 1, false, "more"));
         assert!(out.is_empty(), "a stray delta after close emits nothing");
         assert_eq!(a.pending(), 0, "a stray delta after close must not open an entry that can never close");
+    }
+
+    /// Codex has no message-display event. Its `Stop` hook's
+    /// `last_assistant_message` is the entire prose this path can produce
+    /// without reading the transcript.
+    #[test]
+    fn codex_says_what_it_answered_when_the_turn_ends() {
+        let mut a = MessageAssembler::new();
+        let out = a.accept(
+            Agent::Codex,
+            "Stop",
+            &serde_json::json!({
+                "hook_event_name": "Stop",
+                "session_id": "s",
+                "turn_id": "t",
+                "last_assistant_message": "TCP slow start is a congestion-control mechanism.",
+            }),
+        );
+        assert_eq!(
+            out,
+            vec![
+                AgentEvent::Message {
+                    role: Role::Agent,
+                    text: "TCP slow start is a congestion-control mechanism.".to_string(),
+                    parent: None,
+                },
+                AgentEvent::TurnEnded { reason: EndReason::EndTurn },
+            ],
+            "codex's only prose is the one the Stop hook hands over"
+        );
+    }
+
+    /// Cursor's `stop` carries no prose. It must still end the turn, or the
+    /// row sits on Working forever.
+    #[test]
+    fn cursor_ends_its_turn_without_saying_anything() {
+        let mut a = MessageAssembler::new();
+        let out = a.accept(
+            Agent::Cursor,
+            "stop",
+            &serde_json::json!({ "hook_event_name": "stop", "status": "completed" }),
+        );
+        assert_eq!(out, vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }]);
+    }
+
+    #[test]
+    fn a_submitted_prompt_is_the_user_speaking() {
+        let mut a = MessageAssembler::new();
+        let out = a.accept(
+            Agent::Claude,
+            "UserPromptSubmit",
+            &serde_json::json!({ "prompt": "what is TCP slow start?" }),
+        );
+        assert_eq!(
+            out,
+            vec![AgentEvent::Message {
+                role: Role::User,
+                text: "what is TCP slow start?".to_string(),
+                parent: None,
+            }]
+        );
     }
 }
