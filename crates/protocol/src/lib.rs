@@ -308,7 +308,19 @@ pub mod capability {
     /// which is an empty board with no explanation rather than a surface it
     /// knew not to offer.
     ///
-    /// Absent means the runner keeps no tasks, so a client offers no board.
+    /// Absent means the runner keeps no tasks. **What a client then does with
+    /// that is not yet decided anywhere: nothing reads this constant.** The
+    /// capability is published so that a client CAN hide the board rather than
+    /// offer one that cannot work, and none does — the Mac board is reachable
+    /// on any runner and finds out by asking.
+    ///
+    /// So what a person actually meets on an older runner is the refusal, not
+    /// a hidden surface: the daemon routes every `task.*` method through this
+    /// capability and answers `CAPABILITY_UNSUPPORTED`, which the CLI turns
+    /// into its own sentence and the Mac board reports as a board it could not
+    /// read. That is a worse experience than not offering the board, which is
+    /// exactly why this is published — but publishing it and reading it are
+    /// two jobs, and only the first is done.
     pub const TASKS: &str = "tasks";
 
     /// Every capability this build has, in a stable order.

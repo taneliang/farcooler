@@ -229,6 +229,16 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
         FleetEvent::Stack { repository } => {
             json!({ "event": "stack", "repository": repository.to_string() })
         }
+        // The actor is on the line, which means two writes to one board by two
+        // different actors do NOT coalesce into one notice. That is the right
+        // trade and it is bounded: the actors on a board are the user, the
+        // manager, and the agents currently holding a pane, so the ceiling is
+        // the fleet's size and not the board's. A line without the actor would
+        // coalesce more and tell a client nothing about who moved the row,
+        // which is the whole reason the field crosses at all.
+        FleetEvent::Task { repository, actor } => {
+            json!({ "event": "task", "repository": repository.to_string(), "actor": actor })
+        }
     }
     .to_string()
 }

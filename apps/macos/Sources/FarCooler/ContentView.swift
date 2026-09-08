@@ -55,6 +55,13 @@ struct ContentView: View {
     /// which owns every rectangle in this window. The diff is a tmux pane now,
     /// so where it sits is tmux's answer like every other pane's.
     @State private var changesStores: [String: ChangesStore] = [:]
+    /// One board store per repository, keyed by runner and repository id.
+    ///
+    /// Keyed by both because a repository's id is minted per daemon: two
+    /// runners can hand back rows that collide on id alone. Same lifetime rule
+    /// as `changesStores` — see `boardStore(for:client:)`.
+    @State private var boardStores: [String: TaskBoardStore] = [:]
+    @State private var showBoard = false
     @State private var showAddRepository = false
     @State private var showAdd = false
     @State private var showShortcuts = false
@@ -307,6 +314,28 @@ struct ContentView: View {
             // clearing a notification nobody read is worse than not sending one
             // — but being on screen is, which is more than the pane you clicked.
             markVisibleSeen()
+        }
+        .sheet(isPresented: $showBoard) {
+            // Resolved inside the sheet rather than captured when it opened,
+            // so a board opened before a runner finished listing its
+            // repositories still finds one when it does.
+            if let target = boardTarget {
+                TaskBoardSheet(
+                    store: boardStore(
+                        for: target.repository, client: target.client, host: target.host),
+                    client: target.client,
+                    onClose: { showBoard = false })
+            } else {
+                // Never a guess between several. A picker belongs here
+                // eventually; a wrong board does not.
+                VStack(spacing: 10) {
+                    Text("Pick a project first.").font(.headline)
+                    Text("Select a worktree in the sidebar, and ⇧⌘B opens its board.")
+                        .foregroundStyle(.secondary)
+                    Button("Done") { showBoard = false }.keyboardShortcut(.defaultAction)
+                }
+                .padding(30)
+            }
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
         .sheet(isPresented: $showAbout) { AboutSheet() }
@@ -1325,6 +1354,48 @@ struct ContentView: View {
         }
     }
 
+    /// One board store per repository.
+    ///
+    /// Cached on the client for the reason `changesStore(for:client:)` gives:
+    /// `FleetStore` drops a `DaemonClient` when its runner leaves and builds a
+    /// fresh one when it comes back, and a store held over from the old one
+    /// would go on talking to a connection nobody is answering.
+    private func boardStore(for repository: Repository, client: DaemonClient, host: String)
+        -> TaskBoardStore
+    {
+        let key = "\(host)/\(repository.id)"
+        if let existing = boardStores[key], existing.client === client { return existing }
+        let made = TaskBoardStore(client: client, repository: repository)
+        // Outside the view update, because creating it IS a state change and
+        // SwiftUI is reading that state right now. See `changesStore`.
+        DispatchQueue.main.async { boardStores[key] = made }
+        return made
+    }
+
+    /// Whose board ⇧⌘B opens.
+    ///
+    /// The repository of whatever the sidebar is showing, and the only
+    /// repository there is when nothing is selected. Never a guess between
+    /// several: a board is repository-scoped, and opening the wrong one looks
+    /// exactly like a repository with somebody else's work on it.
+    ///
+    /// Matched by display name, because that is what the CLI puts on a
+    /// workspace — see `Workspace.repository`, which carries the name here and
+    /// a uuid on the phone.
+    private var boardTarget: (host: String, repository: Repository, client: DaemonClient)? {
+        if let ws = currentWorkspace, let client = store.client(for: ws),
+            let name = ws.repository,
+            let match = client.repositories.first(where: { $0.displayName == name })
+        {
+            return (ws.host ?? "", match, client)
+        }
+        let all = store.repositories
+        guard all.count == 1, let only = all.first,
+            let client = store.clients[only.host]
+        else { return nil }
+        return (only.host, only.repository, client)
+    }
+
     /// One changes store per worktree.
     ///
     /// Cached on the client too, not just the worktree. `FleetStore` drops a
@@ -2107,6 +2178,15 @@ struct ContentView: View {
                 showQuickCreate = true
             }
         case .addRepository: showAddRepository = true
+        case .showBoard:
+            // Only reachable with a project registered; a board needs a
+            // repository to be scoped to, the same way New Task needs one to
+            // create into.
+            if store.repositories.isEmpty {
+                showAddRepository = true
+            } else {
+                showBoard = true
+            }
         case .openInEditor: openInPreferredEditor()
         case .reload: Task { for client in store.clients.values { await client.refresh() } }
         case .showShortcuts: showShortcuts = true

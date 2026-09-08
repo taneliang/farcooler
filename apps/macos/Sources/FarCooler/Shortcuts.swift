@@ -104,6 +104,7 @@ enum Shortcut {
             "Tasks",
             [
                 Item(keys: "⌘N", action: "New task — describe it and go"),
+                Item(keys: "⇧⌘B", action: "Show this project’s board"),
                 Item(keys: "⇧⌘R", action: "Add Repository"),
                 Item(keys: "⇧⌘E", action: "Open this worktree in your editor"),
             ]

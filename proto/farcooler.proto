@@ -2623,6 +2623,15 @@ message TaskNoteAppend {
 // scope table governing the same fact, and the two could be gated differently.
 // A cycle is refused — a deadlock nobody resolves presents as a queue that
 // quietly stopped moving rather than as an error.
+//
+// WRITING an edge is not idempotent, and `clear` is — the two halves of this
+// one message behave differently, which is worth knowing before a retry.
+// `task_blocks` is keyed on the pair, so blocking a pair that is already
+// blocked comes back `resource-conflict`; clearing one that was never there
+// succeeds. Correcting a `reason` is therefore two calls: `clear` the edge,
+// then write it again. Recorded rather than fixed — making the write an
+// upsert is a semantic change with its own test surface, and is a change of
+// its own.
 message TaskBlockSet {
   bytes task_id = 1;
   bytes blocked_by = 2;

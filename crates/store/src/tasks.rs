@@ -551,6 +551,22 @@ impl Store {
 
     /// Record that `task` cannot proceed until `blocked_by` does, and why.
     ///
+    /// **Not idempotent, unlike `unblock` below, and the name does not say
+    /// so.** `task_blocks` is keyed `PRIMARY KEY (task_id, blocked_by)` and
+    /// this is a plain `INSERT`, so blocking a pair that is already blocked
+    /// hits the constraint and comes back `ResourceConflict` -- see `map_err`,
+    /// which maps every constraint violation onto that. A caller correcting a
+    /// `reason` therefore has to `unblock` the pair and block it again;
+    /// re-setting it in place is refused.
+    ///
+    /// That is genuinely surprising for a `set_` function and it is recorded
+    /// here rather than fixed, because turning this into an upsert is a
+    /// semantic change with its own test surface -- one that belongs in a
+    /// change of its own rather than folded into somebody else's. Until then
+    /// this doc, `TaskBlockSet` in the proto, and `farcooler task block
+    /// --reason`'s help all say the same thing, so the surprise is met in
+    /// writing before it is met at runtime.
+    ///
     /// Refuses a cycle. Before inserting, this walks the graph forward from
     /// `blocked_by` -- what `blocked_by` itself is blocked on, and what
     /// blocks THAT, and so on -- and refuses the moment the walk reaches

@@ -1868,67 +1868,7 @@ async fn events(runner: Option<&str>) -> Fallible {
         let event = link.next_event().await?;
         let Some(payload) = event.payload else { continue };
 
-        let line = match payload {
-            farcooler_protocol::v1::event::Payload::TerminalChanged(t) => terminal_event_json(&t),
-            farcooler_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
-                "kind": "workspace",
-                "id": uuid_of(&w.id).to_string(),
-                "short": short_bytes(&w.id),
-                "task": w.task_name,
-                "state": workspace_label(w.state()),
-            }),
-            farcooler_protocol::v1::event::Payload::LayoutChanged(l) => serde_json::json!({
-                "kind": "layout",
-                "workspace": uuid_of(&l.workspace_id).to_string(),
-                "groups": l.items.iter().map(|g| serde_json::json!({
-                    "id": g.id,
-                    "name": g.name,
-                    "active": g.active,
-                    "columns": g.columns,
-                    "rows": g.rows,
-                    "layout": g.layout,
-                    "panes": g.panes.iter().map(|p| serde_json::json!({
-                        "id": uuid_of(&p.terminal_id).to_string(),
-                        "short": short_bytes(&p.terminal_id),
-                        "left": p.left, "top": p.top,
-                        "columns": p.columns, "rows": p.rows,
-                        "focused": p.focused, "zoomed": p.zoomed,
-                    })).collect::<Vec<_>>(),
-                })).collect::<Vec<_>>(),
-            }),
-            farcooler_protocol::v1::event::Payload::FleetChanged(_) => serde_json::json!({
-                "kind": "fleet",
-            }),
-            // One worktree's diff moved. The set itself is not here on purpose —
-            // see `announce_change_set` on the daemon side: most clients are not
-            // showing a diff, and a lockfile regeneration would otherwise fan
-            // thousands of file records out to every connected device. A client
-            // re-reads `changes inbox`, or this worktree's change set.
-            farcooler_protocol::v1::event::Payload::ChangeSetChanged(c) => serde_json::json!({
-                "kind": "change_set",
-                "workspace": uuid_of(&c.workspace_id).to_string(),
-                "short": short_bytes(&c.workspace_id),
-                "version": c.version,
-            }),
-            // A repository's PR state was re-read, because somebody's
-            // `stack.get` found a cache nobody had filled. `known` is the field
-            // that matters: false means GitHub could not be asked, and an
-            // absent `pr` on a link means nothing at all in that case.
-            farcooler_protocol::v1::event::Payload::StackChanged(s) => serde_json::json!({
-                "kind": "stack",
-                "repository": uuid_of(&s.repository_id).to_string(),
-                "short": short_bytes(&s.repository_id),
-                "known": s.pr_known,
-                "prs": s.items.iter().filter_map(|l| l.pr.as_ref().map(|p| serde_json::json!({
-                    "branch": l.branch,
-                    "number": p.number,
-                    "url": p.url,
-                }))).collect::<Vec<_>>(),
-            }),
-            // Other resources have no events yet. Skipping is right: a client
-            // that reacts to a line it cannot read would be worse.
-            _ => continue,
-        };
+        let Some(line) = event_json(payload) else { continue };
 
         writeln!(out, "{line}")?;
         // Unbuffered on purpose. A client blocked on a line that is sitting in
@@ -2936,6 +2876,123 @@ fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_j
     })
 }
 
+/// One pushed change as the line a client reads, or `None` for a payload with
+/// no reader.
+///
+/// Extracted from `events` rather than left inline, and the extraction is the
+/// point rather than tidying. The board arm used to be swept up by the `_ =>`
+/// below: the daemon emitted `TaskChanged` on every board write, this
+/// command dropped it, and the only symptom was a board on screen that
+/// rendered once and never moved. Nothing could have caught that, because a
+/// match arm inside an infinite loop over a live link is not a thing a test
+/// can reach. As a function it is, and `events` is now just the loop.
+fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_json::Value> {
+    Some(match payload {
+        farcooler_protocol::v1::event::Payload::TerminalChanged(t) => terminal_event_json(&t),
+        farcooler_protocol::v1::event::Payload::WorkspaceChanged(w) => serde_json::json!({
+            "kind": "workspace",
+            "id": uuid_of(&w.id).to_string(),
+            "short": short_bytes(&w.id),
+            "task": w.task_name,
+            "state": workspace_label(w.state()),
+        }),
+        farcooler_protocol::v1::event::Payload::LayoutChanged(l) => serde_json::json!({
+            "kind": "layout",
+            "workspace": uuid_of(&l.workspace_id).to_string(),
+            "groups": l.items.iter().map(|g| serde_json::json!({
+                "id": g.id,
+                "name": g.name,
+                "active": g.active,
+                "columns": g.columns,
+                "rows": g.rows,
+                "layout": g.layout,
+                "panes": g.panes.iter().map(|p| serde_json::json!({
+                    "id": uuid_of(&p.terminal_id).to_string(),
+                    "short": short_bytes(&p.terminal_id),
+                    "left": p.left, "top": p.top,
+                    "columns": p.columns, "rows": p.rows,
+                    "focused": p.focused, "zoomed": p.zoomed,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }),
+        farcooler_protocol::v1::event::Payload::FleetChanged(_) => serde_json::json!({
+            "kind": "fleet",
+        }),
+        // One worktree's diff moved. The set itself is not here on purpose —
+        // see `announce_change_set` on the daemon side: most clients are not
+        // showing a diff, and a lockfile regeneration would otherwise fan
+        // thousands of file records out to every connected device. A client
+        // re-reads `changes inbox`, or this worktree's change set.
+        farcooler_protocol::v1::event::Payload::ChangeSetChanged(c) => serde_json::json!({
+            "kind": "change_set",
+            "workspace": uuid_of(&c.workspace_id).to_string(),
+            "short": short_bytes(&c.workspace_id),
+            "version": c.version,
+        }),
+        // A repository's PR state was re-read, because somebody's
+        // `stack.get` found a cache nobody had filled. `known` is the field
+        // that matters: false means GitHub could not be asked, and an
+        // absent `pr` on a link means nothing at all in that case.
+        farcooler_protocol::v1::event::Payload::StackChanged(s) => serde_json::json!({
+            "kind": "stack",
+            "repository": uuid_of(&s.repository_id).to_string(),
+            "short": short_bytes(&s.repository_id),
+            "known": s.pr_known,
+            "prs": s.items.iter().filter_map(|l| l.pr.as_ref().map(|p| serde_json::json!({
+                "branch": l.branch,
+                "number": p.number,
+                "url": p.url,
+            }))).collect::<Vec<_>>(),
+        }),
+        // A repository's board moved. The repository and not the task,
+        // because `task list` answers a whole board in one call and a
+        // board is the thing on screen — a client told only which task
+        // moved would still have to read the board to know where the row
+        // goes now. `actor` is the word the write named itself with:
+        // `user`, `manager`, or `agent:<uuid>`, verbatim from the daemon's
+        // `Actor` — carried so a client can tell its own write coming back
+        // from somebody else's, which is the difference between a refresh
+        // and a loop. See `FleetEvent::Task` in crates/client/src/session.rs,
+        // which is the same news over the other transport.
+        farcooler_protocol::v1::event::Payload::TaskChanged(t) => task_event_json(&t),
+        // Other resources have no events yet. `None` is right: a client that
+        // reacted to a line it cannot read would be worse. What is NOT right
+        // is a resource that HAS a reader landing here by omission, which is
+        // the bug the board arm above was, and which is what this function
+        // exists to make testable.
+        _ => return None,
+    })
+}
+
+/// A repository's board moved.
+///
+/// A named function rather than an object built inline in `events`, for the
+/// reason `terminal_event_json` above is one: a hand-built object in a match
+/// arm is a thing with no test, and the field most likely to be dropped from
+/// one is the field a client cannot work without. Here that is `actor` —
+/// without it the line still says "the board moved" and every client keeps
+/// working, and the one thing that quietly stops being possible is telling
+/// your own write apart from somebody else's.
+///
+/// The repository and not just the task, because `task list` answers a whole
+/// board in one call and a board is what is on screen: a client told only
+/// which task moved would still have to read the board to know where the row
+/// goes now. See `FleetEvent::Task` in crates/client/src/session.rs, which is
+/// the same news over the other transport.
+fn task_event_json(t: &farcooler_protocol::v1::TaskChanged) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "task",
+        "task": uuid_of(&t.task_id).to_string(),
+        "short": short_bytes(&t.task_id),
+        "repository": uuid_of(&t.repository_id).to_string(),
+        // `user`, `manager`, or `agent:<uuid>` — the daemon's `Actor` display,
+        // verbatim. Never parsed into parts here: two fields are two things
+        // that can disagree, which is the argument the proto's own comment on
+        // this field makes.
+        "actor": t.actor,
+    })
+}
+
 /// The JSON line `events` pushes for a `TerminalChanged` message.
 ///
 /// A free function rather than an inline object literal in the event loop:
@@ -3136,6 +3193,89 @@ fn resolve<'a, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every resource with a reader on the other end gets a line.
+    ///
+    /// The guard over the DISPATCH, not the shape — `task_event_json` below
+    /// covers the shape, and it stayed green through the exact bug this
+    /// catches. `events` used to sweep the board arm into `_ => continue`,
+    /// so the daemon emitted the change, this command silently dropped it,
+    /// and the Mac board rendered once and never moved. Nothing noticed,
+    /// because the arm lived inside an infinite loop over a live link. Now it
+    /// lives in a function, and this asks that function.
+    #[test]
+    fn every_resource_a_client_reads_gets_a_line_rather_than_being_swept_up() {
+        use farcooler_protocol::v1::event::Payload;
+        let kinds = [
+            (Payload::TerminalChanged(Default::default()), "terminal"),
+            (Payload::WorkspaceChanged(Default::default()), "workspace"),
+            (Payload::LayoutChanged(Default::default()), "layout"),
+            (Payload::FleetChanged(farcooler_protocol::v1::Empty {}), "fleet"),
+            (Payload::ChangeSetChanged(Default::default()), "change_set"),
+            (Payload::StackChanged(Default::default()), "stack"),
+            (Payload::TaskChanged(Default::default()), "task"),
+        ];
+        for (payload, kind) in kinds {
+            let line = event_json(payload)
+                .unwrap_or_else(|| panic!("a {kind} change reached a client as nothing at all"));
+            assert_eq!(line["kind"], kind, "the wrong resource was named on the line");
+        }
+    }
+
+    /// And a payload with no reader is still dropped.
+    ///
+    /// The pair matters. Turning `_ => None` into "everything gets a line" is
+    /// one careless edit away, and it would put a JSON object on stdout for
+    /// every chunk of terminal output a busy runner produces.
+    #[test]
+    fn a_payload_with_no_reader_is_still_dropped() {
+        use farcooler_protocol::v1::event::Payload;
+        assert!(event_json(Payload::TerminalFrame(Default::default())).is_none());
+        assert!(event_json(Payload::HostChanged(Default::default())).is_none());
+    }
+
+    /// The board event carries what a client needs to act on it.
+    ///
+    /// The bug this guards is the one this whole surface's history is about: a
+    /// board that renders once and never moves. The daemon emits
+    /// `TaskChanged` on every board write, the CLI is the Mac app's transport,
+    /// and for a while this match arm fell through to `_ => continue` — so the
+    /// event existed, the daemon sent it, every test passed, and the board on
+    /// screen sat still.
+    #[test]
+    fn a_board_change_reaches_a_client_with_the_repository_and_the_actor() {
+        let task = uuid::Uuid::now_v7();
+        let repository = uuid::Uuid::now_v7();
+        let json = task_event_json(&farcooler_protocol::v1::TaskChanged {
+            task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
+            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+            actor: "agent:0198f2c0-0000-7000-8000-000000000001".into(),
+        });
+        assert_eq!(json["kind"], "task");
+        // The repository is the read a client makes, so it is the field a
+        // board cannot be refreshed without.
+        assert_eq!(json["repository"], repository.to_string());
+        assert_eq!(json["task"], task.to_string());
+        assert_eq!(json["short"], short_bytes(&bytes::Bytes::copy_from_slice(task.as_bytes())));
+        assert_eq!(
+            json["actor"], "agent:0198f2c0-0000-7000-8000-000000000001",
+            "the actor was dropped, and a client can no longer tell its own write apart"
+        );
+    }
+
+    /// Every actor word crosses whole, including the two that have no id in
+    /// them.
+    #[test]
+    fn every_actor_word_crosses_the_cli_unchanged() {
+        for word in ["user", "manager", "agent:0198f2c0-0000-7000-8000-000000000001"] {
+            let json = task_event_json(&farcooler_protocol::v1::TaskChanged {
+                task_id: bytes::Bytes::new(),
+                repository_id: bytes::Bytes::new(),
+                actor: word.to_string(),
+            });
+            assert_eq!(json["actor"], word, "the actor was rewritten on the way out");
+        }
+    }
 
     #[test]
     fn a_terminal_changed_event_carries_chat_capable() {

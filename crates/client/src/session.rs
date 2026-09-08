@@ -202,6 +202,28 @@ pub enum FleetEvent {
     /// local speed, so without this the only delivery mechanism was asking
     /// again on the next poll. See `crates/daemon/src/watch.rs:2538`.
     Stack { repository: Uuid },
+    /// A repository's board moved: a task was made, revised, moved, blocked,
+    /// or had a note appended to it.
+    ///
+    /// The repository and not the task, because that is the read a client
+    /// makes. `task.list` answers a whole board in one call and a board is the
+    /// thing on screen; a client told only which task moved would still have to
+    /// ask for the board to know where the row goes now. Which also keeps the
+    /// coalescing in `EventQueue` doing useful work — a manager moving six
+    /// tasks in a burst is one re-read, not six.
+    ///
+    /// **`actor` is carried, and it is the reason this variant is not just
+    /// `Task { repository }`.** Every board write names who made it — `user`,
+    /// `manager`, or `agent:<uuid>`, the word `Actor`'s `Display` produces and
+    /// the same word `TaskNote.actor` stores — and a client that writes to a
+    /// board hears its own write come back. Without the actor the only way to
+    /// tell "somebody else moved this" from "you moved this" is to diff the
+    /// board you just wrote, which is the loop this field exists to let a
+    /// client skip. Whether a given client SHOULD skip it is that client's
+    /// call: the Mac board deliberately does not, because its own writes and a
+    /// person's writes from the CLI in another window are both `user`, and a
+    /// board that dropped `user` would go blind to the second.
+    Task { repository: Uuid, actor: String },
 }
 
 impl FleetEvent {
@@ -236,24 +258,28 @@ impl FleetEvent {
             // exhaustiveness is checked against the enum's variant set, not
             // against what the daemon actually sends, so it says nothing
             // about an already-named arm that starts being sent — see
-            // `TaskChanged` below, which is exactly that case and is handled
+            // `TaskChanged` below, which is exactly that case and was handled
             // on its own rather than filed here.
             Payload::HostChanged(_)
             | Payload::RepositoryRootChanged(_)
             | Payload::RepositoryChanged(_) => None,
-            // Dropped deliberately, not by omission: the board this carries
-            // has no `FleetEvent` reader yet. The daemon DOES emit
-            // `TaskChanged` now — every board write in `daemon::task_ops`
-            // calls `Watcher::announce_task_changed` — so this arm is
-            // discarding real traffic rather than waiting for it. That is
-            // still the right answer today: a client wanting the board
-            // re-reads the board, not the fleet, so this gains its own
-            // `FleetEvent` variant at the point something actually reads one.
-            // The Mac task board is what needs to hear it, and until that
-            // variant exists a board built against this would render once and
-            // never move. Revisit this arm when that board lands; a reader who
-            // arrives here after it exists should find this note, not a guess.
-            Payload::TaskChanged(_) => None,
+            // This arm used to return `None`, with a note saying to revisit it
+            // when a board existed to hear it. The Mac board is that board, so
+            // here it is. Kept as a sentence rather than deleted because the
+            // shape of the mistake is worth leaving behind: the daemon had
+            // been emitting `TaskChanged` since `task_ops` was wired to
+            // `Watcher::announce_task_changed`, every client-side test still
+            // passed, and the only symptom was a board that rendered once and
+            // never moved — a bug no test in the plan could see, because every
+            // board test was a model test.
+            Payload::TaskChanged(t) => Some(FleetEvent::Task {
+                repository: uuid_of(&t.repository_id),
+                // Verbatim. This is a word the daemon composed and a client
+                // compares; parsing it here into a kind and an id would give
+                // two fields that can disagree, which is the exact thing the
+                // proto's own comment on `TaskChanged.actor` refuses.
+                actor: t.actor,
+            }),
         }
     }
 }
@@ -2072,6 +2098,80 @@ mod tests {
             "a connect that configured nothing unset the rendezvous anyway"
         );
         farcooler_tailcat::set_derp_map_url("");
+    }
+
+    /// A board write on the wire becomes news a client can act on.
+    ///
+    /// Asserted through `FleetEvent::of` — the one function that turns a
+    /// payload into news — and not by checking that the variant exists. The
+    /// bug this replaces was not a missing variant; it was a present payload
+    /// mapped to `None`, which every other test in this crate was happy with,
+    /// because a dropped notice looks exactly like a quiet fleet. Put the arm
+    /// back to `None` and this is the test that goes red.
+    #[test]
+    fn a_board_write_becomes_news_rather_than_being_dropped() {
+        use farcooler_protocol::v1::event::Payload;
+        let repository = Uuid::now_v7();
+        let news = FleetEvent::of(Payload::TaskChanged(farcooler_protocol::v1::TaskChanged {
+            task_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+            actor: "agent:0198f2c0-0000-7000-8000-000000000001".into(),
+        }));
+        assert_eq!(
+            news,
+            Some(FleetEvent::Task {
+                repository,
+                // Verbatim, which is what lets a client compare it against the
+                // word it writes with. A client that had to reconstruct this
+                // from a parsed kind and id would be the second place the
+                // vocabulary is spelled out.
+                actor: "agent:0198f2c0-0000-7000-8000-000000000001".into(),
+            }),
+            "a board write reached a client as nothing at all"
+        );
+    }
+
+    /// The three actor words the daemon can send all survive the crossing.
+    ///
+    /// Cheap, and it guards the failure that would be invisible: an arm that
+    /// built the variant but dropped or normalized the actor still delivers a
+    /// re-read, so the board would look fine and only the "was this mine"
+    /// question would quietly always answer no.
+    #[test]
+    fn every_actor_word_crosses_unchanged() {
+        use farcooler_protocol::v1::event::Payload;
+        for word in ["user", "manager", "agent:0198f2c0-0000-7000-8000-000000000001"] {
+            let news = FleetEvent::of(Payload::TaskChanged(farcooler_protocol::v1::TaskChanged {
+                task_id: bytes::Bytes::new(),
+                repository_id: bytes::Bytes::new(),
+                actor: word.to_string(),
+            }));
+            let Some(FleetEvent::Task { actor, .. }) = news else {
+                panic!("{word} did not arrive as board news at all");
+            };
+            assert_eq!(actor, word, "the actor was rewritten on the way across");
+        }
+    }
+
+    /// A payload with a reader keeps it, and one without stays without.
+    ///
+    /// The pair is the point. Adding the board arm is one line away from
+    /// answering `Some` for `TerminalFrame` too, which would spend a fleet
+    /// re-read on every chunk of terminal output a busy runner produces.
+    #[test]
+    fn a_payload_with_no_fleet_reader_is_still_nothing() {
+        use farcooler_protocol::v1::event::Payload;
+        assert_eq!(
+            FleetEvent::of(Payload::FleetChanged(farcooler_protocol::v1::Empty {})),
+            Some(FleetEvent::Fleet)
+        );
+        assert_eq!(
+            FleetEvent::of(Payload::TerminalFrame(
+                farcooler_protocol::v1::TerminalFrame::default()
+            )),
+            None,
+            "terminal bytes became a fleet re-read"
+        );
     }
 
     #[test]

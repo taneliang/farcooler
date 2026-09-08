@@ -15,6 +15,7 @@ enum AppCommand: String {
     case nextAttention
     case newWorkspace
     case addRepository
+    case showBoard
     case openInEditor
     case reload
     case showShortcuts
@@ -80,6 +81,17 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("n", modifiers: .command)
             Button("Add Repository…") { AppCommand.addRepository.post() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+        }
+
+        // The board, beside the things it is about.
+        //
+        // ⇧⌘B rather than a bare ⌘B, which is the sidebar's on every Mac and
+        // is not up for grabs. Repository-scoped, like the board itself: it
+        // opens the board of whatever the sidebar is showing, and of the only
+        // repository there is when nothing is selected.
+        CommandGroup(after: .toolbar) {
+            Button("Show Board") { AppCommand.showBoard.post() }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .newItem) {

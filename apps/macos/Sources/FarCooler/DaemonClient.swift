@@ -472,6 +472,14 @@ final class DaemonClient: ObservableObject {
                     self.refreshChangesInboxSoon()
                 }
             },
+            onTask: { [weak self] event in
+                Task { @MainActor in
+                    // Stale-guarded like every other arm here, for the reason
+                    // `onEvent` states.
+                    guard let self, self.streamGeneration == generation else { return }
+                    self.boardMoved(event)
+                }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     // Stale: either this stream was deliberately stopped, or
@@ -887,6 +895,84 @@ final class DaemonClient: ObservableObject {
         // without anybody asking it to.
         reconnectNow()
         return .updated
+    }
+
+    // -----------------------------------------------------------------------
+    // The board
+    //
+    // Reads only, plus the one write that moves a task between columns. What
+    // is deliberately NOT here is anything that changes a note already
+    // written: the record is append-only in the store — `task_notes` has a
+    // `BEFORE UPDATE` trigger that refuses unconditionally — so a button for
+    // it would compile, ship, and fail in front of a user. Correcting the
+    // record is a NEW note carrying `supersedes`, which is `farcooler task
+    // note --supersedes` and is not composed from this app yet.
+    // -----------------------------------------------------------------------
+
+    /// Bumped every time a runner says a board moved.
+    ///
+    /// A counter rather than the event, for the same reason `linkGeneration`
+    /// is one: what a board needs to know is "something changed since the read
+    /// you are showing", and a value that settles back to its old self would
+    /// be missed by a view comparing it. It is also what keeps the re-read out
+    /// of this object — one `DaemonClient` serves a window full of surfaces
+    /// and only the open board wants a board.
+    @Published private(set) var boardGeneration = 0
+
+    /// Who caused the last board move, verbatim: `user`, `manager`, or
+    /// `agent:<uuid>`.
+    ///
+    /// **Written, and read by nothing.** No view draws a byline for the last
+    /// move, and this property claims no use it does not have — it is here so
+    /// that the actor survives the crossing, and for no other reason yet.
+    ///
+    /// Kept rather than dropped because it is the wire's own field. The daemon
+    /// stamps every board write with it, `FleetEvent::Task` carries it, the
+    /// CLI's `task` line prints it and `TaskEvent` decodes it; a client that
+    /// threw it away at the last hop would have to have all four re-plumbed
+    /// the day somebody wants it. Storing it costs one optional string per
+    /// runner.
+    ///
+    /// What it is FOR, when something wants it, is one of two things: skipping
+    /// a re-read of a change this client made itself, or attributing a row
+    /// that just moved. This app deliberately does not do the first — its own
+    /// writes name themselves `user`, and so does a person typing `farcooler
+    /// task set` in a terminal beside this window, so a board that dropped
+    /// `user` would go blind to the second, which is the more interesting of
+    /// the two. The second is simply not built.
+    @Published private(set) var lastBoardActor: String?
+
+    private func boardMoved(_ event: TaskEvent) {
+        lastBoardActor = event.actor
+        boardGeneration += 1
+    }
+
+    /// A repository's board, as `task list --json` prints it.
+    ///
+    /// `background: true` because a board re-read must not toggle `busy`,
+    /// which is `@Published` and re-evaluates every terminal surface in the
+    /// window — and a busy repository moves its board several times a minute.
+    func taskBoard(repository: String) async -> (data: Data?, message: String?) {
+        await runRaw(["task", "list", "--repo", repository, "--json"], background: true)
+    }
+
+    /// One task's card with its record and what it waits on, in one call.
+    func taskDetail(key: String, repository: String) async -> (data: Data?, message: String?) {
+        await runRaw(["task", "show", key, "--repo", repository, "--json"], background: true)
+    }
+
+    /// Move a task to another column. Nil means it went.
+    ///
+    /// The status word crosses as the CLI's own word, which is the proto's
+    /// name lowercased — see `TaskStatus` in AgentKit, whose raw values are
+    /// checked against the proto by that package's suite. The actor is left
+    /// unsaid: an unnamed write is `user`, which is what a person clicking in
+    /// this window is.
+    func moveTask(key: String, to status: String, repository: String) async -> String? {
+        let (data, message) = await runRaw(
+            ["task", "set", key, "--status", status, "--repo", repository], background: true)
+        if data != nil { return nil }
+        return message ?? "The task didn’t move."
     }
 
     @Published var repositories: [Repository] = []

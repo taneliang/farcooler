@@ -93,6 +93,27 @@ struct LayoutEvent: Sendable, Decodable {
     var groups: [PaneGroup]
 }
 
+/// A repository's board moved.
+///
+/// The repository and not the task, because `task list` answers a whole board
+/// in one call and a board is the thing on screen: a client told only which
+/// task moved would still have to read the board to know where the row goes
+/// now. Carries no delta for the same reason every other event here does not —
+/// three editors move this state at once (this app, the CLI, and an agent
+/// driving the CLI), and a client that applied deltas would have to be right
+/// about all three.
+///
+/// `actor` is who caused it: `user`, `manager`, or `agent:<uuid>`, the word
+/// the daemon's `Actor` prints and the same one stored on every note. It is
+/// here so a board can tell its own write coming back from somebody else's.
+/// This app deliberately re-reads either way — see `TaskBoardStore.reload` —
+/// but the field has to reach Swift for that to be a decision rather than an
+/// omission.
+struct TaskEvent: Sendable, Decodable {
+    var repository: String
+    var actor: String?
+}
+
 /// Which resource a line is about.
 private struct EventKind: Decodable {
     var kind: String
@@ -131,6 +152,8 @@ final class EventStream {
     /// was does not narrow that: `changes inbox` answers every row at once and is
     /// the only call the sidebar makes.
     private let onChangeSet: @Sendable () -> Void
+    /// A repository's board moved. See `TaskEvent`.
+    private let onTask: @Sendable (TaskEvent) -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
@@ -138,12 +161,14 @@ final class EventStream {
         onLayout: @escaping @Sendable (LayoutEvent) -> Void = { _ in },
         onFleet: @escaping @Sendable () -> Void = {},
         onChangeSet: @escaping @Sendable () -> Void = {},
+        onTask: @escaping @Sendable (TaskEvent) -> Void = { _ in },
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
         self.onLayout = onLayout
         self.onFleet = onFleet
         self.onChangeSet = onChangeSet
+        self.onTask = onTask
         self.onEnd = onEnd
     }
 
@@ -169,7 +194,7 @@ final class EventStream {
         let buffer = LineBuffer()
         let handle = out.fileHandleForReading
         outputHandle = handle
-        handle.readabilityHandler = { [onEvent, onLayout, onFleet, onChangeSet] h in
+        handle.readabilityHandler = { [onEvent, onLayout, onFleet, onChangeSet, onTask] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
@@ -192,6 +217,10 @@ final class EventStream {
                     onFleet()
                 case "change_set":
                     onChangeSet()
+                case "task":
+                    if let event = try? decoder.decode(TaskEvent.self, from: line) {
+                        onTask(event)
+                    }
                 // Resources this app does not track yet are skipped, not an error.
                 default: continue
                 }
