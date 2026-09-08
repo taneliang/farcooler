@@ -219,11 +219,15 @@ async fn a_hook_told_an_agent_nobody_ships_is_invisible() {
 /// The other half: when there IS an answer, it reaches the agent.
 ///
 /// The unit tests end at a `String`. Between that string and the agent lie a
-/// write, a flush and a process exit — and stdout is line-buffered while a
-/// verdict is one line with no newline on the end, so "the string is right" and
-/// "the agent can read it" are two different claims. Only this one is about the
-/// binary, and it is the case where being wrong is silent: an agent that reads
-/// nothing defers, which looks exactly like a daemon with no opinion.
+/// write, a flush and a process exit, and only a test of the binary crosses
+/// those. Being wrong here is silent — an agent that reads nothing defers,
+/// which looks exactly like a daemon with no opinion.
+///
+/// What this test does NOT do is guard the flush, and the file should say so
+/// rather than let its name imply otherwise: with the flush deleted this case
+/// still passes about 197 times in 200, because at the size of a real verdict
+/// the bytes usually win their race with the exit. The test below is the one
+/// that guards it.
 #[tokio::test]
 async fn a_gating_hook_hands_the_verdict_to_the_agent_on_stdout() {
     let dir = tempfile::tempdir().expect("a directory");
@@ -266,4 +270,69 @@ async fn a_gating_hook_hands_the_verdict_to_the_agent_on_stdout() {
         "Denied from a test",
         "our own words reach the pane verbatim, through the flush and the exit"
     );
+}
+
+
+/// The verdict is not lost to the exit that follows it.
+///
+/// tokio's stdout hands the real write to the blocking pool and returns before
+/// any of it has left the process; `std::process::exit` does not wait for that
+/// pool, and std's own cleanup flush `try_lock`s and skips a pool thread
+/// holding the lock. So between writing the verdict and exiting there is a
+/// race, and the hook's `flush` is what settles it. At the size a deny message
+/// really is, the bytes win that race about 199 times in 200 — which is exactly
+/// the shape of a check that cannot fail, and therefore does not check.
+///
+/// So the daemon here hands back a verdict far larger than a real one, for no
+/// reason except that it makes the window certain. Measured on this machine:
+/// with the hook's `flush` deleted, 40 of 40 runs lose the verdict at this size
+/// and 3 of 200 lose it at a realistic one; with the flush, 0 of 100 and 0 of
+/// 200. Nothing about the program is bent to suit the test — the only thing
+/// made unusual is the length of a string the daemon chose to send.
+#[tokio::test]
+async fn a_big_verdict_is_not_lost_to_the_exit_that_follows_it() {
+    /// Comfortably past the point where the blocking pool cannot finish the
+    /// write before the exit. Not a plausible deny message, and not pretending
+    /// to be one.
+    const A_VERDICT_TOO_BIG_TO_RACE: usize = 512 * 1024;
+
+    let dir = tempfile::tempdir().expect("a directory");
+    let socket = dir.path().join("h.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+    let message = "D".repeat(A_VERDICT_TOO_BIG_TO_RACE);
+    let sent = message.clone();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("accept");
+        let mut reader = tokio::io::BufReader::new(&mut stream);
+        let mut line = String::new();
+        tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+        let verdict = format!(
+            "{}\n",
+            serde_json::json!({ "decision": { "behavior": "deny", "message": sent } })
+        );
+        tokio::io::AsyncWriteExt::write_all(&mut stream, verdict.as_bytes())
+            .await
+            .expect("write");
+    });
+
+    let out = run_the_hook("PermissionRequest", true, &socket, a_payload_of(64), Pipe::Closed)
+        .await;
+
+    assert_eq!(out.status.code(), Some(0), "a hook exits 0 even with a lot to say");
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !printed.is_empty(),
+        "the verdict never reached the agent: the exit outran the write"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(printed.trim()).unwrap_or_else(|e| {
+        panic!("stdout was {} bytes and did not parse: {e}", out.stdout.len())
+    });
+    assert_eq!(
+        parsed["hookSpecificOutput"]["decision"]["message"]
+            .as_str()
+            .map(str::len),
+        Some(A_VERDICT_TOO_BIG_TO_RACE),
+        "the verdict arrived truncated, which is the same race half-lost"
+    );
+    assert_eq!(parsed["hookSpecificOutput"]["decision"]["message"], message);
 }

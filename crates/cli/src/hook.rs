@@ -53,17 +53,25 @@ pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool) {
     if !out.is_empty() {
         let mut stdout = tokio::io::stdout();
         if stdout.write_all(out.as_bytes()).await.is_ok() {
-            // Explicit, and honestly: no test can currently make it matter.
-            // std's stdout is line-buffered and a verdict is one line with NO
-            // trailing newline, so it sits in the buffer until something
-            // flushes — but today both routes out of this process do, because
-            // `process::exit` runs the same runtime cleanup a normal return
-            // from `main` does. Measured, not assumed: removing this line
-            // breaks nothing. It stays because the next person to reach for a
-            // harder exit — `libc::_exit`, an abort path, a panic hook — gets
-            // no warning that the verdict is what they dropped, and an agent
-            // that reads nothing defers, which looks exactly like a daemon
-            // having had no opinion.
+            // Required, for a reason one layer below where it looks. This
+            // write does not reach `std::io::Stdout` here at all: tokio's
+            // stdout is a `Blocking<std::io::Stdout>`, and its `poll_write`
+            // copies the bytes into its own buffer, hands the real write to the
+            // blocking pool, and returns `Ready` before anything has left this
+            // process (tokio-1.53.1, `src/io/blocking.rs:109-133`).
+            // `poll_flush` is what waits for that write to land. The `exit`
+            // below does not wait for the blocking pool, and the stdout flush
+            // in std's own cleanup `try_lock`s and skips if the pool thread is
+            // holding the lock — two independent ways to lose the verdict. And
+            // losing it is silent: an agent that reads nothing defers, which is
+            // indistinguishable from a daemon that had no opinion.
+            //
+            // Measured, because measuring too little is how this line was once
+            // called unnecessary. Delete it and a short verdict is lost about
+            // 3 times in 200 — so a suite that runs the case once stays green
+            // and proves nothing. `a_big_verdict_is_not_lost_to_the_exit_that_
+            // follows_it` widens the window until the race is certain: 40/40
+            // lost without this line, 0/100 with it.
             let _ = stdout.flush().await;
         }
     }
