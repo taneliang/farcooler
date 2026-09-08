@@ -337,4 +337,45 @@ mod tests {
             }]
         );
     }
+
+    /// Claude's prose already left through `MessageDisplay`'s final flush, so
+    /// its own `Stop` must emit only the turn boundary. Nothing else pins
+    /// `Agent::Claude` staying in the `Stop` arm's pattern: drop it from the
+    /// match and this test is what turns silently falling through to
+    /// `_ => Vec::new()` into a failure, instead of a claude chat parked on
+    /// Working forever with no error anywhere.
+    #[test]
+    fn claudes_stop_ends_the_turn_without_repeating_its_answer() {
+        let mut a = MessageAssembler::new();
+        let out = a.accept(
+            Agent::Claude,
+            "Stop",
+            &serde_json::json!({ "hook_event_name": "Stop", "session_id": "s", "turn_id": "t" }),
+        );
+        assert_eq!(out, vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }]);
+    }
+
+    /// A message still accumulating when `Stop` arrives must be left exactly
+    /// as it is. Force-closing it here would mean a genuinely late `final`
+    /// flush lands on a `Closed` marker and gets dropped as a duplicate —
+    /// the same data-loss shape three earlier defects in this assembler
+    /// already came from.
+    #[test]
+    fn stop_does_not_disturb_a_message_still_being_assembled() {
+        let mut a = MessageAssembler::new();
+        a.accept(Agent::Claude, "MessageDisplay", &display("m1", 0, false, "one "));
+        assert_eq!(a.pending(), 1, "the message is open before Stop arrives");
+
+        let out = a.accept(
+            Agent::Claude,
+            "Stop",
+            &serde_json::json!({ "hook_event_name": "Stop", "session_id": "s", "turn_id": "t" }),
+        );
+        assert_eq!(
+            out,
+            vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }],
+            "Stop emits only the turn boundary, nothing pulled early from an open accumulation"
+        );
+        assert_eq!(a.pending(), 1, "the open message is untouched by Stop, not force-closed");
+    }
 }
