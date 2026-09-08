@@ -1117,6 +1117,39 @@ mod tests {
         );
     }
 
+    /// A tail that could not start must RELEASE the terminal's slot rather
+    /// than leave it claimed. The nearest wrong implementation is the one
+    /// this round replaced: insert into `tails` and never look at whether
+    /// anything actually started, which marks the terminal tailed for the
+    /// rest of the daemon's life with nothing running behind it and no later
+    /// payload able to try again — the whole feature silently off for that
+    /// terminal, at `debug!`.
+    ///
+    /// `/` is the cheapest transcript path with no parent directory to watch,
+    /// which is the one case `TranscriptTail::follow` still refuses outright
+    /// rather than degrading to polling.
+    #[tokio::test]
+    async fn a_tail_that_could_not_start_releases_the_terminal_for_the_next_payload() {
+        let ingress = ingress_for_test();
+        ingress.install_sink(|_, _| {});
+
+        let f = Facts { transcript_path: Some(PathBuf::from("/")), ..Facts::default() };
+        let terminal = Uuid::from_u128(107);
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+
+        // The slot is claimed synchronously and released by the spawned task,
+        // so this polls rather than reading once: what is being asserted is
+        // that the release happens at all, not how quickly.
+        let start = std::time::Instant::now();
+        while ingress.is_tailing(terminal) && start.elapsed() < std::time::Duration::from_secs(10) {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(
+            !ingress.is_tailing(terminal),
+            "a terminal whose tail never started must be left free for its next payload to retry"
+        );
+    }
+
     /// Claude already streams through `MessageDisplay` — starting a tail for
     /// it too would draw its answers a second time from the transcript.
     #[tokio::test]
