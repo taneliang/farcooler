@@ -30,24 +30,38 @@ use serde_json::{Value, json};
 ///
 /// claude and codex spell every one of these identically, so one table
 /// drives both `claude_settings` and `merge_codex`.
+///
+/// **Cut down to exactly what something consumes today, fix round 1.** The
+/// original table also carried `PreToolUse`, `PostToolUse` and
+/// `PermissionRequest` (gating); nothing in this crate reads any of the
+/// three yet — `assemble.rs`'s assembler only matches `UserPromptSubmit` and
+/// `Stop`, and `hook_ingress::announced_terminal` binds a pane from ANY
+/// event's `Facts`, not from `SessionStart` by name, but is still worth an
+/// early hook so a pane binds before its first prompt rather than waiting
+/// for one. Registering a gating event that nothing answers is not free: a
+/// gating hook blocks on the socket for `hook::HOOK_DEADLINE` (400ms) before
+/// deferring, so `PermissionRequest` today would add up to 400ms to every
+/// permission prompt in every pane for no return. `PreToolUse`/`PostToolUse`
+/// are cheaper — measured at ~15-18ms per invocation in the design doc — but
+/// still buy nothing yet. Task 11 is what gives the daemon an opinion on a
+/// permission request and re-adds `PermissionRequest`; whichever task wires
+/// up a `PreToolUse`/`PostToolUse` consumer re-adds those two. This is
+/// sequencing, not an oversight: see fix round 1 in
+/// `.superpowers/sdd/2026-09-07-live-agent-sessions/task-9-report.md`.
 const CLAUDE_CODEX_EVENTS: &[(&str, bool)] = &[
     ("SessionStart", false),
     ("UserPromptSubmit", false),
     ("Stop", false),
-    ("PreToolUse", false),
-    ("PostToolUse", false),
-    ("PermissionRequest", true),
 ];
 
-/// Cursor's own vocabulary for the same five moments, camelCase and its own
-/// words for the tool gates: `beforeShellExecution` and `beforeMCPExecution`
-/// where claude and codex both say `PreToolUse`.
+/// Cursor's own vocabulary for the same three moments, camelCase. Its tool
+/// gates — `beforeShellExecution` and `beforeMCPExecution`, where claude and
+/// codex both say `PreToolUse` — are cut for the same reason and by the same
+/// fix round as `PermissionRequest` above; Task 11 re-adds both alongside it.
 const CURSOR_EVENTS: &[(&str, bool)] = &[
     ("sessionStart", false),
     ("beforeSubmitPrompt", false),
     ("stop", false),
-    ("beforeShellExecution", true),
-    ("beforeMCPExecution", true),
 ];
 
 /// The path this binary was launched as, resolved the same way the shim's
@@ -236,12 +250,64 @@ mod tests {
         assert_eq!(once, twice, "installing is idempotent");
     }
 
+    /// The real case a daemon restart produces: the socket path rotates, so
+    /// the second merge is never byte-identical to the first. An
+    /// implementation that dedups by whole-entry equality (rather than by
+    /// the `entry_is_ours` marker) would pass `merging_twice_installs_one_copy`
+    /// above — same socket both times, so the two entries ARE equal — and
+    /// still duplicate here, where they are not.
+    #[test]
+    fn merging_again_with_a_new_socket_replaces_the_stale_entry() {
+        let once = merge_codex(SOMEONE_ELSES, Path::new("/tmp/h.sock"));
+        let twice = merge_codex(&once, Path::new("/tmp/other.sock"));
+        let v: Value = serde_json::from_str(&twice).expect("json");
+        let arr = v["hooks"]["SessionStart"].as_array().expect("SessionStart is an array");
+        let ours: Vec<&Value> = arr.iter().filter(|e| entry_is_ours(e)).collect();
+        assert_eq!(ours.len(), 1, "a re-merge with a new socket replaces, not accompanies: {arr:?}");
+        let command = ours[0]["hooks"][0]["command"].as_str().unwrap();
+        assert!(command.contains("other.sock"), "the surviving entry names the new socket: {command}");
+        assert!(!command.contains("/tmp/h.sock"), "the stale socket is gone: {command}");
+    }
+
     #[test]
     fn removing_ours_leaves_theirs_alone() {
         let merged = merge_codex(SOMEONE_ELSES, Path::new("/tmp/h.sock"));
         let cleaned = remove_ours(&merged);
         assert!(cleaned.contains("herdr-agent-state.sh"));
         assert!(!cleaned.contains("farcooler"));
+    }
+
+    /// A command that merely MENTIONS our prefix somewhere other than the
+    /// front — the way a wrapper script's log line or comment might quote
+    /// it — must not be mistaken for ours. Pins `is_ours`'s use of
+    /// `starts_with` rather than `contains`: flipping that one word makes
+    /// this fail while every other test in this module stays green, because
+    /// no other fixture's foreign command shares any substring with the
+    /// prefix.
+    #[test]
+    fn a_command_that_only_mentions_our_prefix_midstream_is_not_ours() {
+        let foreign_command =
+            format!("echo not-us && true # mentions {} elsewhere", ours_prefix());
+        let existing = json!({
+            "hooks": {
+                "SessionStart": [
+                    { "hooks": [ { "type": "command", "command": foreign_command } ] }
+                ]
+            }
+        })
+        .to_string();
+
+        let merged = merge_codex(&existing, Path::new("/tmp/h.sock"));
+        assert!(
+            merged.contains("echo not-us"),
+            "a command that only mentions our prefix midstream must survive merging: {merged}"
+        );
+
+        let cleaned = remove_ours(&merged);
+        assert!(
+            cleaned.contains("echo not-us"),
+            "and remove_ours must not treat it as ours either: {cleaned}"
+        );
     }
 
     /// Cursor's shape is flatter than the other two: no inner `hooks` array,
@@ -255,6 +321,63 @@ mod tests {
             v["hooks"]["beforeSubmitPrompt"][0]["hooks"].is_null(),
             "cursor has no nested hooks array"
         );
+    }
+
+    /// `CURSORS_ELSES`, cursor's own flat shape holding somebody else's real
+    /// hook, the way `~/.cursor/hooks.json` on this machine actually reads.
+    const CURSORS_ELSES: &str = r#"{
+      "version": 1,
+      "hooks": {
+        "sessionStart": [
+          { "command": "bash /Users/x/.cursor/herdr-agent-state.sh session" }
+        ]
+      }
+    }"#;
+
+    /// The CRITICAL gap fix round 1 found: every one of the three
+    /// properties this task exists to guarantee (merge preserves others,
+    /// merge is idempotent, remove strips only ours) was exercised only
+    /// through codex's nested shape. `entry_is_ours`'s flat-shape branch
+    /// (the `entry.get("command")` path, reached only by cursor) was only
+    /// ever proven to return `false` — never proven to return `true` on a
+    /// real cursor entry. These three give cursor the same coverage codex
+    /// already had.
+    #[test]
+    fn cursor_merging_keeps_every_hook_that_was_already_there() {
+        let merged = merge_cursor(CURSORS_ELSES, Path::new("/tmp/h.sock"));
+        assert!(
+            merged.contains("herdr-agent-state.sh"),
+            "another tool's hook survives ours being added"
+        );
+        assert!(merged.contains("farcooler"), "and ours is there too");
+    }
+
+    #[test]
+    fn cursor_merging_twice_installs_one_copy() {
+        let once = merge_cursor(CURSORS_ELSES, Path::new("/tmp/h.sock"));
+        let twice = merge_cursor(&once, Path::new("/tmp/h.sock"));
+        assert_eq!(once, twice, "installing is idempotent");
+    }
+
+    #[test]
+    fn cursor_merging_again_with_a_new_socket_replaces_the_stale_entry() {
+        let once = merge_cursor(CURSORS_ELSES, Path::new("/tmp/h.sock"));
+        let twice = merge_cursor(&once, Path::new("/tmp/other.sock"));
+        let v: Value = serde_json::from_str(&twice).expect("json");
+        let arr = v["hooks"]["sessionStart"].as_array().expect("sessionStart is an array");
+        let ours: Vec<&Value> = arr.iter().filter(|e| entry_is_ours(e)).collect();
+        assert_eq!(ours.len(), 1, "a re-merge with a new socket replaces, not accompanies: {arr:?}");
+        let command = ours[0]["command"].as_str().unwrap();
+        assert!(command.contains("other.sock"), "the surviving entry names the new socket: {command}");
+        assert!(!command.contains("/tmp/h.sock"), "the stale socket is gone: {command}");
+    }
+
+    #[test]
+    fn cursor_removing_ours_leaves_theirs_alone() {
+        let merged = merge_cursor(CURSORS_ELSES, Path::new("/tmp/h.sock"));
+        let cleaned = remove_ours(&merged);
+        assert!(cleaned.contains("herdr-agent-state.sh"));
+        assert!(!cleaned.contains("farcooler"));
     }
 
     /// Rule 1 from this plan's cost ledger: a test must assert what reached
@@ -289,12 +412,18 @@ mod tests {
         }
     }
 
-    /// claude's settings object touches no file at all, and both halves of
-    /// that promise get checked: the shape Task 10 will write out, and that
-    /// no `merge_*`/`remove_ours` function in this module is ever called on
-    /// claude's behalf anywhere in this crate.
+    /// The shape `claude_settings` hands Task 10 for `--settings <file>`.
+    ///
+    /// This test checks that shape only. The other half of the "claude
+    /// never has a file touched" promise — that no `merge_*`/`remove_ours`
+    /// call in this crate is ever made on claude's behalf — is not
+    /// encoded as an assertion here: it was checked by hand,
+    /// `grep -rn "hook_install::" crates/daemon/src crates/cli/src
+    /// crates/daemon/tests`, which today returns nothing at all because
+    /// nothing calls this module yet (see the task report). That grep needs
+    /// re-running once a caller exists.
     #[test]
-    fn claude_settings_carries_every_event_with_no_file_read() {
+    fn claude_settings_carries_every_event() {
         let settings = claude_settings(Path::new("/tmp/h.sock"));
         for (event, gating) in CLAUDE_CODEX_EVENTS {
             let command = settings["hooks"][event][0]["hooks"][0]["command"]
