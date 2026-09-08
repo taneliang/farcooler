@@ -68,8 +68,14 @@ impl Store {
     }
 
     fn init(conn: &mut Connection, backup_source: Option<&Path>) -> Result<()> {
+        // `recursive_triggers` is not decoration: without it, task_notes's
+        // BEFORE DELETE trigger never fires for an `INSERT OR REPLACE` that
+        // collides on id, because SQLite treats REPLACE's implicit delete as
+        // internal and only runs delete triggers for it when this is on. See
+        // `migration_0010_the_board` in migrate.rs for the full story.
         conn.execute_batch(
             "PRAGMA foreign_keys = ON; \
+             PRAGMA recursive_triggers = ON; \
              CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);",
         )
         .map_err(map_err)?;
@@ -885,6 +891,116 @@ mod tests {
         for e in expected {
             assert!(cols.iter().any(|c| c == e), "missing expected column {e}, have {cols:?}");
         }
+    }
+
+    /// `migrate.rs`'s own append-only tests build a bare connection and turn
+    /// `recursive_triggers` on themselves to prove the trigger-plus-pragma
+    /// combination works at all; none of them go through `Store::init`, so
+    /// none of them actually prove `Store::init` sets that pragma. This one
+    /// does, end to end through `Store::open_in_memory`, so a future edit
+    /// that drops the pragma from `init` (rather than from the migration)
+    /// fails here instead of only in a schema-level test that never runs it.
+    #[test]
+    fn a_stores_init_actually_closes_the_replace_gap_in_task_notes() {
+        let s = store();
+        s.conn()
+            .execute_batch(
+                "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+                 INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
+                 INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
+                     VALUES (x'04', x'03', 'fc-1', 'a task', 'backlog', 0, 0, 1);
+                 INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
+                     VALUES (x'05', x'04', 'decision', 'user', 0, 'because', '{}');",
+            )
+            .unwrap();
+
+        let err = s
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO task_notes (id, task_id, kind, actor, at, body, extra)
+                 VALUES (x'05', x'04', 'decision', 'user', 0, 'rewritten, same id', '{}')",
+                [],
+            )
+            .expect_err("Store::init must turn recursive_triggers on, or REPLACE walks through");
+        assert!(
+            err.to_string().contains("append-only") || err.to_string().contains("trigger"),
+            "the schema itself refuses, not a comment asking nicely: {err}"
+        );
+
+        let body: String = s
+            .conn()
+            .query_row("SELECT body FROM task_notes WHERE id = x'05'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(body, "because", "REPLACE keeps the id, so only the body proves nothing moved");
+    }
+
+    /// Round 1's `BEFORE DELETE` trigger on `task_notes` had no `WHEN`
+    /// clause, and `ON DELETE CASCADE` fires delete triggers unconditionally
+    /// — unlike `REPLACE`'s implicit delete, this is never gated by
+    /// `recursive_triggers`. So the moment any task on a repository carried
+    /// a note, deleting that repository aborted with "task_notes is
+    /// append-only" and left every row in place, including the repository
+    /// itself. Nothing in this file called the real `Store::delete_repository`
+    /// before this test, which is exactly how that shipped: 44/44 green with
+    /// the bug live.
+    ///
+    /// Goes through `Store::delete_repository`, the real function, not raw
+    /// SQL, because a schema-level test proving the trigger has the right
+    /// `WHEN` clause would not have proven this call site actually reaches
+    /// it.
+    #[test]
+    fn deleting_a_repository_takes_its_whole_board_with_it() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "r", "/repos/one/.git", "").unwrap();
+        let task_id = Uuid::now_v7();
+
+        {
+            let conn = s.conn();
+            conn.execute(
+                "INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
+                 VALUES (?1, ?2, 'fc-1', 'a task', 'backlog', 0, 0, 1)",
+                params![uuid_blob(task_id), uuid_blob(repo.id)],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
+                 VALUES (?1, ?2, 'decision', 'user', 0, 'because', '{}')",
+                params![uuid_blob(Uuid::now_v7()), uuid_blob(task_id)],
+            )
+            .unwrap();
+        } // drop the guard: delete_repository locks the same mutex itself.
+
+        s.delete_repository(repo.id, repo.resource_version).unwrap();
+
+        let conn = s.conn();
+        let repos: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM repositories WHERE id = ?1",
+                params![uuid_blob(repo.id)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let tasks: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM tasks WHERE repository_id = ?1",
+                params![uuid_blob(repo.id)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let notes: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM task_notes WHERE task_id = ?1",
+                params![uuid_blob(task_id)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            (repos, tasks, notes),
+            (0, 0, 0),
+            "the repository, its task, and the task's note must all be gone"
+        );
     }
 
     // ---- round trips ----

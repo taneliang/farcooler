@@ -21,6 +21,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0007_review,
     migration_0008_drop_task_name,
     migration_0009_workspace_order,
+    migration_0010_the_board,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -390,6 +391,144 @@ fn migration_0009_workspace_order(tx: &Transaction) -> rusqlite::Result<()> {
     )
 }
 
+/// The board: tasks, their notes, and what blocks what.
+///
+/// **`task_notes` is append-only, and two triggers say so.** The split this
+/// whole design rests on is that current understanding may be revised while
+/// the record of how it was reached may not; a note that can be silently
+/// rewritten is indistinguishable from one that was always that way, which
+/// makes the decision log worth nothing exactly when somebody leans on it.
+/// Correcting the record is a new note carrying `supersedes`.
+///
+/// `UPDATE` is the obvious rewrite and `DELETE` the obvious erasure, so each
+/// gets its own `BEFORE` trigger raising the same `ABORT`. Neither is enough
+/// on its own against `INSERT OR REPLACE` (an ordinary Rust upsert idiom):
+/// `REPLACE` on a `PRIMARY KEY` collision is an implicit delete-then-insert
+/// that keeps the row's id, so a rewrite via `REPLACE` is worse than an
+/// `UPDATE` — a reader querying by id cannot even tell the row was ever
+/// touched. SQLite only fires delete triggers for that implicit delete when
+/// `recursive_triggers` is on, which is why `Store::init` sets it right next
+/// to `PRAGMA foreign_keys = ON`: the trigger here is necessary but silently
+/// incomplete without that pragma.
+///
+/// The delete trigger only fires while the note's task still exists (see
+/// its `WHEN` clause). Append-only means a note cannot be revised or removed
+/// from a *live* log — it does not mean the record outlives the task it is
+/// about. `ON DELETE CASCADE`, unlike `REPLACE`'s implicit delete, is never
+/// gated by `recursive_triggers`, so an unconditional trigger here would
+/// also fire for the cascade out of `tasks` and `Store::delete_repository`
+/// would fail outright the moment any task on the repository had a note —
+/// which is exactly what shipped in fix round 1 and had to be reverted.
+///
+/// `status_since` is stored rather than derived from the notes. The board's
+/// most important column is how long a task has been sitting still, and a list
+/// view must not read every task's history to draw a row.
+fn migration_0010_the_board(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE repositories ADD COLUMN task_key_prefix TEXT NOT NULL DEFAULT '';
+
+        -- Every existing row defaults to '', so a plain UNIQUE would refuse
+        -- to even add the column to a database with two repositories
+        -- already in it. A partial index allows any number of empties and
+        -- only starts enforcing uniqueness once a prefix is actually
+        -- assigned, which is the "resolved when the second repository is
+        -- registered, once" promise from the design.
+        CREATE UNIQUE INDEX repositories_one_task_prefix
+            ON repositories (task_key_prefix) WHERE task_key_prefix != '';
+
+        CREATE TABLE tasks (
+            id BLOB PRIMARY KEY NOT NULL,
+            -- Deleting a repository cascades here, and from here on to every
+            -- note the task ever carried (see task_notes.task_id below). The
+            -- notes' append-only triggers do not block this: they guard a
+            -- note against being touched while its task is still around, not
+            -- against leaving with it. So deleting a repository DOES succeed
+            -- and DOES take its whole board with it, decision log included —
+            -- the same rule as the ephemeral rows (workspaces, terminals)
+            -- this pattern was written for, even though a task's notes are a
+            -- decision log the design explicitly wants kept while the task
+            -- lives. Left as CASCADE deliberately — changing it is a product
+            -- decision, not this migration's to make — but a reader of the
+            -- schema should not have to discover the consequence by testing
+            -- repository deletion.
+            repository_id BLOB NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL,
+            status_since INTEGER NOT NULL,
+            intent TEXT NOT NULL DEFAULT '',
+            acceptance TEXT NOT NULL DEFAULT '[]',
+            constraints TEXT NOT NULL DEFAULT '[]',
+            labels TEXT NOT NULL DEFAULT '[]',
+            workspace_id BLOB REFERENCES workspaces(id) ON DELETE SET NULL,
+            created_at INTEGER NOT NULL,
+            resource_version INTEGER NOT NULL,
+            UNIQUE (repository_id, key)
+        );
+
+        CREATE INDEX tasks_by_repository ON tasks (repository_id, status);
+
+        CREATE TABLE task_notes (
+            id BLOB PRIMARY KEY NOT NULL,
+            -- A task deleted (directly, or by its repository cascading, see
+            -- tasks.repository_id above) takes its whole decision log with
+            -- it, and succeeds in doing so: the append-only trigger below is
+            -- guarded to fire only while the task still exists, so it stops
+            -- a note being rewritten or erased one at a time out of a LIVE
+            -- log, and gets out of the way of the log leaving as a unit when
+            -- its task goes.
+            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            at INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            extra TEXT NOT NULL DEFAULT '{}',
+            supersedes BLOB REFERENCES task_notes(id)
+        );
+
+        CREATE INDEX task_notes_by_task ON task_notes (task_id, at);
+        CREATE INDEX task_notes_by_kind ON task_notes (task_id, kind);
+
+        -- The record refuses to be rewritten. See this function's doc.
+        CREATE TRIGGER task_notes_forbid_update
+        BEFORE UPDATE ON task_notes
+        BEGIN
+            SELECT RAISE(ABORT, 'task_notes is append-only; supersede instead');
+        END;
+
+        -- The other half of append-only: no erasing a note either, whether
+        -- by a direct DELETE or by REPLACE's implicit one. See this
+        -- function's doc for why REPLACE also needs recursive_triggers on.
+        --
+        -- The WHEN clause is not a loophole: it is what makes "append-only"
+        -- mean "cannot be revised while its task lives" rather than
+        -- "outlives its task forever". ON DELETE CASCADE out of tasks (see
+        -- tasks.repository_id above) fires this trigger too, and unlike
+        -- REPLACE's implicit delete that firing is NOT gated by
+        -- recursive_triggers — an unconditional trigger here would make
+        -- Store::delete_repository fail outright the instant any task on
+        -- the repository had a note, deleting nothing. Guarding on the task
+        -- still existing lets a note go with its task while still refusing
+        -- to let a note be deleted out from under a task that is still
+        -- there.
+        CREATE TRIGGER task_notes_forbid_delete
+        BEFORE DELETE ON task_notes
+        WHEN EXISTS (SELECT 1 FROM tasks WHERE id = OLD.task_id)
+        BEGIN
+            SELECT RAISE(ABORT, 'task_notes is append-only; supersede instead');
+        END;
+
+        CREATE TABLE task_blocks (
+            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            blocked_by BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            reason TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (task_id, blocked_by)
+        );
+        "#,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,7 +734,7 @@ mod tests {
         migrate(&mut conn, 0).unwrap();
         conn.execute_batch(
             "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
-             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
              INSERT INTO workspaces VALUES (x'04', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0, 0);",
         )
         .unwrap();
@@ -604,5 +743,175 @@ mod tests {
             "INSERT INTO workspaces VALUES (x'05', x'03', 'main', '/r/wt', 0, 0, 1, 0, 0, 0);",
         );
         assert!(second.is_err(), "a second row for the same path is refused");
+    }
+
+    #[test]
+    fn a_database_from_before_the_board_gains_its_tables() {
+        let mut conn = open();
+        migrate(&mut conn, 0).unwrap();
+        for table in ["tasks", "task_notes", "task_blocks"] {
+            let found: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "{table} is missing");
+        }
+    }
+
+    /// A migrated database with one task (`x'02'`, under repository `x'12'`)
+    /// for a note to point at.
+    ///
+    /// `task_notes.task_id` is a foreign key and this build enforces foreign
+    /// keys whether or not `Store::init`'s pragma has run (see
+    /// `a_note_cannot_be_updated`'s history), so every append-only test needs
+    /// a real task rather than a bare `x'02'`. Factored out because three
+    /// tests need the identical row.
+    fn open_with_a_task() -> Connection {
+        let mut conn = open();
+        migrate(&mut conn, 0).unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'10', x'11', '/r', 0, 1);
+             INSERT INTO repositories
+                 VALUES (x'12', x'11', x'10', 'r', '/r/.git', '', 1, '');
+             INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
+                 VALUES (x'02', x'12', 'fc-1', 'a task', 'backlog', 0, 0, 1);
+             INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
+             VALUES (x'01', x'02', 'decision', 'user', 0, 'because', '{}');",
+        )
+        .unwrap();
+        conn
+    }
+
+    /// The body a fresh note in `open_with_a_task` carries, so every refusal
+    /// test can assert it is still there rather than merely that some error
+    /// came back. An error alone does not distinguish a trigger that aborts
+    /// before the write from one that aborts after it — SQLite rolls back
+    /// either way, but only the re-read proves the row was never actually
+    /// changed by the statement under test.
+    const THE_ORIGINAL_BODY: &str = "because";
+
+    fn note_body(conn: &Connection) -> String {
+        conn.query_row("SELECT body FROM task_notes WHERE id = x'01'", [], |r| r.get(0)).unwrap()
+    }
+
+    /// A note is a record, and a record that can be rewritten is not one.
+    ///
+    /// Enforced in the schema rather than left to the code, because "the code
+    /// never does that" is exactly the guarantee that decays. The whole value
+    /// of the decision log is that a reader can trust it was not edited after
+    /// the fact.
+    #[test]
+    fn a_note_cannot_be_updated() {
+        let conn = open_with_a_task();
+        let err = conn
+            .execute("UPDATE task_notes SET body = 'rewritten' WHERE id = x'01'", [])
+            .expect_err("a note must not be rewritable");
+        assert!(
+            err.to_string().contains("append-only") || err.to_string().contains("trigger"),
+            "the schema itself refuses, not a comment asking nicely: {err}"
+        );
+        assert_eq!(
+            note_body(&conn),
+            THE_ORIGINAL_BODY,
+            "the error must mean the write never happened, not merely that one was reported"
+        );
+    }
+
+    /// The other half of append-only: erasing a note is exactly as forbidden
+    /// as rewriting it. A record you can delete is a record you can make
+    /// disappear the moment it becomes inconvenient, which is the same
+    /// failure the UPDATE trigger exists to prevent.
+    #[test]
+    fn a_note_cannot_be_deleted() {
+        let conn = open_with_a_task();
+        let err = conn
+            .execute("DELETE FROM task_notes WHERE id = x'01'", [])
+            .expect_err("a note must not be erasable");
+        assert!(
+            err.to_string().contains("append-only") || err.to_string().contains("trigger"),
+            "the schema itself refuses, not a comment asking nicely: {err}"
+        );
+        assert_eq!(note_body(&conn), THE_ORIGINAL_BODY, "the row must still be there at all");
+    }
+
+    /// `INSERT OR REPLACE` is the case that matters most: it is an ordinary
+    /// upsert idiom, it keeps the row's id, and a `BEFORE DELETE` trigger
+    /// alone does NOT stop it — SQLite only runs delete triggers for
+    /// REPLACE's implicit delete when `recursive_triggers` is on. This test
+    /// turns that pragma on itself (mirroring what `Store::init` does) so it
+    /// is exercising the same configuration a real `Store` runs with, not a
+    /// looser one that happens to also refuse the write for an unrelated
+    /// reason.
+    #[test]
+    fn a_note_cannot_be_replaced() {
+        let conn = open_with_a_task();
+        conn.execute_batch("PRAGMA recursive_triggers = ON;").unwrap();
+        let err = conn
+            .execute(
+                "INSERT OR REPLACE INTO task_notes (id, task_id, kind, actor, at, body, extra)
+                 VALUES (x'01', x'02', 'decision', 'user', 0, 'rewritten, same id', '{}')",
+                [],
+            )
+            .expect_err("a note must not be replaceable, same id or not");
+        assert!(
+            err.to_string().contains("append-only") || err.to_string().contains("trigger"),
+            "the schema itself refuses, not a comment asking nicely: {err}"
+        );
+        assert_eq!(
+            note_body(&conn),
+            THE_ORIGINAL_BODY,
+            "REPLACE keeps the id, so a body check is the only way to tell a rewrite happened"
+        );
+    }
+
+    #[test]
+    fn a_repository_carries_the_prefix_its_task_keys_use() {
+        let mut conn = open();
+        migrate(&mut conn, 0).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('repositories') WHERE name='task_key_prefix'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    /// Two repositories, no prefix assigned to either: a plain `UNIQUE`
+    /// column could never have been added at all, since every pre-existing
+    /// row defaults to `''` — this is what the partial index buys instead.
+    #[test]
+    fn two_repositories_with_no_task_prefix_are_both_fine() {
+        let mut conn = open();
+        migrate(&mut conn, 0).unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
+             INSERT INTO repositories VALUES (x'04', x'02', x'01', 'r2', '/r2/.git', '', 1, '');",
+        )
+        .unwrap();
+    }
+
+    /// Once a prefix is actually assigned, a second repository cannot claim
+    /// the same one — the "resolved when the second repository is
+    /// registered, once" promise from the design, enforced by the schema
+    /// rather than by every caller remembering to check first.
+    #[test]
+    fn two_repositories_cannot_share_a_task_prefix() {
+        let mut conn = open();
+        migrate(&mut conn, 0).unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, 'fc');",
+        )
+        .unwrap();
+        let second = conn.execute_batch(
+            "INSERT INTO repositories VALUES (x'04', x'02', x'01', 'r2', '/r2/.git', '', 1, 'fc');",
+        );
+        assert!(second.is_err(), "a second repository claiming the same prefix is refused");
     }
 }
