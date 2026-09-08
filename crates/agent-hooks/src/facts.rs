@@ -6,7 +6,7 @@
 //! `workspace_roots` instead, which is the kind of difference that is found in
 //! production rather than in review unless it is pinned here.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::Agent;
 
@@ -51,6 +51,7 @@ pub fn facts(agent: Agent, payload: &serde_json::Value) -> Facts {
 mod tests {
     use super::*;
     use crate::Agent;
+    use std::path::Path;
 
     fn fixture(name: &str) -> serde_json::Value {
         let path = format!("{}/tests/fixtures/{name}.json", env!("CARGO_MANIFEST_DIR"));
