@@ -9,6 +9,7 @@ pub mod foreground;
 pub mod fs_watch;
 pub mod git;
 pub mod hook_ingress;
+pub mod hook_install;
 pub mod layout;
 pub mod log_join;
 pub mod log_watch;
