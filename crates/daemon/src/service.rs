@@ -527,7 +527,7 @@ impl Service {
         Ok(Self {
             store: store.clone(),
             tmux,
-            inventory,
+            inventory: inventory.clone(),
             host_id,
             install_id,
             root,
@@ -535,7 +535,7 @@ impl Service {
             sessions: crate::sessions::Sessions::new(),
             registry,
             agents: agent_supervisor::AgentSupervisor::new(),
-            hooks: hook_ingress::HookIngress::new(store.clone()),
+            hooks: hook_ingress::HookIngress::new(store.clone(), Arc::new(inventory.clone())),
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             pr_fills: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -2370,7 +2370,7 @@ impl Service {
     }
 }
 
-fn to_record(t: &models::Terminal) -> derive::TerminalRecord {
+pub(crate) fn to_record(t: &models::Terminal) -> derive::TerminalRecord {
     derive::TerminalRecord {
         id: t.id,
         workspace_id: t.workspace_id,
@@ -3662,6 +3662,7 @@ mod remove_root_tests {
             farcooler_agent_hooks::Agent::Claude,
             "UserPromptSubmit",
             &serde_json::json!({ "prompt": "hello" }),
+            Some("a-session"),
         );
         assert!(
             service.hooks.is_tracking(terminal),

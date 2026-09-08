@@ -18,6 +18,18 @@
 //! listener that is slow, wrong or absent looks from the agent's end exactly
 //! like a listener that is working. Nothing over there will ever complain
 //! about anything done here.
+//!
+//! So the diagnostics have to carry the whole weight, and they are pitched at
+//! the level the daemon actually runs at — `main.rs` defaults the filter to
+//! `farcooler=info,warn`, which a module whose every line was `debug!` would
+//! be entirely invisible under. Two things are said out loud: the first time a
+//! session binds to a terminal, because which conversation landed on which
+//! pane has no other record and a wrong binding renders as an ordinary
+//! transcript; and a read that FAILED, because folding that into the same
+//! `None` an unclaimed session produces makes a broken runner and an idle one
+//! look identical. Everything else — an unbound session, an ambiguity, a
+//! frame we could not parse — stays at `debug!`, because those are ordinary
+//! and a warning that cries wolf is how the one that matters gets ignored.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -28,14 +40,64 @@ use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::assemble::MessageAssembler;
 use farcooler_agent_hooks::facts::{Facts, facts};
 use farcooler_agent_hooks::wire::{HookLine, decode_line};
-use farcooler_store::Store;
+use farcooler_core::derive;
+use farcooler_core::inventory::{RuntimeInventory, RuntimeSnapshot};
+use farcooler_protocol::v1::TerminalState;
+use farcooler_store::{Store, Terminal};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
 
+/// How long a connection may say nothing at all before it is dropped.
+///
+/// NOT a deadline on a decision. `farcooler hook` bounds its whole
+/// conversation at 400ms today, and the design says a permission somebody is
+/// looking at "may take as long as a person takes" — so this is deliberately
+/// far longer than any answer a person would give, and a gating hook added
+/// later must still fit inside it.
+///
+/// It exists because nothing else reclaims a connection. A hook process that
+/// leaked, or a peer that connected and died, holds a descriptor and a task
+/// for the life of the daemon; enough of those is the descriptor shortage that
+/// `listen` now has to survive.
+const IDLE: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// How long to wait before accepting again after a refusal.
+///
+/// `LiveInventory::RETRY_PAUSE`'s reasoning, for the same kind of condition:
+/// not a backoff, just long enough that the retry is asking about a different
+/// moment. Immediately retrying `EMFILE` is a spin at full CPU.
+const ACCEPT_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Whether an `accept` failure is about this connection rather than the socket.
+///
+/// A descriptor shortage is the one that matters and it is the one Rust does
+/// not name: `EMFILE` and `ENFILE` both arrive as `ErrorKind::Uncategorized`,
+/// so they are matched by errno or not at all.
+fn transient(e: &std::io::Error) -> bool {
+    if matches!(
+        e.kind(),
+        std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
+    ) {
+        return true;
+    }
+    matches!(
+        e.raw_os_error(),
+        Some(libc::EMFILE) | Some(libc::ENFILE) | Some(libc::ENOBUFS) | Some(libc::ENOMEM)
+    )
+}
+
 #[derive(Clone)]
 pub struct HookIngress {
     store: Arc<Store>,
+    /// tmux's view, for the one question the store cannot answer.
+    ///
+    /// A terminal's row says what somebody INTENDED; whether the pane is still
+    /// alive is derived from this and never stored, which is the whole premise
+    /// of `farcooler-store`. The announce path needs it because an exited pane
+    /// keeps its row, and a row nobody reaps would otherwise sit in its
+    /// worktree forever as a second candidate.
+    inventory: Arc<dyn RuntimeInventory>,
     /// One assembler per terminal. Claude's prose arrives in pieces and the
     /// pieces of two panes must never be added to each other.
     ///
@@ -49,8 +111,8 @@ pub struct HookIngress {
 }
 
 impl HookIngress {
-    pub fn new(store: Arc<Store>) -> Self {
-        Self { store, assemblers: Arc::new(Mutex::new(HashMap::new())) }
+    pub fn new(store: Arc<Store>, inventory: Arc<dyn RuntimeInventory>) -> Self {
+        Self { store, inventory, assemblers: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     /// Short, for `agent_supervisor::socket_path`'s reason.
@@ -73,7 +135,21 @@ impl HookIngress {
     /// chat to the wrong conversation") arriving by the new route.
     pub fn terminal_for(&self, f: &Facts, agent: Agent) -> Option<Uuid> {
         let session = f.session_id.as_deref()?;
-        let claimants = self.store.terminals_with_agent_session(session).ok()?;
+        // A store error is not an answer. Swallowed into `None` it would be
+        // indistinguishable from an ordinary unbound session, and every hook
+        // on the runner would go quietly nowhere with nothing anywhere saying
+        // why -- the hook itself exits 0 and prints nothing.
+        let claimants = match self.store.terminals_with_agent_session(session) {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    session,
+                    "could not read which terminal claims this session; the hook is dropped"
+                );
+                return None;
+            }
+        };
         match claimants.as_slice() {
             [only] => return Some(only.id),
             [] => {}
@@ -102,28 +178,72 @@ impl HookIngress {
     /// Keyed on the agent rather than on a `SessionStart` event name, because
     /// only codex sends one: cursor has no session-start hook at all, and
     /// gating on the name would leave every cursor session permanently
-    /// unattached. The match is therefore standing rather than one-shot, which
-    /// it can afford to be — nothing here writes, so re-resolving a session on
-    /// its every hook costs two indexed reads and reaches the same answer.
+    /// unattached. The match is therefore standing rather than one-shot: it
+    /// re-resolves on every hook and reaches the same answer, because nothing
+    /// here writes.
     ///
-    /// A pane that already names a session is never a candidate. It is
-    /// speaking for a conversation, and handing it a second one would draw two
-    /// sessions into one transcript.
+    /// That is not free, and the cost is worth stating rather than assuming.
+    /// There is no index on `terminals` at all — the only indexes in the
+    /// schema are on `pane_groups`, `pane_members` and `workspaces` — so this
+    /// is a scan of `workspaces`, one `canonicalize` syscall per workspace to
+    /// compare it, and a scan of `terminals` per matching workspace. At a
+    /// flush every couple of seconds per session, against a fleet of panes,
+    /// that is small; it is not a lookup by identity, and nothing here should
+    /// be written as though it were.
+    ///
+    /// Two kinds of pane are never candidates. One that already names a
+    /// session is speaking for a conversation, and handing it a second would
+    /// draw two sessions into one transcript. And one whose pane is gone:
+    /// nothing reaps a terminal's row, so a worktree accumulates the rows of
+    /// every pane it has held, and counting those would find two candidates
+    /// where there is one live pane and bind NEITHER — permanently, and
+    /// silently, since a refusal looks exactly like an unmanaged pane. That
+    /// judgement needs tmux, which is why this holds an inventory: the store
+    /// records intent and nothing writes an exit onto a row when a process
+    /// ends by itself, so a codex that quit looks, to the store alone, exactly
+    /// like the live one beside it.
     fn announced_terminal(&self, f: &Facts, agent: Agent) -> Option<Uuid> {
         if agent == Agent::Claude {
             return None;
         }
         let cwd = canonical(f.cwd.as_deref()?);
-        let workspaces = self.store.list_all_workspaces().ok()?;
+        // Hidden rows included, deliberately. `hide_workspace` sets a flag and
+        // never touches git or tmux, so an agent in a hidden worktree keeps
+        // running and keeps firing hooks; `list_all_workspaces` filters
+        // `hidden = 0` and says in its own doc that it is for summaries.
+        // Reading through that one would leave every codex and cursor session
+        // in a hidden worktree unattached while claude, which never consults a
+        // workspace, kept working — an asymmetry nobody could guess from the
+        // symptom.
+        let workspaces = match self.store.list_workspaces_in_order() {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not read the worktrees; the announcement is dropped");
+                return None;
+            }
+        };
+        // Once, so every candidate is judged against one view of the runner.
+        let snapshot = self.inventory.snapshot();
 
         let mut candidates: Vec<Uuid> = Vec::new();
         for ws in workspaces.iter().filter(|w| canonical(Path::new(&w.worktree_path)) == cwd) {
-            let terminals = self.store.list_terminals_for_workspace(ws.id).ok()?;
+            let terminals = match self.store.list_terminals_for_workspace(ws.id) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        workspace = %ws.id,
+                        "could not read this worktree's panes; the announcement is dropped"
+                    );
+                    return None;
+                }
+            };
             candidates.extend(
                 terminals
                     .into_iter()
                     .filter(|t| t.agent_session_id.is_none())
                     .filter(|t| preset_agent(&t.command_preset) == Some(agent))
+                    .filter(|t| still_a_pane(t, &snapshot))
                     .map(|t| t.id),
             );
         }
@@ -156,9 +276,30 @@ impl HookIngress {
         agent: Agent,
         event: &str,
         payload: &serde_json::Value,
+        session: Option<&str>,
     ) -> Vec<AgentEvent> {
         let mut assemblers = self.assemblers.lock().unwrap_or_else(|e| e.into_inner());
-        assemblers.entry(terminal).or_default().accept(agent, event, payload)
+        // The transition, not the flush. Which conversation ended up on which
+        // pane is the fact with no other record: the hook exits 0 and prints
+        // nothing, and a wrong binding renders as a working transcript.
+        // `set_pane_mode`'s adoption path already learned this and logs at the
+        // same level for the same reason — "the success path was the silent
+        // one ... an ADOPTION recorded nothing at all".
+        //
+        // Once per terminal, because the map's own emptiness is what says
+        // this is the first, and `forget` clears it along with the row.
+        let first = !assemblers.contains_key(&terminal);
+        let events = assemblers.entry(terminal).or_default().accept(agent, event, payload);
+        drop(assemblers);
+        if first {
+            tracing::info!(
+                terminal = %terminal,
+                agent = agent.as_str(),
+                session = ?session,
+                "a live agent session is bound to this terminal"
+            );
+        }
+        events
     }
 
     /// Drop the assembly state held for a terminal whose record is gone.
@@ -202,7 +343,36 @@ impl HookIngress {
         let on_events = Arc::new(on_events);
 
         loop {
-            let (stream, _) = listener.accept().await?;
+            let stream = match listener.accept().await {
+                Ok((stream, _)) => stream,
+                // A refused connection is not a broken listener. `?` here
+                // ended the loop for good on a descriptor shortage somebody
+                // else caused, and nothing calls this twice —
+                // `agent_supervisor` at least re-arms through
+                // `ensure_listening`. Every session on the runner then went
+                // silent until the daemon was restarted, with the hook side
+                // exiting 0 and printing nothing.
+                Err(e) if transient(&e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "the hook socket could not take a connection; still listening"
+                    );
+                    // A pause, because the common cause is a descriptor
+                    // shortage and retrying it immediately is a spin at full
+                    // CPU against a condition only time fixes.
+                    tokio::time::sleep(ACCEPT_RETRY_PAUSE).await;
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        path = %path.display(),
+                        "the hook listener has stopped; no live agent session will report \
+                         anything on this runner until the daemon is restarted"
+                    );
+                    return Err(e);
+                }
+            };
             let this = self.clone();
             let on_events = on_events.clone();
             // One task per connection: a hook that is waiting on a decision
@@ -223,7 +393,14 @@ impl HookIngress {
         let mut line = String::new();
         loop {
             line.clear();
-            if reader.read_line(&mut line).await? == 0 {
+            let Ok(read) = tokio::time::timeout(IDLE, reader.read_line(&mut line)).await else {
+                tracing::debug!(
+                    seconds = IDLE.as_secs(),
+                    "a hook connection said nothing at all for this long; dropping it"
+                );
+                return Ok(());
+            };
+            if read? == 0 {
                 return Ok(());
             }
             // The half of the framing contract this side owns. `hook.rs`'s
@@ -249,12 +426,29 @@ impl HookIngress {
                 continue;
             };
 
-            let events = self.accept(terminal, hook.agent, &hook.event, &hook.payload);
+            let events =
+                self.accept(terminal, hook.agent, &hook.event, &hook.payload, f.session_id.as_deref());
             if !events.is_empty() {
                 on_events(terminal, events);
             }
         }
     }
+}
+
+/// Whether a terminal's row still has a pane a session could be running in.
+///
+/// `Exited`, `Lost` and `Error` are findings that the pane is gone. `Unknown`
+/// is not: `derive_terminal` says outright that an unusable inventory "is not
+/// proof of life — and it is not proof of death either", and tmux answers one
+/// request at a time per server, so a single wedged pane makes every read
+/// unhealthy for a few seconds. Retiring a candidate on that would make every
+/// announcement fail exactly when the runner is busiest. `Starting` stays a
+/// candidate too — a hook can fire before the daemon has confirmed the pane.
+fn still_a_pane(terminal: &Terminal, snapshot: &RuntimeSnapshot) -> bool {
+    !matches!(
+        derive::derive_terminal(&crate::service::to_record(terminal), snapshot).state,
+        TerminalState::Exited | TerminalState::Lost | TerminalState::Error
+    )
 }
 
 /// Which agent a command preset runs, when it is one of the three that hook.
@@ -291,6 +485,42 @@ mod tests {
         assert_eq!(preset_agent("cursor"), Some(Agent::Cursor));
         assert_eq!(preset_agent("shell"), None, "a shell pane hosts no agent");
         assert_eq!(preset_agent(""), None);
+    }
+
+    /// The descriptor shortage is the case that matters, and it is the one
+    /// `ErrorKind` does not name.
+    ///
+    /// A reader written against `ErrorKind` alone looks complete — it handles
+    /// `Interrupted` and `ConnectionAborted` — and still ends the listener for
+    /// good on `EMFILE`, which is both the likeliest cause and the one that
+    /// mends itself. `EMFILE` and `ENFILE` arrive as `Uncategorized`, which no
+    /// pattern may match, so they are matched by errno or not at all.
+    #[test]
+    fn a_descriptor_shortage_is_a_refused_connection_and_not_a_broken_socket() {
+        for errno in [libc::EMFILE, libc::ENFILE, libc::ENOBUFS, libc::ENOMEM] {
+            let e = std::io::Error::from_raw_os_error(errno);
+            assert!(
+                transient(&e),
+                "errno {errno} ({e}) arrives as {:?} and must not end the listener",
+                e.kind()
+            );
+        }
+        for kind in [std::io::ErrorKind::Interrupted, std::io::ErrorKind::ConnectionAborted] {
+            assert!(transient(&std::io::Error::from(kind)), "{kind:?} is about one connection");
+        }
+    }
+
+    /// And something that really is the socket still stops it.
+    ///
+    /// Without this the rule could be "everything is transient", which never
+    /// returns and never reports — the accept loop would spin forever on a
+    /// listener that is genuinely gone.
+    #[test]
+    fn a_socket_that_is_actually_broken_is_not_treated_as_transient() {
+        for errno in [libc::EBADF, libc::EINVAL, libc::ENOTSOCK] {
+            let e = std::io::Error::from_raw_os_error(errno);
+            assert!(!transient(&e), "errno {errno} ({e}) is the listener itself");
+        }
     }
 
     /// The socket has to fit, and the reason it might not is the runtime

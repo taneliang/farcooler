@@ -673,9 +673,13 @@ impl Store {
     ///
     /// Keyed on the column, so the caller is handed the claimants rather than
     /// every terminal on the runner to sift for itself. That is about where
-    /// the filtering lives and what crosses the boundary, not about the query
-    /// plan: there is no index on `agent_session_id`, so SQLite still walks
-    /// the table — a handful of rows for a fleet of panes.
+    /// the filtering lives and what crosses the boundary, and NOT about the
+    /// query plan: `terminals` carries no index at all — the only ones in the
+    /// schema are `pane_groups_by_workspace`, `pane_members_by_group`,
+    /// `workspaces_one_per_path` and `workspaces_by_ordinal` — so SQLite walks
+    /// the table, which for a fleet of panes is a handful of rows. Nothing
+    /// here should be described as a lookup by identity, because it is not
+    /// one.
     ///
     /// A `Vec` rather than an `Option`, because nothing constrains the column
     /// to be unique and two rows really can carry one id — a split pane copies
