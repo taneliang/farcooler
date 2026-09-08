@@ -897,6 +897,21 @@ impl Service {
             &remote,
         )?;
 
+        // Unlike the reconcile call below, this is NOT best-effort: a
+        // repository with no task key prefix cannot ever get one later (see
+        // `Store::assign_task_key_prefix` — this is the only call site, and
+        // it exists for exactly this moment), so every board this
+        // repository will ever have depends on this succeeding here. `?`
+        // propagates a failure as the registration's own failure, rather
+        // than logging and returning a repository that would silently emit
+        // "-1", "-2" task keys with no prefix forever.
+        let prefix = self.store.assign_task_key_prefix(repository.id)?;
+        tracing::info!(repository = %repository.id, %prefix, "assigned a task key prefix");
+        // Re-read rather than patching the struct in hand: `assign_task_key_prefix`
+        // also bumped `resource_version`, and this is the one copy of that
+        // number that is actually current.
+        let repository = self.store.get_repository(repository.id)?;
+
         // Synchronously, before returning: adding a project should fill the
         // sidebar by the time the sheet closes, not a tick later. A failure
         // here is logged rather than propagated — the repository IS registered,
@@ -2620,6 +2635,44 @@ mod tests {
         std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main").unwrap();
         let hits = service.search_worktree_files(ws.id, "", 500).await.unwrap();
         assert!(!hits.iter().any(|p| p.starts_with(".git/")), "{hits:?}");
+    }
+
+    /// `register_repository` is the only production caller of
+    /// `Store::assign_task_key_prefix` — everything else that exercises it
+    /// is this crate's own test helpers. Going through the real,
+    /// fully-async `register_repository` here rather than calling
+    /// `svc.store.assign_task_key_prefix` directly is the whole point: a
+    /// test written the second way would prove the store-level mechanism
+    /// works without proving registration ever reaches it, which is exactly
+    /// the gap that shipped — `create_repository` alone leaves
+    /// `task_key_prefix` at the schema's `''` default forever, and nothing
+    /// before this test called `register_repository` and then checked.
+    ///
+    /// `crate::test_support::fixture()` registers through this exact
+    /// function (see its own body), so this asserts against what it
+    /// produced rather than repeating the registration call.
+    #[tokio::test]
+    async fn registering_a_repository_assigns_a_task_key_prefix() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let repository = svc.store.get_repository(repo).unwrap();
+
+        // The fixture's worktree directory is named "repo" — a single,
+        // four-letter word, so `derive_prefix` takes its first two letters.
+        assert_eq!(
+            repository.task_key_prefix, "re",
+            "register_repository must have called assign_task_key_prefix, not left the \
+             schema's '' default in place"
+        );
+        assert_eq!(
+            svc.store.next_task_key(repo).unwrap(),
+            "re-1",
+            "a real prefix, not the bare '-1' an empty prefix would produce"
+        );
+        assert_eq!(
+            repository.resource_version, 2,
+            "create_repository left it at 1; the prefix assignment inside \
+             register_repository must have bumped it once"
+        );
     }
 
     /// Hiding never consults terminal state at all — proven structurally,

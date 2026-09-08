@@ -56,6 +56,13 @@ pub struct Repository {
     pub canonical_git_dir: String,
     pub remote_summary: String,
     pub resource_version: u64,
+    /// The task key prefix this repository was assigned, once, at
+    /// registration -- `''` until `Store::assign_task_key_prefix` sets it.
+    ///
+    /// Stored, not derived from `display_name`: see `farcooler_store::tasks`
+    /// for why a prefix computed on every read would break every task key
+    /// ever written down the moment the repository was renamed.
+    pub task_key_prefix: String,
 }
 
 pub(crate) fn row_to_repository(row: &Row) -> rusqlite::Result<Repository> {
@@ -67,6 +74,7 @@ pub(crate) fn row_to_repository(row: &Row) -> rusqlite::Result<Repository> {
         canonical_git_dir: row.get(4)?,
         remote_summary: row.get(5)?,
         resource_version: row.get::<_, i64>(6)? as u64,
+        task_key_prefix: row.get(7)?,
     })
 }
 

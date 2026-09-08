@@ -208,13 +208,16 @@ impl Store {
             canonical_git_dir: canonical_git_dir.to_string(),
             remote_summary: remote_summary.to_string(),
             resource_version: 1,
+            // The schema's own default for a freshly inserted row; assigned
+            // later, once, by `Store::assign_task_key_prefix`.
+            task_key_prefix: String::new(),
         })
     }
 
     pub fn get_repository(&self, id: Uuid) -> Result<Repository> {
         self.conn()
             .query_row(
-                "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version
+                "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version, task_key_prefix
                  FROM repositories WHERE id = ?1",
                 params![uuid_blob(id)],
                 row_to_repository,
@@ -226,7 +229,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version
+                "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version, task_key_prefix
                  FROM repositories WHERE repository_root_id = ?1",
             )
             .map_err(map_err)?;

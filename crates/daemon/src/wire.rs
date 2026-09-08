@@ -753,6 +753,7 @@ mod tests {
             canonical_git_dir: "/Users/someone/farcooler/.git".into(),
             remote_summary: "github".into(),
             resource_version: 1,
+            task_key_prefix: String::new(),
         };
         assert_eq!(repository(&model, Scope::Read).canonical_git_dir, None);
         assert!(repository(&model, Scope::HostAdmin).canonical_git_dir.is_some());
