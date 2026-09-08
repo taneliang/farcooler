@@ -3062,6 +3062,17 @@ impl Watcher {
         });
     }
 
+    /// A task's row changed: status, title, intent, acceptance, or the note
+    /// log behind it.
+    ///
+    /// Carries the actor that caused it, unlike every other announce here —
+    /// see `task_changed_event` and the comment on `task_changed` in the
+    /// proto for why: without it, whatever eventually wakes a manager on this
+    /// event would wake it on its own write.
+    pub fn announce_task_changed(&self, task_id: Uuid, repository_id: Uuid, actor: farcooler_store::models::Actor) {
+        let _ = self.events.send(task_changed_event(task_id, repository_id, actor));
+    }
+
     /// Start a change-set pass, unless one is still going.
     ///
     /// Detached rather than awaited inside the tick loop, because this is the
@@ -4294,6 +4305,27 @@ pub fn worktrees_changed(
     }
 }
 
+/// Build a `TaskChanged` event, without sending it.
+///
+/// Split from `Watcher::announce_task_changed` so a test can check what an
+/// event carries without standing up a `Watcher` to send it through — the
+/// same split `announce_fleet_changed` and `announce_change_set` above do not
+/// need, because nothing has to assert on their payload's shape independent
+/// of delivery.
+fn task_changed_event(task_id: Uuid, repository_id: Uuid, actor: farcooler_store::models::Actor) -> Event {
+    Event {
+        event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+        sequence: 0,
+        payload: Some(farcooler_protocol::v1::event::Payload::TaskChanged(
+            farcooler_protocol::v1::TaskChanged {
+                task_id: bytes::Bytes::copy_from_slice(task_id.as_bytes()),
+                repository_id: bytes::Bytes::copy_from_slice(repository_id.as_bytes()),
+                actor: actor.to_string(),
+            },
+        )),
+    }
+}
+
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -4579,6 +4611,8 @@ mod tests {
 
     use super::*;
     use farcooler_core::session_log::TurnOutcome;
+    use farcooler_protocol::v1::event::Payload;
+    use farcooler_store::models::Actor;
 
     /// The clock a person actually reads.
     ///
@@ -6774,5 +6808,28 @@ mod tests {
         // does not answer it.
         let next = activity::advance(AgentActivity::Idle, agent_observation(AgentActivity::Blocked));
         assert_eq!(next, AgentActivity::Blocked);
+    }
+
+    /// Without this the manager updates a ticket, is told the ticket changed,
+    /// updates it again, and the loop never settles. The filter belongs on the
+    /// event rather than in the manager, because a manager that has to
+    /// remember not to answer itself will one day forget.
+    #[test]
+    fn a_task_event_names_who_caused_it() {
+        let event = task_changed_event(Uuid::now_v7(), Uuid::now_v7(), Actor::Manager);
+        let Some(Payload::TaskChanged(payload)) = event.payload else {
+            panic!("wrong payload");
+        };
+        assert_eq!(payload.actor, "manager");
+    }
+
+    #[test]
+    fn an_agents_event_names_the_terminal_that_caused_it() {
+        let terminal = Uuid::now_v7();
+        let event = task_changed_event(Uuid::now_v7(), Uuid::now_v7(), Actor::Agent { terminal });
+        let Some(Payload::TaskChanged(payload)) = event.payload else {
+            panic!("wrong payload");
+        };
+        assert_eq!(payload.actor, format!("agent:{terminal}"));
     }
 }

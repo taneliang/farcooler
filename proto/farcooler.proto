@@ -425,6 +425,21 @@ message Event {
     // ever sent this way — the input and resize arms are a client talking, and
     // an `Event` is only ever the daemon.
     TerminalFrame terminal_frame = 20;
+    // A task's row changed: status, title, intent, acceptance, or the note
+    // log behind it. Carries the id and its repository, like
+    // `change_set_changed` carries a workspace, so a client knows which board
+    // to re-read; the task itself is fetched rather than attached, for the
+    // same reason.
+    //
+    // Carries the actor too, which nothing else in this oneof does. The wake
+    // loop this event feeds is not in this plan, but a manager that writes a
+    // task and is then told the task changed will answer its own write and
+    // never settle — a manager that has to remember not to answer itself will
+    // one day forget, so the filter belongs on the wire rather than in the
+    // manager. It has to be here from the start: adding it later means every
+    // client that already decodes this event has to be taught a new field
+    // before the loop can be trusted.
+    TaskChanged task_changed = 22;
   }
 }
 
@@ -1725,6 +1740,17 @@ message ChangeSetRequest {
 message ChangeSetChanged {
   bytes workspace_id = 1;
   uint64 version = 2;
+}
+
+message TaskChanged {
+  bytes task_id = 1;
+  bytes repository_id = 2;
+  // `user`, `manager`, or `agent:<uuid>` — the daemon's `Actor::Display`
+  // impl, verbatim. A wire word rather than a kind-plus-optional-id for the
+  // same reason the store column is: two fields are two things that can
+  // disagree, and nothing would stop a `manager` row from also carrying a
+  // terminal.
+  string actor = 3;
 }
 
 // Where a base came from, because a guessed one silently produces a wrong diff

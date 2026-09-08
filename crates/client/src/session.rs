@@ -227,14 +227,32 @@ impl FleetEvent {
                 Some(FleetEvent::Stack { repository: uuid_of(&s.repository_id) })
             }
             Payload::TerminalFrame(_) | Payload::AgentEvents(_) => None,
-            // Reserved arms no daemon emits. Named one by one rather than
-            // swept up by `_`, so that the day one of them starts being sent
-            // this match stops compiling and somebody decides what a client
-            // should re-read — which for these is the repository list, not the
-            // fleet, and so is not a decision to make by default.
+            // Reserved arms no daemon emits yet. Named one by one rather than
+            // swept up by `_` so that the day a NEW variant is added to this
+            // oneof, this match stops compiling (E0004) and somebody decides
+            // what a client should re-read — which for these is the
+            // repository list, not the fleet, and so is not a decision to
+            // make by default. That is what naming them individually buys:
+            // exhaustiveness is checked against the enum's variant set, not
+            // against what the daemon actually sends, so it says nothing
+            // about an already-named arm that starts being sent — see
+            // `TaskChanged` below, which is exactly that case and is handled
+            // on its own rather than filed here.
             Payload::HostChanged(_)
             | Payload::RepositoryRootChanged(_)
             | Payload::RepositoryChanged(_) => None,
+            // Dropped deliberately, not by omission: the board this carries
+            // has no `FleetEvent` reader yet. The daemon starts emitting
+            // `TaskChanged` once a later task in this plan wires the store's
+            // write paths to `Watcher::announce_task_changed`, and the Mac
+            // task board after that is what needs to hear it — a client
+            // wanting the board re-reads the board, not the fleet, so this
+            // gains its own `FleetEvent` variant at the point something
+            // actually reads one. Until then this event is silently dropped
+            // on purpose. Revisit this arm when that board lands; a reader
+            // who arrives here after it exists should find this note, not a
+            // guess.
+            Payload::TaskChanged(_) => None,
         }
     }
 }
