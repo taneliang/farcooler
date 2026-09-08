@@ -439,9 +439,23 @@ pub fn parse_numstat_z(bytes: &[u8]) -> Vec<FileChange> {
 /// that fills them, and it is deliberately not folded in here — this function is
 /// also what `untracked_lines` and `worktree_digest` call, and neither of them
 /// wants a diff run underneath it.
+/// The files Far Cooler wrote into the worktree itself are subtracted here,
+/// for `git::is_dirty`'s reason and by the same pathspec: a worktree this
+/// runner has just made must not open with two files in its diff view that
+/// nobody put there. This is the one place to do it — `untracked_lines` and
+/// `worktree_digest` both call this function, so the digest does not move when
+/// the installer runs either.
 pub async fn working_tree(repo: &Path) -> Result<WorkingTree> {
-    let raw =
-        git_bytes(repo, &["status", "--porcelain=v2", "--untracked-files=all", "-z"]).await?;
+    let mut args = vec![
+        "status".to_string(),
+        "--porcelain=v2".to_string(),
+        "--untracked-files=all".to_string(),
+        "-z".to_string(),
+        "--".to_string(),
+    ];
+    args.extend(crate::hook_install::project_hook_exclusions());
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    let raw = git_bytes(repo, &borrowed).await?;
     if !raw.ok {
         return Err(DomainError::OperationFailed);
     }

@@ -86,6 +86,35 @@ const CURSOR_EVENTS: &[(&str, bool)] = &[
     ("stop", false),
 ];
 
+/// The project-local files `service::install_project_hooks` writes into a
+/// worktree, relative to its root.
+///
+/// One list, read by three things that must agree: the installer that writes
+/// them, `git::is_dirty`, and `change_set::working_tree`. Far Cooler wrote
+/// these files, so Far Cooler must not then report them to the user as work —
+/// a fresh worktree that opens with two files in its diff view, and a
+/// just-created workspace that demands a typed confirmation to remove, are the
+/// same bug read through two different signals. A second hand-kept copy of
+/// these two strings is what would let the installer and the filters drift.
+pub const CODEX_HOOKS: &str = ".codex/hooks.json";
+pub const CURSOR_HOOKS: &str = ".cursor/hooks.json";
+pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
+
+/// `PROJECT_HOOK_FILES` as git pathspecs that subtract them from an answer.
+///
+/// A pathspec rather than a filter over `git status` output, because git's own
+/// matching is the only thing that gets this right. `git status --porcelain`
+/// collapses a wholly-untracked directory to one entry — `?? .codex/`, never
+/// `?? .codex/hooks.json` — so a filter comparing whole lines against these
+/// paths would match nothing at all and silently do nothing. It is also
+/// conservative in the direction that matters: with a file of the user's own
+/// beside ours, git reports the directory again and their file is not hidden.
+///
+/// The caller puts `--` in front of these.
+pub fn project_hook_exclusions() -> Vec<String> {
+    PROJECT_HOOK_FILES.iter().map(|p| format!(":(exclude){p}")).collect()
+}
+
 /// The path this binary was launched as, resolved the same way the shim's
 /// own command line is (`service::shim_binary`), so a hooks file and a pane
 /// command never disagree about which CLI they mean.

@@ -240,16 +240,15 @@ fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
 /// a file rather than a directory, a hooks file we cannot parse — each of
 /// those loses the live view for that agent in that worktree and nothing else.
 fn install_project_hooks(worktree: &Path, socket: &Path) {
-    install_project_hook_file(
-        &worktree.join(".codex").join("hooks.json"),
-        socket,
-        crate::hook_install::merge_codex,
-    );
-    install_project_hook_file(
-        &worktree.join(".cursor").join("hooks.json"),
-        socket,
-        crate::hook_install::merge_cursor,
-    );
+    // Both paths come off `PROJECT_HOOK_FILES`, which `git::is_dirty` and
+    // `change_set::working_tree` also read to subtract these files from what
+    // they report. Spelling them out here as well is what would let the
+    // installer and those two filters drift apart, and the drift is invisible:
+    // a file written under a name nothing filters just quietly becomes the
+    // user's uncommitted work.
+    use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
+    install_project_hook_file(&worktree.join(CODEX_HOOKS), socket, merge_codex);
+    install_project_hook_file(&worktree.join(CURSOR_HOOKS), socket, merge_cursor);
 }
 
 /// Merge our registrations into one such file.
@@ -343,12 +342,36 @@ fn install_project_hook_file(path: &Path, socket: &Path, merge: fn(&str, &Path) 
 /// for the user, so they keep starting clean. That is a statement about what
 /// has been checked, not about what those CLIs can do; either may well
 /// support resuming, unverified rather than unsupported.
-fn terminal_mode_command(preset: &str, session_id: &str, resumable: bool) -> String {
+fn terminal_mode_command(
+    preset: &str,
+    session_id: &str,
+    resumable: bool,
+    hook_settings: Option<&Path>,
+) -> String {
     let preset = if preset.is_empty() { "shell" } else { preset };
     let shell = farcooler_core::shell::login_shell;
     if preset.starts_with("claude") {
         if resumable {
-            format!("{} -ilc 'claude --resume {session_id}'", shell())
+            // A RESUMED claude pane needs the settings file exactly as much as
+            // a fresh one: this is the path a pane takes coming back from a
+            // chat, or being restarted after its process died, and it is how
+            // most claude panes on a long-lived runner are running by the end
+            // of a day. Without it the live view worked once, at launch, and
+            // went silent the first time anything respawned the pane.
+            //
+            // `shell_quote` around the whole payload for `preset_command`'s
+            // reason, and byte-identical to the bare `'…'` this branch used to
+            // write when there is no settings file: the session id is parsed
+            // as a uuid before this branch is chosen, so the payload carries
+            // no quote of its own.
+            let settings = hook_settings
+                .map(|p| format!(" --settings {}", shell_quote(&p.display().to_string())))
+                .unwrap_or_default();
+            format!(
+                "{} -ilc {}",
+                shell(),
+                shell_quote(&format!("claude --resume {session_id}{settings}"))
+            )
         } else {
             // Nothing to continue: start claude clean rather than fail into
             // an error message the user cannot act on.
@@ -358,7 +381,7 @@ fn terminal_mode_command(preset: &str, session_id: &str, resumable: bool) -> Str
             // cannot say the same — `--model` alongside `--resume` has not
             // been checked end to end here, and this file does not invent
             // flags it has not seen work.
-            preset_command(preset, None)
+            preset_command_with_hooks(preset, None, hook_settings)
         }
     } else if preset.starts_with("codex") {
         if resumable {
@@ -372,10 +395,18 @@ fn terminal_mode_command(preset: &str, session_id: &str, resumable: bool) -> Str
             // `preset` rather than the bare name, for the same reason as
             // claude's branch above: the model a pane was launched with
             // survives a clean start.
-            preset_command(preset, None)
+            //
+            // Handed the settings path like every other branch, and it reaches
+            // nothing: `preset_command_with_hooks` writes `--settings` in its
+            // claude arm alone, which a codex preset never enters. Passing it
+            // uniformly keeps that rule in ONE place rather than restating it
+            // as a condition at each call site, where the two spellings could
+            // disagree — `no_other_agent_is_handed_claudes_settings_flag` is
+            // what pins it.
+            preset_command_with_hooks(preset, None, hook_settings)
         }
     } else {
-        preset_command(preset, None)
+        preset_command_with_hooks(preset, None, hook_settings)
     }
 }
 
@@ -408,7 +439,13 @@ fn terminal_mode_command(preset: &str, session_id: &str, resumable: bool) -> Str
 /// inside a `-ilc` string, and `terminal_mode_command` interpolates it
 /// unquoted — the parse is what makes that safe, so it has to happen before
 /// the flag is chosen and not merely alongside it.
-fn respawn_command(home: Option<&Path>, preset: &str, worktree: &str, session_id: &str) -> String {
+fn respawn_command(
+    home: Option<&Path>,
+    preset: &str,
+    worktree: &str,
+    session_id: &str,
+    hook_settings: Option<&Path>,
+) -> String {
     let resumable = Uuid::parse_str(session_id).is_ok()
         && home.is_some_and(|home| {
             // Claude Code writes a transcript when a turn happens, not when a
@@ -425,7 +462,7 @@ fn respawn_command(home: Option<&Path>, preset: &str, worktree: &str, session_id
                 session_discovery::transcript_exists(home, Path::new(worktree), session_id)
             }
         });
-    terminal_mode_command(preset, session_id, resumable)
+    terminal_mode_command(preset, session_id, resumable, hook_settings)
 }
 
 /// This user's home directory, or `None` when there is no answer.
@@ -1615,6 +1652,27 @@ impl Service {
 
     // ---- terminals ----
 
+    /// The settings file a pane running this preset should be launched with,
+    /// written to disk now, or `None`.
+    ///
+    /// Written for a claude preset and nothing else, matching the same
+    /// `starts_with("claude")` that gates minting a session id, and for the
+    /// same reason: `--settings` is claude's flag, and putting it in front of
+    /// another CLI would kill the pane on startup rather than merely leave it
+    /// quiet. codex and cursor are registered by `install_project_hooks` when
+    /// the worktree is made, and need nothing at launch.
+    ///
+    /// **Every path that puts a TUI in a pane calls this.** There are five —
+    /// `create_terminal`, `split_terminal`, `restart_terminal`, `set_pane_mode`
+    /// going back to a terminal, and the respawn builders they share — and the
+    /// first version of this wired only the first. That left the live view
+    /// working exactly once, on a pane made by the New Terminal button and
+    /// never restarted; splitting, which `split_terminal`'s own comment calls
+    /// "how most panes on a runner are made", produced a silent one.
+    fn hook_settings_for(&self, preset: &str) -> Option<PathBuf> {
+        preset.starts_with("claude").then(|| write_claude_hook_settings(&self.root)).flatten()
+    }
+
     /// Create a terminal: a tagged tmux window running the preset.
     pub async fn create_terminal(
         &self,
@@ -1668,16 +1726,7 @@ impl Service {
         let term = self.mark_changes_pane(term, command_preset)?;
 
         // 2. Create and tag the window.
-        //
-        // The settings file is written for a claude pane and nothing else,
-        // matching `declared` above and for the same reason: `--settings` is
-        // claude's flag, and handing it to another CLI would put an argument
-        // it does not understand in front of it. codex and cursor are
-        // registered by `install_project_hooks` when the worktree is made.
-        let hook_settings = command_preset
-            .starts_with("claude")
-            .then(|| write_claude_hook_settings(&self.root))
-            .flatten();
+        let hook_settings = self.hook_settings_for(command_preset);
         let command =
             preset_command_with_hooks(command_preset, declared.as_deref(), hook_settings.as_deref());
         let created = self
@@ -1907,7 +1956,16 @@ impl Service {
             term
         };
 
-        let command = preset_command(command_preset, term.agent_session_id.as_deref());
+        // A split is a LAUNCH, not a respawn — the same one `create_terminal`
+        // makes — so it gets the same settings file. It read `preset_command`
+        // until this line was found: splitting is how most panes on a runner
+        // are made, so most claude panes reported nothing at all.
+        let hook_settings = self.hook_settings_for(command_preset);
+        let command = preset_command_with_hooks(
+            command_preset,
+            term.agent_session_id.as_deref(),
+            hook_settings.as_deref(),
+        );
         let created = self
             .tmux
             .split_pane(&pane.pane_id, axis, term.id, &ws.worktree_path, &command, before)
@@ -2020,11 +2078,13 @@ impl Service {
         // the socket, and the pane's activity would sit frozen at whatever it
         // last reported. That is precisely the silent disagreement between
         // record and runtime this whole design exists to prevent.
+        let hook_settings = self.hook_settings_for(&term.command_preset);
         let command = respawn_command(
             user_home().as_deref(),
             &term.command_preset,
             &ws.worktree_path,
             term.agent_session_id.as_deref().unwrap_or_default(),
+            hook_settings.as_deref(),
         );
         // The PANE, not the window. This line used to be
         // `kill_terminal_window` followed by `create_terminal_window`, which
@@ -2304,11 +2364,13 @@ impl Service {
                 // point: a pane going back to a TUI is one question with one
                 // answer, however it got there. See `respawn_command`.
                 let sid = session_id.clone().unwrap_or_default();
+                let hook_settings = self.hook_settings_for(&term.command_preset);
                 respawn_command(
                     user_home().as_deref(),
                     &term.command_preset,
                     &ws.worktree_path,
                     &sid,
+                    hook_settings.as_deref(),
                 )
             }
             models::PaneMode::Agent => {
@@ -2999,7 +3061,7 @@ mod tests {
         // The regression this whole function exists to prevent: a codex pane
         // switched to chat and back used to hardcode `claude`, silently
         // handing the user a different agent in the same pane.
-        let cmd = terminal_mode_command("codex", "", false);
+        let cmd = terminal_mode_command("codex", "", false, None);
         assert!(cmd.contains("codex"), "must respawn codex: {cmd}");
         assert!(!cmd.contains("claude"), "must not respawn claude: {cmd}");
     }
@@ -3010,7 +3072,7 @@ mod tests {
         // checked end to end the way claude's and codex's have, so both keep
         // starting clean rather than guess at a flag.
         for preset in ["opencode", "cursor"] {
-            let cmd = terminal_mode_command(preset, "", false);
+            let cmd = terminal_mode_command(preset, "", false, None);
             assert!(!cmd.contains("claude"), "{preset} must not respawn claude: {cmd}");
         }
     }
@@ -3022,7 +3084,7 @@ mod tests {
         // own job is to never invent a flag for a CLI nobody has verified one
         // for, regardless of what it is told.
         for preset in ["opencode", "cursor"] {
-            let cmd = terminal_mode_command(preset, "some-id", true);
+            let cmd = terminal_mode_command(preset, "some-id", true, None);
             assert!(!cmd.contains("resume"), "{preset} must not resume: {cmd}");
         }
     }
@@ -3030,13 +3092,13 @@ mod tests {
     #[test]
     fn a_resumable_claude_pane_still_gets_resume() {
         let sid = Uuid::now_v7().to_string();
-        let cmd = terminal_mode_command("claude", &sid, true);
+        let cmd = terminal_mode_command("claude", &sid, true, None);
         assert!(cmd.contains(&format!("claude --resume {sid}")), "{cmd}");
     }
 
     #[test]
     fn a_non_resumable_claude_pane_starts_clean() {
-        let cmd = terminal_mode_command("claude", "some-id", false);
+        let cmd = terminal_mode_command("claude", "some-id", false, None);
         assert!(!cmd.contains("--resume"), "{cmd}");
         assert!(cmd.contains("claude"), "{cmd}");
     }
@@ -3046,7 +3108,7 @@ mod tests {
         // Verified end to end on a real machine: `codex resume <uuid>`
         // restores the conversation when `codex-acp` wrote a rollout for it.
         let sid = Uuid::now_v7().to_string();
-        let cmd = terminal_mode_command("codex", &sid, true);
+        let cmd = terminal_mode_command("codex", &sid, true, None);
         assert!(cmd.contains(&format!("codex resume {sid}")), "{cmd}");
     }
 
@@ -3055,7 +3117,7 @@ mod tests {
         // The codex equivalent of claude's "No conversation found": a session
         // id with no completed turn wrote no rollout, and `codex resume`
         // on it fails with an error the user cannot act on.
-        let cmd = terminal_mode_command("codex", "some-id", false);
+        let cmd = terminal_mode_command("codex", "some-id", false, None);
         assert!(!cmd.contains("resume"), "{cmd}");
         assert!(cmd.contains("codex"), "{cmd}");
     }
@@ -3064,7 +3126,7 @@ mod tests {
     fn an_empty_preset_falls_back_to_a_clean_shell_not_claude() {
         // `command_preset` is always written by `create_terminal`, so empty
         // means "never been an agent pane", not "forgot it was claude".
-        let cmd = terminal_mode_command("", "", false);
+        let cmd = terminal_mode_command("", "", false, None);
         assert!(!cmd.contains("claude"), "{cmd}");
     }
 }
@@ -3748,7 +3810,7 @@ mod respawn_tests {
         let sid = Uuid::now_v7().to_string();
         a_claude_transcript(&home, &worktree, &sid);
 
-        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid);
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid, None);
         assert!(cmd.contains(&format!("claude --resume {sid}")), "must reopen it: {cmd}");
         assert!(!cmd.contains("--session-id"), "--session-id names a NEW conversation: {cmd}");
     }
@@ -3764,7 +3826,7 @@ mod respawn_tests {
         let worktree = scratch("claude-clean-tree");
         let sid = Uuid::now_v7().to_string();
 
-        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid);
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid, None);
         assert!(cmd.contains("claude"), "{cmd}");
         assert!(!cmd.contains("--resume"), "nothing on disk to resume: {cmd}");
         assert!(!cmd.contains("--session-id"), "{cmd}");
@@ -3783,7 +3845,7 @@ mod respawn_tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("rollout-2026-08-03T10-33-15-{sid}.jsonl")), "{}").unwrap();
 
-        let cmd = respawn_command(Some(&home), "codex", worktree.to_str().unwrap(), &sid);
+        let cmd = respawn_command(Some(&home), "codex", worktree.to_str().unwrap(), &sid, None);
         assert!(cmd.contains(&format!("codex resume {sid}")), "{cmd}");
     }
 
@@ -3798,7 +3860,7 @@ mod respawn_tests {
         let sid = "not-a-uuid'; echo pwned; '";
         a_claude_transcript(&home, &worktree, sid);
 
-        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), sid);
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), sid, None);
         assert!(!cmd.contains("--resume"), "{cmd}");
         assert!(!cmd.contains("pwned"), "{cmd}");
     }
@@ -3807,7 +3869,7 @@ mod respawn_tests {
     fn no_home_directory_at_all_starts_clean_rather_than_resuming_blind() {
         let worktree = scratch("nohome-tree");
         let sid = Uuid::now_v7().to_string();
-        let cmd = respawn_command(None, "claude", worktree.to_str().unwrap(), &sid);
+        let cmd = respawn_command(None, "claude", worktree.to_str().unwrap(), &sid, None);
         assert!(!cmd.contains("--resume"), "{cmd}");
         assert!(cmd.contains("claude"), "{cmd}");
     }
@@ -3844,7 +3906,7 @@ mod respawn_tests {
         let worktree = scratch("adopt-tree");
         let kept = preset_after_adopting("claude:opus", "claude")
             .unwrap_or_else(|| "claude:opus".to_string());
-        let cmd = respawn_command(Some(&home), &kept, worktree.to_str().unwrap(), "");
+        let cmd = respawn_command(Some(&home), &kept, worktree.to_str().unwrap(), "", None);
         assert!(cmd.contains("claude --model opus"), "{cmd}");
     }
 
@@ -3856,9 +3918,9 @@ mod respawn_tests {
         // this builder must not quietly cost it.
         let home = scratch("model-home");
         let worktree = scratch("model-tree");
-        let cmd = respawn_command(Some(&home), "claude:opus", worktree.to_str().unwrap(), "");
+        let cmd = respawn_command(Some(&home), "claude:opus", worktree.to_str().unwrap(), "", None);
         assert!(cmd.contains("claude --model opus"), "{cmd}");
-        let cmd = respawn_command(Some(&home), "codex:gpt-5.6-sol", worktree.to_str().unwrap(), "");
+        let cmd = respawn_command(Some(&home), "codex:gpt-5.6-sol", worktree.to_str().unwrap(), "", None);
         assert!(cmd.contains("codex --model gpt-5.6-sol"), "{cmd}");
     }
 
@@ -3873,7 +3935,7 @@ mod respawn_tests {
         let worktree = scratch("shell-fallback-tree");
         let shell = farcooler_core::shell::login_shell();
         for preset in ["claude", "codex", "cursor", "opencode", "claude:opus"] {
-            let cmd = respawn_command(Some(&home), preset, worktree.to_str().unwrap(), "");
+            let cmd = respawn_command(Some(&home), preset, worktree.to_str().unwrap(), "", None);
             assert_ne!(cmd, format!("{shell} -il"), "{preset} came back as a shell: {cmd}");
             assert!(cmd.contains("-ilc"), "{preset} must run something: {cmd}");
         }
@@ -5247,6 +5309,226 @@ mod hook_file_tests {
         let worktree = Path::new(&ws.worktree_path);
         assert!(worktree.join(".codex/hooks.json").exists(), "codex reports itself here too");
         assert!(worktree.join(".cursor/hooks.json").exists(), "and so does cursor");
+    }
+
+    /// The regression the workspace suite caught, asked directly.
+    ///
+    /// `against_a_real_daemon` went red on `ConfirmationRequired` where it
+    /// expected `Removed`: `install_project_hooks` writes two files into a
+    /// fresh worktree, `git::is_dirty` counts untracked files, and
+    /// `removal_needs_confirmation` reads that — so a workspace created a
+    /// second ago and touched by nobody demanded that the user type its name
+    /// back to remove it, on the strength of two files they have never seen.
+    /// Far Cooler must not report its own writes to the user as their work.
+    #[tokio::test]
+    async fn a_workspace_nobody_has_touched_needs_no_confirmation_to_remove() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .await
+            .expect("a workspace");
+
+        // The files really are there -- this is a filter, not an absence.
+        let worktree = Path::new(&ws.worktree_path);
+        assert!(worktree.join(".codex/hooks.json").exists(), "the installer ran");
+
+        assert!(
+            !svc.removal_needs_confirmation(ws.id).await.expect("dirt check"),
+            "a worktree holding nothing but files Far Cooler wrote is clean"
+        );
+
+        // And the guard still guards: a file the USER wrote brings it back.
+        std::fs::write(worktree.join("theirs.txt"), "real work").unwrap();
+        assert!(
+            svc.removal_needs_confirmation(ws.id).await.expect("dirt check"),
+            "one file of the user's own is still uncommitted work"
+        );
+    }
+
+    /// The other signal the same fact reaches: the diff view a worktree opens
+    /// with. `change_set::working_tree` is what draws it, and it must not show
+    /// the user two files nobody put there.
+    #[tokio::test]
+    async fn a_fresh_worktree_opens_with_an_empty_diff() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .await
+            .expect("a workspace");
+        let worktree = Path::new(&ws.worktree_path);
+
+        let wt = crate::change_set::working_tree(worktree).await.expect("status");
+        assert!(
+            !wt.is_dirty(),
+            "nothing Far Cooler wrote appears as the user's work: {:?}",
+            wt.untracked
+        );
+
+        std::fs::write(worktree.join("theirs.txt"), "real work").unwrap();
+        let wt = crate::change_set::working_tree(worktree).await.expect("status");
+        assert_eq!(
+            wt.untracked.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+            vec!["theirs.txt"],
+            "and the user's own file is the only thing in it"
+        );
+    }
+
+    /// A file of the user's OWN inside `.codex/` must not be swallowed by the
+    /// exclusion. Git's pathspec is what makes this true — it re-reports the
+    /// directory once anything in it is not excluded — and the alternative
+    /// this rules out is an exclusion written as `.codex/` or a glob, which
+    /// would hide their file along with ours.
+    #[tokio::test]
+    async fn a_users_own_file_beside_ours_is_still_their_work() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .await
+            .expect("a workspace");
+        let worktree = Path::new(&ws.worktree_path);
+
+        std::fs::write(worktree.join(".codex").join("config.toml"), "theirs").unwrap();
+
+        assert!(
+            svc.removal_needs_confirmation(ws.id).await.expect("dirt check"),
+            "a file of their own next to ours is still uncommitted work"
+        );
+    }
+
+    /// A resumed claude pane reports itself too.
+    ///
+    /// This is the branch a pane takes coming back from a chat or after a
+    /// restart, and by the end of a day on a long-lived runner it is how most
+    /// claude panes are running. Wired only at `create_terminal`, the live
+    /// view worked once and went silent the first time anything respawned the
+    /// pane — which is the exact shape of the bug this whole plan exists to
+    /// remove, arriving through the other door.
+    #[test]
+    fn a_resumed_claude_pane_is_still_launched_with_the_settings_file() {
+        let command = terminal_mode_command(
+            "claude",
+            "018f5b2c-0000-7000-8000-00000000000b",
+            true,
+            Some(Path::new("/tmp/fc/hooks.json")),
+        );
+        assert!(command.contains("--resume"), "it is still a resume: {command}");
+        assert!(command.contains("--settings"), "and it still reports itself: {command}");
+        assert!(command.contains("'/tmp/fc/hooks.json'"), "quoted, as everywhere else: {command}");
+    }
+
+    #[test]
+    fn a_claude_pane_that_starts_clean_is_launched_with_it_as_well() {
+        // The other half of the claude branch: a session with nothing on disk
+        // behind it starts fresh, and a fresh start is a launch like any other.
+        let command =
+            terminal_mode_command("claude:opus", "", false, Some(Path::new("/tmp/fc/hooks.json")));
+        assert!(!command.contains("--resume"), "nothing to resume: {command}");
+        assert!(command.contains("--model opus"), "the model survives: {command}");
+        assert!(command.contains("--settings"), "and so does the live view: {command}");
+    }
+
+    /// codex has its own file in the worktree and no flag to be told about
+    /// one. A `--settings` in front of `codex resume` would be an argument it
+    /// does not understand, which kills the pane rather than merely quieting
+    /// it — a strictly worse failure than the one this is fixing.
+    #[test]
+    fn a_resumed_codex_pane_is_not_handed_claudes_flag() {
+        for resumable in [true, false] {
+            let command = terminal_mode_command(
+                "codex",
+                "018f5b2c-0000-7000-8000-00000000000c",
+                resumable,
+                Some(Path::new("/tmp/fc/hooks.json")),
+            );
+            assert!(!command.contains("--settings"), "resumable={resumable}: {command}");
+        }
+    }
+
+    /// The resumed command still has to survive both shells, for
+    /// `the_settings_path_survives_both_shells_as_one_argument`'s reason —
+    /// this branch writes its own `format!` and could have been quoted the
+    /// naive way independently of the launch arm.
+    #[cfg(unix)]
+    #[test]
+    fn the_resumed_settings_path_survives_both_shells_too() {
+        let path = "/tmp/My Runner/hooks.json";
+        let sid = "018f5b2c-0000-7000-8000-00000000000d";
+        let command = terminal_mode_command("claude", sid, true, Some(Path::new(path)));
+        let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
+        let probe = command.replace(&prefix, "/bin/sh -c").replace("claude", "printf ,%s");
+        assert!(probe.starts_with("/bin/sh -c"), "the prefix was found and replaced: {probe}");
+
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&probe)
+            .output()
+            .expect("run the probe");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            stdout,
+            format!(",--resume,{sid},--settings,{path}"),
+            "four arguments, and the path is one of them: {probe} -> {stdout}"
+        );
+    }
+
+    /// `split_terminal`, on a real pane. Splitting is how most panes on a
+    /// runner are made and it built its command with `preset_command`, so
+    /// most claude panes reported nothing at all.
+    #[tokio::test]
+    async fn a_claude_pane_made_by_splitting_names_the_settings_file() {
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
+
+        let split = svc
+            .split_terminal(ws.id, target.id, farcooler_protocol::v1::SplitSide::Right, "two", "claude")
+            .await
+            .expect("split");
+
+        let command = super::restart_wiring_tests::pane_start_command(&svc, split.id).await;
+        let settings = claude_hook_settings_path(&svc.root);
+        assert!(settings.exists(), "the split wrote the settings file: {}", settings.display());
+        assert!(
+            command.contains(&settings.display().to_string()),
+            "and the pane it made names it: {command}"
+        );
+    }
+
+    /// `restart_terminal`, on a real pane. A pane that restarts must not go
+    /// quiet; this is the path a lost or killed agent comes back through.
+    #[tokio::test]
+    async fn a_restarted_claude_pane_names_the_settings_file() {
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        let command = super::restart_wiring_tests::pane_start_command(&svc, term.id).await;
+        let settings = claude_hook_settings_path(&svc.root);
+        assert!(
+            command.contains(&settings.display().to_string()),
+            "a restarted pane still reports itself: {command}"
+        );
+    }
+
+    /// `set_pane_mode` going back to a terminal — the pane the user just
+    /// switched out of chat. Same builder as the restart, different door, and
+    /// the door is what this pins.
+    #[tokio::test]
+    async fn a_pane_switched_back_to_a_terminal_names_the_settings_file() {
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+
+        let back = svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
+        assert_eq!(back.pane_mode, models::PaneMode::Terminal);
+
+        let command = super::restart_wiring_tests::pane_start_command(&svc, term.id).await;
+        let settings = claude_hook_settings_path(&svc.root);
+        assert!(
+            command.contains(&settings.display().to_string()),
+            "a pane coming back from a chat still reports itself: {command}"
+        );
+
+        let _ = svc.stop_terminal(term.id).await;
     }
 
     /// The other call site, and the one Task 9 described and never wired: a

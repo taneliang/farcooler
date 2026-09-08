@@ -419,8 +419,23 @@ pub async fn rollback_worktree(
 }
 
 /// Uncommitted or untracked changes present.
+///
+/// The files Far Cooler itself wrote into the worktree are subtracted first.
+/// `install_project_hooks` puts `.codex/hooks.json` and `.cursor/hooks.json`
+/// into every worktree this runner makes, and this answer is what
+/// `removal_needs_confirmation` reads — so without the exclusion a workspace
+/// created a second ago and never touched by anyone would demand the user type
+/// its name back to remove it, on the strength of two files Far Cooler wrote
+/// and the user has never seen.
+///
+/// Git's own pathspec, rather than a filter over these lines: `--porcelain`
+/// collapses a wholly-untracked directory into one entry (`?? .codex/`), so
+/// there is no line here to compare against a file path in the first place.
 pub async fn is_dirty(worktree: &Path) -> Result<bool> {
-    let r = git(worktree, &["status", "--porcelain"]).await?;
+    let mut args = vec!["status".to_string(), "--porcelain".to_string(), "--".to_string()];
+    args.extend(crate::hook_install::project_hook_exclusions());
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    let r = git(worktree, &borrowed).await?;
     if !r.ok {
         return Err(DomainError::OperationFailed);
     }
