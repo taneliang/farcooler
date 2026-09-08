@@ -4,6 +4,7 @@ members = [
     "crates/protocol",
     "crates/core",
     "crates/agent-core",
+    "crates/agent-hooks",
     "crates/acp",
     "crates/codex",
     "crates/claude",

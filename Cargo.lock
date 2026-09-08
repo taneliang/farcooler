@@ -877,6 +877,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "farcooler-agent-hooks"
+version = "0.1.0"
+dependencies = [
+ "farcooler-agent-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "farcooler-claude"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,9 @@
+[package]
+name = "farcooler-agent-hooks"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+farcooler-agent-core = { path = "../agent-core" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
