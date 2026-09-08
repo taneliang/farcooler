@@ -914,38 +914,34 @@ mod tests {
     /// It settles the NUMBERING and not the duplication, and the two are easy
     /// to read as one question. They are not: one cursor pointing at one
     /// transcript says nothing about whether that transcript holds each
-    /// message once. **Nothing anywhere refuses a pane that is fed by both**,
-    /// and `hook_ingress::terminal_for` never looks at `pane_mode` on either
-    /// of its two routes. An agent-mode pane whose hooks fire is therefore
-    /// appended to by `apply` and by `record`, interleaved, into this ring.
+    /// message once. A pane fed by both transports has every assistant turn
+    /// appended twice — by `apply` from its shim and by `record` from its
+    /// hooks — interleaved into this one ring, and the user reads it twice.
     ///
-    /// How reachable that is differs by agent, and the difference is the
-    /// whole risk profile.
+    /// **That refusal now exists, and it is `hook_ingress::is_a_chat`.** It
+    /// guards BOTH of `terminal_for`'s routes: a hook is never routed to a
+    /// terminal whose `pane_mode` is `Agent`, whichever route found it.
     ///
-    /// **codex and cursor: by default, once hooks are installed at all.**
-    /// Their hooks are project-local — `.codex/hooks.json` and
-    /// `.cursor/hooks.json` in the worktree — so they apply to every pane in
-    /// that worktree, agent mode included, with nothing per-pane to opt in.
-    /// The route is `announced_terminal`, which matches on the worktree and
-    /// considers only panes with NO `agent_session_id`; nothing mints one for
-    /// these two (`--session-id` is `preset_command`'s claude arm alone, and
-    /// `set_pane_mode`'s adoption is gated on `pane_can_adopt_a_claude_session`),
-    /// so a codex pane in agent mode is not excluded by that filter — it is
-    /// exactly the shape the filter admits.
-    ///
-    /// **claude: only if somebody asks for it.** It routes by the other path,
-    /// on the `agent_session_id` an agent-mode pane has because setting it is
-    /// how the shim was bound. But the design keeps claude's hooks to
-    /// `--settings` on the panes Far Cooler launches and offers a user-level
-    /// merge explicitly, for hand-typed sessions
-    /// (`docs/superpowers/specs/2026-09-07-live-agent-sessions-design.md`,
-    /// "Installing hooks, without owning them").
-    ///
-    /// Nothing in this tree writes any of those three files yet, so none of it
-    /// is reachable today. One ring is still right and two would be worse, so
-    /// nothing here changes on account of it — but whoever writes the
+    /// This comment used to end differently, and the way it was wrong is
+    /// worth keeping. It said: "Nothing in this tree writes any of those three
+    /// files yet, so none of it is reachable today ... whoever writes the
     /// installer inherits the question, and this comment is the only place it
-    /// is written down.
+    /// is written down." Both halves were true when written and the reasoning
+    /// was sound. Six commits later, on this same branch, Task 10's
+    /// `install_project_hooks` wrote `.codex/hooks.json` and
+    /// `.cursor/hooks.json` into every worktree Far Cooler makes — and the
+    /// premise the deferral rested on was gone with nothing anywhere noticing,
+    /// because a comment cannot fail. The double-record was live for codex
+    /// from that commit until the guard landed.
+    ///
+    /// A deferral is only as good as its premise, and a premise about what the
+    /// tree CONTAINS has to be re-checked by whoever later makes the tree
+    /// contain it. Nothing enforced that here, which is why the note reads as
+    /// history rather than as a plan: the test that would have caught it —
+    /// a pane in agent mode with a hook delivered for it — did not exist, and
+    /// the commit that documented the hazard is the one that declared it
+    /// untestable. `hook_ingress`'s
+    /// `a_pane_in_agent_mode_is_never_handed_a_hook_as_well` is that test now.
     #[test]
     fn a_recorded_event_continues_the_transcript_the_shim_started() {
         let supervisor = AgentSupervisor::new();
