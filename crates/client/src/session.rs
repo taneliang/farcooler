@@ -242,16 +242,17 @@ impl FleetEvent {
             | Payload::RepositoryRootChanged(_)
             | Payload::RepositoryChanged(_) => None,
             // Dropped deliberately, not by omission: the board this carries
-            // has no `FleetEvent` reader yet. The daemon starts emitting
-            // `TaskChanged` once a later task in this plan wires the store's
-            // write paths to `Watcher::announce_task_changed`, and the Mac
-            // task board after that is what needs to hear it — a client
-            // wanting the board re-reads the board, not the fleet, so this
-            // gains its own `FleetEvent` variant at the point something
-            // actually reads one. Until then this event is silently dropped
-            // on purpose. Revisit this arm when that board lands; a reader
-            // who arrives here after it exists should find this note, not a
-            // guess.
+            // has no `FleetEvent` reader yet. The daemon DOES emit
+            // `TaskChanged` now — every board write in `daemon::task_ops`
+            // calls `Watcher::announce_task_changed` — so this arm is
+            // discarding real traffic rather than waiting for it. That is
+            // still the right answer today: a client wanting the board
+            // re-reads the board, not the fleet, so this gains its own
+            // `FleetEvent` variant at the point something actually reads one.
+            // The Mac task board is what needs to hear it, and until that
+            // variant exists a board built against this would render once and
+            // never move. Revisit this arm when that board lands; a reader who
+            // arrives here after it exists should find this note, not a guess.
             Payload::TaskChanged(_) => None,
         }
     }
@@ -1825,6 +1826,12 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::ClientList(_) => "client_list",
         result::Value::ClientEnroll(_) => "client_enroll",
         result::Value::ClientSetNodeKey(_) => "client_set_node_key",
+        result::Value::Task(_) => "task",
+        result::Value::TaskList(_) => "task_list",
+        result::Value::TaskDetail(_) => "task_detail",
+        result::Value::TaskNote(_) => "task_note",
+        result::Value::TaskBlockList(_) => "task_block_list",
+        result::Value::TaskNoteHitList(_) => "task_note_hit_list",
     }
 }
 

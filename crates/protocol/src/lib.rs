@@ -297,6 +297,19 @@ pub mod capability {
     /// Absent means the runner has no order to keep, so a client leaves the
     /// list where the daemon put it and offers no handles.
     pub const WORKSPACE_ORDER: &str = "workspace_order";
+    /// The repository task board: `task.list` through `task.search`, and the
+    /// `task_changed` event that says one of them moved.
+    ///
+    /// Its own capability rather than part of `WORKSPACES`, for the reason
+    /// every one above it is its own. `workspaces` is the floor — every daemon
+    /// that has ever existed advertises it and none before this one has a
+    /// board — so a client that folded this in would draw a board against an
+    /// older runner and get `CAPABILITY_UNSUPPORTED` for every read behind it,
+    /// which is an empty board with no explanation rather than a surface it
+    /// knew not to offer.
+    ///
+    /// Absent means the runner keeps no tasks, so a client offers no board.
+    pub const TASKS: &str = "tasks";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -305,7 +318,7 @@ pub mod capability {
     pub const ALL: &[&str] =
         &[
             WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
-            ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKSPACE_ORDER,
+            ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKSPACE_ORDER, TASKS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -366,6 +379,14 @@ pub mod capability {
             "client.list" | "client.enroll" | "client.revoke" => ENROLLMENT,
             "client.set_node_key" => TUNNEL,
             "workspace.reorder" => WORKSPACE_ORDER,
+            "task.list"
+            | "task.get"
+            | "task.create"
+            | "task.update"
+            | "task.set_status"
+            | "task.note"
+            | "task.block"
+            | "task.search" => TASKS,
             "terminal.watching" => WATCHING,
             "terminal.attach" => TERMINAL_STREAM,
             _ => return None,
@@ -474,6 +495,8 @@ mod tests {
             "client.set_node_key",
             "terminal.attach",
             "workspace.reorder",
+            "task.create",
+            "task.note",
         ] {
             let cap = capability::for_method(method).expect("a known method");
             assert!(capability::ALL.contains(&cap), "{method} names {cap}, which is not advertised");

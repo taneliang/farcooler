@@ -2641,3 +2641,571 @@ async fn a_terminal_list_carries_the_activity_trace_and_the_fleet_sum() {
     ]);
     assert_eq!(fleet_output, 9, "the fleet sum lost the only agent in it");
 }
+
+// ---------------------------------------------------------------------------
+// The board
+//
+// What these prove that the store's own tests cannot: that a board request
+// crossing the wire reaches the store, that the reply is shaped as a client
+// expects, that the scope table gates the writes, and that every write says so
+// to everybody else. The split the whole design rests on — mutable
+// understanding on the row, an append-only record in notes — is asserted here
+// too, because the wire is where a route that collapsed the two would appear.
+// ---------------------------------------------------------------------------
+
+/// A registered repository whose name yields a DISTINCTIVE task key prefix.
+///
+/// Three words, so `derive_prefix` produces `afb` — not the two-letter prefix
+/// of a one-word name, and not the `t` fallback. That matters: an assertion
+/// that a key starts with the repository's prefix proves nothing if the prefix
+/// under test is the one anything returning a constant would also produce.
+///
+/// Returns the prefix beside the id rather than letting a test spell it out,
+/// so the fixture and the expectation cannot drift apart.
+async fn board_repository(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+) -> (tempfile::TempDir, bytes::Bytes, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("agent-factory-board");
+    std::fs::create_dir(&repo_path).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo_path)
+            .status()
+            .unwrap();
+    }
+
+    let mut add = request("repository_root.add");
+    add.payload = Some(request::Payload::RepositoryRootAdd(
+        farcooler_protocol::v1::RepositoryRootAdd {
+            absolute_path: dir.path().to_string_lossy().into_owned(),
+            typed_confirmation: String::new(),
+        },
+    ));
+    client.call(add).await.expect("repository_root.add");
+
+    let mut register = request("repository.register");
+    register.payload = Some(request::Payload::RepositoryRegister(
+        farcooler_protocol::v1::RepositoryRegister {
+            relative_path: repo_path.to_string_lossy().into_owned(),
+        },
+    ));
+    let result = client.call(register).await.expect("repository.register");
+    let Some(result::Value::Repository(repository)) = result.value else {
+        panic!("wrong result")
+    };
+    // The initials of `agent-factory-board`, from the store's own rule.
+    (dir, repository.id, "afb".to_string())
+}
+
+fn into_task(result: farcooler_protocol::v1::Result) -> farcooler_protocol::v1::Task {
+    let Some(result::Value::Task(task)) = result.value else { panic!("wrong result") };
+    task
+}
+
+/// Create a task over the wire, with just a title.
+async fn create_task(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    repository: bytes::Bytes,
+    title: &str,
+) -> farcooler_protocol::v1::Task {
+    let mut req = request("task.create");
+    req.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: repository,
+        title: title.to_string(),
+        ..Default::default()
+    }));
+    into_task(client.call(req).await.expect("task.create"))
+}
+
+/// One task, its record and its blocks, in the shape `task.get` answers with.
+async fn task_detail(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    task_id: bytes::Bytes,
+) -> farcooler_protocol::v1::TaskDetail {
+    let mut req = request("task.get");
+    req.payload = Some(request::Payload::TaskGet(farcooler_protocol::v1::TaskGetRequest {
+        task_id,
+        note_kind: 0,
+    }));
+    let result = client.call(req).await.expect("task.get");
+    let Some(result::Value::TaskDetail(detail)) = result.value else { panic!("wrong result") };
+    detail
+}
+
+/// Wait for a `task_changed` naming this task, or give up.
+///
+/// Returns the actor the event carried, which is the half a client cannot see
+/// in its own reply and the half that says whose work it was.
+async fn announced_actor(
+    events: &mut tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>,
+    task_id: &bytes::Bytes,
+) -> Option<String> {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let event = events.recv().await.expect("the watcher is alive");
+            if let Some(farcooler_protocol::v1::event::Payload::TaskChanged(changed)) =
+                event.payload
+                && changed.task_id == task_id
+            {
+                return changed.actor;
+            }
+        }
+    })
+    .await
+    .ok()
+}
+
+#[tokio::test]
+async fn a_task_created_over_the_wire_comes_back_with_a_key() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, prefix) = board_repository(&mut client).await;
+
+    let mut req = request("task.create");
+    req.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: repository.clone(),
+        title: "fix the thing".to_string(),
+        intent: "it is broken".to_string(),
+        ..Default::default()
+    }));
+    let task = into_task(client.call(req).await.expect("create"));
+
+    assert!(
+        task.key.starts_with(&format!("{prefix}-")),
+        "keys are the repository's: {} is not under {prefix}-",
+        task.key
+    );
+    assert_eq!(
+        task.status,
+        farcooler_protocol::v1::TaskStatus::Backlog as i32,
+        "a new task starts in the backlog"
+    );
+    // The one round trip carried the intent too, so a client never has to show
+    // a card that exists with nothing on it.
+    assert_eq!(task.intent, "it is broken");
+    assert_eq!(task.title, "fix the thing");
+    assert_eq!(task.repository_id, repository);
+
+    // And it is on the board, by the read a client actually uses.
+    let mut list = request("task.list");
+    list.payload = Some(request::Payload::TaskList(
+        farcooler_protocol::v1::TaskListRequest {
+            repository_id: repository,
+            status: 0,
+            stale_after_millis: None,
+        },
+    ));
+    let result = client.call(list).await.expect("task.list");
+    let Some(result::Value::TaskList(board)) = result.value else { panic!("wrong result") };
+    assert_eq!(board.items.len(), 1);
+    assert_eq!(board.items[0].key, task.key);
+}
+
+/// The scope table is the security boundary, and a route missing from it is
+/// the failure this pins. `rpc.rs` matches on method name, so a new method
+/// that nobody added to the table takes whatever the fallback gives it.
+#[tokio::test]
+async fn a_read_only_device_can_list_tasks_and_cannot_write_one() {
+    let h = start(Scope::Read).await;
+    let mut client = connect(&h).await;
+
+    let mut list = request("task.list");
+    list.payload = Some(request::Payload::TaskList(
+        farcooler_protocol::v1::TaskListRequest {
+            repository_id: bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
+            status: 0,
+            stale_after_millis: None,
+        },
+    ));
+    client.call(list).await.expect("reading is allowed");
+
+    // A task id that names nothing, deliberately: the scope check happens
+    // before the payload is read, so a refusal here is the TABLE refusing and
+    // not the store failing to find a row.
+    let mut write = request("task.set_status");
+    write.payload = Some(request::Payload::TaskSetStatus(
+        farcooler_protocol::v1::TaskSetStatus {
+            task_id: bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
+            status: farcooler_protocol::v1::TaskStatus::Done as i32,
+            ..Default::default()
+        },
+    ));
+    match client.call(write).await {
+        Err(ClientError::Daemon { code, retryable, .. }) => {
+            assert_eq!(code, ErrorCode::ScopeDenied as i32);
+            assert!(!retryable, "retrying a scope denial can never succeed");
+        }
+        other => panic!("expected a scope denial, got {other:?}"),
+    }
+
+    // Every other write behind the same gate, so a route added at `read` by
+    // mistake is caught here rather than in review.
+    for method in ["task.create", "task.update", "task.note", "task.block"] {
+        match client.call(request(method)).await {
+            Err(ClientError::Daemon { code, .. }) => {
+                assert_eq!(code, ErrorCode::ScopeDenied as i32, "{method} is not gated")
+            }
+            other => panic!("expected {method} to be denied, got {other:?}"),
+        }
+    }
+    // And the reads are not, which is what makes the split worth having: a
+    // phone that can see the fleet can see what it is working on.
+    for method in ["task.get", "task.search"] {
+        match client.call(request(method)).await {
+            Err(ClientError::Daemon { code, .. }) => assert_ne!(
+                code,
+                ErrorCode::ScopeDenied as i32,
+                "{method} is a read and must not need more than read"
+            ),
+            other => panic!("expected {method} to fail on its payload, got {other:?}"),
+        }
+    }
+}
+
+/// Understanding is revised on the row; the record is appended to and never
+/// edited. The whole design, asserted over the wire.
+#[tokio::test]
+async fn revising_a_task_rewrites_the_row_and_correcting_the_record_appends_to_it() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, _prefix) = board_repository(&mut client).await;
+    let task = create_task(&mut client, repository, "fix the thing").await;
+
+    // A creation writes exactly one note, and it is the `Created` entry — who
+    // made this, which is history and so is not a column on the row.
+    let before = task_detail(&mut client, task.id.clone()).await;
+    assert_eq!(before.notes.len(), 1);
+    assert_eq!(
+        before.notes[0].kind,
+        farcooler_protocol::v1::TaskNoteKind::Created as i32,
+        "a task comes into being in its own record"
+    );
+
+    // Revise the row. Every field, because this is a whole revision.
+    let mut update = request("task.update");
+    update.payload = Some(request::Payload::TaskUpdate(farcooler_protocol::v1::TaskUpdate {
+        task_id: task.id.clone(),
+        expected_version: task.resource_version,
+        title: "fix the thing properly".into(),
+        intent: "it is broken in two places".into(),
+        constraints: vec!["no migration".into()],
+        ..Default::default()
+    }));
+    let revised = into_task(client.call(update).await.expect("task.update"));
+    assert_eq!(revised.intent, "it is broken in two places");
+    assert_eq!(revised.constraints, ["no migration"]);
+    assert!(revised.resource_version > task.resource_version, "a revision moves the version");
+
+    // And wrote NO note. This is the half the design is most easily lost from:
+    // a log entry per wording change buries the reasoning the record exists to
+    // keep.
+    let after = task_detail(&mut client, task.id.clone()).await;
+    assert_eq!(after.notes.len(), 1, "revising understanding is not an entry in the record");
+
+    // A stale version is refused rather than merged, so two clients revising
+    // the same fields cannot both believe they won.
+    let mut stale = request("task.update");
+    stale.payload = Some(request::Payload::TaskUpdate(farcooler_protocol::v1::TaskUpdate {
+        task_id: task.id.clone(),
+        expected_version: task.resource_version,
+        title: "something else entirely".into(),
+        ..Default::default()
+    }));
+    match client.call(stale).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, ErrorCode::ResourceConflict as i32)
+        }
+        other => panic!("expected a version conflict, got {other:?}"),
+    }
+
+    // Now the record. A decision, then a better one that names it.
+    let mut decide = request("task.note");
+    decide.payload = Some(request::Payload::TaskNoteAppend(
+        farcooler_protocol::v1::TaskNoteAppend {
+            task_id: task.id.clone(),
+            kind: farcooler_protocol::v1::TaskNoteKind::Decision as i32,
+            body: "use sqlite".into(),
+            extra_json: r#"{"rejected":["files"]}"#.into(),
+            ..Default::default()
+        },
+    ));
+    let result = client.call(decide).await.expect("task.note");
+    let Some(result::Value::TaskNote(first)) = result.value else { panic!("wrong result") };
+    assert_eq!(first.extra_json, r#"{"rejected":["files"]}"#);
+
+    let mut correct = request("task.note");
+    correct.payload = Some(request::Payload::TaskNoteAppend(
+        farcooler_protocol::v1::TaskNoteAppend {
+            task_id: task.id.clone(),
+            kind: farcooler_protocol::v1::TaskNoteKind::Decision as i32,
+            body: "use files after all".into(),
+            supersedes: Some(first.id.clone()),
+            ..Default::default()
+        },
+    ));
+    let result = client.call(correct).await.expect("the correcting note");
+    let Some(result::Value::TaskNote(second)) = result.value else { panic!("wrong result") };
+    assert_eq!(second.supersedes, Some(first.id.clone()));
+
+    // BOTH are still there, in the order they were written. "We decided X,
+    // then learned better and decided Y" is the thing a reader in three weeks
+    // needs to see, and an edit would have shown them only Y.
+    let record = task_detail(&mut client, task.id.clone()).await;
+    let bodies: Vec<_> = record.notes.iter().map(|n| n.body.clone()).collect();
+    assert_eq!(bodies, ["fix the thing", "use sqlite", "use files after all"]);
+
+    // There is no route that edits one, and there must never be one: the store
+    // has a `BEFORE UPDATE` trigger that refuses unconditionally, so such a
+    // route would fail on a caller's data rather than at review.
+    for invented in ["task.note_update", "task.note_edit", "task.edit_note"] {
+        match client.call(request(invented)).await {
+            Err(ClientError::Daemon { code, .. }) => assert_eq!(
+                code,
+                ErrorCode::CapabilityUnsupported as i32,
+                "{invented} exists, and the record is no longer append-only"
+            ),
+            other => panic!("expected {invented} not to exist, got {other:?}"),
+        }
+    }
+
+    // And the search that makes the record worth keeping finds both, flagging
+    // the one that was retracted.
+    let mut search = request("task.search");
+    search.payload = Some(request::Payload::TaskSearch(
+        farcooler_protocol::v1::TaskSearchRequest {
+            repository_id: record.task.expect("a task").repository_id,
+            query: "use".into(),
+            kind: farcooler_protocol::v1::TaskNoteKind::Decision as i32,
+        },
+    ));
+    let result = client.call(search).await.expect("task.search");
+    let Some(result::Value::TaskNoteHitList(hits)) = result.value else { panic!("wrong result") };
+    let found: Vec<_> =
+        hits.items.iter().map(|h| (h.note.as_ref().unwrap().body.clone(), h.superseded)).collect();
+    assert_eq!(found, [("use sqlite".into(), true), ("use files after all".into(), false)]);
+}
+
+/// Every write says so, naming who caused it.
+///
+/// The half a client cannot see in its own reply. Without it every OTHER
+/// connected client draws the old board until something unrelated happens —
+/// and for a status move there is not even a version bump to notice, because
+/// `Store::set_task_status` deliberately does not make one.
+#[tokio::test]
+async fn every_board_write_announces_and_says_whose_work_it_was() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, _prefix) = board_repository(&mut client).await;
+
+    let mut events = h.watcher.subscribe();
+    let mut req = request("task.create");
+    req.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: repository.clone(),
+        title: "fix the thing".to_string(),
+        actor: "manager".to_string(),
+        ..Default::default()
+    }));
+    let task = into_task(client.call(req).await.expect("task.create"));
+    assert_eq!(
+        announced_actor(&mut events, &task.id).await.as_deref(),
+        Some("manager"),
+        "a creation nobody is told about is a card only one client has"
+    );
+
+    // A second task to block on, and a terminal-shaped actor for the writes
+    // that follow — an entry saying an agent decided something is only useful
+    // if you can go and see which pane said it.
+    let other = create_task(&mut client, repository, "the other thing").await;
+    let terminal = uuid::Uuid::now_v7();
+    let agent = format!("agent:{terminal}");
+
+    let mut mv = request("task.set_status");
+    mv.payload = Some(request::Payload::TaskSetStatus(
+        farcooler_protocol::v1::TaskSetStatus {
+            task_id: task.id.clone(),
+            status: farcooler_protocol::v1::TaskStatus::InProgress as i32,
+            actor: agent.clone(),
+        },
+    ));
+    let moved = into_task(client.call(mv).await.expect("task.set_status"));
+    assert_eq!(moved.status, farcooler_protocol::v1::TaskStatus::InProgress as i32);
+    assert_eq!(
+        announced_actor(&mut events, &task.id).await.as_deref(),
+        Some(agent.as_str()),
+        "a move announces, and it is the only signal a move produces"
+    );
+
+    let mut note = request("task.note");
+    note.payload = Some(request::Payload::TaskNoteAppend(
+        farcooler_protocol::v1::TaskNoteAppend {
+            task_id: task.id.clone(),
+            kind: farcooler_protocol::v1::TaskNoteKind::Finding as i32,
+            body: "the parser eats the escape".into(),
+            actor: agent.clone(),
+            ..Default::default()
+        },
+    ));
+    client.call(note).await.expect("task.note");
+    assert_eq!(announced_actor(&mut events, &task.id).await.as_deref(), Some(agent.as_str()));
+
+    let mut update = request("task.update");
+    update.payload = Some(request::Payload::TaskUpdate(farcooler_protocol::v1::TaskUpdate {
+        task_id: task.id.clone(),
+        expected_version: moved.resource_version,
+        title: "fix the thing properly".into(),
+        actor: agent.clone(),
+        ..Default::default()
+    }));
+    client.call(update).await.expect("task.update");
+    assert_eq!(announced_actor(&mut events, &task.id).await.as_deref(), Some(agent.as_str()));
+
+    let mut block = request("task.block");
+    block.payload = Some(request::Payload::TaskBlockSet(
+        farcooler_protocol::v1::TaskBlockSet {
+            task_id: task.id.clone(),
+            blocked_by: other.id.clone(),
+            reason: "waiting on the parser".into(),
+            clear: false,
+            actor: agent.clone(),
+        },
+    ));
+    let result = client.call(block).await.expect("task.block");
+    let Some(result::Value::TaskBlockList(blocks)) = result.value else { panic!("wrong result") };
+    assert_eq!(blocks.items.len(), 1);
+    assert_eq!(blocks.items[0].blocked_by, other.id);
+    assert_eq!(announced_actor(&mut events, &task.id).await.as_deref(), Some(agent.as_str()));
+
+    // Clearing it is the same route in the other direction, and announces too.
+    let mut clear = request("task.block");
+    clear.payload = Some(request::Payload::TaskBlockSet(
+        farcooler_protocol::v1::TaskBlockSet {
+            task_id: task.id.clone(),
+            blocked_by: other.id.clone(),
+            reason: String::new(),
+            clear: true,
+            actor: agent.clone(),
+        },
+    ));
+    let result = client.call(clear).await.expect("task.block clear");
+    let Some(result::Value::TaskBlockList(blocks)) = result.value else { panic!("wrong result") };
+    assert!(blocks.items.is_empty(), "the edge is gone and the reply says so");
+    assert_eq!(announced_actor(&mut events, &task.id).await.as_deref(), Some(agent.as_str()));
+
+    // A cycle is refused rather than written. A deadlock the manager never
+    // resolves presents as a queue that quietly stopped moving.
+    let mut cycle = request("task.block");
+    cycle.payload = Some(request::Payload::TaskBlockSet(
+        farcooler_protocol::v1::TaskBlockSet {
+            task_id: task.id.clone(),
+            blocked_by: task.id.clone(),
+            reason: "itself".into(),
+            clear: false,
+            actor: agent,
+        },
+    ));
+    match client.call(cycle).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, ErrorCode::InvalidArgument as i32)
+        }
+        other => panic!("expected a cycle to be refused, got {other:?}"),
+    }
+}
+
+/// A malformed request leaves NOTHING on the board.
+///
+/// The failure this pins is deterministic, not a rare interleaving: a client
+/// sends an acceptance item whose id is not sixteen bytes of uuid, or a
+/// malformed `workspace_id`, and if either is validated after `create_task` has
+/// committed then a titled task with a `Created` note and no intent is sitting
+/// on the board — with NO announce, so nothing tells any client it appeared.
+/// The caller reads `InvalidArgument`, fixes its request, retries, and now
+/// there are two, the first having burned a key number.
+///
+/// So this asserts on what the store HOLDS, read back over the wire, rather
+/// than on the error the call returned. The error is identical whether the
+/// validation ran before the write or after it, which is exactly why asserting
+/// on it would pass against the broken ordering.
+#[tokio::test]
+async fn a_create_that_is_refused_leaves_no_task_behind_and_burns_no_key() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, prefix) = board_repository(&mut client).await;
+
+    /// The board as the store holds it, not as any reply described it.
+    async fn board(
+        client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+        repository: bytes::Bytes,
+    ) -> Vec<farcooler_protocol::v1::Task> {
+        let mut list = request("task.list");
+        list.payload = Some(request::Payload::TaskList(
+            farcooler_protocol::v1::TaskListRequest {
+                repository_id: repository,
+                status: 0,
+                stale_after_millis: None,
+            },
+        ));
+        let result = client.call(list).await.expect("task.list");
+        let Some(result::Value::TaskList(board)) = result.value else { panic!("wrong result") };
+        board.items
+    }
+
+    assert!(board(&mut client, repository.clone()).await.is_empty(), "the fixture starts empty");
+
+    // Sixteen bytes short of a uuid, on an acceptance item.
+    let mut bad_item = request("task.create");
+    bad_item.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: repository.clone(),
+        title: "fix the thing".into(),
+        acceptance: vec![farcooler_protocol::v1::TaskAcceptanceItem {
+            id: bytes::Bytes::from_static(b"nope"),
+            text: "the suite is green".into(),
+            met: false,
+        }],
+        ..Default::default()
+    }));
+    match client.call(bad_item).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, ErrorCode::InvalidArgument as i32)
+        }
+        other => panic!("expected a malformed acceptance id to be refused, got {other:?}"),
+    }
+    assert!(
+        board(&mut client, repository.clone()).await.is_empty(),
+        "a refused create wrote a task anyway, and announced nothing about it"
+    );
+
+    // And the other conversion that runs after the title: the lane id.
+    let mut bad_lane = request("task.create");
+    bad_lane.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: repository.clone(),
+        title: "fix the thing".into(),
+        workspace_id: Some(bytes::Bytes::from_static(b"not a workspace")),
+        ..Default::default()
+    }));
+    match client.call(bad_lane).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, ErrorCode::InvalidArgument as i32)
+        }
+        other => panic!("expected a malformed workspace_id to be refused, got {other:?}"),
+    }
+    assert!(
+        board(&mut client, repository.clone()).await.is_empty(),
+        "a refused create wrote a task anyway, and announced nothing about it"
+    );
+
+    // Nothing was written, so nothing was consumed either: the first task this
+    // repository actually accepts is still number one. A create that had
+    // committed and then failed would leave this at `afb-3`, and the two rows
+    // it left behind would be invisible to every client until a refresh.
+    let good = create_task(&mut client, repository.clone(), "fix the thing").await;
+    assert_eq!(good.key, format!("{prefix}-1"), "a refused create burned a key number");
+    assert_eq!(board(&mut client, repository).await.len(), 1);
+}

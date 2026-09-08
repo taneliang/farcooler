@@ -163,6 +163,16 @@ message Request {
     TerminalsWatched terminals_watched = 68;
     ClientSetNodeKey client_set_node_key = 69;
     WorkspaceReorder workspace_reorder = 70;
+    // The board. Reads first, then the writes; see the section at the foot of
+    // this file for why there is no payload here that edits a note.
+    TaskListRequest task_list = 71;
+    TaskGetRequest task_get = 72;
+    TaskCreate task_create = 73;
+    TaskUpdate task_update = 74;
+    TaskSetStatus task_set_status = 75;
+    TaskNoteAppend task_note_append = 76;
+    TaskBlockSet task_block_set = 77;
+    TaskSearchRequest task_search = 78;
   }
 }
 
@@ -216,6 +226,15 @@ message Result {
     ClientList client_list = 34;
     ClientEnrollResult client_enroll = 35;
     ClientSetNodeKeyResult client_set_node_key = 36;
+    // The board. `task.note` answers with the note it appended rather than
+    // with the task, because the note carries the id a later `supersedes` has
+    // to name.
+    Task task = 37;
+    TaskList task_list = 38;
+    TaskDetail task_detail = 39;
+    TaskNote task_note = 40;
+    TaskBlockList task_block_list = 41;
+    TaskNoteHitList task_note_hit_list = 42;
   }
 }
 
@@ -2361,4 +2380,268 @@ message ClientSetNodeKeyResult {
   // and the runner starts serving on its next boot. The line is written either
   // way — this field only says whether there is a token to dial yet.
   string conn_blob = 1;
+}
+
+// ---------------------------------------------------------------------------
+// The board
+//
+// The split this whole surface rests on, and the reason there is no route here
+// that edits a note: a `Task` is what is understood NOW and every field of it
+// may be revised through `task.update`, while a `TaskNote` is the record of how
+// that understanding was reached and no field of any note may ever change.
+// Correcting the record is `task.note` again, carrying `supersedes`. The store
+// enforces it too — `task_notes` has a `BEFORE UPDATE` trigger that refuses
+// unconditionally — so an edit route would fail at runtime rather than at
+// review. See `crates/store/src/tasks.rs`.
+// ---------------------------------------------------------------------------
+
+// Where a task sits, in the order work moves through the board.
+//
+// UNSPECIFIED is refused wherever it is a VALUE — `task.set_status` will not
+// take it — for the reason `PaneMode` gives: defaulting an unreadable status to
+// `BACKLOG` would quietly move a finished task back onto the board. Where it is
+// a FILTER, on `TaskListRequest`, it means "every status", which is the store's
+// own `Option<TaskStatus>` and not a default standing in for a real value.
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_BACKLOG = 1;
+  TASK_STATUS_TODO = 2;
+  // Waiting on a person. A QUESTION note puts a task here and the ANSWER takes
+  // it back out.
+  TASK_STATUS_NEEDS_DECISION = 3;
+  TASK_STATUS_IN_PROGRESS = 4;
+  TASK_STATUS_IN_REVIEW = 5;
+  TASK_STATUS_DONE = 6;
+  TASK_STATUS_CANCELLED = 7;
+}
+
+// What a note is. Same vocabulary as the stored column, so a note on a screen
+// reads as the row it came from.
+//
+// UNSPECIFIED follows the same rule `TaskStatus` states: refused as a value on
+// `task.note`, and "every kind" as a filter on `task.get` and `task.search`.
+//
+// STATUS_CHANGE and CREATED are written only by the transactions that move or
+// make a task, and `task.note` refuses both — a caller appending a
+// STATUS_CHANGE whose `from` and `to` no move ever produced would be writing a
+// lie into a log whose whole claim is that a move is recorded rather than
+// inferred.
+enum TaskNoteKind {
+  TASK_NOTE_KIND_UNSPECIFIED = 0;
+  TASK_NOTE_KIND_DECISION = 1;
+  TASK_NOTE_KIND_FINDING = 2;
+  TASK_NOTE_KIND_QUESTION = 3;
+  TASK_NOTE_KIND_ANSWER = 4;
+  TASK_NOTE_KIND_PROGRESS = 5;
+  TASK_NOTE_KIND_COMMENT = 6;
+  TASK_NOTE_KIND_STATUS_CHANGE = 7;
+  TASK_NOTE_KIND_CREATED = 8;
+}
+
+// One checkable thing, and whether it holds.
+message TaskAcceptanceItem {
+  bytes id = 1;
+  string text = 2;
+  bool met = 3;
+}
+
+// Current understanding, and nothing about how it was reached.
+message Task {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes repository_id = 3;
+  // Short and typeable, for a person and for a prompt: `fc-42`. Per
+  // repository, and derived once at registration — never from the
+  // repository's current name, so a rename does not strand a key.
+  string key = 4;
+  string title = 5;
+  TaskStatus status = 6;
+  // Unix milliseconds, from when the status last changed. The board's most
+  // important column is "how long has this been sitting like this".
+  int64 status_since = 7;
+  string intent = 8;
+  repeated TaskAcceptanceItem acceptance = 9;
+  repeated string constraints = 10;
+  // The lane this task is using, when it has one. A task exists in the backlog
+  // long before any worktree does.
+  optional bytes workspace_id = 11;
+  repeated string labels = 12;
+}
+
+message TaskList { repeated Task items = 1; }
+
+// One entry in the record. Never edited, here or anywhere.
+message TaskNote {
+  bytes id = 1;
+  bytes task_id = 2;
+  TaskNoteKind kind = 3;
+  // `user`, `manager`, or `agent:<uuid>` — the daemon's `Actor::Display` impl,
+  // verbatim, the same word `TaskChanged.actor` carries. One string rather
+  // than a kind plus a nullable id, because two fields are two things that can
+  // disagree.
+  string actor = 4;
+  // Unix milliseconds.
+  int64 at = 5;
+  string body = 6;
+  // Kind-specific structure as a JSON object: a decision's rejected
+  // alternatives, a question's options, a status change's `from` and `to`.
+  //
+  // A JSON string on the wire rather than proto fields, for the reason the
+  // column is JSON: adding a kind must stay a line of Rust rather than a
+  // migration AND a protocol change. Empty means no structure; anything that
+  // is not a JSON object is refused rather than stored.
+  string extra_json = 7;
+  // The note this replaces, when a later understanding replaced an earlier
+  // one. Both stay readable forever.
+  optional bytes supersedes = 8;
+}
+
+// One note matched by `task.search`, plus whether something has since
+// superseded it.
+//
+// `supersedes` only ever points backward, so a note cannot say of itself that
+// it was retracted. This flag is the forward fact, and it is true the moment
+// ANY note names this one — including one whose own body would never have
+// matched the query. What it cannot hand back is the retracting note's text; a
+// caller that needs the current word follows `task_id` to `task.get`.
+message TaskNoteHit {
+  TaskNote note = 1;
+  bool superseded = 2;
+}
+
+message TaskNoteHitList { repeated TaskNoteHit items = 1; }
+
+// One thing a task is waiting on, and why.
+message TaskBlock {
+  bytes task_id = 1;
+  bytes blocked_by = 2;
+  string reason = 3;
+}
+
+message TaskBlockList { repeated TaskBlock items = 1; }
+
+// A task with its record and what it waits on, in one read.
+//
+// One round trip rather than three, because every reader of a task — a person
+// opening a card, an agent picking work up — wants all three, and the notes are
+// the half that says why the row reads as it does.
+message TaskDetail {
+  Task task = 1;
+  repeated TaskNote notes = 2;
+  repeated TaskBlock blocks = 3;
+}
+
+message TaskListRequest {
+  bytes repository_id = 1;
+  // UNSPECIFIED means every status. See `TaskStatus`.
+  TaskStatus status = 2;
+  // When set and non-zero, answer with the tasks that have sat in their
+  // current status longer than this instead — the staleness view, whose whole
+  // point is a task in `todo` that a manager assumed was in flight. `done` and
+  // `cancelled` are excluded from it outright.
+  optional uint64 stale_after_millis = 3;
+}
+
+message TaskGetRequest {
+  bytes task_id = 1;
+  // UNSPECIFIED means every kind. Narrowing is what makes the split pay:
+  // DECISION alone answers "why is it like this" without a wall of progress
+  // chatter.
+  TaskNoteKind note_kind = 2;
+}
+
+// `actor` on every write below is the same word `TaskNote.actor` carries.
+// Empty means `user`: a call arriving with nobody named is a person at a
+// client, which is what `user` means, while `manager` and `agent:<uuid>` are
+// claims that have to be made out loud. A non-empty word that does not parse
+// is refused rather than quietly read as `user`, so a typo in an agent's uuid
+// cannot file its work under a person.
+message TaskCreate {
+  bytes repository_id = 1;
+  string title = 2;
+  string intent = 3;
+  repeated TaskAcceptanceItem acceptance = 4;
+  repeated string constraints = 5;
+  repeated string labels = 6;
+  optional bytes workspace_id = 7;
+  string actor = 8;
+}
+
+// Revise what is currently understood. The mutable half of the design.
+//
+// Every field is sent every time and replaces what was there: this is a whole
+// revision, not a patch, and a client that sends only what it changed would
+// blank the rest. Read the task, edit, send it back — which is what
+// `expected_version` is for.
+message TaskUpdate {
+  bytes task_id = 1;
+  // The `resource_version` the caller read. A mismatch is refused rather than
+  // merged: two clients revising the same fields must not both believe they
+  // won.
+  //
+  // In the payload rather than the envelope's `expected_resource_version`,
+  // which no method in this daemon reads yet — one source for a precondition
+  // beats two that can disagree.
+  uint64 expected_version = 2;
+  string title = 3;
+  string intent = 4;
+  repeated TaskAcceptanceItem acceptance = 5;
+  repeated string constraints = 6;
+  repeated string labels = 7;
+  optional bytes workspace_id = 8;
+  string actor = 9;
+}
+
+// Move a task. Deliberately not part of `task.update`: a status settable there
+// would be a status that could move without the log noticing, and the move and
+// its STATUS_CHANGE note are one transaction in the store.
+message TaskSetStatus {
+  bytes task_id = 1;
+  TaskStatus status = 2;
+  string actor = 3;
+}
+
+// Append one entry to a task's record. There is no counterpart that changes an
+// entry already there, and there must never be one.
+message TaskNoteAppend {
+  bytes task_id = 1;
+  TaskNoteKind kind = 2;
+  string body = 3;
+  // A JSON object, or empty. See `TaskNote.extra_json`.
+  string extra_json = 4;
+  // Correcting the record: the note this one replaces. It must be on the same
+  // task and of the same kind — a note correcting another task's history reads
+  // as a correction and is not one.
+  optional bytes supersedes = 5;
+  string actor = 6;
+}
+
+// Record that a task cannot proceed until another does, or clear that edge.
+//
+// One route for both directions rather than two, because a block is one edge
+// with two states: a separate `task.unblock` would be a second row in the
+// scope table governing the same fact, and the two could be gated differently.
+// A cycle is refused — a deadlock nobody resolves presents as a queue that
+// quietly stopped moving rather than as an error.
+message TaskBlockSet {
+  bytes task_id = 1;
+  bytes blocked_by = 2;
+  string reason = 3;
+  // Remove the edge instead of writing it. Clearing one that was never there
+  // is not an error: the state afterward is the same either way.
+  bool clear = 4;
+  string actor = 5;
+}
+
+// Every note in a repository whose body contains `query` literally.
+//
+// The read for "why did we do it this way", asked months later about a task
+// nobody remembers the key of — the case the split between tasks and notes
+// exists for. `query` is matched literally: `%` and `_` in it are characters,
+// not wildcards.
+message TaskSearchRequest {
+  bytes repository_id = 1;
+  string query = 2;
+  // UNSPECIFIED means every kind.
+  TaskNoteKind kind = 3;
 }

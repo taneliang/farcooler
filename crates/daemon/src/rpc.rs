@@ -359,6 +359,26 @@ fn required_scope(method: &str) -> Option<Scope> {
         // needs-you badge let a read-scoped phone triage the fleet without being
         // able to read a line of the code.
         "changes.inbox" | "stack.get" => Scope::Read,
+        // The board reads. A task's title, intent and record are metadata about
+        // work, not the work: no path, no diff, no terminal byte — the same
+        // ground `changes.inbox` stands on, and a read-scoped phone has to be
+        // able to see what the fleet is doing to be worth carrying.
+        "task.list" | "task.get" | "task.search" => Scope::Read,
+        // The board writes, at the scope `workspace.create` and
+        // `terminal.create` already sit at: a write that touches no git data
+        // and reveals no path.
+        //
+        // Not `host_admin`, because an agent has to be able to move its own
+        // card and file its own findings for any of this to be automatable —
+        // and `host_admin` is the scope that decides who may log in. Not
+        // `read`, because `read` is what a client gets when it should only see
+        // the SHAPE of the fleet, and a client that could append notes could
+        // write a decision the record then claims a person made.
+        "task.create"
+        | "task.update"
+        | "task.set_status"
+        | "task.note"
+        | "task.block" => Scope::Control,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
@@ -1768,6 +1788,81 @@ impl Rpc {
                 Ok(result::Value::StackLinkList(crate::review_ops::pr_refresh(svc, &p).await?))
             }
 
+            // ---- the board ----
+            //
+            // Thin for the reason the review arms above are, and one more:
+            // every write here has to announce, and the announce lives at the
+            // foot of the `task_ops` function rather than in this table, so a
+            // route cannot be added with the call site left empty. See that
+            // module's doc.
+            //
+            // There is no arm that edits a note, and there must not be one.
+            // Current understanding is mutable and lives on the row —
+            // `task.update` — while the record of how you got there is
+            // append-only and lives in notes that can be superseded and never
+            // edited. `task_notes` carries a `BEFORE UPDATE` trigger that
+            // refuses unconditionally, so such an arm would fail on a caller's
+            // data rather than at review.
+            "task.list" => {
+                let Some(request::Payload::TaskList(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskList(crate::task_ops::list(svc, &p)?))
+            }
+
+            "task.get" => {
+                let Some(request::Payload::TaskGet(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskDetail(crate::task_ops::get(svc, &p)?))
+            }
+
+            "task.search" => {
+                let Some(request::Payload::TaskSearch(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskNoteHitList(crate::task_ops::search(svc, &p)?))
+            }
+
+            "task.create" => {
+                let Some(request::Payload::TaskCreate(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Task(crate::task_ops::create(svc, &self.watcher, &p)?))
+            }
+
+            "task.update" => {
+                let Some(request::Payload::TaskUpdate(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Task(crate::task_ops::update(svc, &self.watcher, &p)?))
+            }
+
+            "task.set_status" => {
+                let Some(request::Payload::TaskSetStatus(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Task(crate::task_ops::set_status(svc, &self.watcher, &p)?))
+            }
+
+            "task.note" => {
+                let Some(request::Payload::TaskNoteAppend(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskNote(crate::task_ops::note(svc, &self.watcher, &p)?))
+            }
+
+            "task.block" => {
+                let Some(request::Payload::TaskBlockSet(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskBlockList(crate::task_ops::block(
+                    svc,
+                    &self.watcher,
+                    &p,
+                )?))
+            }
+
             "terminal.agent_answer" => {
                 let Some(request::Payload::AgentAnswer(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -2257,6 +2352,78 @@ mod tests {
             assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
         }
         assert_eq!(required_scope("layout.list"), Some(Scope::Read));
+    }
+
+    /// Every `task.` route this file dispatches is in the scope table, and
+    /// every one the table names is dispatched.
+    ///
+    /// A SET DIFFERENCE, both ways, because the two sides fail differently and
+    /// a check in one direction misses the one that matters. A route in
+    /// `dispatch` and not in `required_scope` is unreachable — the table
+    /// refuses it as an unknown method — which reads to a client as "this
+    /// runner is too old" for a feature this runner has. A route in the table
+    /// and not in `dispatch` is worse: the scope check passes, the method
+    /// falls through to the `other =>` arm, and the caller is told `NotFound`
+    /// as though the task it named did not exist.
+    ///
+    /// Read out of this file's own source, so it pins the two lists rather
+    /// than a third list somebody has to remember to update. That is the
+    /// entire point: a hand-written roll-call of method names would pass for a
+    /// route added to `dispatch` and forgotten everywhere else, which is
+    /// exactly the mistake being guarded.
+    #[test]
+    fn every_board_route_is_in_the_scope_table_and_every_table_entry_is_dispatched() {
+        let source = include_str!("rpc.rs");
+        let table = task_methods_in(source, "fn required_scope", "\n}\n");
+        let dispatched = task_methods_in(source, "async fn dispatch", "\n    }\n");
+
+        assert!(!table.is_empty(), "the slicing found nothing, so this test proves nothing");
+        let ungated: Vec<_> = dispatched.difference(&table).collect();
+        assert!(ungated.is_empty(), "dispatched but absent from the scope table: {ungated:?}");
+        let unreachable: Vec<_> = table.difference(&dispatched).collect();
+        assert!(
+            unreachable.is_empty(),
+            "in the scope table but never dispatched: {unreachable:?}"
+        );
+
+        // And the routes themselves are split the way the table's comment says
+        // they are, which the set comparison above cannot see.
+        for method in ["task.list", "task.get", "task.search"] {
+            assert_eq!(required_scope(method), Some(Scope::Read), "{method}");
+        }
+        for method in
+            ["task.create", "task.update", "task.set_status", "task.note", "task.block"]
+        {
+            assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
+        }
+        // The one route that must never exist. Notes are append-only: the
+        // store has a `BEFORE UPDATE` trigger that refuses unconditionally, so
+        // a route here would fail on a caller's data rather than at review.
+        assert_eq!(required_scope("task.note_update"), None);
+        assert_eq!(required_scope("task.note_edit"), None);
+    }
+
+    /// The `"task.…"` string literals inside one function of this file.
+    ///
+    /// `start` names the function, `end` the first thing after its body — `\n}\n`
+    /// for a free function, `\n    }\n` for one inside an `impl`. Crude on
+    /// purpose: a parser here would be a second thing that can be wrong.
+    #[cfg(test)]
+    fn task_methods_in(
+        source: &str,
+        start: &str,
+        end: &str,
+    ) -> std::collections::BTreeSet<String> {
+        let body = source.split_once(start).expect("this file declares that function").1;
+        let body = body.split_once(end).expect("that function closes").0;
+        let mut found = std::collections::BTreeSet::new();
+        let mut rest = body;
+        while let Some((_, after)) = rest.split_once("\"task.") {
+            let (name, tail) = after.split_once('"').expect("a closed string literal");
+            found.insert(format!("task.{name}"));
+            rest = tail;
+        }
+        found
     }
 
     #[test]

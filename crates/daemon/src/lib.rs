@@ -24,6 +24,7 @@ pub mod service;
 pub mod sessions;
 pub mod stack;
 pub mod session_discovery;
+pub mod task_ops;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod watch;
