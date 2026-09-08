@@ -742,6 +742,13 @@ impl HookIngress {
 /// unhealthy for a few seconds. Retiring a candidate on that would make every
 /// announcement fail exactly when the runner is busiest. `Starting` stays a
 /// candidate too — a hook can fire before the daemon has confirmed the pane.
+fn still_a_pane(terminal: &Terminal, snapshot: &RuntimeSnapshot) -> bool {
+    !matches!(
+        derive::derive_terminal(&crate::service::to_record(terminal), snapshot).state,
+        TerminalState::Exited | TerminalState::Lost | TerminalState::Error
+    )
+}
+
 /// A pane whose conversation already arrives over its shim.
 ///
 /// **One ring per terminal, fed by one transport.** A pane in `Agent` mode has
@@ -767,13 +774,6 @@ impl HookIngress {
 /// re-checked by whoever makes the tree contain it.
 fn is_a_chat(terminal: &Terminal) -> bool {
     terminal.pane_mode == farcooler_store::models::PaneMode::Agent
-}
-
-fn still_a_pane(terminal: &Terminal, snapshot: &RuntimeSnapshot) -> bool {
-    !matches!(
-        derive::derive_terminal(&crate::service::to_record(terminal), snapshot).state,
-        TerminalState::Exited | TerminalState::Lost | TerminalState::Error
-    )
 }
 
 /// Which agent a command preset runs, when it is one of the three that hook.
