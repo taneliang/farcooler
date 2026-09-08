@@ -173,6 +173,58 @@ mod tests {
         );
     }
 
+    /// The one answer that can approve something on a person's behalf.
+    ///
+    /// Every other outcome in this file degrades to deferring, which is safe
+    /// because deferring is what an agent with no hook installed already does.
+    /// This branch is the exception: a wrong shape here is the difference
+    /// between the TUI asking and the TUI being told yes.
+    #[tokio::test]
+    async fn a_gating_hook_prints_the_allow_the_daemon_returned() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut reader = tokio::io::BufReader::new(&mut stream);
+            let mut line = String::new();
+            tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+            let verdict = HookVerdict { decision: Some(Decision::Allow) };
+            tokio::io::AsyncWriteExt::write_all(
+                &mut stream,
+                encode_line(&verdict).expect("encode").as_bytes(),
+            )
+            .await
+            .expect("write");
+        });
+
+        let out = run_with_input(
+            Agent::Claude,
+            "PermissionRequest".to_string(),
+            socket,
+            true,
+            b"{\"session_id\":\"abc\",\"tool_name\":\"Write\"}".to_vec(),
+        )
+        .await;
+
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("hook printed json");
+        assert_eq!(
+            parsed["hookSpecificOutput"]["decision"]["behavior"],
+            "allow",
+            "an allow must arrive as an allow, under the name the agent reads"
+        );
+        assert_eq!(
+            parsed["hookSpecificOutput"]["hookEventName"],
+            "PermissionRequest",
+            "the envelope the agent matches on before it reads the decision"
+        );
+        assert_eq!(
+            parsed["hookSpecificOutput"]["decision"]["message"],
+            serde_json::Value::Null,
+            "an allow carries no words to put in the pane"
+        );
+    }
+
     /// A daemon that hangs must not hang an agent.
     #[tokio::test]
     async fn a_gating_hook_whose_daemon_never_answers_defers_to_the_human() {
