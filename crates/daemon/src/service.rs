@@ -108,6 +108,25 @@ fn changes_host_command() -> String {
 }
 
 pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
+    preset_command_with_hooks(preset, session_id, None)
+}
+
+/// The same launch, plus the settings file that makes the pane report itself.
+///
+/// `hook_settings` is the file `hook_install::claude_settings` produced,
+/// written into this daemon's runtime directory by `write_claude_hook_settings`
+/// and handed to claude as `--settings <file>`. It is claude's arm and nobody
+/// else's: codex and cursor have no equivalent flag and read the project-local
+/// `.codex/hooks.json` and `.cursor/hooks.json` that `install_project_hooks`
+/// merges into a worktree instead.
+///
+/// Nothing about a launch with no settings file changes, which is what
+/// `preset_command` above still is.
+pub fn preset_command_with_hooks(
+    preset: &str,
+    session_id: Option<&str>,
+    hook_settings: Option<&Path>,
+) -> String {
     let shell = farcooler_core::shell::login_shell();
     let (agent, model) = match preset.split_once(':') {
         Some((a, m)) if is_safe_model(m) => (a, Some(m)),
@@ -128,6 +147,15 @@ pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
         .map(|s| format!(" --session-id {s}"))
         .unwrap_or_default();
 
+    // The one interpolation in this function whose text Far Cooler did not
+    // choose the shape of. A model and a session id are both filtered down to
+    // a plain identifier above; this is a real path on a real disk, and on
+    // macOS the runtime directory it lives in is under `Application Support`
+    // — a space, in the default install, for every user.
+    let settings = hook_settings
+        .map(|p| format!(" --settings {}", shell_quote(&p.display().to_string())))
+        .unwrap_or_default();
+
     match agent {
         "shell" => format!("{shell} -il"),
         // Before the shell branches below, and deliberately not through one: a
@@ -135,7 +163,19 @@ pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
         // the one thing this pane has to do is exist for as long as tmux says
         // it does.
         CHANGES_PRESET => changes_host_command(),
-        "claude" => format!("{shell} -ilc 'claude{flag}{session}'"),
+        // `shell_quote` around the whole payload rather than the bare `'…'`
+        // every other arm writes, because this is the only arm that can carry
+        // a quote of its own: `settings` is `shell_quote`d in turn, and a
+        // single-quoted path nested inside a single-quoted `-ilc` argument
+        // ends the outer quote and splits the command in half. The two layers
+        // are real — tmux hands this string to `sh -c`, which hands the `-ilc`
+        // argument to the login shell — and `shell_quote` is what survives
+        // both. With no settings file the payload holds no quote at all, so
+        // `shell_quote` produces exactly the `'claude…'` this arm has always
+        // produced, byte for byte.
+        "claude" => {
+            format!("{shell} -ilc {}", shell_quote(&format!("claude{flag}{session}{settings}")))
+        }
         "codex" => format!("{shell} -ilc 'codex{flag}'"),
         "cursor" => format!("{shell} -ilc 'cursor-agent{flag}'"),
         other if is_safe_model(other) => format!("{shell} -ilc '{other}{flag}'"),
@@ -143,6 +183,132 @@ pub fn preset_command(preset: &str, session_id: Option<&str>) -> String {
         // all. A preset is chosen from a list; anything else is a bug or an
         // attempt.
         _ => format!("{shell} -il"),
+    }
+}
+
+/// Where this daemon keeps the settings file it hands claude.
+///
+/// One file per runner, in the runtime directory, beside the socket it names.
+/// Not one per terminal: `claude_settings` is a pure function of the hook
+/// socket and the socket is per daemon, so every terminal on this runner would
+/// otherwise get an identical copy under a different name.
+///
+/// Far Cooler's own file, in Far Cooler's own directory — which is the whole
+/// point of `--settings`. No file claude reads by itself is touched, so a
+/// person's `~/.claude/settings.json` is exactly as it was whether Far Cooler
+/// is installed or not.
+fn claude_hook_settings_path(runtime_dir: &Path) -> PathBuf {
+    runtime_dir.join("claude-hooks.json")
+}
+
+/// Write that file, and say where it went.
+///
+/// `None` on any failure, and the caller launches the pane anyway. A runner
+/// that cannot write its own runtime directory has a larger problem than a
+/// silent agent, and refusing to open a terminal over it would turn a missing
+/// live view into a feature that will not start.
+fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
+    let socket = hook_ingress::HookIngress::socket_path(runtime_dir);
+    let settings = crate::hook_install::claude_settings(&socket);
+    let text = serde_json::to_string_pretty(&settings).ok()?;
+    let path = claude_hook_settings_path(runtime_dir);
+    match std::fs::write(&path, text) {
+        Ok(()) => Some(path),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %path.display(),
+                "could not write claude's hook settings; this pane reports nothing"
+            );
+            None
+        }
+    }
+}
+
+/// Give a fresh worktree the two project-local hook files codex and cursor
+/// read, so a pane launched in it reports itself the way a claude pane does.
+///
+/// claude is absent here on purpose: it is handed `--settings` at launch
+/// (`preset_command_with_hooks`) and has no file of anyone's rewritten at all.
+/// The other two have no such flag, so the registration has to live in a file
+/// they will find — project-local, in this worktree, rather than in the user's
+/// `~/.codex` or `~/.cursor`, so nothing outside a Far Cooler worktree changes
+/// behavior.
+///
+/// Never fails. Writing into a worktree is a side effect on somebody's files
+/// and it is not worth a workspace for: a read-only mount, a `.cursor` that is
+/// a file rather than a directory, a hooks file we cannot parse — each of
+/// those loses the live view for that agent in that worktree and nothing else.
+fn install_project_hooks(worktree: &Path, socket: &Path) {
+    install_project_hook_file(
+        &worktree.join(".codex").join("hooks.json"),
+        socket,
+        crate::hook_install::merge_codex,
+    );
+    install_project_hook_file(
+        &worktree.join(".cursor").join("hooks.json"),
+        socket,
+        crate::hook_install::merge_cursor,
+    );
+}
+
+/// Merge our registrations into one such file.
+///
+/// The guard worth naming is the parse. `merge_codex`/`merge_cursor` treat
+/// text they cannot read as a file with nothing in it yet — the right answer
+/// for a missing or empty file, and the wrong one for a file somebody is
+/// midway through editing, because the merge would then hand back a document
+/// holding our three hooks and nothing else and we would write it over theirs.
+/// So a file that is present and is not a JSON object is left exactly as it
+/// is. Losing the live view is recoverable; replacing a file we do not own is
+/// a support incident somebody finds out about days later.
+fn install_project_hook_file(path: &Path, socket: &Path, merge: fn(&str, &Path) -> String) {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %path.display(),
+                "could not read an existing hooks file; leaving it alone"
+            );
+            return;
+        }
+    };
+
+    let starting = if existing.trim().is_empty() {
+        // A file with nothing in it says nothing to preserve. This is also the
+        // state a missing file arrives here as.
+        "{}".to_string()
+    } else if serde_json::from_str::<serde_json::Value>(&existing).is_ok_and(|v| v.is_object()) {
+        existing
+    } else {
+        tracing::warn!(
+            path = %path.display(),
+            "an existing hooks file is not a JSON object; leaving it alone rather than replacing it"
+        );
+        return;
+    };
+
+    let merged = merge(&starting, socket);
+
+    if let Some(dir) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(dir)
+    {
+        tracing::warn!(
+            error = %e,
+            path = %dir.display(),
+            "could not make room for a hooks file; this worktree reports nothing for this agent"
+        );
+        return;
+    }
+
+    if let Err(e) = std::fs::write(path, merged) {
+        tracing::warn!(
+            error = %e,
+            path = %path.display(),
+            "could not write a hooks file; this worktree reports nothing for this agent"
+        );
     }
 }
 
@@ -991,7 +1157,13 @@ impl Service {
         git::mark_owner(&dest, &self.install_id).await;
 
         match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
-            Ok(ws) => Ok(ws),
+            Ok(ws) => {
+                // After the row, not before it: the failure arm below removes
+                // the worktree again, and there is no reason to have written
+                // into a directory that is about to go.
+                install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root));
+                Ok(ws)
+            }
             Err(e) => {
                 // Do not erase a possibly valuable worktree to make the database
                 // look clean. Roll back only what is provably safe.
@@ -1061,7 +1233,14 @@ impl Service {
         git::mark_owner(&dest, &self.install_id).await;
 
         match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
-            Ok(workspace) => Ok(workspace),
+            Ok(workspace) => {
+                // The other door into "a worktree Far Cooler just made". A
+                // branch picked up from somewhere else runs the same agents in
+                // the same panes, and a pane that reports nothing is exactly
+                // as broken here as it is in `create_workspace`.
+                install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root));
+                Ok(workspace)
+            }
             Err(e) => {
                 // The worktree exists but nothing records it. Remove it —
                 // carefully, and never the branch, which was not ours to make.
@@ -1489,7 +1668,18 @@ impl Service {
         let term = self.mark_changes_pane(term, command_preset)?;
 
         // 2. Create and tag the window.
-        let command = preset_command(command_preset, declared.as_deref());
+        //
+        // The settings file is written for a claude pane and nothing else,
+        // matching `declared` above and for the same reason: `--settings` is
+        // claude's flag, and handing it to another CLI would put an argument
+        // it does not understand in front of it. codex and cursor are
+        // registered by `install_project_hooks` when the worktree is made.
+        let hook_settings = command_preset
+            .starts_with("claude")
+            .then(|| write_claude_hook_settings(&self.root))
+            .flatten();
+        let command =
+            preset_command_with_hooks(command_preset, declared.as_deref(), hook_settings.as_deref());
         let created = self
             .tmux
             .create_terminal_window(workspace_id, term.id, title, &ws.worktree_path, &command)
@@ -2918,6 +3108,102 @@ mod preset_tests {
         // Presets are not a closed set: someone's own wrapper should run.
         assert!(preset_command("aider", None).contains("'aider'"));
         assert!(preset_command("aider:sonnet", None).contains("aider --model sonnet"));
+    }
+
+    /// The task brief writes this test with `Some("a-session")` and asserts
+    /// `--session-id a-session` comes back. It cannot: `preset_command` drops
+    /// any session id that is not a plain uuid (see
+    /// `a_session_id_that_is_not_a_uuid_is_dropped_rather_than_escaped`
+    /// below), so the brief's literal would be filtered out before it reached
+    /// the command and the assertion would fail against a correct
+    /// implementation. A real uuid, which is what `create_terminal` mints,
+    /// asks the same question the brief meant to ask.
+    #[test]
+    fn a_claude_pane_is_launched_with_far_coolers_settings() {
+        const SESSION: &str = "018f5b2c-0000-7000-8000-00000000000a";
+        let command = preset_command_with_hooks(
+            "claude",
+            Some(SESSION),
+            Some(Path::new("/tmp/fc/hooks.json")),
+        );
+        assert!(command.contains("--settings"), "a launched pane reports what it is doing: {command}");
+        assert!(
+            command.contains(&format!("--session-id {SESSION}")),
+            "and still declares its session: {command}"
+        );
+    }
+
+    /// A settings path with a space in it must not split into two arguments.
+    #[test]
+    fn the_settings_path_is_quoted_like_every_other_interpolation_here() {
+        let command =
+            preset_command_with_hooks("claude", None, Some(Path::new("/tmp/My Runner/hooks.json")));
+        assert!(
+            command.contains("'/tmp/My Runner/hooks.json'")
+                || command.contains("\"/tmp/My Runner/hooks.json\""),
+            "tmux hands this to a shell: {command}"
+        );
+    }
+
+    #[test]
+    fn a_pane_with_no_hook_settings_is_the_command_it_always_was() {
+        assert_eq!(
+            preset_command_with_hooks("claude", Some("s"), None),
+            preset_command("claude", Some("s")),
+            "hooks are additive; nothing about an existing launch changes"
+        );
+    }
+
+    /// `--settings` is claude's flag alone. Handed to codex or cursor it would
+    /// be an argument the CLI does not understand sitting in front of it, and
+    /// the pane would die on startup rather than merely stay quiet — the
+    /// worst possible trade for a feature that is meant to be invisible.
+    /// Those two are registered by `install_project_hooks` instead.
+    #[test]
+    fn no_other_agent_is_handed_claudes_settings_flag() {
+        for preset in ["codex", "cursor", "shell", "aider", "claude-ish"] {
+            let with = preset_command_with_hooks(preset, None, Some(Path::new("/tmp/fc/h.json")));
+            assert!(!with.contains("--settings"), "{preset}: {with}");
+            assert_eq!(with, preset_command(preset, None), "{preset}: {with}");
+        }
+    }
+
+    /// The bug the nested quoting exists to prevent, asked of two real
+    /// shells rather than of a substring.
+    ///
+    /// `preset_command` produces `<shell> -ilc '<payload>'`, and tmux hands
+    /// that whole string to `sh -c`. So the settings path is inside two
+    /// layers of quoting, and the single quotes `shell_quote` writes would
+    /// close the `-ilc` argument early if the payload were not itself quoted.
+    /// A substring assertion cannot see that — the broken string contains the
+    /// quoted path too. This runs both layers and reads the argv that comes
+    /// out the far end: `claude` is swapped for a `printf` whose format joins
+    /// its arguments with commas, so a path that split into two words shows
+    /// up as two fields.
+    #[cfg(unix)]
+    #[test]
+    fn the_settings_path_survives_both_shells_as_one_argument() {
+        let path = "/tmp/My Runner/hooks.json";
+        let command = preset_command_with_hooks("claude", None, Some(Path::new(path)));
+
+        // The login shell is whatever this machine's user has; `sh` is enough
+        // to parse the `-ilc` payload and is the same parser in the way that
+        // matters here. Interactive login startup files are not this test's
+        // subject and would make it depend on somebody's `.zshrc`.
+        let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
+        let probe = command.replace(&prefix, "/bin/sh -c").replace("claude", "printf ,%s");
+        assert!(probe.starts_with("/bin/sh -c"), "the prefix was found and replaced: {probe}");
+
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&probe)
+            .output()
+            .expect("run the probe");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            stdout, format!(",--settings,{path}"),
+            "the path arrives as one argument through both shells: {probe} -> {stdout}"
+        );
     }
 
     #[test]
@@ -4730,5 +5016,263 @@ mod hook_wiring_tests {
              is; got {:?}",
             events[1].event
         );
+    }
+}
+
+/// The files a launched pane is registered through: claude's `--settings`
+/// document in the runtime directory, and the project-local `.codex`/`.cursor`
+/// hooks a new worktree gets.
+///
+/// Every case here is about a file somebody else may own. `hook_install`'s own
+/// tests prove the merge preserves what was already there; these prove the
+/// caller never hands the merge something it would be wrong to merge, and
+/// never takes a workspace down over a directory it could not write.
+#[cfg(test)]
+mod hook_file_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "farcooler-hooks-{}-{}-{name}",
+            std::process::id(),
+            Uuid::now_v7()
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    #[test]
+    fn a_new_worktree_gets_the_two_files_codex_and_cursor_read() {
+        let worktree = scratch("fresh");
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+
+        let codex = std::fs::read_to_string(worktree.join(".codex/hooks.json"))
+            .expect("codex hooks.json is written at the path codex reads");
+        let cursor = std::fs::read_to_string(worktree.join(".cursor/hooks.json"))
+            .expect("cursor hooks.json is written at the path cursor reads");
+
+        // The shape each agent actually reads back, not merely "a file exists".
+        let codex_v: serde_json::Value = serde_json::from_str(&codex).expect("codex json");
+        assert!(
+            codex_v["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+                .as_str()
+                .is_some_and(|c| c.contains("--agent codex") && c.contains("/tmp/h.sock")),
+            "codex's nested shape, naming this daemon's socket: {codex}"
+        );
+        let cursor_v: serde_json::Value = serde_json::from_str(&cursor).expect("cursor json");
+        assert!(
+            cursor_v["hooks"]["sessionStart"][0]["command"]
+                .as_str()
+                .is_some_and(|c| c.contains("--agent cursor") && c.contains("/tmp/h.sock")),
+            "cursor's flat shape and its own event names: {cursor}"
+        );
+
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    /// The support incident, not the test failure: a hooks file we cannot
+    /// parse is somebody's file midway through an edit, and `merge_codex`
+    /// treats text it cannot read as an empty document — so passing it
+    /// through would hand back our three hooks alone and we would write that
+    /// over theirs.
+    #[test]
+    fn a_hooks_file_we_cannot_parse_is_left_exactly_as_it_was() {
+        let worktree = scratch("unparseable");
+        let path = worktree.join(".codex/hooks.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let theirs = "{ \"hooks\": { \"SessionStart\": [ oops this is not json";
+        std::fs::write(&path, theirs).unwrap();
+
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            theirs,
+            "not one byte of a file we could not read is rewritten"
+        );
+        // And the agent whose file WAS readable is still installed: one
+        // unreadable file costs that agent's live view and nothing else.
+        assert!(worktree.join(".cursor/hooks.json").exists(), "cursor is unaffected");
+
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    /// Valid JSON that is not an object — an array, a bare string — reaches
+    /// `parse_or_empty_object` as the same "nothing here yet" a garbled file
+    /// does, so it needs the same guard.
+    #[test]
+    fn a_hooks_file_that_is_json_but_not_an_object_is_left_alone_too() {
+        let worktree = scratch("not-an-object");
+        let path = worktree.join(".cursor/hooks.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "[1, 2, 3]").unwrap();
+
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[1, 2, 3]");
+
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    #[test]
+    fn an_existing_hooks_file_keeps_the_entries_it_already_had() {
+        let worktree = scratch("theirs");
+        let path = worktree.join(".codex/hooks.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bash /Users/x/herdr-agent-state.sh session"}]}]}}"#,
+        )
+        .unwrap();
+
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("herdr-agent-state.sh"), "their hook survives: {after}");
+        assert!(after.contains("--agent codex"), "and ours is there too: {after}");
+
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    /// A worktree we cannot write into is a logged line, never a workspace
+    /// that fails to be created. `.cursor` as a FILE is the real shape of
+    /// this: `create_dir_all` refuses, and the alternative — propagating
+    /// that — would mean somebody's stray file stops them making a worktree.
+    #[test]
+    fn a_worktree_we_cannot_write_into_costs_the_live_view_and_nothing_else() {
+        let worktree = scratch("blocked");
+        std::fs::write(worktree.join(".cursor"), "a file, not a directory").unwrap();
+
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+
+        assert_eq!(
+            std::fs::read_to_string(worktree.join(".cursor")).unwrap(),
+            "a file, not a directory",
+            "their file is untouched"
+        );
+        assert!(
+            worktree.join(".codex/hooks.json").exists(),
+            "and codex, which had nothing in the way, is installed"
+        );
+
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    /// Installing twice — a worktree adopted, removed and adopted again, or a
+    /// daemon restarted — must not accumulate copies. The property is
+    /// `hook_install`'s, but it only holds through this caller if the caller
+    /// feeds the existing file back in rather than starting from empty.
+    #[test]
+    fn installing_twice_leaves_one_copy() {
+        let worktree = scratch("twice");
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        let once = std::fs::read_to_string(worktree.join(".codex/hooks.json")).unwrap();
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        let twice = std::fs::read_to_string(worktree.join(".codex/hooks.json")).unwrap();
+        assert_eq!(once, twice, "installing is idempotent through the caller too");
+
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    #[test]
+    fn the_settings_file_names_the_socket_the_ingress_listens_on() {
+        let runtime = scratch("runtime");
+        let path = write_claude_hook_settings(&runtime).expect("settings are written");
+        assert!(path.starts_with(&runtime), "in this daemon's own directory: {}", path.display());
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).expect("settings json");
+        // The one path that must agree with `hook_ingress`, asked of the
+        // ingress itself rather than spelled out again here: two computations
+        // of one socket path are two things that can disagree, and the
+        // disagreement is silent at both ends.
+        let socket = hook_ingress::HookIngress::socket_path(&runtime);
+        let command = v["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .expect("a SessionStart command");
+        assert!(command.contains(&socket.display().to_string()), "{command}");
+        assert!(command.contains("--agent claude"), "{command}");
+
+        let _ = std::fs::remove_dir_all(&runtime);
+    }
+
+    /// A runtime directory that does not exist is a runner with a larger
+    /// problem than a quiet pane, and the pane must still open.
+    /// The call site, end to end on a real tmux server: what the pane was
+    /// actually launched with.
+    ///
+    /// The pure builders above prove `--settings` can be produced; this is the
+    /// only thing that proves anything produces it. Task 9 shipped four hook
+    /// installers whose sole callers were their own tests, and this is that
+    /// failure asked about directly — `pane_start_command` reads
+    /// `#{pane_start_command}`, the string tmux was handed, so a wiring that
+    /// quietly stopped passing the file would show up here as a launch with
+    /// no flag on it.
+    #[tokio::test]
+    async fn a_claude_pane_this_runner_launched_names_its_settings_file() {
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+
+        // A pane that is not claude first, in the same runtime directory: the
+        // file is claude's alone, and writing it for every terminal would put
+        // a settings document on disk for a runner that never launches one.
+        svc.create_terminal(ws.id, "plain", "shell").await.expect("a shell pane");
+        let settings = claude_hook_settings_path(&svc.root);
+        assert!(!settings.exists(), "a shell pane writes no settings file: {}", settings.display());
+
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+        assert!(settings.exists(), "and a claude pane does: {}", settings.display());
+
+        let command = super::restart_wiring_tests::pane_start_command(&svc, term.id).await;
+        assert!(
+            command.contains("--settings"),
+            "the pane was launched telling claude where the hooks are: {command}"
+        );
+        assert!(
+            command.contains(&settings.display().to_string()),
+            "and it names the file this daemon just wrote: {command}"
+        );
+    }
+
+    /// `adopt_branch` is the other door into "a worktree Far Cooler just
+    /// made" — work picked up from a branch pushed somewhere else. It runs
+    /// the same agents in the same panes, so a pane that reports nothing is
+    /// exactly as broken here as it is in `create_workspace`.
+    #[tokio::test]
+    async fn an_adopted_branch_gets_them_too() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        git::git(&dir.path().join("repo"), &["branch", "feat/rate-limiting"]).await.unwrap();
+
+        let ws = svc.adopt_branch(repo, "feat/rate-limiting").await.expect("a workspace");
+
+        let worktree = Path::new(&ws.worktree_path);
+        assert!(worktree.join(".codex/hooks.json").exists(), "codex reports itself here too");
+        assert!(worktree.join(".cursor/hooks.json").exists(), "and so does cursor");
+    }
+
+    /// The other call site, and the one Task 9 described and never wired: a
+    /// worktree Far Cooler makes gets the files codex and cursor read.
+    #[tokio::test]
+    async fn a_new_workspace_gets_the_project_local_hook_files() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .await
+            .expect("a workspace");
+
+        let worktree = Path::new(&ws.worktree_path);
+        for relative in [".codex/hooks.json", ".cursor/hooks.json"] {
+            let text = std::fs::read_to_string(worktree.join(relative))
+                .unwrap_or_else(|e| panic!("{relative} is written into the worktree: {e}"));
+            assert!(
+                text.contains(&hook_ingress::HookIngress::socket_path(&svc.root).display().to_string()),
+                "{relative} names this daemon's hook socket: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_settings_file_that_cannot_be_written_is_not_a_terminal_that_fails() {
+        let missing = std::env::temp_dir().join(format!("farcooler-absent-{}", Uuid::now_v7()));
+        assert!(write_claude_hook_settings(&missing).is_none(), "no path, no panic");
     }
 }
