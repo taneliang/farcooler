@@ -24,23 +24,55 @@
 //! different fit than the push-per-line callback this needs. What is reused
 //! is the crate and the pattern (a `recommended_watcher` closure feeding a
 //! channel), not the struct.
+//!
+//! **A known, accepted ordering quirk, named here rather than fixed.**
+//! Codex's own closing line reaches `agents.record` through the hook path
+//! (`assemble.rs`'s `Stop` arm), synchronously, the moment the `Stop`
+//! payload is parsed. Its narration for the SAME turn reaches `agents.record`
+//! through this module instead, on a background thread that wakes on a real
+//! filesystem event OR `WAIT_POLL_FALLBACK` (up to a second), whichever comes
+//! first. A turn short enough to finish inside that gap can therefore have
+//! its closing answer NUMBERED AND RENDERED before the narration that, in
+//! the agent's own transcript, preceded it. Not a numbering violation --
+//! `AgentSupervisor::record` still numbers everything by the order it
+//! actually arrives, which is the only order it can promise -- but it is
+//! user-visible, and worth a client someday reading the delivered order
+//! rather than assuming it matches the turn's real one.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use notify::{RecursiveMode, Watcher as _};
 use serde_json::Value;
 
-/// The largest line this will decode. `farcooler_core::session_log::tail`
-/// draws the same line at the same value, for the same reason: the biggest
-/// line ever observed in a real session log is 1.35 MB
-/// (`docs/agent-session-logs.md`, claude's "Hazards"), so this is nowhere
-/// near it and a line over the cap is one this tail was never going to be
-/// able to afford anyway. A separate constant rather than that module's,
-/// because `Tail` computes its own starting offset from the file's size and
-/// this type's whole reason to exist is that its caller supplies one
-/// instead -- see `follow`.
+/// The largest line this will decode, at the same value
+/// `farcooler_core::session_log::tail::Tail` uses -- but not "for the same
+/// reason": that module reads in bounded chunks and clears an over-cap line
+/// as it goes, so its cap is what keeps a still-growing or oversized line
+/// from ever being held in memory whole. This one is applied AFTER
+/// `read_new_lines` has already read the candidate bytes into `buf` (bounded
+/// by `MAX_READ_BYTES`, not by this), so what this cap actually does is
+/// refuse to spend a `serde_json` parse on a line that has no business being
+/// this large -- a line's WORST case is skipped rather than decoded, not
+/// kept out of memory. Set to the same number anyway because the reasoning
+/// for the number itself still holds: the biggest line ever observed in a
+/// real session log is 1.35 MB (`docs/agent-session-logs.md`, claude's
+/// "Hazards"), so this is nowhere near it and a line over the cap was never
+/// going to be assistant prose worth affording the parse for.
 const MAX_LINE_BYTES: usize = 64 * 1024;
+
+/// The most this will read from the file in one call to `read_new_lines`,
+/// regardless of how much is actually new. Ordinary growth between polls is
+/// nowhere near this -- an agent's commentary is a few hundred bytes to a
+/// few KB per line -- but the truncate-and-replace case this module's own
+/// doc names resets `*offset` to 0 and would otherwise read the WHOLE
+/// replacement file into `buf` in one call, unbounded. Capping the read
+/// bounds that to one memory-sized chunk per call: whatever does not fit is
+/// simply picked up on the next call, exactly like an ordinary append that
+/// outpaces one poll interval already is.
+const MAX_READ_BYTES: u64 = 8 * 1024 * 1024;
 
 /// The longest a real append can go undelivered when the filesystem watch
 /// stays silent -- either FSEvents' own documented gap right after a stream
@@ -56,12 +88,13 @@ const WAIT_POLL_FALLBACK: std::time::Duration = std::time::Duration::from_secs(1
 /// underneath.
 ///
 /// Holds nothing of its own. `follow` keeps everything it needs -- the read
-/// offset, the watcher -- alive on the thread it spawns for as long as that
-/// thread keeps running, which today is the life of the daemon process:
-/// nothing stops it, because nothing this type is given ever asks it to. A
-/// caller that wants delivery to stop (`hook_ingress::HookIngress::forget`,
-/// when a terminal's row is deleted) has to gate its own sink instead; see
-/// that call site's `alive` flag.
+/// offset, the watcher, if any -- alive on the thread it spawns for as long
+/// as `alive` (the flag passed into `follow`, not this struct) says to keep
+/// running. That is the ONLY way delivery stops: `hook_ingress::HookIngress
+/// ::forget` flips the same `Arc` this was handed, and the loop checks it
+/// itself rather than relying on a channel disconnecting, which a fix to
+/// this file's first review round found could never actually happen while
+/// the loop ran (see `follow`'s own doc).
 pub struct TranscriptTail;
 
 impl TranscriptTail {
@@ -70,20 +103,40 @@ impl TranscriptTail {
     }
 
     /// Deliver every complete line's assistant text from `path`, starting at
-    /// byte `from`, once per line, for as long as the file keeps growing.
+    /// byte `from`, once per line, for as long as `alive` holds `true` and
+    /// the file keeps growing. Returns whether a tailing thread was actually
+    /// started; a caller that gets `false` back has nothing running and
+    /// should treat this as a request it may retry, not as a stopped tail.
     ///
-    /// The catch-up read and the OS-level watch registration happen on the
-    /// CALLING thread, before this returns -- both are quick (no wait for a
-    /// file event, only for the watch to confirm itself is scheduled), which
-    /// keeps this well inside the 400ms `hook_ingress::HookIngress::serve`
-    /// has for a whole connection. Only the open-ended part -- blocking until
-    /// the file changes again, for as long as this daemon runs -- moves to a
-    /// spawned thread, and deliberately not sooner: registering the watch
-    /// from a thread OTHER than the one that keeps running past this call
-    /// (verified empirically against this exact `notify` backend) delivers no
-    /// events at all, silently, forever. `log_watch.rs`'s `LogWatcher::start`
-    /// registers on its caller's thread for the same reason, whether or not
-    /// its own doc says so.
+    /// **The watch is an optimization over `WAIT_POLL_FALLBACK` below, not
+    /// the mechanism.** A first version of this function treated a failed
+    /// `watch()` as fatal -- log and return, with nothing spawned -- which
+    /// bricked the feature FOREVER for any terminal whose transcript
+    /// directory did not exist yet at the moment its first hook payload
+    /// arrived: guaranteed for the first codex session of every calendar day
+    /// (`~/.codex/sessions/YYYY/MM/DD/` is created with that day's first
+    /// turn), and routine for cursor, whose per-conversation directory is
+    /// created lazily and which has no OTHER source of prose to fall back to
+    /// at all. The loop below is spawned regardless of whether a watch could
+    /// be registered, and `WAIT_POLL_FALLBACK` alone is what bounds delivery
+    /// either way; a watch that registers and fires only ever moves a
+    /// delivery earlier inside that bound, never makes one happen that would
+    /// not have. Nothing here asserts the watch does fire: this file's own
+    /// history records a `notify` registration in this sandbox going
+    /// silently deaf depending on which thread registered it, and
+    /// `start_transcript_tail` now registers from a blocking-pool thread
+    /// that does not outlive the call.
+    ///
+    /// **Calling this may block the calling thread for a while doing OS-level
+    /// work** -- `File::open`, `read_to_end`,
+    /// `notify::recommended_watcher`, `Watcher::watch` all run here, inline,
+    /// with no `.await` between them. Measured in the sandbox this was built
+    /// against, watch registration alone has taken as long as ~11 seconds
+    /// under load. `hook_ingress::HookIngress::start_transcript_tail` is
+    /// where that is accounted for -- it runs this inside `tokio::spawn` and
+    /// `spawn_blocking` rather than on `serve`'s own task, which is this
+    /// function's caller's problem to solve, not this function's to pretend
+    /// does not exist.
     ///
     /// `from` is the caller's choice and not derived here on purpose. The
     /// caller knows why it is starting a tail at this moment -- a session
@@ -91,7 +144,7 @@ impl TranscriptTail {
     /// starts every tail at the file's length at that moment, so a session
     /// with turns already behind it does not replay them into the live
     /// transcript as if they had just happened.
-    pub fn follow<S>(&self, path: PathBuf, from: u64, on_text: S)
+    pub fn follow<S>(&self, path: PathBuf, from: u64, on_text: S, alive: Arc<AtomicBool>) -> bool
     where
         S: Fn(String) + Send + Sync + 'static,
     {
@@ -104,81 +157,100 @@ impl TranscriptTail {
 
         let Some(parent) = path.parent().map(|p| p.to_path_buf()) else {
             tracing::warn!(path = %path.display(), "a transcript path with no parent directory; nothing to watch");
-            return;
+            return false;
         };
 
         let (tx, rx) = std::sync::mpsc::channel::<()>();
-        let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        // A clone taken BEFORE `tx` is moved into the watcher's callback,
+        // and held for the life of the spawned loop below regardless of
+        // whether that watcher ever exists. Without it, a failed
+        // `recommended_watcher` or a failed `watch()` -- the exact cases
+        // this function now degrades gracefully from rather than refusing
+        // outright -- drops the only `Sender` there is, `rx` reports
+        // `Disconnected` on the very next call, and the "poll-only" fallback
+        // this whole change exists to provide would itself never run a
+        // second time.
+        let keep_alive_tx = tx.clone();
+        let watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if res.is_ok() {
                 let _ = tx.send(());
             }
-        });
-        let mut watcher = match watcher {
-            Ok(w) => w,
+        }) {
+            Ok(mut w) => {
+                // The DIRECTORY, not the file. Codex does not open its
+                // rollout until the first turn is submitted
+                // (`docs/agent-session-logs.md`, "Which file belongs to
+                // which pane"), so a tail can start before the file exists
+                // -- and even once it exists, a watch on the file alone
+                // would miss a truncate-and-replace, which some editors and
+                // log rotators do instead of an in-place append.
+                match w.watch(&parent, RecursiveMode::Recursive) {
+                    Ok(()) => Some(w),
+                    Err(error) => {
+                        // NOT fatal -- see this function's own doc. A
+                        // directory nobody has written into yet, or one that
+                        // does not exist for either agent's reason above, is
+                        // the ordinary case for a first payload, not a
+                        // fault, so this stays below `warn!`.
+                        tracing::debug!(
+                            ?error,
+                            path = %parent.display(),
+                            "could not watch this transcript's directory; falling back to polling alone"
+                        );
+                        None
+                    }
+                }
+            }
             Err(error) => {
                 tracing::warn!(
                     ?error,
                     path = %path.display(),
-                    "could not start a transcript tail; this session's prose stops here"
+                    "could not build a filesystem watcher; falling back to polling alone"
                 );
-                return;
+                None
             }
         };
 
-        // The DIRECTORY, not the file. Codex does not open its rollout until
-        // the first turn is submitted (`docs/agent-session-logs.md`, "Which
-        // file belongs to which pane"), so a tail can start before the file
-        // exists -- and even once it exists, a watch on the file alone would
-        // miss a truncate-and-replace, which some editors and log rotators do
-        // instead of an in-place append. The date directory it lives under is
-        // created once per day across every codex session on the machine, so
-        // by the time any hook fires it is essentially always there; if it
-        // genuinely is not (the very first codex session of the day, hooked
-        // before its first turn), this tail never starts and says so at
-        // `debug!` rather than `warn!` -- `log_watch.rs`'s call for the same
-        // shape of absence: a directory nobody has written into yet is the
-        // ordinary case, not a fault.
-        if let Err(error) = watcher.watch(&parent, RecursiveMode::Recursive) {
-            tracing::debug!(?error, path = %parent.display(), "transcript directory not there yet; not tailed");
-            return;
-        }
-
         std::thread::spawn(move || {
             // Keeping `watcher` alive is this closure's whole job for as
-            // long as it runs: a `notify::Watcher` stops watching the moment
-            // it is dropped (`log_watch.rs`'s own `LogWatcher` carries the
-            // same note about its field), and this is the last place that
-            // still holds it once `follow` has returned.
+            // long as it runs, when there is one to keep: a
+            // `notify::Watcher` stops watching the moment it is dropped
+            // (`log_watch.rs`'s own `LogWatcher` carries the same note about
+            // its field), and this is the last place that still holds it
+            // once `follow` has returned. `None` here is a no-op to hold and
+            // means every wakeup below comes from `WAIT_POLL_FALLBACK`
+            // rather than a real event.
             let _watcher = watcher;
+            // See `keep_alive_tx`'s own doc above: held so `rx` never
+            // disconnects on its own, which is what makes `alive` -- checked
+            // below -- the only thing that can end this loop.
+            let _keep_alive_tx = keep_alive_tx;
 
-            // `recv_timeout` rather than `recv`: an actual event triggers a
-            // read immediately, and `WAIT_POLL_FALLBACK` triggers one anyway
-            // if none arrives. FSEvents (this daemon's target platform) is
-            // documented by Apple as coalescing and, immediately after a
-            // stream starts, as able to miss an event that lands in the same
-            // instant the watch was registered -- a real gap, not a
-            // hypothetical one, and one a hook firing right after a session
-            // announces itself can land in. The fallback bounds how long that
-            // gap can cost: at worst, an agent's prose is this constant late,
-            // never lost. Only a disconnected channel -- this end of `tx`
-            // dropped, `notify`'s watcher gone -- ends the loop for good.
             loop {
-                match rx.recv_timeout(WAIT_POLL_FALLBACK) {
-                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                        // Every event on the directory triggers a read, not
-                        // only ones that name this exact path. The three
-                        // platform backends do not agree on which paths one
-                        // event carries for a rename or a coalesced burst
-                        // (`log_watch.rs` makes the same call, for the same
-                        // reason), and the cost of over-triggering -- like the
-                        // cost of the periodic fallback above -- is one cheap
-                        // no-op read against an unchanged offset.
-                        read_new_lines(&path, &mut offset, &on_text);
-                    }
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                if !alive.load(Ordering::Relaxed) {
+                    return;
                 }
+                // The `Result` is not matched on. `Ok` means a real event
+                // fired; `Err(Timeout)` means `WAIT_POLL_FALLBACK` elapsed
+                // with nothing; `Err(Disconnected)` cannot happen while
+                // `_keep_alive_tx` above is held, but treating it as a
+                // reason to stop here would resurrect exactly the dead exit
+                // condition this loop used to have before `alive` existed --
+                // every one of the three is answered the same way: read
+                // whatever is new, then check `alive` again at the top.
+                // Every event on the directory triggers a read, not only
+                // ones that name this exact path -- the three platform
+                // backends do not agree on which paths one event carries for
+                // a rename or a coalesced burst (`log_watch.rs` makes the
+                // same call, for the same reason), and the cost of
+                // over-triggering, like the cost of the periodic fallback
+                // itself, is one cheap no-op read against an unchanged
+                // offset.
+                let _ = rx.recv_timeout(WAIT_POLL_FALLBACK);
+                read_new_lines(&path, &mut offset, &on_text);
             }
         });
+        true
     }
 }
 
@@ -190,8 +262,19 @@ impl Default for TranscriptTail {
 
 /// Read every complete line appended to `path` since `*offset`, decode
 /// whatever assistant text each holds, and hand it to `on_text` -- advancing
-/// `*offset` past exactly the bytes read, so a line is never delivered
-/// twice.
+/// `*offset` past exactly the bytes read, so an ordinary append is never
+/// delivered twice.
+///
+/// **That guarantee has one named exception: a truncate-and-replace.** If
+/// the file has shrunk since `*offset` was last set, `*offset` resets to 0
+/// below and the WHOLE of whatever replaced it is read as new -- including
+/// any line the replacement happens to share with what this tail already
+/// delivered from the file's previous life. None of the three formats
+/// `docs/agent-session-logs.md` documents has ever been observed to rotate
+/// or truncate, so this is a real behavior with no known real trigger, kept
+/// deliberately simple rather than tracking a file identity (an inode, a
+/// leading record's own id) to detect and suppress the replay -- the
+/// complexity is not worth affording for a case nothing here has seen.
 ///
 /// A missing file, or one that has not grown past `*offset`, is not an
 /// error and produces nothing: both are the ordinary state before an
@@ -202,11 +285,12 @@ fn read_new_lines(path: &Path, offset: &mut u64, on_text: &impl Fn(String)) {
     let Ok(len) = file.metadata().map(|m| m.len()) else { return };
 
     // Smaller than what was already read: the file was truncated or
-    // replaced underneath this tail. `farcooler_core::session_log::tail`
-    // resets to zero for the same case and the same reason -- the stored
-    // offset now points past the end of a file that no longer has that much
-    // in it, and seeking there would read nothing forever rather than
-    // picking the replacement up from its own start.
+    // replaced underneath this tail -- see this function's own doc on what
+    // that costs. `farcooler_core::session_log::tail` resets to zero for the
+    // same case and the same reason -- the stored offset now points past the
+    // end of a file that no longer has that much in it, and seeking there
+    // would read nothing forever rather than picking the replacement up from
+    // its own start.
     if len < *offset {
         *offset = 0;
     }
@@ -217,8 +301,12 @@ fn read_new_lines(path: &Path, offset: &mut u64, on_text: &impl Fn(String)) {
         return;
     }
 
+    // `take(MAX_READ_BYTES)` rather than a plain `read_to_end`: see
+    // `MAX_READ_BYTES`'s own doc. What is not read here is simply left for
+    // the next call -- `*offset` only ever advances past bytes this
+    // function actually consumed below.
     let mut buf = Vec::new();
-    if file.read_to_end(&mut buf).is_err() {
+    if file.take(MAX_READ_BYTES).read_to_end(&mut buf).is_err() {
         return;
     }
 
@@ -228,7 +316,28 @@ fn read_new_lines(path: &Path, offset: &mut u64, on_text: &impl Fn(String)) {
     // succeed on a coincidentally-valid truncated prefix. It is left
     // exactly where it is; the next event re-reads it whole once its own
     // newline lands, because `*offset` was never advanced past it.
-    let Some(last_newline) = buf.iter().rposition(|&b| b == b'\n') else { return };
+    let Some(last_newline) = buf.iter().rposition(|&b| b == b'\n') else {
+        // No newline in a read that filled `MAX_READ_BYTES`. Byte for byte
+        // that is indistinguishable from the half-written tail below, but it
+        // cannot be one: a record still being written that is already longer
+        // than the cap is also already far past `MAX_LINE_BYTES` and could
+        // never have been decoded. Leaving `*offset` where it is -- the right
+        // answer for a genuine fragment -- would re-read the same capped
+        // chunk on every wakeup, advance nothing, and block every ordinary
+        // line sitting behind the oversized one for as long as this tail
+        // runs. So the bytes are stepped over. Whatever remains of that line
+        // after the next call's own cap is eventually consumed as a leading
+        // fragment, fails `from_utf8` or `serde_json`, and is skipped like
+        // any other line this does not recognize.
+        if buf.len() as u64 == MAX_READ_BYTES {
+            tracing::debug!(
+                path = %path.display(),
+                "a transcript line longer than one capped read; stepping over it"
+            );
+            *offset += buf.len() as u64;
+        }
+        return;
+    };
     let complete = &buf[..=last_newline];
     *offset += complete.len() as u64;
 
@@ -317,12 +426,19 @@ fn codex_assistant_text(payload: &Value) -> Option<String> {
             if item.get("phase").and_then(Value::as_str) == Some("final_answer") {
                 return None;
             }
-            let text: String = item
+            // Joined with a space, matching
+            // `farcooler_core::session_log::codex::item_completed`'s own read
+            // of this same field: two readers of one record shape must not
+            // hand back different text for it, and concatenating bare -- what
+            // this did before -- runs the last word of one block into the
+            // first word of the next.
+            let text = item
                 .get("content")?
                 .as_array()?
                 .iter()
                 .filter_map(|b| b.get("text").and_then(Value::as_str))
-                .collect();
+                .collect::<Vec<_>>()
+                .join(" ");
             said(&text)
         }
         _ => None,
@@ -368,7 +484,15 @@ mod tests {
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = { let seen = seen.clone(); move |t: String| seen.lock().unwrap().push(t) };
         let tail = TranscriptTail::new();
-        tail.follow(path.clone(), 0, sink);
+        // The brief's own mandated block called `follow(path, from, sink)` --
+        // three arguments, matching the task-8 brief verbatim. The fourth,
+        // `alive`, was added in this file's first review round (`hook_ingress
+        // ::HookIngress::forget` needs a way to stop the loop itself, not
+        // only its sink -- see `follow`'s own doc), and the brief's
+        // "parameter list" was never meant to survive a review that found a
+        // real bug in the shape it pinned. `AtomicBool::new(true)` is this
+        // test's own stand-in for what `hook_ingress` normally owns.
+        assert!(tail.follow(path.clone(), 0, sink, Arc::new(AtomicBool::new(true))));
 
         for _ in 0..100 {
             if seen.lock().unwrap().len() == 1 { break; }
@@ -412,13 +536,58 @@ mod tests {
 
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = { let seen = seen.clone(); move |t: String| seen.lock().unwrap().push(t) };
-        TranscriptTail::new().follow(path.clone(), from, sink);
+        assert!(TranscriptTail::new().follow(path.clone(), from, sink, Arc::new(AtomicBool::new(true))));
 
         for _ in 0..100 {
             if !seen.lock().unwrap().is_empty() { break; }
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
         assert_eq!(seen.lock().unwrap().as_slice(), ["new"], "\"old\" sat before `from` and must stay unseen");
+    }
+
+    /// The exact shape of the bug this file's first review round found: a
+    /// codex pane hooked before its rollout directory exists at all --
+    /// guaranteed for the first codex session of every calendar day
+    /// (`~/.codex/sessions/YYYY/MM/DD/` is created with that day's first
+    /// turn) and routine for cursor, whose per-conversation directory is
+    /// created lazily. The nearest wrong implementation treats a failed
+    /// `watch()` as fatal: logs and returns with nothing spawned, which
+    /// bricks this terminal's prose for the rest of the session with no
+    /// symptom above `debug!`. This asserts BOTH halves of the fix -- that
+    /// `follow` still reports it started, and that content written after the
+    /// directory finally appears is still delivered, on the poll fallback
+    /// alone since nothing ever re-registers a watch.
+    #[tokio::test]
+    async fn a_transcript_directory_missing_at_start_still_delivers_once_it_exists() {
+        let dir = tempfile::tempdir().expect("dir");
+        let parent = dir.path().join("2026").join("09").join("08");
+        let path = parent.join("rollout.jsonl");
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = { let seen = seen.clone(); move |t: String| seen.lock().unwrap().push(t) };
+        let started = TranscriptTail::new().follow(path.clone(), 0, sink, Arc::new(AtomicBool::new(true)));
+        assert!(
+            started,
+            "a directory that does not exist yet must not be treated as a reason to spawn nothing"
+        );
+
+        // The directory -- and the file -- appear only now, the way codex's
+        // own first turn of the day creates both at once.
+        std::fs::create_dir_all(&parent).expect("mkdir");
+        std::fs::write(&path, "{\"type\":\"message\",\"role\":\"assistant\",\"text\":\"hello\"}\n").expect("seed");
+
+        for _ in 0..100 {
+            if !seen.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            ["hello"],
+            "the poll fallback alone must still find this, since nothing ever re-registered a watch \
+             once the directory existed"
+        );
     }
 
     // -- assistant_text: the decode `follow` runs every line through --
@@ -585,5 +754,72 @@ mod tests {
             .unwrap();
         read_new_lines(&path, &mut offset, &|t| seen.lock().unwrap().push(t));
         assert_eq!(seen.lock().unwrap().as_slice(), ["whole", "second"]);
+    }
+
+    /// `MAX_READ_BYTES` bounds one call's read, and a line longer than that
+    /// bound arrives with no newline anywhere in what was read -- which is
+    /// indistinguishable, byte for byte, from the half-written tail the test
+    /// above holds onto. The nearest wrong implementation treats both the
+    /// same way and holds the offset still: every later wakeup then re-reads
+    /// the same capped chunk, finds no newline again, and advances nothing,
+    /// so this tail spends the rest of the daemon's life reading
+    /// `MAX_READ_BYTES` a second and never delivers another line -- including
+    /// the perfectly ordinary records sitting behind the oversized one.
+    #[test]
+    fn a_line_longer_than_one_capped_read_does_not_stall_the_tail_behind_it() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+
+        // One line of `MAX_READ_BYTES + 1` bytes before its newline, so the
+        // first read fills the cap with no newline in it at all, and a real
+        // record behind it that must still arrive.
+        let mut oversized = vec![b'x'; MAX_READ_BYTES as usize + 1];
+        oversized.push(b'\n');
+        oversized.extend_from_slice(b"{\"type\":\"message\",\"role\":\"assistant\",\"text\":\"behind it\"}\n");
+        std::fs::write(&path, &oversized).expect("seed");
+
+        let seen: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let mut offset = 0u64;
+        // Three calls is generous: the oversized line needs two capped reads
+        // to get past, and the third reaches the record behind it. A
+        // stalling implementation delivers nothing however many are made.
+        for _ in 0..3 {
+            read_new_lines(&path, &mut offset, &|t| seen.lock().unwrap().push(t));
+        }
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            ["behind it"],
+            "a line too long to ever decode must be stepped over, not left blocking every line behind it"
+        );
+    }
+
+    /// `farcooler_core::session_log::codex::item_completed` reads this exact
+    /// field and joins its blocks with a space. The nearest wrong
+    /// implementation `collect()`s them with no separator, which runs the
+    /// last word of one block into the first word of the next -- two readers
+    /// of one record handing back different text for it.
+    #[test]
+    fn codex_item_completed_joins_its_content_blocks_the_way_the_session_log_reader_does() {
+        let line = serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "item_completed",
+                "item": {
+                    "type": "AgentMessage",
+                    "phase": "commentary",
+                    "content": [
+                        { "text": "Reading the config" },
+                        { "text": "now." },
+                    ],
+                },
+            },
+        })
+        .to_string();
+        assert_eq!(
+            assistant_text(&line),
+            Some("Reading the config now.".to_string()),
+            "`session_log::codex::item_completed` joins the same blocks with a space; a reader that \
+             concatenates them bare says something else"
+        );
     }
 }

@@ -4574,4 +4574,161 @@ mod hook_wiring_tests {
             events[1].event
         );
     }
+
+    /// Cursor's own transcript is the ONLY source of its prose there is —
+    /// `stop` carries none at all (`docs/agent-session-logs.md`, "cursor" --
+    /// "Records") — which is what makes this the more important of the two
+    /// agents this task covers, not merely the second one. Mirrors the codex
+    /// test above through the same production path
+    /// (`resume_agent_listeners`, a real socket, `HookIngress::serve`'s own
+    /// `start_transcript_tail`), because a mutation deleting cursor from the
+    /// agent gate in `start_transcript_tail` passed every OTHER test in this
+    /// suite — every positive test before this one, the E2E included, was
+    /// codex.
+    #[tokio::test]
+    async fn a_cursors_own_transcript_reaches_the_terminals_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+        let root = service
+            .store
+            .create_repository_root(service.host_id, "/tmp/cursor-transcript-tests", now_millis())
+            .unwrap();
+        let repository = service
+            .store
+            .create_repository(service.host_id, root.id, "repo", "/tmp/cursor-transcript-tests/.git", "")
+            .unwrap();
+        let workspace = service
+            .store
+            .create_workspace(repository.id, "main", "/tmp/cursor-transcript-tests", true)
+            .unwrap();
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "cursor", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        let term = service
+            .store
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Terminal,
+                Some("a-cursor-session".to_string()),
+            )
+            .unwrap();
+
+        // Cursor's own transcript: `~/.cursor/projects/<slug>/agent-
+        // transcripts/<uuid>/<uuid>.jsonl` for real, a bare temp file here --
+        // nothing on this path reads the real directory.
+        let transcript = dir.path().join("transcript.jsonl");
+        std::fs::write(&transcript, "").unwrap();
+
+        service.resume_agent_listeners();
+
+        let socket = hook_ingress::HookIngress::socket_path(&service.root);
+        let mut stream = None;
+        for _ in 0..200 {
+            if let Ok(s) = tokio::net::UnixStream::connect(&socket).await {
+                stream = Some(s);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let mut stream = stream.unwrap_or_else(|| {
+            panic!("nothing is listening on {} — no live session can report anything", socket.display())
+        });
+
+        // Cursor's own spelling of the turn-start hook -- `beforeSubmitPrompt`,
+        // lowercase, unlike claude's and codex's `UserPromptSubmit`
+        // (`assemble.rs`'s own match arm names the same three spellings of
+        // one event).
+        let frame = serde_json::to_string(&serde_json::json!({
+            "agent": "cursor",
+            "event": "beforeSubmitPrompt",
+            "payload": {
+                "session_id": "a-cursor-session",
+                "prompt": "write a haiku about lighthouses",
+                "transcript_path": transcript.to_string_lossy(),
+            },
+        }))
+        .unwrap();
+        stream.write_all(format!("{frame}\n").as_bytes()).await.unwrap();
+        stream.flush().await.unwrap();
+
+        // Wait for the prompt to land before appending -- the same race this
+        // file's codex test above documents: `start_transcript_tail` starts
+        // its tail at the transcript's length AT THE MOMENT the hook is
+        // processed, and appending before that moment is reached can be
+        // skipped as "already there" even though nothing had actually read
+        // it yet.
+        let mut prompt_landed = false;
+        for _ in 0..240 {
+            if !service.agents.replay(term.id, 0, 0).1.is_empty() {
+                prompt_landed = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        assert!(prompt_landed, "the hook above must have reached the terminal's transcript by now");
+
+        // Cursor's real record shape: `{role, message: {content: [...]}}`
+        // (`docs/agent-session-logs.md`, "cursor" -- "Records"), a `text`
+        // block alongside a `tool_use` block on the same line, matching the
+        // one real sample the format doc describes.
+        use std::io::Write as _;
+        let mut transcript_file = std::fs::OpenOptions::new().append(true).open(&transcript).unwrap();
+        writeln!(
+            transcript_file,
+            "{}",
+            serde_json::json!({
+                "role": "assistant",
+                "message": {
+                    "content": [
+                        { "type": "text", "text": "Running that command now." },
+                        { "type": "tool_use", "name": "Shell", "input": { "command": "ls" } },
+                    ],
+                },
+            })
+        )
+        .unwrap();
+
+        let mut events = Vec::new();
+        for _ in 0..240 {
+            events = service.agents.replay(term.id, 0, 0).1;
+            if events.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+
+        assert_eq!(
+            events.len(),
+            2,
+            "the prompt from the hook and cursor's own prose from its transcript, and nothing else \
+             -- cursor's `stop` carries none at all: {events:?}"
+        );
+        assert!(
+            matches!(
+                &events[0].event,
+                farcooler_agent::event::AgentEvent::Message {
+                    role: farcooler_agent::event::Role::User,
+                    text,
+                    ..
+                } if text == "write a haiku about lighthouses"
+            ),
+            "got {:?}",
+            events[0].event
+        );
+        assert!(
+            matches!(
+                &events[1].event,
+                farcooler_agent::event::AgentEvent::Message {
+                    role: farcooler_agent::event::Role::Agent,
+                    text,
+                    parent: None,
+                } if text == "Running that command now."
+            ),
+            "cursor's own prose, read out of the transcript its hook named, is the ONLY source of it there \
+             is; got {:?}",
+            events[1].event
+        );
+    }
 }

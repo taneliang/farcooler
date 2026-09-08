@@ -453,21 +453,57 @@ impl HookIngress {
     /// delivers. Also a no-op when `listen` has not run — `self.sink` is
     /// `None` — since a tail with nowhere to deliver would be a background
     /// thread doing work for nobody, forever.
+    ///
+    /// **The `tails` entry is claimed BEFORE the tail is actually started,
+    /// not after.** Two hook payloads for one terminal can be `serve`d by two
+    /// different connections at once — nothing serializes them — and
+    /// claiming the slot first, under one lock, is what stops both from
+    /// starting a tail; whichever loses the race sees the entry already
+    /// there and returns. If starting genuinely fails (`TranscriptTail::
+    /// follow` returns `false`, or the task that runs it panics), the entry
+    /// is removed again so the NEXT payload gets another attempt — a failed
+    /// watch registration must not brick this terminal's prose for the rest
+    /// of the session, which is what an insert with no way back out would
+    /// do.
+    ///
+    /// **`TranscriptTail::follow` is deliberately not run inline on `serve`'s
+    /// own task.** It does its catch-up read and its OS-level watch
+    /// registration synchronously, and both are ordinary blocking calls —
+    /// `File::open`, `read_to_end`, `notify::recommended_watcher`,
+    /// `Watcher::watch` — with no `.await` anywhere between them. Run
+    /// straight inside `serve`'s async body, that blocks the tokio worker
+    /// thread serving THIS connection for however long registration takes —
+    /// measured, in the sandbox this was built against, at up to ~11 seconds
+    /// under load (see the task report) against a doc that used to claim
+    /// this "keeps well inside 400ms". `tokio::spawn` plus `spawn_blocking`
+    /// moves that whole sequence off any worker thread `serve` needs, at the
+    /// cost of `start_transcript_tail` itself no longer waiting to see
+    /// whether the tail actually started before returning — which is exactly
+    /// why the slot has to be claimed synchronously, above, rather than by
+    /// the spawned task.
+    ///
+    /// Two things stay on this thread on purpose and are cheap enough to:
+    /// claiming the `tails` slot, and the one `std::fs::metadata` that fixes
+    /// `from` — see that call's own comment for why deferring a snapshot of
+    /// "what counts as history" loses prose.
     fn start_transcript_tail(&self, terminal: Uuid, agent: Agent, f: &Facts) {
         if !matches!(agent, Agent::Codex | Agent::Cursor) {
             return;
         }
         let Some(path) = f.transcript_path.clone() else { return };
-        let mut tails = self.tails.lock().unwrap_or_else(|e| e.into_inner());
-        if tails.contains_key(&terminal) {
-            return;
+
+        let alive = Arc::new(AtomicBool::new(true));
+        {
+            let mut tails = self.tails.lock().unwrap_or_else(|e| e.into_inner());
+            if tails.contains_key(&terminal) {
+                return;
+            }
+            tails.insert(terminal, alive.clone());
         }
         let Some(sink) = self.sink.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+            self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
             return;
         };
-        let alive = Arc::new(AtomicBool::new(true));
-        tails.insert(terminal, alive.clone());
-        drop(tails);
 
         // The length of the file at THIS moment, not 0: a session's own
         // history is not this feature's to replay. `terminal_for` may bind a
@@ -476,6 +512,17 @@ impl HookIngress {
         // pane that was already running — and starting at 0 would draw every
         // one of those turns into the live transcript as if they had all
         // just happened, in one burst, the moment the tail catches up.
+        //
+        // Taken HERE, synchronously, and not down inside the spawned task
+        // with everything else this defers. `from` is the line between
+        // "history, already told" and "live, still to tell", and every byte
+        // written between this moment and the moment the snapshot is
+        // actually taken lands on the wrong side of it — read as history and
+        // dropped, silently, forever. Deferring it moves that line from
+        // "when the hook was processed" to "whenever a blocking-pool thread
+        // got round to it", which is unbounded. One `stat` is not what I1
+        // was about: the ~11s measured under load was `Watcher::watch`, and
+        // that is still deferred below.
         let from = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         tracing::info!(
             terminal = %terminal,
@@ -483,11 +530,43 @@ impl HookIngress {
             path = %path.display(),
             "tailing this session's own transcript for its prose"
         );
-        TranscriptTail::new().follow(path, from, move |text| {
-            if !alive.load(Ordering::Relaxed) {
-                return;
+
+        let this = self.clone();
+        let loop_alive = alive.clone();
+        tokio::spawn(async move {
+            let started = tokio::task::spawn_blocking(move || {
+                TranscriptTail::new().follow(
+                    path,
+                    from,
+                    move |text| {
+                        if !alive.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        sink(terminal, vec![AgentEvent::Message { role: Role::Agent, text, parent: None }]);
+                    },
+                    loop_alive,
+                )
+            })
+            .await;
+
+            match started {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::debug!(
+                        terminal = %terminal,
+                        "a transcript tail could not be started; the next payload for this terminal will retry"
+                    );
+                    this.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        terminal = %terminal,
+                        %error,
+                        "the task starting a transcript tail did not finish; the next payload for this terminal will retry"
+                    );
+                    this.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+                }
             }
-            sink(terminal, vec![AgentEvent::Message { role: Role::Agent, text, parent: None }]);
         });
     }
 
@@ -857,7 +936,7 @@ mod tests {
         )
         .expect("append");
 
-        until_len(&events, 1, 3_000).await;
+        until_len(&events, 1, 20_000).await;
         let seen = events.lock().unwrap();
         assert_eq!(
             seen.len(),
@@ -913,7 +992,7 @@ mod tests {
         };
 
         append("before forget");
-        until_len(&events, 1, 3_000).await;
+        until_len(&events, 1, 20_000).await;
         assert_eq!(events.lock().unwrap().len(), 1, "the tail must be delivering before forget");
 
         ingress.forget(terminal);
@@ -928,6 +1007,113 @@ mod tests {
             events.lock().unwrap().len(),
             1,
             "a line appended after forget must never reach the sink, however long this waits"
+        );
+    }
+
+    /// The dedup invariant `codex_final_answer_is_dropped_because_stop_
+    /// already_sends_it` (in `transcript_tail`'s own tests) can only see
+    /// from the decode side: it proves `assistant_text` returns `None` for a
+    /// `final_answer` line, which is true whether or not anything ELSE ever
+    /// produces that text. It cannot see the other producer.
+    ///
+    /// This drives BOTH real inputs into one terminal — codex's own
+    /// `final_answer` line, sitting in the rollout the tail is reading, AND
+    /// a `Stop` hook payload carrying the identical text as
+    /// `last_assistant_message` — and asserts exactly one `Message` reaches
+    /// the terminal's transcript. The nearest wrong implementation drops the
+    /// phase filter (forwards every `agent_message`/`AgentMessage`
+    /// regardless of phase): that implementation draws the same answer
+    /// twice, once from each producer, and this is the one test in the suite
+    /// that would actually see it, because it is the only one that gives
+    /// both producers something to say.
+    #[tokio::test]
+    async fn codexs_own_final_answer_line_and_its_stop_payload_do_not_both_land() {
+        let ingress = ingress_for_test();
+        let events: Arc<Mutex<Vec<(Uuid, AgentEvent)>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = events.clone();
+        ingress.install_sink(move |terminal, batch| {
+            let mut events = sink_events.lock().unwrap();
+            for event in batch {
+                events.push((terminal, event));
+            }
+        });
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        // Empty, not merely absent: nothing is written to this file before
+        // the tail starts, so whatever `from` the tail computes for itself
+        // is 0 regardless of exactly when it computes it — the append below
+        // races nothing, because there is nothing in the file yet to have
+        // already been "caught up" on.
+        std::fs::write(&path, "").expect("seed");
+        let f = Facts { transcript_path: Some(path.clone()), ..Facts::default() };
+        let terminal = Uuid::from_u128(106);
+
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+
+        let answer = "TCP slow start is a congestion-control mechanism.";
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).expect("open");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "phase": "final_answer",
+                    "message": answer,
+                },
+            })
+        )
+        .expect("append");
+
+        // Longer than `transcript_tail::WAIT_POLL_FALLBACK` (1s): the point
+        // is to give the tail's own poll loop every chance it would ever
+        // get to (wrongly) forward this line BEFORE the Stop payload below
+        // gives the real producer its turn — a race the other direction (Stop
+        // firing before the tail has even looked at the file) would prove
+        // nothing, since a dropped implementation and a correct one would
+        // both show one Message either way.
+        tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+        assert!(
+            events.lock().unwrap().is_empty(),
+            "codex's own final_answer line must never reach the sink by itself: {:?}",
+            events.lock().unwrap()
+        );
+
+        let stop_events = ingress.accept(
+            terminal,
+            Agent::Codex,
+            "Stop",
+            &serde_json::json!({
+                "hook_event_name": "Stop",
+                "session_id": "s",
+                "turn_id": "t",
+                "last_assistant_message": answer,
+            }),
+            None,
+        );
+        events.lock().unwrap().extend(stop_events.into_iter().map(|e| (terminal, e)));
+
+        let seen = events.lock().unwrap();
+        let messages: Vec<_> = seen
+            .iter()
+            .filter(|(_, e)| matches!(e, AgentEvent::Message { role: Role::Agent, .. }))
+            .collect();
+        assert_eq!(
+            messages.len(),
+            1,
+            "the rollout's own final_answer line and Stop's last_assistant_message name the \
+             same turn's closing answer; exactly one of the two producers may land it: {seen:?}"
+        );
+        assert!(
+            matches!(
+                messages[0],
+                (t, AgentEvent::Message { text, parent: None, .. }) if *t == terminal && text == answer
+            ),
+            "got {:?}",
+            messages[0]
         );
     }
 
