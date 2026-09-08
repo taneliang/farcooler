@@ -914,19 +914,38 @@ mod tests {
     /// It settles the NUMBERING and not the duplication, and the two are easy
     /// to read as one question. They are not: one cursor pointing at one
     /// transcript says nothing about whether that transcript holds each
-    /// message once. A pane really can be fed by both — `terminal_for` routes
-    /// on `agent_session_id` and never looks at `pane_mode`, and a pane in
-    /// agent mode carries exactly that id, because setting it is how the shim
-    /// was bound to the conversation. So a claude running under `agent-host`
-    /// whose hooks are registered would fire them straight back at its own
-    /// terminal, and `apply` and `record` would both append the same messages
-    /// here, interleaved.
+    /// message once. **Nothing anywhere refuses a pane that is fed by both**,
+    /// and `hook_ingress::terminal_for` never looks at `pane_mode` on either
+    /// of its two routes. An agent-mode pane whose hooks fire is therefore
+    /// appended to by `apply` and by `record`, interleaved, into this ring.
     ///
-    /// Not reachable today: registering the hooks is a user-level change to
-    /// the agent's own settings and nothing in this tree writes them yet. One
-    /// ring is still right and two would be worse, so nothing here should
-    /// change on account of it — but whoever writes that installer inherits
-    /// the question, and this comment is the only place it is written down.
+    /// How reachable that is differs by agent, and the difference is the
+    /// whole risk profile.
+    ///
+    /// **codex and cursor: by default, once hooks are installed at all.**
+    /// Their hooks are project-local — `.codex/hooks.json` and
+    /// `.cursor/hooks.json` in the worktree — so they apply to every pane in
+    /// that worktree, agent mode included, with nothing per-pane to opt in.
+    /// The route is `announced_terminal`, which matches on the worktree and
+    /// considers only panes with NO `agent_session_id`; nothing mints one for
+    /// these two (`--session-id` is `preset_command`'s claude arm alone, and
+    /// `set_pane_mode`'s adoption is gated on `pane_can_adopt_a_claude_session`),
+    /// so a codex pane in agent mode is not excluded by that filter — it is
+    /// exactly the shape the filter admits.
+    ///
+    /// **claude: only if somebody asks for it.** It routes by the other path,
+    /// on the `agent_session_id` an agent-mode pane has because setting it is
+    /// how the shim was bound. But the design keeps claude's hooks to
+    /// `--settings` on the panes Far Cooler launches and offers a user-level
+    /// merge explicitly, for hand-typed sessions
+    /// (`docs/superpowers/specs/2026-09-07-live-agent-sessions-design.md`,
+    /// "Installing hooks, without owning them").
+    ///
+    /// Nothing in this tree writes any of those three files yet, so none of it
+    /// is reachable today. One ring is still right and two would be worse, so
+    /// nothing here changes on account of it — but whoever writes the
+    /// installer inherits the question, and this comment is the only place it
+    /// is written down.
     #[test]
     fn a_recorded_event_continues_the_transcript_the_shim_started() {
         let supervisor = AgentSupervisor::new();
