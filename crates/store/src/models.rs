@@ -488,6 +488,24 @@ pub struct TaskNote {
     pub supersedes: Option<Uuid>,
 }
 
+/// One hit from `Store::search_notes`: a note, plus whether some other note
+/// on the same task and kind supersedes it.
+///
+/// `supersedes` on `TaskNote` only ever points BACKWARD, at the note a given
+/// note replaces -- there is no back-pointer, so a note has no way to say of
+/// itself "something replaced me." `search_notes` computes that forward fact
+/// cheaply, with one correlated `EXISTS` per row, over notes its own query
+/// may never have returned -- which is exactly why it is worth flagging
+/// here rather than leaving a caller to reconstruct it from a result set
+/// that cannot always contain the note that would reveal it. See
+/// `Store::search_notes`'s doc for exactly what this can and cannot resolve
+/// on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteHit {
+    pub note: TaskNote,
+    pub superseded: bool,
+}
+
 /// A column that should have decoded and did not.
 ///
 /// Every one of these columns is written only by this crate, so reaching here
@@ -598,6 +616,15 @@ pub(crate) fn row_to_task_note(row: &Row) -> rusqlite::Result<TaskNote> {
         extra: get_json(row, 6)?,
         supersedes: get_optional_uuid(row, 7)?,
     })
+}
+
+/// `TaskNote`'s eight columns, in `row_to_task_note`'s order, plus one more:
+/// column 8, an `EXISTS` the caller's query computes, not a column any table
+/// actually has. `row_to_task_note` only ever reads indices 0-7, so calling
+/// it here to build the `note` field is safe even though this row carries an
+/// extra column it does not know about.
+pub(crate) fn row_to_note_hit(row: &Row) -> rusqlite::Result<NoteHit> {
+    Ok(NoteHit { note: row_to_task_note(row)?, superseded: row.get(8)? })
 }
 
 /// One edge in the block graph: `task_id` cannot proceed until `blocked_by`

@@ -19,6 +19,8 @@
 //! stop resolving. Keys are the one identifier in this system that leaves the
 //! database.
 
+use std::time::Duration;
+
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 use serde_json::json;
 use uuid::Uuid;
@@ -27,8 +29,9 @@ use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
 use crate::models::{
-    Actor, NoteKind, Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate, acceptance_to_json,
-    get_uuid, row_to_task, row_to_task_block, row_to_task_note, strings_to_json, uuid_blob,
+    Actor, NoteHit, NoteKind, Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate, acceptance_to_json,
+    get_uuid, row_to_note_hit, row_to_task, row_to_task_block, row_to_task_note, strings_to_json,
+    uuid_blob,
 };
 use crate::store::Store;
 
@@ -162,6 +165,25 @@ fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// The character `search_notes` uses to mark an escaped wildcard in its
+/// `LIKE` pattern -- SQLite's default `LIKE` treats `%` and `_` as wildcards
+/// with no way to write a literal one, which is exactly the character a
+/// person searching this tool's own history is likeliest to type: a table
+/// name (`task_notes`, underscore and all) or a percentage (`50%`).
+const LIKE_ESCAPE: char = '\\';
+
+/// Rewrites `raw` so every `%`, `_`, and literal `\` in it is prefixed with
+/// `LIKE_ESCAPE`, and so a `LIKE ... ESCAPE '\'` pattern built by wrapping the
+/// result in a leading and trailing `%` matches `raw` as literal text, not as
+/// a pattern with its own wildcards. `search_notes` is the only caller: a
+/// search for `50%` must not also match `"5000"`, and a search for
+/// `task_notes` must not also match `"taskXnotes"` -- a search that quietly
+/// widens is worse than one that finds nothing, because the person reading
+/// the results has no way to tell it happened.
+fn escape_like(raw: &str) -> String {
+    raw.replace(LIKE_ESCAPE, "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
 /// Every column of `tasks` that `row_to_task` reads, in its order. Named once
@@ -622,6 +644,103 @@ impl Store {
             .map_err(map_err)?;
         Ok(())
     }
+
+    // ---- reads a manager can afford ----
+
+    /// Every note across a whole repository whose body contains `query`
+    /// LITERALLY, oldest first, optionally narrowed to one kind, each hit
+    /// flagged with whether some other note supersedes it.
+    ///
+    /// `notes_for` answers "why is it like this" for one task whose key you
+    /// already have. This is the read for "why did we do it this way," asked
+    /// months later, about a task nobody remembers the key of -- the case the
+    /// split between `tasks` and `task_notes` exists for.
+    ///
+    /// A `LIKE` over `body`, not FTS5: the volume here is a person's tasks on
+    /// one runner, not a search engine's corpus, and a second index is a
+    /// second thing that can drift from the rows it is supposed to mirror.
+    ///
+    /// `query` is escaped (`escape_like`) before it reaches the pattern, and
+    /// the pattern carries an explicit `ESCAPE` clause: SQLite's `LIKE`
+    /// otherwise treats `%` and `_` IN THE QUERY as wildcards too, so a
+    /// search for `50%` would also match `"5000"`, and a search for
+    /// `task_notes` would also match `"taskXnotes"` -- exactly the two kinds
+    /// of term (a percentage, a table name) someone searching this tool's own
+    /// history is likely to type. A search that quietly widens is worse than
+    /// one that finds nothing, because nothing in the result tells the reader
+    /// it happened.
+    ///
+    /// `NoteHit::superseded` answers "has this been revised," a narrower and
+    /// much cheaper question than "what is the current word on this," which
+    /// this function still cannot answer from its own result set: the flag is
+    /// a correlated `EXISTS (SELECT 1 FROM task_notes WHERE supersedes =
+    /// tn.id)`, true the moment ANY note names this one in its `supersedes`
+    /// column, regardless of whether that retracting note's own body matches
+    /// `query` -- a search for "sqlite" flags "use sqlite" as superseded even
+    /// when the note that superseded it reads "use files after all" and would
+    /// never itself have matched. What this cannot do is hand back the
+    /// retracting note's text, or a chain more than one link long, without a
+    /// second read: a caller that needs the actual current word, not just the
+    /// fact that this one is stale, follows `task_id` back to `notes_for`.
+    pub fn search_notes(
+        &self,
+        repository: Uuid,
+        query: &str,
+        kind: Option<NoteKind>,
+    ) -> Result<Vec<NoteHit>> {
+        let pattern = format!("%{}%", escape_like(query));
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT tn.id, tn.task_id, tn.kind, tn.actor, tn.at, tn.body, tn.extra, tn.supersedes,
+                        EXISTS (SELECT 1 FROM task_notes s WHERE s.supersedes = tn.id) AS superseded
+                   FROM task_notes tn
+                   JOIN tasks t ON t.id = tn.task_id
+                  WHERE t.repository_id = ?1
+                    AND tn.body LIKE ?2 ESCAPE '\\'
+                    AND (?3 IS NULL OR tn.kind = ?3)
+                  ORDER BY tn.at, tn.rowid",
+            )
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(
+                params![uuid_blob(repository), pattern, kind.map(NoteKind::as_str)],
+                row_to_note_hit,
+            )
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    /// Tasks in `repository` that have sat in their current status longer
+    /// than `threshold`, oldest-sitting first.
+    ///
+    /// The failure mode this whole arrangement is built to surface is not an
+    /// agent doing the wrong thing -- it is a task sitting in `todo` that a
+    /// manager assumed was in flight. `status_since` is on the row precisely
+    /// so this never has to read a history to answer; see `set_task_status`
+    /// for where that column is actually kept honest.
+    ///
+    /// `done` and `cancelled` are excluded outright, not merely treated as
+    /// unlikely to qualify: a finished task sits still forever, and a
+    /// staleness view that lists every completed task next to the ones that
+    /// actually need attention is a view nobody reads.
+    pub fn list_tasks_stale_for(&self, repository: Uuid, threshold: Duration) -> Result<Vec<Task>> {
+        let cutoff = now_millis() - threshold.as_millis() as i64;
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {TASK_COLUMNS} FROM tasks
+                  WHERE repository_id = ?1
+                    AND status NOT IN ('done', 'cancelled')
+                    AND status_since < ?2
+                  ORDER BY status_since, rowid"
+            ))
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(params![uuid_blob(repository), cutoff], row_to_task)
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
 }
 
 /// Every column of `task_blocks`, in `row_to_task_block`'s order.
@@ -707,6 +826,60 @@ impl Store {
                 params![uuid_blob(id), uuid_blob(repo), key, title],
             )
             .expect("insert task");
+        id
+    }
+
+    /// Moves a task's `status_since` into the past by `ago`, and nothing
+    /// else. The one way a staleness test gets an old-looking task without
+    /// actually waiting for one.
+    pub(crate) fn backdate_status_since_for_test(&self, task: Uuid, ago: Duration) {
+        let since = now_millis() - ago.as_millis() as i64;
+        self.conn()
+            .execute(
+                "UPDATE tasks SET status_since = ?1 WHERE id = ?2",
+                params![since, uuid_blob(task)],
+            )
+            .expect("backdate status_since");
+    }
+
+    /// A note carrying a caller-chosen `at`, not `now_millis()`'s.
+    ///
+    /// There is no `backdate_note_at_for_test` UPDATE-based counterpart to
+    /// `backdate_status_since_for_test` above, and there cannot be one:
+    /// `task_notes_forbid_update` (`migrate.rs`) refuses EVERY `UPDATE` on
+    /// `task_notes` unconditionally, with no `WHEN` clause carving out a
+    /// test-only column the way `task_notes_forbid_delete` carves out a
+    /// note whose task is already gone. An `UPDATE ... SET at = ...` here
+    /// would abort exactly the way `there_is_no_path_that_rewrites_a_note`
+    /// proves a body rewrite does.
+    ///
+    /// An `INSERT` is not blocked, and gets a test the same fixture it
+    /// needs: every note written through `add_note` alone has `at`
+    /// (stamped by `now_millis()` at the moment of that note's own INSERT),
+    /// `rowid` (assigned at INSERT, always increasing), and even its
+    /// UUIDv7 `id` (also time-ordered) all increase together -- so no
+    /// fixture built only from `add_note` can tell `search_notes`'s
+    /// `ORDER BY tn.at, tn.rowid` apart from an implementation that instead
+    /// orders by `rowid` or by `id`. This inserts a note directly, the way
+    /// `create_task_for_test` inserts a task directly, with `at` chosen by
+    /// the caller rather than the clock -- letting a test put two notes'
+    /// `rowid` order and `at` order in disagreement, which nothing written
+    /// through the crate's own API can ever produce.
+    pub(crate) fn insert_note_with_at_for_test(
+        &self,
+        task: Uuid,
+        kind: NoteKind,
+        body: &str,
+        at: i64,
+    ) -> Uuid {
+        let id = Uuid::now_v7();
+        self.conn()
+            .execute(
+                "INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
+                 VALUES (?1, ?2, ?3, 'user', ?4, ?5, '{}')",
+                params![uuid_blob(id), uuid_blob(task), kind.as_str(), at, body],
+            )
+            .expect("insert note with chosen at");
         id
     }
 }
@@ -1614,5 +1787,296 @@ mod tests {
         let blocks = store.blocks_for(b.id).unwrap();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].blocked_by, a.id);
+    }
+
+    // ---- reads a manager can afford ----
+
+    /// "Why did we do it this way" is asked months later, about a task nobody
+    /// remembers the key of. Without this the board is a queue, not a memory.
+    ///
+    /// The brief's fixture, plus one assertion this fix round added: the one
+    /// hit here was never superseded, so `NoteHit::superseded` must read
+    /// `false` -- without this line, `search_flags_a_hit_that_was_later_superseded`
+    /// below could pass against an implementation that returns `true` for
+    /// every row unconditionally, and this test alone would never notice.
+    #[test]
+    fn decisions_are_searchable_across_every_task_in_a_repository() {
+        let store = seeded();
+        let a = store.create_task(repo(), "storage", Actor::User).unwrap();
+        let b = store.create_task(repo(), "unrelated", Actor::User).unwrap();
+        store
+            .add_note(a.id, NoteKind::Decision, Actor::Manager, "sqlite over files", json!({}))
+            .unwrap();
+        store
+            .add_note(b.id, NoteKind::Progress, Actor::Manager, "sqlite is installed", json!({}))
+            .unwrap();
+
+        let hits = store.search_notes(repo(), "sqlite", Some(NoteKind::Decision)).unwrap();
+        assert_eq!(hits.len(), 1, "narrowing to decisions skips the progress chatter");
+        assert_eq!(hits[0].note.task_id, a.id);
+        assert!(!hits[0].superseded, "nothing has ever replaced this decision");
+
+        let all = store.search_notes(repo(), "sqlite", None).unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    /// The whole reason this fix round exists: SQLite's `LIKE` treats `%` and
+    /// `_` as wildcards even when they appear IN THE SEARCH TERM, and the two
+    /// terms most likely to appear in a search of this tool's own history are
+    /// exactly those characters -- a table name (`task_notes`) and a
+    /// percentage (`50%`). An unescaped search silently returns more than it
+    /// claims to, and nothing in the result says so.
+    #[test]
+    fn a_percent_or_underscore_in_the_query_is_matched_literally_not_as_a_wildcard() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        store.add_note(task.id, NoteKind::Finding, Actor::User, "grep task_notes", json!({})).unwrap();
+        store.add_note(task.id, NoteKind::Finding, Actor::User, "taskXnotes typo", json!({})).unwrap();
+        store.add_note(task.id, NoteKind::Finding, Actor::User, "hit rate is 50%", json!({})).unwrap();
+        store.add_note(task.id, NoteKind::Finding, Actor::User, "5000 requests", json!({})).unwrap();
+
+        let underscore_hits = store.search_notes(repo(), "task_notes", None).unwrap();
+        assert_eq!(underscore_hits.len(), 1, "`_` must match only a literal underscore");
+        assert_eq!(underscore_hits[0].note.body, "grep task_notes");
+
+        let percent_hits = store.search_notes(repo(), "50%", None).unwrap();
+        assert_eq!(percent_hits.len(), 1, "`%` must match only a literal percent sign");
+        assert_eq!(percent_hits[0].note.body, "hit rate is 50%");
+    }
+
+    /// The escape character itself has to be escaped, and correct only "by
+    /// inspection" until a test proves it. `escape_like` runs three
+    /// `.replace` calls in sequence -- backslash, then `%`, then `_` -- and
+    /// the order is load-bearing: escaping backslash FIRST means the
+    /// backslashes `%` and `_` insert next are never re-escaped by a step
+    /// that already ran. A query with only a literal `\` and no `%` or `_`
+    /// cannot tell that order apart from its reverse (nothing exists yet
+    /// for a misordered backslash step to corrupt), so this combines a
+    /// literal backslash with a `%` in the SAME query, which is exactly the
+    /// shape that breaks under the wrong order: escaping `%` first inserts
+    /// a backslash, and THEN escaping backslash (wrongly, last) doubles
+    /// that inserted backslash too, along with the query's own literal one,
+    /// scrambling the pattern.
+    #[test]
+    fn a_literal_backslash_in_the_query_is_matched_literally() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        store
+            .add_note(task.id, NoteKind::Finding, Actor::User, "rate is 50%\\d always", json!({}))
+            .unwrap();
+        store
+            .add_note(task.id, NoteKind::Finding, Actor::User, "5000d nothing else", json!({}))
+            .unwrap();
+
+        let hits = store.search_notes(repo(), "50%\\d", None).unwrap();
+        assert_eq!(hits.len(), 1, "the literal backslash and percent must both match literally");
+        assert_eq!(hits[0].note.body, "rate is 50%\\d always");
+    }
+
+    /// The brief's own fixture above cannot tell a repository-scoped search
+    /// apart from one that searches every repository on the runner: both
+    /// tasks it creates live in `repo()`. A second repository holding a note
+    /// with the same matching body is what actually exercises the join's
+    /// `WHERE t.repository_id = ?1` -- the same gap `notes_do_not_leak_between_tasks`
+    /// and `a_listing_shows_only_its_own_repositorys_tasks` close for
+    /// `notes_for` and `list_tasks`.
+    #[test]
+    fn search_does_not_leak_across_repositories() {
+        let store = seeded();
+        let other = store.register_repository_for_test("Other Thing");
+        let ours = store.create_task(repo(), "ours", Actor::User).unwrap();
+        let theirs = store.create_task(other, "theirs", Actor::User).unwrap();
+        store.add_note(ours.id, NoteKind::Decision, Actor::User, "sqlite", json!({})).unwrap();
+        store.add_note(theirs.id, NoteKind::Decision, Actor::User, "sqlite", json!({})).unwrap();
+
+        let hits = store.search_notes(repo(), "sqlite", None).unwrap();
+        assert_eq!(hits.len(), 1, "the other repository's matching note must not appear");
+        assert_eq!(hits[0].note.task_id, ours.id);
+    }
+
+    /// Search does not hide a note that was later superseded, the same
+    /// choice `notes_for` makes -- see `search_notes`'s doc for why filtering
+    /// it out here would not actually close the gap it looks like it would
+    /// close. Proven against what the database hands back, not asserted in
+    /// prose: both notes come back when both match, `TaskNote::supersedes`
+    /// still names the one the newer note replaced, and `NoteHit::superseded`
+    /// tells a reader which of the two is the stale one without them having
+    /// to notice the link themselves.
+    #[test]
+    fn search_does_not_hide_a_note_that_was_later_superseded() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let first = store
+            .add_note(task.id, NoteKind::Decision, Actor::Manager, "sqlite over files", json!({}))
+            .unwrap();
+        let second = store
+            .add_note_superseding(
+                task.id,
+                NoteKind::Decision,
+                Actor::Manager,
+                "sqlite, but see the earlier note about files",
+                json!({}),
+                first.id,
+            )
+            .unwrap();
+
+        let hits = store.search_notes(repo(), "sqlite", None).unwrap();
+        assert_eq!(hits.len(), 2, "the retracted decision is still a hit, same as notes_for");
+        assert_eq!(hits[0].note.id, first.id);
+        assert_eq!(hits[0].note.supersedes, None);
+        assert!(hits[0].superseded, "the second note replaced this one");
+        assert_eq!(hits[1].note.id, second.id);
+        assert_eq!(
+            hits[1].note.supersedes,
+            Some(first.id),
+            "the link a reader would need to notice the retraction without the flag"
+        );
+        assert!(!hits[1].superseded, "nothing has replaced the second note");
+    }
+
+    /// The coordinator's ruling, proven directly: `search_notes` flags a hit
+    /// as superseded by inspecting `task_notes.supersedes` for ANY row that
+    /// names it, not by checking whether the retracting note's own body
+    /// matches `query`. So this is the case
+    /// `search_does_not_hide_a_note_that_was_later_superseded` above cannot
+    /// exercise -- there, both notes happen to contain "sqlite," which would
+    /// let a wrong implementation that only flags a hit when the retracting
+    /// note ALSO matches the query pass anyway. Here the retracting note
+    /// deliberately shares no words with the query, so only a real
+    /// `EXISTS` over the unfiltered table gets this right.
+    #[test]
+    fn search_flags_a_hit_that_was_later_superseded_even_when_the_retracting_note_does_not_match() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let first = store
+            .add_note(task.id, NoteKind::Decision, Actor::Manager, "use sqlite", json!({}))
+            .unwrap();
+        store
+            .add_note_superseding(
+                task.id,
+                NoteKind::Decision,
+                Actor::Manager,
+                "use files after all",
+                json!({}),
+                first.id,
+            )
+            .unwrap();
+
+        let hits = store.search_notes(repo(), "sqlite", None).unwrap();
+        assert_eq!(hits.len(), 1, "only the original decision's body matches \"sqlite\"");
+        assert_eq!(hits[0].note.id, first.id);
+        assert!(
+            hits[0].superseded,
+            "flagged as revised even though the retracting note never matched the query"
+        );
+    }
+
+    /// The two-hit ordering `search_does_not_hide_a_note_that_was_later_superseded`
+    /// happens to exercise is not adversarial: every note built through
+    /// `add_note` alone has `at`, `rowid`, and its UUIDv7 `id` all increase
+    /// together, so nothing in this file's other fixtures can tell
+    /// `search_notes`'s documented "oldest first" (`ORDER BY tn.at,
+    /// tn.rowid`) apart from an implementation that instead orders by
+    /// `rowid` or by `id`. `insert_note_with_at_for_test` breaks that
+    /// correlation on purpose: `second_inserted` is written after
+    /// `first_inserted` (so its `rowid` and `id` both say it came later),
+    /// but carries the EARLIER `at`. Only a real sort on `at` gets the order
+    /// right.
+    #[test]
+    fn search_orders_by_at_not_by_insertion_order() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+
+        let first_inserted =
+            store.insert_note_with_at_for_test(task.id, NoteKind::Finding, "sqlite alpha", 2_000);
+        let second_inserted =
+            store.insert_note_with_at_for_test(task.id, NoteKind::Finding, "sqlite beta", 1_000);
+
+        let hits = store.search_notes(repo(), "sqlite", None).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(
+            hits[0].note.id, second_inserted,
+            "the earlier `at` sorts first, even though it was written to the table second"
+        );
+        assert_eq!(hits[1].note.id, first_inserted);
+    }
+
+    /// The failure mode of the whole arrangement is not an agent doing the
+    /// wrong thing. It is a task sitting in `todo` that you assumed was in
+    /// flight.
+    #[test]
+    fn a_task_that_has_not_moved_can_be_found_by_how_long_it_has_sat() {
+        let store = seeded();
+        let old = store.create_task(repo(), "forgotten", Actor::User).unwrap();
+        store.backdate_status_since_for_test(old.id, Duration::from_secs(3 * 86_400));
+        store.create_task(repo(), "fresh", Actor::User).unwrap();
+
+        let stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].id, old.id);
+    }
+
+    /// One stale task, above, proves a task can be found this way at all --
+    /// it says nothing about the order several of them come back in. An
+    /// implementation with no `ORDER BY`, or one ordered by `created_at`
+    /// instead of `status_since`, passes every test above and would still
+    /// hand a manager the wrong task first, which defeats the point of a
+    /// staleness view: surfacing the worst stall first. Creation order here
+    /// is deliberately the OPPOSITE of staleness order -- `less_stale` is
+    /// created first but backdated less -- so an implementation ordering by
+    /// `created_at` returns these two rows swapped.
+    #[test]
+    fn several_stale_tasks_sort_worst_stall_first() {
+        let store = seeded();
+        let less_stale = store.create_task(repo(), "less stale", Actor::User).unwrap();
+        store.backdate_status_since_for_test(less_stale.id, Duration::from_secs(2 * 86_400));
+        let more_stale = store.create_task(repo(), "more stale", Actor::User).unwrap();
+        store.backdate_status_since_for_test(more_stale.id, Duration::from_secs(5 * 86_400));
+
+        let stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
+        assert_eq!(stale.len(), 2);
+        assert_eq!(stale[0].id, more_stale.id, "the one that has sat longest sorts first");
+        assert_eq!(stale[1].id, less_stale.id);
+    }
+
+    /// Done and cancelled tasks sit still forever and are not stale, they are
+    /// finished. A staleness view that lists every completed task is a view
+    /// nobody reads.
+    #[test]
+    fn finished_tasks_are_never_stale() {
+        let store = seeded();
+        let t = store.create_task(repo(), "shipped", Actor::User).unwrap();
+        store.set_task_status(t.id, TaskStatus::Done, Actor::Manager).unwrap();
+        store.backdate_status_since_for_test(t.id, Duration::from_secs(30 * 86_400));
+        assert!(store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap().is_empty());
+    }
+
+    /// The brief's own fixture above only exercises `done`. The
+    /// implementation excludes `status NOT IN ('done', 'cancelled')`
+    /// together, and a `done`-only fixture cannot tell that apart from an
+    /// implementation that excludes `done` alone and lets a stale, abandoned,
+    /// cancelled task keep showing up on the board forever.
+    #[test]
+    fn cancelled_tasks_are_never_stale_either() {
+        let store = seeded();
+        let t = store.create_task(repo(), "abandoned", Actor::User).unwrap();
+        store.set_task_status(t.id, TaskStatus::Cancelled, Actor::Manager).unwrap();
+        store.backdate_status_since_for_test(t.id, Duration::from_secs(30 * 86_400));
+        assert!(store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap().is_empty());
+    }
+
+    /// Staleness is scoped to one repository, for the same reason
+    /// `search_does_not_leak_across_repositories` exists: the brief's own
+    /// fixture never registers a second repository, so it cannot distinguish
+    /// a scoped query from one that stale-checks the whole runner.
+    #[test]
+    fn staleness_does_not_leak_across_repositories() {
+        let store = seeded();
+        let other = store.register_repository_for_test("Other Thing");
+        let theirs = store.create_task(other, "theirs, forgotten", Actor::User).unwrap();
+        store.backdate_status_since_for_test(theirs.id, Duration::from_secs(3 * 86_400));
+
+        let ours_stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
+        assert!(ours_stale.is_empty(), "another repository's stale task must not appear in ours");
     }
 }
