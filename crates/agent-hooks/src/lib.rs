@@ -5,6 +5,7 @@
 //! socket, no tmux and no agent. The I/O lives in `farcooler-cli`'s `hook`
 //! subcommand and in the daemon's `hook_ingress`.
 
+pub mod facts;
 pub mod wire;
 
 /// Which agent a hook fired from.

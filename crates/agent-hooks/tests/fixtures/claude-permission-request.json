@@ -1,0 +1,10 @@
+{
+  "session_id": "7ecba53c-31c6-4c8e-9704-b2d582039d04",
+  "transcript_path": "/Users/x/.claude/projects/-tmp-probe/7ecba53c-31c6-4c8e-9704-b2d582039d04.jsonl",
+  "cwd": "/tmp/probe",
+  "permission_mode": "default",
+  "effort": { "level": "high" },
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Write",
+  "tool_input": { "file_path": "/tmp/probe/probe-test.txt", "content": "hello\n" }
+}

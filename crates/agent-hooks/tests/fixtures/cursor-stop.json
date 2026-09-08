@@ -1,0 +1,11 @@
+{
+  "conversation_id": "68d64051-6ab2-4668-97a1-a45df658bada",
+  "generation_id": "f472dda5-3d33-4a8c-b93e-ebeb60f2eca4",
+  "model": "default",
+  "status": "completed",
+  "session_id": "68d64051-6ab2-4668-97a1-a45df658bada",
+  "hook_event_name": "stop",
+  "cursor_version": "2026.08.25-3e8eec8",
+  "workspace_roots": ["/tmp/probe-cursor"],
+  "transcript_path": "/Users/x/.cursor/projects/tmp-probe-cursor/agent-transcripts/68d64051/68d64051.jsonl"
+}

@@ -1,0 +1,12 @@
+{
+  "session_id": "7ecba53c-31c6-4c8e-9704-b2d582039d04",
+  "transcript_path": "/Users/x/.claude/projects/-tmp-probe/7ecba53c-31c6-4c8e-9704-b2d582039d04.jsonl",
+  "cwd": "/tmp/probe",
+  "prompt_id": "01139a69-720f-4dbb-9245-2e81470be67f",
+  "hook_event_name": "MessageDisplay",
+  "turn_id": "b17ac5a9-adb5-4a00-8efd-738f26a52391",
+  "message_id": "c76ae445-cb0a-472e-bf53-b21cf1cdf8ab",
+  "index": 1,
+  "final": true,
+  "delta": "Let me know if you'd like me to write it somewhere else."
+}
