@@ -599,3 +599,18 @@ pub(crate) fn row_to_task_note(row: &Row) -> rusqlite::Result<TaskNote> {
         supersedes: get_optional_uuid(row, 7)?,
     })
 }
+
+/// One edge in the block graph: `task_id` cannot proceed until `blocked_by`
+/// does, and `reason` is why. Its own table rather than a column on `Task`,
+/// because the reason matters and because a task blocks on more than one
+/// thing -- see `farcooler_store::tasks::Store::set_block`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskBlock {
+    pub task_id: Uuid,
+    pub blocked_by: Uuid,
+    pub reason: String,
+}
+
+pub(crate) fn row_to_task_block(row: &Row) -> rusqlite::Result<TaskBlock> {
+    Ok(TaskBlock { task_id: get_uuid(row, 0)?, blocked_by: get_uuid(row, 1)?, reason: row.get(2)? })
+}

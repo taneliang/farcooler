@@ -27,8 +27,8 @@ use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
 use crate::models::{
-    Actor, NoteKind, Task, TaskNote, TaskStatus, TaskUpdate, acceptance_to_json, row_to_task,
-    row_to_task_note, strings_to_json, uuid_blob,
+    Actor, NoteKind, Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate, acceptance_to_json,
+    get_uuid, row_to_task, row_to_task_block, row_to_task_note, strings_to_json, uuid_blob,
 };
 use crate::store::Store;
 
@@ -524,6 +524,149 @@ impl Store {
             .map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
+
+    // ---- blocking ----
+
+    /// Record that `task` cannot proceed until `blocked_by` does, and why.
+    ///
+    /// Refuses a cycle. Before inserting, this walks the graph forward from
+    /// `blocked_by` -- what `blocked_by` itself is blocked on, and what
+    /// blocks THAT, and so on -- and refuses the moment the walk reaches
+    /// `task`. A self-block (`task == blocked_by`) needs no separate check:
+    /// the walk starts at `blocked_by` and the very first node it looks at
+    /// is `task` itself.
+    ///
+    /// A cycle is a deadlock the manager would never resolve, and it would
+    /// present as a queue that quietly stopped moving rather than as an
+    /// error -- so this is checked here, once, rather than left for whatever
+    /// eventually reads the graph to notice.
+    ///
+    /// The whole check-then-insert runs inside one transaction, holding the
+    /// store's single connection for its duration: two `set_block` calls
+    /// racing each other must not both walk the graph before either has
+    /// written its edge, which is the one way a real cycle could slip past a
+    /// check that only ever looked at a still-clean graph.
+    ///
+    /// The walk itself is bounded by the number of tasks in `task`'s OWN
+    /// repository, read fresh inside this same transaction, so a corrupt or
+    /// enormous graph cannot hang the daemon -- past that many distinct
+    /// tasks visited, the walk gives up and refuses rather than keep going.
+    ///
+    /// That bound is narrower than it sounds. `task_blocks`' foreign keys
+    /// (see `migrate.rs`) only guarantee both ids name real rows in `tasks`
+    /// -- nothing constrains `task` and `blocked_by` to the same repository,
+    /// and this function does not check that itself. A block whose chain
+    /// wanders into a second repository's tasks is therefore a graph this
+    /// function CAN write, and if that wandering pushes the walk past `task`'s
+    /// own repository's task count, a legitimate acyclic chain can be refused
+    /// as a cycle. Fixing that -- a schema constraint requiring both ends of
+    /// a block to share a repository, a same-repository check here, or
+    /// widening the bound to every task the runner holds -- is a design
+    /// decision for this plan's owner, not one this function has made.
+    pub fn set_block(&self, task: Uuid, blocked_by: Uuid, reason: &str) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+
+        let repository_id: Vec<u8> = tx
+            .query_row(
+                "SELECT repository_id FROM tasks WHERE id = ?1",
+                params![uuid_blob(task)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)?
+            .ok_or(DomainError::NotFound)?;
+        let task_count: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE repository_id = ?1",
+                params![repository_id],
+                |r| r.get(0),
+            )
+            .map_err(map_err)?;
+
+        if blocking_walk_reaches(&tx, blocked_by, task, task_count as usize)? {
+            return Err(DomainError::InvalidArgument { what: "cycle" });
+        }
+
+        tx.execute(
+            "INSERT INTO task_blocks (task_id, blocked_by, reason) VALUES (?1, ?2, ?3)",
+            params![uuid_blob(task), uuid_blob(blocked_by), reason],
+        )
+        .map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Everything currently blocking `task`, one row per thing it is waiting
+    /// on. `rowid` orders it, so a listing read twice reads the same both
+    /// times -- the same reasoning `notes_for` and `list_tasks` follow.
+    pub fn blocks_for(&self, task: Uuid) -> Result<Vec<TaskBlock>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!("SELECT {BLOCK_COLUMNS} FROM task_blocks WHERE task_id = ?1 ORDER BY rowid"))
+            .map_err(map_err)?;
+        let rows = stmt.query_map(params![uuid_blob(task)], row_to_task_block).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    /// Remove one block. Not an error if it was never there: whether it was
+    /// resolved a moment ago by someone else or never existed, the state
+    /// afterward -- `task` is not blocked on `blocked_by` -- is the same
+    /// either way.
+    pub fn unblock(&self, task: Uuid, blocked_by: Uuid) -> Result<()> {
+        self.conn()
+            .execute(
+                "DELETE FROM task_blocks WHERE task_id = ?1 AND blocked_by = ?2",
+                params![uuid_blob(task), uuid_blob(blocked_by)],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+}
+
+/// Every column of `task_blocks`, in `row_to_task_block`'s order.
+const BLOCK_COLUMNS: &str = "task_id, blocked_by, reason";
+
+/// True if, starting at `start` and repeatedly following "what does this task
+/// block on", the walk ever reaches `target`.
+///
+/// `limit` bounds the number of distinct tasks the walk will visit before
+/// giving up and reporting a cycle rather than looping forever. See
+/// `Store::set_block`'s doc: that bound is sized to `task`'s own repository,
+/// and a chain that wanders into another repository's tasks can exhaust it
+/// and be refused even when it is not actually a cycle.
+fn blocking_walk_reaches(conn: &Connection, start: Uuid, target: Uuid, limit: usize) -> Result<bool> {
+    let mut stack = vec![start];
+    let mut seen = std::collections::HashSet::new();
+
+    while let Some(node) = stack.pop() {
+        if node == target {
+            return Ok(true);
+        }
+        if !seen.insert(node) {
+            continue;
+        }
+        if seen.len() > limit {
+            // Past `task`'s own repository's task count. Almost always a
+            // genuine cycle or a corrupt graph, but see `set_block`'s doc:
+            // a chain that wanders into another repository's tasks can also
+            // land here without being one, since nothing stops a block from
+            // crossing repositories.
+            return Ok(true);
+        }
+
+        let mut stmt = conn
+            .prepare("SELECT blocked_by FROM task_blocks WHERE task_id = ?1")
+            .map_err(map_err)?;
+        let next = stmt
+            .query_map(params![uuid_blob(node)], |r| get_uuid(r, 0))
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_err)?;
+        stack.extend(next);
+    }
+
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -1319,5 +1462,157 @@ mod tests {
         let ours = store.list_tasks(repo(), None).unwrap();
         assert_eq!(ours.len(), 1);
         assert_eq!(ours[0].title, "ours");
+    }
+
+    // ---- blocking ----
+
+    #[test]
+    fn a_task_can_be_blocked_on_several_things_each_with_a_reason() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let c = store.create_task(repo(), "c", Actor::User).unwrap();
+        store.set_block(a.id, b.id, "needs the migration first").unwrap();
+        store.set_block(a.id, c.id, "needs the CLI").unwrap();
+
+        let blocks = store.blocks_for(a.id).unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks.iter().any(|x| x.reason == "needs the migration first"));
+    }
+
+    /// A cycle is a deadlock the manager would never resolve, and it would
+    /// present as a queue that quietly stops moving rather than as an error.
+    #[test]
+    fn a_cycle_is_refused_rather_than_stored() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        store.set_block(a.id, b.id, "").unwrap();
+
+        let err = store.set_block(b.id, a.id, "").expect_err("must refuse");
+        assert!(
+            format!("{err}").contains("cycle"),
+            "the refusal says what is wrong: {err}"
+        );
+    }
+
+    /// A two-task fixture cannot tell a real cycle check apart from one that
+    /// only ever refuses the immediate reverse of an edge just inserted (or
+    /// only ever refuses a self-block): with just `a` and `b`, both of those
+    /// narrower checks happen to give the same answer as a real walk of the
+    /// graph. Three tasks, with the new edge closing the loop one hop further
+    /// away than the edge it would directly reverse, is what actually forces
+    /// the walk to look past its immediate neighbor.
+    #[test]
+    fn a_cycle_three_tasks_long_is_also_refused() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let c = store.create_task(repo(), "c", Actor::User).unwrap();
+        store.set_block(a.id, b.id, "a waits on b").unwrap();
+        store.set_block(b.id, c.id, "b waits on c").unwrap();
+
+        // Closing the loop: c waits on a, and a already (transitively) waits
+        // on c. Neither `c == a` nor a row already blocking `a` on `c` is
+        // true yet, so only a real walk from `a` through `b` to `c` notices.
+        let err = store.set_block(c.id, a.id, "c waits on a").expect_err("must refuse");
+        assert!(format!("{err}").contains("cycle"), "the refusal says what is wrong: {err}");
+
+        // And the graph is exactly as it was before the refused call: two
+        // edges, not three.
+        assert_eq!(store.blocks_for(a.id).unwrap().len(), 1);
+        assert_eq!(store.blocks_for(b.id).unwrap().len(), 1);
+        assert!(store.blocks_for(c.id).unwrap().is_empty());
+    }
+
+    /// A revisit inside one walk is not a cycle: it means "this task was
+    /// already found some other way," which is exactly what two things
+    /// sharing a dependency looks like -- `p` waiting on both `q1` and `q2`,
+    /// which both in turn wait on the same `r`, is legitimate and must be
+    /// allowed. `blocking_walk_reaches`'s `if !seen.insert(node) { continue;
+    /// }` treats a revisit as nothing new to learn; the nearby-wrong version
+    /// -- `return Ok(true)` on that same line -- would refuse every
+    /// multi-parent convergence, and no straight-line fixture would ever
+    /// notice, including the three-task cycle above: a straight line never
+    /// revisits a node, so it cannot exercise this line at all.
+    #[test]
+    fn a_diamond_of_shared_dependencies_is_allowed() {
+        let store = seeded();
+        let p = store.create_task(repo(), "p", Actor::User).unwrap();
+        let q1 = store.create_task(repo(), "q1", Actor::User).unwrap();
+        let q2 = store.create_task(repo(), "q2", Actor::User).unwrap();
+        let r = store.create_task(repo(), "r", Actor::User).unwrap();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+
+        // p waits on both q1 and q2, and both of those wait on the same r.
+        store.set_block(p.id, q1.id, "").unwrap();
+        store.set_block(p.id, q2.id, "").unwrap();
+        store.set_block(q1.id, r.id, "").unwrap();
+        store.set_block(q2.id, r.id, "").unwrap();
+
+        // a's walk from p reaches r twice -- once through q1, once through
+        // q2 -- which is the revisit this test exists to exercise.
+        store.set_block(a.id, p.id, "").expect("a diamond below p is not a cycle");
+
+        assert_eq!(store.blocks_for(a.id).unwrap().len(), 1);
+        assert_eq!(store.blocks_for(p.id).unwrap().len(), 2, "p still waits on both q1 and q2");
+    }
+
+    #[test]
+    fn a_task_cannot_block_on_itself() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        assert!(store.set_block(a.id, a.id, "").is_err());
+    }
+
+    /// The other half of the pair, read back OUT of the database rather than
+    /// taken on faith from `unblock` returning `Ok(())`: a no-op that quietly
+    /// left the row behind would be invisible from `unblock`'s own return
+    /// value and total from `blocks_for`'s.
+    #[test]
+    fn unblocking_removes_the_edge_and_only_that_edge() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let c = store.create_task(repo(), "c", Actor::User).unwrap();
+        store.set_block(a.id, b.id, "needs the migration first").unwrap();
+        store.set_block(a.id, c.id, "needs the CLI").unwrap();
+
+        store.unblock(a.id, b.id).unwrap();
+
+        let remaining = store.blocks_for(a.id).unwrap();
+        assert_eq!(remaining.len(), 1, "only the one edge named should go");
+        assert_eq!(remaining[0].blocked_by, c.id);
+    }
+
+    /// Unblocking something that was never a block, or was already removed,
+    /// ends in the same state either way -- not an error a caller has to
+    /// special-case.
+    #[test]
+    fn unblocking_something_never_blocked_is_not_an_error() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        store.unblock(a.id, b.id).unwrap();
+        assert!(store.blocks_for(a.id).unwrap().is_empty());
+    }
+
+    /// Once a block is lifted, the edge that would have closed a cycle is
+    /// free to be added: a refusal is about the graph as it stands, not a
+    /// permanent memory of a pair of ids.
+    #[test]
+    fn unblocking_a_link_in_a_cycle_lets_it_be_closed_the_other_way() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        store.set_block(a.id, b.id, "").unwrap();
+        store.set_block(b.id, a.id, "").expect_err("still a cycle while a->b stands");
+
+        store.unblock(a.id, b.id).unwrap();
+        store.set_block(b.id, a.id, "now it's b waiting on a").unwrap();
+
+        let blocks = store.blocks_for(b.id).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].blocked_by, a.id);
     }
 }
