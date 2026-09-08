@@ -126,7 +126,6 @@ pub fn guard_toggle(current: AgentActivity, force: bool) -> Result<(), ToggleRef
 #[derive(Debug, Default)]
 struct SessionState {
     activity: AgentActivity,
-    cursor: Seq,
     session_id: Option<String>,
     agent_mode: Option<String>,
     /// What the agent calls this conversation.
@@ -344,11 +343,11 @@ impl AgentSupervisor {
         // into a ring that now holds 30 — returns nothing at all, and every
         // message sent before the toggle simply disappeared. A connection is a
         // new stream; the only honest cursor for one is 0.
+        //
+        // There is nothing to reset beside the window any more: this used to
+        // keep a `cursor` per session as well, and nothing ever read it.
         if let Ok(mut recent) = self.recent.lock() {
             recent.remove(&terminal);
-        }
-        if let Ok(mut sessions) = self.sessions.lock() {
-            sessions.entry(terminal).or_default().cursor = 0;
         }
         let subscribe = encode_line(&DaemonMessage::Subscribe { from_seq: 0 })
             .unwrap_or_else(|_| "\n".to_string());
@@ -410,7 +409,6 @@ impl AgentSupervisor {
                     let entry = sessions.entry(terminal).or_default();
                     entry.session_id = Some(session_id);
                     entry.available_modes = available_modes;
-                    entry.cursor = 0;
                     // A session that established is not a session that failed.
                     // A pane that failed, was toggled back to a terminal and
                     // toggled in again would otherwise keep reporting the old
@@ -453,16 +451,10 @@ impl AgentSupervisor {
             }
         };
 
-        // The shim's own numbering ends here. It counts positions in THAT
-        // shim's ring rather than in this transcript — the distinction the
-        // epoch above exists for — so it is read for the cursor before the
-        // events are handed on bare.
-        if let Ok(mut sessions) = self.sessions.lock() {
-            let entry = sessions.entry(terminal).or_default();
-            for s in &batch {
-                entry.cursor = s.seq + 1;
-            }
-        }
+        // The shim's numbering is dropped here, and nothing is kept in its
+        // place. It counts positions in THAT shim's ring rather than in this
+        // transcript — the distinction the epoch above exists for — and
+        // `record` works the position out from the transcript itself.
         self.record(terminal, batch.into_iter().map(|s| s.event).collect(), on_events);
     }
 
@@ -559,6 +551,44 @@ impl AgentSupervisor {
         }
 
         on_events(terminal, renumbered);
+    }
+
+    /// Drop everything held for a terminal whose record is gone.
+    ///
+    /// The counterpart to `record`, which creates both of these through
+    /// `or_default()` for whatever terminal it is handed. On the shim path
+    /// that was only ever a pane somebody had toggled into agent mode; the
+    /// hook path hands it every terminal a live session routes to, which is
+    /// most of them. A row and up to `TRANSCRIPT_LIMIT` events each, for the
+    /// life of the daemon, and every one of them answers correctly the whole
+    /// time — it is simply never asked again. `HookIngress::forget` is called
+    /// from the same line of the same delete path, against the same class of
+    /// leak.
+    ///
+    /// Not `Established`'s job and not covered by it: that clears the window
+    /// because a shim restarted and its numbering began again, which is a
+    /// different event from a terminal ending, and on the hook path no shim
+    /// ever establishes anything.
+    ///
+    /// `writers` goes too. It is inserted in `serve` and removed nowhere else,
+    /// and a terminal whose record is deleted is one nothing can address.
+    ///
+    /// `listening` deliberately stays. It stands for a task that is still
+    /// running — nothing cancels the spawned `listen` — so clearing the flag
+    /// would advertise a socket path that is still bound. Terminal ids are
+    /// never reused, so nothing will ask to bind that path again, and what is
+    /// left behind is one `Uuid` and one task blocked on `accept` for a socket
+    /// no shim will ever dial.
+    pub fn forget(&self, terminal: Uuid) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.remove(&terminal);
+        }
+        if let Ok(mut recent) = self.recent.lock() {
+            recent.remove(&terminal);
+        }
+        if let Ok(mut writers) = self.writers.lock() {
+            writers.remove(&terminal);
+        }
     }
 }
 
@@ -877,10 +907,26 @@ mod tests {
     /// And it is the ring the SHIM numbers, not a second one beside it.
     ///
     /// The test above passes just as happily against a `record` that kept a
-    /// window of its own, because nothing in it ever goes near `apply`. A pane
-    /// can be fed by both — a hook fires from a session whose pane is also in
-    /// agent mode — and a client holds one cursor per terminal, so there is
-    /// exactly one place for it to point.
+    /// window of its own, because nothing in it ever goes near `apply`. This
+    /// one crosses the two transports, which is the property the split exists
+    /// for.
+    ///
+    /// It settles the NUMBERING and not the duplication, and the two are easy
+    /// to read as one question. They are not: one cursor pointing at one
+    /// transcript says nothing about whether that transcript holds each
+    /// message once. A pane really can be fed by both — `terminal_for` routes
+    /// on `agent_session_id` and never looks at `pane_mode`, and a pane in
+    /// agent mode carries exactly that id, because setting it is how the shim
+    /// was bound to the conversation. So a claude running under `agent-host`
+    /// whose hooks are registered would fire them straight back at its own
+    /// terminal, and `apply` and `record` would both append the same messages
+    /// here, interleaved.
+    ///
+    /// Not reachable today: registering the hooks is a user-level change to
+    /// the agent's own settings and nothing in this tree writes them yet. One
+    /// ring is still right and two would be worse, so nothing here should
+    /// change on account of it — but whoever writes that installer inherits
+    /// the question, and this comment is the only place it is written down.
     #[test]
     fn a_recorded_event_continues_the_transcript_the_shim_started() {
         let supervisor = AgentSupervisor::new();
@@ -919,9 +965,12 @@ mod tests {
     /// Activity is folded for recorded events too, onto what was already there.
     ///
     /// A card renders this word and nothing else on the hook path writes it.
-    /// The second assertion is the one with teeth: `Done` is reachable only
-    /// from `Working`, so a `record` that folded each batch from scratch would
-    /// leave the row on `Idle` — a finished turn that never asks for anybody.
+    /// The second assertion is the one with teeth, and the rule it leans on is
+    /// `activity::advance`: an `Idle` observation becomes `Done` only from
+    /// `Working` or `Blocked` (and a row already `Done` stays `Done`); from
+    /// anything else, `Unspecified` included, it is plain `Idle`. So a
+    /// `record` that folded each batch from scratch would leave a finished
+    /// turn sitting on `Idle` — a turn that never asks for anybody.
     #[test]
     fn recording_folds_activity_onto_what_the_terminal_already_had() {
         let supervisor = AgentSupervisor::new();
@@ -1037,5 +1086,66 @@ mod gap_tests {
         for (index, item) in events.iter().enumerate() {
             assert_eq!(item.seq, index as u64);
         }
+    }
+
+    /// What the fan-out is handed across a trim is numbered like the
+    /// transcript it came out of.
+    ///
+    /// This exists for one line — `renumbered = entry[entry.len() -
+    /// renumbered.len()..].to_vec()`, the last statement of the trim — and
+    /// that line was previously deletable in silence across the whole
+    /// workspace. Every other sink in this file is `|_, _| {}`, and the one
+    /// that collects is handed two batches of one event that never come near
+    /// `TRANSCRIPT_LIMIT`. Without it a subscriber is handed the numbers the
+    /// batch had BEFORE the front was dropped — positions past the end of the
+    /// transcript it can ask for — and its next cursor sits there, which is
+    /// the same class of failure as a cursor that survived a toggle.
+    ///
+    /// The length assertion is not decoration either: it is what stops
+    /// `on_events(terminal, renumbered)` being narrowed to the last event
+    /// alone, which the collecting test above cannot see because every batch
+    /// it submits is one event long.
+    #[test]
+    fn a_batch_handed_out_across_a_trim_carries_the_numbers_it_will_be_asked_for() {
+        const OVERFLOW: usize = 10;
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        let message = |n: usize| AgentEvent::Message {
+            role: farcooler_agent::event::Role::Agent,
+            text: format!("line {n}"),
+            parent: None,
+        };
+        let fanned: Mutex<Vec<Vec<Sequenced>>> = Mutex::new(Vec::new());
+        let sink = |_: Uuid, batch: Vec<Sequenced>| fanned.lock().unwrap().push(batch);
+
+        // Exactly full, and deliberately not yet over: the limit is a maximum,
+        // so this batch is handed out untouched and the NEXT one is the one
+        // that drops a front.
+        supervisor.record(terminal, (0..TRANSCRIPT_LIMIT).map(message).collect(), &sink);
+        supervisor.record(terminal, (0..OVERFLOW).map(message).collect(), &sink);
+
+        let fanned = fanned.into_inner().unwrap();
+        let last = fanned.last().expect("both batches reached the fan-out");
+        assert_eq!(last.len(), OVERFLOW, "every event submitted is handed on, not merely the last");
+        assert_eq!(
+            last.first().unwrap().seq,
+            (TRANSCRIPT_LIMIT - OVERFLOW) as u64,
+            "the batch starts where the trimmed transcript's tail starts"
+        );
+        assert_eq!(
+            last.last().unwrap().seq,
+            (TRANSCRIPT_LIMIT - 1) as u64,
+            "and ends at its end: a subscriber's next cursor is built from this number \
+             and must not point past a transcript it can ask for"
+        );
+
+        // The same events, by the same numbers, as a client that asked instead
+        // of being told.
+        let (_, replayed) = supervisor.replay(terminal, 0, 0);
+        assert_eq!(
+            last.as_slice(),
+            &replayed[replayed.len() - OVERFLOW..],
+            "the live batch and the replayed transcript disagree about the same events"
+        );
     }
 }

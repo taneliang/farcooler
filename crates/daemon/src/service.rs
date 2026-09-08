@@ -1149,7 +1149,7 @@ impl Service {
         self.delete_terminal_record(id, record.resource_version)
     }
 
-    /// Delete a terminal's row, and drop the hook assembly state held for it.
+    /// Delete a terminal's row, and drop the in-memory state held for it.
     ///
     /// One function for both delete paths, because the second half is easy to
     /// leave out of one of them and nothing would report it: an orphaned
@@ -1158,13 +1158,22 @@ impl Service {
     /// message and a marker per message the terminal ever displayed, so a
     /// daemon that kept them would grow for as long as it stayed up.
     ///
+    /// The supervisor holds the larger half of the same thing and is dropped
+    /// on the same line: a session row and a transcript of up to
+    /// `TRANSCRIPT_LIMIT` events. Both maps fill for any terminal a hook
+    /// routes to, not only for panes in agent pane mode, which is what makes
+    /// this worth a second call rather than a comment.
+    ///
     /// After the delete, never before. A delete that is refused — a live pane,
     /// a version conflict — leaves a conversation that is still running, and
     /// discarding its half-assembled message would make the agent's next
-    /// answer render as its tail alone.
+    /// answer render as its tail alone; discarding its transcript would
+    /// renumber the next event to 0 under every cursor already pointing into
+    /// it.
     fn delete_terminal_record(&self, id: Uuid, expected_version: u64) -> Result<()> {
         self.store.delete_terminal(id, expected_version)?;
         self.hooks.forget(id);
+        self.agents.forget(id);
         Ok(())
     }
 
@@ -3712,6 +3721,147 @@ mod remove_root_tests {
         assert!(
             service.hooks.is_tracking(terminal),
             "this fixture is only worth anything if state was actually accumulated"
+        );
+    }
+
+    /// Put a transcript on a terminal, the way a hook or a shim would.
+    fn record_something(service: &Service, terminal: Uuid) {
+        service.agents.record(
+            terminal,
+            vec![farcooler_agent::event::AgentEvent::Message {
+                role: farcooler_agent::event::Role::Agent,
+                text: "an answer".to_string(),
+                parent: None,
+            }],
+            &|_, _| {},
+        );
+        assert_eq!(
+            service.agents.replay(terminal, 0, 0).1.len(),
+            1,
+            "this fixture is only worth anything if a transcript was actually recorded"
+        );
+        assert_eq!(
+            service.agents.activity(terminal),
+            farcooler_protocol::v1::AgentActivity::Working,
+            "and only if the row left its default, or the assertion after the delete \
+             cannot tell an eviction from a terminal that never had anything"
+        );
+    }
+
+    /// A terminal's transcript goes when the terminal does, too.
+    ///
+    /// The bigger half of the same leak, on the same delete path. `record`
+    /// creates a `SessionState` and a transcript window through `or_default()`
+    /// for whatever terminal it is handed, and the hook path hands it every
+    /// terminal a live session routes to — panes nobody toggled into agent
+    /// mode, which is most of them. That is one row plus up to
+    /// `TRANSCRIPT_LIMIT` events each, held for as long as the daemon runs,
+    /// beside the assembler markers the test above evicts.
+    ///
+    /// Nothing else clears these. `ShimMessage::Established` drops the window,
+    /// but that is a shim restarting rather than a terminal ending, and on the
+    /// hook path no shim ever establishes anything.
+    #[tokio::test]
+    async fn removing_a_terminal_drops_the_transcript_recorded_for_it() {
+        let (service, _root, workspace) = fixture_with_workspace().await;
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
+            .unwrap();
+        assert_eq!(
+            service.derive_one(&term).state,
+            TerminalState::Exited,
+            "a stopped terminal must be removable for this test to reach the delete"
+        );
+        record_something(&service, term.id);
+
+        service.remove_terminal(term.id).await.expect("an exited terminal's record is removable");
+
+        assert!(
+            service.agents.replay(term.id, 0, 0).1.is_empty(),
+            "the transcript outlived the terminal it belonged to"
+        );
+        assert_eq!(
+            service.agents.activity(term.id),
+            farcooler_protocol::v1::AgentActivity::Unspecified,
+            "and so did the session row behind it — a window dropped without the row \
+             beside it is half an eviction"
+        );
+    }
+
+    /// And a removal the daemon REFUSES leaves the conversation alone.
+    ///
+    /// The nearest wrong wiring is the same one the assembler has: not a
+    /// missing eviction but an early one, above the guard that refuses a live
+    /// pane. That passes the test above and discards the transcript of a
+    /// session still running, whose next event would then be numbered 0 into
+    /// an empty window while every client holds a cursor into the old one.
+    #[tokio::test]
+    async fn a_refused_removal_leaves_a_live_terminals_transcript_alone() {
+        let (service, _root, workspace) = fixture_with_workspace().await;
+        assert!(
+            service.inventory_snapshot().inventory_healthy,
+            "this test needs a healthy inventory to derive `starting` rather than `unknown`"
+        );
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        assert_eq!(
+            service.derive_one(&term).state,
+            TerminalState::Starting,
+            "an unconfirmed terminal with no pane must derive as starting for the refusal below"
+        );
+        record_something(&service, term.id);
+
+        match service.remove_terminal(term.id).await {
+            Err(DomainError::RunningProcesses) => {}
+            other => panic!("expected RunningProcesses for a starting terminal, got {other:?}"),
+        }
+
+        assert_eq!(
+            service.agents.replay(term.id, 0, 0).1.len(),
+            1,
+            "a removal that did not happen must not discard a live conversation"
+        );
+    }
+
+    /// A delete the STORE refuses leaves the conversation alone too.
+    ///
+    /// The other reading of "after the delete, never before", and the one the
+    /// refusal test above cannot reach: `remove_terminal`'s guard returns
+    /// before this function is entered at all, so nothing there says whether
+    /// the two evictions sit above or below `delete_terminal`. A version
+    /// conflict is what puts a failing delete and a live terminal in the same
+    /// call — somebody renamed the pane between the read and the delete — and
+    /// the record is still there afterwards, so its transcript has to be.
+    #[tokio::test]
+    async fn a_delete_that_fails_on_a_version_conflict_evicts_nothing() {
+        let (service, _root, workspace) = fixture_with_workspace().await;
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Stopped, 80, 24)
+            .unwrap();
+        record_something(&service, term.id);
+        assemble_something(&service, term.id);
+
+        match service.delete_terminal_record(term.id, term.resource_version + 7) {
+            Err(DomainError::ResourceConflict) => {}
+            other => panic!("expected a version conflict, got {other:?}"),
+        }
+        assert!(
+            service.store.get_terminal(term.id).is_ok(),
+            "the row must survive for this test to be about a delete that did not happen"
+        );
+
+        assert_eq!(
+            service.agents.replay(term.id, 0, 0).1.len(),
+            1,
+            "a delete that failed discarded the transcript of a terminal that still exists"
+        );
+        assert!(
+            service.hooks.is_tracking(term.id),
+            "and its half-assembled message went with it"
         );
     }
 
