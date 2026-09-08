@@ -91,10 +91,23 @@ fn ingress_over(store: Arc<Store>, snapshot: RuntimeSnapshot) -> HookIngress {
     HookIngress::new(store, Arc::new(FakeInventory { snapshot }))
 }
 
-/// An ingress that cannot read tmux at all — a fresh `LiveInventory`'s own
-/// starting state, and the view every test here gets unless it says otherwise.
-fn ingress(store: Arc<Store>) -> HookIngress {
-    ingress_over(store, RuntimeSnapshot::unavailable())
+/// The default view: tmux is readable, and it claims a live pane for each of
+/// `live`.
+///
+/// This is the fixture almost every test here should be standing on, and
+/// getting it wrong once would be invisible. An ingress over an UNAVAILABLE
+/// inventory derives every `Running` row as `unknown`, and `unknown` is
+/// deliberately kept as a candidate — so under that view `still_a_pane` says
+/// yes to everything and is not a filter at all. Every announce test sharing
+/// that one default would agree just as happily with an implementation that
+/// had no liveness rule in it, which is a fixture too uniform to tell two
+/// implementations apart rather than a set of independent probes. The relay's
+/// account-scoping tests were wrong in precisely this shape three times: each
+/// held one account's rows, so a scoped query and an unscoped one were
+/// literally the same query.
+fn ingress_claiming(store: Arc<Store>, live: &[Uuid]) -> HookIngress {
+    let panes = live.iter().copied().map(live_pane).collect();
+    ingress_over(store, RuntimeSnapshot::healthy(panes))
 }
 
 /// Mark a terminal as one the daemon has seen alive at least once.
@@ -148,6 +161,16 @@ fn live_pane(terminal_id: Uuid) -> TaggedPane {
     }
 }
 
+/// A pane tmux is still showing whose command has exited.
+///
+/// `remain-on-exit` keeps it, which is the whole reason a clean exit is
+/// distinguishable from a loss — so this is an OBSERVED death rather than an
+/// absence, and it derives `exited` where the same row with no pane at all
+/// would derive `lost`.
+fn dead_pane(terminal_id: Uuid) -> TaggedPane {
+    TaggedPane { dead: true, dead_status: Some(0), ..live_pane(terminal_id) }
+}
+
 /// What a hook of `agent` in `worktree` naming `session` reports about itself.
 fn payload(agent: Agent, worktree: &str, session: &str) -> serde_json::Value {
     match agent {
@@ -166,8 +189,12 @@ fn payload(agent: Agent, worktree: &str, session: &str) -> serde_json::Value {
 /// A bound listener, and the socket a hook would dial.
 ///
 /// Returns once the socket exists, so a caller never races the bind.
-async fn listening(store: Arc<Store>, dir: &std::path::Path) -> (std::path::PathBuf, Seen) {
-    let ingress = ingress(store);
+async fn listening(
+    store: Arc<Store>,
+    live: &[Uuid],
+    dir: &std::path::Path,
+) -> (std::path::PathBuf, Seen) {
+    let ingress = ingress_claiming(store, live);
     let seen: Seen = Arc::new(Mutex::new(Vec::new()));
     {
         let seen = seen.clone();
@@ -195,7 +222,7 @@ async fn send(socket: &std::path::Path, line: &HookLine) {
 async fn a_claude_session_in_a_known_worktree_binds_to_its_terminal() {
     let dir = tempfile::tempdir().unwrap();
     let (store, terminal) = store_with_terminal("/wt/bound", "claude", Some("sess-1"));
-    let (socket, seen) = listening(store, dir.path()).await;
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
 
     send(
         &socket,
@@ -228,8 +255,8 @@ async fn a_claude_session_in_a_known_worktree_binds_to_its_terminal() {
 #[tokio::test]
 async fn a_session_nothing_claims_is_dropped_rather_than_attached() {
     let dir = tempfile::tempdir().unwrap();
-    let (store, _terminal) = store_with_terminal("/wt/unclaimed", "claude", Some("sess-1"));
-    let (socket, seen) = listening(store, dir.path()).await;
+    let (store, terminal) = store_with_terminal("/wt/unclaimed", "claude", Some("sess-1"));
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
 
     send(
         &socket,
@@ -261,8 +288,8 @@ async fn a_session_nothing_claims_is_dropped_rather_than_attached() {
 #[tokio::test]
 async fn half_a_frame_with_no_newline_is_discarded_rather_than_acted_on() {
     let dir = tempfile::tempdir().unwrap();
-    let (store, _terminal) = store_with_terminal("/wt/truncated", "claude", Some("sess-1"));
-    let (socket, seen) = listening(store, dir.path()).await;
+    let (store, terminal) = store_with_terminal("/wt/truncated", "claude", Some("sess-1"));
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
 
     let line = HookLine {
         agent: Agent::Claude,
@@ -293,7 +320,7 @@ async fn half_a_frame_with_no_newline_is_discarded_rather_than_acted_on() {
 async fn two_frames_on_one_connection_both_arrive() {
     let dir = tempfile::tempdir().unwrap();
     let (store, terminal) = store_with_terminal("/wt/two", "claude", Some("sess-1"));
-    let (socket, seen) = listening(store, dir.path()).await;
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
 
     let mut both = String::new();
     for prompt in ["one", "two"] {
@@ -331,7 +358,7 @@ async fn two_frames_on_one_connection_both_arrive() {
 #[tokio::test]
 async fn a_session_two_terminals_both_claim_binds_to_neither() {
     let (store, ids) = store_with("/wt/ambiguous", &[("claude", Some("s")), ("claude", Some("s"))]);
-    let ingress = ingress(store);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Claude, &payload(Agent::Claude, "/wt/ambiguous", "s"));
 
     let bound = ingress.terminal_for(&f, Agent::Claude);
@@ -348,7 +375,7 @@ async fn a_codex_session_binds_to_the_codex_pane_in_its_worktree() {
         "/wt/announce",
         &[("shell", None), ("claude", Some("claude-s")), ("codex:gpt-5.6-terra", None)],
     );
-    let ingress = ingress(store);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Codex, &payload(Agent::Codex, "/wt/announce", "brand-new"));
 
     assert_eq!(
@@ -364,7 +391,7 @@ async fn a_codex_session_binds_to_the_codex_pane_in_its_worktree() {
 #[tokio::test]
 async fn a_cursor_session_binds_through_workspace_roots() {
     let (store, ids) = store_with("/wt/cursor", &[("cursor", None)]);
-    let ingress = ingress(store);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Cursor, &payload(Agent::Cursor, "/wt/cursor", "brand-new"));
 
     assert_eq!(ingress.terminal_for(&f, Agent::Cursor), Some(ids[0]));
@@ -378,8 +405,8 @@ async fn a_cursor_session_binds_through_workspace_roots() {
 /// conversation to whichever claude pane happened to share the directory.
 #[tokio::test]
 async fn a_claude_session_no_row_claims_is_never_guessed_from_the_worktree() {
-    let (store, _ids) = store_with("/wt/handstarted", &[("claude", None)]);
-    let ingress = ingress(store);
+    let (store, ids) = store_with("/wt/handstarted", &[("claude", None)]);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Claude, &payload(Agent::Claude, "/wt/handstarted", "started-by-hand"));
 
     assert_eq!(ingress.terminal_for(&f, Agent::Claude), None);
@@ -388,8 +415,8 @@ async fn a_claude_session_no_row_claims_is_never_guessed_from_the_worktree() {
 /// Two panes of one agent in one worktree tell the announcement nothing.
 #[tokio::test]
 async fn two_codex_panes_in_one_worktree_leave_an_announcement_unattached() {
-    let (store, _ids) = store_with("/wt/twocodex", &[("codex", None), ("codex", None)]);
-    let ingress = ingress(store);
+    let (store, ids) = store_with("/wt/twocodex", &[("codex", None), ("codex", None)]);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Codex, &payload(Agent::Codex, "/wt/twocodex", "brand-new"));
 
     assert_eq!(ingress.terminal_for(&f, Agent::Codex), None);
@@ -398,8 +425,8 @@ async fn two_codex_panes_in_one_worktree_leave_an_announcement_unattached() {
 /// A pane already speaking for a conversation must not be handed a second one.
 #[tokio::test]
 async fn an_announcement_passes_over_a_codex_pane_that_already_names_a_session() {
-    let (store, _ids) = store_with("/wt/taken", &[("codex", Some("someone-elses"))]);
-    let ingress = ingress(store);
+    let (store, ids) = store_with("/wt/taken", &[("codex", Some("someone-elses"))]);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Codex, &payload(Agent::Codex, "/wt/taken", "brand-new"));
 
     assert_eq!(ingress.terminal_for(&f, Agent::Codex), None);
@@ -430,7 +457,7 @@ async fn a_worktree_reached_through_a_symlink_is_still_the_same_worktree() {
     );
 
     let (store, ids) = store_with(&resolved.display().to_string(), &[("codex", None)]);
-    let ingress = ingress(store);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Codex, &payload(Agent::Codex, &link.display().to_string(), "new"));
 
     assert_eq!(
@@ -464,7 +491,7 @@ async fn an_announcement_binds_inside_its_own_worktree_and_not_the_one_next_door
             .unwrap();
         panes.push(term.id);
     }
-    let ingress = ingress(Arc::new(store));
+    let ingress = ingress_claiming(Arc::new(store), &panes);
 
     for (worktree, expected) in [("/wt/left", panes[0]), ("/wt/right", panes[1])] {
         let f = facts(Agent::Codex, &payload(Agent::Codex, worktree, "brand-new"));
@@ -497,7 +524,7 @@ async fn a_hidden_workspace_still_holds_panes_an_announcement_must_reach() {
     let hidden = store.set_workspace_flags(ws.id, ws.resource_version, true, false).unwrap();
     assert!(hidden.hidden, "the fixture is only interesting if the workspace really is hidden");
 
-    let ingress = ingress(Arc::new(store));
+    let ingress = ingress_claiming(Arc::new(store), &[term.id]);
     let f = facts(Agent::Codex, &payload(Agent::Codex, "/wt/hidden", "brand-new"));
 
     assert_eq!(
@@ -526,7 +553,7 @@ async fn a_stopped_pane_does_not_poison_its_worktree_for_the_live_one() {
             ("codex", None, TerminalIntent::Running),
         ],
     );
-    let ingress = ingress(store);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Codex, &payload(Agent::Codex, "/wt/stopped", "brand-new"));
 
     assert_eq!(
@@ -589,7 +616,7 @@ async fn an_unreadable_inventory_does_not_retire_a_pane() {
 async fn a_frame_that_cannot_be_read_does_not_swallow_the_one_behind_it() {
     let dir = tempfile::tempdir().unwrap();
     let (store, terminal) = store_with_terminal("/wt/garbage", "claude", Some("sess-1"));
-    let (socket, seen) = listening(store, dir.path()).await;
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
 
     let mut both = String::from("{\"this\":\"is not a HookLine\"}\n");
     both.push_str(
@@ -666,7 +693,7 @@ fn captured(f: impl FnOnce()) -> String {
 #[tokio::test]
 async fn the_first_binding_of_a_session_to_a_terminal_is_recorded() {
     let (store, terminal) = store_with_terminal("/wt/logged", "claude", Some("sess-1"));
-    let ingress = ingress(store);
+    let ingress = ingress_claiming(store, &[terminal]);
 
     let log = captured(|| {
         ingress.accept(
@@ -691,7 +718,7 @@ async fn the_first_binding_of_a_session_to_a_terminal_is_recorded() {
 #[tokio::test]
 async fn the_binding_is_recorded_once_and_not_on_every_flush() {
     let (store, terminal) = store_with_terminal("/wt/logged-once", "claude", Some("sess-1"));
-    let ingress = ingress(store);
+    let ingress = ingress_claiming(store, &[terminal]);
 
     let log = captured(|| {
         for _ in 0..5 {
@@ -722,8 +749,8 @@ async fn the_binding_is_recorded_once_and_not_on_every_flush() {
 /// arm warns and this one does not.
 #[tokio::test]
 async fn a_session_nobody_claims_is_not_logged_as_a_fault() {
-    let (store, _ids) = store_with("/wt/quiet", &[("claude", Some("sess-1"))]);
-    let ingress = ingress(store);
+    let (store, ids) = store_with("/wt/quiet", &[("claude", Some("sess-1"))]);
+    let ingress = ingress_claiming(store, &ids);
     let f = facts(Agent::Claude, &payload(Agent::Claude, "/wt/quiet", "started-by-hand"));
 
     let log = captured(|| {
@@ -734,4 +761,85 @@ async fn a_session_nobody_claims_is_not_logged_as_a_fault() {
         log.is_empty(),
         "a pane Far Cooler does not manage is an ordinary thing, not a fault: {log}"
     );
+}
+
+/// A pane tmux still shows, whose command exited, is not a candidate either.
+///
+/// The third way into the exclusion, and a different one: `stopped` is intent,
+/// `lost` is an absence, and this is a pane sitting right there in the layout
+/// with a dead process in it. `remain-on-exit` keeps it deliberately, so it is
+/// the case most likely to be looked at and mistaken for alive.
+#[tokio::test]
+async fn a_retained_dead_pane_does_not_poison_its_worktree_for_the_live_one() {
+    let (store, ids) = store_with("/wt/retained", &[("codex", None), ("codex", None)]);
+    let ingress =
+        ingress_over(store, RuntimeSnapshot::healthy(vec![dead_pane(ids[0]), live_pane(ids[1])]));
+    let f = facts(Agent::Codex, &payload(Agent::Codex, "/wt/retained", "brand-new"));
+
+    assert_eq!(
+        ingress.terminal_for(&f, Agent::Codex),
+        Some(ids[1]),
+        "a pane still on the screen with a dead process in it is not somewhere a session is"
+    );
+}
+
+/// And the fourth: a pane that never started.
+///
+/// `intent = Failed` is what `create_terminal` records when the launch itself
+/// did not work. It derives `error` with no reference to tmux at all, which is
+/// why it needs its own test — the exclusion list names three states and each
+/// is reached down a different path.
+#[tokio::test]
+async fn a_pane_that_failed_to_launch_does_not_poison_its_worktree() {
+    let (store, ids) = store_with_intents(
+        "/wt/failed",
+        &[("codex", None, TerminalIntent::Failed), ("codex", None, TerminalIntent::Running)],
+    );
+    let ingress = ingress_claiming(store, &ids);
+    let f = facts(Agent::Codex, &payload(Agent::Codex, "/wt/failed", "brand-new"));
+
+    assert_eq!(
+        ingress.terminal_for(&f, Agent::Codex),
+        Some(ids[1]),
+        "a pane whose launch failed is not a pane a session could be in"
+    );
+}
+
+/// A peer that says nothing at all does not hold a descriptor forever.
+///
+/// This is the input to the exhaustion the accept loop now has to survive: a
+/// hook process that leaked, or a client that connected and died, pins a
+/// descriptor and a task for the life of the daemon. Nothing else reclaims
+/// one — there is no other timeout anywhere on this path.
+///
+/// `start_paused` because the bound is deliberately long: tokio auto-advances
+/// its clock whenever every task is parked, which is exactly what this
+/// situation is, so the whole test runs in no wall time at all.
+#[tokio::test(start_paused = true)]
+async fn a_connection_that_says_nothing_is_eventually_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, terminal) = store_with_terminal("/wt/idle", "claude", Some("sess-1"));
+    let (socket, _seen) = listening(store, &[terminal], dir.path()).await;
+
+    let mut stream = tokio::net::UnixStream::connect(&socket).await.expect("connect");
+
+    // Not a write of nothing — no write at all, which is what a hook that was
+    // killed between `connect` and `write_all` leaves behind.
+    //
+    // The outer hour is what makes a missing bound a FAILURE rather than a
+    // hang: with no timer on the daemon's side there is nothing for the
+    // paused clock to advance to, and this test would park forever instead of
+    // saying anything. It is far past the daemon's own bound, so it never
+    // fires while that one exists — and on a paused clock an hour costs
+    // nothing.
+    let mut buf = [0u8; 1];
+    let read = tokio::time::timeout(
+        Duration::from_secs(3600),
+        tokio::io::AsyncReadExt::read(&mut stream, &mut buf),
+    )
+    .await
+    .expect("the daemon never let go of a connection that said nothing")
+    .expect("read");
+
+    assert_eq!(read, 0, "the daemon let go of a connection that never said anything");
 }

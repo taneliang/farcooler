@@ -27,9 +27,11 @@
 //! pane has no other record and a wrong binding renders as an ordinary
 //! transcript; and a read that FAILED, because folding that into the same
 //! `None` an unclaimed session produces makes a broken runner and an idle one
-//! look identical. Everything else — an unbound session, an ambiguity, a
-//! frame we could not parse — stays at `debug!`, because those are ordinary
-//! and a warning that cries wolf is how the one that matters gets ignored.
+//! look identical. Everything else — an unbound session, an ambiguity, a frame
+//! we could not read, one that never ended, a connection that said nothing at
+//! all — is written at `debug!` rather than not written: ordinary enough that
+//! a warning would cry wolf, and a warning that cries wolf is how the one that
+//! matters gets ignored.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -68,6 +70,54 @@ const IDLE: std::time::Duration = std::time::Duration::from_secs(600);
 /// not a backoff, just long enough that the retry is asking about a different
 /// moment. Immediately retrying `EMFILE` is a spin at full CPU.
 const ACCEPT_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// How often a refusal that will not go away is worth repeating.
+///
+/// The condition this exists for — a descriptor shortage — lasts as long as
+/// whatever caused it, and at `ACCEPT_RETRY_PAUSE` the loop meets it about
+/// seven times a second. A line each would put thousands of them an hour into
+/// the log this module just went to some trouble to make worth reading.
+const REFUSAL_REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Says the first refusal, then says it again rarely, then says how many there
+/// were.
+///
+/// Separated from the loop so the rule can be tested against a clock the test
+/// owns; provoking a real `EMFILE` would mean exhausting the descriptor table
+/// of the whole test binary.
+#[derive(Default)]
+struct Refusals {
+    since_report: u64,
+    total: u64,
+    last_report: Option<std::time::Instant>,
+}
+
+impl Refusals {
+    /// One more refusal. `Some(n)` when it is worth a line, `n` being how many
+    /// have happened since the last one.
+    ///
+    /// The FIRST is always worth a line: the whole point is that a runner
+    /// going deaf says so at the moment it happens, not thirty seconds later.
+    fn refused(&mut self, now: std::time::Instant) -> Option<u64> {
+        self.since_report += 1;
+        self.total += 1;
+        let due = self.last_report.is_none_or(|t| now.duration_since(t) >= REFUSAL_REPORT_EVERY);
+        if !due {
+            return None;
+        }
+        self.last_report = Some(now);
+        Some(std::mem::take(&mut self.since_report))
+    }
+
+    /// The socket is taking connections again. `Some(n)` when it had stopped,
+    /// so the recovery names what the quiet was hiding.
+    fn recovered(&mut self) -> Option<u64> {
+        let total = std::mem::take(&mut self.total);
+        self.since_report = 0;
+        self.last_report = None;
+        (total > 0).then_some(total)
+    }
+}
 
 /// Whether an `accept` failure is about this connection rather than the socket.
 ///
@@ -183,13 +233,14 @@ impl HookIngress {
     /// here writes.
     ///
     /// That is not free, and the cost is worth stating rather than assuming.
-    /// There is no index on `terminals` at all — the only indexes in the
-    /// schema are on `pane_groups`, `pane_members` and `workspaces` — so this
-    /// is a scan of `workspaces`, one `canonicalize` syscall per workspace to
-    /// compare it, and a scan of `terminals` per matching workspace. At a
-    /// flush every couple of seconds per session, against a fleet of panes,
-    /// that is small; it is not a lookup by identity, and nothing here should
-    /// be written as though it were.
+    /// `terminals` has no DECLARED index, and none on `workspace_id` — the
+    /// `sqlite_autoindex` behind its `BLOB PRIMARY KEY` serves `get_terminal`
+    /// and nothing on this path — so a hook costs a scan of `workspaces`, one
+    /// `canonicalize` syscall per workspace to compare it, and a scan of
+    /// `terminals` per matching workspace. At a flush every couple of seconds
+    /// per session, against a fleet of panes, that is small; it is not a
+    /// lookup by identity, and nothing here should be written as though it
+    /// were.
     ///
     /// Two kinds of pane are never candidates. One that already names a
     /// session is speaking for a conversation, and handing it a second would
@@ -341,10 +392,20 @@ impl HookIngress {
             );
         })?;
         let on_events = Arc::new(on_events);
+        let mut refusals = Refusals::default();
 
         loop {
             let stream = match listener.accept().await {
-                Ok((stream, _)) => stream,
+                Ok((stream, _)) => {
+                    if let Some(refused) = refusals.recovered() {
+                        tracing::warn!(
+                            refused,
+                            "the hook socket is taking connections again; \
+                             this many hooks were turned away in the meantime"
+                        );
+                    }
+                    stream
+                }
                 // A refused connection is not a broken listener. `?` here
                 // ended the loop for good on a descriptor shortage somebody
                 // else caused, and nothing calls this twice —
@@ -353,10 +414,13 @@ impl HookIngress {
                 // silent until the daemon was restarted, with the hook side
                 // exiting 0 and printing nothing.
                 Err(e) if transient(&e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "the hook socket could not take a connection; still listening"
-                    );
+                    if let Some(refused) = refusals.refused(std::time::Instant::now()) {
+                        tracing::warn!(
+                            error = %e,
+                            refused,
+                            "the hook socket could not take a connection; still listening"
+                        );
+                    }
                     // A pause, because the common cause is a descriptor
                     // shortage and retrying it immediately is a spin at full
                     // CPU against a condition only time fixes.
@@ -414,10 +478,24 @@ impl HookIngress {
             // down would notice either. The terminator is the whole of the
             // check.
             if !line.ends_with('\n') {
+                tracing::debug!(
+                    bytes = line.len(),
+                    "a frame that never ended; discarded rather than acted on"
+                );
                 return Ok(());
             }
             let Ok(hook) = decode_line::<HookLine>(line.trim()) else {
-                // A shape we cannot read is not worth a log line per flush.
+                // Said, rather than dropped in silence. This frame was written
+                // by our own `farcooler hook`, so a shape we cannot read means
+                // the two halves of one design disagree — which is the
+                // `ShimMessage::Failed` class of bug, declared and handled and
+                // constructed nowhere, that this module's tests exist against.
+                //
+                // At `debug!` because it costs nothing under the daemon's own
+                // filter and because a payload shape that really has changed
+                // would arrive on every flush; the point is that somebody
+                // looking has something to find, not that anybody is paged.
+                tracing::debug!("a frame this daemon could not read");
                 continue;
             };
             let f = facts(hook.agent, &hook.payload);
@@ -521,6 +599,54 @@ mod tests {
             let e = std::io::Error::from_raw_os_error(errno);
             assert!(!transient(&e), "errno {errno} ({e}) is the listener itself");
         }
+    }
+
+    /// A refusal that will not go away must not become the log.
+    ///
+    /// The first is said at once — a runner going deaf has to say so when it
+    /// happens — and then the rule has to hold its tongue, because the
+    /// condition it was written for persists and the loop meets it about
+    /// seven times a second. The nearest wrong implementation is the one this
+    /// replaced: a line every time, which is thousands an hour under exactly
+    /// the circumstance the warning was added for.
+    #[test]
+    fn a_refusal_that_persists_is_reported_once_and_then_rarely() {
+        let mut refusals = Refusals::default();
+        let start = std::time::Instant::now();
+
+        assert_eq!(refusals.refused(start), Some(1), "the first is always worth a line");
+
+        // A second of it, at the rate the loop actually runs.
+        let mut at = start;
+        for _ in 0..7 {
+            at += ACCEPT_RETRY_PAUSE;
+            assert_eq!(refusals.refused(at), None, "and then it stops talking");
+        }
+
+        // Past the reporting interval, one line, carrying what the silence held.
+        let later = start + REFUSAL_REPORT_EVERY;
+        assert_eq!(
+            refusals.refused(later),
+            Some(8),
+            "the repeat says how many refusals it is standing for"
+        );
+    }
+
+    /// And the count is what makes the quiet safe to have.
+    #[test]
+    fn recovery_reports_every_refusal_the_quiet_covered() {
+        let mut refusals = Refusals::default();
+        let start = std::time::Instant::now();
+        for i in 0..100 {
+            refusals.refused(start + ACCEPT_RETRY_PAUSE * i);
+        }
+
+        assert_eq!(
+            refusals.recovered(),
+            Some(100),
+            "every refusal is counted, including the ones no line was written for"
+        );
+        assert_eq!(refusals.recovered(), None, "and a socket that never stopped says nothing");
     }
 
     /// The socket has to fit, and the reason it might not is the runtime

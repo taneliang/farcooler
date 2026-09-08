@@ -103,6 +103,11 @@ rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile = "3"
+# `test-util` for tokio's pausable clock, and only here: `IDLE` in
+# `hook_ingress` is deliberately long enough that a person answering a
+# permission never meets it, so the only way to test it in no wall time is a
+# clock the test owns. A dev-dependency, so nothing ships with it.
+tokio = { workspace = true, features = ["test-util"] }
 farcooler-transport.workspace = true
 # The emulator every client runs, so `replay`'s tests can assert what a client
 # ends up holding rather than which bytes were written at it. A dev-dependency
