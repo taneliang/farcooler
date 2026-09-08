@@ -19,6 +19,7 @@
 
 mod agent_host;
 mod daemon_link;
+mod hook;
 mod remote;
 mod runner_install;
 mod runner_pipe;
@@ -188,6 +189,23 @@ enum Command {
         /// and its argument vector never have to survive tmux's shell quoting.
         #[arg(long)]
         preset: Option<String>,
+    },
+    /// Report one agent lifecycle hook to the daemon. Not for humans.
+    ///
+    /// Registered as a lifecycle hook on claude, codex and cursor, so it runs
+    /// on the critical path of somebody's agent. It is never in the way: every
+    /// failure inside it exits 0 and prints nothing, which is why there is no
+    /// error type on the way back out of this arm.
+    Hook {
+        #[arg(long)]
+        agent: String,
+        #[arg(long)]
+        event: String,
+        #[arg(long)]
+        socket: PathBuf,
+        /// Wait for a decision and print it. Only for permission gates.
+        #[arg(long, default_value_t = false)]
+        gating: bool,
     },
     /// Hold a pane open for a surface the client draws. Started by the daemon.
     ///
@@ -858,6 +876,14 @@ async fn run() -> Fallible {
         }
         Command::AgentHost { terminal, socket, worktree, session, preset } => {
             agent_host::run(terminal, socket, worktree, session, preset).await
+        }
+        Command::Hook { agent, event, socket, gating } => {
+            // An unknown agent name is not an error a hook may report: it
+            // exits 0 like every other failure here.
+            if let Ok(agent) = agent.parse() {
+                hook::run(agent, event, socket, gating).await;
+            }
+            Ok(())
         }
         Command::PaneHost { kind } => pane_host(&kind).await,
     }

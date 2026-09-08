@@ -32,6 +32,7 @@ license = "MIT"
 farcooler-protocol = { path = "crates/protocol" }
 farcooler-core = { path = "crates/core" }
 farcooler-agent-core = { path = "crates/agent-core" }
+farcooler-agent-hooks = { path = "crates/agent-hooks" }
 farcooler-acp = { path = "crates/acp" }
 farcooler-codex = { path = "crates/codex" }
 farcooler-claude = { path = "crates/claude" }

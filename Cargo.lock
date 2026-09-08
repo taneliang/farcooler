@@ -905,6 +905,7 @@ dependencies = [
  "farcooler-acp",
  "farcooler-agent",
  "farcooler-agent-core",
+ "farcooler-agent-hooks",
  "farcooler-claude",
  "farcooler-client",
  "farcooler-codex",

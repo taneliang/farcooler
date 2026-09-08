@@ -25,6 +25,7 @@ tailcat = ["farcooler-tailcat/linked"]
 [dependencies]
 farcooler-agent.workspace = true
 farcooler-agent-core.workspace = true
+farcooler-agent-hooks.workspace = true
 farcooler-acp.workspace = true
 farcooler-codex.workspace = true
 farcooler-claude.workspace = true
