@@ -104,7 +104,7 @@ impl Store {
     /// never pays for the extra lookup; only the failure path distinguishes
     /// "nothing there" (`NotFound`) from "something there but the version
     /// moved" (`ResourceConflict`).
-    fn run_versioned(
+    pub(crate) fn run_versioned(
         &self,
         mutate_sql: &str,
         mutate_params: &[&dyn ToSql],
@@ -726,8 +726,8 @@ impl Store {
 
     /// Record which mode this terminal's pane is in, and the session it names.
     ///
-    /// Version-checked like every other mutation: two clients toggling the same
-    /// pane must not both believe they won.
+    /// Version-checked, which not every mutation here is: two clients toggling
+    /// the same pane must not both believe they won.
     ///
     /// A session id is never CLEARED by a mode change. Switching to terminal
     /// mode and back has to land on the same conversation, so `None` means

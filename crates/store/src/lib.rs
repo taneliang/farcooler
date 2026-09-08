@@ -20,7 +20,8 @@ mod store;
 mod tasks;
 
 pub use models::{
-    IdempotencyRecord, Repository, RepositoryRoot, Terminal, TerminalUpdate, Workspace,
+    AcceptanceItem, Actor, IdempotencyRecord, NoteKind, Repository, RepositoryRoot, Task, TaskNote,
+    TaskStatus, TaskUpdate, Terminal, TerminalUpdate, Workspace,
 };
 pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};
 pub use tasks::derive_prefix;

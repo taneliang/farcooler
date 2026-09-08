@@ -1,20 +1,35 @@
-//! The key people and agents actually use: `fc-42`.
+//! The board: a task's current understanding, and the record of how it got
+//! there.
 //!
-//! A repository's task key prefix is computed once, at registration, from its
-//! name -- and then stored, never recomputed. See `derive_prefix` and
+//! The split is the whole design. A task row holds what is understood NOW --
+//! intent, acceptance, constraints, status -- and every field of it may be
+//! revised freely. Everything about how that understanding was reached is a
+//! note, and no note is ever edited: correcting the record is a new note
+//! carrying `supersedes`. There is no function in this module that changes a
+//! note, `task_notes` carries triggers that refuse one, and the reason is that
+//! an agent revising a description to reflect what it has learned overwrites
+//! the reasoning, and the reasoning is the part you want in three weeks.
+//!
+//! The other half of this module is the key people and agents actually use:
+//! `fc-42`. A repository's task key prefix is computed once, at registration,
+//! from its name -- and then stored, never recomputed. See `derive_prefix` and
 //! `Store::assign_task_key_prefix` for why: a prefix that answered to the
 //! CURRENT name would change under a rename, and every key ever written into
 //! a note, spoken aloud, or handed to an agent in its opening prompt would
 //! stop resolving. Keys are the one identifier in this system that leaves the
 //! database.
 
-use rusqlite::{ErrorCode, params};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
+use serde_json::json;
 use uuid::Uuid;
 
-use farcooler_core::Result;
+use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
-use crate::models::uuid_blob;
+use crate::models::{
+    Actor, NoteKind, Task, TaskNote, TaskStatus, TaskUpdate, acceptance_to_json, row_to_task,
+    row_to_task_note, strings_to_json, uuid_blob,
+};
 use crate::store::Store;
 
 /// A repository's task key prefix, from its name.
@@ -75,9 +90,9 @@ impl Store {
     /// registrations racing each other still cannot both win the same
     /// prefix.
     ///
-    /// Bumps `resource_version` in the same `UPDATE`, same as every other
-    /// mutation in this crate, so a watcher or an RPC layer that treats an
-    /// unchanged version as "nothing to refresh" notices this write too.
+    /// Bumps `resource_version` in the same `UPDATE`, so a watcher or an RPC
+    /// layer that treats an unchanged version as "nothing to refresh" notices
+    /// this write too.
     /// There is no `expected_version` parameter here to check against --
     /// unlike this crate's versioned mutations, this one is not a client
     /// request replaying a version it read; it is called exactly once, from
@@ -135,6 +150,382 @@ impl Store {
     }
 }
 
+/// Unix milliseconds, now.
+///
+/// The rest of this crate takes the clock from its caller --
+/// `create_repository_root` and `mark_reviewed` both do -- and the board
+/// deliberately does not. `status_since` and a note's `at` say when a task
+/// actually moved, and moving one is meant to be driven from the wire, where
+/// a timestamp parameter would be a clock a client could set.
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Every column of `tasks` that `row_to_task` reads, in its order. Named once
+/// because several queries share it and a drifting column order is a silent
+/// field swap rather than a compile error.
+const TASK_COLUMNS: &str = "id, repository_id, key, title, status, status_since, \
+     intent, acceptance, constraints, labels, workspace_id, resource_version";
+
+/// The same, for `row_to_task_note`.
+const NOTE_COLUMNS: &str = "id, task_id, kind, actor, at, body, extra, supersedes";
+
+/// The one place `task_notes` is ever written.
+///
+/// Takes a `&Connection` rather than reaching for the store's own so that
+/// `create_task` and `set_task_status` can call it inside their transactions,
+/// which is what makes a row and the note recording it land together or not
+/// at all.
+///
+/// There is no matching update helper, and there must never be one. The table
+/// carries triggers that refuse an UPDATE outright and refuse a DELETE while
+/// the note's task still exists, so an edit path could not work even if
+/// somebody wrote one; correcting the record is `add_note_superseding`.
+fn insert_note(
+    conn: &Connection,
+    task: Uuid,
+    kind: NoteKind,
+    actor: Actor,
+    body: &str,
+    extra: &serde_json::Value,
+    supersedes: Option<Uuid>,
+) -> Result<TaskNote> {
+    let note = TaskNote {
+        id: Uuid::now_v7(),
+        task_id: task,
+        kind,
+        actor,
+        at: now_millis(),
+        body: body.to_string(),
+        extra: extra.clone(),
+        supersedes,
+    };
+    conn.execute(
+        "INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra, supersedes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            uuid_blob(note.id),
+            uuid_blob(note.task_id),
+            note.kind.as_str(),
+            note.actor.to_string(),
+            note.at,
+            note.body,
+            note.extra.to_string(),
+            note.supersedes.map(uuid_blob),
+        ],
+    )
+    .map_err(map_err)?;
+    Ok(note)
+}
+
+impl Store {
+    // ---- the task row: current understanding ----
+
+    /// A new task, in the backlog, carrying this repository's next key.
+    ///
+    /// The key is read before the transaction opens, not inside it, so two
+    /// creations racing can both read the same next key. `UNIQUE
+    /// (repository_id, key)` is the referee when they do: the loser gets a
+    /// conflict rather than a duplicate key.
+    ///
+    /// `actor` is recorded as the first entry in the record. The row has no
+    /// author column -- who made a task is history, not current understanding,
+    /// and history lives in notes.
+    pub fn create_task(&self, repository: Uuid, title: &str, actor: Actor) -> Result<Task> {
+        // Before the connection is locked: `next_task_key` locks it itself,
+        // and the mutex is not reentrant.
+        let key = self.next_task_key(repository)?;
+        let now = now_millis();
+        let task = Task {
+            id: Uuid::now_v7(),
+            key,
+            repository_id: repository,
+            title: title.to_string(),
+            status: TaskStatus::Backlog,
+            status_since: now,
+            intent: String::new(),
+            acceptance: Vec::new(),
+            constraints: Vec::new(),
+            workspace_id: None,
+            labels: Vec::new(),
+            resource_version: 1,
+        };
+
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        tx.execute(
+            "INSERT INTO tasks
+             (id, repository_id, key, title, status, status_since, created_at, resource_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+            params![
+                uuid_blob(task.id),
+                uuid_blob(task.repository_id),
+                task.key,
+                task.title,
+                task.status.as_str(),
+                task.status_since,
+                now,
+            ],
+        )
+        .map_err(map_err)?;
+        insert_note(&tx, task.id, NoteKind::Created, actor, title, &json!({}), None)?;
+        tx.commit().map_err(map_err)?;
+
+        Ok(task)
+    }
+
+    pub fn get_task(&self, task: Uuid) -> Result<Task> {
+        self.conn()
+            .query_row(
+                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"),
+                params![uuid_blob(task)],
+                row_to_task,
+            )
+            .map_err(map_err)
+    }
+
+    /// Every task in a repository, optionally narrowed to one status.
+    ///
+    /// Ordered by when each was created, so a listing read twice reads the
+    /// same both times. `rowid` breaks a tie between two tasks created in the
+    /// same millisecond, which is why the order does not depend on how coarse
+    /// the clock happens to be.
+    pub fn list_tasks(&self, repository: Uuid, status: Option<TaskStatus>) -> Result<Vec<Task>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {TASK_COLUMNS} FROM tasks
+                  WHERE repository_id = ?1 AND (?2 IS NULL OR status = ?2)
+                  ORDER BY created_at, rowid"
+            ))
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(params![uuid_blob(repository), status.map(TaskStatus::as_str)], row_to_task)
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    /// Revise what is currently understood about a task.
+    ///
+    /// Writes no note, deliberately. This is the mutable half of the design:
+    /// intent and acceptance are meant to be rewritten as understanding
+    /// improves, and a log entry per wording change would bury the reasoning
+    /// the record exists to keep.
+    ///
+    /// Version-checked, unlike `set_task_status` below: two clients revising
+    /// the same fields must not both believe they won, while a status move
+    /// touches none of these fields and so is deliberately allowed to happen
+    /// underneath a revision in flight.
+    pub fn update_task(
+        &self,
+        task: Uuid,
+        expected_version: u64,
+        update: &TaskUpdate,
+    ) -> Result<Task> {
+        self.run_versioned(
+            "UPDATE tasks
+                SET title = ?1, intent = ?2, acceptance = ?3, constraints = ?4, labels = ?5,
+                    workspace_id = ?6, resource_version = ?7
+              WHERE id = ?8 AND resource_version = ?9",
+            &[
+                &update.title,
+                &update.intent,
+                &acceptance_to_json(&update.acceptance),
+                &strings_to_json(&update.constraints),
+                &strings_to_json(&update.labels),
+                &update.workspace_id.map(uuid_blob),
+                &(expected_version as i64 + 1),
+                &uuid_blob(task),
+                &(expected_version as i64),
+            ],
+            "SELECT 1 FROM tasks WHERE id = ?1",
+            &[&uuid_blob(task)],
+        )?;
+        self.get_task(task)
+    }
+
+    /// Move a task, and record the move in the same transaction.
+    ///
+    /// A status change that failed to record itself would be a hole in the log
+    /// exactly where it matters, so the row and its `StatusChange` note are
+    /// one write.
+    ///
+    /// Unversioned, unlike `update_task`, and it does not bump
+    /// `resource_version` either -- the same answer `add_note` gives, for the
+    /// same reason. `TaskUpdate` carries no status, so a move and a revision
+    /// touch disjoint fields and neither can lose the other's work; a version
+    /// bump here would only fail a manager's in-flight `update_task` because
+    /// an agent moved the task meanwhile, which is a conflict about nothing.
+    ///
+    /// The cost is real and is paid elsewhere: a client that refetches only
+    /// when `resource_version` moves will not see a status change, so the
+    /// change signal for a status move has to be an announced event rather
+    /// than the version.
+    ///
+    /// Setting the status a task already has does nothing at all -- no row
+    /// write, no note. `status_since` answers "how long has this sat here",
+    /// and re-asserting a status is not sitting somewhere new.
+    pub fn set_task_status(&self, task: Uuid, status: TaskStatus, actor: Actor) -> Result<Task> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+
+        let existing: Task = tx
+            .query_row(
+                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"),
+                params![uuid_blob(task)],
+                row_to_task,
+            )
+            .optional()
+            .map_err(map_err)?
+            .ok_or(DomainError::NotFound)?;
+
+        if existing.status == status {
+            return Ok(existing);
+        }
+
+        let now = now_millis();
+        tx.execute(
+            "UPDATE tasks SET status = ?1, status_since = ?2 WHERE id = ?3",
+            params![status.as_str(), now, uuid_blob(task)],
+        )
+        .map_err(map_err)?;
+        insert_note(
+            &tx,
+            task,
+            NoteKind::StatusChange,
+            actor,
+            &format!("moved from {} to {}", existing.status.as_str(), status.as_str()),
+            &json!({ "from": existing.status.as_str(), "to": status.as_str() }),
+            None,
+        )?;
+        tx.commit().map_err(map_err)?;
+
+        Ok(Task { status, status_since: now, ..existing })
+    }
+
+    // ---- the notes: the record of how it got there ----
+
+    /// Append one entry to a task's record.
+    ///
+    /// There is no counterpart that changes an entry already there. That is
+    /// the whole design: an edited decision is indistinguishable from a
+    /// decision that was always that way, which makes the log worth nothing
+    /// exactly when somebody leans on it.
+    pub fn add_note(
+        &self,
+        task: Uuid,
+        kind: NoteKind,
+        actor: Actor,
+        body: &str,
+        extra: serde_json::Value,
+    ) -> Result<TaskNote> {
+        self.append(task, kind, actor, body, extra, None)
+    }
+
+    /// Correct the record: a NEW entry, naming the one it replaces.
+    ///
+    /// Both entries stay readable forever. "We decided X, then learned better
+    /// and decided Y" is a thing a reader in three weeks needs to see, and an
+    /// in-place edit would have shown them only Y.
+    ///
+    /// The superseded note must be on the same task and of the same kind. The
+    /// column's foreign key only proves it exists somewhere.
+    ///
+    /// Same task, because a note correcting another task's history reads as a
+    /// correction and is not one. Same kind, because the superseded note
+    /// carries no back-pointer -- the only marker that a decision was
+    /// retracted lives on the newer note, so a `Progress` note superseding a
+    /// `Decision` would leave `notes_for(t, Some(Decision))` returning a
+    /// retracted decision with nothing in the result set saying so.
+    pub fn add_note_superseding(
+        &self,
+        task: Uuid,
+        kind: NoteKind,
+        actor: Actor,
+        body: &str,
+        extra: serde_json::Value,
+        supersedes: Uuid,
+    ) -> Result<TaskNote> {
+        let superseded: Option<(Vec<u8>, String)> = self
+            .conn()
+            .query_row(
+                "SELECT task_id, kind FROM task_notes WHERE id = ?1",
+                params![uuid_blob(supersedes)],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(map_err)?;
+        let matches = superseded.is_some_and(|(owner, was)| {
+            owner == task.as_bytes().as_slice() && was == kind.as_str()
+        });
+        if !matches {
+            return Err(DomainError::InvalidArgument { what: "supersedes" });
+        }
+        self.append(task, kind, actor, body, extra, Some(supersedes))
+    }
+
+    /// The shared body of the two appenders, and the only caller of
+    /// `insert_note` outside a transaction.
+    ///
+    /// `StatusChange` and `Created` are refused here. Both are written by the
+    /// transactions that actually move a task, and this pair of appenders is
+    /// meant to be the surface a client reaches: a caller appending a
+    /// `StatusChange` whose `from` and `to` no status change ever produced
+    /// would be writing a lie into a log whose entire claim is that a move is
+    /// recorded rather than inferred.
+    fn append(
+        &self,
+        task: Uuid,
+        kind: NoteKind,
+        actor: Actor,
+        body: &str,
+        extra: serde_json::Value,
+        supersedes: Option<Uuid>,
+    ) -> Result<TaskNote> {
+        if matches!(kind, NoteKind::StatusChange | NoteKind::Created) {
+            return Err(DomainError::InvalidArgument { what: "kind" });
+        }
+        let written = insert_note(&self.conn(), task, kind, actor, body, &extra, supersedes);
+        match written {
+            // A note whose task is gone fails on the foreign key, which maps
+            // to a version conflict -- a sentence telling somebody to retry
+            // something that can never work. It is a missing task, and it
+            // should say so.
+            Err(DomainError::ResourceConflict) if self.get_task(task).is_err() => {
+                Err(DomainError::NotFound)
+            }
+            other => other,
+        }
+    }
+
+    /// A task's record, oldest first, optionally narrowed to one kind.
+    ///
+    /// Oldest first because the record is read to follow how understanding
+    /// moved, and `rowid` breaks a tie between two notes written in the same
+    /// millisecond so that order is the order they were appended in.
+    ///
+    /// Narrowing is what makes the split pay: `notes_for(t, Some(Decision))`
+    /// answers "why is it like this" without reading a wall of progress
+    /// chatter.
+    pub fn notes_for(&self, task: Uuid, kind: Option<NoteKind>) -> Result<Vec<TaskNote>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {NOTE_COLUMNS} FROM task_notes
+                  WHERE task_id = ?1 AND (?2 IS NULL OR kind = ?2)
+                  ORDER BY at, rowid"
+            ))
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(params![uuid_blob(task), kind.map(NoteKind::as_str)], row_to_task_note)
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+}
+
 #[cfg(test)]
 impl Store {
     /// A repository with a real, assigned task key prefix -- not the schema's
@@ -180,6 +571,8 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::models::AcceptanceItem;
 
     #[test]
     fn a_prefix_is_letters_from_the_name_lowercased() {
@@ -257,11 +650,10 @@ mod tests {
         assert_eq!(store.next_task_key(second).unwrap(), format!("{second_prefix}-1"));
     }
 
-    /// `assign_task_key_prefix` is a mutation like any other in this crate,
-    /// and every other one bumps `resource_version` -- a watcher polling on
-    /// version alone must be able to tell a bare `create_repository` (version
-    /// 1, empty prefix) apart from a fully registered one (version 2, real
-    /// prefix). The nearest wrong implementation is exactly what this
+    /// A watcher polling on version alone must be able to tell a bare
+    /// `create_repository` (version 1, empty prefix) apart from a fully
+    /// registered one (version 2, real prefix), so this write bumps
+    /// `resource_version`. The nearest wrong implementation is exactly what this
     /// function looked like before this test existed: an `UPDATE` that
     /// writes `task_key_prefix` and leaves `resource_version` untouched,
     /// which this test would catch by seeing `2` come back as `1`.
@@ -292,5 +684,640 @@ mod tests {
         // would come back "tp-3", not "tp-1".
         assert_eq!(store.next_task_key(two).unwrap(), "tp-1");
         assert_eq!(store.next_task_key(one).unwrap(), "op-3");
+    }
+
+    // ---- the board ----
+
+    /// The one repository every test below works in.
+    ///
+    /// A fixed id rather than whatever `seeded` happened to generate, so a
+    /// test can name the repository without threading it through every call.
+    fn repo() -> Uuid {
+        Uuid::from_u128(0x0000_fc00_0000_0000_0000_0000_0000_0001)
+    }
+
+    /// A store holding exactly that repository, with its task key prefix
+    /// assigned by the real `assign_task_key_prefix`, so the keys these tests
+    /// see are the keys production issues.
+    fn seeded() -> Store {
+        let store = Store::open_in_memory().expect("store");
+        let host = Uuid::now_v7();
+        let root = store.create_repository_root(host, "/repos/board", 0).expect("root");
+        // Inserted directly rather than through `create_repository`, which
+        // picks its own id: `repo()` has to be knowable before the row exists.
+        store
+            .conn()
+            .execute(
+                "INSERT INTO repositories
+                 (id, host_id, repository_root_id, display_name, canonical_git_dir,
+                  remote_summary, resource_version)
+                 VALUES (?1, ?2, ?3, 'Far Cooler', '/repos/board/.git', '', 1)",
+                params![uuid_blob(repo()), uuid_blob(host), uuid_blob(root.id)],
+            )
+            .expect("repository");
+        store.assign_task_key_prefix(repo()).expect("prefix");
+        store
+    }
+
+    #[test]
+    fn a_status_change_records_when_it_happened_and_who_did_it() {
+        let store = seeded();
+        let task = store.create_task(repo(), "fix the thing", Actor::User).unwrap();
+        let before = task.status_since;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let after = store
+            .set_task_status(task.id, TaskStatus::InProgress, Actor::Manager)
+            .unwrap();
+
+        assert_eq!(after.status, TaskStatus::InProgress);
+        assert!(after.status_since > before, "the board's staleness column depends on this");
+
+        let notes = store.notes_for(task.id, None).unwrap();
+        let change = notes.iter().find(|n| n.kind == NoteKind::StatusChange).expect("recorded");
+        assert_eq!(change.actor, Actor::Manager, "who moved it is the point of the log");
+        assert_eq!(change.extra["from"], "backlog");
+        assert_eq!(change.extra["to"], "in_progress");
+    }
+
+    /// The constraint the whole design rests on, checked through the store's
+    /// own API rather than only in the schema.
+    #[test]
+    fn correcting_the_record_supersedes_rather_than_edits() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let first = store
+            .add_note(task.id, NoteKind::Decision, Actor::Manager, "use sqlite", json!({}))
+            .unwrap();
+        let second = store
+            .add_note_superseding(
+                task.id,
+                NoteKind::Decision,
+                Actor::Manager,
+                "use files after all",
+                json!({}),
+                first.id,
+            )
+            .unwrap();
+
+        let notes = store.notes_for(task.id, Some(NoteKind::Decision)).unwrap();
+        assert_eq!(notes.len(), 2, "the old decision is still there; that is the point");
+        assert_eq!(second.supersedes, Some(first.id));
+    }
+
+    #[test]
+    fn a_decision_keeps_what_it_rejected() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let note = store
+            .add_note(
+                task.id,
+                NoteKind::Decision,
+                Actor::Manager,
+                "sqlite, not files",
+                json!({ "rejected": ["files: merge conflicts on every status change"] }),
+            )
+            .unwrap();
+        assert_eq!(note.extra["rejected"][0], "files: merge conflicts on every status change");
+    }
+
+    #[test]
+    fn an_agent_note_names_the_terminal_you_can_go_and_read() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let terminal = Uuid::now_v7();
+        let note = store
+            .add_note(task.id, NoteKind::Progress, Actor::Agent { terminal }, "building", json!({}))
+            .unwrap();
+        assert_eq!(note.actor, Actor::Agent { terminal });
+    }
+
+    #[test]
+    fn listing_filters_by_status_and_reports_staleness() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        store.create_task(repo(), "b", Actor::User).unwrap();
+        store.set_task_status(a.id, TaskStatus::InProgress, Actor::Manager).unwrap();
+
+        let in_progress = store.list_tasks(repo(), Some(TaskStatus::InProgress)).unwrap();
+        assert_eq!(in_progress.len(), 1);
+        assert_eq!(in_progress[0].id, a.id);
+    }
+
+    /// `create_task` is the only thing that issues a key; nothing outside a
+    /// test calls `next_task_key` directly. Two tasks, because one proves
+    /// only that a key was produced: the nearest wrong implementation asks
+    /// `next_task_key` for a key and never writes the row it counted, and so
+    /// hands out `fc-1` twice.
+    #[test]
+    fn a_created_task_carries_the_repositorys_next_key() {
+        let store = seeded();
+        let first = store.create_task(repo(), "first", Actor::User).unwrap();
+        let second = store.create_task(repo(), "second", Actor::User).unwrap();
+        assert_eq!(first.key, "fc-1");
+        assert_eq!(second.key, "fc-2");
+        assert_eq!(first.status, TaskStatus::Backlog, "a task is born in the backlog");
+    }
+
+    /// The mutable half of the design, and the half that writes nothing to the
+    /// record. The nearest wrong implementation is an `update_task` that also
+    /// appends a note "recording" the revision, which would bury the reasoning
+    /// the log exists for under every wording tweak.
+    #[test]
+    fn revising_the_understanding_rewrites_the_row_and_records_nothing() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let notes_before = store.notes_for(task.id, None).unwrap().len();
+        let item = Uuid::now_v7();
+
+        let updated = store
+            .update_task(
+                task.id,
+                task.resource_version,
+                &TaskUpdate {
+                    title: "t, better understood".to_string(),
+                    intent: "the daemon drops the second connection".to_string(),
+                    acceptance: vec![AcceptanceItem {
+                        id: item,
+                        text: "a second client reconnects".to_string(),
+                        met: false,
+                    }],
+                    constraints: vec!["never blocks the reactor".to_string()],
+                    labels: vec!["daemon".to_string()],
+                    workspace_id: None,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(updated.intent, "the daemon drops the second connection");
+        assert_eq!(updated.constraints, ["never blocks the reactor"]);
+        assert_eq!(updated.acceptance.len(), 1);
+        assert_eq!(updated.acceptance[0].id, item, "an acceptance item keeps the id it was given");
+        assert_eq!(updated.resource_version, task.resource_version + 1);
+        assert_eq!(
+            store.notes_for(task.id, None).unwrap().len(),
+            notes_before,
+            "revising current understanding is not an entry in the record"
+        );
+        // Read back rather than trusted from the value `update_task` returned:
+        // acceptance, constraints and labels all round-trip through JSON text
+        // columns, and only a fresh read proves the decoding matches.
+        assert_eq!(store.get_task(task.id).unwrap(), updated);
+    }
+
+    /// Versioned, unlike `set_task_status`: two clients revising the same
+    /// fields must not both believe they won.
+    #[test]
+    fn a_revision_against_a_stale_version_is_refused() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let update = TaskUpdate {
+            title: "t".to_string(),
+            intent: "first".to_string(),
+            acceptance: Vec::new(),
+            constraints: Vec::new(),
+            labels: Vec::new(),
+            workspace_id: None,
+        };
+        store.update_task(task.id, task.resource_version, &update).expect("the first write wins");
+
+        let err = store
+            .update_task(task.id, task.resource_version, &update)
+            .expect_err("the second holds a version that has moved");
+        assert!(matches!(err, DomainError::ResourceConflict), "got {err}");
+    }
+
+    /// Setting the status a task already has is not a change, and must not
+    /// look like one. `status_since` answers "how long has this sat here",
+    /// which is the board's most important column; a manager re-asserting a
+    /// status it read a moment ago would otherwise hide a week-old stall.
+    #[test]
+    fn re_asserting_the_status_a_task_already_has_does_not_restart_its_clock() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let again = store.set_task_status(task.id, TaskStatus::Backlog, Actor::Manager).unwrap();
+
+        assert_eq!(again.status_since, task.status_since, "nothing moved, so the clock did not");
+        assert!(
+            store.notes_for(task.id, Some(NoteKind::StatusChange)).unwrap().is_empty(),
+            "nothing changed, so there is nothing to record"
+        );
+    }
+
+    /// A status change nobody can land is `NotFound`, and leaves nothing
+    /// behind.
+    ///
+    /// This proves the error and the empty table, and deliberately not the
+    /// transaction: the foreign key refuses a note for a missing task whether
+    /// or not one is open. `a_status_change_whose_note_is_refused_leaves_the_row_where_it_was`
+    /// is what actually exercises the rollback.
+    #[test]
+    fn a_status_change_that_cannot_land_writes_no_note() {
+        let store = seeded();
+        let err = store
+            .set_task_status(Uuid::now_v7(), TaskStatus::Done, Actor::Manager)
+            .expect_err("there is no such task");
+        assert!(matches!(err, DomainError::NotFound), "got {err}");
+
+        let notes: i64 = store
+            .conn()
+            .query_row("SELECT count(*) FROM task_notes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(notes, 0);
+    }
+
+    /// A note belongs to its task, and `notes_for` must not hand a reader
+    /// another task's history. The nearest wrong implementation filters on
+    /// `kind` alone.
+    #[test]
+    fn notes_do_not_leak_between_tasks() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        store.add_note(a.id, NoteKind::Decision, Actor::User, "a's", json!({})).unwrap();
+        store.add_note(b.id, NoteKind::Decision, Actor::User, "b's", json!({})).unwrap();
+
+        let for_a = store.notes_for(a.id, Some(NoteKind::Decision)).unwrap();
+        assert_eq!(for_a.len(), 1);
+        assert_eq!(for_a[0].body, "a's");
+        assert_eq!(for_a[0].task_id, a.id);
+    }
+
+    /// The whole point of the split, stated as a test: there is no API that
+    /// edits a note, and the schema refuses one even if somebody writes the
+    /// SQL by hand. `insert_note` is the only writer -- the two appenders and
+    /// the two transactions all go through it -- and it only ever INSERTs, so
+    /// no caller of any of them can reach a row that already exists.
+    #[test]
+    fn there_is_no_path_that_rewrites_a_note() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let note =
+            store.add_note(task.id, NoteKind::Decision, Actor::Manager, "as written", json!({}))
+                .unwrap();
+
+        let err = store
+            .conn()
+            .execute(
+                "UPDATE task_notes SET body = 'rewritten' WHERE id = ?1",
+                params![uuid_blob(note.id)],
+            )
+            .expect_err("the record refuses");
+        assert!(err.to_string().contains("append-only"), "{err}");
+
+        let decisions = store.notes_for(task.id, Some(NoteKind::Decision)).unwrap();
+        assert_eq!(decisions[0].body, "as written");
+    }
+
+    /// `as_str` and `parse` are two lists that have to agree, and nothing but
+    /// this notices when they stop. A single mistyped arm would make one
+    /// status or kind unreadable on the way back out, and `get_status`
+    /// refuses an unreadable status rather than guessing -- so the defect
+    /// would present as one whole task that can no longer be read.
+    #[test]
+    fn every_status_and_kind_round_trips_through_its_stored_form() {
+        for status in [
+            TaskStatus::Backlog,
+            TaskStatus::Todo,
+            TaskStatus::NeedsDecision,
+            TaskStatus::InProgress,
+            TaskStatus::InReview,
+            TaskStatus::Done,
+            TaskStatus::Cancelled,
+        ] {
+            assert_eq!(TaskStatus::parse(status.as_str()), Some(status), "{status:?}");
+        }
+        for kind in [
+            NoteKind::Decision,
+            NoteKind::Finding,
+            NoteKind::Question,
+            NoteKind::Answer,
+            NoteKind::Progress,
+            NoteKind::Comment,
+            NoteKind::StatusChange,
+            NoteKind::Created,
+        ] {
+            assert_eq!(NoteKind::parse(kind.as_str()), Some(kind), "{kind:?}");
+        }
+        let terminal = Uuid::now_v7();
+        for actor in [Actor::User, Actor::Manager, Actor::Agent { terminal }] {
+            assert_eq!(Actor::parse(&actor.to_string()), Some(actor), "{actor}");
+        }
+
+        // And nothing unreadable is quietly accepted as something else.
+        assert_eq!(TaskStatus::parse("nonsense"), None);
+        assert_eq!(NoteKind::parse("nonsense"), None);
+        assert_eq!(Actor::parse("agent:not-a-uuid"), None);
+    }
+
+    /// A note about a task that does not exist is a missing task, not a
+    /// version conflict. The foreign key raises the latter, and a person told
+    /// their write conflicted would retry something that can never work.
+    #[test]
+    fn a_note_on_a_task_that_does_not_exist_says_so() {
+        let store = seeded();
+        let err = store
+            .add_note(Uuid::now_v7(), NoteKind::Comment, Actor::User, "hello?", json!({}))
+            .expect_err("there is no such task");
+        assert!(matches!(err, DomainError::NotFound), "got {err}");
+    }
+
+    /// A correction has to be a correction OF something, on the task it
+    /// claims to correct. The column's foreign key only proves the superseded
+    /// note exists somewhere; a note pointing at another task's history would
+    /// read as a correction and not be one.
+    #[test]
+    fn a_note_cannot_supersede_another_tasks_note() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let theirs =
+            store.add_note(b.id, NoteKind::Decision, Actor::Manager, "b's call", json!({})).unwrap();
+
+        let err = store
+            .add_note_superseding(
+                a.id,
+                NoteKind::Decision,
+                Actor::Manager,
+                "not mine to correct",
+                json!({}),
+                theirs.id,
+            )
+            .expect_err("must refuse");
+        assert!(matches!(err, DomainError::InvalidArgument { .. }), "got {err}");
+        assert_eq!(
+            store.notes_for(b.id, Some(NoteKind::Decision)).unwrap().len(),
+            1,
+            "and the other task's record is untouched"
+        );
+    }
+
+    /// The design's one link, read back OUT of the database rather than taken
+    /// from the struct `add_note_superseding` built on the way in.
+    ///
+    /// `insert_note` returns a value it constructed before the INSERT, so an
+    /// assertion against that value proves only that an argument reached a
+    /// struct field -- it holds just as well if the column is written NULL
+    /// forever. That failure is invisible from inside the process and total
+    /// from outside it: two `Decision` notes with no relation between them,
+    /// so "we decided X, then learned better" reads as two people deciding
+    /// two different things.
+    #[test]
+    fn a_supersede_link_survives_the_database() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let first = store
+            .add_note(task.id, NoteKind::Decision, Actor::Manager, "use sqlite", json!({}))
+            .unwrap();
+        let second = store
+            .add_note_superseding(
+                task.id,
+                NoteKind::Decision,
+                Actor::Manager,
+                "use files after all",
+                json!({}),
+                first.id,
+            )
+            .unwrap();
+
+        let read = store.notes_for(task.id, Some(NoteKind::Decision)).unwrap();
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].id, first.id);
+        assert_eq!(read[0].supersedes, None, "the first entry corrected nothing");
+        assert_eq!(read[1].id, second.id);
+        assert_eq!(
+            read[1].supersedes,
+            Some(first.id),
+            "the link is the design; a NULL here is two unrelated decisions"
+        );
+    }
+
+    /// The same weakness as the supersede link, on the two other fields whose
+    /// entire value is that a reader gets them back out later: the terminal
+    /// you can go and open, and what a decision rejected.
+    #[test]
+    fn an_agents_terminal_and_a_decisions_alternatives_survive_the_database() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let terminal = Uuid::now_v7();
+        store
+            .add_note(task.id, NoteKind::Progress, Actor::Agent { terminal }, "building", json!({}))
+            .unwrap();
+        store
+            .add_note(
+                task.id,
+                NoteKind::Decision,
+                Actor::Manager,
+                "sqlite, not files",
+                json!({ "rejected": ["files: merge conflicts on every status change"] }),
+            )
+            .unwrap();
+
+        let progress = store.notes_for(task.id, Some(NoteKind::Progress)).unwrap();
+        assert_eq!(
+            progress[0].actor,
+            Actor::Agent { terminal },
+            "an entry saying an agent did something is only useful if you can find the pane"
+        );
+
+        let decisions = store.notes_for(task.id, Some(NoteKind::Decision)).unwrap();
+        assert_eq!(
+            decisions[0].extra["rejected"][0],
+            "files: merge conflicts on every status change"
+        );
+    }
+
+    /// `create_task` takes an actor and the task row has no author column, so
+    /// this note is the only place who made a task is ever written down.
+    #[test]
+    fn creating_a_task_records_who_made_it() {
+        let store = seeded();
+        let terminal = Uuid::now_v7();
+        let task = store.create_task(repo(), "fix the thing", Actor::Agent { terminal }).unwrap();
+
+        let created = store.notes_for(task.id, Some(NoteKind::Created)).unwrap();
+        assert_eq!(created.len(), 1, "a task's record starts with how it started");
+        assert_eq!(
+            created[0].actor,
+            Actor::Agent { terminal },
+            "the caller's actor, not whichever one the implementation felt like"
+        );
+        assert_eq!(created[0].body, "fix the thing", "and what it was originally called");
+    }
+
+    /// The row and its note are one write, proven by making the note fail
+    /// AFTER the row update has already succeeded -- which is the only
+    /// arrangement that tells a transaction apart from two statements in a
+    /// row. An implementation without one leaves the task moved and the move
+    /// unrecorded, which is the hole in the log this design cannot afford.
+    #[test]
+    fn a_status_change_whose_note_is_refused_leaves_the_row_where_it_was() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        store
+            .conn()
+            .execute_batch(
+                "CREATE TRIGGER refuse_status_notes BEFORE INSERT ON task_notes
+                 WHEN NEW.kind = 'status_change'
+                 BEGIN SELECT RAISE(ABORT, 'injected: the note cannot be written'); END;",
+            )
+            .expect("fault injection");
+
+        let err = store
+            .set_task_status(task.id, TaskStatus::Done, Actor::Manager)
+            .expect_err("the note cannot be written, so the move cannot happen");
+        assert!(matches!(err, DomainError::ResourceConflict), "got {err}");
+
+        let after = store.get_task(task.id).unwrap();
+        assert_eq!(after.status, TaskStatus::Backlog, "a move the log never saw did not happen");
+        assert_eq!(after.status_since, task.status_since, "nor did its clock move");
+    }
+
+    /// A correction has to correct the same kind of thing. The superseded
+    /// note carries no back-pointer, so the only marker that a decision was
+    /// retracted lives on the newer note -- and a `Progress` note superseding
+    /// a `Decision` leaves `notes_for(t, Some(Decision))`, whose whole job is
+    /// answering "why is it like this", returning a retracted decision with
+    /// nothing in the result set saying so.
+    #[test]
+    fn a_note_cannot_supersede_a_note_of_another_kind() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let decision = store
+            .add_note(task.id, NoteKind::Decision, Actor::Manager, "sqlite", json!({}))
+            .unwrap();
+
+        let err = store
+            .add_note_superseding(
+                task.id,
+                NoteKind::Progress,
+                Actor::Manager,
+                "still going",
+                json!({}),
+                decision.id,
+            )
+            .expect_err("must refuse");
+        assert!(matches!(err, DomainError::InvalidArgument { .. }), "got {err}");
+
+        let decisions = store.notes_for(task.id, Some(NoteKind::Decision)).unwrap();
+        assert_eq!(decisions.len(), 1, "and the decision stands, unretracted");
+        assert_eq!(decisions[0].supersedes, None);
+    }
+
+    /// `StatusChange` and `Created` are written by the two transactions that
+    /// actually move a task, and by nothing else. `add_note` is meant to be
+    /// callable by anyone, so a caller appending a `StatusChange` carrying a
+    /// `from` and `to` that no status change ever produced would be writing a
+    /// lie into a log whose entire claim is that a move is recorded rather
+    /// than inferred.
+    #[test]
+    fn a_caller_cannot_append_a_status_change_or_a_creation_by_hand() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+
+        for forged in [NoteKind::StatusChange, NoteKind::Created] {
+            let err = store
+                .add_note(task.id, forged, Actor::User, "never happened", json!({}))
+                .expect_err("must refuse");
+            assert!(matches!(err, DomainError::InvalidArgument { .. }), "{forged:?}: {err}");
+        }
+
+        assert!(
+            store.notes_for(task.id, Some(NoteKind::StatusChange)).unwrap().is_empty(),
+            "and nothing was written"
+        );
+        assert_eq!(
+            store.notes_for(task.id, Some(NoteKind::Created)).unwrap().len(),
+            1,
+            "the one `create_task` wrote is still the only one"
+        );
+    }
+
+    /// A status move and a revision touch different fields -- `TaskUpdate`
+    /// carries no status -- so neither can lose the other's work, and an agent
+    /// moving a task to `in_review` must not fail a manager's in-flight
+    /// `update_task`. That is exactly the false conflict `add_note` is spared,
+    /// for exactly the same reason, and the pair has to answer the same way.
+    #[test]
+    fn a_status_move_does_not_conflict_with_a_revision_in_flight() {
+        let store = seeded();
+        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let terminal = Uuid::now_v7();
+
+        // The manager holds the version it read; an agent moves the task.
+        store
+            .set_task_status(task.id, TaskStatus::InProgress, Actor::Agent { terminal })
+            .unwrap();
+
+        let revised = store
+            .update_task(
+                task.id,
+                task.resource_version,
+                &TaskUpdate {
+                    title: "t".to_string(),
+                    intent: "now better understood".to_string(),
+                    acceptance: Vec::new(),
+                    constraints: Vec::new(),
+                    labels: Vec::new(),
+                    workspace_id: None,
+                },
+            )
+            .expect("a status move is not a competing revision");
+
+        assert_eq!(revised.intent, "now better understood");
+        assert_eq!(
+            revised.status,
+            TaskStatus::InProgress,
+            "and the move it did not conflict with still stands"
+        );
+    }
+
+    /// The task ROW, read back, for the two writers that return a struct they
+    /// built rather than one they read.
+    ///
+    /// The same defect as the supersede link, one field over: `set_task_status`
+    /// could write any status it liked and return the one it was asked for.
+    ///
+    /// A wrong `status` on the row would still be caught elsewhere --
+    /// `listing_filters_by_status_and_reports_staleness` discards the return
+    /// and goes through `list_tasks`'s own SELECT, and
+    /// `a_status_move_does_not_conflict_with_a_revision_in_flight` reads
+    /// through `update_task`, which ends in a fresh `get_task`. A wrong
+    /// `status_since` is caught here and nowhere else, which is the one that
+    /// matters: that is the board's staleness column.
+    #[test]
+    fn a_created_and_moved_task_reads_back_as_what_was_returned() {
+        let store = seeded();
+
+        let created = store.create_task(repo(), "fix the thing", Actor::User).unwrap();
+        assert_eq!(
+            store.get_task(created.id).unwrap(),
+            created,
+            "the row `create_task` wrote, not the struct it returned"
+        );
+
+        let moved =
+            store.set_task_status(created.id, TaskStatus::InReview, Actor::Manager).unwrap();
+        let row = store.get_task(created.id).unwrap();
+        assert_eq!(row, moved, "the row `set_task_status` wrote, not the struct it returned");
+        assert_eq!(row.status, TaskStatus::InReview);
+        assert_eq!(row.status_since, moved.status_since, "including the board's staleness column");
+    }
+
+    /// A task's key is scoped to its repository, and so is every listing of
+    /// it. The nearest wrong implementation forgets the `repository_id`
+    /// predicate and shows one runner's whole board under every repository.
+    #[test]
+    fn a_listing_shows_only_its_own_repositorys_tasks() {
+        let store = seeded();
+        let other = store.register_repository_for_test("Other Thing");
+        store.create_task(repo(), "ours", Actor::User).unwrap();
+        store.create_task(other, "theirs", Actor::User).unwrap();
+
+        let ours = store.list_tasks(repo(), None).unwrap();
+        assert_eq!(ours.len(), 1);
+        assert_eq!(ours[0].title, "ours");
     }
 }
