@@ -339,27 +339,42 @@ mod tests {
     }
 
     /// Claude's prose already left through `MessageDisplay`'s final flush, so
-    /// its own `Stop` must emit only the turn boundary. Nothing else pins
-    /// `Agent::Claude` staying in the `Stop` arm's pattern: drop it from the
-    /// match and this test is what turns silently falling through to
-    /// `_ => Vec::new()` into a failure, instead of a claude chat parked on
-    /// Working forever with no error anywhere.
+    /// its own `Stop` must emit only the turn boundary, even though this
+    /// payload carries the same `last_assistant_message` field codex's does.
+    /// The field must be present here and non-empty — an absent field would
+    /// let a `Codex`-only-in-name-but-not-in-guard mutation through
+    /// unnoticed, since `payload.get("last_assistant_message")` would return
+    /// `None` regardless of whether the guard was checking the right agent.
     #[test]
     fn claudes_stop_ends_the_turn_without_repeating_its_answer() {
         let mut a = MessageAssembler::new();
         let out = a.accept(
             Agent::Claude,
             "Stop",
-            &serde_json::json!({ "hook_event_name": "Stop", "session_id": "s", "turn_id": "t" }),
+            &serde_json::json!({
+                "hook_event_name": "Stop",
+                "session_id": "s",
+                "turn_id": "t",
+                "last_assistant_message": "TCP slow start is a congestion-control mechanism.",
+            }),
         );
-        assert_eq!(out, vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }]);
+        assert_eq!(
+            out,
+            vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }],
+            "claude's Stop must not repeat last_assistant_message as a Message, even though the field is there to repeat"
+        );
     }
 
     /// A message still accumulating when `Stop` arrives must be left exactly
-    /// as it is. Force-closing it here would mean a genuinely late `final`
-    /// flush lands on a `Closed` marker and gets dropped as a duplicate —
-    /// the same data-loss shape three earlier defects in this assembler
-    /// already came from.
+    /// as it is: the `Stop` arm must not touch `self.state` at all. Force-
+    /// closing it, or clearing its text while leaving it `Open`, would mean
+    /// a genuinely late `final` flush either lands on a `Closed` marker and
+    /// gets dropped as a duplicate, or emits only its own tail instead of
+    /// the full answer — the same data-loss shape three earlier defects in
+    /// this assembler already came from. `pending()` alone cannot tell an
+    /// intact accumulation from one that was silently emptied while staying
+    /// `Open`; only a later `final` flush, and what text it actually
+    /// carries, can.
     #[test]
     fn stop_does_not_disturb_a_message_still_being_assembled() {
         let mut a = MessageAssembler::new();
@@ -376,6 +391,12 @@ mod tests {
             vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }],
             "Stop emits only the turn boundary, nothing pulled early from an open accumulation"
         );
-        assert_eq!(a.pending(), 1, "the open message is untouched by Stop, not force-closed");
+
+        let out = a.accept(Agent::Claude, "MessageDisplay", &display("m1", 1, true, "two"));
+        assert_eq!(
+            out,
+            vec![AgentEvent::Message { role: Role::Agent, text: "one two".to_string(), parent: None }],
+            "the late final flush still carries the full text accumulated before Stop, not just its own tail"
+        );
     }
 }
