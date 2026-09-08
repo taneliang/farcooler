@@ -1548,7 +1548,12 @@ impl Service {
         identifies_claude(&self.registry(), &pane.command, &screen)
     }
 
-    /// Re-open a socket for every terminal already in agent pane mode.
+    /// Open every socket an agent conversation arrives on.
+    ///
+    /// Two of them, and they are separate stories that happen to start at the
+    /// same moment. One socket per terminal in agent pane mode, for the shims;
+    /// one for the whole daemon, for the hooks of sessions nobody toggled into
+    /// anything.
     ///
     /// A daemon restart must not cost a conversation. The shims survived it —
     /// they live in tmux panes, which is the whole reason they are there — and
@@ -1556,7 +1561,47 @@ impl Service {
     /// socket nobody is listening on, forever, and every agent pane goes
     /// permanently silent after the first daemon restart while still looking
     /// perfectly healthy.
+    ///
+    /// Called from `main`, once. Nothing in this workspace can reach a line
+    /// inside `main`, so the bind lives here where a test can drive it — which
+    /// is not a detail: a `listen` that is written, tested and never called is
+    /// precisely how the shim path spent its first week inert, and
+    /// `agent_supervisor::ensure_listening` still carries the note.
     pub fn resume_agent_listeners(&self) {
+        // The hook path, beside the shim path and independent of it. A runner
+        // with no live sessions binds this and never hears anything, which
+        // costs one socket.
+        //
+        // Spawned from `self.hooks` rather than from a `HookIngress` made
+        // here, because the assemblers have to be the ones `remove_terminal`
+        // can evict from — see the field's own doc.
+        //
+        // Not idempotent, unlike `ensure_listening` below, and nothing here
+        // makes it so: `HookIngress::listen` unlinks the path before it binds,
+        // so a second call would take the socket off the first listener and
+        // leave it accepting on a path nothing dials. `main` calls this once,
+        // at startup, and nothing on a running daemon calls it again.
+        let hooks = self.hooks.clone();
+        let agents = self.agents.clone();
+        let root = self.root.clone();
+        tokio::spawn(async move {
+            // `listen` returns only on a listener that is genuinely broken,
+            // and says so at `error!` on its way out. There is nothing to add
+            // here and nothing above this to tell.
+            let _ = hooks
+                .listen(&root, move |terminal, events| {
+                    // Through `record`, which is the tail of `apply`: one
+                    // ring, numbered in one place, whichever transport the
+                    // events arrived on.
+                    //
+                    // The same sink `ensure_listening` passes. Clients read
+                    // this transcript by asking for it; nothing in the daemon
+                    // subscribes to the callback yet.
+                    agents.record(terminal, events, &|_, _| {});
+                })
+                .await;
+        });
+
         let Ok(workspaces) = self.list_workspaces() else { return };
         for ws in workspaces {
             let Ok(terminals) = self.store.list_terminals_for_workspace(ws.id) else { continue };
@@ -4091,5 +4136,126 @@ mod claude_session_adoption_tests {
 
         // A shell is neither chat-capable nor claude.
         assert!(!identifies_claude(&r, "zsh", "e-liang@Mac project % "));
+    }
+}
+
+#[cfg(test)]
+mod hook_wiring_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    /// A hook that fires reaches the transcript clients already read.
+    ///
+    /// End to end, over the real socket, because the failure this is written
+    /// against is not in any of the pieces. `HookIngress::listen` has its own
+    /// tests, `MessageAssembler` has its own tests, and
+    /// `AgentSupervisor::record` has its own tests; the whole feature is still
+    /// inert if nothing binds `h.sock` in a running daemon. That is exactly
+    /// what happened to the shim path — `agent_supervisor::ensure_listening`
+    /// carries the note: "`listen` was written, tested and never called, so
+    /// the socket was never bound ... The whole feature was inert and nothing
+    /// said so."
+    ///
+    /// So this drives the startup call `main.rs` makes and then behaves like
+    /// `farcooler hook`: connect, write one frame, and read the conversation
+    /// back out of the supervisor.
+    #[tokio::test]
+    async fn a_hook_arriving_on_the_socket_lands_in_the_terminals_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+        let root = service
+            .store
+            .create_repository_root(service.host_id, "/tmp/hook-wiring-tests", now_millis())
+            .unwrap();
+        let repository = service
+            .store
+            .create_repository(service.host_id, root.id, "repo", "/tmp/hook-wiring-tests/.git", "")
+            .unwrap();
+        let workspace = service
+            .store
+            .create_workspace(repository.id, "main", "/tmp/hook-wiring-tests", true)
+            .unwrap();
+        let term = service
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        // The pane stays in TERMINAL mode. A claude somebody is running for
+        // themselves is the whole point of the hook path, and putting this one
+        // in agent mode would prove the shim's story instead.
+        let term = service
+            .store
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Terminal,
+                Some("a-session".to_string()),
+            )
+            .unwrap();
+        assert_eq!(term.pane_mode, models::PaneMode::Terminal);
+
+        service.resume_agent_listeners();
+
+        // The bind happens in a spawned task, so the socket appears a moment
+        // after the call rather than during it.
+        let socket = hook_ingress::HookIngress::socket_path(&service.root);
+        let mut stream = None;
+        for _ in 0..200 {
+            if let Ok(s) = tokio::net::UnixStream::connect(&socket).await {
+                stream = Some(s);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let mut stream = stream.unwrap_or_else(|| {
+            panic!("nothing is listening on {} — no live session can report anything", socket.display())
+        });
+
+        let frame = serde_json::to_string(&serde_json::json!({
+            "agent": "claude",
+            "event": "UserPromptSubmit",
+            "payload": { "session_id": "a-session", "prompt": "count the panes" },
+        }))
+        .unwrap();
+        stream.write_all(format!("{frame}\n").as_bytes()).await.unwrap();
+        stream.flush().await.unwrap();
+
+        let mut events = Vec::new();
+        for _ in 0..200 {
+            events = service.agents.replay(term.id, 0, 0).1;
+            if !events.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        assert_eq!(events.len(), 1, "one hook, one event, on the terminal that claims the session");
+        assert_eq!(events[0].seq, 0, "numbered by the supervisor, at the start of this transcript");
+        assert!(
+            matches!(
+                &events[0].event,
+                farcooler_agent::event::AgentEvent::Message {
+                    role: farcooler_agent::event::Role::User,
+                    text,
+                    ..
+                } if text == "count the panes"
+            ),
+            "the prompt somebody typed is what the transcript holds, got {:?}",
+            events[0].event
+        );
+        assert_eq!(
+            service.agents.activity(term.id),
+            farcooler_protocol::v1::AgentActivity::Unspecified,
+            "a user's own words say nothing about what the agent is doing — \
+             `activity_source::observe` returns `None` for them"
+        );
+        // The assembler that half-built that message is one THIS service can
+        // reach, which is the difference between spawning from `self.hooks`
+        // and constructing a `HookIngress` inside the spawn. Both deliver the
+        // event above; only one of them can ever be told the terminal went
+        // away, and `remove_terminal` calls `forget` on this one.
+        assert!(
+            service.hooks.is_tracking(term.id),
+            "the listener is assembling into a `HookIngress` nothing can evict from"
+        );
     }
 }

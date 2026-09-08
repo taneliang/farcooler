@@ -453,13 +453,40 @@ impl AgentSupervisor {
             }
         };
 
+        // The shim's own numbering ends here. It counts positions in THAT
+        // shim's ring rather than in this transcript — the distinction the
+        // epoch above exists for — so it is read for the cursor before the
+        // events are handed on bare.
         if let Ok(mut sessions) = self.sessions.lock() {
             let entry = sessions.entry(terminal).or_default();
             for s in &batch {
-                entry.activity = fold_activity(entry.activity, &s.event);
+                entry.cursor = s.seq + 1;
+            }
+        }
+        self.record(terminal, batch.into_iter().map(|s| s.event).collect(), on_events);
+    }
+
+    /// Fold, number and fan out a batch of events for one terminal.
+    ///
+    /// Split out of `apply` so the hook ingress and the shim share it. They are
+    /// two transports for one conversation and must not number two rings — see
+    /// the epoch discussion above for what happens when a cursor means more
+    /// than one thing.
+    ///
+    /// Takes bare events rather than `Sequenced`, because only one of the two
+    /// transports has a number to offer and neither number is the one this
+    /// keeps: the position in this transcript is worked out below.
+    pub fn record<F>(&self, terminal: Uuid, events: Vec<AgentEvent>, on_events: &F)
+    where
+        F: Fn(Uuid, Vec<Sequenced>),
+    {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            let entry = sessions.entry(terminal).or_default();
+            for event in &events {
+                entry.activity = fold_activity(entry.activity, event);
                 // `SessionStarted` and `ModeSet` are the only events that name
                 // the ACP mode; anything else leaves it as it was.
-                match &s.event {
+                match event {
                     AgentEvent::SessionStarted { agent_mode, available_modes, .. } => {
                         if agent_mode.is_some() {
                             entry.agent_mode = agent_mode.clone();
@@ -480,7 +507,6 @@ impl AgentSupervisor {
                     }
                     _ => {}
                 }
-                entry.cursor = s.seq + 1;
             }
         }
 
@@ -496,10 +522,10 @@ impl AgentSupervisor {
             // is what tells a reader that happened, and there is nothing left
             // here to deduplicate against.
             let base = entry.len() as u64;
-            renumbered = batch
+            renumbered = events
                 .into_iter()
                 .enumerate()
-                .map(|(i, e)| Sequenced { seq: base + i as u64, event: e.event })
+                .map(|(i, event)| Sequenced { seq: base + i as u64, event })
                 .collect();
             entry.extend(renumbered.iter().cloned());
 
@@ -805,6 +831,124 @@ mod tests {
         assert_ne!(second_epoch, first_epoch, "a new shim is a new stream");
         assert_eq!(after.len(), 4, "a stale cursor must not hide the new transcript");
     }
+
+    /// Both sources number one ring.
+    ///
+    /// The shim and the hook path are different transports for the same
+    /// conversation. If each numbered its own, a client's cursor would mean
+    /// two things and the transcript would interleave two sequences of zeros —
+    /// the exact failure the epoch exists to make visible, arriving by a new
+    /// route.
+    #[test]
+    fn events_recorded_from_a_hook_continue_the_same_numbering() {
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        // Collected rather than discarded, because a `record` that numbered
+        // perfectly and never called `on_events` would leave every watching
+        // client waiting on a poll it has no reason to make. Nothing else in
+        // this file asserts the fan-out happens at all.
+        let fanned: Mutex<Vec<(Uuid, Vec<Sequenced>)>> = Mutex::new(Vec::new());
+        let sink = |t: Uuid, batch: Vec<Sequenced>| fanned.lock().unwrap().push((t, batch));
+
+        supervisor.record(
+            terminal,
+            vec![AgentEvent::Message { role: Role::User, text: "one".to_string(), parent: None }],
+            &sink,
+        );
+        supervisor.record(
+            terminal,
+            vec![AgentEvent::Message { role: Role::Agent, text: "two".to_string(), parent: None }],
+            &sink,
+        );
+
+        let (_, events) = supervisor.replay(terminal, 0, 0);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].seq, 0);
+        assert_eq!(events[1].seq, 1, "the second call continues the first's numbering");
+
+        let fanned = fanned.into_inner().unwrap();
+        assert_eq!(
+            fanned.iter().map(|(t, b)| (*t, b.iter().map(|s| s.seq).collect::<Vec<_>>())).collect::<Vec<_>>(),
+            vec![(terminal, vec![0]), (terminal, vec![1])],
+            "each batch is handed on as it is numbered, or a subscriber hears nothing"
+        );
+    }
+
+    /// And it is the ring the SHIM numbers, not a second one beside it.
+    ///
+    /// The test above passes just as happily against a `record` that kept a
+    /// window of its own, because nothing in it ever goes near `apply`. A pane
+    /// can be fed by both — a hook fires from a session whose pane is also in
+    /// agent mode — and a client holds one cursor per terminal, so there is
+    /// exactly one place for it to point.
+    #[test]
+    fn a_recorded_event_continues_the_transcript_the_shim_started() {
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+
+        supervisor.apply(
+            terminal,
+            ShimMessage::Events {
+                events: (0..3)
+                    .map(|seq| Sequenced {
+                        seq,
+                        event: AgentEvent::Message { role: Role::Agent, text: format!("m{seq}"), parent: None },
+                    })
+                    .collect(),
+            },
+            &|_, _| {},
+        );
+        supervisor.record(
+            terminal,
+            vec![AgentEvent::Message { role: Role::User, text: "typed".to_string(), parent: None }],
+            &|_, _| {},
+        );
+
+        let (_, events) = supervisor.replay(terminal, 0, 0);
+        assert_eq!(events.len(), 4, "one transcript, not two");
+        for (index, item) in events.iter().enumerate() {
+            assert_eq!(item.seq, index as u64, "numbered by position, whichever transport brought it");
+        }
+        assert!(
+            matches!(&events[3].event, AgentEvent::Message { text, .. } if text == "typed"),
+            "the recorded event belongs at the end of the shim's transcript, got {:?}",
+            events[3].event
+        );
+    }
+
+    /// Activity is folded for recorded events too, onto what was already there.
+    ///
+    /// A card renders this word and nothing else on the hook path writes it.
+    /// The second assertion is the one with teeth: `Done` is reachable only
+    /// from `Working`, so a `record` that folded each batch from scratch would
+    /// leave the row on `Idle` — a finished turn that never asks for anybody.
+    #[test]
+    fn recording_folds_activity_onto_what_the_terminal_already_had() {
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+
+        supervisor.record(
+            terminal,
+            vec![AgentEvent::Message { role: Role::Agent, text: "working".to_string(), parent: None }],
+            &|_, _| {},
+        );
+        assert_eq!(
+            supervisor.activity(terminal),
+            AgentActivity::Working,
+            "activity is folded for hook events too, or no card ever updates"
+        );
+
+        supervisor.record(
+            terminal,
+            vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }],
+            &|_, _| {},
+        );
+        assert_eq!(
+            supervisor.activity(terminal),
+            AgentActivity::Done,
+            "finished and unseen, which is what puts the pane in front of somebody"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -849,6 +993,47 @@ mod gap_tests {
         );
         // Still a position in this transcript, which is what every cursor in
         // the system counts on.
+        for (index, item) in events.iter().enumerate() {
+            assert_eq!(item.seq, index as u64);
+        }
+    }
+
+    /// A transcript filled by recorded events is bounded and says so too.
+    ///
+    /// The trim, the gap and the renumber are the rest of the tail `record`
+    /// was split out of. A `record` that appended and numbered but stopped
+    /// short of them would pass every other test in this file and grow for as
+    /// long as the daemon stayed up — and the loss would arrive as a shorter
+    /// story with contiguous numbers, which is the one thing this design says
+    /// it will never do.
+    #[test]
+    fn a_transcript_filled_by_recorded_events_is_trimmed_and_says_so() {
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+
+        let mut sent = 0;
+        while sent < TRANSCRIPT_LIMIT + 500 {
+            let batch: Vec<AgentEvent> = (0..250)
+                .map(|i| AgentEvent::Message {
+                    role: farcooler_agent::event::Role::Agent,
+                    text: format!("line {}", sent + i),
+                    parent: None,
+                })
+                .collect();
+            supervisor.record(terminal, batch, &|_, _| {});
+            sent += 250;
+        }
+
+        let (_, events) = supervisor.replay(terminal, 0, 0);
+        assert_eq!(events.len(), TRANSCRIPT_LIMIT, "the window is bounded on this path as well");
+        assert!(
+            matches!(
+                events[0].event,
+                AgentEvent::Gap { reason: AgentGapReason::RingTrimmed }
+            ),
+            "a trimmed transcript must open with the gap that says so, got {:?}",
+            events[0].event
+        );
         for (index, item) in events.iter().enumerate() {
             assert_eq!(item.seq, index as u64);
         }
