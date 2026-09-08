@@ -6,10 +6,18 @@
 //! the terminal keep its promise — an agent whose Far Cooler is broken must
 //! behave exactly as an agent with no Far Cooler at all.
 //!
+//! Failing is only half of it. **Not returning is the worse failure**, because a
+//! failure is over and a hang is somebody's agent stopped mid-turn with nothing
+//! it can do about it. So nothing in here is merely unlikely to block: the whole
+//! errand runs under one deadline, and every way of getting stuck — a parent
+//! that never closes the pipe, a connect, a write into a socket nobody drains,
+//! an answer that never comes — ends the same way, at the same moment, with
+//! nothing printed.
+//!
 //! It is a subcommand of the binary that already ships rather than a second
 //! executable, so there is nothing extra to build, sign, notarize or install.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use farcooler_agent_hooks::wire::{Decision, HookLine, HookVerdict, decode_line, encode_line};
@@ -17,7 +25,7 @@ use farcooler_agent_hooks::Agent;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-/// How long a gating hook waits for the daemon's answer.
+/// The whole of the hook's patience, spent once.
 ///
 /// A name and not a literal at the call site, because it is the knob that
 /// trades "the phone got a chance to answer" against "the agent sat still for
@@ -32,17 +40,62 @@ use tokio::net::UnixStream;
 /// mid-answer wedges the agent for a minute, which is the one thing this file
 /// exists to prevent. So the bound stays short until there is a signal to widen
 /// it on.
-const DECISION_DEADLINE: Duration = Duration::from_millis(400);
+const HOOK_DEADLINE: Duration = Duration::from_millis(400);
 
 pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool) {
+    // One bound over everything, rather than one per way of getting stuck. A
+    // list of blocking calls each with its own guard is only right while
+    // somebody keeps adding to the list; a bound around the lot is a property,
+    // and it is the property this file exists for.
+    let out = tokio::time::timeout(HOOK_DEADLINE, errand(agent, event, socket, gating))
+        .await
+        .unwrap_or_default();
+    if !out.is_empty() {
+        let mut stdout = tokio::io::stdout();
+        if stdout.write_all(out.as_bytes()).await.is_ok() {
+            // Explicit, and honestly: no test can currently make it matter.
+            // std's stdout is line-buffered and a verdict is one line with NO
+            // trailing newline, so it sits in the buffer until something
+            // flushes — but today both routes out of this process do, because
+            // `process::exit` runs the same runtime cleanup a normal return
+            // from `main` does. Measured, not assumed: removing this line
+            // breaks nothing. It stays because the next person to reach for a
+            // harder exit — `libc::_exit`, an abort path, a panic hook — gets
+            // no warning that the verdict is what they dropped, and an agent
+            // that reads nothing defers, which looks exactly like a daemon
+            // having had no opinion.
+            let _ = stdout.flush().await;
+        }
+    }
+    // The deadline above bounds the WORK. This bounds the PROCESS, and they are
+    // not the same thing. `tokio::io::stdin()` reads on the blocking pool, and
+    // dropping that read when the deadline fires does not cancel it; the
+    // runtime's own shutdown then waits for it to finish. So a parent that
+    // writes the payload and holds the pipe open keeps this process alive
+    // forever, having already sailed past every guard above — measured, not
+    // feared. claude closes the pipe when it has written; codex and cursor are
+    // unmeasured, and holding a pipe open is the first thing either of them
+    // could do to us.
+    //
+    // Exiting is also simply what this program means: the errand is done, there
+    // is nothing here to tear down, and the one thing that must survive the
+    // exit was flushed above.
+    std::process::exit(0);
+}
+
+/// Take the payload from the agent, and do the errand with it.
+///
+/// The stdin read is inside the deadline rather than before it because it is a
+/// blocking call like any other. claude closes the pipe when it has written the
+/// payload; codex and cursor are unmeasured, and a parent that writes and then
+/// holds the pipe open would otherwise leave this process alive forever, before
+/// it had reached a single one of the guards below.
+async fn errand(agent: Agent, event: String, socket: PathBuf, gating: bool) -> String {
     let mut payload = Vec::new();
     if tokio::io::AsyncReadExt::read_to_end(&mut tokio::io::stdin(), &mut payload).await.is_err() {
-        return;
+        return String::new();
     }
-    let out = run_with_input(agent, event, socket, gating, payload).await;
-    if !out.is_empty() {
-        let _ = tokio::io::stdout().write_all(out.as_bytes()).await;
-    }
+    run_with_input(agent, event, socket, gating, payload).await
 }
 
 /// The whole of the hook, minus stdin and stdout, so it can be tested.
@@ -60,8 +113,31 @@ async fn run_with_input(
     let Ok(encoded) = encode_line(&line) else {
         return String::new();
     };
+    // The same bound again, over the conversation alone, so this function holds
+    // the property on its own terms and a test can say so. `run`'s bound starts
+    // first and so still dominates: the process is over inside one
+    // `HOOK_DEADLINE`, whichever route it took to get there.
+    tokio::time::timeout(HOOK_DEADLINE, converse(&socket, &encoded, gating))
+        .await
+        .unwrap_or_default()
+}
 
-    let Ok(mut stream) = UnixStream::connect(&socket).await else {
+/// Connect, hand over the frame, and — for a gating event — read the answer.
+///
+/// Every step of this can block against a peer that is merely PRESENT rather
+/// than working. `connect` to an AF_UNIX socket succeeds as soon as it lands in
+/// the listen backlog, with nothing having accepted it, so a daemon paused on a
+/// write of its own, stopped under a debugger, or mid-restart with its socket
+/// still bound is indistinguishable from a healthy one until the send buffer
+/// fills — 8 KB of it on macOS, which a `PreToolUse` carrying a Write's content
+/// clears routinely. The write then waits for a writability that never arrives.
+///
+/// Hence the deadline around the caller's call to this, and not around the read
+/// alone. Being cut off mid-write leaves a partial line on the socket, which is
+/// the right outcome: the daemon reads whole lines, and half a frame with no
+/// newline is discarded at EOF rather than acted on.
+async fn converse(socket: &Path, encoded: &str, gating: bool) -> String {
+    let Ok(mut stream) = UnixStream::connect(socket).await else {
         return String::new();
     };
     if stream.write_all(encoded.as_bytes()).await.is_err() {
@@ -74,8 +150,7 @@ async fn run_with_input(
 
     let mut reply = String::new();
     let mut reader = BufReader::new(&mut stream);
-    let read = tokio::time::timeout(DECISION_DEADLINE, reader.read_line(&mut reply)).await;
-    if !matches!(read, Ok(Ok(n)) if n > 0) {
+    if !matches!(reader.read_line(&mut reply).await, Ok(n) if n > 0) {
         return String::new();
     }
 
@@ -216,7 +291,9 @@ mod tests {
         assert_eq!(
             parsed["hookSpecificOutput"]["hookEventName"],
             "PermissionRequest",
-            "the envelope the agent matches on before it reads the decision"
+            "claude's envelope, measured against 2.1.263 and asserted for claude only: \
+             codex and cursor are sent this same shape unmeasured, and cursor does not \
+             even spell its gate this way"
         );
         assert_eq!(
             parsed["hookSpecificOutput"]["decision"]["message"],
