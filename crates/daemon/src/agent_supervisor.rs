@@ -497,6 +497,24 @@ impl AgentSupervisor {
                     // toggled in again would otherwise keep reporting the old
                     // failure over a chat that is working.
                     entry.failure = None;
+                    // Nor is it mid-turn. A shim that has just finished its
+                    // handshake has done nothing yet, and the activity here is
+                    // whatever the pane's LAST life left behind — the same
+                    // stale `Working` the `Failed` arm below already resets,
+                    // arrived at down the other road.
+                    //
+                    // It costs more than a wrong badge. `guard_toggle` refuses
+                    // a switch out of agent mode while activity says
+                    // `Working`, so a pane whose previous shim died mid-turn
+                    // came back with a perfectly good agent in it that could
+                    // not be switched away from without forcing, over a turn
+                    // that ended with a process that no longer exists.
+                    //
+                    // `Unspecified` rather than `Idle`: nothing has been
+                    // observed of this session yet, and `Idle` is a claim that
+                    // it is waiting for a person. The first event the shim
+                    // sends folds it onward from here.
+                    entry.activity = AgentActivity::Unspecified;
                     // A new shim is a new stream. Readers holding a cursor into
                     // the old one are told by the change, rather than being
                     // left to work it out from numbers that silently mean
@@ -784,6 +802,53 @@ mod tests {
         assert!(
             guard_toggle(supervisor.activity(terminal), false).is_ok(),
             "a pane with no agent in it must not refuse the switch that gets the user out"
+        );
+    }
+
+    #[test]
+    fn a_shim_that_has_just_established_is_not_still_mid_turn() {
+        // The other half of the stale-`Working` problem. `Failed` resets the
+        // activity; `Established` did not, so a pane whose previous shim died
+        // in the middle of a turn came back with a working agent in it and an
+        // activity that still said `Working` — and `guard_toggle` refuses the
+        // switch out of agent mode on exactly that word, over a turn that
+        // ended with a process that no longer exists.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        supervisor.apply(
+            terminal,
+            ShimMessage::Events {
+                events: vec![Sequenced {
+                    seq: 0,
+                    event: AgentEvent::Message {
+                        role: Role::Agent,
+                        text: "half a turn".into(),
+                        parent: None,
+                    },
+                }],
+            },
+            &|_, _| {},
+        );
+        assert_eq!(
+            supervisor.activity(terminal),
+            AgentActivity::Working,
+            "the fixture must start from a turn in flight"
+        );
+
+        supervisor.apply(
+            terminal,
+            ShimMessage::Established { session_id: "s".into(), available_modes: Vec::new() },
+            &|_, _| {},
+        );
+
+        assert_eq!(
+            supervisor.activity(terminal),
+            AgentActivity::Unspecified,
+            "a shim that has just finished its handshake has done nothing yet"
+        );
+        assert!(
+            guard_toggle(supervisor.activity(terminal), false).is_ok(),
+            "and the toggle out must not be refused over a turn that is not running"
         );
     }
 
