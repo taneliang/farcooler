@@ -3072,7 +3072,7 @@ async fn every_board_write_announces_and_says_whose_work_it_was() {
         farcooler_protocol::v1::TaskBlockSet {
             task_id: task.id.clone(),
             blocked_by: other.id.clone(),
-            reason: "waiting on the parser".into(),
+            reason: Some("waiting on the parser".into()),
             clear: false,
             actor: agent.clone(),
         },
@@ -3081,6 +3081,38 @@ async fn every_board_write_announces_and_says_whose_work_it_was() {
     let Some(result::Value::TaskBlockList(blocks)) = result.value else { panic!("wrong result") };
     assert_eq!(blocks.items.len(), 1);
     assert_eq!(blocks.items[0].blocked_by, other.id);
+    assert_eq!(blocks.items[0].reason, "waiting on the parser");
+    assert_eq!(announced_actor(&mut events, &task.id).await.as_deref(), Some(agent.as_str()));
+
+    // Re-asserting the same edge with no `reason` on the wire leaves the reason
+    // alone, all the way through the route rather than only in the store.
+    //
+    // This layer is where the data loss actually lived: the store took a
+    // `&str`, so `block` had to produce one, and `&req.reason` on an
+    // implicit-presence field produced `""` for every caller who had not
+    // mentioned a reason -- which the upsert then wrote over words somebody
+    // had taken the trouble to type. Any `unwrap_or_default()` put back here
+    // fails this assertion; the store's own tests would not notice, because
+    // the store would be doing exactly what it was told.
+    let mut again = request("task.block");
+    again.payload = Some(request::Payload::TaskBlockSet(
+        farcooler_protocol::v1::TaskBlockSet {
+            task_id: task.id.clone(),
+            blocked_by: other.id.clone(),
+            reason: None,
+            clear: false,
+            actor: agent.clone(),
+        },
+    ));
+    let result = client.call(again).await.expect("task.block again");
+    let Some(result::Value::TaskBlockList(blocks)) = result.value else { panic!("wrong result") };
+    // The count holds at one under every way of getting the reason wrong, so
+    // it cannot fire first and leave the line below it unproven.
+    assert_eq!(blocks.items.len(), 1, "re-asserting an edge writes no second one");
+    assert_eq!(
+        blocks.items[0].reason, "waiting on the parser",
+        "saying nothing about the reason is not the same as saying it is nothing"
+    );
     assert_eq!(announced_actor(&mut events, &task.id).await.as_deref(), Some(agent.as_str()));
 
     // Clearing it is the same route in the other direction, and announces too.
@@ -3089,7 +3121,7 @@ async fn every_board_write_announces_and_says_whose_work_it_was() {
         farcooler_protocol::v1::TaskBlockSet {
             task_id: task.id.clone(),
             blocked_by: other.id.clone(),
-            reason: String::new(),
+            reason: None,
             clear: true,
             actor: agent.clone(),
         },
@@ -3106,7 +3138,7 @@ async fn every_board_write_announces_and_says_whose_work_it_was() {
         farcooler_protocol::v1::TaskBlockSet {
             task_id: task.id.clone(),
             blocked_by: task.id.clone(),
-            reason: "itself".into(),
+            reason: Some("itself".into()),
             clear: false,
             actor: agent,
         },

@@ -247,8 +247,9 @@ pub enum TaskCmd {
         ///
         /// Blocking a pair that is already blocked replaces the reason, so
         /// correcting one is the same command again with the new words. Left
-        /// off, it writes an empty reason — which on a pair already blocked
-        /// clears the reason that was there.
+        /// off entirely, it leaves the reason already on the edge standing —
+        /// re-asserting a block says nothing about why. Pass `--reason ""` to
+        /// clear one on purpose.
         #[arg(long)]
         reason: Option<String>,
         /// Remove the edge instead of writing it.
@@ -603,7 +604,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                     request::Payload::TaskBlockSet(pb::TaskBlockSet {
                         task_id: id_bytes(id),
                         blocked_by: blocker.id.clone(),
-                        reason: reason.unwrap_or_default(),
+                        reason,
                         clear,
                         actor: actor.to_string(),
                     }),
@@ -626,7 +627,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 return Ok(());
             }
             for b in &l.items {
-                println!("{} waits on {}  {}", task.key, short_bytes(&b.blocked_by), b.reason);
+                println!("{} waits on {}{}", task.key, short_bytes(&b.blocked_by), said(&b.reason));
             }
         }
 
@@ -748,7 +749,8 @@ fn render_show(detail: &pb::TaskDetail, fields: &[&str], notes: Option<NoteKind>
     if wants(fields, "blocks") && !detail.blocks.is_empty() {
         out.push_str("blocks\n");
         for b in &detail.blocks {
-            out.push_str(&format!("  waits on {}  {}\n", short_bytes(&b.blocked_by), b.reason));
+            let on = short_bytes(&b.blocked_by);
+            out.push_str(&format!("  waits on {on}{}\n", said(&b.reason)));
         }
     }
     // `--notes` is a request for history, so it brings the section with it.
@@ -848,6 +850,17 @@ fn note_json(note: &pb::TaskNote) -> serde_json::Value {
         "extra": parsed_extra(&note.extra_json),
         "supersedes": note.supersedes.as_ref().map(|b| uuid_of(b).to_string()),
     })
+}
+
+/// A reason as it appears after a blocker's id, or nothing at all.
+///
+/// A block may legitimately carry no reason -- a first block written without
+/// `--reason` stores an empty one -- and the naive `"{id}  {reason}"` printed
+/// that as an id followed by two spaces and a void, which reads as a line the
+/// renderer got wrong rather than as a block nobody explained. Absent is a
+/// state this surface has to say nothing about, so it says nothing.
+fn said(reason: &str) -> String {
+    if reason.is_empty() { String::new() } else { format!("  {reason}") }
 }
 
 fn block_json(block: &pb::TaskBlock) -> serde_json::Value {
@@ -1439,6 +1452,49 @@ mod tests {
             note(NoteKind::Finding, "the trigger refuses an update", ""),
         ];
         pb::TaskDetail { task: Some(task), notes, blocks: Vec::new() }
+    }
+
+    /// A block nobody explained still prints as a finished line.
+    ///
+    /// `set_block` stores an empty reason for a block written without
+    /// `--reason`, so this is a state the board really holds, not a
+    /// hypothetical -- and `"waits on {id}  {reason}"` rendered it as an id
+    /// followed by two spaces and nothing, which reads as a renderer that
+    /// dropped something rather than as a block with nothing to say.
+    ///
+    /// Both directions are asserted, because either alone is passable by a
+    /// renderer that has stopped doing its job: dropping the reason entirely
+    /// satisfies the trailing-space check, and always prepending the two
+    /// spaces satisfies the reason check.
+    #[test]
+    fn a_block_with_no_reason_prints_no_trailing_gap() {
+        let mut detail = a_task_with_history();
+        let explained = id_bytes(Uuid::now_v7());
+        let bare = id_bytes(Uuid::now_v7());
+        detail.blocks = vec![
+            pb::TaskBlock {
+                task_id: detail.task.as_ref().unwrap().id.clone(),
+                blocked_by: explained.clone(),
+                reason: "needs the migration first".to_string(),
+            },
+            pb::TaskBlock {
+                task_id: detail.task.as_ref().unwrap().id.clone(),
+                blocked_by: bare.clone(),
+                reason: String::new(),
+            },
+        ];
+
+        let rendered = render_show(&detail, &["blocks"], None);
+
+        let (explained, bare) = (short_bytes(&explained), short_bytes(&bare));
+        assert!(
+            rendered.contains(&format!("waits on {explained}  needs the migration first\n")),
+            "a reason that was written is still printed beside its blocker:\n{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("waits on {bare}\n")),
+            "a block with no reason ends at its blocker, with no gap after it:\n{rendered}"
+        );
     }
 
     /// A manager surveying thirty tasks must be able to ask for three fields.

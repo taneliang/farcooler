@@ -553,10 +553,10 @@ impl Store {
     ///
     /// An upsert, and idempotent like `unblock` below. `task_blocks` is keyed
     /// `PRIMARY KEY (task_id, blocked_by)`, so blocking a pair that is
-    /// already blocked conflicts on that key; `ON CONFLICT DO UPDATE SET
-    /// reason = excluded.reason` takes the new reason rather than refusing.
-    /// The row keeps its `rowid`, so a correction does not move the edge to
-    /// the end of `blocks_for`'s listing.
+    /// already blocked conflicts on that key; `ON CONFLICT DO UPDATE` takes
+    /// the new reason rather than refusing. The row keeps its `rowid`, so a
+    /// correction does not move the edge to the end of `blocks_for`'s
+    /// listing.
     ///
     /// This was once a plain `INSERT`, which meant a caller correcting a
     /// `reason` got the constraint violation `map_err` turns into
@@ -572,10 +572,35 @@ impl Store {
     /// is meant to be revisable in place. The reason a block was written is
     /// not history worth keeping once it is known to be wrong.
     ///
-    /// One consequence worth knowing at the call site: the reason is taken
-    /// from every successful call, so re-blocking a pair while passing an
-    /// empty `reason` overwrites whatever reason was there with nothing. A
-    /// caller that means to leave a reason alone must not call this.
+    /// `reason` is an `Option` because "correct this reason" and "re-assert
+    /// this block" are different intents and the second one must not destroy
+    /// the first one's words. `None` leaves whatever reason is on the edge
+    /// standing (`DO UPDATE SET reason = COALESCE(?3, reason)` -- the bound
+    /// NULL falls through to the column's own value); `Some("")` clears it,
+    /// because that is a caller saying so; `Some(words)` replaces it.
+    ///
+    /// This was briefly `SET reason = excluded.reason` against a `&str`, with
+    /// the CLI handing it `reason.unwrap_or_default()`. Re-blocking a pair
+    /// without `--reason` therefore wrote `""` over a reason someone had
+    /// taken the trouble to write. Before the upsert that same call was
+    /// refused outright, so the words were safe by accident; the upsert
+    /// removed the accident without putting anything in its place.
+    ///
+    /// Note that `excluded.reason` is NOT usable in the update: the insert
+    /// half has to spell `COALESCE(?3, '')` because the column is
+    /// `NOT NULL DEFAULT ''` (see `migrate.rs`), so `excluded.reason` on an
+    /// absent reason would read `''` and clear the row -- which is the exact
+    /// bug. The update half binds `?3` again, unflattened.
+    ///
+    /// A FIRST block with no reason still writes `''` rather than NULL. The
+    /// column is `NOT NULL`, `TaskBlock::reason` is a `String`, and the READ
+    /// side of the wire (`TaskBlock`, not `TaskBlockSet`) is a plain
+    /// `string`; NULL would need a migration that relaxed a constraint --
+    /// not additive -- and an `Option` through the whole read path, to draw
+    /// a distinction no reader could see. "No reason" and "an
+    /// empty reason" are the same fact once written; the difference this
+    /// function cares about is between the two only at the moment of WRITING,
+    /// and that is what the `Option` argument carries.
     ///
     /// Refuses a cycle. Before inserting, this walks the graph forward from
     /// `blocked_by` -- what `blocked_by` itself is blocked on, and what
@@ -611,7 +636,7 @@ impl Store {
     /// a block to share a repository, a same-repository check here, or
     /// widening the bound to every task the runner holds -- is a design
     /// decision for this plan's owner, not one this function has made.
-    pub fn set_block(&self, task: Uuid, blocked_by: Uuid, reason: &str) -> Result<()> {
+    pub fn set_block(&self, task: Uuid, blocked_by: Uuid, reason: Option<&str>) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
 
@@ -637,8 +662,8 @@ impl Store {
         }
 
         tx.execute(
-            "INSERT INTO task_blocks (task_id, blocked_by, reason) VALUES (?1, ?2, ?3)
-             ON CONFLICT (task_id, blocked_by) DO UPDATE SET reason = excluded.reason",
+            "INSERT INTO task_blocks (task_id, blocked_by, reason) VALUES (?1, ?2, COALESCE(?3, ''))
+             ON CONFLICT (task_id, blocked_by) DO UPDATE SET reason = COALESCE(?3, reason)",
             params![uuid_blob(task), uuid_blob(blocked_by), reason],
         )
         .map_err(map_err)?;
@@ -1672,8 +1697,8 @@ mod tests {
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
         let b = store.create_task(repo(), "b", Actor::User).unwrap();
         let c = store.create_task(repo(), "c", Actor::User).unwrap();
-        store.set_block(a.id, b.id, "needs the migration first").unwrap();
-        store.set_block(a.id, c.id, "needs the CLI").unwrap();
+        store.set_block(a.id, b.id, Some("needs the migration first")).unwrap();
+        store.set_block(a.id, c.id, Some("needs the CLI")).unwrap();
 
         let blocks = store.blocks_for(a.id).unwrap();
         assert_eq!(blocks.len(), 2);
@@ -1697,9 +1722,9 @@ mod tests {
         let store = seeded();
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
         let b = store.create_task(repo(), "b", Actor::User).unwrap();
-        store.set_block(a.id, b.id, "needs the cheap lookup").unwrap();
+        store.set_block(a.id, b.id, Some("needs the cheap lookup")).unwrap();
 
-        store.set_block(a.id, b.id, "corrected reason").expect("a re-set is not a conflict");
+        store.set_block(a.id, b.id, Some("corrected reason")).expect("a re-set is not a conflict");
 
         let blocks = store.blocks_for(a.id).unwrap();
         assert_eq!(blocks.len(), 1, "a corrected block is the same edge, not a second one");
@@ -1718,10 +1743,10 @@ mod tests {
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
         let b = store.create_task(repo(), "b", Actor::User).unwrap();
         let c = store.create_task(repo(), "c", Actor::User).unwrap();
-        store.set_block(a.id, b.id, "needs the migration first").unwrap();
-        store.set_block(a.id, c.id, "needs the CLI").unwrap();
+        store.set_block(a.id, b.id, Some("needs the migration first")).unwrap();
+        store.set_block(a.id, c.id, Some("needs the CLI")).unwrap();
 
-        store.set_block(a.id, b.id, "needs the migration and the backfill").unwrap();
+        store.set_block(a.id, b.id, Some("needs the migration and the backfill")).unwrap();
 
         let blocks = store.blocks_for(a.id).unwrap();
         assert_eq!(blocks.len(), 2, "correcting one edge adds none");
@@ -1731,23 +1756,87 @@ mod tests {
         assert_eq!(blocks[1].reason, "needs the CLI");
     }
 
-    /// The sharp edge of taking the reason from every call, pinned because
-    /// `set_block`'s doc, `TaskBlockSet` in the proto and `task block
-    /// --reason`'s help all now promise it: a re-block carrying no reason
-    /// writes no reason, rather than leaving the previous one standing. A
-    /// caller that means to leave a reason alone must not call this at all.
+    /// Re-asserting a block says nothing about its reason, so the reason
+    /// stands. This is the data loss the `Option` exists to close: while
+    /// `set_block` took a `&str` and updated `SET reason = excluded.reason`,
+    /// and the CLI handed it `reason.unwrap_or_default()`, `farcooler task
+    /// block A --on B` with no `--reason` silently wrote `""` over words
+    /// somebody had taken the trouble to write. Before the upsert that call
+    /// was refused outright, so the words were safe by accident.
+    ///
+    /// Read back through `blocks_for`, not from anything this test passed in
+    /// or that `set_block` built: `Ok(())` says only that nothing refused,
+    /// and the row is the only witness to which reason survived.
+    ///
+    /// The length assertion above the reason one is a check, not the check.
+    /// Every way of getting the reason wrong here -- `SET reason = ?3`, `SET
+    /// reason = excluded.reason`, `COALESCE(reason, ?3)` with the arguments
+    /// the wrong way round -- still leaves exactly one row, so the count
+    /// cannot fire first and leave the equality under test unproven.
     #[test]
-    fn re_blocking_with_no_reason_clears_the_reason_that_was_there() {
+    fn re_blocking_without_a_reason_leaves_the_reason_that_was_there() {
         let store = seeded();
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
         let b = store.create_task(repo(), "b", Actor::User).unwrap();
-        store.set_block(a.id, b.id, "needs the cheap lookup").unwrap();
+        store.set_block(a.id, b.id, Some("needs the migration first")).unwrap();
 
-        store.set_block(a.id, b.id, "").unwrap();
+        store.set_block(a.id, b.id, None).expect("re-asserting a block is not a conflict");
 
         let blocks = store.blocks_for(a.id).unwrap();
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].reason, "", "an empty reason is written, not ignored");
+        assert_eq!(blocks.len(), 1, "re-asserting an edge writes no second one");
+        assert_eq!(
+            blocks[0].reason,
+            "needs the migration first",
+            "saying nothing about the reason is not the same as saying it is nothing"
+        );
+    }
+
+    /// Clearing a reason on purpose still works, and it is the same call
+    /// with an empty string rather than nothing at all. `Some("")` is a
+    /// caller who typed `--reason ""` and meant it; `None` is a caller who
+    /// did not mention the reason. Collapsing those two back together is
+    /// what made this bug, so both are pinned.
+    ///
+    /// The count here holds at one under every mutation that gets the reason
+    /// wrong, for the same reason it does in the test above, so the equality
+    /// is what has to catch them.
+    #[test]
+    fn re_blocking_with_an_empty_reason_clears_the_reason_that_was_there() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        store.set_block(a.id, b.id, Some("needs the cheap lookup")).unwrap();
+
+        store.set_block(a.id, b.id, Some("")).unwrap();
+
+        let blocks = store.blocks_for(a.id).unwrap();
+        assert_eq!(blocks.len(), 1, "clearing a reason does not remove the edge");
+        assert_eq!(blocks[0].reason, "", "an empty reason asked for is an empty reason written");
+    }
+
+    /// A FIRST block with no reason writes an empty one, not NULL --
+    /// `task_blocks.reason` is `NOT NULL DEFAULT ''` (see `migrate.rs`) and
+    /// `TaskBlock::reason` is a `String`, so the insert half has to flatten
+    /// `None` with `COALESCE(?3, '')` before it reaches the column.
+    ///
+    /// Which makes this test the one that would catch that flattening being
+    /// dropped: binding NULL straight into a `NOT NULL` column is a
+    /// constraint violation `map_err` turns into `ResourceConflict`, so the
+    /// `unwrap` below would fail before any assertion ran. The same
+    /// flattening must NOT appear in the update half -- `excluded.reason`
+    /// there reads `''` and clears the row, which is the bug the test above
+    /// pins.
+    #[test]
+    fn a_first_block_with_no_reason_reads_back_as_an_empty_reason() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+
+        store.set_block(a.id, b.id, None).expect("a block with no reason is still a block");
+
+        let blocks = store.blocks_for(a.id).unwrap();
+        assert_eq!(blocks.len(), 1, "the edge is written even with nothing to say about it");
+        assert_eq!(blocks[0].reason, "", "no reason reads back as an empty one, never as NULL");
     }
 
     /// A cycle is a deadlock the manager would never resolve, and it would
@@ -1757,9 +1846,9 @@ mod tests {
         let store = seeded();
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
         let b = store.create_task(repo(), "b", Actor::User).unwrap();
-        store.set_block(a.id, b.id, "").unwrap();
+        store.set_block(a.id, b.id, Some("")).unwrap();
 
-        let err = store.set_block(b.id, a.id, "").expect_err("must refuse");
+        let err = store.set_block(b.id, a.id, Some("")).expect_err("must refuse");
         assert!(
             format!("{err}").contains("cycle"),
             "the refusal says what is wrong: {err}"
@@ -1779,13 +1868,13 @@ mod tests {
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
         let b = store.create_task(repo(), "b", Actor::User).unwrap();
         let c = store.create_task(repo(), "c", Actor::User).unwrap();
-        store.set_block(a.id, b.id, "a waits on b").unwrap();
-        store.set_block(b.id, c.id, "b waits on c").unwrap();
+        store.set_block(a.id, b.id, Some("a waits on b")).unwrap();
+        store.set_block(b.id, c.id, Some("b waits on c")).unwrap();
 
         // Closing the loop: c waits on a, and a already (transitively) waits
         // on c. Neither `c == a` nor a row already blocking `a` on `c` is
         // true yet, so only a real walk from `a` through `b` to `c` notices.
-        let err = store.set_block(c.id, a.id, "c waits on a").expect_err("must refuse");
+        let err = store.set_block(c.id, a.id, Some("c waits on a")).expect_err("must refuse");
         assert!(format!("{err}").contains("cycle"), "the refusal says what is wrong: {err}");
 
         // And the graph is exactly as it was before the refused call: two
@@ -1815,14 +1904,14 @@ mod tests {
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
 
         // p waits on both q1 and q2, and both of those wait on the same r.
-        store.set_block(p.id, q1.id, "").unwrap();
-        store.set_block(p.id, q2.id, "").unwrap();
-        store.set_block(q1.id, r.id, "").unwrap();
-        store.set_block(q2.id, r.id, "").unwrap();
+        store.set_block(p.id, q1.id, Some("")).unwrap();
+        store.set_block(p.id, q2.id, Some("")).unwrap();
+        store.set_block(q1.id, r.id, Some("")).unwrap();
+        store.set_block(q2.id, r.id, Some("")).unwrap();
 
         // a's walk from p reaches r twice -- once through q1, once through
         // q2 -- which is the revisit this test exists to exercise.
-        store.set_block(a.id, p.id, "").expect("a diamond below p is not a cycle");
+        store.set_block(a.id, p.id, Some("")).expect("a diamond below p is not a cycle");
 
         assert_eq!(store.blocks_for(a.id).unwrap().len(), 1);
         assert_eq!(store.blocks_for(p.id).unwrap().len(), 2, "p still waits on both q1 and q2");
@@ -1832,7 +1921,7 @@ mod tests {
     fn a_task_cannot_block_on_itself() {
         let store = seeded();
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        assert!(store.set_block(a.id, a.id, "").is_err());
+        assert!(store.set_block(a.id, a.id, Some("")).is_err());
     }
 
     /// The other half of the pair, read back OUT of the database rather than
@@ -1845,8 +1934,8 @@ mod tests {
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
         let b = store.create_task(repo(), "b", Actor::User).unwrap();
         let c = store.create_task(repo(), "c", Actor::User).unwrap();
-        store.set_block(a.id, b.id, "needs the migration first").unwrap();
-        store.set_block(a.id, c.id, "needs the CLI").unwrap();
+        store.set_block(a.id, b.id, Some("needs the migration first")).unwrap();
+        store.set_block(a.id, c.id, Some("needs the CLI")).unwrap();
 
         store.unblock(a.id, b.id).unwrap();
 
@@ -1875,11 +1964,11 @@ mod tests {
         let store = seeded();
         let a = store.create_task(repo(), "a", Actor::User).unwrap();
         let b = store.create_task(repo(), "b", Actor::User).unwrap();
-        store.set_block(a.id, b.id, "").unwrap();
-        store.set_block(b.id, a.id, "").expect_err("still a cycle while a->b stands");
+        store.set_block(a.id, b.id, Some("")).unwrap();
+        store.set_block(b.id, a.id, Some("")).expect_err("still a cycle while a->b stands");
 
         store.unblock(a.id, b.id).unwrap();
-        store.set_block(b.id, a.id, "now it's b waiting on a").unwrap();
+        store.set_block(b.id, a.id, Some("now it's b waiting on a")).unwrap();
 
         let blocks = store.blocks_for(b.id).unwrap();
         assert_eq!(blocks.len(), 1);

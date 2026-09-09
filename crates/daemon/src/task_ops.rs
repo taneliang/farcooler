@@ -450,6 +450,12 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
 /// Answers with everything the task is waiting on rather than with the one
 /// edge, so a client renders the whole answer from one reply.
 ///
+/// `reason` carries presence and is passed through with it, not flattened:
+/// absent leaves the reason on an existing edge alone, `""` clears it. An
+/// `unwrap_or_default()` here would put the two back together and make every
+/// re-block an erasure -- which is exactly what it did until this route
+/// stopped doing it.
+///
 /// A cycle is refused by the store. A deadlock the manager would never resolve
 /// presents as a queue that quietly stopped moving rather than as an error,
 /// which is exactly the failure this board exists to make visible.
@@ -465,7 +471,7 @@ pub fn block(
     if req.clear {
         svc.store.unblock(id, blocked_by)?;
     } else {
-        svc.store.set_block(id, blocked_by, &req.reason)?;
+        svc.store.set_block(id, blocked_by, req.reason.as_deref())?;
     }
 
     let blocks = svc.store.blocks_for(id)?;

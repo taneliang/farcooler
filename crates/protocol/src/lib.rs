@@ -454,6 +454,54 @@ pub const MAX_ROWS: u32 = 200;
 mod tests {
     use super::*;
 
+    /// `TaskBlockSet.reason` carries presence, and the bytes have to agree
+    /// with what its comment in the proto promises, because that promise is
+    /// the whole argument that adding `optional` did not break the wire.
+    ///
+    /// Three claims, each checked as bytes rather than reasoned about:
+    ///
+    ///   - `None` puts no field 3 on the wire, so an old daemon reading it
+    ///     sees the `string` default `""` -- which is what an old client
+    ///     meaning "no reason given" already sent.
+    ///   - `Some("")` DOES put field 3 on the wire (tag byte `0x1a`, length
+    ///     `0`), which is the difference presence buys: an implicit-presence
+    ///     `string` cannot say "empty on purpose" at all.
+    ///   - a plain proto3 `string` still vanishes when empty -- `actor` here,
+    ///     the neighbouring field -- which is why an OLD client that sent
+    ///     `reason: ""` is read as absent by a new daemon and so preserves a
+    ///     reason rather than clearing it.
+    ///
+    /// That last one is the compatibility note worth having pinned: the
+    /// upgrade makes old clients safe by default and costs them only the
+    /// ability to clear a reason, which they had no way to ask for anyway.
+    #[test]
+    fn an_absent_block_reason_is_absent_on_the_wire_and_an_empty_one_is_not() {
+        use prost::Message;
+
+        let absent =
+            v1::TaskBlockSet { reason: None, actor: String::new(), ..Default::default() };
+        assert!(
+            !absent.encode_to_vec().contains(&0x1au8),
+            "no reason means no field 3, which an old daemon reads as the default"
+        );
+
+        let empty =
+            v1::TaskBlockSet { reason: Some(String::new()), ..Default::default() };
+        assert_eq!(
+            empty.encode_to_vec(),
+            vec![0x1a, 0x00],
+            "an empty reason asked for on purpose is sent, or nobody could ever clear one"
+        );
+
+        // The neighbouring plain `string`, to show that vanishing-when-empty
+        // is proto3's rule and not something this field opted into.
+        let actor = v1::TaskBlockSet { actor: String::new(), ..Default::default() };
+        assert!(
+            actor.encode_to_vec().is_empty(),
+            "an implicit-presence string is not sent when it is empty"
+        );
+    }
+
     /// Every channel, so a match arm added to one list and forgotten in another
     /// fails here rather than shipping.
     const ALL_CHANNELS: [Channel; 4] =

@@ -2628,8 +2628,7 @@ message TaskNoteAppend {
 // keyed on the pair: writing an edge that is already there takes the new
 // `reason` rather than refusing, and clearing one that was never there
 // succeeds. Correcting a `reason` is therefore one call, the same call that
-// wrote it — which also means a write that leaves `reason` empty overwrites
-// the reason that was there with nothing.
+// wrote it.
 //
 // This changed: writing an edge used to come back `resource-conflict` when
 // the pair was already blocked. A block is current understanding of what a
@@ -2639,7 +2638,24 @@ message TaskNoteAppend {
 message TaskBlockSet {
   bytes task_id = 1;
   bytes blocked_by = 2;
-  string reason = 3;
+  // Why the task has to wait. Three states, not two, which is the whole
+  // reason this field carries presence: absent leaves whatever reason is on
+  // the edge standing, `""` clears it, and any other value replaces it.
+  //
+  // "Correct this reason" and "re-assert this block" are different intents,
+  // and while this was a plain `string` the second one destroyed the first
+  // one's words — a re-block carrying no reason wrote an empty one over
+  // whatever was there. Presence is what lets a caller say nothing about the
+  // reason rather than being forced to say something about it.
+  //
+  // Adding `optional` does not break the wire. A present value encodes
+  // exactly as the plain `string` did, so an old daemon reads a new client;
+  // and a proto3 `string` was never sent at all when it was empty, so an old
+  // client that passed `""` for "no reason given" already put no bytes on the
+  // wire and is read here as absent — which is now the safe answer rather
+  // than the destructive one. The one thing an old client can no longer do is
+  // CLEAR a reason, because it has no way to distinguish the two.
+  optional string reason = 3;
   // Remove the edge instead of writing it. Clearing one that was never there
   // is not an error: the state afterward is the same either way.
   bool clear = 4;
