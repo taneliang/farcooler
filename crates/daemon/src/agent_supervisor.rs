@@ -238,6 +238,10 @@ impl AgentSupervisor {
             term.resource_version,
             term.pane_mode,
             Some(session_id.to_string()),
+            // The pane is not replaced by learning its conversation's name.
+            // Bumping the epoch here would hand every attached client a full
+            // re-read of a terminal that did not change.
+            false,
         ) {
             tracing::warn!(
                 terminal = %terminal,

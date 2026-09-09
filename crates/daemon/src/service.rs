@@ -1797,6 +1797,9 @@ impl Service {
                 term.resource_version,
                 models::PaneMode::Terminal,
                 Some(sid.clone()),
+                // A terminal nothing has attached to yet has no offsets to
+                // invalidate; the epoch it was created with is still true.
+                false,
             )?
         } else {
             term
@@ -2029,6 +2032,9 @@ impl Service {
                 term.resource_version,
                 models::PaneMode::Terminal,
                 Some(sid.clone()),
+                // A terminal nothing has attached to yet has no offsets to
+                // invalidate; the epoch it was created with is still true.
+                false,
             )?
         } else {
             term
@@ -2225,6 +2231,9 @@ impl Service {
             restarted.resource_version,
             models::PaneMode::Terminal,
             term.agent_session_id.clone(),
+            // `update_terminal` above already bumped the epoch for this very
+            // respawn. Bumping again here would count one new runtime twice.
+            false,
         )
     }
 
@@ -2248,6 +2257,9 @@ impl Service {
             term.resource_version,
             models::PaneMode::Changes,
             None,
+            // Called from `create_terminal` and `split_terminal` on a terminal
+            // whose window has not been made yet. Nothing is reading it.
+            false,
         )
     }
 
@@ -2518,7 +2530,20 @@ impl Service {
         }
 
         self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
-        let updated = self.store.set_pane_mode(id, term.resource_version, pane_mode, session_id)?;
+        // The epoch moves, and this is the one caller of `set_pane_mode` for
+        // which it must.
+        //
+        // A toggle respawns the pane: the program a client was reading is gone
+        // and a different one is writing to the same terminal id. Every byte
+        // offset held against it — `from_seq` on the output stream, whatever a
+        // client cached of the screen — now points into a stream that does not
+        // exist. The epoch is the whole mechanism for saying that, and this
+        // wrote `resource_version + 1` alone, so a client saw the mode change,
+        // kept its offsets, and resumed reading a pane that had restarted
+        // under it. `restart_terminal` bumps for exactly the same event; this
+        // path simply never did.
+        let updated =
+            self.store.set_pane_mode(id, term.resource_version, pane_mode, session_id, true)?;
         let Some(harness) = harness.filter(|_| pane_mode == models::PaneMode::Agent) else {
             return Ok(updated);
         };
@@ -3678,7 +3703,13 @@ mod restart_wiring_tests {
             .unwrap();
         let term = svc
             .store
-            .set_pane_mode(term.id, term.resource_version, models::PaneMode::Terminal, Some(sid.clone()))
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Terminal,
+                Some(sid.clone()),
+                false,
+            )
             .unwrap();
 
         svc.restart_terminal(term.id).await.expect("restart");
@@ -3763,7 +3794,13 @@ mod restart_wiring_tests {
             .unwrap();
         let term = svc
             .store
-            .set_pane_mode(term.id, term.resource_version, models::PaneMode::Agent, Some(sid.clone()))
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Agent,
+                Some(sid.clone()),
+                false,
+            )
             .unwrap();
         assert_eq!(term.pane_mode, models::PaneMode::Agent, "the fixture must start as a chat");
 
@@ -3891,6 +3928,7 @@ mod agent_mode_wiring_tests {
         let (_dir, svc, ws) = a_workspace().await;
         let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
         let before = svc.pane_of(term.id).await.expect("a pane").pane_id;
+        let before_epoch = svc.store.get_terminal(term.id).unwrap().epoch;
 
         let updated = svc
             .set_pane_mode(term.id, models::PaneMode::Agent, false)
@@ -3940,6 +3978,21 @@ mod agent_mode_wiring_tests {
             svc.store.get_terminal(term.id).unwrap().command_preset,
             "claude",
             "the record learns which agent the pane actually held"
+        );
+
+        // The epoch, which is how every attached client learns its offsets
+        // are worthless. The toggle respawned the pane: a different program is
+        // writing to this terminal id now, and a client that kept reading from
+        // `from_seq` where it left off is reading a stream that ended. This
+        // wrote `resource_version + 1` alone, so the mode change was
+        // announced and the restart under it was not.
+        //
+        // Read back out of the store rather than off `updated`, because the
+        // question is what the row holds.
+        assert_eq!(
+            svc.store.get_terminal(term.id).unwrap().epoch,
+            before_epoch + 1,
+            "a toggle is a new runtime in the pane, and the epoch has to say so"
         );
 
         // Nothing is left running an adapter after the assertions.
@@ -4896,6 +4949,7 @@ mod hook_wiring_tests {
                 term.resource_version,
                 models::PaneMode::Terminal,
                 Some("a-session".to_string()),
+                false,
             )
             .unwrap();
         assert_eq!(term.pane_mode, models::PaneMode::Terminal);
@@ -5038,7 +5092,7 @@ mod hook_wiring_tests {
             // only thing left that can refuse it.
             let term = service
                 .store
-                .set_pane_mode(term.id, term.resource_version, mode, None)
+                .set_pane_mode(term.id, term.resource_version, mode, None, false)
                 .unwrap();
             assert_eq!(term.pane_mode, mode);
             panes.push((worktree, term));
@@ -5171,6 +5225,7 @@ mod hook_wiring_tests {
                 term.resource_version,
                 models::PaneMode::Terminal,
                 Some("a-declared-session".to_string()),
+                false,
             )
             .unwrap();
         assert_eq!(
@@ -5187,6 +5242,7 @@ mod hook_wiring_tests {
                 term.resource_version,
                 models::PaneMode::Agent,
                 Some("a-declared-session".to_string()),
+                false,
             )
             .unwrap();
         assert_eq!(term.pane_mode, models::PaneMode::Agent);
@@ -5228,6 +5284,7 @@ mod hook_wiring_tests {
                 term.resource_version,
                 models::PaneMode::Terminal,
                 Some("a-codex-session".to_string()),
+                false,
             )
             .unwrap();
 
@@ -5391,6 +5448,7 @@ mod hook_wiring_tests {
                 term.resource_version,
                 models::PaneMode::Terminal,
                 Some("a-cursor-session".to_string()),
+                false,
             )
             .unwrap();
 

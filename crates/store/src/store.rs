@@ -768,12 +768,28 @@ impl Store {
     /// A session id is never CLEARED by a mode change. Switching to terminal
     /// mode and back has to land on the same conversation, so `None` means
     /// "leave it alone" rather than "forget it".
+    ///
+    /// `bump_epoch` is asked for rather than decided here, and the parameter
+    /// exists because the callers genuinely disagree. A pane-mode TOGGLE
+    /// replaces the program in the pane, so every byte offset a client holds
+    /// against this terminal is meaningless and the epoch has to move or the
+    /// client will keep reading from a position in a stream that no longer
+    /// exists. The other callers replace nothing: `create_terminal` and
+    /// `split_terminal` write a declared session id onto a terminal that has
+    /// not been drawn yet, `mark_changes_pane` runs on the same brand new
+    /// terminal, `restart_terminal` has already bumped the epoch once for the
+    /// same event through `update_terminal`, and the supervisor's
+    /// `remember_session` writes down a name for a conversation that is
+    /// already running in the pane it is named after. A blanket bump inside
+    /// here would make all five of those hand every attached client a full
+    /// re-read for nothing.
     pub fn set_pane_mode(
         &self,
         id: Uuid,
         expected_version: u64,
         pane_mode: PaneMode,
         agent_session_id: Option<String>,
+        bump_epoch: bool,
     ) -> Result<Terminal> {
         let changed = self
             .conn()
@@ -781,6 +797,7 @@ impl Store {
                 r#"UPDATE terminals
                       SET pane_mode = ?1,
                           agent_session_id = COALESCE(?2, agent_session_id),
+                          epoch = epoch + ?5,
                           resource_version = resource_version + 1
                     WHERE id = ?3 AND resource_version = ?4"#,
                 params![
@@ -788,6 +805,7 @@ impl Store {
                     agent_session_id,
                     id.as_bytes().as_slice(),
                     expected_version as i64,
+                    i64::from(bump_epoch),
                 ],
             )
             .map_err(map_err)?;
@@ -1327,11 +1345,47 @@ mod tests {
         let ws = s.create_workspace(repo.id, "feature/x", "/wt/session-id", false).unwrap();
         let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
         let updated =
-            s.set_pane_mode(t.id, t.resource_version, PaneMode::Agent, Some("abc-123".into())).unwrap();
+            s.set_pane_mode(t.id, t.resource_version, PaneMode::Agent, Some("abc-123".into()), false)
+                .unwrap();
         assert_eq!(updated.pane_mode, PaneMode::Agent);
 
         let reopened = s.get_terminal(t.id).unwrap();
         assert_eq!(reopened.agent_session_id.as_deref(), Some("abc-123"));
+    }
+
+    /// The epoch is the caller's to ask for, and both answers have to work.
+    ///
+    /// A pane-mode TOGGLE replaces the program in the pane, so every offset a
+    /// client holds against that terminal is stale and the epoch is how it is
+    /// told. Every other caller of this writes a session id onto a pane that
+    /// nothing has replaced, and a bump there would cost every attached client
+    /// a full re-read for no change. Read back off the row rather than off the
+    /// returned struct: the value that matters is the one SQLite holds.
+    #[test]
+    fn only_a_caller_that_asks_for_it_moves_the_epoch() {
+        let s = store();
+        let host = Uuid::now_v7();
+        let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
+        let repo = s.create_repository(host, root.id, "name", "/gitdir", "origin").unwrap();
+        let ws = s.create_workspace(repo.id, "feature/x", "/wt/epochs", false).unwrap();
+        let t = s.create_terminal(ws.id, "t", "claude", TerminalIntent::Running, 120, 40).unwrap();
+        let started = s.get_terminal(t.id).unwrap().epoch;
+
+        let quiet = s
+            .set_pane_mode(t.id, t.resource_version, PaneMode::Terminal, Some("s-1".into()), false)
+            .unwrap();
+        assert_eq!(
+            s.get_terminal(t.id).unwrap().epoch,
+            started,
+            "writing down a conversation's name replaces nothing in the pane"
+        );
+
+        s.set_pane_mode(t.id, quiet.resource_version, PaneMode::Agent, None, true).unwrap();
+        assert_eq!(
+            s.get_terminal(t.id).unwrap().epoch,
+            started + 1,
+            "a toggle respawns the pane, and every offset held against it is stale"
+        );
     }
 
     /// The join a live agent session arrives on.
@@ -1351,10 +1405,10 @@ mod tests {
 
         let mine = s.create_terminal(ws.id, "a", "claude", TerminalIntent::Running, 80, 24).unwrap();
         let mine =
-            s.set_pane_mode(mine.id, mine.resource_version, PaneMode::Terminal, Some("s-1".into()))
+            s.set_pane_mode(mine.id, mine.resource_version, PaneMode::Terminal, Some("s-1".into()), false)
                 .unwrap();
         let other = s.create_terminal(ws.id, "b", "claude", TerminalIntent::Running, 80, 24).unwrap();
-        s.set_pane_mode(other.id, other.resource_version, PaneMode::Terminal, Some("s-2".into()))
+        s.set_pane_mode(other.id, other.resource_version, PaneMode::Terminal, Some("s-2".into()), false)
             .unwrap();
         // A terminal that has declared nothing must never be swept up by a
         // lookup for a session, which is what `agent_session_id = NULL`
@@ -1384,7 +1438,7 @@ mod tests {
         for title in ["a", "b"] {
             let t =
                 s.create_terminal(ws.id, title, "claude", TerminalIntent::Running, 80, 24).unwrap();
-            s.set_pane_mode(t.id, t.resource_version, PaneMode::Terminal, Some("shared".into()))
+            s.set_pane_mode(t.id, t.resource_version, PaneMode::Terminal, Some("shared".into()), false)
                 .unwrap();
         }
 

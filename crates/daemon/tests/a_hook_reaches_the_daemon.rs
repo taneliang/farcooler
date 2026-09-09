@@ -68,6 +68,7 @@ fn store_with_intents(
                     term.resource_version,
                     PaneMode::Terminal,
                     Some(session.to_string()),
+                    false,
                 )
                 .unwrap();
         }
