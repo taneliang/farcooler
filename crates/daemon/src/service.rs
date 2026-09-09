@@ -19,7 +19,7 @@ use farcooler_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
 use crate::runtime::Runtime;
-use crate::{agent_supervisor, git, hook_ingress, paths, session_discovery};
+use crate::{agent_supervisor, foreground, git, hook_ingress, paths, session_discovery};
 
 /// Launch presets. Coding agents run through the user's configured shell so
 /// startup files, version managers, direnv, and aliases behave like a
@@ -508,6 +508,79 @@ fn identifies_claude(
     registry
         .identify(command, screen)
         .is_some_and(|rules| rules.preset == "claude")
+}
+
+/// The conversation a pane switching into agent mode may adopt, if any.
+///
+/// Pulled out of `Service::set_pane_mode` for one reason: the argument this
+/// hands `discover_claude_session` for `started_after` is the thing that was
+/// wrong, and until it lived in a function a test could call, no test could
+/// see it. `session_discovery`'s own
+/// `a_session_older_than_the_pane_is_not_a_candidate` passes and always has —
+/// it calls discovery directly with a floor of its own choosing, so it pins
+/// what the parameter DOES and is blind to production having disabled it.
+/// A test of adoption has to be a test of the caller.
+///
+/// `pid` is the process the pane is showing, and `None` means the `ps` walk
+/// could not name one. Both that and an unreadable start time refuse: there is
+/// no safe default floor. A floor old enough to never wrongly exclude is the
+/// epoch, which is the bug; a floor recent enough to be safe is a guess about
+/// a process nobody could see. Starting a fresh conversation is the answer
+/// that cannot attach a person to somebody else's thread.
+async fn session_to_adopt(
+    terminal: Uuid,
+    home: &Path,
+    worktree: &Path,
+    pid: Option<i32>,
+    claimed: &[String],
+) -> Option<String> {
+    let Some(pid) = pid else {
+        tracing::info!(
+            terminal = %terminal,
+            "nothing is running in this pane to date a conversation against; starting a new one"
+        );
+        return None;
+    };
+    let Some(started_after) = foreground::started_at(pid).await else {
+        tracing::info!(
+            terminal = %terminal,
+            pid,
+            "this pane's process has no readable start time; starting a new one"
+        );
+        return None;
+    };
+    match session_discovery::discover_claude_session(home, worktree, started_after) {
+        Ok(found) if !claimed.contains(&found) => {
+            // The success path was the silent one. A refusal said so; an
+            // ADOPTION -- the case where this pane is about to render
+            // somebody's conversation -- recorded nothing at all, so "which
+            // session did it pick, and what else was on the table" had no
+            // answer after the fact.
+            tracing::info!(
+                terminal = %terminal,
+                worktree = %worktree.display(),
+                session = %found,
+                claimed = ?claimed,
+                started_after = ?started_after,
+                "adopting the conversation found in this pane"
+            );
+            Some(found)
+        }
+        Ok(found) => {
+            tracing::info!(
+                session = %found,
+                "the only session here belongs to another terminal; starting a new one"
+            );
+            None
+        }
+        // Ambiguous, absent, or older than the process in the pane: start
+        // fresh rather than guess which of several conversations this pane
+        // meant.
+        Err(e) => {
+            tracing::info!(error = %e, "no session to adopt; starting a new one");
+            None
+        }
+    }
 }
 
 /// The `command_preset` to store once a pane is known to be hosting `harness`,
@@ -2233,13 +2306,23 @@ impl Service {
             Some(existing) => Some(existing),
             // Adoption, and it has to be earned rather than assumed.
             //
-            // This used to search unconditionally with a start time of the
-            // UNIX epoch, which defeated the staleness guard entirely, and
-            // then swallowed the ambiguity refusal with `.ok()`. So a SHELL
-            // pane switching to agent mode quietly adopted whatever single
-            // session happened to exist in the worktree — routinely the
-            // conversation belonging to a different pane, which then showed
-            // the same transcript under two identities.
+            // Three things a SHELL pane switching to agent mode is asked for
+            // before it may render an existing conversation: that no other
+            // terminal already claims it, that the lookup was unambiguous, and
+            // that the transcript is newer than the process running in this
+            // pane. The third arrived last and is the reason for the `ps`
+            // below. Until it did, this searched with a start time of the UNIX
+            // epoch — older than every file on the disk, so the staleness
+            // guard filtered nothing — and a pane in a reused worktree quietly
+            // adopted the previous task's conversation, or another live pane's,
+            // and then showed one transcript under two identities.
+            //
+            // What an honest floor costs, plainly: a claude that has not
+            // written a transcript yet leaves nothing newer than itself to
+            // find, so that pane adopts nothing and starts fresh. That is the
+            // correct answer — there is no evidence tying any file in that
+            // directory to this pane — and it will read as a regression to
+            // anyone who had been relying on the stale adoption.
             None if self.pane_can_adopt_a_claude_session(id).await => {
                 let home = directories::UserDirs::new()
                     .map(|d| d.home_dir().to_path_buf())
@@ -2255,41 +2338,16 @@ impl Service {
                     .filter(|t| t.id != id)
                     .filter_map(|t| t.agent_session_id)
                     .collect();
-                match session_discovery::discover_claude_session(
-                    &home,
-                    Path::new(&ws.worktree_path),
-                    std::time::SystemTime::UNIX_EPOCH,
-                ) {
-                    Ok(found) if !claimed.contains(&found) => {
-                        // The success path was the silent one. A refusal said
-                        // so; an ADOPTION -- the case where this pane is about
-                        // to render somebody's conversation -- recorded
-                        // nothing at all, so "which session did it pick, and
-                        // what else was on the table" had no answer after the
-                        // fact.
-                        tracing::info!(
-                            terminal = %id,
-                            worktree = %ws.worktree_path,
-                            session = %found,
-                            claimed = ?claimed,
-                            "adopting the conversation found in this pane"
-                        );
-                        Some(found)
-                    }
-                    Ok(found) => {
-                        tracing::info!(
-                            session = %found,
-                            "the only session here belongs to another terminal; starting a new one"
-                        );
-                        None
-                    }
-                    // Ambiguous or absent: start fresh rather than guess which
-                    // of several conversations this pane meant.
-                    Err(e) => {
-                        tracing::info!(error = %e, "no session to adopt; starting a new one");
-                        None
-                    }
-                }
+                // The pid of what this pane is showing, which is what dates
+                // the conversation. The whole-host walk is reused rather than
+                // a second, narrower `ps` written next to it: this runs once,
+                // on a person switching a pane into agent mode, alongside a
+                // tmux refresh and a screen capture that each cost more.
+                let pid = foreground::read()
+                    .await
+                    .pane(pane.tty.trim_start_matches("/dev/"))
+                    .map(|running| running.pid);
+                session_to_adopt(id, &home, Path::new(&ws.worktree_path), pid, &claimed).await
             }
             None => None,
         };
@@ -2799,6 +2857,132 @@ pub fn stable_host_id(install_id: &str) -> Uuid {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scratch `$HOME` and a scratch worktree, wired the way Claude Code
+    /// wires them: `~/.claude/projects/<munged realpath of the worktree>`.
+    ///
+    /// The REALPATH, because on macOS a `TempDir` lands under `/var`, which is
+    /// a symlink into `/private/var`, and Claude Code munges the resolved cwd.
+    fn adoption_scratch() -> (tempfile::TempDir, tempfile::TempDir, PathBuf) {
+        let home = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        let resolved = std::fs::canonicalize(worktree.path()).unwrap();
+        let munged = session_discovery::project_dir_name(&resolved);
+        let projects = home.path().join(".claude/projects").join(munged);
+        std::fs::create_dir_all(&projects).unwrap();
+        (home, worktree, projects)
+    }
+
+    /// Move a file's mtime into the past, so it predates this test process.
+    ///
+    /// The floor under test is when a process started, and the only process
+    /// this test can honestly ask about is itself. So "older than the pane"
+    /// has to mean "older than this binary", and the only way to write a file
+    /// older than a program that is already running is to backdate it.
+    fn backdate(path: &Path, seconds_ago: u64) {
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(seconds_ago);
+        let secs = when.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let stamp = libc::timeval { tv_sec: secs as libc::time_t, tv_usec: 0 };
+        let times = [stamp, stamp];
+        let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: `utimes` reads a NUL-terminated path and a two-element
+        // `timeval` array, both of which outlive the call.
+        let rc = unsafe { libc::utimes(c_path.as_ptr(), times.as_ptr()) };
+        assert_eq!(rc, 0, "could not backdate {}", path.display());
+    }
+
+    /// THE test for this path, and it is a test of the CALLER.
+    ///
+    /// `session_discovery` already pins what `started_after` does when it is
+    /// given a real value — `a_session_older_than_the_pane_is_not_a_candidate`
+    /// has passed since the day it was written. What nothing could see is that
+    /// production handed that parameter `SystemTime::UNIX_EPOCH`, which is
+    /// older than every file on every disk, so the filter removed nothing and
+    /// a pane in a reused worktree adopted the previous task's conversation.
+    /// A guard whose only test calls past the code that disables it is not a
+    /// guard.
+    ///
+    /// So this calls `session_to_adopt`, which is the function that CHOOSES
+    /// the floor, and hands it a live pid — this process — with a transcript
+    /// backdated to before this process started. Put the epoch back at the
+    /// call site and the stale file becomes the sole candidate and is adopted,
+    /// and this goes red.
+    #[tokio::test]
+    async fn a_transcript_older_than_the_process_in_the_pane_is_not_adopted() {
+        let (home, worktree, projects) = adoption_scratch();
+        let stale = projects.join("last-months-task.jsonl");
+        std::fs::write(&stale, "{}").unwrap();
+        backdate(&stale, 3600);
+
+        let mine = Some(std::process::id() as i32);
+        let adopted =
+            session_to_adopt(Uuid::nil(), home.path(), worktree.path(), mine, &[]).await;
+        assert_eq!(adopted, Option::None, "a file older than the pane is not this pane's");
+    }
+
+    /// The other half, without which the test above passes for the wrong
+    /// reason.
+    ///
+    /// A floor of "now", or of any moment in the future, would refuse
+    /// everything and satisfy the assertion above while breaking adoption
+    /// outright. This pins that a transcript written AFTER the process in the
+    /// pane started is still adopted, which is the behaviour the feature
+    /// exists for.
+    #[tokio::test]
+    async fn a_transcript_written_after_the_process_started_is_adopted() {
+        let (home, worktree, projects) = adoption_scratch();
+        // Written now, and this test binary started before now.
+        std::fs::write(projects.join("this-panes-conversation.jsonl"), "{}").unwrap();
+
+        let mine = Some(std::process::id() as i32);
+        let adopted =
+            session_to_adopt(Uuid::nil(), home.path(), worktree.path(), mine, &[]).await;
+        assert_eq!(adopted.as_deref(), Some("this-panes-conversation"));
+    }
+
+    /// No start time means no adoption — never a floor invented to stand in
+    /// for one.
+    ///
+    /// This is the shape the original bug would come back in: a `ps` that
+    /// fails, a pid that has gone, a pane with nothing in the foreground, and
+    /// somewhere a `.unwrap_or(UNIX_EPOCH)` to keep the code tidy. That
+    /// fallback is the defect, reintroduced behind a fresh coat of paint, so
+    /// the adoptable transcript here is deliberately a good one: only a
+    /// refusal that comes from not knowing the floor can leave it alone.
+    #[tokio::test]
+    async fn a_pane_with_no_readable_start_time_adopts_nothing() {
+        let (home, worktree, projects) = adoption_scratch();
+        std::fs::write(projects.join("perfectly-adoptable.jsonl"), "{}").unwrap();
+
+        // The `ps` walk named no foreground process for this pane's tty.
+        let none = session_to_adopt(Uuid::nil(), home.path(), worktree.path(), None, &[]).await;
+        assert_eq!(none, Option::None);
+
+        // A pid `ps` will not answer for: the process is gone, or never was.
+        let gone =
+            session_to_adopt(Uuid::nil(), home.path(), worktree.path(), Some(i32::MAX), &[])
+                .await;
+        assert_eq!(gone, Option::None);
+    }
+
+    /// Recency is necessary and not sufficient: a fresh transcript another
+    /// terminal already holds still belongs to that terminal.
+    ///
+    /// Two panes rendering one conversation under two identities is the
+    /// failure this exclusion exists for, and it now lives in
+    /// `session_to_adopt` rather than inline in `set_pane_mode`, so it is
+    /// tested here.
+    #[tokio::test]
+    async fn a_transcript_another_terminal_claims_is_not_adopted() {
+        let (home, worktree, projects) = adoption_scratch();
+        std::fs::write(projects.join("pane-ones-conversation.jsonl"), "{}").unwrap();
+
+        let mine = Some(std::process::id() as i32);
+        let claimed = ["pane-ones-conversation".to_string()];
+        let adopted =
+            session_to_adopt(Uuid::nil(), home.path(), worktree.path(), mine, &claimed).await;
+        assert_eq!(adopted, Option::None);
+    }
 
     #[test]
     fn presets_run_through_an_interactive_login_shell() {

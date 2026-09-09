@@ -11,6 +11,7 @@
 //! processes a second.
 
 use std::collections::HashMap;
+use std::time::{Duration, SystemTime};
 
 /// The process a pane is showing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +89,120 @@ pub async fn read() -> Foreground {
     let Ok(out) = out else { return Foreground::default() };
     parse(&String::from_utf8_lossy(&out.stdout))
 }
+
+/// When the process with this pid started, as the kernel recorded it.
+///
+/// The one fact adoption needs and the daemon does not otherwise hold: a
+/// transcript written before the claude in a pane started cannot be that
+/// claude's, and `session_discovery::discover_claude_session` takes exactly
+/// that floor. Its sole production caller used to hand it
+/// `SystemTime::UNIX_EPOCH`, which is older than every file on the disk, so
+/// the guard filtered nothing and a pane routinely adopted last month's
+/// conversation from a worktree it was reusing.
+///
+/// A targeted `ps` on one pid rather than a column added to the whole-host
+/// walk above. Adoption runs only when a person switches a pane into agent
+/// mode, so a process on that action is cheap, and the watcher's sampling loop
+/// — which is where an extra column would have been paid for every tick — is
+/// untouched. If anything else ever needs a start time, `etime=` on that walk
+/// is where this should end up instead.
+///
+/// `None` for a pid that is gone, a `ps` that fails, and a line that does not
+/// parse. Each of those is "we do not know when this started", and the caller
+/// must refuse to adopt rather than substitute a floor of its own: any default
+/// old enough to be safe is the epoch again, wearing a different name.
+pub async fn started_at(pid: i32) -> Option<SystemTime> {
+    let out = tokio::process::Command::new("ps")
+        .arg("-o")
+        .arg("lstart=")
+        .arg("-p")
+        .arg(pid.to_string())
+        // `lstart` is rendered with `strftime`, so the month and weekday names
+        // are whatever the caller's locale says. The daemon inherits a login
+        // environment it did not choose; pinning the locale for this one call
+        // is what makes the parser below a parser of a known format rather
+        // than a guess at the user's.
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_lstart(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `Www Mmm dd hh:mm:ss yyyy`, in the LOCAL timezone, as `ps -o lstart=` writes
+/// it — `Tue Sep  8 21:07:05 2026`, day-of-month space padded, trailing spaces
+/// included.
+///
+/// Split from `started_at` so the format is testable without a live process,
+/// and strict about every field: `mktime` happily NORMALIZES nonsense, so a
+/// misread `32` for a day would come back as the first of the next month and
+/// look like a perfectly good answer. A field out of range is a format this
+/// code does not understand, and the honest report of that is `None`.
+fn parse_lstart(stdout: &str) -> Option<SystemTime> {
+    let line = stdout.lines().find(|l| !l.trim().is_empty())?;
+    let mut fields = line.split_whitespace();
+    // The weekday is redundant with the date and is not checked against it:
+    // `mktime` computes the true one, and disagreeing with `ps` about it would
+    // be this code's error, not a reason to refuse.
+    let _weekday = fields.next()?;
+    let month_name = fields.next()?;
+    let month = MONTHS.iter().position(|m| *m == month_name)? as libc::c_int;
+    let day = field(fields.next()?, 1, 31)?;
+    let clock = fields.next()?;
+    let year = field(fields.next()?, 1970, 9999)?;
+    if fields.next().is_some() {
+        return None;
+    }
+
+    let mut hms = clock.split(':');
+    let hour = field(hms.next()?, 0, 23)?;
+    let minute = field(hms.next()?, 0, 59)?;
+    // A leap second is 60, and a process may genuinely be stamped with one.
+    let second = field(hms.next()?, 0, 60)?;
+    if hms.next().is_some() {
+        return None;
+    }
+
+    // SAFETY: `mktime` reads and writes only the `tm` it is given, which is
+    // fully initialized here and outlives the call. `tm_isdst` of -1 is the
+    // documented "work out for yourself whether this local time was in
+    // daylight saving", which is the only correct answer for a wall-clock
+    // reading with no offset attached — the alternative, assuming one, is
+    // wrong for an hour twice a year.
+    let seconds = unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        tm.tm_sec = second;
+        tm.tm_min = minute;
+        tm.tm_hour = hour;
+        tm.tm_mday = day;
+        tm.tm_mon = month;
+        tm.tm_year = year - 1900;
+        tm.tm_isdst = -1;
+        libc::mktime(&mut tm)
+    };
+    // -1 is `mktime`'s failure, and anything negative is a start time before
+    // 1970 — neither is a process that is running right now.
+    if seconds < 0 {
+        return None;
+    }
+    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds as u64))
+}
+
+/// One numeric field of an `lstart` line, refused rather than normalized when
+/// it falls outside the range the format allows.
+fn field(text: &str, low: libc::c_int, high: libc::c_int) -> Option<libc::c_int> {
+    let value: libc::c_int = text.parse().ok()?;
+    (low..=high).contains(&value).then_some(value)
+}
+
+/// `ps` writes these under `LC_ALL=C`, and `started_at` pins that locale so
+/// this list is the whole set it can be asked about.
+const MONTHS: [&str; 12] =
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /// Split out from `read` so the column layout is testable.
 ///
@@ -343,6 +458,75 @@ mod tests {
         let f = parse(PS);
         let by_group = f.ports_by_group(&HashMap::from([(99999, vec![7000])]));
         assert!(by_group.is_empty(), "{by_group:?}");
+    }
+
+    /// Verbatim `ps -o lstart= -p <pid>`, trailing spaces and all.
+    ///
+    /// Read off this machine: `ps -o lstart= -p $$` answers
+    /// `Tue Sep  8 21:07:05 2026    `. The day of the month is space padded,
+    /// so a parser that splits on a fixed width sees a different field than
+    /// one that splits on whitespace, and only the second is right.
+    #[test]
+    fn a_start_time_is_a_wall_clock_reading_with_a_padded_day() {
+        let parsed = parse_lstart("Tue Sep  8 21:07:05 2026    \n")
+            .expect("the format `ps` actually writes");
+        // The value is local-time dependent, so what is asserted is that it
+        // landed in the right YEAR rather than an exact instant: a timezone
+        // mistake is hours, and the epoch fallback this whole change exists to
+        // remove is decades.
+        let secs = parsed.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        assert!((1_767_000_000..1_800_000_000).contains(&secs), "{secs}");
+        // Single-digit days arrive with one space, double-digit with none.
+        assert!(parse_lstart("Wed Dec 31 23:59:59 2025").is_some());
+    }
+
+    /// Anything that is not that format is "we do not know", never a default.
+    ///
+    /// The bug behind this function was a caller substituting a floor it had
+    /// made up. A parser that quietly rounds a bad field into a good one hands
+    /// the caller the same lie one layer down, so every field is refused
+    /// rather than normalized — `mktime` would have turned month 12 into
+    /// January of the next year without a word.
+    #[test]
+    fn a_line_that_is_not_that_format_is_refused_rather_than_guessed() {
+        // What a pid that is gone leaves behind: `ps` exits non-zero and says
+        // nothing.
+        assert_eq!(parse_lstart(""), Option::None);
+        assert_eq!(parse_lstart("   \n\n"), Option::None);
+        // A month name from a locale this call did not pin.
+        assert_eq!(parse_lstart("mar. sept.  8 21:07:05 2026"), Option::None);
+        // Fields out of range, each of which `mktime` would have normalized
+        // into a plausible-looking wrong answer.
+        assert_eq!(parse_lstart("Tue Sep 32 21:07:05 2026"), Option::None);
+        assert_eq!(parse_lstart("Tue Sep  8 24:07:05 2026"), Option::None);
+        assert_eq!(parse_lstart("Tue Sep  8 21:60:05 2026"), Option::None);
+        assert_eq!(parse_lstart("Tue Sep  8 21:07:61 2026"), Option::None);
+        assert_eq!(parse_lstart("Tue Sep  8 21:07:05 1969"), Option::None);
+        // Too few fields, too many fields, and a clock that is not a clock.
+        assert_eq!(parse_lstart("Tue Sep  8 21:07:05"), Option::None);
+        assert_eq!(parse_lstart("Tue Sep  8 21:07:05 2026 UTC"), Option::None);
+        assert_eq!(parse_lstart("Tue Sep  8 21:07 2026"), Option::None);
+        assert_eq!(parse_lstart("Tue Sep  8 21:07:05:00 2026"), Option::None);
+    }
+
+    /// The whole chain against a process whose start time is known: this one.
+    ///
+    /// The unit test above cannot catch a timezone mistake, because it has no
+    /// second opinion about what the string means. This does: the test binary
+    /// started moments ago, so `started_at` must answer with a time in the
+    /// recent past. A `mktime` fed a UTC reading as local — or a `tm_isdst` of
+    /// 0 instead of -1 — is off by whole hours and fails here.
+    #[tokio::test]
+    async fn a_live_process_started_a_moment_ago() {
+        let mine = std::process::id() as i32;
+        let started = started_at(mine).await.expect("this process is running");
+        let now = SystemTime::now();
+        let age = now.duration_since(started).expect("a running process started in the past");
+        assert!(age < Duration::from_secs(3600), "{age:?} old, so the timezone is wrong");
+
+        // A pid nothing can be running under. `ps` refuses it, and a refusal
+        // must read as "unknown" rather than as a time.
+        assert_eq!(started_at(i32::MAX).await, Option::None);
     }
 
     /// Verbatim `ps -axo pid=,pgid=,tty=,stat=,args=`, with a wrapper pairing
