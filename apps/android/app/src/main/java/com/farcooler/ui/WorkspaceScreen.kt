@@ -407,12 +407,6 @@ fun WorkspaceScreen(
             ImagePasteChips(pastes, Modifier.align(Alignment.BottomCenter))
         }
 
-        // `choose`, not `open`: this strip is the ONE writer of the remembered
-        // focus. A chip is a person saying where they want to be, which is
-        // exactly what a fleet row and a tapped notification are not — see
-        // [Focus]. And because the strip is scoped to this workspace, a chip
-        // never moves the navigation stack at all: `choose` finds the workspace
-        // it is already on and installs nothing.
         // What a chip's menu asked to close, waiting on an answer.
         //
         // Held HERE and not inside the strip, for the reason the strip's own
@@ -422,6 +416,12 @@ fun WorkspaceScreen(
         // lives in a recycled item is a dialog that can vanish mid-answer.
         var closing by remember { mutableStateOf<Pair<Terminal, ShellClose.Question>?>(null) }
 
+        // `choose`, not `open`: this strip is the ONE writer of the remembered
+        // focus. A chip is a person saying where they want to be, which is
+        // exactly what a fleet row and a tapped notification are not — see
+        // [Focus]. And because the strip is scoped to this workspace, a chip
+        // never moves the navigation stack at all: `choose` finds the workspace
+        // it is already on and installs nothing.
         TerminalTabStrip(
             workspace = workspace,
             counts = counts,

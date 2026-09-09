@@ -334,14 +334,18 @@ struct ShellColumn: View {
     /// should highlight immediately when I touch down on it… but we shouldn't
     /// confirm the tap until my touch goes up."*
     ///
-    /// A `simultaneousGesture` and not a `gesture`: the row still has to reach
-    /// the swipe recognizer underneath it and the bar's release above it, and
-    /// this reports rather than claims. It is a SECOND answer to "which row is
-    /// that", which this file otherwise refuses — but it is the row's own
-    /// index, which cannot be off by one, and it only ever applies where the
-    /// geometric mapping has gone silent. The DRAGGED column keeps
-    /// `ShellGesture.columnRow` exactly as it was: that touch starts on the bar
-    /// row, below this list, so nothing arbitrates it away.
+    /// What reports it is `ShellRowPress`, the row's own `ButtonStyle`, and not
+    /// a gesture of any kind. A gesture was tried and is why `onChoose` below
+    /// exists: anything that watches the touch directly inside a cell ends up
+    /// claiming it. `isPressed` is the press the platform has already resolved,
+    /// so reading it costs the swipe and the tap nothing.
+    ///
+    /// It is a SECOND answer to "which row is that", which this file otherwise
+    /// refuses — but it is the row's own index, which cannot be off by one, and
+    /// it only ever applies where the geometric mapping has gone silent. The
+    /// DRAGGED column keeps `ShellGesture.columnRow` exactly as it was: that
+    /// touch starts on the bar row, below this list, so nothing arbitrates it
+    /// away.
     var onTouch: ((Int?) -> Void)?
     /// A row, chosen. Its own index, which is the tab.
     ///
@@ -387,10 +391,29 @@ struct ShellColumn: View {
         // window's animating proposal, so nothing this list contains ever hears
         // that a height is moving. A `List` is if anything a better citizen
         // there than the `VStack` was — its rows are laid out by UIKit inside a
-        // scroll view whose bounds are pinned by that frame — but the property
-        // was verified rather than reasoned about: `ShellColumnMotionTests`
-        // drives the open with the spring slowed and reads the row positions
-        // out of the frames, and the trace is in the lane's report.
+        // scroll view whose bounds are pinned by that frame — but that is the
+        // reasoning, and reasoning is exactly what three earlier attempts at
+        // this bug were wrong by. It was measured instead, once, BY HAND.
+        //
+        // **NOTHING GUARDS IT. There is no test for this property and there is
+        // no test named below that you can go and read.** The measurement was
+        // `ShellMotion.menu` slowed to an eight-second response, a scratch flag
+        // that pinned the column three seconds after launch, `xcrun simctl io
+        // booted screenshot` in a loop, and the y of every row's text band read
+        // out of the frames: each row appears at its final position and holds
+        // it for the whole of the open, and deleting the fixed frame below
+        // makes all three slide for six seconds and arrive 24 points apart
+        // where they should be 44. All of that scaffolding is reverted, because
+        // an auto-pin hook is not a thing to ship in order to make a comment
+        // true.
+        //
+        // So if you change the frame, the list, or what is inside a row, YOU
+        // have to re-measure it that way — a screenshot cannot show it and
+        // neither can this paragraph. The trace is in
+        // `.superpowers/phone-close-report.md`, and it is worth reading first
+        // for what the broken case looks like: the two are loud and they are
+        // shaped differently, which is the only reason the method is worth
+        // anything.
         //
         // Everything below is the list being told to stop being a list. It has
         // no scroll of its own (the frame is exactly the content), no

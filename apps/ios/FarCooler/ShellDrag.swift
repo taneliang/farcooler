@@ -747,11 +747,17 @@ extension ShellRootView {
                 // — a tap-opened column that stayed open after a choice would
                 // leave the chosen pane behind a list of its siblings.
                 columnPinned = false
-                // And the row's own report goes with it. `ShellColumn.onTouch`
-                // is a `simultaneousGesture` inside a list cell, so its
-                // `onEnded` is not something to depend on: a cell whose
-                // recognizer claims the touch cancels it, and a highlight left
-                // standing would light a row in the column the NEXT tap opens.
+                // And the row's own report goes with it, at every one of the
+                // five places that clear `columnPinned`.
+                //
+                // `ShellColumn.onTouch` is `ShellRowPress` reporting
+                // `ButtonStyle.isPressed`, and what is not safe to depend on is
+                // its TRAILING edge: this line furls the column, the rows stop
+                // being composed, and a style whose body has gone never
+                // delivers the `false`. A drag release reaches this arm with no
+                // button pressed at all, so whatever the last press left is
+                // simply still standing. Either way a stale row would be lit in
+                // the column the NEXT tap opens.
                 touchedRow = nil
                 flatten()
             }
@@ -762,8 +768,8 @@ extension ShellRootView {
         case .toggleColumn:
             withAnimation(Self.settle) {
                 columnPinned = !wasOpen
-                // See `.land` above: a report the list never ended must not
-                // outlive the column it was about.
+                // See `.land` above: a press whose trailing edge the column
+                // outlived must not outlive the column itself.
                 touchedRow = nil
                 flatten()
             }
@@ -824,6 +830,10 @@ extension ShellRootView {
             // translation instead of stepping the moment `flights` changed.
             cropped = 1
             columnPinned = false
+            // With the report the column carried. See `.land`: the trailing
+            // edge of a press is not something to wait for once the rows have
+            // stopped being composed.
+            touchedRow = nil
             trackX = 0
             crossing = 0
             // Not read at all once `overview` is true — the offset takes its
@@ -964,7 +974,10 @@ extension ShellRootView {
             // The column belongs to the workspace it lists, so a crossing
             // furls it. A swipe within one workspace leaves it alone: the same
             // list is still the right list.
-            if step.crossesWorkspace { columnPinned = false }
+            if step.crossesWorkspace {
+                columnPinned = false
+                touchedRow = nil
+            }
         } completion: {
             // Only the re-seat is silent, and it is invisible for the reason
             // it always was: the pane that was arriving is already the pane in
@@ -1204,6 +1217,7 @@ extension ShellRootView {
                 // of somebody else's tabs; one that does not still moves the
                 // tab out from under the highlighted row.
                 columnPinned = false
+                touchedRow = nil
             }
         }
     }
