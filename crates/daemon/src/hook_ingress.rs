@@ -760,8 +760,9 @@ fn still_a_pane(terminal: &Terminal, snapshot: &RuntimeSnapshot) -> bool {
 /// Guarding both of `terminal_for`'s routes with one predicate rather than
 /// only the route that bites today, because both are live and for different
 /// reasons. The announcement route is codex's and cursor's by default: their
-/// hooks are project-local, so `install_project_hooks` puts them in every
-/// worktree Far Cooler makes and they fire in agent-mode panes too. The
+/// hooks are project-local, so they are installed in every worktree Far Cooler
+/// makes and in any worktree one of those two is opened in
+/// (`Service::prepare_launch_hooks`), and they fire in agent-mode panes too. The
 /// claimants route reaches an agent-mode pane whenever one carries an
 /// `agent_session_id` — claude's from `--session-id` at launch, and codex's
 /// from the shim's own `Established` report, which

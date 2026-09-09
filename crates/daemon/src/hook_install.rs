@@ -86,8 +86,10 @@ const CURSOR_EVENTS: &[(&str, bool)] = &[
     ("stop", false),
 ];
 
-/// The project-local files `service::install_project_hooks` writes into a
-/// worktree, relative to its root.
+/// The project-local files Far Cooler writes into a worktree, relative to its
+/// root — by `service::install_project_hooks` when it makes one, and by
+/// `service::Service::prepare_launch_hooks` when a codex or cursor pane is
+/// opened in one it did not make.
 ///
 /// One list, read by three things that must agree: the installer that writes
 /// them, `git::is_dirty`, and `change_set::working_tree`. Far Cooler wrote

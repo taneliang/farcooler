@@ -229,6 +229,13 @@ fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
     }
 }
 
+/// The function that folds our registrations into one agent's hooks file.
+///
+/// `merge_codex` or `merge_cursor` — one shape, because the difference between
+/// the two is the vocabulary inside the document rather than anything the
+/// caller has to know about.
+type MergeHooks = fn(&str, &Path) -> String;
+
 /// Give a fresh worktree the two project-local hook files codex and cursor
 /// read, so a pane launched in it reports itself the way a claude pane does.
 ///
@@ -255,6 +262,35 @@ fn install_project_hooks(worktree: &Path, socket: &Path) {
     install_project_hook_file(&worktree.join(CURSOR_HOOKS), socket, merge_cursor);
 }
 
+/// The one project-local hooks file this preset's agent reads, or `None` for
+/// an agent that reads none.
+///
+/// codex and cursor each have a file of their own, in their own vocabulary.
+/// claude has neither, because it is handed `--settings` instead; `shell`,
+/// `changes` and every agent with no hook support have nothing to write, and
+/// writing something anyway would leave a registration on disk for a program
+/// that will never read it.
+///
+/// One file, not both, deliberately — and this is the difference between this
+/// and `install_project_hooks` above. Making a worktree is "get this directory
+/// ready for whatever runs in it"; launching a pane is one person opening one
+/// agent, and dropping a `.cursor/` into somebody's checkout because they
+/// opened codex is a write nothing they did asked for.
+///
+/// The AGENT, not the whole preset: `codex:gpt-5.6-sol` names codex, and a
+/// match on the whole string would miss every pane launched with a model on
+/// it. Compared exactly rather than by prefix, so that a later `codex-review`
+/// preset arrives here as a miss somebody has to decide about rather than as a
+/// file quietly written for it.
+fn project_hook_file_for(preset: &str) -> Option<(&'static str, MergeHooks)> {
+    use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
+    match preset.split_once(':').map_or(preset, |(agent, _)| agent) {
+        "codex" => Some((CODEX_HOOKS, merge_codex)),
+        "cursor" => Some((CURSOR_HOOKS, merge_cursor)),
+        _ => None,
+    }
+}
+
 /// Merge our registrations into one such file.
 ///
 /// The guard worth naming is the parse. `merge_codex`/`merge_cursor` treat
@@ -265,7 +301,7 @@ fn install_project_hooks(worktree: &Path, socket: &Path) {
 /// So a file that is present and is not a JSON object is left exactly as it
 /// is. Losing the live view is recoverable; replacing a file we do not own is
 /// a support incident somebody finds out about days later.
-fn install_project_hook_file(path: &Path, socket: &Path, merge: fn(&str, &Path) -> String) {
+fn install_project_hook_file(path: &Path, socket: &Path, merge: MergeHooks) {
     let existing = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -294,6 +330,26 @@ fn install_project_hook_file(path: &Path, socket: &Path, merge: fn(&str, &Path) 
     };
 
     let merged = merge(&starting, socket);
+
+    // The file already says this, so leave it alone entirely.
+    //
+    // Every launch of a codex or cursor pane comes through here now, and the
+    // second launch in a worktree must cost nothing: an identical rewrite
+    // still changes the mtime, which wakes every file watcher on the runner
+    // and drops the file out of git's stat cache so the next `git status`
+    // re-hashes it — all for a byte-for-byte identical document. The merge is
+    // a pure function of the socket path and the socket is `<root>/h.sock` for
+    // the life of the daemon, so "no change" is the ordinary answer here
+    // rather than a rare one, which is why installing on every launch needs no
+    // record of which worktrees have already been done.
+    //
+    // `starting`, not `existing`: the two are the same string for every file
+    // that is present and is an object, which is every file this can reach
+    // here with one. A missing or empty file arrives as `{}`, which no merge
+    // ever produces, so the first install always writes.
+    if merged == starting {
+        return;
+    }
 
     if let Some(dir) = path.parent()
         && let Err(e) = std::fs::create_dir_all(dir)
@@ -1729,24 +1785,66 @@ impl Service {
 
     // ---- terminals ----
 
-    /// The settings file a pane running this preset should be launched with,
-    /// written to disk now, or `None`.
+    /// Put everything this pane needs in order to report itself in place, and
+    /// hand back the settings file claude is launched with — or `None`, for
+    /// the two agents registered through a file in the worktree instead and
+    /// the several that are not registered at all.
     ///
-    /// Written for a claude preset and nothing else, matching the same
-    /// `starts_with("claude")` that gates minting a session id, and for the
-    /// same reason: `--settings` is claude's flag, and putting it in front of
-    /// another CLI would kill the pane on startup rather than merely leave it
-    /// quiet. codex and cursor are registered by `install_project_hooks` when
-    /// the worktree is made, and need nothing at launch.
+    /// **Every path that puts a TUI in a pane calls this.** There are four —
+    /// `create_terminal`, `split_terminal`, `restart_terminal` and
+    /// `set_pane_mode` going back to a terminal — and the first version of the
+    /// claude half wired only the first. That left the live view working
+    /// exactly once, on a pane made by the New Terminal button and never
+    /// restarted; splitting, which `split_terminal`'s own comment calls "how
+    /// most panes on a runner are made", produced a silent one.
+    /// `every_launch_path_prepares_hooks_before_it_builds_a_command` in this
+    /// file's tests is what notices a fifth path arriving without this call.
     ///
-    /// **Every path that puts a TUI in a pane calls this.** There are five —
-    /// `create_terminal`, `split_terminal`, `restart_terminal`, `set_pane_mode`
-    /// going back to a terminal, and the respawn builders they share — and the
-    /// first version of this wired only the first. That left the live view
-    /// working exactly once, on a pane made by the New Terminal button and
-    /// never restarted; splitting, which `split_terminal`'s own comment calls
-    /// "how most panes on a runner are made", produced a silent one.
-    fn hook_settings_for(&self, preset: &str) -> Option<PathBuf> {
+    /// The two halves are one function because they are one question — "make
+    /// this agent able to report itself, here" — and splitting them is exactly
+    /// how the bug this fixes happened. claude's `--settings` hung off the
+    /// launch; codex's and cursor's project files hung off `create_workspace`
+    /// and `adopt_branch`. So a worktree Far Cooler made had all three, and the
+    /// checkout a person actually works in — adopted by the reconciler, never
+    /// created by us — had only claude. The one repository that mattered most
+    /// was the one that stayed silent.
+    ///
+    /// **Per worktree, not per repository.** The ruling says "first agent
+    /// launch in that repository", but git gives every worktree its own
+    /// working directory and an untracked `.codex/hooks.json` in one is
+    /// invisible from another. There is nowhere a repository-wide copy could
+    /// live that codex or cursor would read. So the file goes into the
+    /// worktree this pane launches in, and "first" is per worktree because it
+    /// can be nothing else.
+    ///
+    /// **Nothing is remembered, and nothing needs to be.** "First" wants no
+    /// flag: the merge is a pure function of the socket path, the socket is
+    /// `<root>/h.sock` for as long as this daemon lives, and
+    /// `install_project_hook_file` returns without writing when the merge
+    /// changes nothing. The first launch in a worktree writes; every later one
+    /// reads one small file and stops. No row, no column, no migration.
+    ///
+    /// **The reconciler is deliberately still not a caller.** Installing from
+    /// there would write into every repository git reports, none of which
+    /// anybody pointed Far Cooler at. The trigger is an act — this agent, in
+    /// this worktree, because somebody opened it.
+    ///
+    /// Never fails, in either half. A read-only mount, a `.cursor` that is a
+    /// file, a hooks file we cannot parse, a runtime directory we cannot write
+    /// — each of those costs the live view for that agent in that worktree and
+    /// nothing else. A pane that opens quiet beats a pane that will not open.
+    fn prepare_launch_hooks(&self, preset: &str, worktree: &str) -> Option<PathBuf> {
+        if let Some((relative, merge)) = project_hook_file_for(preset) {
+            install_project_hook_file(
+                &Path::new(worktree).join(relative),
+                &hook_ingress::HookIngress::socket_path(&self.root),
+                merge,
+            );
+        }
+        // claude's half, unchanged, and gated by the same `starts_with` that
+        // gates minting a session id, for the same reason: `--settings` is
+        // claude's flag, and putting it in front of another CLI would kill the
+        // pane on startup rather than merely leave it quiet.
         preset.starts_with("claude").then(|| write_claude_hook_settings(&self.root)).flatten()
     }
 
@@ -1807,7 +1905,7 @@ impl Service {
         let term = self.mark_changes_pane(term, command_preset)?;
 
         // 2. Create and tag the window.
-        let hook_settings = self.hook_settings_for(command_preset);
+        let hook_settings = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
         let command =
             preset_command_with_hooks(command_preset, declared.as_deref(), hook_settings.as_deref());
         let created = self
@@ -2044,7 +2142,7 @@ impl Service {
         // makes — so it gets the same settings file. It read `preset_command`
         // until this line was found: splitting is how most panes on a runner
         // are made, so most claude panes reported nothing at all.
-        let hook_settings = self.hook_settings_for(command_preset);
+        let hook_settings = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
         let command = preset_command_with_hooks(
             command_preset,
             term.agent_session_id.as_deref(),
@@ -2162,7 +2260,7 @@ impl Service {
         // the socket, and the pane's activity would sit frozen at whatever it
         // last reported. That is precisely the silent disagreement between
         // record and runtime this whole design exists to prevent.
-        let hook_settings = self.hook_settings_for(&term.command_preset);
+        let hook_settings = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
         let command = respawn_command(
             user_home().as_deref(),
             &term.command_preset,
@@ -2490,7 +2588,8 @@ impl Service {
                 // point: a pane going back to a TUI is one question with one
                 // answer, however it got there. See `respawn_command`.
                 let sid = session_id.clone().unwrap_or_default();
-                let hook_settings = self.hook_settings_for(&term.command_preset);
+                let hook_settings =
+                    self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
                 respawn_command(
                     user_home().as_deref(),
                     &term.command_preset,
@@ -6339,5 +6438,346 @@ mod hook_file_tests {
     fn a_settings_file_that_cannot_be_written_is_not_a_terminal_that_fails() {
         let missing = std::env::temp_dir().join(format!("farcooler-absent-{}", Uuid::now_v7()));
         assert!(write_claude_hook_settings(&missing).is_none(), "no path, no panic");
+    }
+}
+
+/// Opening a codex or cursor pane is what installs that agent's hooks, in the
+/// worktree the pane opens in.
+///
+/// The repository a person actually works in is adopted by the reconciler, not
+/// created by Far Cooler, so the two installers that hung off `create_workspace`
+/// and `adopt_branch` never reached it: the checkout that mattered most was the
+/// one that stayed silent while throwaway worktrees worked. Every workspace here
+/// therefore comes from `a_workspace`, which is `reconcile::repository` adopting
+/// a real main checkout — the exact shape of the case this fixes.
+#[cfg(test)]
+mod launch_hook_install_tests {
+    use super::*;
+
+    use super::restart_wiring_tests::a_workspace;
+
+    fn codex_hooks(ws: &models::Workspace) -> PathBuf {
+        Path::new(&ws.worktree_path).join(crate::hook_install::CODEX_HOOKS)
+    }
+
+    fn cursor_hooks(ws: &models::Workspace) -> PathBuf {
+        Path::new(&ws.worktree_path).join(crate::hook_install::CURSOR_HOOKS)
+    }
+
+    /// A model on the preset must not hide the agent behind it. Half the
+    /// presets a runner launches carry one.
+    #[test]
+    fn the_agent_is_read_off_the_preset_whether_or_not_it_names_a_model() {
+        for preset in ["codex", "codex:gpt-5.6-sol"] {
+            let (file, _) = project_hook_file_for(preset).unwrap_or_else(|| panic!("{preset}"));
+            assert_eq!(file, crate::hook_install::CODEX_HOOKS, "{preset}");
+        }
+        for preset in ["cursor", "cursor:auto"] {
+            let (file, _) = project_hook_file_for(preset).unwrap_or_else(|| panic!("{preset}"));
+            assert_eq!(file, crate::hook_install::CURSOR_HOOKS, "{preset}");
+        }
+        // claude is handed `--settings`; the rest read no hooks file at all,
+        // and writing one for them would leave a registration on disk for a
+        // program that never looks.
+        for preset in ["claude", "claude:opus", "shell", "aider", "opencode", CHANGES_PRESET] {
+            assert!(project_hook_file_for(preset).is_none(), "{preset}");
+        }
+    }
+
+    /// The owner's own checkout, end to end: silent before the pane is opened,
+    /// reporting after it.
+    #[tokio::test]
+    async fn opening_a_codex_pane_installs_codexs_hooks_in_a_checkout_far_cooler_did_not_make() {
+        let (_dir, svc, ws) = a_workspace().await;
+        assert!(
+            !codex_hooks(&ws).exists(),
+            "the reconciler adopts without writing, which is the whole problem"
+        );
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+
+        let text = std::fs::read_to_string(codex_hooks(&ws)).expect("codex's file, in this worktree");
+        let socket = hook_ingress::HookIngress::socket_path(&svc.root);
+        assert!(
+            text.contains(&socket.display().to_string()),
+            "and it names this daemon's hook socket: {text}"
+        );
+        assert!(text.contains("--agent codex"), "as codex: {text}");
+    }
+
+    /// One agent, one file. Making a worktree gets it ready for anything;
+    /// opening a pane is one person opening one agent, and a `.cursor/`
+    /// appearing in somebody's checkout because they opened codex is a write
+    /// nothing they did asked for.
+    #[tokio::test]
+    async fn opening_codex_does_not_also_write_cursors_file() {
+        let (_dir, svc, ws) = a_workspace().await;
+
+        svc.create_terminal(ws.id, "agent", "codex:gpt-5.6-sol").await.expect("a codex pane");
+
+        assert!(codex_hooks(&ws).exists(), "the agent that was opened is installed");
+        assert!(
+            !cursor_hooks(&ws).exists(),
+            "and the one that was not is not: {}",
+            cursor_hooks(&ws).display()
+        );
+    }
+
+    #[tokio::test]
+    async fn opening_a_cursor_pane_installs_cursors_hooks_and_only_those() {
+        let (_dir, svc, ws) = a_workspace().await;
+
+        svc.create_terminal(ws.id, "agent", "cursor").await.expect("a cursor pane");
+
+        let text = std::fs::read_to_string(cursor_hooks(&ws)).expect("cursor's file");
+        assert!(text.contains("--agent cursor"), "{text}");
+        // Cursor's flat shape and its own event names, read back the way
+        // cursor reads them -- "a file exists" would pass on codex's shape.
+        let v: serde_json::Value = serde_json::from_str(&text).expect("cursor json");
+        assert!(v["hooks"]["sessionStart"][0]["command"].is_string(), "{text}");
+        assert!(!codex_hooks(&ws).exists(), "codex was not opened");
+    }
+
+    /// claude has no project file and must not grow one. `--settings` is the
+    /// whole of claude's registration, and it touches nothing of the user's.
+    #[tokio::test]
+    async fn a_claude_or_shell_pane_writes_nothing_into_the_users_repository() {
+        let (_dir, svc, ws) = a_workspace().await;
+
+        svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+        svc.create_terminal(ws.id, "plain", "shell").await.expect("a shell pane");
+
+        assert!(!codex_hooks(&ws).exists(), "claude is handed a file of ours instead");
+        assert!(!cursor_hooks(&ws).exists(), "and a shell reads no hooks at all");
+        assert!(claude_hook_settings_path(&svc.root).exists(), "claude's own half still runs");
+    }
+
+    /// Splitting is how most panes on a runner are made.
+    #[tokio::test]
+    async fn a_codex_pane_made_by_splitting_installs_them_too() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
+        assert!(!codex_hooks(&ws).exists(), "the shell wrote nothing");
+
+        svc.split_terminal(ws.id, target.id, farcooler_protocol::v1::SplitSide::Right, "two", "codex")
+            .await
+            .expect("split");
+
+        assert!(codex_hooks(&ws).exists(), "the split installed them");
+    }
+
+    /// A restart is a launch: the agent process starts again and reads the
+    /// file again. A worktree cleaned out between the two must come back
+    /// reporting rather than come back quiet.
+    #[tokio::test]
+    async fn a_restarted_codex_pane_installs_them_again() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+        std::fs::remove_file(codex_hooks(&ws)).expect("take the file away");
+
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        assert!(codex_hooks(&ws).exists(), "a restarted pane is not a quiet one");
+    }
+
+    /// The fourth door: a pane coming back out of a chat is a TUI being
+    /// launched, and it reads the file on startup like any other.
+    #[tokio::test]
+    async fn a_codex_pane_coming_back_to_a_terminal_installs_them_again() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+        std::fs::remove_file(codex_hooks(&ws)).expect("take the file away");
+
+        let back = svc
+            .set_pane_mode(term.id, models::PaneMode::Terminal, false)
+            .await
+            .expect("back to a terminal");
+        assert_eq!(back.pane_mode, models::PaneMode::Terminal);
+
+        assert!(codex_hooks(&ws).exists(), "and it reports itself again");
+
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// Somebody else's registrations survive ours arriving, through the launch
+    /// path and not only through `hook_install`'s own merge. This runner really
+    /// does have `herdr-agent-state.sh` registered against codex, in a
+    /// repository nobody asked Far Cooler to write into.
+    #[tokio::test]
+    async fn a_hooks_file_the_user_already_had_keeps_everything_it_had() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let path = codex_hooks(&ws);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bash /Users/x/herdr-agent-state.sh session"}]}]}}"#,
+        )
+        .unwrap();
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("herdr-agent-state.sh"), "their hook survives: {after}");
+        assert!(after.contains("--agent codex"), "and ours is there too: {after}");
+    }
+
+    /// A file we cannot parse is somebody midway through an edit. Launching a
+    /// pane must not be what replaces it.
+    #[tokio::test]
+    async fn a_hooks_file_we_cannot_parse_survives_a_launch_byte_for_byte() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let path = codex_hooks(&ws);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let theirs = "{ \"hooks\": { \"SessionStart\": [ oops this is not json";
+        std::fs::write(&path, theirs).unwrap();
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("the pane still opens");
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), theirs, "not one byte");
+    }
+
+    /// A worktree we cannot write into costs the live view for that agent and
+    /// nothing else. The pane opens; it is quiet.
+    #[tokio::test]
+    async fn a_worktree_we_cannot_write_into_still_opens_the_pane() {
+        let (_dir, svc, ws) = a_workspace().await;
+        // `.codex` as a FILE is the real shape of this: `create_dir_all`
+        // refuses, and the alternative -- propagating it -- would mean a stray
+        // file of somebody's stops them opening a terminal.
+        std::fs::write(Path::new(&ws.worktree_path).join(".codex"), "a file, not a directory")
+            .unwrap();
+
+        let term = svc.create_terminal(ws.id, "agent", "codex").await.expect("the pane opens");
+
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&ws.worktree_path).join(".codex")).unwrap(),
+            "a file, not a directory",
+            "their file is untouched"
+        );
+        assert_eq!(term.command_preset, "codex");
+    }
+
+    /// "First launch" is not tracked, and this is what lets it not be.
+    ///
+    /// Every launch of a codex pane comes through the installer now. If a
+    /// second one rewrote the file it would churn the mtime under every file
+    /// watcher on the runner, and show the file as touched in a `git status`
+    /// somebody is reading -- for no change at all. Skipping the write instead
+    /// is what makes the flag, the column and the migration unnecessary.
+    #[tokio::test]
+    async fn launching_again_in_a_worktree_that_already_has_them_writes_nothing() {
+        let (_dir, svc, ws) = a_workspace().await;
+        svc.create_terminal(ws.id, "one", "codex").await.expect("a codex pane");
+        let path = codex_hooks(&ws);
+
+        // Dated rather than compared against `SystemTime::now`: mtime
+        // granularity on some filesystems is a whole second, so a second write
+        // milliseconds later can carry the same stamp as the first and a
+        // "changed?" test would pass without meaning anything.
+        let long_ago = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(long_ago)).unwrap();
+        drop(file);
+
+        svc.create_terminal(ws.id, "two", "codex").await.expect("a second codex pane");
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            long_ago,
+            "the file already said this, so it was not written again"
+        );
+    }
+
+    /// A fifth launch path, arriving without hooks.
+    ///
+    /// Every other test in this module drives one of the four paths that exist
+    /// today, and every one of them would still be green on the day somebody
+    /// adds a fifth and forgets. This is the one that would not. It reads this
+    /// file's own production half and asks, of every method on `Service` that
+    /// builds a pane's command, whether it prepared that pane's hooks first --
+    /// so the guard covers the shape of the mistake rather than the four
+    /// instances of it we happen to know about.
+    ///
+    /// Order matters and is checked: the file has to be on disk before the
+    /// process that reads it starts.
+    #[test]
+    fn every_launch_path_prepares_hooks_before_it_builds_a_command() {
+        const SOURCE: &str = include_str!("service.rs");
+
+        // The production half. Every test module in this file follows it, so
+        // this is the whole of the code that runs on a runner -- and the
+        // assertions below fail loudly rather than quietly scanning nothing if
+        // that ever stops being true.
+        let production = SOURCE.split("#[cfg(test)]").next().expect("a production half");
+        for expected in ["fn create_terminal", "fn split_terminal", "fn restart_terminal"] {
+            assert!(
+                production.contains(expected),
+                "this guard is reading the wrong text: it cannot see `{expected}`"
+            );
+        }
+
+        /// The name of a method on `Service` -- four spaces of indent, inside
+        /// the `impl` block -- or `None` for anything else.
+        fn method(line: &str) -> Option<&str> {
+            let rest = line.strip_prefix("    ")?;
+            if rest.starts_with(' ') {
+                return None;
+            }
+            let rest = rest.strip_prefix("pub(crate) ").unwrap_or(rest);
+            let rest = rest.strip_prefix("pub ").unwrap_or(rest);
+            let rest = rest.strip_prefix("async ").unwrap_or(rest);
+            let rest = rest.strip_prefix("fn ")?;
+            Some(rest.split(['(', '<']).next().unwrap_or(rest))
+        }
+
+        /// A free function or the end of the `impl`: whatever method we were
+        /// inside of, we are not inside of it any more.
+        fn leaves_the_impl(line: &str) -> bool {
+            !line.starts_with(' ')
+                && !line.is_empty()
+                && (line.starts_with("fn ")
+                    || line.starts_with("pub fn ")
+                    || line.starts_with("async fn ")
+                    || line.starts_with("pub async fn ")
+                    || line.starts_with("impl ")
+                    || line.starts_with('}'))
+        }
+
+        let mut inside: Option<&str> = None;
+        let mut prepared = false;
+        let mut covered: Vec<&str> = Vec::new();
+        for line in production.lines() {
+            if let Some(name) = method(line) {
+                inside = Some(name);
+                prepared = false;
+                continue;
+            }
+            if leaves_the_impl(line) {
+                inside = None;
+                prepared = false;
+                continue;
+            }
+            if line.contains("prepare_launch_hooks(") {
+                prepared = true;
+            }
+            let builds_a_launch = line.contains("preset_command_with_hooks(")
+                || line.contains("respawn_command(");
+            if builds_a_launch && let Some(name) = inside {
+                assert!(
+                    prepared,
+                    "`{name}` puts a program in a pane without calling \
+                     `prepare_launch_hooks` first, so a codex or cursor pane launched \
+                     through it reports nothing"
+                );
+                covered.push(name);
+            }
+        }
+
+        // And the guard is still looking at the four it was written for: a
+        // rename that put a launch path out of its sight would otherwise leave
+        // it passing over an empty walk.
+        for expected in ["create_terminal", "split_terminal", "restart_terminal", "set_pane_mode"] {
+            assert!(covered.contains(&expected), "{expected} was not walked at all: {covered:?}");
+        }
     }
 }

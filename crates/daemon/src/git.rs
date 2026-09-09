@@ -422,11 +422,13 @@ pub async fn rollback_worktree(
 ///
 /// The files Far Cooler itself wrote into the worktree are subtracted first.
 /// `install_project_hooks` puts `.codex/hooks.json` and `.cursor/hooks.json`
-/// into every worktree this runner makes, and this answer is what
-/// `removal_needs_confirmation` reads — so without the exclusion a workspace
-/// created a second ago and never touched by anyone would demand the user type
-/// its name back to remove it, on the strength of two files Far Cooler wrote
-/// and the user has never seen.
+/// into every worktree this runner makes, and `Service::prepare_launch_hooks`
+/// puts one of the two into any worktree a codex or cursor pane is opened in —
+/// including the checkout the user works in every day, which Far Cooler did not
+/// make. This answer is what `removal_needs_confirmation` reads, so without the
+/// exclusion a workspace created a second ago and never touched by anyone would
+/// demand the user type its name back to remove it, on the strength of files
+/// Far Cooler wrote and the user has never seen.
 ///
 /// Git's own pathspec, rather than a filter over these lines: `--porcelain`
 /// collapses a wholly-untracked directory into one entry (`?? .codex/`), so
