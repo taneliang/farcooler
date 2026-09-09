@@ -2224,6 +2224,11 @@ impl Service {
         if term.pane_mode != models::PaneMode::Agent {
             return Ok(restarted);
         }
+        // The other way a pane leaves agent mode, and it needs the same
+        // cleanup: this respawned the pane as a TUI, so that terminal's shim is
+        // gone and everything the supervisor holds for it describes a process
+        // that no longer exists.
+        self.agents.left_agent_mode(id);
         // Told the truth about what is in the pane. The user can switch it back
         // to a chat, which respawns it as the shim properly.
         self.store.set_pane_mode(
@@ -2573,6 +2578,13 @@ impl Service {
 
         self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
         let updated = self.record_pane_mode(&term, pane_mode, session_id)?;
+        // The shim died with the pane the line above respawned. Nothing told
+        // the supervisor that, so everything it held for this terminal went on
+        // answering for a process that no longer exists — see
+        // `left_agent_mode` for what is dropped and what deliberately is not.
+        if pane_mode != models::PaneMode::Agent {
+            self.agents.left_agent_mode(id);
+        }
         let Some(harness) = harness.filter(|_| pane_mode == models::PaneMode::Agent) else {
             return Ok(updated);
         };
@@ -4056,6 +4068,67 @@ mod agent_mode_wiring_tests {
         assert!(
             !agent_supervisor::socket_path(&svc.root, term.id).exists(),
             "a refused switch must leave no listener behind"
+        );
+
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// The cleanup has to be REACHED, not merely written.
+    ///
+    /// `left_agent_mode` has its own unit tests. This is about the wiring, and
+    /// the wiring is exactly what has gone missing here before —
+    /// `ensure_listening` carries the note: "`listen` was written, tested and
+    /// never called, so the socket was never bound ... The whole feature was
+    /// inert and nothing said so."
+    ///
+    /// It is also the remaining half of the stale-`Working` problem. Forcing a
+    /// switch out mid-turn left `Working` in the supervisor for a shim that
+    /// died with the pane, and `guard_toggle` refuses the switch back IN on
+    /// that word — so getting back into the chat needed `force` and a warning
+    /// about discarding a turn that was already gone.
+    #[tokio::test]
+    async fn a_pane_forced_out_of_a_chat_mid_turn_is_not_left_reporting_a_turn() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
+        svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
+
+        // A turn in flight, put there the way a shim's events put it there.
+        svc.agents().record(
+            term.id,
+            vec![farcooler_agent::event::AgentEvent::Message {
+                role: farcooler_agent::event::Role::Agent,
+                text: "half a turn".into(),
+                parent: None,
+            }],
+            &|_, _| {},
+        );
+        assert_eq!(
+            svc.agents().activity(term.id),
+            farcooler_protocol::v1::AgentActivity::Working,
+            "the fixture must start from a turn in flight"
+        );
+        // Which is what makes this a FORCED switch: the unforced one is
+        // refused, and that refusal is the whole reason the leftover matters.
+        assert!(
+            matches!(
+                svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await,
+                Err(DomainError::ConfirmationRequired)
+            ),
+            "a turn in flight must still be worth a confirmation"
+        );
+
+        svc.set_pane_mode(term.id, models::PaneMode::Terminal, true)
+            .await
+            .expect("forcing the switch out");
+
+        assert_eq!(
+            svc.agents().activity(term.id),
+            farcooler_protocol::v1::AgentActivity::Unspecified,
+            "the shim died with the pane, and nothing it reported is true any more"
+        );
+        assert!(
+            agent_supervisor::guard_toggle(svc.agents().activity(term.id), false).is_ok(),
+            "so the way back into the chat must not need forcing over a turn that is gone"
         );
 
         let _ = svc.stop_terminal(term.id).await;

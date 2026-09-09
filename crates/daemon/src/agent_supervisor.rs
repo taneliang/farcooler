@@ -680,6 +680,60 @@ impl AgentSupervisor {
     /// never reused, so nothing will ask to bind that path again, and what is
     /// left behind is one `Uuid` and one task blocked on `accept` for a socket
     /// no shim will ever dial.
+    /// A pane has stopped being a chat.
+    ///
+    /// Everything the supervisor holds for a terminal used to survive the
+    /// toggle out of agent mode, because nothing anywhere told it that the
+    /// shim it was describing had been killed. `Service::set_pane_mode`
+    /// respawns the pane as a TUI and the shim dies with it; the map went on
+    /// answering for it.
+    ///
+    /// The activity is the expensive one. A pane forced out of agent mode
+    /// mid-turn kept `Working` for a session that no longer exists, and
+    /// `guard_toggle` refuses the switch back IN on that word — so the way out
+    /// of a stuck chat needed `force` and a warning about discarding a turn
+    /// that had already been discarded. `failure` is the same shape: it names
+    /// why a shim that is gone could not start one, and a pane switched back
+    /// in would draw that old failure over a new chat until `Established`
+    /// cleared it. `session_id`, `agent_mode` and `available_modes` all
+    /// describe the dead shim's session; the id is safe to drop because the
+    /// toggle that got here has just written it to the row.
+    ///
+    /// `writers` goes for a reason of its own: the channel belongs to that
+    /// shim's `serve` loop, and while it is in the map `send` looks like a
+    /// delivery. See `send`.
+    ///
+    /// Three things deliberately stay.
+    ///
+    /// `epoch` is kept because it must never go backwards. Removing the whole
+    /// entry would reset it to 0, and a client holding epoch 1 from the old
+    /// stream would then match the NEXT shim's epoch 1 and keep a cursor into
+    /// a stream it has never read.
+    ///
+    /// `recent` — the transcript — is kept because it is the conversation, not
+    /// the shim. A client may still read the chat's history while the pane is
+    /// showing a terminal, and `serve` clears it when a new shim connects.
+    ///
+    /// `title` is kept for the same reason: it names the CONVERSATION, which
+    /// outlives every shim that has ever hosted it, and `Established` does not
+    /// clear it either.
+    ///
+    /// `listening` stays for the reason `forget` gives below.
+    pub fn left_agent_mode(&self, terminal: Uuid) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            if let Some(entry) = sessions.get_mut(&terminal) {
+                entry.activity = AgentActivity::Unspecified;
+                entry.failure = None;
+                entry.session_id = None;
+                entry.agent_mode = None;
+                entry.available_modes = Vec::new();
+            }
+        }
+        if let Ok(mut writers) = self.writers.lock() {
+            writers.remove(&terminal);
+        }
+    }
+
     pub fn forget(&self, terminal: Uuid) {
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.remove(&terminal);
@@ -871,6 +925,109 @@ mod tests {
             ShimMessage::Established { session_id: "s".into(), available_modes: Vec::new() },
             &|_, _| {},
         );
+        assert_eq!(supervisor.failure(terminal), None);
+    }
+
+    #[test]
+    fn leaving_agent_mode_drops_the_dead_shims_state_and_keeps_the_conversations() {
+        // Nothing used to tell the supervisor that a toggle out of agent mode
+        // had killed the shim, so every word it held went on describing a
+        // process that no longer exists.
+        //
+        // The two halves are asserted together on purpose: what must go, and
+        // what must not. Removing the whole entry would take the epoch with
+        // it, and an epoch that goes back to 0 lets a client holding 1 from
+        // the old stream match the NEXT shim's 1 and keep a cursor into a
+        // stream it has never read.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+
+        supervisor.apply(
+            terminal,
+            ShimMessage::Established {
+                session_id: "the-conversation".into(),
+                available_modes: vec!["ask".into(), "code".into()],
+            },
+            &|_, _| {},
+        );
+        supervisor.record(
+            terminal,
+            vec![AgentEvent::SessionInfo { title: "porting the parser".into() }],
+            &|_, _| {},
+        );
+        supervisor.apply(
+            terminal,
+            ShimMessage::Events {
+                events: vec![Sequenced {
+                    seq: 0,
+                    event: AgentEvent::Message {
+                        role: Role::Agent,
+                        text: "half a turn".into(),
+                        parent: None,
+                    },
+                }],
+            },
+            &|_, _| {},
+        );
+        let epoch_before = supervisor.replay(terminal, 0, u64::MAX).0;
+        assert_eq!(
+            supervisor.activity(terminal),
+            AgentActivity::Working,
+            "the fixture must start from a turn in flight"
+        );
+        assert_eq!(supervisor.session_id(terminal).as_deref(), Some("the-conversation"));
+
+        supervisor.left_agent_mode(terminal);
+
+        assert_eq!(
+            supervisor.activity(terminal),
+            AgentActivity::Unspecified,
+            "a pane forced out mid-turn kept `Working` forever, and `guard_toggle` refuses on it"
+        );
+        assert!(
+            guard_toggle(supervisor.activity(terminal), false).is_ok(),
+            "so the way back into a chat must not need forcing"
+        );
+        assert_eq!(supervisor.session_id(terminal), None, "that shim's session is over");
+        assert!(
+            supervisor.available_modes(terminal).is_empty(),
+            "and the modes it offered belonged to its adapter"
+        );
+
+        assert_eq!(
+            supervisor.replay(terminal, 0, u64::MAX).0,
+            epoch_before,
+            "the epoch must never go backwards; a client would keep a cursor into another stream"
+        );
+        assert_eq!(
+            supervisor.title(terminal).as_deref(),
+            Some("porting the parser"),
+            "the title names the conversation, which outlives every shim that hosts it"
+        );
+        assert_eq!(
+            supervisor.replay(terminal, 0, epoch_before).1.len(),
+            2,
+            "and the transcript is the conversation, still readable while the pane is a terminal"
+        );
+    }
+
+    #[test]
+    fn a_failure_does_not_outlive_the_chat_it_was_reported_against() {
+        // The way out of a failed chat is the toggle to terminal mode. If the
+        // word survives it, switching back in draws the OLD failure over a new
+        // chat until `Established` happens to clear it — which for a chat that
+        // is starting normally is precisely the window the user is watching.
+        let supervisor = AgentSupervisor::new();
+        let terminal = Uuid::now_v7();
+        supervisor.apply(
+            terminal,
+            ShimMessage::Failed { failure: AgentFailure::NotAuthenticated },
+            &|_, _| {},
+        );
+        assert_eq!(supervisor.failure(terminal), Some(AgentFailure::NotAuthenticated));
+
+        supervisor.left_agent_mode(terminal);
+
         assert_eq!(supervisor.failure(terminal), None);
     }
 
