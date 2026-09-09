@@ -1809,6 +1809,19 @@ impl Service {
     /// created by us — had only claude. The one repository that mattered most
     /// was the one that stayed silent.
     ///
+    /// **`set_pane_mode` going the other way, into `Agent`, deliberately does
+    /// not call this** — and not for the reason it is tempting to give. A codex
+    /// process really does start in this worktree there: the pane runs
+    /// `farcooler agent-host`, which spawns its adapter with `current_dir` set
+    /// to the worktree (`acp::conn`), so `.codex/hooks.json` really would be
+    /// read. The reason is one step further on. Every hook record routed to a
+    /// pane in `Agent` mode is dropped by `hook_ingress::is_a_chat`, on both of
+    /// `terminal_for`'s routes, because that pane's conversation already
+    /// arrives over its shim and folding the hooks in as well would show the
+    /// user every assistant turn twice. So installing there could not produce a
+    /// live view even if the file were read — it would be a write into
+    /// somebody's repository with nothing on the other end of it.
+    ///
     /// **Per worktree, not per repository.** The ruling says "first agent
     /// launch in that repository", but git gives every worktree its own
     /// working directory and an untracked `.codex/hooks.json` in one is
@@ -6700,21 +6713,79 @@ mod launch_hook_install_tests {
     ///
     /// Order matters and is checked: the file has to be on disk before the
     /// process that reads it starts.
+    /// This file's production half: everything outside its `#[cfg(test)]`
+    /// modules.
+    ///
+    /// Cutting at the FIRST `#[cfg(test)]`, which is what the guard below did
+    /// until review caught it, was wrong the day it was written.
+    /// `canonical_or_raw` is production code sitting BETWEEN two test modules,
+    /// so a positional cut stopped hundreds of lines short of the end of the
+    /// production code — and a fifth launch path written below that point
+    /// would have been invisible to the guard while its coverage assert went
+    /// on passing, because all four launch paths that exist today happen to
+    /// live above the cut. A guard that cannot fail over the region it never
+    /// reads is exactly the shape this file's tests keep being written to
+    /// avoid, arriving inside one of them.
+    ///
+    /// So the test modules are removed by name rather than by position. Every
+    /// one of them is `#[cfg(test)]` alone on a line at column zero followed by
+    /// `mod x {`, and everything inside a module is indented — so the bare `}`
+    /// that ends the skip is that module's own closing brace and nothing
+    /// else's. `the_production_half_is_the_whole_of_the_production_code` checks
+    /// that claim in both directions rather than trusting it.
+    fn production_half() -> String {
+        const SOURCE: &str = include_str!("service.rs");
+        let mut kept = String::new();
+        let mut lines = SOURCE.lines();
+        while let Some(line) = lines.next() {
+            if line == "#[cfg(test)]" {
+                for inner in lines.by_ref() {
+                    if inner == "}" {
+                        break;
+                    }
+                }
+                continue;
+            }
+            kept.push_str(line);
+            kept.push('\n');
+        }
+        kept
+    }
+
+    /// The stripper really strips, and really keeps.
+    ///
+    /// Both directions matter and both fail loudly. Left short, the guard below
+    /// reads less than the production code and cannot fail over the rest --
+    /// which is the defect this replaced. Left long, it would walk
+    /// `preset_tests`'s own functions, which build launch commands and have no
+    /// worktree to install into, and go red on code that is not a launch path
+    /// at all.
+    #[test]
+    fn the_production_half_is_the_whole_of_the_production_code() {
+        let production = production_half();
+
+        // The exact line that made a positional cut wrong: production code
+        // living BELOW the first test module.
+        assert!(
+            production.contains("pub fn canonical_or_raw"),
+            "production code below the first test module is missing from the scan"
+        );
+        for name in
+            ["fn create_terminal", "fn split_terminal", "fn restart_terminal", "fn set_pane_mode"]
+        {
+            assert!(production.contains(name), "the scan cannot see `{name}`");
+        }
+
+        // And nothing from inside a test module survived -- including this
+        // module, which is why `fn production_half` is one of the three.
+        for test_only in ["mod restart_wiring_tests", "mod preset_tests", "fn production_half"] {
+            assert!(!production.contains(test_only), "`{test_only}` is test code and was kept");
+        }
+    }
+
     #[test]
     fn every_launch_path_prepares_hooks_before_it_builds_a_command() {
-        const SOURCE: &str = include_str!("service.rs");
-
-        // The production half. Every test module in this file follows it, so
-        // this is the whole of the code that runs on a runner -- and the
-        // assertions below fail loudly rather than quietly scanning nothing if
-        // that ever stops being true.
-        let production = SOURCE.split("#[cfg(test)]").next().expect("a production half");
-        for expected in ["fn create_terminal", "fn split_terminal", "fn restart_terminal"] {
-            assert!(
-                production.contains(expected),
-                "this guard is reading the wrong text: it cannot see `{expected}`"
-            );
-        }
+        let production = production_half();
 
         /// The name of a method on `Service` -- four spaces of indent, inside
         /// the `impl` block -- or `None` for anything else.
