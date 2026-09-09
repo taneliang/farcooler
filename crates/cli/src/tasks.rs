@@ -245,9 +245,10 @@ pub enum TaskCmd {
         on: String,
         /// Why it has to wait.
         ///
-        /// Only settable when the edge is written. Blocking a pair that is
-        /// already blocked is refused, so correcting a reason is `--clear`
-        /// and then block again.
+        /// Blocking a pair that is already blocked replaces the reason, so
+        /// correcting one is the same command again with the new words. Left
+        /// off, it writes an empty reason — which on a pair already blocked
+        /// clears the reason that was there.
         #[arg(long)]
         reason: Option<String>,
         /// Remove the edge instead of writing it.

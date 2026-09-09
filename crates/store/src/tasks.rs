@@ -551,21 +551,31 @@ impl Store {
 
     /// Record that `task` cannot proceed until `blocked_by` does, and why.
     ///
-    /// **Not idempotent, unlike `unblock` below, and the name does not say
-    /// so.** `task_blocks` is keyed `PRIMARY KEY (task_id, blocked_by)` and
-    /// this is a plain `INSERT`, so blocking a pair that is already blocked
-    /// hits the constraint and comes back `ResourceConflict` -- see `map_err`,
-    /// which maps every constraint violation onto that. A caller correcting a
-    /// `reason` therefore has to `unblock` the pair and block it again;
-    /// re-setting it in place is refused.
+    /// An upsert, and idempotent like `unblock` below. `task_blocks` is keyed
+    /// `PRIMARY KEY (task_id, blocked_by)`, so blocking a pair that is
+    /// already blocked conflicts on that key; `ON CONFLICT DO UPDATE SET
+    /// reason = excluded.reason` takes the new reason rather than refusing.
+    /// The row keeps its `rowid`, so a correction does not move the edge to
+    /// the end of `blocks_for`'s listing.
     ///
-    /// That is genuinely surprising for a `set_` function and it is recorded
-    /// here rather than fixed, because turning this into an upsert is a
-    /// semantic change with its own test surface -- one that belongs in a
-    /// change of its own rather than folded into somebody else's. Until then
-    /// this doc, `TaskBlockSet` in the proto, and `farcooler task block
-    /// --reason`'s help all say the same thing, so the surprise is met in
-    /// writing before it is met at runtime.
+    /// This was once a plain `INSERT`, which meant a caller correcting a
+    /// `reason` got the constraint violation `map_err` turns into
+    /// `ResourceConflict` -- read by a client as "this changed while you were
+    /// reading it, read it again and reapply," advice that could never
+    /// succeed however many times it was followed. A verb named `set_` that
+    /// refuses a re-set is surprising on its own.
+    ///
+    /// The append-only rule this store keeps elsewhere protects the RECORD --
+    /// `task_notes`, where a correction is a new note that `supersedes` an
+    /// old one and both survive. A block is not a record; it is current
+    /// understanding of what a task is waiting on, and current understanding
+    /// is meant to be revisable in place. The reason a block was written is
+    /// not history worth keeping once it is known to be wrong.
+    ///
+    /// One consequence worth knowing at the call site: the reason is taken
+    /// from every successful call, so re-blocking a pair while passing an
+    /// empty `reason` overwrites whatever reason was there with nothing. A
+    /// caller that means to leave a reason alone must not call this.
     ///
     /// Refuses a cycle. Before inserting, this walks the graph forward from
     /// `blocked_by` -- what `blocked_by` itself is blocked on, and what
@@ -627,7 +637,8 @@ impl Store {
         }
 
         tx.execute(
-            "INSERT INTO task_blocks (task_id, blocked_by, reason) VALUES (?1, ?2, ?3)",
+            "INSERT INTO task_blocks (task_id, blocked_by, reason) VALUES (?1, ?2, ?3)
+             ON CONFLICT (task_id, blocked_by) DO UPDATE SET reason = excluded.reason",
             params![uuid_blob(task), uuid_blob(blocked_by), reason],
         )
         .map_err(map_err)?;
@@ -1667,6 +1678,76 @@ mod tests {
         let blocks = store.blocks_for(a.id).unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(blocks.iter().any(|x| x.reason == "needs the migration first"));
+    }
+
+    /// The correction path, read back OUT of the database rather than taken
+    /// on faith from `set_block` returning `Ok(())` a second time. That
+    /// return value proves only that nothing refused: an `ON CONFLICT DO
+    /// NOTHING` would hand back exactly the same `Ok(())` while leaving the
+    /// old reason sitting in the row, and only a read through `blocks_for`
+    /// can tell those two apart.
+    ///
+    /// This is the bug the upsert fixes. A plain `INSERT` here hit the
+    /// primary key and came back `ResourceConflict`, which a client renders
+    /// as "this task changed while you were reading it, read it again and
+    /// reapply the change" -- advice that fails identically however many
+    /// times it is followed, because nothing about the task had changed.
+    #[test]
+    fn re_blocking_a_pair_replaces_the_reason_rather_than_refusing() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        store.set_block(a.id, b.id, "needs the cheap lookup").unwrap();
+
+        store.set_block(a.id, b.id, "corrected reason").expect("a re-set is not a conflict");
+
+        let blocks = store.blocks_for(a.id).unwrap();
+        assert_eq!(blocks.len(), 1, "a corrected block is the same edge, not a second one");
+        assert_eq!(blocks[0].reason, "corrected reason", "the new reason is what the row holds");
+    }
+
+    /// A correction updates the row in place, so the edge keeps its `rowid`
+    /// and `blocks_for`'s `ORDER BY rowid` goes on listing it where it was.
+    /// A delete-then-insert would satisfy both assertions in the test above
+    /// and still shuffle a task's blockers under its reader every time one
+    /// of them was corrected -- which is the thing that ordering exists to
+    /// promise it will not do.
+    #[test]
+    fn a_corrected_reason_keeps_the_edge_where_it_was_in_the_listing() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let c = store.create_task(repo(), "c", Actor::User).unwrap();
+        store.set_block(a.id, b.id, "needs the migration first").unwrap();
+        store.set_block(a.id, c.id, "needs the CLI").unwrap();
+
+        store.set_block(a.id, b.id, "needs the migration and the backfill").unwrap();
+
+        let blocks = store.blocks_for(a.id).unwrap();
+        assert_eq!(blocks.len(), 2, "correcting one edge adds none");
+        assert_eq!(blocks[0].blocked_by, b.id, "the corrected edge stays first");
+        assert_eq!(blocks[0].reason, "needs the migration and the backfill");
+        assert_eq!(blocks[1].blocked_by, c.id, "and the edge beside it is untouched");
+        assert_eq!(blocks[1].reason, "needs the CLI");
+    }
+
+    /// The sharp edge of taking the reason from every call, pinned because
+    /// `set_block`'s doc, `TaskBlockSet` in the proto and `task block
+    /// --reason`'s help all now promise it: a re-block carrying no reason
+    /// writes no reason, rather than leaving the previous one standing. A
+    /// caller that means to leave a reason alone must not call this at all.
+    #[test]
+    fn re_blocking_with_no_reason_clears_the_reason_that_was_there() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        store.set_block(a.id, b.id, "needs the cheap lookup").unwrap();
+
+        store.set_block(a.id, b.id, "").unwrap();
+
+        let blocks = store.blocks_for(a.id).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].reason, "", "an empty reason is written, not ignored");
     }
 
     /// A cycle is a deadlock the manager would never resolve, and it would

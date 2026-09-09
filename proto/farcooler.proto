@@ -2624,14 +2624,18 @@ message TaskNoteAppend {
 // A cycle is refused — a deadlock nobody resolves presents as a queue that
 // quietly stopped moving rather than as an error.
 //
-// WRITING an edge is not idempotent, and `clear` is — the two halves of this
-// one message behave differently, which is worth knowing before a retry.
-// `task_blocks` is keyed on the pair, so blocking a pair that is already
-// blocked comes back `resource-conflict`; clearing one that was never there
-// succeeds. Correcting a `reason` is therefore two calls: `clear` the edge,
-// then write it again. Recorded rather than fixed — making the write an
-// upsert is a semantic change with its own test surface, and is a change of
-// its own.
+// Both halves are idempotent, so either is safe to retry. `task_blocks` is
+// keyed on the pair: writing an edge that is already there takes the new
+// `reason` rather than refusing, and clearing one that was never there
+// succeeds. Correcting a `reason` is therefore one call, the same call that
+// wrote it — which also means a write that leaves `reason` empty overwrites
+// the reason that was there with nothing.
+//
+// This changed: writing an edge used to come back `resource-conflict` when
+// the pair was already blocked. A block is current understanding of what a
+// task waits on, not a record of what was once believed, so it is revisable
+// in place; the append-only rule applies to `TaskNoteAppend`, where a
+// correction supersedes rather than replaces.
 message TaskBlockSet {
   bytes task_id = 1;
   bytes blocked_by = 2;
