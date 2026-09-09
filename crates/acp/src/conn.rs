@@ -152,10 +152,14 @@ pub struct AcpWriter {
     stdin: ChildStdin,
     next_id: u64,
     pub worktree: PathBuf,
-    /// Kept so the adapter process is not reaped out from under the reader
+    /// Kept so the adapter process is not killed out from under the reader
     /// task `split` spawned. That task still owns stdout and expects frames
     /// for as long as a turn is in flight; dropping `Child` here would kill
     /// the subprocess and turn a live turn into a spurious `Closed`.
+    ///
+    /// That sentence used to describe an intention. `spawn` sets
+    /// `kill_on_drop`, so it now describes what actually happens, and this
+    /// field is load-bearing rather than merely tidy.
     _child: Child,
 }
 
@@ -229,6 +233,28 @@ impl AcpConnection {
             // Inherited so the adapter's own diagnostics land in the pane the
             // shim is running in, where a user can actually read them.
             .stderr(Stdio::inherit())
+            // The adapter does not outlive the connection that started it.
+            //
+            // Tokio detaches by default: dropping a `Child` leaves the process
+            // running and reparents it. Every path where this shim gives up on
+            // an adapter drops the connection — a handshake that never
+            // answers, `session/new` refused, a backend swapped out — and each
+            // of those left a real `npx` and the node process under it running
+            // in the worktree for the life of the pane, with nothing holding a
+            // handle to it any more.
+            //
+            // It is not the whole of the orphan question, and it is worth
+            // being exact about which half it is. A pane-mode toggle kills the
+            // SHIM with `respawn-pane -k`, and SIGKILL runs no destructors, so
+            // nothing here executes; what saves that case is the adapter
+            // reading EOF on the stdin pipe the kernel closes for it. This
+            // covers the other half: every abandonment the shim decides on
+            // itself, where a `Drop` really does run.
+            //
+            // `AcpWriter::_child` is what makes this safe across a split: the
+            // handle is held for as long as the reader task expects frames, so
+            // a live turn is not killed out from under itself.
+            .kill_on_drop(true)
             .spawn()
             .map_err(|_| AcpError::Spawn)?;
         let stdin = child.stdin.take().ok_or(AcpError::Spawn)?;
@@ -456,9 +482,10 @@ impl AcpConnection {
         if n == 0 { Err(AcpError::Closed) } else { Ok(line) }
     }
 
-    pub async fn kill(&mut self) {
-        let _ = self.child.kill().await;
-    }
+    // `kill` used to live here and had no callers anywhere -- an explicit
+    // teardown nothing ever reached, next to a spawn that detached. The
+    // teardown is `kill_on_drop` now, which happens on every path rather than
+    // on the ones somebody remembered to write.
 }
 
 #[cfg(test)]
@@ -517,6 +544,55 @@ mod tests {
             AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
         let result = conn.request("initialize", serde_json::json!({})).await.expect("a result");
         assert_eq!(result["saw"], "/proof");
+    }
+
+    /// Whether a pid is still a live process on this host.
+    ///
+    /// `ps` rather than a `libc::kill(pid, 0)` probe, because this crate has
+    /// no libc dependency and adding one for a test would be the larger
+    /// change. A zombie counts as gone: it has been killed, and the only thing
+    /// left is the `wait` tokio's reaper does on its own schedule.
+    fn still_running(pid: u32) -> bool {
+        let out = std::process::Command::new("/bin/ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .output()
+            .expect("ps");
+        let stat = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        !stat.is_empty() && !stat.starts_with('Z')
+    }
+
+    #[tokio::test]
+    async fn an_adapter_does_not_outlive_the_connection_that_abandoned_it() {
+        // Tokio detaches a `Child` on drop by default, so every path where the
+        // shim gives up on an adapter -- a handshake that never answers,
+        // `session/new` refused, a backend swapped out -- left a real `npx`
+        // and the node process under it running in the worktree for the life
+        // of the pane, with nothing anywhere holding a handle to it.
+        //
+        // The fake adapter is `exec sleep`, which keeps the spawned pid and
+        // will not exit on its own when its stdin closes. An adapter that DID
+        // exit on EOF would pass this test whether or not anything killed it,
+        // which would make the guard unable to fail. Bounded so that a
+        // regression leaves a process that goes away by itself rather than one
+        // that runs until the machine is rebooted.
+        let launch = Launch {
+            program: "/bin/sh".into(),
+            args: vec!["-c".to_string(), "exec sleep 30".to_string()],
+            env: Default::default(),
+        };
+        let conn = AcpConnection::spawn(&launch, std::env::temp_dir()).await.expect("spawn");
+        let pid = conn.child.id().expect("a freshly spawned adapter has a pid");
+        assert!(still_running(pid), "the fixture must start from a live adapter");
+
+        drop(conn);
+
+        for _ in 0..60 {
+            if !still_running(pid) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("the adapter (pid {pid}) outlived the connection that started it");
     }
 
     #[tokio::test]
