@@ -3857,6 +3857,66 @@ mod restart_wiring_tests {
         assert!(!command.contains("agent-host"), "a restart puts back a TUI, not the shim: {command}");
     }
 
+    /// A restart is the OTHER way a pane leaves agent mode, and it needs the
+    /// same cleanup.
+    ///
+    /// Guarded separately because the cleanup is called from two places and
+    /// only one of them had a test: deleting the `left_agent_mode` call in
+    /// `restart_terminal` left the whole suite green. The supervisor's own
+    /// unit tests cover what the method does; nothing covered whether this
+    /// path reaches it.
+    ///
+    /// The activity is the half that costs something. The restart respawns the
+    /// pane as a TUI and the shim dies with it, so a `Working` left behind
+    /// describes a process that no longer exists — and `guard_toggle` refuses
+    /// the switch back into a chat on exactly that word.
+    #[tokio::test]
+    async fn restarting_an_agent_pane_stops_it_answering_for_the_shim_that_died() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc
+            .store
+            .create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+        let term = svc
+            .store
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                models::PaneMode::Agent,
+                Some(Uuid::now_v7().to_string()),
+                false,
+            )
+            .unwrap();
+
+        // A turn in flight, put there the way a shim's events put it there.
+        svc.agents().record(
+            term.id,
+            vec![farcooler_agent::event::AgentEvent::Message {
+                role: farcooler_agent::event::Role::Agent,
+                text: "half a turn".into(),
+                parent: None,
+            }],
+            &|_, _| {},
+        );
+        assert_eq!(
+            svc.agents().activity(term.id),
+            farcooler_protocol::v1::AgentActivity::Working,
+            "the fixture must start from a turn in flight"
+        );
+
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        assert_eq!(
+            svc.agents().activity(term.id),
+            farcooler_protocol::v1::AgentActivity::Unspecified,
+            "the restart killed the shim, and nothing it reported is true any more"
+        );
+        assert!(
+            agent_supervisor::guard_toggle(svc.agents().activity(term.id), false).is_ok(),
+            "so the way back into the chat must not need forcing over a turn that is gone"
+        );
+    }
+
     /// The window a pane sits in, as tmux reports it.
     async fn window_of(svc: &Service, terminal: Uuid) -> Option<String> {
         let snapshot = svc.inventory.refresh().await;
@@ -4129,6 +4189,58 @@ mod agent_mode_wiring_tests {
         assert!(
             agent_supervisor::guard_toggle(svc.agents().activity(term.id), false).is_ok(),
             "so the way back into the chat must not need forcing over a turn that is gone"
+        );
+
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// The WIRING for the leftover above: that `set_pane_mode` itself writes
+    /// through `record_pane_mode`.
+    ///
+    /// The guard below drives `record_pane_mode` directly, so it goes red when
+    /// that function misbehaves and stays green when the call site is reverted
+    /// to the old `store.set_pane_mode(id, term.resource_version, ..)`. That is
+    /// a guard that cannot fail for the defect it was written against, which is
+    /// this repo's defining failure mode, so here is the other half.
+    ///
+    /// Two toggles at once, and the interleaving is deterministic rather than
+    /// hoped for. Each call reads the terminal synchronously at the top of
+    /// `set_pane_mode` and then hits `inventory.refresh()`, which shells out to
+    /// tmux and therefore returns `Pending` on its first poll — so `join!` has
+    /// run BOTH reads before either future can reach its write, and both hold
+    /// the same `resource_version`. Whichever writes second is writing under a
+    /// version that is now one behind.
+    ///
+    /// `PaneMode::Terminal` deliberately: a toggle to `Agent` would have each
+    /// call capture the pane's screen to identify the harness, and one of them
+    /// would be looking at a pane the other had already respawned. Nothing in
+    /// this test needs an agent — the race is in the bookkeeping.
+    ///
+    /// This is exactly the case `record_pane_mode`'s doc comment claims to
+    /// handle: two clients toggling one pane both reach `respawn_pane`, the
+    /// last respawn is what is in the pane, and a version check could only
+    /// make the record disagree with that rather than prevent it.
+    #[tokio::test]
+    async fn two_toggles_at_once_both_record_themselves() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "pane", "shell").await.expect("a pane");
+
+        let (first, second) = tokio::join!(
+            svc.set_pane_mode(term.id, models::PaneMode::Terminal, false),
+            svc.set_pane_mode(term.id, models::PaneMode::Terminal, false),
+        );
+
+        assert!(
+            first.is_ok() && second.is_ok(),
+            "both toggles respawned the pane, so both have to be able to say so: \
+             first {first:?}, second {second:?}"
+        );
+        // Read back off the row, and it must have moved twice: one write
+        // refused is one respawn the record never learned about.
+        assert_eq!(
+            svc.store.get_terminal(term.id).unwrap().resource_version,
+            term.resource_version + 2,
+            "a refused write is a pane respawned under a record that never heard about it"
         );
 
         let _ = svc.stop_terminal(term.id).await;
