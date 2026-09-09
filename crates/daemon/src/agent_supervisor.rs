@@ -692,6 +692,18 @@ impl AgentSupervisor {
     /// never reused, so nothing will ask to bind that path again, and what is
     /// left behind is one `Uuid` and one task blocked on `accept` for a socket
     /// no shim will ever dial.
+    pub fn forget(&self, terminal: Uuid) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.remove(&terminal);
+        }
+        if let Ok(mut recent) = self.recent.lock() {
+            recent.remove(&terminal);
+        }
+        if let Ok(mut writers) = self.writers.lock() {
+            writers.remove(&terminal);
+        }
+    }
+
     /// A pane has stopped being a chat.
     ///
     /// Everything the supervisor holds for a terminal used to survive the
@@ -730,7 +742,7 @@ impl AgentSupervisor {
     /// outlives every shim that has ever hosted it, and `Established` does not
     /// clear it either.
     ///
-    /// `listening` stays for the reason `forget` gives below.
+    /// `listening` stays for the reason `forget` gives above.
     pub fn left_agent_mode(&self, terminal: Uuid) {
         if let Ok(mut sessions) = self.sessions.lock() {
             if let Some(entry) = sessions.get_mut(&terminal) {
@@ -740,18 +752,6 @@ impl AgentSupervisor {
                 entry.agent_mode = None;
                 entry.available_modes = Vec::new();
             }
-        }
-        if let Ok(mut writers) = self.writers.lock() {
-            writers.remove(&terminal);
-        }
-    }
-
-    pub fn forget(&self, terminal: Uuid) {
-        if let Ok(mut sessions) = self.sessions.lock() {
-            sessions.remove(&terminal);
-        }
-        if let Ok(mut recent) = self.recent.lock() {
-            recent.remove(&terminal);
         }
         if let Ok(mut writers) = self.writers.lock() {
             writers.remove(&terminal);

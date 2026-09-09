@@ -248,6 +248,20 @@ impl Handler for RpcFactory {
 ///
 /// Shared with `Rpc::handle` so a response built outside the dispatcher cannot
 /// be a differently shaped one — same code mapping, same redaction.
+fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
+    let (code, retryable) = err.wire();
+    Response {
+        request_id,
+        outcome: Some(response::Outcome::Error(WireError {
+            code: code as i32,
+            retryable,
+            // Redacted by construction: never a path, terminal byte, command,
+            // or session id.
+            message: err.redacted_message(),
+        })),
+    }
+}
+
 /// Hand a message to a terminal's shim, or say that nothing got it.
 ///
 /// Every one of the nine agent methods below is a person acting on a chat, and
@@ -267,20 +281,6 @@ fn to_the_shim(svc: &Service, terminal: Uuid, message: DaemonMessage) -> Result<
         Ok(())
     } else {
         Err(DomainError::AgentNotConnected)
-    }
-}
-
-fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
-    let (code, retryable) = err.wire();
-    Response {
-        request_id,
-        outcome: Some(response::Outcome::Error(WireError {
-            code: code as i32,
-            retryable,
-            // Redacted by construction: never a path, terminal byte, command,
-            // or session id.
-            message: err.redacted_message(),
-        })),
     }
 }
 
