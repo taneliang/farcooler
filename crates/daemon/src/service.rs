@@ -4211,10 +4211,27 @@ mod agent_mode_wiring_tests {
     /// the same `resource_version`. Whichever writes second is writing under a
     /// version that is now one behind.
     ///
-    /// `PaneMode::Terminal` deliberately: a toggle to `Agent` would have each
-    /// call capture the pane's screen to identify the harness, and one of them
-    /// would be looking at a pane the other had already respawned. Nothing in
-    /// this test needs an agent — the race is in the bookkeeping.
+    /// `PaneMode::Terminal` deliberately, and the reason is the refusal rather
+    /// than the screen capture.
+    ///
+    /// This fixture's pane runs `shell`, so `Registry::identify` finds no agent
+    /// in it and `Agent` is refused outright — "nothing in this pane is an
+    /// agent", the arm `a_pane_with_nothing_in_it_is_refused_a_chat` guards.
+    /// Both calls would return `InvalidArgument` before reaching the write, and
+    /// the test would prove nothing at all.
+    ///
+    /// Dressing the pane up as claude would not rescue it either, for a reason
+    /// worth stating exactly: `harness` is computed from a screen capture that
+    /// BOTH modes take — `self.screen(id).await` runs unconditionally, above
+    /// the `match pane_mode` — so the capture is not what the mode changes.
+    /// What the mode changes is what the answer is USED for. In the `Agent` arm
+    /// it decides whether the call is refused; in `Terminal` it is computed and
+    /// then thrown away by `.filter(|_| pane_mode == Agent)`. So with `Agent`
+    /// the second call's verdict would depend on whether it captured before or
+    /// after the first call respawned the pane into the shim, and with
+    /// `Terminal` a wrong answer decides nothing.
+    ///
+    /// Nothing in this test needs an agent — the race is in the bookkeeping.
     ///
     /// This is exactly the case `record_pane_mode`'s doc comment claims to
     /// handle: two clients toggling one pane both reach `respawn_pane`, the
