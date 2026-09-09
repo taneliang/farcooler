@@ -248,6 +248,28 @@ impl Handler for RpcFactory {
 ///
 /// Shared with `Rpc::handle` so a response built outside the dispatcher cannot
 /// be a differently shaped one — same code mapping, same redaction.
+/// Hand a message to a terminal's shim, or say that nothing got it.
+///
+/// Every one of the nine agent methods below is a person acting on a chat, and
+/// every one of them used to do nothing at all when no shim held that pane's
+/// socket -- the supervisor found no writer, dropped the message, and the RPC
+/// replied with the terminal read back, which is the same reply a delivery
+/// gets. The prompt was the worst of them, because what it dropped was words
+/// somebody had typed, but a mode a client believes it set and an answer to a
+/// permission request that never arrives are the same lie.
+///
+/// `AgentNotConnected` and not `OperationFailed`, so a client can say which
+/// thing happened; retryable, because the usual cause is a chat whose shim has
+/// not finished dialling. The runner sends the word and the app owns the
+/// sentence, as with every other code here.
+fn to_the_shim(svc: &Service, terminal: Uuid, message: DaemonMessage) -> Result<()> {
+    if svc.agents().send(terminal, message) {
+        Ok(())
+    } else {
+        Err(DomainError::AgentNotConnected)
+    }
+}
+
 fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
     let (code, retryable) = err.wire();
     Response {
@@ -1678,13 +1700,14 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(
+                to_the_shim(
+                    svc,
                     id,
                     DaemonMessage::Prompt {
                         text: wire::prompt_text(&p.blocks),
                         images: wire::prompt_images(&p.blocks),
                     },
-                );
+                )?;
                 // Typing into a pane is reading it. Waiting for the shim's first
                 // event to move the row off `Done` would leave a terminal you
                 // are actively using still asking for your attention.
@@ -1868,10 +1891,11 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(
+                to_the_shim(
+                    svc,
                     id,
                     DaemonMessage::Answer { request_id: p.request_id, option_id: p.option_id },
-                );
+                )?;
                 // The same call `terminal.seen` makes: answering is only
                 // reachable by having looked, so it ends `Done` the same way.
                 // Against the WATCHER, which is the one place `Done` lives —
@@ -1885,7 +1909,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(id, DaemonMessage::SetMode { agent_mode: p.agent_mode });
+                to_the_shim(svc, id, DaemonMessage::SetMode { agent_mode: p.agent_mode })?;
                 self.terminal_result(id).await
             }
 
@@ -1894,7 +1918,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(id, DaemonMessage::SetModel { model: p.model });
+                to_the_shim(svc, id, DaemonMessage::SetModel { model: p.model })?;
                 self.terminal_result(id).await
             }
 
@@ -1903,7 +1927,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(id, DaemonMessage::SetConfig { id: p.config_id, value: p.value });
+                to_the_shim(svc, id, DaemonMessage::SetConfig { id: p.config_id, value: p.value })?;
                 self.terminal_result(id).await
             }
 
@@ -1912,8 +1936,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents()
-                    .send(id, DaemonMessage::EditQueued { id: p.queued_id, text: p.text });
+                to_the_shim(svc, id, DaemonMessage::EditQueued { id: p.queued_id, text: p.text })?;
                 self.terminal_result(id).await
             }
 
@@ -1922,7 +1945,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(id, DaemonMessage::CancelQueued { id: p.queued_id });
+                to_the_shim(svc, id, DaemonMessage::CancelQueued { id: p.queued_id })?;
                 self.terminal_result(id).await
             }
 
@@ -1931,7 +1954,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(id, DaemonMessage::SteerQueued { id: p.queued_id });
+                to_the_shim(svc, id, DaemonMessage::SteerQueued { id: p.queued_id })?;
                 self.terminal_result(id).await
             }
 
@@ -1940,7 +1963,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                svc.agents().send(id, DaemonMessage::Cancel);
+                to_the_shim(svc, id, DaemonMessage::Cancel)?;
                 self.terminal_result(id).await
             }
 

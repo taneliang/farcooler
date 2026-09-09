@@ -1567,6 +1567,49 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted() {
     assert!(batch.events.is_empty(), "nothing has happened on this pane yet");
 }
 
+/// Words nobody received are not words that were sent.
+///
+/// `terminal.agent_prompt` handed the message to the supervisor, the
+/// supervisor found no writer for that pane, and the RPC replied with the
+/// terminal read back — the same reply a delivered prompt gets. So a person
+/// watched what they had typed leave the composer and never appear anywhere,
+/// with the app told it had worked.
+///
+/// The pane here has no shim, which is also the state a real one is in for the
+/// first second after a chat is opened, and the state it is in forever if the
+/// shim died. `AgentNotConnected` is retryable for exactly that reason: the
+/// client can offer Send Again. The runner sends the word; the app owns the
+/// sentence.
+#[tokio::test]
+async fn a_prompt_nothing_is_listening_for_is_refused_rather_than_dropped() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = h._dir.path().to_path_buf();
+    let workspace = a_workspace(&mut client, &dir).await;
+    let terminal = a_terminal(&mut client, &workspace.id, "pane").await;
+
+    let mut req = request("terminal.agent_prompt");
+    req.payload = Some(request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
+        terminal_id: terminal.id.clone(),
+        blocks: vec![farcooler_protocol::v1::AgentPromptBlock {
+            content: Some(farcooler_protocol::v1::agent_prompt_block::Content::Text(
+                "please do the thing".to_string(),
+            )),
+        }],
+    }));
+
+    match client.call(req).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(
+                code,
+                ErrorCode::AgentNotConnected as i32,
+                "a prompt that reached no shim has to arrive as its own word, not a shrug"
+            );
+        }
+        other => panic!("a prompt nothing received must not be answered with a success: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn switching_a_panes_mode_tells_every_client_and_not_just_the_caller() {
     // A pane-mode change alters nothing the watcher samples — same activity,

@@ -1715,6 +1715,16 @@ enum ErrorCode {
   //
   // Never retryable: no amount of retrying updates the other side.
   ERROR_CODE_CAPABILITY_UNSUPPORTED = 28;
+  // "This chat isn't connected yet." The pane is in agent mode but no shim
+  // holds the socket, so a prompt sent now would reach nobody.
+  //
+  // Retryable, and that is the point of it being its own code rather than
+  // OPERATION_FAILED: the usual cause is a chat that has been opened and whose
+  // shim has not finished dialling, which resolves in about a second. A client
+  // that knows this is what happened can offer Send Again rather than a
+  // shrug — and, more importantly, can say ANYTHING, where before the words
+  // the person typed were dropped on the floor with a success reply.
+  ERROR_CODE_AGENT_NOT_CONNECTED = 29;
 }
 
 // ---------------------------------------------------------------------------

@@ -113,6 +113,20 @@ pub enum DomainError {
     /// arrives as "managed processes are still running".
     #[error("workspaces still exist under this resource")]
     WorkspacesExist,
+
+    /// A prompt was sent to a pane no shim is holding the socket for.
+    ///
+    /// Deliberately not `OperationFailed`, and deliberately not silence, which
+    /// is what this replaces: `agent_prompt` handed the message to the
+    /// supervisor, the supervisor found no writer, and the RPC replied with
+    /// the terminal read back as though the words had been delivered. The
+    /// person watched their own message vanish with nothing anywhere saying it
+    /// had.
+    ///
+    /// Retryable, because the usual cause is a chat whose shim has not
+    /// finished dialling and which will be there a second later.
+    #[error("no agent is connected to this pane")]
+    AgentNotConnected,
 }
 
 impl DomainError {
@@ -139,6 +153,8 @@ impl DomainError {
             DomainError::SensitiveRoot => (ErrorCode::SensitiveRoot, false),
             DomainError::ConfirmationRequired => (ErrorCode::ConfirmationRequired, false),
             DomainError::WorkspacesExist => (ErrorCode::WorkspacesExist, false),
+            // Retryable: a shim that has not finished dialling will be there.
+            DomainError::AgentNotConnected => (ErrorCode::AgentNotConnected, true),
             DomainError::BaseUnresolvable => (ErrorCode::BaseUnresolvable, false),
             DomainError::DiffTooLarge => (ErrorCode::DiffTooLarge, false),
             DomainError::DiffUnsupported => (ErrorCode::DiffUnsupported, false),
@@ -217,6 +233,7 @@ pub fn word(code: ErrorCode) -> &'static str {
         ErrorCode::AttachmentLimit => "attachment-limit",
         ErrorCode::DispatchUnknown => "dispatch-unknown",
         ErrorCode::CapabilityUnsupported => "capability-unsupported",
+        ErrorCode::AgentNotConnected => "agent-not-connected",
     }
 }
 
@@ -277,6 +294,7 @@ mod tests {
             DomainError::AttachmentLimit,
             DomainError::DispatchUnknown,
             DomainError::CapabilityUnsupported { needed: "changes" },
+            DomainError::AgentNotConnected,
         ]
     }
 

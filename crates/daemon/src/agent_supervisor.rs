@@ -316,12 +316,24 @@ impl AgentSupervisor {
         (epoch, all.into_iter().filter(|e| e.seq >= from_seq).collect())
     }
 
-    pub fn send(&self, terminal: Uuid, message: DaemonMessage) {
-        if let Ok(writers) = self.writers.lock() {
-            if let Some(tx) = writers.get(&terminal) {
-                let _ = tx.send(message);
-            }
-        }
+    /// Hand a message to this terminal's shim, and say whether it got there.
+    ///
+    /// This returned nothing at all, which made every caller's silence look
+    /// like a delivery. The one that matters is `terminal.agent_prompt`: it
+    /// dropped the words a person had typed and replied with the terminal read
+    /// back, so the message simply vanished out of the composer with nothing
+    /// anywhere saying it had.
+    ///
+    /// Both ways of missing are reported. No writer is a pane whose shim has
+    /// not dialled yet — or has stopped being a chat, see `left_agent_mode`.
+    /// A writer whose `send` fails is a `serve` loop that has already returned
+    /// and dropped its receiver: the entry is stale, and treating it as a
+    /// delivery is the same lie with one more step in it.
+    #[must_use = "a message the shim never got is not a message that was sent"]
+    pub fn send(&self, terminal: Uuid, message: DaemonMessage) -> bool {
+        let Ok(writers) = self.writers.lock() else { return false };
+        let Some(tx) = writers.get(&terminal) else { return false };
+        tx.send(message).is_ok()
     }
 
     /// Accept the shim for one terminal and pump it until the pane dies.
@@ -1029,6 +1041,39 @@ mod tests {
         supervisor.left_agent_mode(terminal);
 
         assert_eq!(supervisor.failure(terminal), None);
+    }
+
+    #[test]
+    fn a_message_only_counts_as_sent_when_something_is_there_to_take_it() {
+        // `send` returned nothing, so both ways of missing looked exactly like
+        // a delivery to every caller. The RPC layer then answered a prompt
+        // nobody received with the terminal read back — the success reply.
+        //
+        // Two ways of missing, and the second is the quieter one: a `serve`
+        // loop that has already returned leaves its entry in the map with the
+        // receiving end of the channel dropped, so the lookup succeeds and the
+        // push does not.
+        let supervisor = AgentSupervisor::new();
+        let connected = Uuid::now_v7();
+        let never_dialled = Uuid::now_v7();
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        supervisor.writers.lock().unwrap().insert(connected, tx);
+
+        assert!(
+            supervisor.send(connected, DaemonMessage::Cancel),
+            "a shim on the other end is the case this all exists for"
+        );
+        assert!(
+            !supervisor.send(never_dialled, DaemonMessage::Cancel),
+            "a pane whose shim has not dialled received nothing"
+        );
+
+        drop(rx);
+        assert!(
+            !supervisor.send(connected, DaemonMessage::Cancel),
+            "and neither did one whose serve loop has already returned"
+        );
     }
 
     #[test]
