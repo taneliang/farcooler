@@ -99,6 +99,23 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// default to nothing. See `ShellOverviewCard.menu`.
     private let onToggleHidden: (ShellWorkspace) -> Void
     private let onRemoveWorktree: (ShellWorkspace) -> Void
+    /// A pinned column's row, swiped and closed.
+    ///
+    /// A tab rather than a terminal, for `request`'s reason: a tab is what this
+    /// shell has positions for, and the Diff tab has no terminal to name.
+    /// Resolving the one into the other is `ShellScreen`'s, which is the only
+    /// place holding both the fleet's refs and the runners to call.
+    ///
+    /// **The shell chooses nothing afterwards, on purpose.** Every other close
+    /// in this product picks the next pane itself and this one must not:
+    /// `ShellFleet.reseat(_:holding:)` already runs on every poll and already
+    /// answers this exact question — the anchored tab is gone, so it clamps,
+    /// which keeps the person in the same workspace on the index that slid into
+    /// the slot they were on. A second rule here would be a second answer, and
+    /// the Mac's `selectNeighbour(of:)` is what that looks like when it drifts:
+    /// despite the name it takes the first running terminal ANYWHERE in the
+    /// fleet and jumps runners freely.
+    private let onCloseTab: (ShellWorkspace, ShellTab) -> Void
     private let pane: (ShellPaneSlot) -> Pane
     /// What the overview puts in its navigation bar. See
     /// `ShellOverview.actions`.
@@ -344,6 +361,13 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
 
     /// The column, held open by a tap. Separate from `lift`, see above.
     @State var columnPinned = false
+    /// The pinned column's row under a finger, as the row itself reported it.
+    ///
+    /// Nil whenever nothing is touching one, which includes the whole of a
+    /// dragged column: those frames arrive on the bar's own gesture and are
+    /// written to `fingerAbove` instead. See `ShellColumn.onTouch`, which is
+    /// where the arbitration this works around is written down.
+    @State var touchedRow: Int?
 
     /// How far a finger has taken the page back out of the grid, 0…1.
     ///
@@ -571,6 +595,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
         onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
         onRemoveWorktree: @escaping (ShellWorkspace) -> Void = { _ in },
+        onCloseTab: @escaping (ShellWorkspace, ShellTab) -> Void = { _, _ in },
         @ViewBuilder overviewActions: @escaping () -> Actions,
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
@@ -580,6 +605,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         self.onCross = onCross
         self.onToggleHidden = onToggleHidden
         self.onRemoveWorktree = onRemoveWorktree
+        self.onCloseTab = onCloseTab
         self.pane = pane
         self.overviewActions = overviewActions
         self.runners = runners
@@ -1134,7 +1160,18 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
                 currentTab: position.tab,
                 width: width,
                 columnHeight: menuHeight,
-                columnSelection: columnSelection)
+                columnSelection: columnSelection,
+                // The pin, not the height. A column is showing for both halves
+                // of the gesture and only one of them may destroy anything —
+                // see `ShellColumn.closable`, which is where the owner's third
+                // constraint is written down.
+                columnPinned: columnPinned,
+                onClose: { tab in
+                    guard let workspace = currentWorkspace else { return }
+                    onCloseTab(workspace, tab)
+                },
+                onTouch: { touchedRow = $0 },
+                onChoose: chooseRow)
                 .accessibilityIdentifier("shell-bar")
                 // Where the bar actually is, for the tap that chooses a column
                 // row. See `barBottom`.
@@ -1195,7 +1232,11 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         ShellBar(
             workspace: step.flatMap { workspace(at: $0.position.workspace) },
             currentTab: step?.position.tab ?? -1,
-            width: width)
+            width: width,
+            // No column at all. See `ShellBar.showsColumn`: the two lines
+            // below are not enough on their own since the column became a
+            // `List`, whose rows are accessibility elements in their own right.
+            showsColumn: false)
             .frame(width: page)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -1377,6 +1418,12 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         {
             return row
         }
+        // The row's own report, for the touch the list arbitrates away from
+        // the branch above. Second rather than first, so nothing changes for a
+        // gesture the bar still owns: `fingerAbove` is nil for every frame of
+        // a pinned column's press and non-nil for every frame of a drag, and
+        // the two are never both answering. See `ShellColumn.onTouch`.
+        if let touchedRow, columnPinned, lift == 0 { return touchedRow }
         if columnPinned && lift == 0 { return position.tab }
         // The same `openMin` a release is gated on, and then the same
         // `columnRow` a release resolves through — so what is lit is what
@@ -1449,6 +1496,7 @@ extension ShellRootView where Actions == EmptyView, Trouble == EmptyView {
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
         onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
         onRemoveWorktree: @escaping (ShellWorkspace) -> Void = { _ in },
+        onCloseTab: @escaping (ShellWorkspace, ShellTab) -> Void = { _, _ in },
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
         self.init(
@@ -1456,7 +1504,7 @@ extension ShellRootView where Actions == EmptyView, Trouble == EmptyView {
             request: request, onRest: onRest, liveServer: liveServer, elsewhere: elsewhere,
             runners: { EmptyView() },
             onCross: onCross, onToggleHidden: onToggleHidden,
-            onRemoveWorktree: onRemoveWorktree,
+            onRemoveWorktree: onRemoveWorktree, onCloseTab: onCloseTab,
             overviewActions: { EmptyView() }, pane: pane)
     }
 }

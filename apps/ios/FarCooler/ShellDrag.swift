@@ -709,6 +709,26 @@ extension ShellRootView {
         }
     }
 
+    /// A pinned column's row, tapped on the row itself.
+    ///
+    /// The same landing a drag's release makes, through the same arm of the
+    /// same function — `.land` is where the tab changes, where the column
+    /// furls and where the animation that does both is chosen, and a second
+    /// copy of any of that is a second thing to keep in step. What differs is
+    /// only where the row came from: a button knows its own index, and a
+    /// release has to be told one by `ShellGesture.columnRow`.
+    ///
+    /// `dx` and `page` are the release's, and `.land` reads neither; `wasOpen`
+    /// belongs to `.toggleColumn`. Passed as the honest values for a tap on a
+    /// column that is open: no sideways travel, and the column was open.
+    ///
+    /// `syncMenu` afterwards, exactly as `onEnded` does it, because the furl
+    /// is a transaction of its own — see that function's header.
+    func chooseRow(_ index: Int) {
+        apply(.land(tab: index), dx: 0, page: 0, wasOpen: true)
+        syncMenu()
+    }
+
     private func apply(_ release: ShellRelease, dx: CGFloat, page: CGFloat, wasOpen: Bool) {
         switch release {
         case .commit(let step):
@@ -727,6 +747,12 @@ extension ShellRootView {
                 // — a tap-opened column that stayed open after a choice would
                 // leave the chosen pane behind a list of its siblings.
                 columnPinned = false
+                // And the row's own report goes with it. `ShellColumn.onTouch`
+                // is a `simultaneousGesture` inside a list cell, so its
+                // `onEnded` is not something to depend on: a cell whose
+                // recognizer claims the touch cancels it, and a highlight left
+                // standing would light a row in the column the NEXT tap opens.
+                touchedRow = nil
                 flatten()
             }
         case .openOverview:
@@ -736,6 +762,9 @@ extension ShellRootView {
         case .toggleColumn:
             withAnimation(Self.settle) {
                 columnPinned = !wasOpen
+                // See `.land` above: a report the list never ended must not
+                // outlive the column it was about.
+                touchedRow = nil
                 flatten()
             }
         }

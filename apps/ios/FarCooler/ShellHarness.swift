@@ -191,7 +191,14 @@ struct ShellHarness: View {
                             // ribbon is only learnable because the marks do
                             // not move.
                             mark: mark(workspace: index, tab: tab).mark,
-                            wantsAttention: mark(workspace: index, tab: tab).wantsAttention)
+                            wantsAttention: mark(workspace: index, tab: tab).wantsAttention,
+                            // Tab 0 is the diff and cannot be closed; every
+                            // other tab is a terminal and can. The SAME split
+                            // `ShellFleetMap.one(_:naming:now:)` makes over a
+                            // real fleet, and a fixture that marked all of them
+                            // alike would let `ShellColumnCloseTests` pass
+                            // against a column that offered Close on the diff.
+                            closable: tab != 0)
                     })
             })
     }

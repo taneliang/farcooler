@@ -66,6 +66,23 @@ struct ShellPaneRef: Hashable {
     var pane: Pane
 }
 
+/// A terminal a swipe asked to close, the runner to close it on, and the words
+/// to say first.
+///
+/// The connection travels WITH the request, exactly as `RemoveWorktreeRequest`
+/// carries its own: a merged fleet has several runners in one column's reach,
+/// and resolving the runner again when the button is tapped would resolve it
+/// against whatever the shell has moved to since. The question travels too,
+/// because it is timed — it names how long the agent has been going, and
+/// rebuilding it when the dialog draws would re-read the clock and could find
+/// the terminal already gone.
+struct CloseTerminalRequest: Identifiable {
+    let terminal: Terminal
+    let connection: Connection
+    let question: ShellClose.Question
+    var id: String { terminal.id }
+}
+
 /// The fleet as the shell needs it, plus what each of its tabs is.
 ///
 /// Built whole from the store on every poll and thrown away. Nothing here is
@@ -199,7 +216,12 @@ struct ShellFleetMap {
                     mark: mark(of: terminal, now: now),
                     // The sort's own question, kept separate from the
                     // drawing's. See `ShellTab.wantsAttention`.
-                    wantsAttention: terminal.agent.wantsAttention))
+                    wantsAttention: terminal.agent.wantsAttention,
+                    // Every terminal tab, and only a terminal tab. The Diff
+                    // above defaults to false and must: it is synthesized here
+                    // rather than being a pane, and it is what closing the last
+                    // terminal in a workspace lands on.
+                    closable: true))
             order.append(ShellPaneRef(runner: runner, workspace: workspace.id, pane: pane))
         }
 
@@ -754,6 +776,15 @@ struct ShellScreen: View {
     /// lose the view it is attached to. A removal outlives the card that asked
     /// for it — that is most of the point of asking.
     @State private var removing: RemoveWorktreeRequest?
+    /// The terminal a swipe asked to close, waiting on an answer.
+    ///
+    /// Held here for `removing`'s reason and one of its own: the column that
+    /// raised it FURLS. Landing on a row, crossing a workspace and flying to
+    /// the overview all clear `columnPinned`, so a dialog presented from inside
+    /// `ShellBar` would be a dialog whose presenter is a surface that has since
+    /// closed. What is being confirmed is a runner and a terminal, and neither
+    /// of those is the menu.
+    @State private var closing: CloseTerminalRequest?
     /// The runner a status row asked to correct, and whether this device's own
     /// key is on screen. Both held HERE rather than in the row for the reason
     /// the sheets above are: the overview is unmounted when the grid is neither
@@ -929,6 +960,81 @@ struct ShellScreen: View {
         // ceremony against the wrong machine. `RemoveWorktreeRequest` carries
         // the connection for exactly this.
         .removeWorktreeFlow($removing)
+        // The one thing a swipe on a column row can raise, and only for a pane
+        // with something in it to lose.
+        //
+        // A `confirmationDialog` and not an `alert`, which is the same choice
+        // `RemoveWorktreeFlow` makes for the same reason: this is a destructive
+        // action confirmed from a gesture, and the platform's action sheet is
+        // where a destructive confirmation belongs — it puts the red verb under
+        // the thumb that swiped and Cancel below it.
+        //
+        // `presenting:` rather than reading `closing` back inside the button,
+        // for the reason the removal flow writes down: a dialog hands its
+        // buttons the value it was BUILT with, and read at tap time the request
+        // has already been cleared by the same tap's dismissal — so the button
+        // would quietly do nothing.
+        .confirmationDialog(
+            closing?.question.title ?? "",
+            isPresented: Binding(
+                get: { closing != nil }, set: { if !$0 { closing = nil } }),
+            titleVisibility: .visible,
+            presenting: closing
+        ) { request in
+            Button(ShellClose.confirm, role: .destructive) {
+                closing = nil
+                Task { await request.connection.close(terminal: request.terminal) }
+            }
+            Button("Cancel", role: .cancel) { closing = nil }
+        } message: { request in
+            Text(request.question.message)
+        }
+    }
+
+    /// A column row, swiped and closed.
+    ///
+    /// **Asks only where there is something to interrupt.** `ShellClose`
+    /// answers nil for a pane whose process has already gone, and nil means
+    /// close it now — a sheet in front of every close would be a tax charged on
+    /// the harmless case to protect the rare one, which is the trade the ruling
+    /// refused.
+    ///
+    /// **The LIVE terminal, not the one the tab was built from.** A
+    /// `ShellPaneRef` carries a `Pane`, which holds the `Terminal` the daemon
+    /// described when this tab was made — a snapshot, and the two things this
+    /// function needs from it are exactly the two that change: whether it is
+    /// still running, and how long it has been going. Confirming against a
+    /// snapshot would name an agent that finished four polls ago.
+    ///
+    /// **And it chooses no next tab.** See `ShellRootView.onCloseTab`: the
+    /// vanish rule already exists, runs on every poll, and is the one this
+    /// shell is anchored to.
+    private func close(tab: ShellTab, in map: ShellFleetMap) {
+        guard let ref = map.refs[tab.id],
+            let connection = connection(ref),
+            let terminal = live(ref, on: connection)
+        else { return }
+        guard let question = ShellClose.question(about: terminal, at: Date()) else {
+            Task { await connection.close(terminal: terminal) }
+            return
+        }
+        closing = CloseTerminalRequest(
+            terminal: terminal, connection: connection, question: question)
+    }
+
+    /// The runner's current word on the pane a ref names, or nil once it is
+    /// gone.
+    ///
+    /// Nil is ordinary rather than exceptional: a fleet shrinks under a finger,
+    /// and a swipe landing on a tab a poll has already taken away is a swipe
+    /// with nothing to do. It is also the guard that keeps the Changes tab out
+    /// — a `changes` pane has no terminal id to match — though `ShellTab.closable`
+    /// has already refused that row a Close button.
+    private func live(_ ref: ShellPaneRef, on connection: Connection) -> Terminal? {
+        guard let wanted = ref.pane.terminal else { return nil }
+        return connection.fleet.workspaces
+            .first { $0.id == ref.workspace }?
+            .terminals.first { $0.id == wanted.id }
     }
 
     /// The runner's workspace a card names, or nil when the fleet has moved on
@@ -1249,6 +1355,12 @@ struct ShellScreen: View {
                 guard let (workspace, connection) = workspace(shell) else { return }
                 removing = .confirming(workspace, on: connection)
             },
+            // The workspace is ignored: a tab id already names its runner and
+            // its worktree — that is what `ShellIdentity.tab` composes — and
+            // `map.refs` is the lookup that gets both back. Taking the
+            // workspace instead would be a second route to the same runner
+            // that could disagree with the first.
+            onCloseTab: { _, tab in close(tab: tab, in: map) },
             overviewActions: { overviewActions }
         ) { slot in
             // **The pane resolves its own runner.** A slot names a tab, the map

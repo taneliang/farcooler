@@ -294,12 +294,168 @@ struct ShellColumn: View {
     /// Whether these rows are the ones saying where the dots are.
     var menuOpen = false
 
+    /// Whether a row may be swiped to reveal Close.
+    ///
+    /// **The pinned column only, and that is the owner's third constraint
+    /// verbatim**: *"if the user swipes up from the workspace bar, they should
+    /// not be able to delete terminals that way"*. A dragged column is the
+    /// middle of a navigation gesture — a thumb travelling up the phone with
+    /// the page in it — and putting a destructive action inside it would mean
+    /// the same continuous movement chooses a tab or destroys one depending on
+    /// which way it curved. Pinning is a separate, completed act: a tap, with
+    /// the finger already lifted, on a menu that is standing still.
+    ///
+    /// `ShellRootView.columnPinned` is the fact, and it is the fact rather than
+    /// a second reading of one: the shell already keeps a pinned column and a
+    /// dragged one as separate inputs — that is `ShellGesture.columnHeight`'s
+    /// whole signature — so this gate is that existing distinction spent, not a
+    /// new threshold that could disagree with it.
+    var closable = false
+    /// A row's Close, tapped. Nil in a bar that has no runner behind it — the
+    /// two neighbours on the track, and the harness's fixtures.
+    var onClose: ((ShellTab) -> Void)?
+    /// Which row a finger is resting on, reported by the row itself, and nil
+    /// the moment it lifts.
+    ///
+    /// **This is what the `List` cost, and it had to be given back.** A pinned
+    /// column's touch-down highlight used to come from the bar's own
+    /// `DragGesture` — `ShellDrag.barMoved`'s no-axis arm writes `fingerAbove`
+    /// on the very first frame of a touch, and `ShellRootView.columnSelection`
+    /// turns that into the lit row. A `List` cell arbitrates that touch away:
+    /// the tap still reaches the bar at the END (`.land` fires and the tab
+    /// changes), but the frames BEFORE the release do not, so the row under the
+    /// thumb stopped lighting up at all. Measured after the rebuild:
+    /// 0.98 brightness levels between the thumbed row and its neighbour,
+    /// against the 8 the assertion asks for and the 24.74 a lit row stands at.
+    ///
+    /// That is not cosmetic and it is not new ground — it is the defect
+    /// `ShellGestureTests.testAColumnRowLightsUpUnderAThumb` exists for, and
+    /// WWDC 2018 803 puts it first among the things a tap owes: *"the button
+    /// should highlight immediately when I touch down on it… but we shouldn't
+    /// confirm the tap until my touch goes up."*
+    ///
+    /// A `simultaneousGesture` and not a `gesture`: the row still has to reach
+    /// the swipe recognizer underneath it and the bar's release above it, and
+    /// this reports rather than claims. It is a SECOND answer to "which row is
+    /// that", which this file otherwise refuses — but it is the row's own
+    /// index, which cannot be off by one, and it only ever applies where the
+    /// geometric mapping has gone silent. The DRAGGED column keeps
+    /// `ShellGesture.columnRow` exactly as it was: that touch starts on the bar
+    /// row, below this list, so nothing arbitrates it away.
+    var onTouch: ((Int?) -> Void)?
+    /// A row, chosen. Its own index, which is the tab.
+    ///
+    /// **The rows are BUTTONS now, and that is the other half of what the list
+    /// cost.** A pinned column's tap used to be answered by the bar's own
+    /// gesture and resolved through `ShellGesture.columnRow` — the geometry
+    /// that also answers the drag — and a list cell arbitrates that away in
+    /// both directions: reporting the press from a `simultaneousGesture`
+    /// restored the highlight and took the tap with it, because a
+    /// `DragGesture(minimumDistance: 0)` inside a cell claims the touch
+    /// outright and neither the swipe nor the bar's release saw another frame.
+    /// Measured: the highlight came back, `testTappingAColumnRowSwitchesToThatTab`
+    /// went red, and so did both swipe tests.
+    ///
+    /// A `Button` is the platform's own answer to the same pair. It highlights
+    /// on touch-down through `ButtonStyle.isPressed`, it confirms on touch-up,
+    /// and it yields to the swipe recognizer the moment a drag begins — which
+    /// is three behaviors that were being hand-built out of one drag gesture.
+    ///
+    /// It is a second route to `.land`, and the file's own rule against two
+    /// mappings is why this is the row's INDEX rather than a second reading of
+    /// the geometry: an index cannot be off by one against itself. The DRAGGED
+    /// column is untouched and still lands through `ShellFleet.barRelease` —
+    /// that touch begins on the bar row, below this list, so no cell ever sees
+    /// it.
+    var onChoose: ((Int) -> Void)?
+
     var body: some View {
-        VStack(spacing: 0) {
+        // A `List`, and it is the swipe that requires one.
+        //
+        // `.swipeActions` is a `List` modifier and has no equivalent anywhere
+        // else in SwiftUI; the owner asked for *"the native uitableview swipe
+        // to delete interaction"* by name, so a hand-rolled offset-and-reveal
+        // is out — it would be a drawing of the gesture rather than the
+        // gesture, and it would arrive with none of the rubber-banding, the
+        // velocity, the full-swipe threshold or the VoiceOver actions the real
+        // one carries.
+        //
+        // **This is the surface the file's own header warns about**, so read
+        // `ShellBar.columnWindow` before touching it. The rows must be laid out
+        // EXACTLY ONCE or the menu scrambles as it opens, and what guarantees
+        // that is unchanged: the fixed frame around this list absorbs the
+        // window's animating proposal, so nothing this list contains ever hears
+        // that a height is moving. A `List` is if anything a better citizen
+        // there than the `VStack` was — its rows are laid out by UIKit inside a
+        // scroll view whose bounds are pinned by that frame — but the property
+        // was verified rather than reasoned about: `ShellColumnMotionTests`
+        // drives the open with the spring slowed and reads the row positions
+        // out of the frames, and the trace is in the lane's report.
+        //
+        // Everything below is the list being told to stop being a list. It has
+        // no scroll of its own (the frame is exactly the content), no
+        // background (the one piece of glass is outside it), no separators, no
+        // insets and no row height but the shell's own — because the column is
+        // not a table that happens to sit in a bar, it is the bar, grown, and
+        // a hairline or an inset would be the platform drawing a second
+        // surface inside the only one this file is allowed to have.
+        List {
             ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
-                row(tab, isSelected: index == selection, isCurrent: index == current)
+                Button {
+                    onChoose?(index)
+                } label: {
+                    row(tab, isSelected: index == selection, isCurrent: index == current)
+                }
+                .buttonStyle(ShellRowPress { onTouch?($0 ? index : nil) })
+                    // Named by its PLACE, because that is what a test presses.
+                    // The title is on the button's label already and is the
+                    // fixture's, not the shell's — two rows in one fleet can
+                    // and do carry the same agent's name.
+                    .accessibilityIdentifier("shell-column-row-\(index)")
+
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        // **No full swipe, deliberately.** `allowsFullSwipe`
+                        // makes a long enough flick fire the first action
+                        // without the button ever being pressed, and the whole
+                        // reason this lives behind a pinned menu is that the
+                        // owner does not want a terminal closed by a movement.
+                        // The swipe reveals; the tap decides.
+                        //
+                        // Absent rather than disabled on the Diff tab. The
+                        // Mac's rule, kept: a daemon-side refusal is a safety
+                        // net, and the button should not be there to press.
+                        if closable, tab.closable {
+                            Button(role: .destructive) { onClose?(tab) } label: {
+                                Label("Close", systemImage: "trash")
+                            }
+                        }
+                    }
             }
         }
+        .listStyle(.plain)
+        // The list is exactly as tall as its rows, so there is nothing to
+        // scroll and a scroll would be a way to move the menu's contents
+        // inside a menu that is itself opening. It also keeps the list's pan
+        // recognizer off a surface whose whole job is to be dragged: the bar
+        // owns the vertical gesture, and it starts on the bar row below this.
+        .scrollDisabled(true)
+        // Both of these, and they are two different backgrounds. The scroll
+        // content's is the system grouped fill a `List` paints behind its rows;
+        // the safe-area one is what it paints under them when the list is
+        // shorter than its container. Either left in place is an opaque
+        // rectangle inside the glass — see the file header: the column is one
+        // surface, and a `List` arrives believing it is a screen.
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
+        // A plain list still reserves a little room top and bottom for a
+        // section that is not there. Zeroed, because `fullColumnHeight` is
+        // `tabs.count * rowHeight` exactly and every point of inset is a point
+        // of row pushed out through the clip.
+        .contentMargins(.vertical, 0, for: .scrollContent)
+        .environment(\.defaultMinListRowHeight, ShellMetrics.rowHeight)
     }
 
     /// One tab's place in the menu.
@@ -342,7 +498,12 @@ struct ShellColumn: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, PaneMetrics.edge)
-        .frame(height: ShellMetrics.rowHeight)
+        .frame(maxWidth: .infinity, minHeight: ShellMetrics.rowHeight, alignment: .leading)
+        // The whole row is the swipe's target and the tap's, not the words on
+        // it. A `List` row hit-tests its content, and a row holding a mark at
+        // one end and a short name at the other is mostly gap — the same rule
+        // `ShellBar` states for the bar itself.
+        .contentShape(.rect)
         .background(
             // The platform's own selection fill, NOT amber.
             //
@@ -357,6 +518,28 @@ struct ShellColumn: View {
             // outlines the current workspace's card in amber. Flagged rather
             // than silently resolved.)
             isSelected ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.clear))
+    }
+}
+
+/// A column row's press, drawn by the row and reported to the shell.
+///
+/// The whole of what a `ButtonStyle` is for here is `isPressed`: the platform
+/// already knows when a finger is down on a control and when it has slid off,
+/// and it knows it a frame before any gesture of ours could. What this adds is
+/// telling the shell — `ShellRootView.columnSelection` decides which row is
+/// lit, because the same question has to be answered for a dragged column,
+/// where there is no button under the finger at all.
+///
+/// `onChange` rather than calling out of `makeBody` directly. A style's body is
+/// evaluated during a view update, and writing state from inside one is the
+/// modification-during-update SwiftUI warns about and then resolves by
+/// dropping a frame.
+private struct ShellRowPress: ButtonStyle {
+    let onPress: (Bool) -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, pressed in onPress(pressed) }
     }
 }
 
@@ -416,6 +599,38 @@ struct ShellBar: View {
     /// rather than a follow — see `ShellMotion.menu`.
     var columnHeight: CGFloat = 0
     var columnSelection: Int? = nil
+    /// Whether this bar's column is the PINNED one, and therefore whether its
+    /// rows may be swiped to close a terminal.
+    ///
+    /// Passed straight through to `ShellColumn.closable`, which carries the
+    /// argument. It defaults to false, so the two neighbour bars on the track —
+    /// which are drawn a page off the screen and are not hit-testable at all —
+    /// cannot offer it either.
+    var columnPinned = false
+    /// A row's Close, tapped. See `ShellColumn.onClose`.
+    var onClose: ((ShellTab) -> Void)?
+    /// The row a finger is resting on. See `ShellColumn.onTouch`.
+    var onTouch: ((Int?) -> Void)?
+    /// A row, chosen. See `ShellColumn.onChoose`.
+    var onChoose: ((Int) -> Void)?
+    /// Whether this bar can grow a column at all.
+    ///
+    /// **False for the two neighbours on the track, and it is not an
+    /// optimization.** A neighbour is a page off the display, is not
+    /// hit-testable and has `columnHeight` nailed to zero, so its column is
+    /// three rows nobody can see — and since the rebuild those rows are
+    /// `List` cells, which are hosted as accessibility elements of their own
+    /// and leak straight through the `accessibilityHidden(true)`
+    /// `ShellRootView.neighbourBar` puts on them and through `ShellBar`'s own
+    /// `accessibilityElement(children: .ignore)`. Measured: every row
+    /// identifier matched three times, and XCUITest refused to press any of
+    /// them because none of the three was the one.
+    ///
+    /// So a bar that cannot open a menu does not build one. What that costs is
+    /// nothing on screen — a neighbour's column window is already zero points
+    /// tall at zero opacity — and what it saves is two whole lists composed on
+    /// every frame of every workspace swipe.
+    var showsColumn = true
 
     /// The identity the glass keeps across the morph.
     ///
@@ -505,10 +720,12 @@ struct ShellBar: View {
     /// reads top to bottom, the LAST tab.
     @ViewBuilder
     private var columnWindow: some View {
-        if fullColumnHeight > 0 {
+        if showsColumn, fullColumnHeight > 0 {
             ShellColumn(
                 tabs: tabs, selection: columnSelection, current: currentTab,
-                marks: marks, menuOpen: columnHeight > 0)
+                marks: marks, menuOpen: columnHeight > 0,
+                closable: columnPinned, onClose: onClose, onTouch: onTouch,
+                onChoose: onChoose)
                 .frame(width: width, height: fullColumnHeight)
                 // The rows move as ONE object, or they scramble.
                 //
@@ -529,6 +746,19 @@ struct ShellBar: View {
                 // modifier that exists for precisely this, and it belongs on
                 // the fixed frame rather than further out — the group has to
                 // be the thing whose layout is settled.
+                //
+                // **Measured inert now that the column is a `List`, and kept
+                // anyway.** Traced frame by frame with the menu spring slowed
+                // to an 8-second response, removing this line produced a
+                // byte-identical set of row positions: a list's rows are laid
+                // out by UIKit inside one hosting layer, so they already travel
+                // rigidly and there is nothing left for the group to gather.
+                // The line stays because it costs a modifier and it is the
+                // documented protection for the thing above it, and because
+                // what makes it inert is an implementation detail of `List`
+                // rather than a promise anybody made. The frame BELOW it is not
+                // inert — removing that one still scrambles the open, and the
+                // trace is in the same report.
                 .geometryGroup()
                 .frame(height: max(0, min(columnHeight, fullColumnHeight)), alignment: .bottom)
                 .clipped()
@@ -554,6 +784,28 @@ struct ShellBar: View {
                 // state: `ShellRootView.syncMenu`, which opens and shuts this
                 // inside a `withAnimation(ShellMotion.menu)` of its own.
                 .opacity(columnHeight > 0 ? 1 : 0)
+                // And out of the accessibility tree entirely while it is shut.
+                //
+                // There are three bars on the track and each one builds its
+                // whole column, so nine rows exist for the three that are on
+                // screen — the two neighbours' six, a page off the display, and
+                // this bar's own three behind a closed window. None of the nine
+                // is reachable by a finger, and a furled menu that still read
+                // out its rows would be VoiceOver describing a menu that is not
+                // open.
+                //
+                // It has to be HERE and not on the rows. `neighbourBar` already
+                // says `accessibilityHidden(true)` and `ShellBar` already
+                // ignores its own children, and a `List` leaks through both:
+                // its rows are hosted as elements of their own. Measured before
+                // this line — three matches for every row identifier, and
+                // XCUITest refusing to press any of them.
+                //
+                // `columnHeight` and not `menuOpen`, so the rows stay in the
+                // tree for the whole of the close: the height is a step the
+                // caller's transaction interpolates, so this goes false when
+                // the menu has finished shutting rather than when it started.
+                .accessibilityHidden(columnHeight <= 0)
         }
     }
 

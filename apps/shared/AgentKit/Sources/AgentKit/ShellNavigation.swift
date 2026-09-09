@@ -280,11 +280,37 @@ struct ShellTab: Identifiable, Hashable {
     /// `ShellTab` makes the same split for the same reason.
     var wantsAttention: Bool
 
-    init(id: String, title: String, mark: GlanceMark, wantsAttention: Bool = false) {
+    /// Whether this tab is a terminal somebody could close.
+    ///
+    /// **False for the Diff tab and true for every other tab there is**, which
+    /// is the whole of the rule and is why it is a `Bool` rather than a pane
+    /// reference. A workspace's column is one synthesized diff followed by its
+    /// terminals (`ShellScreen.one(_:naming:now:)`), and the diff is the one
+    /// row with no process behind it: it is not removable, and closing the last
+    /// terminal in a workspace lands on it rather than on nothing.
+    ///
+    /// Carried rather than derived from the row's POSITION. "Row 0 is the diff"
+    /// is true today and is true in exactly one file; a column that read it off
+    /// the index would offer Close on a diff the day anything is ever put in
+    /// front of it, and offering the destructive action on the wrong row is not
+    /// a defect that shows up in a screenshot.
+    ///
+    /// What it does NOT say is whether closing needs confirming — that is a
+    /// question about the live process, it changes between polls, and
+    /// `ShellClose.mustAsk(about:)` answers it from the `Terminal` at the
+    /// moment somebody actually swipes. A tab is a drawing; a terminal is a
+    /// process.
+    var closable: Bool
+
+    init(
+        id: String, title: String, mark: GlanceMark, wantsAttention: Bool = false,
+        closable: Bool = false
+    ) {
         self.id = id
         self.title = title
         self.mark = mark
         self.wantsAttention = wantsAttention
+        self.closable = closable
     }
 }
 

@@ -151,6 +151,14 @@ AGENTKIT_SOURCES = [
     # the iOS UI suite is compiled by CI and never executed. See
     # `ShellIdentityTests`.
     "ShellIdentity.swift",
+    # What a phone says before it closes a terminal, and the rule for when it
+    # says anything at all. Here for `ShellNavigation.swift`'s reason and for
+    # one of its own: closing is irreversible — the pane is killed and the
+    # record deleted — so the sentence naming what is about to be lost is the
+    # one string in this app it is worth a test to read back, and the iOS
+    # target has no unit tests to read it with. Android says the same three
+    # sentences from `model/ShellClose.kt`. See `ShellCloseTests`.
+    "ShellClose.swift",
     # What the shell draws before anybody has swiped it, and what an empty grid
     # says. Here for `ShellNavigation.swift`'s reason and for one of its own:
     # the branch this replaces chose a permanent spinner for a connected runner
@@ -559,6 +567,11 @@ UI_TEST_SOURCES = [
     # `ShellGridTests` proves the arithmetic; this proves the grid is laid out
     # by it. Needs no runner either.
     "ShellGridLayoutTests.swift",
+    # The swipe that closes a terminal, in the column a tap on the bar opens.
+    # Needs no runner — the fixture's tab 0 is a diff and its others are
+    # terminals, which is the whole of what these assert — so it cannot skip
+    # itself green when the demo daemon is down.
+    "ShellColumnCloseTests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
