@@ -10,7 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +40,8 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.model.InboxRow
+import com.farcooler.model.ShellClose
+import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
 import com.farcooler.model.reviewAgentTargets
 import com.farcooler.net.Connection
@@ -408,13 +413,62 @@ fun WorkspaceScreen(
         // [Focus]. And because the strip is scoped to this workspace, a chip
         // never moves the navigation stack at all: `choose` finds the workspace
         // it is already on and installs nothing.
+        // What a chip's menu asked to close, waiting on an answer.
+        //
+        // Held HERE and not inside the strip, for the reason the strip's own
+        // header gives about the menu: the strip is a `LazyRow`, and the chip
+        // that raised the dialog is disposed the moment the fleet's next poll
+        // reorders it or a scroll takes it off the end. A dialog whose state
+        // lives in a recycled item is a dialog that can vanish mid-answer.
+        var closing by remember { mutableStateOf<Pair<Terminal, ShellClose.Question>?>(null) }
+
         TerminalTabStrip(
             workspace = workspace,
             counts = counts,
             current = panes.current,
             onSelect = { model.choose(route.hostId, route.workspaceId, it) },
+            // **Asks only where there is something to interrupt.**
+            // `ShellClose` answers null for a pane whose process has already
+            // gone, and null means close it now — a dialog in front of every
+            // close would be a tax charged on the harmless case to protect the
+            // rare one, which is the trade the ruling refused.
+            //
+            // **And it chooses no next tab.** `PaneDeck.prune` already runs on
+            // every poll and already answers "the pane you were on is gone" —
+            // the most recently shown survivor, with Changes as the floor —
+            // and a second rule here would be a second answer.
+            onClose = { terminal ->
+                val question = ShellClose.question(terminal, System.currentTimeMillis())
+                if (question == null) scope.launch { connection.close(terminal) }
+                else closing = terminal to question
+            },
             modifier = Modifier.navigationBarsPadding(),
         )
+
+        closing?.let { (terminal, question) ->
+            AlertDialog(
+                onDismissRequest = { closing = null },
+                title = { Text(question.title) },
+                text = { Text(question.message) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        closing = null
+                        scope.launch { connection.close(terminal) }
+                    }) {
+                        // Red, because Material's dialog has no destructive
+                        // role either. Same ink as the menu item that opened
+                        // this, so the two read as one act.
+                        Text(
+                            ShellClose.CONFIRM,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { closing = null }) { Text("Cancel") }
+                },
+            )
+        }
     }
 }
 

@@ -1154,6 +1154,43 @@ class Connection(
     }
 
     /**
+     * Close a terminal: stop whatever is in it, then delete the record.
+     *
+     * **Two calls because it has to be two calls.** `Service::remove_terminal`
+     * refuses a `Running` or `Starting` terminal with `RunningProcesses`, so the
+     * stop is not politeness — it is what makes the removal legal. And the
+     * removal is not optional: `remain-on-exit` keeps a dead pane deliberately,
+     * so a stop with no remove leaves a dead chip in the tab strip, which is a
+     * worse outcome than leaving the terminal running. Closing has to leave
+     * nothing behind, which is what closing means everywhere else. iOS's
+     * `Connection.close(terminal:)` is the same pair in the same order, and the
+     * Mac has said it since `ContentView.swift:2149`.
+     *
+     * **Sequential, and it is safe to be.** `stop_terminal` kills the pane and
+     * then awaits `inventory.refresh()` before it answers, so by the time this
+     * makes the second call the state the second call inspects has already been
+     * re-derived. A parallel pair would be a race with the daemon's own refusal
+     * on the losing side.
+     *
+     * **One [refresh] at the end, not two.** [act] refreshes after each call and
+     * the first of those two is a fleet in which the pane is stopped and still
+     * listed — a dead chip, published to every screen, for one round trip.
+     * Calling through [core] directly keeps that intermediate state off the
+     * phone entirely: what a person sees is the chip, and then no chip.
+     *
+     * Failures are swallowed for [act]'s reason, and it is stronger here: what
+     * comes back from a refused remove is `RunningProcesses`, a Rust enum's
+     * name, and no raw runner error reaches a screen in this app. What a person
+     * sees instead is the tab still there — which is the truth, and the same
+     * thing they would see if the connection had dropped.
+     */
+    suspend fun close(terminal: Terminal) {
+        attempt { core.call("terminal.stop", args("terminal" to terminal.id)) }
+        attempt { core.call("terminal.remove", args("terminal" to terminal.id)) }
+        refresh()
+    }
+
+    /**
      * Put a device's key into this runner's `~/.ssh/authorized_keys`.
      *
      * **The daemon owns the write**, and that is the whole reason this is one

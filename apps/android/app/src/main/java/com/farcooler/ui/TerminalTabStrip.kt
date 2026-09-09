@@ -1,9 +1,12 @@
 package com.farcooler.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,11 +21,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Difference
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,7 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.InboxRow
+import com.farcooler.model.ShellClose
 import com.farcooler.model.StateKind
+import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
 
 /**
@@ -77,7 +90,37 @@ import com.farcooler.model.Workspace
  * A host-side `changes` pane gets no chip of its own. The Changes chip already
  * is that pane's review, and two chips onto one diff is a choice with no
  * difference behind it — see [Pane].
+ *
+ * ## Closing a terminal lives here, behind a long press
+ *
+ * **A `DropdownMenu` and not a swipe, per the standing Android convention**
+ * that `WorkspaceSheets.kt` records for the other destructive thing in this app.
+ * iOS closes a terminal with the native table swipe on a row of the column its
+ * workspace bar opens; this platform has neither that bar nor that column, and
+ * porting UIKit's gesture onto a `LazyRow` of chips would be a swipe competing
+ * with the row's own scroll on a surface whose whole job is to scroll
+ * sideways. What the two phones must agree on is not the gesture — it is the
+ * PLACEMENT, the RARITY and the CONFIRMATION, which is what the ruling was
+ * protecting.
+ *
+ * - **Placement.** Inside a menu opened on the tab surface itself, which is
+ *   what this strip is, rather than in the pane's always-visible overflow. The
+ *   overflow in [WorkspaceTopBar] is one tap from anywhere and deliberately
+ *   does not carry this.
+ * - **Rarity.** A long press, so nothing about an ordinary tab change comes
+ *   near it. There is exactly one route and it is not the fast one — *"deleting
+ *   terminals is going to be a rare interaction… we don't want the user to
+ *   accidentally close terminals"*.
+ * - **Confirmation.** A running pane raises a dialog naming the agent and how
+ *   long it has been going, from [ShellClose], which is the same three
+ *   sentences iOS says. A stopped pane closes with no dialog. There is no undo.
+ *
+ * The Changes chip gets no menu at all: it is not a terminal, there is no
+ * `terminal.remove` to make about it, and it is what closing the last terminal
+ * in a workspace lands on. The Mac's rule, kept — a daemon-side refusal is a
+ * safety net, and the item should not be there to press.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TerminalTabStrip(
     /**
@@ -93,6 +136,21 @@ fun TerminalTabStrip(
     counts: InboxRow?,
     current: Pane,
     onSelect: (Pane) -> Unit,
+    /**
+     * A chip's `Close Terminal`, chosen.
+     *
+     * The whole [Terminal] and not its id, because what the caller does next is
+     * decide whether to ask first — [ShellClose.question] reads the state, the
+     * preset and both clocks — and a caller that had to look the terminal up
+     * again would be looking it up in a fleet that has moved on since the menu
+     * opened.
+     *
+     * Defaulted to nothing so the preview and any future caller with no runner
+     * behind it still compose. A strip whose menu did nothing would be a menu
+     * item that lies, which is why the item itself is absent rather than
+     * disabled for the one chip that can never have one.
+     */
+    onClose: (Terminal) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     data class Chip(
@@ -163,92 +221,135 @@ fun TerminalTabStrip(
         items(chips.size, key = { chips[it].pane.id }) { i ->
             val chip = chips[i]
             val isCurrent = chip.pane == current
-            Row(
-                Modifier
-                    .clip(CircleShape)
-                    .background(
-                        if (isCurrent) MaterialTheme.colorScheme.secondaryContainer
-                        else Color.Transparent
+            // Per chip, so the menu is anchored to the chip it is about — a
+            // single menu hoisted out of the row would open under whichever
+            // chip the strip had scrolled to.
+            var menuOpen by remember(chip.pane.id) { mutableStateOf(false) }
+            Box {
+                Row(
+                    Modifier
+                        .clip(CircleShape)
+                        .background(
+                            if (isCurrent) MaterialTheme.colorScheme.secondaryContainer
+                            else Color.Transparent
+                        )
+                        // Amber for blocked, the review ink for a finished turn,
+                        // red for one that died — from [agentTint], which is the one
+                        // place that rule lives and which the fleet row and the
+                        // Mac's glyph read too. Blocked's amber is now the palette's
+                        // rather than Material orange 500, and amber and review are
+                        // both §01's: red is the only hue left here that is this
+                        // app's own ink, for the one outcome the glance vocabulary
+                        // still has no mark for.
+                        //
+                        // **A finished turn is visibly a different color on this
+                        // chip than it was.** It was green until `done` joined the
+                        // review tier; the tier is what a person is being told, and
+                        // green was saying "it worked" where the useful fact is "you
+                        // have not looked at it". The ring here and the mark the
+                        // fleet row draws for the same terminal are the same ink,
+                        // because [agentInk] decides it once for both.
+                        //
+                        // **This chip is exactly why red survived.** The argument for
+                        // folding a failed turn into amber was that the word is
+                        // printed beside the mark — true of a fleet row, false here.
+                        // A chip carries a conversation's NAME and no state text at
+                        // all, so on this surface the hue is the whole distinction
+                        // between a turn that worked and a turn that died.
+                        //
+                        // **A ring and not a mark, and only for now.** §03's
+                        // vocabulary would put an `AgentMarkView` at
+                        // `GlanceMarkSize.RIBBON` in this chip's leading slot — the
+                        // slot [ProcessDot] currently holds — and that is a change
+                        // to what the strip IS rather than to what it is colored.
+                        // The strip is the surface iOS replaced wholesale with the
+                        // shell's bar; restructuring it here would be work thrown
+                        // away twice. So this pass takes the hue only, which is the
+                        // half that is wrong today independently of what the strip
+                        // becomes.
+                        .then(
+                            when (val tint = agentTint(chip.terminal)) {
+                                null -> Modifier
+                                else -> Modifier.border(1.5.dp, tint, CircleShape)
+                            }
+                        )
+                        .combinedClickable(
+                            onClick = { onSelect(chip.pane) },
+                            // The whole of the rarity. A tab change is a tap and
+                            // stays a tap; the one destructive thing this strip can
+                            // do costs a press somebody has to mean.
+                            onLongClick = { menuOpen = true },
+                            onLongClickLabel = "Terminal actions",
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Same dot, same size, same rules as the fleet list —
+                    // [ProcessDot] is shared rather than redrawn here so a terminal
+                    // cannot read one way in one screen and another in the other.
+                    // This drew its own 6dp circle while the list drew 8dp, which is
+                    // exactly the drift the Mac's `StatusGlyph` had to be pulled
+                    // back from.
+                    //
+                    // A running pane draws nothing at all now. The chip does not
+                    // collapse when it does: the box is claimed whether or not
+                    // anything occupies it, so a pane starting or dying does not
+                    // shove every chip after it sideways.
+                    ProcessDot(chip.kind)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        // Capped, because a chip carries the CONVERSATION's name
+                        // rather than "claude 2", and an agent will happily call
+                        // one "Complete D17 authorization decision for Far Cooler"
+                        // — which filled the strip with a single tab and pushed
+                        // every other pane off the end of it.
+                        //
+                        // The runner is gone from the label. It was here while this
+                        // strip spanned the fleet and two chips could be two
+                        // machines; a scoped strip is one workspace on one runner,
+                        // and the title bar above already names it when more than
+                        // one is connected.
+                        chip.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (chip.wantsAttention) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color =
+                            if (isCurrent) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.widthIn(max = 160.dp),
                     )
-                    // Amber for blocked, the review ink for a finished turn,
-                    // red for one that died — from [agentTint], which is the one
-                    // place that rule lives and which the fleet row and the
-                    // Mac's glyph read too. Blocked's amber is now the palette's
-                    // rather than Material orange 500, and amber and review are
-                    // both §01's: red is the only hue left here that is this
-                    // app's own ink, for the one outcome the glance vocabulary
-                    // still has no mark for.
-                    //
-                    // **A finished turn is visibly a different color on this
-                    // chip than it was.** It was green until `done` joined the
-                    // review tier; the tier is what a person is being told, and
-                    // green was saying "it worked" where the useful fact is "you
-                    // have not looked at it". The ring here and the mark the
-                    // fleet row draws for the same terminal are the same ink,
-                    // because [agentInk] decides it once for both.
-                    //
-                    // **This chip is exactly why red survived.** The argument for
-                    // folding a failed turn into amber was that the word is
-                    // printed beside the mark — true of a fleet row, false here.
-                    // A chip carries a conversation's NAME and no state text at
-                    // all, so on this surface the hue is the whole distinction
-                    // between a turn that worked and a turn that died.
-                    //
-                    // **A ring and not a mark, and only for now.** §03's
-                    // vocabulary would put an `AgentMarkView` at
-                    // `GlanceMarkSize.RIBBON` in this chip's leading slot — the
-                    // slot [ProcessDot] currently holds — and that is a change
-                    // to what the strip IS rather than to what it is colored.
-                    // The strip is the surface iOS replaced wholesale with the
-                    // shell's bar; restructuring it here would be work thrown
-                    // away twice. So this pass takes the hue only, which is the
-                    // half that is wrong today independently of what the strip
-                    // becomes.
-                    .then(
-                        when (val tint = agentTint(chip.terminal)) {
-                            null -> Modifier
-                            else -> Modifier.border(1.5.dp, tint, CircleShape)
-                        }
+                }
+                DropdownMenu(menuOpen, onDismissRequest = { menuOpen = false }) {
+                    // One item, and it is the destructive one. A menu with a
+                    // second, harmless entry beside it would be a menu somebody
+                    // opens for other reasons — and the whole point of putting
+                    // this behind a long press is that nobody opens it by
+                    // accident.
+                    DropdownMenuItem(
+                        text = { Text(ShellClose.CONFIRM) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Outlined.DeleteOutline,
+                                null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        // Red on the word as well as on the glyph. Material's
+                        // menu has no destructive role, so the ink is the whole
+                        // of what says this one is different from every other
+                        // item in the app — and `error` is the theme's, not a
+                        // literal: amber is reserved for an agent that needs a
+                        // person, and this is not that.
+                        colors = MenuDefaults.itemColors(
+                            textColor = MaterialTheme.colorScheme.error,
+                        ),
+                        onClick = {
+                            menuOpen = false
+                            onClose(chip.terminal)
+                        },
                     )
-                    .clickable { onSelect(chip.pane) }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Same dot, same size, same rules as the fleet list —
-                // [ProcessDot] is shared rather than redrawn here so a terminal
-                // cannot read one way in one screen and another in the other.
-                // This drew its own 6dp circle while the list drew 8dp, which is
-                // exactly the drift the Mac's `StatusGlyph` had to be pulled
-                // back from.
-                //
-                // A running pane draws nothing at all now. The chip does not
-                // collapse when it does: the box is claimed whether or not
-                // anything occupies it, so a pane starting or dying does not
-                // shove every chip after it sideways.
-                ProcessDot(chip.kind)
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    // Capped, because a chip carries the CONVERSATION's name
-                    // rather than "claude 2", and an agent will happily call
-                    // one "Complete D17 authorization decision for Far Cooler"
-                    // — which filled the strip with a single tab and pushed
-                    // every other pane off the end of it.
-                    //
-                    // The runner is gone from the label. It was here while this
-                    // strip spanned the fleet and two chips could be two
-                    // machines; a scoped strip is one workspace on one runner,
-                    // and the title bar above already names it when more than
-                    // one is connected.
-                    chip.label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (chip.wantsAttention) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color =
-                        if (isCurrent) MaterialTheme.colorScheme.onSecondaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.widthIn(max = 160.dp),
-                )
+                }
             }
         }
     }
