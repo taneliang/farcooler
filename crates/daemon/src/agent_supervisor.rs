@@ -325,7 +325,7 @@ impl AgentSupervisor {
     /// anywhere saying it had.
     ///
     /// Both ways of missing are reported. No writer is a pane whose shim has
-    /// not dialled yet — or has stopped being a chat, see `left_agent_mode`.
+    /// not dialed yet — or has stopped being a chat, see `left_agent_mode`.
     /// A writer whose `send` fails is a `serve` loop that has already returned
     /// and dropped its receiver: the entry is stale, and treating it as a
     /// delivery is the same lie with one more step in it.
@@ -1055,7 +1055,7 @@ mod tests {
         // push does not.
         let supervisor = AgentSupervisor::new();
         let connected = Uuid::now_v7();
-        let never_dialled = Uuid::now_v7();
+        let never_dialed = Uuid::now_v7();
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         supervisor.writers.lock().unwrap().insert(connected, tx);
@@ -1065,8 +1065,8 @@ mod tests {
             "a shim on the other end is the case this all exists for"
         );
         assert!(
-            !supervisor.send(never_dialled, DaemonMessage::Cancel),
-            "a pane whose shim has not dialled received nothing"
+            !supervisor.send(never_dialed, DaemonMessage::Cancel),
+            "a pane whose shim has not dialed received nothing"
         );
 
         drop(rx);

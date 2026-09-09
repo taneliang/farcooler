@@ -274,7 +274,7 @@ fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
 ///
 /// `AgentNotConnected` and not `OperationFailed`, so a client can say which
 /// thing happened; retryable, because the usual cause is a chat whose shim has
-/// not finished dialling. The runner sends the word and the app owns the
+/// not finished dialing. The runner sends the word and the app owns the
 /// sentence, as with every other code here.
 fn to_the_shim(svc: &Service, terminal: Uuid, message: DaemonMessage) -> Result<()> {
     if svc.agents().send(terminal, message) {

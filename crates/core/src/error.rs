@@ -124,7 +124,7 @@ pub enum DomainError {
     /// had.
     ///
     /// Retryable, because the usual cause is a chat whose shim has not
-    /// finished dialling and which will be there a second later.
+    /// finished dialing and which will be there a second later.
     #[error("no agent is connected to this pane")]
     AgentNotConnected,
 }
@@ -153,7 +153,7 @@ impl DomainError {
             DomainError::SensitiveRoot => (ErrorCode::SensitiveRoot, false),
             DomainError::ConfirmationRequired => (ErrorCode::ConfirmationRequired, false),
             DomainError::WorkspacesExist => (ErrorCode::WorkspacesExist, false),
-            // Retryable: a shim that has not finished dialling will be there.
+            // Retryable: a shim that has not finished dialing will be there.
             DomainError::AgentNotConnected => (ErrorCode::AgentNotConnected, true),
             DomainError::BaseUnresolvable => (ErrorCode::BaseUnresolvable, false),
             DomainError::DiffTooLarge => (ErrorCode::DiffTooLarge, false),
