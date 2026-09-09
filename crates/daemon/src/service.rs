@@ -2263,6 +2263,48 @@ impl Service {
         )
     }
 
+    /// Write down the mode the pane is NOW in, against the version the row
+    /// holds NOW.
+    ///
+    /// `term` is the record as it was read at the top of `set_pane_mode`, and
+    /// the whole point of this function is that it does not write under that
+    /// record's version. Everything between the read and here is slow and
+    /// awaits: a tmux inventory refresh, a screen capture, a whole-host `ps`
+    /// for adoption, and the respawn itself. Anything that writes the row in
+    /// that window — most likely `AgentSupervisor::remember_session`, which a
+    /// shim's `Established` now reaches SQLite through the moment it connects —
+    /// makes the stale version lose, and the write is refused with
+    /// `ResourceConflict`.
+    ///
+    /// Refusing it here is the worst of the three outcomes. The pane has
+    /// ALREADY been respawned by the line above: the shim is running, the
+    /// socket is bound, and the only thing left is to say so. A conflict at
+    /// this point leaves the runtime in agent mode and the record saying
+    /// terminal — the silent disagreement between record and runtime this
+    /// whole design exists to prevent — and it leaves it there permanently,
+    /// because nothing retries.
+    ///
+    /// The optimistic-concurrency guard is not lost by re-reading, because it
+    /// was never doing the job here. Two clients toggling one pane both reach
+    /// `respawn_pane`, and whichever ran last is what is in the pane; the
+    /// version check could only ever make the record disagree with that, never
+    /// prevent it. What still holds is that a terminal deleted underneath this
+    /// fails as `NotFound` rather than resurrecting a row.
+    ///
+    /// The epoch moves, and this is the one caller of `store::set_pane_mode`
+    /// for which it must: the program a client was reading is gone and a
+    /// different one is writing to the same terminal id, so every byte offset
+    /// held against it points into a stream that no longer exists.
+    fn record_pane_mode(
+        &self,
+        term: &models::Terminal,
+        pane_mode: models::PaneMode,
+        session_id: Option<String>,
+    ) -> Result<models::Terminal> {
+        let expected = self.store.get_terminal(term.id)?.resource_version;
+        self.store.set_pane_mode(term.id, expected, pane_mode, session_id, true)
+    }
+
     /// Toggle a terminal between hosting a TUI and hosting an ACP agent.
     ///
     /// The pane is respawned rather than replaced, so the terminal keeps its
@@ -2530,20 +2572,7 @@ impl Service {
         }
 
         self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
-        // The epoch moves, and this is the one caller of `set_pane_mode` for
-        // which it must.
-        //
-        // A toggle respawns the pane: the program a client was reading is gone
-        // and a different one is writing to the same terminal id. Every byte
-        // offset held against it — `from_seq` on the output stream, whatever a
-        // client cached of the screen — now points into a stream that does not
-        // exist. The epoch is the whole mechanism for saying that, and this
-        // wrote `resource_version + 1` alone, so a client saw the mode change,
-        // kept its offsets, and resumed reading a pane that had restarted
-        // under it. `restart_terminal` bumps for exactly the same event; this
-        // path simply never did.
-        let updated =
-            self.store.set_pane_mode(id, term.resource_version, pane_mode, session_id, true)?;
+        let updated = self.record_pane_mode(&term, pane_mode, session_id)?;
         let Some(harness) = harness.filter(|_| pane_mode == models::PaneMode::Agent) else {
             return Ok(updated);
         };
@@ -4030,6 +4059,69 @@ mod agent_mode_wiring_tests {
         );
 
         let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// The write that finishes a toggle must not lose a race it cannot win.
+    ///
+    /// The record used to be written under `term.resource_version`, read at
+    /// the very top of `set_pane_mode` and then carried across a tmux
+    /// inventory refresh, a screen capture, a whole-host `ps`, and the respawn
+    /// itself. The likeliest writer in that window is the shim this very call
+    /// just started: `Established` reaches SQLite through
+    /// `AgentSupervisor::remember_session`, which bumps the row. The stale
+    /// version then loses, `set_pane_mode` returns `ResourceConflict`, and the
+    /// pane is left running an agent under a record that says terminal —
+    /// forever, because nothing retries.
+    ///
+    /// Driven through `record_pane_mode` rather than through the whole toggle,
+    /// because the race is a race: the concurrent write is made here, exactly
+    /// once, instead of being hoped for. `term` is handed in stale on purpose,
+    /// the way `set_pane_mode` hands it in.
+    #[tokio::test]
+    async fn a_toggle_still_records_itself_when_the_row_moved_under_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+        let root = svc
+            .store
+            .create_repository_root(svc.host_id, "/tmp/pane-mode-race", now_millis())
+            .unwrap();
+        let repository = svc
+            .store
+            .create_repository(svc.host_id, root.id, "repo", "/tmp/pane-mode-race/.git", "")
+            .unwrap();
+        let workspace = svc
+            .store
+            .create_workspace(repository.id, "feature/x", "/tmp/pane-mode-race", false)
+            .unwrap();
+        let term = svc
+            .store
+            .create_terminal(workspace.id, "pane", "claude", TerminalIntent::Running, 80, 24)
+            .unwrap();
+
+        // Somebody else writes the row between the read and the write. This is
+        // the shim's `Established` arriving, spelled out.
+        svc.store
+            .set_pane_mode(
+                term.id,
+                term.resource_version,
+                term.pane_mode,
+                Some("the-shim-said-so".to_string()),
+                false,
+            )
+            .unwrap();
+
+        let recorded = svc.record_pane_mode(&term, models::PaneMode::Agent, None);
+        assert!(recorded.is_ok(), "the pane is already respawned; the record has to follow: {recorded:?}");
+
+        // Read back off the row, because the row is what every client reads.
+        let held = svc.store.get_terminal(term.id).unwrap();
+        assert_eq!(
+            held.pane_mode,
+            models::PaneMode::Agent,
+            "a pane running an agent under a record that says terminal is the disagreement this design exists to prevent"
+        );
+        // And the id the other writer put there is not clobbered on the way.
+        assert_eq!(held.agent_session_id.as_deref(), Some("the-shim-said-so"));
     }
 }
 
