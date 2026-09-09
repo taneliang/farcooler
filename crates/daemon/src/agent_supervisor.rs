@@ -37,6 +37,7 @@ use farcooler_agent::link::{AgentFailure, DaemonMessage, ShimMessage, decode_lin
 use farcooler_agent::activity_source;
 use farcooler_core::activity;
 use farcooler_protocol::v1::AgentActivity;
+use farcooler_store::Store;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
@@ -168,11 +169,83 @@ pub struct AgentSupervisor {
     /// and the shim's reconnect would land on whichever listener won — so a
     /// session's events would arrive at a supervisor nobody is reading.
     listening: Arc<Mutex<HashSet<Uuid>>>,
+    /// Where a conversation's NAME is written down, when there is a store to
+    /// write it to.
+    ///
+    /// This does not contradict the transcript rule at the top of this file.
+    /// The transcript is runtime state and stays in memory; an
+    /// `agent_session_id` is intent, in the same sense as `pane_mode` and
+    /// `command_preset` — `store.rs`'s own column test says so — and it is the
+    /// only thing that lets a pane be reopened onto the conversation it was
+    /// already having.
+    ///
+    /// `None` for a supervisor nobody gave a store to, which is every test
+    /// that is not about this write. A supervisor without one behaves exactly
+    /// as it did before, so the tests either side of this remain about what
+    /// they were about.
+    records: Option<Arc<Store>>,
 }
 
 impl AgentSupervisor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The supervisor a daemon runs: one that can write down what it learns.
+    pub fn with_records(store: Arc<Store>) -> Self {
+        Self { records: Some(store), ..Self::default() }
+    }
+
+    /// Write down the conversation a shim says this pane actually ended up in.
+    ///
+    /// The shim's `Established` id is the only true one — `session/load` can
+    /// fail and the adapter opens a fresh conversation instead — and until
+    /// this existed it lived in the map above and nowhere else. It reached
+    /// SQLite only on the NEXT `set_pane_mode`, so a pane switched into chat
+    /// once and then lost carried its conversation in memory to the grave: a
+    /// restart read a NULL column and started a new one.
+    ///
+    /// Whatever the preset, deliberately. A pane on the `shell` preset that a
+    /// person typed `claude` into and then opened as a chat is exactly the
+    /// case with no id from anywhere else — `create_terminal` mints one only
+    /// for a preset that starts with `claude`, and adoption finds one only
+    /// when a transcript already exists that is newer than the process in the
+    /// pane. This is also the only way codex or cursor ever gets a real id,
+    /// since neither can be handed one at launch.
+    ///
+    /// Reuses `store.set_pane_mode` because it is the only write that can
+    /// reach the column at all — `update_terminal` does not name it — and its
+    /// `COALESCE(?2, agent_session_id)` means an id is never cleared by
+    /// passing `None`. The mode is written back as it was read, so this
+    /// changes one column and the version.
+    ///
+    /// Failures are logged and dropped rather than retried. A version conflict
+    /// means somebody else wrote the row between the read and the write, and
+    /// the next `Established` or the next toggle writes it again; a shim
+    /// reporting a session is not a place to block or to surface an error to
+    /// anyone.
+    fn remember_session(&self, terminal: Uuid, session_id: &str) {
+        let Some(store) = self.records.as_ref() else { return };
+        let Ok(term) = store.get_terminal(terminal) else { return };
+        // The row already says this. Skipped so that a reconnecting shim
+        // re-reporting the same session does not bump `resource_version` and
+        // wake every watching client for no change.
+        if term.agent_session_id.as_deref() == Some(session_id) {
+            return;
+        }
+        if let Err(e) = store.set_pane_mode(
+            terminal,
+            term.resource_version,
+            term.pane_mode,
+            Some(session_id.to_string()),
+        ) {
+            tracing::warn!(
+                terminal = %terminal,
+                session = %session_id,
+                error = %e,
+                "could not write down which conversation this pane is in"
+            );
+        }
     }
 
     pub fn activity(&self, terminal: Uuid) -> AgentActivity {
@@ -405,6 +478,12 @@ impl AgentSupervisor {
                 if let Ok(mut recent) = self.recent.lock() {
                     recent.remove(&terminal);
                 }
+                // Persisted here, at the moment it is known, and not only in
+                // the map below. See `remember_session`. Done before the
+                // `sessions` lock is taken rather than inside it: this is a
+                // SQLite write, and no lock in this file is worth holding
+                // across one.
+                self.remember_session(terminal, &session_id);
                 if let Ok(mut sessions) = self.sessions.lock() {
                     let entry = sessions.entry(terminal).or_default();
                     entry.session_id = Some(session_id);
@@ -596,7 +675,7 @@ impl AgentSupervisor {
 mod tests {
     use super::*;
     use farcooler_agent::event::{AgentEvent, EndReason, PermissionOption, Role};
-    use farcooler_protocol::v1::AgentActivity;
+    use farcooler_protocol::v1::{AgentActivity, TerminalIntent};
 
     #[test]
     fn a_socket_path_is_per_terminal_and_not_guessable_across_daemons() {
@@ -1011,6 +1090,93 @@ mod tests {
             supervisor.activity(terminal),
             AgentActivity::Done,
             "finished and unseen, which is what puts the pane in front of somebody"
+        );
+    }
+
+    // ---- writing down the conversation a shim reports ----
+
+    /// A store with one terminal in it, on whatever preset is asked for.
+    ///
+    /// Real, not a double, because the whole point of these two tests is what
+    /// SQLite ends up holding. A supervisor handed a struct it built itself
+    /// would prove nothing: the column could stay NULL forever with both of
+    /// them green.
+    fn store_with_a_terminal(preset: &str) -> (Arc<Store>, Uuid) {
+        let store = Arc::new(Store::open_in_memory().expect("store"));
+        let host = Uuid::now_v7();
+        let root = store.create_repository_root(host, "/repos/one", 1_000).expect("root");
+        let repo =
+            store.create_repository(host, root.id, "name", "/gitdir", "origin").expect("repo");
+        let ws = store.create_workspace(repo.id, "feature/x", "/wt/one", false).expect("workspace");
+        let term = store
+            .create_terminal(ws.id, "t", preset, TerminalIntent::Running, 120, 40)
+            .expect("terminal");
+        (store, term.id)
+    }
+
+    /// The hand-typed pane, which is the only one this reaches.
+    ///
+    /// `shell`, deliberately, and that is the "whatever the preset" claim in
+    /// executable form: `create_terminal` mints a session id only for a preset
+    /// starting with `claude`, so this row starts with a NULL column, nothing
+    /// but the shim can fill it, and any gate on the preset fails the
+    /// assertion below rather than passing quietly. Read back out of SQLite
+    /// rather than off anything the supervisor returned — the write is the
+    /// claim.
+    #[test]
+    fn a_shim_that_establishes_writes_its_session_into_the_record() {
+        let (store, terminal) = store_with_a_terminal("shell");
+        assert_eq!(
+            store.get_terminal(terminal).expect("row").agent_session_id,
+            None,
+            "the fixture must start with nothing to find"
+        );
+
+        let supervisor = AgentSupervisor::with_records(store.clone());
+        supervisor.apply(
+            terminal,
+            ShimMessage::Established {
+                session_id: "0199-hand-typed".into(),
+                available_modes: Vec::new(),
+            },
+            &|_, _| {},
+        );
+
+        let row = store.get_terminal(terminal).expect("row");
+        assert_eq!(
+            row.agent_session_id.as_deref(),
+            Some("0199-hand-typed"),
+            "the id the shim reported has to be in the column a restart reads"
+        );
+        assert_eq!(
+            row.pane_mode,
+            farcooler_store::models::PaneMode::Terminal,
+            "a shim reporting its session says which conversation and nothing else; the mode \
+             a pane is in is the person's to change, and `set_pane_mode` is the only write \
+             that can reach this column, so it has to be handed back what it was given"
+        );
+    }
+
+    /// A shim reconnects on every pane-mode toggle and re-reports the same
+    /// session. Writing that again would bump `resource_version` and push a
+    /// fresh terminal to every watching client for a row that did not change.
+    #[test]
+    fn re_reporting_the_same_session_does_not_touch_the_record() {
+        let (store, terminal) = store_with_a_terminal("shell");
+        let supervisor = AgentSupervisor::with_records(store.clone());
+        let established = || ShimMessage::Established {
+            session_id: "0199-same".into(),
+            available_modes: Vec::new(),
+        };
+
+        supervisor.apply(terminal, established(), &|_, _| {});
+        let after_first = store.get_terminal(terminal).expect("row").resource_version;
+
+        supervisor.apply(terminal, established(), &|_, _| {});
+        assert_eq!(
+            store.get_terminal(terminal).expect("row").resource_version,
+            after_first,
+            "a second report of one session is not a change to the row"
         );
     }
 }

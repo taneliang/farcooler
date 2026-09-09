@@ -764,7 +764,8 @@ fn still_a_pane(terminal: &Terminal, snapshot: &RuntimeSnapshot) -> bool {
 /// worktree Far Cooler makes and they fire in agent-mode panes too. The
 /// claimants route reaches an agent-mode pane whenever one carries an
 /// `agent_session_id` — claude's from `--session-id` at launch, and codex's
-/// from the shim's own `Established` report, which `set_pane_mode` stores.
+/// from the shim's own `Established` report, which
+/// `AgentSupervisor::remember_session` writes down as it arrives.
 ///
 /// This was deferred once, in `agent_supervisor`'s
 /// `a_recorded_event_continues_the_transcript_the_shim_started`, on the

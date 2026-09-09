@@ -814,7 +814,7 @@ impl Service {
             authorized_keys: default_authorized_keys(),
             sessions: crate::sessions::Sessions::new(),
             registry,
-            agents: agent_supervisor::AgentSupervisor::new(),
+            agents: agent_supervisor::AgentSupervisor::with_records(store.clone()),
             hooks: hook_ingress::HookIngress::new(store.clone(), Arc::new(inventory.clone())),
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -1785,10 +1785,11 @@ impl Service {
         // and the first switch to chat mode would hand the shim `--session
         // <a session that does not exist>` for `session/load` to fail on.
         // Codex gets a real id the only way it can — from the shim's
-        // `Established` report, which `set_pane_mode` stores — and a codex
-        // pane that has been a chat once does now restart back into its
-        // conversation. Giving it one from disk at launch needs a
-        // `~/.codex/sessions` reader that does not exist yet.
+        // `Established` report, which `AgentSupervisor::remember_session`
+        // writes down the moment it arrives — and a codex pane that has been a
+        // chat once does now restart back into its conversation. Giving it one
+        // from disk at launch needs a `~/.codex/sessions` reader that does not
+        // exist yet.
         let declared = command_preset.starts_with("claude").then(|| Uuid::now_v7().to_string());
         let term = if let Some(ref sid) = declared {
             self.store.set_pane_mode(
@@ -2356,12 +2357,16 @@ impl Service {
         //
         // A session is often not the one we asked for: `session/load` can fail
         // and the adapter starts a fresh one instead. Only the shim knows the
-        // id that resulted, and it reports it in `Established` — which until
-        // now lived in memory and nowhere else. So the record kept a stale id,
-        // switching back ran `claude --resume` on a conversation that was not
-        // the one on screen, and switching in again failed to load it and
-        // opened a third. Every toggle lost the thread and drew a gap saying
-        // so.
+        // id that resulted, and it reports it in `Established`, which lived in
+        // the supervisor's memory and nowhere else until
+        // `AgentSupervisor::remember_session` started writing it down as it
+        // arrives. Before both of those, the record kept a stale id: switching
+        // back ran `claude --resume` on a conversation that was not the one on
+        // screen, and switching in again failed to load it and opened a third.
+        // Every toggle lost the thread and drew a gap saying so. This read
+        // stays even now that the id is persisted, because it is still the
+        // freshest answer at this instant and because a shim that has not
+        // established yet has written nothing down.
         // The one comparison that can catch a wrong attach.
         //
         // Two facts exist here and were never checked against each other: what
