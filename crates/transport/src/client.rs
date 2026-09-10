@@ -33,8 +33,19 @@ pub enum ClientError {
     NoHello,
     #[error("the daemon speaks protocol {daemon}, this client speaks {client}")]
     VersionMismatch { daemon: u32, client: u32 },
+    /// The runner refused, and said what it refused.
+    ///
+    /// `what` names WHICH argument when `code` alone does not — a cycle, a
+    /// blocker naming no task and a bad actor all arrive as
+    /// `INVALID_ARGUMENT` otherwise, and a caller telling them apart by
+    /// guessing from the call it just made is a confident, wrong sentence
+    /// waiting to happen. Empty for every code that is its own whole answer.
+    ///
+    /// A word to switch on, never text to show: `Display` here is still the
+    /// message alone, so nothing that wants prose has to change, and
+    /// `farcooler_core::error::word_for` remains what an app renders from.
     #[error("{message}")]
-    Daemon { code: i32, retryable: bool, message: String },
+    Daemon { code: i32, retryable: bool, message: String, what: String },
     #[error("the daemon returned an empty result")]
     EmptyResult,
     #[error("the daemon returned {got} where {expected} was expected")]
@@ -165,7 +176,12 @@ fn unwrap_response(r: Response) -> Result<farcooler_protocol::v1::Result, Client
     match r.outcome {
         Some(response::Outcome::Result(value)) => Ok(value),
         Some(response::Outcome::Error(e)) => {
-            Err(ClientError::Daemon { code: e.code, retryable: e.retryable, message: e.message })
+            Err(ClientError::Daemon {
+                code: e.code,
+                retryable: e.retryable,
+                message: e.message,
+                what: e.what,
+            })
         }
         None => Err(ClientError::EmptyResult),
     }

@@ -1289,10 +1289,13 @@ async fn tasks_with_key(
 
 /// One task, by the key a person types or by the short id `show` prints.
 ///
-/// Keys are per repository, so two boards can both have an `fc-1`. Without
-/// `--repo` every registered board is asked and an ambiguous answer is refused
-/// rather than picked from — writing to the wrong board is the failure that
-/// would be found days later.
+/// Without `--repo` every registered board is asked and an ambiguous answer is
+/// refused rather than picked from — writing to the wrong board is the failure
+/// that would be found days later. That the refusal is nearly unreachable is
+/// not a reason to drop it: a key is `<prefix>-<n>` and `task_key_prefix` has
+/// a unique index, so a runner that has always worked cannot mint one key
+/// twice, but a repository that missed its prefix at registration issues `-1`,
+/// `-2` with no prefix at all — see `Store::tasks_with_key`.
 ///
 /// Two questions, asked cheapest first. A key goes straight to the runner's
 /// index; only if that names nothing does this fall back to reading the boards
@@ -1379,17 +1382,56 @@ fn new_acceptance(text: &str) -> pb::TaskAcceptanceItem {
     pb::TaskAcceptanceItem { id: bytes::Bytes::new(), text: text.to_string(), met: false }
 }
 
+/// The sentence this CLI owns for an argument the runner named.
+///
+/// `None` for a word this build has never heard of, and the caller's own
+/// sentence answers instead — which is what every one of these calls did
+/// before the runner could say which field it meant. A runner newer than this
+/// CLI will refuse things with words that are not here, and guessing at one
+/// would put a confident, wrong sentence in front of somebody.
+///
+/// The runner's own words are switched on and never printed. These are this
+/// CLI's sentences about this CLI's flags, which is the whole rule: a word
+/// crosses the wire, the app owns the prose.
+fn said_about(what: &str) -> Option<&'static str> {
+    Some(match what {
+        "title" => "a task needs a title, and it has to fit in a line",
+        "actor" => "that is not an actor. use user, manager, or agent:<terminal id>",
+        "status" => "that is not a status this board has",
+        "kind" => "that is not a kind of entry",
+        "body" => "an entry needs something written in it",
+        "acceptance" => "one of those acceptance lines is not something this board can store",
+        "extra_json" => "the extra for that entry has to be a JSON object",
+        "supersedes" => "that entry is not one this task's record has",
+        "workspace_id" => "that is not a workspace on this runner",
+        "repository_id" => "that is not a repository on this runner",
+        "query" => "say what to search for",
+        "key" => "name a task",
+        "cycle" => "those two tasks would end up waiting on each other",
+        "blocked_by" => "the task it would wait on is not on this runner",
+        _ => return None,
+    })
+}
+
 /// A refusal from the runner, in this CLI's own words.
 ///
 /// The runner sends a stable machine word and a message written for its own
 /// log — "invalid argument: title", "resource version is stale". That text is
 /// exactly what `farcooler_core::error::word` exists to keep off a screen, so
-/// none of it is printed here. `invalid` is the sentence this particular call
-/// owes its reader when the word says a field was wrong, because the word says
-/// only that one was.
+/// none of it is printed here.
+///
+/// `invalid` is the FALLBACK now rather than the whole answer. It used to be
+/// the only thing this function had: `invalid-argument` covers a cycle, a
+/// blocker naming no task, a bad actor and an over-long title, so each call
+/// site had to guess which producer had fired from the call it had just made,
+/// and `task block` guessed "those two tasks would end up waiting on each
+/// other" for all four. The runner names the argument now (`Error.what`), so
+/// `said_about` answers the ones this build knows and `invalid` answers the
+/// rest — which is exactly the old behaviour for a word this CLI is too old
+/// to have heard of.
 fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
-    let code = match err {
-        ClientError::Daemon { code, .. } => code,
+    let (code, what) = match err {
+        ClientError::Daemon { code, what, .. } => (code, what),
         // `Codec` is transparent over `CodecError`, which is transparent over
         // `std::io::Error`, so left alone this arm prints "Broken pipe (os
         // error 32)" — an operating system's words, on a screen, about a
@@ -1408,7 +1450,7 @@ fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
     let word = farcooler_core::error::word_for(code);
     let said: String = match word {
         "not-found" => "that task is not on this runner".to_string(),
-        "invalid-argument" => invalid.to_string(),
+        "invalid-argument" => said_about(&what).unwrap_or(invalid).to_string(),
         "resource-conflict" => {
             "this task changed while you were reading it. read it again and reapply the change"
                 .to_string()
@@ -1868,6 +1910,7 @@ mod tests {
             code: pb::ErrorCode::ScopeDenied as i32,
             retryable: false,
             message: "scope denied: control".to_string(),
+            what: String::new(),
         };
         let said = refused(denied, "unused").to_string();
         assert_eq!(said, "this client may read the board but not write to it");
@@ -1875,6 +1918,65 @@ mod tests {
             !said.contains("scope denied: control"),
             "the runner's log prose reached a screen"
         );
+    }
+
+    /// A refusal the runner named beats the guess the call site made.
+    ///
+    /// The bug: `invalid-argument` covers a cycle, a blocker naming no task, a
+    /// bad actor and an over-long title, so `refused` took the sentence as a
+    /// per-call-site parameter and `task block` passed "those two tasks would
+    /// end up waiting on each other" for all four. Telling somebody about a
+    /// cycle when what they got wrong was the blocker's id is a confident,
+    /// wrong sentence -- and it reads exactly like a right one.
+    #[test]
+    fn a_named_argument_answers_instead_of_the_call_sites_guess() {
+        let refusal = |what: &str| {
+            refused(
+                ClientError::Daemon {
+                    code: pb::ErrorCode::InvalidArgument as i32,
+                    retryable: false,
+                    message: format!("invalid argument: {what}"),
+                    what: what.to_string(),
+                },
+                // What `task block` passes, which is right for exactly one of
+                // the two words below.
+                "those two tasks would end up waiting on each other",
+            )
+            .to_string()
+        };
+
+        assert_eq!(refusal("cycle"), "those two tasks would end up waiting on each other");
+        assert_eq!(refusal("blocked_by"), "the task it would wait on is not on this runner");
+        assert_ne!(
+            refusal("blocked_by"),
+            refusal("cycle"),
+            "two different mistakes must not read as the same one"
+        );
+
+        // The runner's log prose never reaches the screen, whatever it says.
+        assert!(!refusal("blocked_by").contains("invalid argument"));
+    }
+
+    /// A word this build has never heard of falls back rather than guesses.
+    ///
+    /// A runner newer than this CLI refuses things with words that are not in
+    /// `said_about`. The old behaviour -- the call site's own sentence -- is
+    /// the right answer for those, and inventing one from the word would put
+    /// the runner's vocabulary on a screen.
+    #[test]
+    fn an_argument_this_cli_has_never_heard_of_keeps_the_old_sentence() {
+        let said = refused(
+            ClientError::Daemon {
+                code: pb::ErrorCode::InvalidArgument as i32,
+                retryable: false,
+                message: "invalid argument: some_future_field".to_string(),
+                what: "some_future_field".to_string(),
+            },
+            "that board could not be read",
+        )
+        .to_string();
+        assert_eq!(said, "that board could not be read");
+        assert!(!said.contains("some_future_field"), "the runner's word reached a screen: {said}");
     }
 
     /// The other half of "a flag that was typed decides something".

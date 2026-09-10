@@ -258,6 +258,9 @@ fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
             // Redacted by construction: never a path, terminal byte, command,
             // or session id.
             message: err.redacted_message(),
+            // WHICH argument, when the code alone does not say. A client
+            // switches on this and never shows it; see `DomainError::what`.
+            what: err.what().to_string(),
         })),
     }
 }

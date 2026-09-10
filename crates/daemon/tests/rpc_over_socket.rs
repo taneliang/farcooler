@@ -3253,6 +3253,107 @@ async fn every_board_write_announces_and_says_whose_work_it_was() {
     }
 }
 
+/// Four different `INVALID_ARGUMENT` refusals, told apart by a real client.
+///
+/// The failure this ends: the code was the whole answer, so a cycle, a blocker
+/// naming no task, a bad actor and a missing title all arrived as the bare word
+/// `invalid-argument`. A client had to guess which producer fired from the call
+/// it had just made -- `farcooler task block` guessed "those two tasks would end
+/// up waiting on each other" for every one of them -- and a wrong guess is a
+/// confident, wrong sentence in front of somebody.
+///
+/// Asserted here rather than in `core`, because this is the WORD as it comes
+/// off a socket: `DomainError::what` returning the right string proves nothing
+/// about whether either place that builds an `Error` frame put it in. And the
+/// exact words are pinned, not merely their difference -- the CLI switches on
+/// them, so renaming one on this side without the other is a sentence that
+/// silently reverts to the guess.
+#[tokio::test]
+async fn a_refusal_names_which_argument_it_refused() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, _prefix) = board_repository(&mut client).await;
+
+    let task = create_task(&mut client, repository.clone(), "fix the thing").await;
+
+    /// The `what` a refusal carried, or a panic naming what came back instead.
+    fn argument(outcome: Result<farcooler_protocol::v1::Result, ClientError>) -> String {
+        match outcome {
+            Err(ClientError::Daemon { code, what, .. }) => {
+                assert_eq!(
+                    code,
+                    ErrorCode::InvalidArgument as i32,
+                    "this test is about telling invalid arguments apart"
+                );
+                what
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    // A title that is nothing at all.
+    let mut blank = request("task.create");
+    blank.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: repository.clone(),
+        title: "   ".into(),
+        ..Default::default()
+    }));
+    assert_eq!(argument(client.call(blank).await), "title");
+
+    // A word that is not an actor. Deliberately not empty, which means `user`.
+    let mut who = request("task.set_status");
+    who.payload = Some(request::Payload::TaskSetStatus(
+        farcooler_protocol::v1::TaskSetStatus {
+            task_id: task.id.clone(),
+            status: farcooler_protocol::v1::TaskStatus::Done as i32,
+            actor: "agent:not-a-uuid".into(),
+        },
+    ));
+    assert_eq!(argument(client.call(who).await), "actor");
+
+    // A task waiting on itself.
+    let mut cycle = request("task.block");
+    cycle.payload = Some(request::Payload::TaskBlockSet(
+        farcooler_protocol::v1::TaskBlockSet {
+            task_id: task.id.clone(),
+            blocked_by: task.id.clone(),
+            reason: Some("itself".into()),
+            clear: false,
+            ..Default::default()
+        },
+    ));
+    assert_eq!(argument(client.call(cycle).await), "cycle");
+
+    // A task waiting on one that is not there. The same code as the cycle
+    // above and a different fix, which is the entire point of this field.
+    let mut ghost = request("task.block");
+    ghost.payload = Some(request::Payload::TaskBlockSet(
+        farcooler_protocol::v1::TaskBlockSet {
+            task_id: task.id.clone(),
+            blocked_by: bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
+            reason: Some("a ghost".into()),
+            clear: false,
+            ..Default::default()
+        },
+    ));
+    assert_eq!(argument(client.call(ghost).await), "blocked_by");
+
+    // And a code that is its own whole answer carries no argument, so a client
+    // cannot start switching on a word that was never promised.
+    let mut missing = request("task.get");
+    missing.payload = Some(request::Payload::TaskGet(farcooler_protocol::v1::TaskGetRequest {
+        task_id: bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
+        note_kind: 0,
+    }));
+    match client.call(missing).await {
+        Err(ClientError::Daemon { code, what, .. }) => {
+            assert_eq!(code, ErrorCode::NotFound as i32);
+            assert_eq!(what, "", "a code that says it all carries nothing else");
+        }
+        other => panic!("expected a not-found, got {other:?}"),
+    }
+}
+
 /// Blocking a task on one that does not exist, from a client that did not
 /// resolve the blocker first.
 ///

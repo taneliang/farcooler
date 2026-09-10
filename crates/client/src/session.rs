@@ -109,7 +109,15 @@ impl From<ClientError> for SessionError {
             // The runner said no, and said why. Kept whole: `Protocol` would
             // throw the code away, and the code is the only thing an app can
             // write a useful sentence from.
-            ClientError::Daemon { code, retryable, message } => {
+            //
+            // `what` — which argument the runner refused — is deliberately not
+            // carried across yet. Nothing behind this boundary reads it: the
+            // phones see a refusal through `ffi::Lost::word`, which is the
+            // code and nothing else. Adding it here would mean a field on
+            // `Refused`, a second one on the FFI, and a word in Swift and in
+            // Kotlin, all with no reader. It belongs here the day a phone
+            // wants to say which field it got wrong.
+            ClientError::Daemon { code, retryable, message, .. } => {
                 SessionError::Refused { code, retryable, message }
             }
             other => SessionError::Protocol(other.to_string()),

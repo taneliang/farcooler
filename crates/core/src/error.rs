@@ -169,6 +169,59 @@ impl DomainError {
         }
     }
 
+    /// WHICH argument this refusal is about, or `""` when the code says it all.
+    ///
+    /// Exhaustive, like `wire()` above and for the same reason: a variant
+    /// added with a detail field and no arm here would cross the wire carrying
+    /// nothing, which is the silence this exists to end.
+    ///
+    /// **A word to switch on, never text to show.** It is this daemon's own
+    /// vocabulary — mostly the field name a caller got wrong, occasionally a
+    /// phrase written for whoever is reading a log — and a client maps the
+    /// words it knows onto its own sentences, exactly as it does with `code`.
+    /// Nothing a caller sent can appear in it: `&'static str` means every
+    /// value is a literal in this source.
+    ///
+    /// `ScopeDenied` and `CapabilityUnsupported` deliberately answer `""`
+    /// though both carry a `needed`. For those two the CODE is already the
+    /// whole meaning, their `needed` is read from a different table, and
+    /// `CapabilityUnsupported`'s fallback in `Rpc::handle` is the prose "a
+    /// newer Far Cooler" — putting that in a field documented as a machine
+    /// word would invite the first client that trusted the documentation to
+    /// print it.
+    pub fn what(&self) -> &'static str {
+        match self {
+            DomainError::InvalidArgument { what } => what,
+            DomainError::AuthRequired
+            | DomainError::ScopeDenied { .. }
+            | DomainError::VersionIncompatible
+            | DomainError::RepositoryLocked
+            | DomainError::BranchExists
+            | DomainError::WorktreeExists
+            | DomainError::DirtyWorktree
+            | DomainError::RunningProcesses
+            | DomainError::OutputGap
+            | DomainError::ClientTooSlow
+            | DomainError::OperationFailed
+            | DomainError::ResourceConflict
+            | DomainError::NotFound
+            | DomainError::IdempotencyMismatch
+            | DomainError::TmuxUnavailable
+            | DomainError::PathNotAllowed
+            | DomainError::SensitiveRoot
+            | DomainError::ConfirmationRequired
+            | DomainError::WorkspacesExist
+            | DomainError::AgentNotConnected
+            | DomainError::BaseUnresolvable
+            | DomainError::DiffTooLarge
+            | DomainError::DiffUnsupported
+            | DomainError::PrStateUnavailable
+            | DomainError::AttachmentLimit
+            | DomainError::DispatchUnknown
+            | DomainError::CapabilityUnsupported { .. } => "",
+        }
+    }
+
     pub fn code(&self) -> ErrorCode {
         self.wire().0
     }
@@ -369,6 +422,53 @@ mod tests {
         // release of the daemon will be sending.
         assert_eq!(word_for(9_999), UNRECOGNIZED_WORD);
         assert_eq!(word_for(-1), UNRECOGNIZED_WORD);
+    }
+
+    /// The detail crosses, and it is the variant's own.
+    ///
+    /// The silence this ends: `wire()` matches `InvalidArgument { .. }`, so a
+    /// cycle, a blocker naming no task, a bad actor and an over-long title all
+    /// reached a client as the bare word `invalid-argument` and a caller had to
+    /// guess which producer had fired from the call it had just made.
+    #[test]
+    fn an_invalid_argument_names_which_argument() {
+        assert_eq!(DomainError::InvalidArgument { what: "blocked_by" }.what(), "blocked_by");
+        assert_eq!(DomainError::InvalidArgument { what: "cycle" }.what(), "cycle");
+    }
+
+    /// Every other variant answers nothing, and says nothing by accident.
+    ///
+    /// A code that is its own whole answer must not start carrying a second
+    /// word a client could switch on -- and `ScopeDenied` and
+    /// `CapabilityUnsupported` are the two that would be easiest to wire up by
+    /// reflex, which is why they are named here rather than left to the sweep.
+    #[test]
+    fn every_other_refusal_carries_no_argument() {
+        for e in all_variants() {
+            if matches!(e, DomainError::InvalidArgument { .. }) {
+                continue;
+            }
+            assert_eq!(e.what(), "", "{e:?} started carrying an argument");
+        }
+        assert_eq!(DomainError::ScopeDenied { needed: "control" }.what(), "");
+        assert_eq!(DomainError::CapabilityUnsupported { needed: "tasks" }.what(), "");
+    }
+
+    /// What crosses is a word, not a screenful.
+    ///
+    /// The field is documented as something to switch on, and the guard that
+    /// keeps it that way is that nothing in it is long enough or private
+    /// enough to be mistaken for prose meant for a person. A path or a session
+    /// id could never appear -- `&'static str` means every value is a literal
+    /// in this source -- and this pins the rest.
+    #[test]
+    fn an_argument_word_carries_nothing_private_and_nothing_long() {
+        for e in all_variants() {
+            let w = e.what();
+            assert!(!w.contains('/'), "{e:?} names a path");
+            assert!(!w.contains('\\'), "{e:?} names a path");
+            assert!(w.len() < 80, "{e:?} carries prose, not a word: {w:?}");
+        }
     }
 
     #[test]

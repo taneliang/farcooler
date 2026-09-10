@@ -189,6 +189,24 @@ message Error {
   ErrorCode code = 1;
   bool retryable = 2;
   string message = 3; // redacted: never a path, terminal byte, command, or session id
+  // WHICH argument the runner refused, when the code alone does not say.
+  //
+  // `INVALID_ARGUMENT` covers a cycle, a blocker that names no task, a bad
+  // actor and a title two hundred characters too long, and until this field
+  // existed all four arrived as the bare word `invalid-argument`. A client had
+  // no way to tell them apart, so it had to guess which producer fired from
+  // the call it had just made -- and a wrong guess is a confident, wrong
+  // sentence in front of somebody.
+  //
+  // **Switch on it; never print it.** Same rule as `code`: the runner sends a
+  // word, the app owns the sentence. This is the runner's OWN vocabulary --
+  // mostly field names (`title`, `actor`, `blocked_by`), occasionally a phrase
+  // written for a daemon log -- so a client maps the words it knows and falls
+  // back to its own wording for anything else. It carries no caller data: every
+  // value is a literal in the runner's source.
+  //
+  // Empty where the code is the whole answer, which is most of them.
+  string what = 4;
 }
 
 message Result {

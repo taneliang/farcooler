@@ -294,6 +294,11 @@ fn reject_envelope(client_message_id: Bytes, err: DomainError) -> WireEnvelope {
                 code: code as i32,
                 retryable,
                 message: err.redacted_message(),
+                // Filled from the same source as `rpc::error_response`, so the
+                // two places that build this frame cannot answer differently.
+                // Always `""` today: the only error that reaches here is
+                // `VersionIncompatible`, which carries no detail.
+                what: err.what().to_string(),
             })),
         })),
     }
