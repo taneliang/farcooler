@@ -39,16 +39,21 @@ use crate::{
 
 /// The ticket a dispatched pane is working.
 ///
-/// **Nothing in this tree sets it yet.** Both of these are the contract with
-/// whatever comes to dispatch panes; this side reads them, and until the other
-/// side exports them a key is typed and every write files as `user`. Named as
-/// constants so there is one word to grep for on the day that changes.
-const TASK_ENV: &str = "FARCOOLER_TASK";
+/// **Nothing in this tree sets it yet**, and `farcooler_core::pane_env::TASK`
+/// says why: no dispatch here knows which task a pane was opened for, so a key
+/// is still typed. The daemon does now export `ACTOR_ENV`, so an unnamed write
+/// from an agent pane no longer files as a person.
+///
+/// Re-exported from `farcooler_core::pane_env` rather than spelled again:
+/// this end reads the names the daemon's end writes, and two literals for one
+/// contract is a contract that can drift into a write filed under the wrong
+/// name.
+const TASK_ENV: &str = farcooler_core::pane_env::TASK;
 
 /// Who a dispatched pane is. `user`, `manager`, or `agent:<terminal id>` — the
 /// same vocabulary `Actor` parses, because it IS what parses it. See
-/// `TASK_ENV`: nothing sets this yet either.
-const ACTOR_ENV: &str = "FARCOOLER_ACTOR";
+/// `TASK_ENV` for where both names live.
+const ACTOR_ENV: &str = farcooler_core::pane_env::ACTOR;
 
 /// The sections `show` prints, in the order it prints them.
 ///

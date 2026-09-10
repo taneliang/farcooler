@@ -120,11 +120,11 @@ enum Command {
     /// Two halves that must not be collapsed into one. `task set` revises what
     /// is currently understood; `task note` appends to the record of how that
     /// understanding was reached, and nothing here edits an entry already
-    /// written. A dispatched pane is MEANT to carry its own key in
-    /// `FARCOOLER_TASK` and its own name in `FARCOOLER_ACTOR`, so that an agent
-    /// working its own ticket never types either — but nothing in this tree
-    /// sets them yet, so today a key is typed and an unnamed write files as a
-    /// person. See `tasks::TASK_ENV`.
+    /// written. A pane Far Cooler launched to run an agent carries its own
+    /// name in `FARCOOLER_ACTOR`, so an agent writing to the board files as
+    /// itself without ever typing `--actor`. Its key in `FARCOOLER_TASK` is
+    /// the other half and is still unset: nothing on this runner knows which
+    /// task a pane was opened for, so a key is typed. See `tasks::TASK_ENV`.
     #[command(subcommand)]
     Task(tasks::TaskCmd),
     /// Search a workspace's worktree files, for an agent chat's @-mention.

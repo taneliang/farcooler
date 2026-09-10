@@ -190,6 +190,55 @@ pub fn preset_command_with_hooks(
     }
 }
 
+/// Whether a pane running `preset` is an agent this runner dispatched.
+///
+/// Two names are not, and everything else is. `shell` is a person's own
+/// prompt and `changes` is a rectangle holding a diff — nobody dispatched
+/// either of them to work a ticket, and a person typing `farcooler task note`
+/// into their own shell is a person. Everything else launches a coding agent,
+/// including a preset from a user-configured adapter this build has never
+/// heard of, which is why the test is a list of what is NOT one: a new agent
+/// arrives as a name nobody here can enumerate, and it must be named
+/// correctly the day it does.
+///
+/// The head of the preset, so that `claude:opus` is still `claude` — the same
+/// split `preset_command_with_hooks` makes on the same string.
+fn preset_runs_an_agent(preset: &str) -> bool {
+    let head = preset.split_once(':').map(|(a, _)| a).unwrap_or(preset);
+    head != "shell" && head != CHANGES_PRESET
+}
+
+/// The launch, plus the name the pane files its board writes under.
+///
+/// `FARCOOLER_ACTOR=agent:<terminal id>`, which is exactly what
+/// `farcooler_store::models::Actor` parses back. Until this existed, every
+/// board write an agent made arrived with no actor named and the runner read
+/// that as `user` — so the actor field the whole `task_changed` event is built
+/// around said "a person" for every agent on the runner, and nothing anywhere
+/// said otherwise. See `farcooler_core::pane_env` for the other end.
+///
+/// `env` rather than a bare `NAME=value` prefix, and that is load-bearing
+/// rather than stylistic. tmux hands a one-argument command to the pane's
+/// `default-shell`, which `TmuxServer`'s managed config pins to the user's own
+/// login shell — and fish, which is somebody's login shell, does not have the
+/// prefix form at all. `env` is a program, so every shell runs it the same
+/// way. It `exec`s its target, so no extra process is left behind and
+/// `pane_current_command` reports exactly what it did before.
+///
+/// Nothing is quoted because nothing here needs it: a uuid is thirty-six
+/// characters of hex and dashes, and `command` was already built to be handed
+/// to a shell.
+///
+/// **`FARCOOLER_TASK` is deliberately not set.** A terminal record names a
+/// workspace, never a task, so there is no honest answer to put in it — see
+/// `farcooler_core::pane_env::TASK`.
+fn with_pane_actor(terminal: Uuid, preset: &str, command: String) -> String {
+    if !preset_runs_an_agent(preset) {
+        return command;
+    }
+    format!("env {}=agent:{terminal} {command}", farcooler_core::pane_env::ACTOR)
+}
+
 /// Where this daemon keeps the settings file it hands claude.
 ///
 /// One file per runner, in the runtime directory, beside the socket it names.
@@ -1919,8 +1968,11 @@ impl Service {
 
         // 2. Create and tag the window.
         let hook_settings = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
-        let command =
-            preset_command_with_hooks(command_preset, declared.as_deref(), hook_settings.as_deref());
+        let command = with_pane_actor(
+            term.id,
+            command_preset,
+            preset_command_with_hooks(command_preset, declared.as_deref(), hook_settings.as_deref()),
+        );
         let created = self
             .tmux
             .create_terminal_window(workspace_id, term.id, title, &ws.worktree_path, &command)
@@ -2156,10 +2208,14 @@ impl Service {
         // until this line was found: splitting is how most panes on a runner
         // are made, so most claude panes reported nothing at all.
         let hook_settings = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
-        let command = preset_command_with_hooks(
+        let command = with_pane_actor(
+            term.id,
             command_preset,
-            term.agent_session_id.as_deref(),
-            hook_settings.as_deref(),
+            preset_command_with_hooks(
+                command_preset,
+                term.agent_session_id.as_deref(),
+                hook_settings.as_deref(),
+            ),
         );
         let created = self
             .tmux
@@ -2274,12 +2330,16 @@ impl Service {
         // last reported. That is precisely the silent disagreement between
         // record and runtime this whole design exists to prevent.
         let hook_settings = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
-        let command = respawn_command(
-            user_home().as_deref(),
+        let command = with_pane_actor(
+            id,
             &term.command_preset,
-            &ws.worktree_path,
-            term.agent_session_id.as_deref().unwrap_or_default(),
-            hook_settings.as_deref(),
+            respawn_command(
+                user_home().as_deref(),
+                &term.command_preset,
+                &ws.worktree_path,
+                term.agent_session_id.as_deref().unwrap_or_default(),
+                hook_settings.as_deref(),
+            ),
         );
         // The PANE, not the window. This line used to be
         // `kill_terminal_window` followed by `create_terminal_window`, which
@@ -2687,6 +2747,25 @@ impl Service {
         if pane_mode == models::PaneMode::Agent {
             self.agents.ensure_listening(&self.root, id);
         }
+
+        // One line for both arms of the match above, and it has to be BELOW
+        // the refusal rather than beside the build: a pane becoming a chat is
+        // running an agent by construction, because everything else was just
+        // turned back, and `harness` is what it actually holds. The record's
+        // own preset may not agree yet — `a_pane_that_looks_like_claude` is a
+        // terminal created as `shell` that Claude Code is running in, and
+        // `preset_after_adopting` at the foot of this function is what finally
+        // writes that down. Reading `command_preset` here would leave exactly
+        // that pane, the one most likely to be a dispatched agent, filing its
+        // board writes as a person.
+        let command = with_pane_actor(
+            id,
+            match pane_mode {
+                models::PaneMode::Agent => harness.as_deref().unwrap_or(&term.command_preset),
+                _ => &term.command_preset,
+            },
+            command,
+        );
 
         self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
         let updated = self.record_pane_mode(&term, pane_mode, session_id)?;
@@ -4105,7 +4184,7 @@ mod agent_mode_wiring_tests {
     /// this. Nothing here needs claude installed, which is the other half of
     /// why it is done this way — a test that only runs on a machine with an
     /// agent on it is a test CI never runs.
-    async fn a_pane_that_looks_like_claude(
+    pub(super) async fn a_pane_that_looks_like_claude(
         svc: &Service,
         ws: &models::Workspace,
         title: &str,
@@ -4436,6 +4515,168 @@ mod agent_mode_wiring_tests {
         );
         // And the id the other writer put there is not clobbered on the way.
         assert_eq!(held.agent_session_id.as_deref(), Some("the-shim-said-so"));
+    }
+}
+
+#[cfg(test)]
+mod pane_actor_tests {
+    //! The name a pane files its board writes under, driven end to end.
+    //!
+    //! Every one of these goes through a `Service` method on a real tmux
+    //! server and reads `#{pane_start_command}` back off the pane afterwards,
+    //! because the failure being guarded is a WIRING failure and nothing else.
+    //! `with_pane_actor` returning the right string proves nothing about
+    //! whether a launched pane got it — this tree has been silently reverted
+    //! that way twice, once at `split_terminal` and once at
+    //! `restart_terminal`, with a green suite pinning the builder both times.
+    //!
+    //! Four launch paths, four tests, plus the fifth door into a pane that is
+    //! not a launch at all: switching one into a chat.
+
+    use super::agent_mode_wiring_tests::a_pane_that_looks_like_claude;
+    use super::restart_wiring_tests::{a_workspace, pane_start_command};
+    use super::*;
+
+    /// What a pane launched for `terminal` must export.
+    fn expected(terminal: Uuid) -> String {
+        format!("{}=agent:{terminal}", farcooler_core::pane_env::ACTOR)
+    }
+
+    #[tokio::test]
+    async fn a_created_agent_pane_carries_its_own_name() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(
+            command.contains(&expected(term.id)),
+            "a created agent pane files its board writes as itself: {command}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_split_agent_pane_carries_its_own_name() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
+
+        let split = svc
+            .split_terminal(ws.id, target.id, farcooler_protocol::v1::SplitSide::Right, "two", "claude")
+            .await
+            .expect("split");
+
+        let command = pane_start_command(&svc, split.id).await;
+        assert!(
+            command.contains(&expected(split.id)),
+            "splitting is how most panes on a runner are made: {command}"
+        );
+        // Its own id, not the id of the pane it was split off. Both are in
+        // scope at the call site and one of them is wrong.
+        assert!(
+            !command.contains(&expected(target.id)),
+            "and it is named after itself, not after the pane it came from: {command}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_restarted_agent_pane_carries_its_own_name() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(
+            command.contains(&expected(term.id)),
+            "a pane that came back is still the same agent: {command}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pane_switched_back_to_a_terminal_carries_its_own_name() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+
+        let back = svc
+            .set_pane_mode(term.id, models::PaneMode::Terminal, false)
+            .await
+            .expect("terminal");
+        assert_eq!(back.pane_mode, models::PaneMode::Terminal);
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(
+            command.contains(&expected(term.id)),
+            "a pane coming back from a chat is still the same agent: {command}"
+        );
+
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// The chat, whose preset the record has not caught up with yet.
+    ///
+    /// This is the case a wrap reading `command_preset` would have missed
+    /// entirely: the terminal was created as `shell`, Claude Code is what is
+    /// actually running in it, and `preset_after_adopting` does not write that
+    /// down until after the respawn. The pane most likely to be a dispatched
+    /// agent is the one whose record is least likely to say so.
+    #[tokio::test]
+    async fn a_pane_opened_as_a_chat_carries_its_own_name() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
+        assert_eq!(
+            svc.store.get_terminal(term.id).unwrap().command_preset,
+            "shell",
+            "the record still says shell at the moment the command is built"
+        );
+
+        svc.set_pane_mode(term.id, models::PaneMode::Agent, false)
+            .await
+            .expect("a claude pane can be opened as a chat");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains("agent-host"), "the pane is running the shim: {command}");
+        assert!(
+            command.contains(&expected(term.id)),
+            "and the agent under it files its board writes as this pane: {command}"
+        );
+
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// A person's own prompt is a person, and `user` is what that means.
+    ///
+    /// The other half of the rule, and the more expensive half to get wrong:
+    /// filing somebody's typed `farcooler task note` under an agent id would
+    /// put a name on the record that nothing downstream could tell from a real
+    /// one. `Actor` has three words and the whole reason it has three is this
+    /// distinction.
+    #[tokio::test]
+    async fn a_shell_pane_is_left_as_a_person() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "shell", "shell").await.expect("a shell pane");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(
+            !command.contains(farcooler_core::pane_env::ACTOR),
+            "a pane a person types into names no agent: {command}"
+        );
+    }
+
+    /// `FARCOOLER_TASK` has no source, so nothing invents one.
+    ///
+    /// A terminal record names a workspace and never a task. Exporting a
+    /// guessed key would be worse than exporting none: an agent would append
+    /// its notes to somebody else's ticket and the board would read as though
+    /// the work had been done.
+    #[tokio::test]
+    async fn no_pane_claims_a_ticket_nothing_knows() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(
+            !command.contains(farcooler_core::pane_env::TASK),
+            "there is no honest answer for this yet: {command}"
+        );
     }
 }
 
