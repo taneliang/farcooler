@@ -2852,6 +2852,65 @@ async fn a_task_created_over_the_wire_comes_back_with_a_key() {
     assert_eq!(board.items[0].key, task.key);
 }
 
+/// The key a person types, resolved over the wire in one small reply.
+///
+/// The read this route exists for: `fc-42` had no route at all, so a client
+/// turned one into an id by listing every registered board and comparing every
+/// row's key -- intent, acceptance, constraints and all -- and `task block`
+/// paid it twice, once per end of the edge.
+///
+/// Driven through a real socket rather than through `task_ops::get_by_key`,
+/// because what is being pinned is the WIRING: the payload arm in `dispatch`,
+/// the row in the scope table, and the capability that says an older runner
+/// cannot serve this. A unit test on the store function notices none of them.
+#[tokio::test]
+async fn a_typed_key_resolves_to_its_task_over_the_wire() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, _prefix) = board_repository(&mut client).await;
+
+    let made = create_task(&mut client, repository.clone(), "fix the thing").await;
+    create_task(&mut client, repository.clone(), "and the other thing").await;
+
+    let by_key = |key: &str, repo: bytes::Bytes| {
+        let mut req = request("task.get_by_key");
+        req.payload = Some(request::Payload::TaskGetByKey(
+            farcooler_protocol::v1::TaskGetByKeyRequest { repository_id: repo, key: key.to_string() },
+        ));
+        req
+    };
+
+    let result = client.call(by_key(&made.key, repository.clone())).await.expect("get_by_key");
+    let Some(result::Value::TaskList(found)) = result.value else { panic!("wrong result") };
+    assert_eq!(found.items.len(), 1, "one key, one task: {:?}", found.items);
+    assert_eq!(found.items[0].id, made.id);
+    // The whole row, so a caller that resolved a key has the task and does not
+    // need a second round trip to read it.
+    assert_eq!(found.items[0].title, "fix the thing");
+
+    // No board named: every board on the runner, which is what a client asking
+    // on somebody's behalf has to be able to do.
+    let result = client.call(by_key(&made.key, bytes::Bytes::new())).await.expect("get_by_key");
+    let Some(result::Value::TaskList(anywhere)) = result.value else { panic!("wrong result") };
+    assert_eq!(anywhere.items.len(), 1);
+    assert_eq!(anywhere.items[0].id, made.id);
+
+    // A key nothing carries is an empty list, not a refusal: "which tasks are
+    // called this" has a true answer of none, and the caller owns the sentence.
+    let result = client.call(by_key("fc-9999", bytes::Bytes::new())).await.expect("get_by_key");
+    let Some(result::Value::TaskList(none)) = result.value else { panic!("wrong result") };
+    assert!(none.items.is_empty(), "{:?}", none.items);
+
+    // An empty key IS refused. `WHERE key = ''` matches nothing, so answering
+    // it would be a confident "no such task" for a caller that forgot a field.
+    match client.call(by_key("", bytes::Bytes::new())).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, ErrorCode::InvalidArgument as i32, "an empty key is a bug, not a miss")
+        }
+        other => panic!("expected an empty key to be refused, got {other:?}"),
+    }
+}
+
 /// The scope table is the security boundary, and a route missing from it is
 /// the failure this pins. `rpc.rs` matches on method name, so a new method
 /// that nobody added to the table takes whatever the fallback gives it.
@@ -2901,7 +2960,7 @@ async fn a_read_only_device_can_list_tasks_and_cannot_write_one() {
     }
     // And the reads are not, which is what makes the split worth having: a
     // phone that can see the fleet can see what it is working on.
-    for method in ["task.get", "task.search"] {
+    for method in ["task.get", "task.get_by_key", "task.search"] {
         match client.call(request(method)).await {
             Err(ClientError::Daemon { code, .. }) => assert_ne!(
                 code,

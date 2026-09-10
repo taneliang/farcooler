@@ -33,7 +33,7 @@ use farcooler_transport::ClientError;
 use uuid::Uuid;
 
 use crate::{
-    Fallible, Link, connect_to, expect_value, id_bytes, list_repositories, req_for,
+    Fallible, Link, connect_to, expect_value, id_bytes, list_repositories, req, req_for,
     resolve_repository, short_bytes, truncate, uuid_of, with,
 };
 
@@ -1236,29 +1236,93 @@ async fn append_note(
     Ok(note)
 }
 
+/// Every task on a board — or on all of them — whose key is `key`.
+///
+/// The cheap half of `find_task`. `task.get_by_key` answers this from the
+/// index behind `UNIQUE (repository_id, key)`, so resolving `fc-42` costs one
+/// small reply instead of every row of every board.
+///
+/// An empty answer for a runner too OLD to have the route, deliberately, and
+/// this is the load-bearing line: `task.get_by_key` is newer than `task.list`,
+/// a daemon without it answers `CAPABILITY_UNSUPPORTED`, and a client that read
+/// that refusal as "no such task" would tell somebody their ticket does not
+/// exist because their runner had not been updated. Empty sends `find_task`
+/// down the listing it always used, which still works on every daemon ever
+/// shipped.
+///
+/// Any OTHER refusal is passed on. A board that cannot be read is a fact the
+/// caller needs, and swallowing it here would hide a scope denial behind a
+/// slower path that would only be denied again.
+async fn tasks_with_key(
+    link: &mut Link,
+    repository: Option<Uuid>,
+    key: &str,
+) -> Result<Vec<pb::Task>, Box<dyn std::error::Error>> {
+    let envelope = match repository {
+        Some(id) => req_for("task.get_by_key", id),
+        // No board named, so there is no one resource this is about.
+        None => req("task.get_by_key"),
+    };
+    let call = link
+        .call(with(
+            envelope,
+            request::Payload::TaskGetByKey(pb::TaskGetByKeyRequest {
+                repository_id: repository.map(id_bytes).unwrap_or_default(),
+                key: key.to_string(),
+            }),
+        ))
+        .await;
+    let r = match call {
+        Ok(r) => r,
+        Err(ClientError::Daemon { code, .. })
+            if farcooler_core::error::word_for(code) == "capability-unsupported" =>
+        {
+            return Ok(Vec::new());
+        }
+        Err(e) => return Err(refused(e, "that board could not be read")),
+    };
+    let result::Value::TaskList(l) = expect_value(r.value, "task_list")? else {
+        return Err("the daemon returned the wrong resource".into());
+    };
+    Ok(l.items)
+}
+
 /// One task, by the key a person types or by the short id `show` prints.
 ///
 /// Keys are per repository, so two boards can both have an `fc-1`. Without
 /// `--repo` every registered board is asked and an ambiguous answer is refused
 /// rather than picked from — writing to the wrong board is the failure that
 /// would be found days later.
+///
+/// Two questions, asked cheapest first. A key goes straight to the runner's
+/// index; only if that names nothing does this fall back to reading the boards
+/// row by row, which is the one thing that can resolve the SHORT ID `show`
+/// prints — there is no index for the last eight characters of a uuid, and
+/// `task block` is not worth a second table to avoid one listing on a miss.
+/// The fallback is also what answers for a runner too old to have the route.
 async fn find_task(
     link: &mut Link,
     repo: Option<&str>,
     needle: &str,
 ) -> Result<pb::Task, Box<dyn std::error::Error>> {
     let repositories = list_repositories(link).await?;
-    let searched: Vec<Uuid> = match repo {
-        Some(name) => vec![uuid_of(&resolve_repository(&repositories, name)?.id)],
-        None => repositories.iter().map(|r| uuid_of(&r.id)).collect(),
+    let named: Option<Uuid> = match repo {
+        Some(name) => Some(uuid_of(&resolve_repository(&repositories, name)?.id)),
+        None => None,
     };
     let wanted = needle.trim().to_lowercase();
 
-    let mut found: Vec<pb::Task> = Vec::new();
-    for repository in searched {
-        for task in tasks_in(link, repository, None, None).await? {
-            if task.key.to_lowercase() == wanted || short_bytes(&task.id) == wanted {
-                found.push(task);
+    let mut found = tasks_with_key(link, named, &wanted).await?;
+    if found.is_empty() {
+        let searched: Vec<Uuid> = match named {
+            Some(id) => vec![id],
+            None => repositories.iter().map(|r| uuid_of(&r.id)).collect(),
+        };
+        for repository in searched {
+            for task in tasks_in(link, repository, None, None).await? {
+                if task.key.to_lowercase() == wanted || short_bytes(&task.id) == wanted {
+                    found.push(task);
+                }
             }
         }
     }

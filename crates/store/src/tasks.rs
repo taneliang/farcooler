@@ -309,6 +309,51 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// Every task whose key is `key`, on one board or on all of them.
+    ///
+    /// The lookup a person's `fc-42` deserves. Resolving a key had exactly one
+    /// route -- `list_tasks` on every registered repository, then a string
+    /// compare over every row's key -- which read each board's whole contents,
+    /// intent and acceptance and constraints and all, to answer a question
+    /// `UNIQUE (repository_id, key)` already indexes. `farcooler task block`
+    /// paid it twice, once per end of the edge.
+    ///
+    /// `repository: None` asks every board, which is not the same question as
+    /// asking one.
+    ///
+    /// A list rather than an `Option`, and the reason is narrower than it
+    /// looks. A runner that has always worked cannot mint the same key twice:
+    /// `task_key_prefix` carries a unique index (see `migrate.rs`) and every
+    /// key is `<prefix>-<n>`. One that has NOT can -- the prefix is assigned
+    /// once, at registration, and `register_repository` says out loud what a
+    /// repository that missed it emits: `-1`, `-2`, with no prefix, forever.
+    /// Two of those on one runner and `-1` names two tasks. So the shape here
+    /// lets a caller REFUSE an ambiguous key rather than pick from it, because
+    /// picking is how a write lands on the wrong board and nobody notices for
+    /// days.
+    ///
+    /// `COLLATE NOCASE`, because `FC-42` is the same ticket as `fc-42` to
+    /// everyone but a database, and the one caller there is already lowercased
+    /// both sides before comparing.
+    ///
+    /// Ordered like `list_tasks`, for the same reason: a listing read twice
+    /// reads the same both times.
+    pub fn tasks_with_key(&self, repository: Option<Uuid>, key: &str) -> Result<Vec<Task>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {TASK_COLUMNS} FROM tasks
+                  WHERE key = ?1 COLLATE NOCASE
+                    AND (?2 IS NULL OR repository_id = ?2)
+                  ORDER BY created_at, rowid"
+            ))
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(params![key, repository.map(uuid_blob)], row_to_task)
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
     /// Every task in a repository, optionally narrowed to one status.
     ///
     /// Ordered by when each was created, so a listing read twice reads the
@@ -1085,6 +1130,72 @@ mod tests {
             .expect("repository");
         store.assign_task_key_prefix(repo()).expect("prefix");
         store
+    }
+
+    /// The key a person types, resolved from the index rather than by reading
+    /// every board.
+    ///
+    /// Read back through `tasks_with_key` on rows `create_task` wrote, so what
+    /// is asserted is what the table holds under the real key the real
+    /// numbering issued -- not a string this test made up.
+    #[test]
+    fn a_key_resolves_to_the_task_it_names() {
+        let store = seeded();
+        let first = store.create_task(repo(), "fix the thing", Actor::User).unwrap();
+        store.create_task(repo(), "and the other thing", Actor::User).unwrap();
+
+        let found = store.tasks_with_key(Some(repo()), &first.key).unwrap();
+        assert_eq!(found.len(), 1, "one key, one task on one board: {found:?}");
+        assert_eq!(found[0].id, first.id);
+        assert_eq!(found[0].title, "fix the thing", "the whole row comes back, not just the id");
+
+        // Every board, asked without naming one, is the same single answer
+        // when only one board holds the key.
+        let anywhere = store.tasks_with_key(None, &first.key).unwrap();
+        assert_eq!(anywhere.len(), 1);
+        assert_eq!(anywhere[0].id, first.id);
+
+        // `FC-42` is the same ticket as `fc-42` to everyone but a database.
+        let shouted = store.tasks_with_key(None, &first.key.to_uppercase()).unwrap();
+        assert_eq!(shouted.len(), 1, "a key typed in capitals is the same key");
+        assert_eq!(shouted[0].id, first.id);
+
+        // A key nothing carries is an empty answer, never somebody else's row.
+        assert!(store.tasks_with_key(None, "fc-9999").unwrap().is_empty());
+    }
+
+    /// No board named reaches every board; a board named reaches only it.
+    ///
+    /// Both halves matter and they fail in opposite directions. A lookup that
+    /// silently stayed on one board would report somebody's task missing; one
+    /// that ignored `--repo` would hand back a task from a board they did not
+    /// ask about, which is how a write lands somewhere nobody looks for days.
+    ///
+    /// The two keys here are DIFFERENT, and that is worth saying: this runner
+    /// cannot mint the same key twice, because `task_key_prefix` carries a
+    /// unique index (see `migrate.rs`) and every key is `<prefix>-<n>`. See
+    /// `tasks_with_key` for why the answer is a list anyway.
+    #[test]
+    fn a_key_is_looked_for_on_every_board_and_narrowed_by_one() {
+        let store = seeded();
+        let other = store.register_repository_for_test("Far Cooler");
+
+        let here = store.create_task(repo(), "ours", Actor::User).unwrap();
+        let there = store.create_task(other, "theirs", Actor::User).unwrap();
+        assert_ne!(here.key, there.key, "two boards on one runner cannot share a prefix");
+
+        let found = store.tasks_with_key(None, &there.key).unwrap();
+        assert_eq!(found.len(), 1, "a key on the other board is still found: {found:?}");
+        assert_eq!(found[0].id, there.id);
+        assert_eq!(found[0].repository_id, other);
+
+        assert!(
+            store.tasks_with_key(Some(repo()), &there.key).unwrap().is_empty(),
+            "naming a board does not reach past it"
+        );
+        let narrowed = store.tasks_with_key(Some(repo()), &here.key).unwrap();
+        assert_eq!(narrowed.len(), 1, "and does reach its own");
+        assert_eq!(narrowed[0].id, here.id);
     }
 
     #[test]

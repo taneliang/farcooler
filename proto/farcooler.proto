@@ -173,6 +173,7 @@ message Request {
     TaskNoteAppend task_note_append = 76;
     TaskBlockSet task_block_set = 77;
     TaskSearchRequest task_search = 78;
+    TaskGetByKeyRequest task_get_by_key = 79;
   }
 }
 
@@ -2558,6 +2559,32 @@ message TaskGetRequest {
   // DECISION alone answers "why is it like this" without a wall of progress
   // chatter.
   TaskNoteKind note_kind = 2;
+}
+
+// Resolve the key a person types -- `fc-42` -- to the task it names.
+//
+// The board's ergonomics are the feature, and a key was costing a client every
+// row of every board to resolve. `task.list` was the only way to turn `fc-42`
+// into an id, so a CLI resolved one by listing every registered repository and
+// reading each board's full rows -- intent, acceptance, constraints, labels --
+// to compare one short string. `farcooler task block` did it twice, once for
+// each end of the edge.
+//
+// Answers with a `TaskList` rather than one `Task`. A runner that has always
+// worked cannot mint the same key twice -- a key is `<prefix>-<n>` and the
+// prefix is uniquely indexed per runner -- but a repository that missed its
+// prefix at registration issues `-1`, `-2` with no prefix at all, and two of
+// those name the same key. The list is what lets a caller REFUSE an ambiguous
+// answer instead of picking from it, which is the failure found days later.
+//
+// Case-insensitive on `key`, because `FC-42` is the same ticket as `fc-42` to
+// everyone but a database.
+message TaskGetByKeyRequest {
+  // Which board. EMPTY means every board this runner has, which is what a
+  // client asking on behalf of somebody who did not name one wants: one round
+  // trip either way.
+  bytes repository_id = 1;
+  string key = 2;
 }
 
 // `actor` on every write below is the same word `TaskNote.actor` carries.

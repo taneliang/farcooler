@@ -273,6 +273,34 @@ pub fn get(svc: &Service, req: &pb::TaskGetRequest) -> Result<pb::TaskDetail> {
     })
 }
 
+/// `task.get_by_key`: the task, or tasks, a typed key names.
+///
+/// An empty `repository_id` asks every board rather than refusing, which is
+/// the one place in this file where an unreadable id is not an error: a client
+/// resolving a key on behalf of somebody who did not name a board has no id to
+/// send, and the runner is the cheapest place to answer that. See
+/// `TaskGetByKeyRequest` in the proto.
+///
+/// An empty key is refused rather than answered. `WHERE key = ''` matches
+/// nothing today, so it would come back as a confident "no such task" for a
+/// caller that simply forgot to fill the field in.
+///
+/// Answers a `TaskList` and never `NotFound`: no match is an empty list, which
+/// is a true answer to "which tasks are called this". The caller owns the
+/// sentence for none and for more than one.
+pub fn get_by_key(svc: &Service, req: &pb::TaskGetByKeyRequest) -> Result<pb::TaskList> {
+    let key = req.key.trim();
+    if key.is_empty() {
+        return Err(DomainError::InvalidArgument { what: "key" });
+    }
+    let repository = optional_id(
+        Some(&req.repository_id).filter(|raw| !raw.is_empty()),
+        "repository_id",
+    )?;
+    let tasks = svc.store.tasks_with_key(repository, key)?;
+    Ok(pb::TaskList { items: tasks.iter().map(pb_task).collect() })
+}
+
 /// `task.search`: every note in a repository whose body carries a phrase.
 pub fn search(svc: &Service, req: &pb::TaskSearchRequest) -> Result<pb::TaskNoteHitList> {
     let repository = required_id(&req.repository_id)?;

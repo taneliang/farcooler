@@ -385,7 +385,7 @@ fn required_scope(method: &str) -> Option<Scope> {
         // work, not the work: no path, no diff, no terminal byte — the same
         // ground `changes.inbox` stands on, and a read-scoped phone has to be
         // able to see what the fleet is doing to be worth carrying.
-        "task.list" | "task.get" | "task.search" => Scope::Read,
+        "task.list" | "task.get" | "task.get_by_key" | "task.search" => Scope::Read,
         // The board writes, at the scope `workspace.create` and
         // `terminal.create` already sit at: a write that touches no git data
         // and reveals no path.
@@ -1840,6 +1840,13 @@ impl Rpc {
                 Ok(result::Value::TaskDetail(crate::task_ops::get(svc, &p)?))
             }
 
+            "task.get_by_key" => {
+                let Some(request::Payload::TaskGetByKey(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskList(crate::task_ops::get_by_key(svc, &p)?))
+            }
+
             "task.search" => {
                 let Some(request::Payload::TaskSearch(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -2411,7 +2418,7 @@ mod tests {
 
         // And the routes themselves are split the way the table's comment says
         // they are, which the set comparison above cannot see.
-        for method in ["task.list", "task.get", "task.search"] {
+        for method in ["task.list", "task.get", "task.get_by_key", "task.search"] {
             assert_eq!(required_scope(method), Some(Scope::Read), "{method}");
         }
         for method in

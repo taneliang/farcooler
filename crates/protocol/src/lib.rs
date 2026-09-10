@@ -393,6 +393,7 @@ pub mod capability {
             "workspace.reorder" => WORKSPACE_ORDER,
             "task.list"
             | "task.get"
+            | "task.get_by_key"
             | "task.create"
             | "task.update"
             | "task.set_status"
