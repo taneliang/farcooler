@@ -3253,6 +3253,55 @@ async fn every_board_write_announces_and_says_whose_work_it_was() {
     }
 }
 
+/// Blocking a task on one that does not exist, from a client that did not
+/// resolve the blocker first.
+///
+/// `farcooler task block` cannot reach this -- it resolves both ends through
+/// `find_task` before it sends -- and anything else that speaks the protocol
+/// can, which is the whole reason the check lives in the store. Until it did,
+/// `blocked_by` fell through to the foreign key, came back
+/// `RESOURCE_CONFLICT`, and rendered as "this task changed while you were
+/// reading it. read it again and reapply the change": advice that fails
+/// identically however many times it is followed, because nothing had changed.
+#[tokio::test]
+async fn blocking_a_task_on_one_that_does_not_exist_is_refused_followably() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, _prefix) = board_repository(&mut client).await;
+
+    let task = create_task(&mut client, repository.clone(), "fix the thing").await;
+    let ghost = bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes());
+
+    let mut block = request("task.block");
+    block.payload = Some(request::Payload::TaskBlockSet(
+        farcooler_protocol::v1::TaskBlockSet {
+            task_id: task.id.clone(),
+            blocked_by: ghost,
+            reason: Some("waiting on a ghost".into()),
+            clear: false,
+            ..Default::default()
+        },
+    ));
+    match client.call(block).await {
+        Err(ClientError::Daemon { code, retryable, .. }) => {
+            assert_ne!(
+                code,
+                ErrorCode::ResourceConflict as i32,
+                "a conflict tells the caller to re-read and retry, which never ends here"
+            );
+            assert_eq!(code, ErrorCode::InvalidArgument as i32, "the argument is what is wrong");
+            assert!(!retryable, "no amount of retrying makes that id name a task");
+        }
+        other => panic!("expected the blocker to be refused, got {other:?}"),
+    }
+
+    // And nothing was written, read back over the wire rather than assumed
+    // from the refusal: a task left waiting on a row that does not exist is a
+    // queue that stops moving with nothing anywhere saying why.
+    let detail = task_detail(&mut client, task.id.clone()).await;
+    assert!(detail.blocks.is_empty(), "a refused block leaves no edge: {:?}", detail.blocks);
+}
+
 /// A malformed request leaves NOTHING on the board.
 ///
 /// The failure this pins is deterministic, not a rare interleaving: a client

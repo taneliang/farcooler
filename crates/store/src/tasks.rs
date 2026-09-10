@@ -647,6 +647,15 @@ impl Store {
     /// function cares about is between the two only at the moment of WRITING,
     /// and that is what the `Option` argument carries.
     ///
+    /// Refuses a `blocked_by` that names no task, in its own words. Both ids
+    /// are checked before anything is written, but they answer differently:
+    /// `task` is the row being written and answers `NotFound`, while
+    /// `blocked_by` is an argument this write carries and answers
+    /// `InvalidArgument { what: "blocked_by" }`, so a caller can tell which of
+    /// the two it got wrong. Left to the foreign key it arrived as
+    /// `ResourceConflict` -- "read it again and reapply the change", which is
+    /// advice that loops forever.
+    ///
     /// Refuses a cycle. Before inserting, this walks the graph forward from
     /// `blocked_by` -- what `blocked_by` itself is blocked on, and what
     /// blocks THAT, and so on -- and refuses the moment the walk reaches
@@ -694,6 +703,35 @@ impl Store {
             .optional()
             .map_err(map_err)?
             .ok_or(DomainError::NotFound)?;
+        // `blocked_by` is checked HERE rather than left to the foreign key,
+        // and what turns on it is whether the refusal can be acted on.
+        // `task_blocks.blocked_by REFERENCES tasks(id)` does catch this -- but
+        // as a constraint violation, which `error::map_err` maps to
+        // `ResourceConflict`, which a client renders as "this task changed
+        // while you were reading it. read it again and reapply the change".
+        // That is advice which loops forever: nothing changed, re-reading
+        // shows the same thing, and reapplying fails identically. It is the
+        // same unfollowable sentence the `COALESCE` fix removed from the other
+        // half of this function.
+        //
+        // `InvalidArgument`, not `NotFound`, and the line is between the
+        // resource a call is ABOUT and an argument it carries. `task` above is
+        // the row being written and answers `NotFound` when it is not there,
+        // the way `Rpc::target` does. `blocked_by` is a reference this write
+        // takes, the way `optional_id(.., "workspace_id")` is -- and naming
+        // the field is the only thing that lets a caller tell which of the two
+        // ids it got wrong.
+        let blocker_exists = tx
+            .query_row("SELECT 1 FROM tasks WHERE id = ?1", params![uuid_blob(blocked_by)], |_| {
+                Ok(())
+            })
+            .optional()
+            .map_err(map_err)?
+            .is_some();
+        if !blocker_exists {
+            return Err(DomainError::InvalidArgument { what: "blocked_by" });
+        }
+
         let task_count: i64 = tx
             .query_row(
                 "SELECT COUNT(*) FROM tasks WHERE repository_id = ?1",
@@ -1948,6 +1986,61 @@ mod tests {
         let blocks = store.blocks_for(a.id).unwrap();
         assert_eq!(blocks.len(), 1, "the edge is written even with nothing to say about it");
         assert_eq!(blocks[0].reason, "", "no reason reads back as an empty one, never as NULL");
+    }
+
+    /// A blocker that is not a task says so, in a word a caller can act on.
+    ///
+    /// Unreachable from `farcooler task block`, which resolves the blocker
+    /// through `find_task` before it sends -- and reachable by anything else
+    /// that speaks the protocol, which is every reason this is checked in the
+    /// store rather than in one client. Left to the foreign key it came back
+    /// as `ResourceConflict`: "this task changed while you were reading it.
+    /// read it again and reapply the change", which is advice that fails
+    /// identically however many times it is followed.
+    ///
+    /// Asserted as the variant rather than as the sentence, and asserted NOT
+    /// to be the conflict: what is being pinned is the word that crosses the
+    /// wire, and a refusal that went back to `ResourceConflict` while still
+    /// refusing would pass any test that only checked for `Err`.
+    #[test]
+    fn a_block_on_a_task_that_is_not_there_names_the_argument_and_not_a_conflict() {
+        let store = seeded();
+        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+
+        let err = store
+            .set_block(a.id, Uuid::now_v7(), Some("waiting on a ghost"))
+            .expect_err("a blocker that does not exist must be refused");
+        assert!(
+            matches!(err, DomainError::InvalidArgument { what: "blocked_by" }),
+            "the refusal has to name which of the two ids was wrong: {err:?}"
+        );
+        assert!(
+            !matches!(err, DomainError::ResourceConflict),
+            "a conflict tells the caller to re-read and retry, which never ends: {err:?}"
+        );
+
+        // And nothing was written on the way out, read back rather than
+        // assumed from the `Err`: the check runs inside the same transaction
+        // as the insert, so a half-applied refusal is the failure that would
+        // leave a task waiting on nothing at all.
+        assert!(
+            store.blocks_for(a.id).unwrap().is_empty(),
+            "a refused block leaves no edge behind"
+        );
+    }
+
+    /// The other id keeps its own answer, which is what makes the pair worth
+    /// telling apart. `task` is the row the write is about, so it is
+    /// `NotFound`; `blocked_by` is an argument it carries.
+    #[test]
+    fn a_block_on_a_task_that_is_not_there_is_still_not_found() {
+        let store = seeded();
+        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+
+        let err = store
+            .set_block(Uuid::now_v7(), b.id, Some(""))
+            .expect_err("a task that does not exist must be refused");
+        assert!(matches!(err, DomainError::NotFound), "{err:?}");
     }
 
     /// A cycle is a deadlock the manager would never resolve, and it would
