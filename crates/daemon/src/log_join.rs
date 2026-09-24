@@ -410,13 +410,64 @@ fn open_files_for_pid(pid: i32) -> Vec<PathBuf> {
 /// rollout's own naming rule specifically -- `~/.codex/sessions/**/rollout-*.jsonl`
 /// -- rather than "the open jsonl", which the wrapper's decoy would satisfy
 /// just as well and pick wrong.
+///
+/// Nor is every rollout under that directory the pane's own. Codex writes a
+/// SUBAGENT's thread to a rollout of its own, named by the same rule, and
+/// holds it open alongside the main one: the guardian that "Approve for me"
+/// (`approvals_reviewer = "auto_review"`) runs for each approval, and any
+/// agent `spawn_agent` starts. `lsof` lists them in fd order, which put the
+/// guardian first on a live 0.153.4 session (fd 42 against fd 55), so taking
+/// the first match joined the pane to the guardian and read every approval
+/// verdict as a turn that ended. Only the file's own `session_meta` says
+/// which thread it is -- see `rollout_is_subagent`.
+///
+/// A rollout whose head has not said yet (codex has opened it and not
+/// finished writing the first line) is taken only when no rollout has said
+/// it is the main one, so the one moment the answer is unknowable cannot
+/// hand the pane to a guardian that happened to be listed first.
 fn pick_codex_rollout(open_files: &[PathBuf]) -> Option<PathBuf> {
-    open_files.iter().find(|p| is_codex_rollout(p)).cloned()
+    let mut unsaid = None;
+    for path in open_files.iter().filter(|p| is_codex_rollout(p)) {
+        match rollout_is_subagent(path) {
+            Some(false) => return Some(path.clone()),
+            Some(true) => {}
+            None => {
+                unsaid.get_or_insert(path);
+            }
+        }
+    }
+    unsaid.cloned()
 }
 
 fn is_codex_rollout(path: &Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     (name.starts_with("rollout-") && name.ends_with(".jsonl")) && path.to_string_lossy().contains("/.codex/sessions/")
+}
+
+/// Whether a rollout is a subagent's thread rather than a session someone
+/// typed into, from its `session_meta` record -- `None` if the head holds no
+/// such record yet.
+///
+/// `payload.source` is a plain string for a session a person started
+/// (`"cli"`, `"vscode"`, `"exec"` on this machine) and an object with a
+/// `subagent` key for a thread codex started itself:
+/// `{"subagent":{"other":"guardian"}}` for an auto-review guardian (0.151.0
+/// and 0.153.4), `{"subagent":{"thread_spawn":{...}}}` for a spawned agent
+/// (0.147.0). Keyed on `subagent` rather than on either kind, so a third kind
+/// is refused too; `thread_source` is not used, because it read `subagent`
+/// for guardians on 0.144.6 and `guardian_review` on 0.153.4.
+///
+/// The record is the file's first line, and that line is large -- 18,589 and
+/// 19,380 bytes on the two 0.153.4 files this was checked against, most of it
+/// the system prompt. `scan_head`'s megabyte bound covers it many times over.
+fn rollout_is_subagent(path: &Path) -> Option<bool> {
+    scan_head(path, |record| {
+        if record.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
+            return None;
+        }
+        let source = record.get("payload").and_then(|payload| payload.get("source"));
+        Some(source.and_then(|source| source.get("subagent")).is_some())
+    })
 }
 
 // ---------------------------------------------------------------------
@@ -901,6 +952,115 @@ mod tests {
         // sides rather than assert on a symlink this test does not control.
         let canonical_rollout = rollout.canonicalize().unwrap();
         assert_eq!(found.map(|p| p.canonicalize().unwrap()), Some(canonical_rollout));
+    }
+
+    /// The first line of a real codex 0.153.4 main rollout, from a session
+    /// run with `approvals_reviewer = "auto_review"`. Redacted: `cwd`, `git`,
+    /// and the system prompt, which `with_real_prompt_size` puts back as bulk.
+    const MAIN_ROLLOUT_META: &str = r#"{"timestamp":"2026-09-24T03:03:31.658Z","ordinal":0,"type":"session_meta","payload":{"session_id":"01a0d15e-1f33-7e31-be39-3999d7ecd388","id":"01a0d15e-1f33-7e31-be39-3999d7ecd388","timestamp":"2026-09-24T03:03:21.685Z","cwd":"/Users/example/project","originator":"codex-tui","cli_version":"0.153.4","source":"cli","thread_source":"user","model_provider":"openai","base_instructions":{"text":"<system prompt omitted>"},"history_mode":"paginated","context_window":{"window_id":"01a0d15e-1f33-7e31-be39-39aaa5f1622f"},"git":"REDACTED"}}"#;
+
+    /// The first line of the guardian rollout the same codex opened 25 seconds
+    /// later, when it reviewed its first approval. Same redactions. The
+    /// `source` object is the whole of the difference that matters, and
+    /// `parent_thread_id` names the main rollout's session.
+    const GUARDIAN_ROLLOUT_META: &str = r#"{"timestamp":"2026-09-24T03:03:56.280Z","type":"session_meta","payload":{"session_id":"01a0d15e-1f33-7e31-be39-3999d7ecd388","id":"01a0d15e-1f9a-7652-80db-ba141f86459f","parent_thread_id":"01a0d15e-1f33-7e31-be39-3999d7ecd388","timestamp":"2026-09-24T03:03:21.782Z","cwd":"/Users/example/project","originator":"codex-tui","cli_version":"0.153.4","source":{"subagent":{"other":"guardian"}},"thread_source":"guardian_review","model_provider":"openai","base_instructions":{"text":"<system prompt omitted>"},"history_mode":"legacy","multi_agent_version":"disabled","context_window":{"window_id":"01a0d15e-1f9a-7652-80db-ba258d65640a"},"git":"REDACTED"}}"#;
+
+    /// What a guardian writes per review after its first line: a turn, a
+    /// verdict as the agent's final answer, and the turn's end. Real records,
+    /// with the rationale shortened.
+    const GUARDIAN_REVIEW: &str = concat!(
+        r#"{"timestamp":"2026-09-24T03:03:56.280Z","type":"event_msg","payload":{"type":"task_started","turn_id":"01a0d15e-a667-76b0-b14d-77ba465a72dc","started_at":1790219036,"model_context_window":258400,"collaboration_mode_kind":"default"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-09-24T03:04:20.114Z","type":"event_msg","payload":{"type":"agent_message","message":"{\"risk_level\":\"low\",\"user_authorization\":\"high\",\"outcome\":\"allow\",\"rationale\":\"The user explicitly authorized this exact network command.\"}","phase":"final_answer"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-09-24T03:04:20.120Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"01a0d15e-a667-76b0-b14d-77ba465a72dc"}}"#,
+        "\n",
+    );
+
+    /// A `session_meta` line at the size codex really writes it. The system
+    /// prompt was redacted to a placeholder, but the real first lines are
+    /// 18,589 bytes (main) and 19,380 (guardian). `source` comes before the
+    /// prompt in both, but nothing promises that order, and a reader bounded
+    /// to the first few kilobytes would miss it the day it moves.
+    fn with_real_prompt_size(meta: &str) -> String {
+        meta.replace("<system prompt omitted>", &"x".repeat(18_000))
+    }
+
+    /// Codex's "Approve for me" (`approvals_reviewer = "auto_review"`) runs
+    /// every approval through a guardian subagent that codex keeps open in
+    /// its own rollout, and `lsof` listed that one FIRST -- fd 42 against
+    /// fd 55 for the main session, seen live on 0.153.4. A join that took the
+    /// first rollout read the guardian's reviews as the pane's turns: each
+    /// verdict a turn that ended, each one a Done, and each Done a push of
+    /// "codex finished" quoting the risk-level JSON.
+    ///
+    /// Held in that order here, guardian first, through the real `lsof` path.
+    #[test]
+    fn codex_picks_the_main_rollout_over_a_guardian_it_opened_first() {
+        let root = scratch("codex-guardian");
+        let rollout_dir = root.join(".codex/sessions/2026/09/24");
+        std::fs::create_dir_all(&rollout_dir).unwrap();
+        let guardian = rollout_dir.join("rollout-2026-09-24T11-03-56-01a0d15e-1f9a-7652-80db-ba141f86459f.jsonl");
+        std::fs::write(&guardian, format!("{}\n{GUARDIAN_REVIEW}", with_real_prompt_size(GUARDIAN_ROLLOUT_META))).unwrap();
+        let main = rollout_dir.join("rollout-2026-09-24T11-03-21-01a0d15e-1f33-7e31-be39-3999d7ecd388.jsonl");
+        std::fs::write(&main, format!("{}\n", with_real_prompt_size(MAIN_ROLLOUT_META))).unwrap();
+
+        let mut child = hold_files_open(&[&guardian, &main]);
+        let pid = child.id() as i32;
+        // Until BOTH are visible, or a slow first `lsof` that has only seen
+        // the guardian would pass this for the wrong reason.
+        let both = poll_until(Duration::from_secs(5), || {
+            let open = open_files_for_pid(pid);
+            (open.iter().filter(|p| is_codex_rollout(p)).count() == 2).then_some(open)
+        });
+        let found = find_codex(Some(pid));
+
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let both = both.expect("lsof sees both rollouts");
+        let first = both.iter().find(|p| is_codex_rollout(p)).unwrap();
+        assert_eq!(
+            first.canonicalize().unwrap(),
+            guardian.canonicalize().unwrap(),
+            "the guardian is listed first, which is the order that caused the bug"
+        );
+        assert_eq!(found.map(|p| p.canonicalize().unwrap()), Some(main.canonicalize().unwrap()));
+    }
+
+    /// The other subagent kind, and the edges of the rule. A spawned agent's
+    /// rollout (0.147.0's `thread_spawn` shape) is skipped like a guardian's;
+    /// a codex whose only open rollout is a guardian has no session of its
+    /// own to join; and a main rollout whose first line is not written yet is
+    /// still taken over a guardian, which HAS said what it is.
+    #[test]
+    fn a_subagent_rollout_is_never_the_pane_s_session() {
+        let dir = scratch("codex-subagent-kinds").join(".codex/sessions/2026/09/24");
+        std::fs::create_dir_all(&dir).unwrap();
+        let guardian = dir.join("rollout-guardian.jsonl");
+        std::fs::write(&guardian, format!("{GUARDIAN_ROLLOUT_META}\n{GUARDIAN_REVIEW}")).unwrap();
+        let spawned = dir.join("rollout-spawned.jsonl");
+        std::fs::write(
+            &spawned,
+            format!(
+                "{}\n",
+                MAIN_ROLLOUT_META.replace(
+                    r#""source":"cli","thread_source":"user""#,
+                    r#""source":{"subagent":{"thread_spawn":{"parent_thread_id":"01a03234-ea93-7321-9634-bd7ad623d3b9","depth":1,"agent_path":"/root/verify","agent_nickname":"Ohm","agent_role":null}}},"thread_source":"subagent""#,
+                )
+            ),
+        )
+        .unwrap();
+        let unwritten = dir.join("rollout-unwritten.jsonl");
+        std::fs::write(&unwritten, "").unwrap();
+        let main = dir.join("rollout-main.jsonl");
+        std::fs::write(&main, format!("{MAIN_ROLLOUT_META}\n")).unwrap();
+
+        assert!(std::fs::read_to_string(&spawned).unwrap().contains("thread_spawn"), "the fixture edit landed");
+        assert_eq!(pick_codex_rollout(&[spawned.clone(), main.clone()]), Some(main.clone()));
+        assert_eq!(pick_codex_rollout(&[guardian.clone(), spawned.clone()]), None);
+        assert_eq!(pick_codex_rollout(&[guardian.clone(), unwritten.clone()]), Some(unwritten.clone()));
+        assert_eq!(pick_codex_rollout(&[unwritten, guardian, main.clone()]), Some(main));
     }
 
     #[test]
