@@ -261,7 +261,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// The same argument `crossing` makes below. This is the shell's SHAPE,
     /// which each release resolves exactly once, rather than a fact about the
     /// gesture, which `rest()` clears.
-    @State var reveal: CGFloat = 0
+    @State var reveal: CGFloat
     /// The page's own alpha over the grid.
     ///
     /// Only ever 1, 0, or on its way between them over `handover`. What it is
