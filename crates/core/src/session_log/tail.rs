@@ -19,8 +19,13 @@
 //!   memory problem nobody asked for, so an oversized line is skipped rather
 //!   than held, and skipping must still leave the offset correct for every
 //!   line after it.
+//!
+//! And a fourth, which breaks the premise: cursor's transcript is not
+//! append-only. It rewrites its last line when a turn starts -- see
+//! [`Tail::read_new_lines`].
 
 use std::fs::File;
+use std::hash::{DefaultHasher, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -64,15 +69,36 @@ const READ_FROM_START_BYTES: u64 = 1024 * 1024;
 
 /// A position in one session log file, advanced only past complete lines.
 ///
-/// Deliberately holds nothing but a path and a byte offset. Every hazard in
-/// `docs/agent-session-logs.md` — the half-written tail, the oversized line,
-/// the file that shrinks — is handled by re-deriving state from the file on
-/// each call rather than remembering "mid-skip" or "mid-line" between calls,
-/// so a crash or restart loses nothing worse than re-scanning from the last
-/// complete line.
+/// Holds a path, a byte offset, and where the last line read began. Every
+/// hazard in `docs/agent-session-logs.md` — the half-written tail, the
+/// oversized line, the file that shrinks — is handled by re-deriving state
+/// from the file on each call rather than remembering "mid-skip" or
+/// "mid-line" between calls, so a crash or restart loses nothing worse than
+/// re-scanning from the last complete line. `last_line` is the exception, and
+/// the one hazard that needs it is a line changed after it was read, which
+/// nothing about the file's length can reveal.
 pub struct Tail {
     path: PathBuf,
     offset: u64,
+    last_line: Option<LastLine>,
+}
+
+/// The last complete line handed back, by position and content.
+///
+/// A hash rather than the bytes, so a follower holds eight bytes per pane
+/// instead of up to `MAX_LINE_BYTES`.
+#[derive(Clone, Copy)]
+struct LastLine {
+    /// Where the line starts. The end of the line is `offset`.
+    start: u64,
+    /// Of the line's content, without its `\n`.
+    hash: u64,
+}
+
+fn hash_of(bytes: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(bytes);
+    hasher.finish()
 }
 
 impl Tail {
@@ -89,7 +115,7 @@ impl Tail {
     pub fn new(path: PathBuf) -> Tail {
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let offset = if len <= READ_FROM_START_BYTES { 0 } else { len };
-        Tail { path, offset }
+        Tail { path, offset, last_line: None }
     }
 
     /// Which file this is following.
@@ -112,6 +138,20 @@ impl Tail {
     /// Never returns a line that does not yet end in `\n`, and never returns
     /// a line whose content exceeds `MAX_LINE_BYTES`. Both kinds still
     /// advance (or correctly fail to advance) the stored offset.
+    ///
+    /// A last line that has CHANGED since it was read is read again, from its
+    /// start. Cursor-agent (2026.09.02, seen live) starts a turn by removing
+    /// the previous turn's `{"type":"turn_ended"}` line and writing the new
+    /// prompt where it was, so the file grows -- 3,619 bytes to 3,911 -- and
+    /// the old offset lands 41 bytes into the new record. Read from there,
+    /// the prompt is a fragment that is not JSON, the turn start is never
+    /// seen, and every turn after the first read Idle. Only the last line is
+    /// checked: that is the one cursor rewrites, and a change further back is
+    /// history the parsers have already folded.
+    ///
+    /// Checked only when the length has moved. A rewrite to exactly the same
+    /// length is missed until the file next changes, and is then caught,
+    /// because the line at the old position still differs.
     pub fn read_new_lines(&mut self) -> Vec<String> {
         // A missing file is the normal case for an agent that has not started
         // writing yet, not an error: return nothing and leave the offset
@@ -124,6 +164,19 @@ impl Tail {
             Ok(m) => m.len(),
             Err(_) => return Vec::new(),
         };
+
+        // Before the shrink rule, so a rewrite that leaves the file shorter
+        // than it was re-reads one line rather than the whole file. If the
+        // file is now shorter than where that line STARTED, more than the last
+        // line changed, and the shrink rule below takes it from zero.
+        if len != self.offset {
+            if let Some(last) = self.last_line {
+                if self.rewritten(&mut file, last, len) {
+                    self.offset = last.start;
+                    self.last_line = None;
+                }
+            }
+        }
 
         // Smaller than what was already read means the file was truncated or
         // replaced underneath us — the old offset now points into the middle
@@ -152,6 +205,8 @@ impl Tail {
         // than re-read whole on the next call.
         let mut consumed: u64 = 0;
 
+        let mut last = self.last_line;
+
         let mut chunk = [0u8; CHUNK_BYTES];
         loop {
             let n = match file.read(&mut chunk) {
@@ -164,6 +219,11 @@ impl Tail {
             };
             for &byte in &chunk[..n] {
                 if byte == b'\n' {
+                    // Where this line started, before `consumed` moves past
+                    // it. An oversized line cannot be checked later, since
+                    // none of it was kept, so it leaves nothing to check.
+                    last = (!current_over_cap)
+                        .then(|| LastLine { start: self.offset + consumed, hash: hash_of(&current) });
                     if !current_over_cap {
                         // Session logs are UTF-8 JSONL; a line that is not
                         // valid UTF-8 cannot become a `String` and is dropped
@@ -192,7 +252,25 @@ impl Tail {
         }
 
         self.offset += consumed;
+        self.last_line = last;
         lines
+    }
+
+    /// Whether the bytes from `last.start` to the stored offset are no longer
+    /// the line that was read there.
+    ///
+    /// A file too short to hold the line any more has plainly changed. A
+    /// read that fails says nothing either way and is not a change: the
+    /// offset is left alone, as every other failure here leaves it.
+    fn rewritten(&self, file: &mut File, last: LastLine, len: u64) -> bool {
+        if len < self.offset {
+            return true;
+        }
+        let mut line = vec![0u8; (self.offset - last.start) as usize];
+        if file.seek(SeekFrom::Start(last.start)).is_err() || file.read_exact(&mut line).is_err() {
+            return false;
+        }
+        line.pop() != Some(b'\n') || hash_of(&line) != last.hash
     }
 }
 
@@ -329,6 +407,56 @@ mod tests {
         // What matters is what happens NEXT: the pane still follows its log.
         append(&path, b"{\"appended\":true}\n");
         assert_eq!(tail.read_new_lines(), vec!["{\"appended\":true}"]);
+    }
+
+    /// The last record of turn 1 in a real cursor-agent 2026.09.02 transcript,
+    /// the `turn_ended` after it, and the user record of turn 2 -- verbatim.
+    const CURSOR_LAST_STEP: &str = r#"{"role":"assistant","message":{"content":[{"type":"text","text":"Finished both sleeps and wrote `note.md`."}]}}"#;
+    const CURSOR_TURN_ENDED: &str = r#"{"type":"turn_ended","status":"success"}"#;
+    const CURSOR_NEXT_PROMPT: &str = r#"{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Thursday, Sep 24, 2026, 11:08 AM (UTC+8)</timestamp>\n<user_query>\nWithout using any tools, write a careful 400-word explanation of how Raft leader election handles split votes. Then run `sleep 40 && echo three` in the shell, then say done.\n</user_query>"}]}}"#;
+
+    /// Cursor does not only append. When a new turn starts it REWRITES its
+    /// transcript: the previous turn's `turn_ended` line is removed and the
+    /// new user record written where it was. Seen live: 3,619 bytes ending
+    /// in `turn_ended`, then 3,911 bytes ending in the user record, with
+    /// `turn_ended` in the file once, at the very end of the session.
+    ///
+    /// The file grew, so the shrink rule never fired, and the read resumed
+    /// at byte 3,619 -- 41 bytes into the new user record. What came back
+    /// was a fragment that is not JSON, so the turn start was never seen and
+    /// the row read Idle for every turn after the first.
+    #[test]
+    fn a_last_line_rewritten_in_place_is_read_again_whole() {
+        let path = scratch("rewritten-last-line");
+        std::fs::write(&path, format!("{CURSOR_LAST_STEP}\n{CURSOR_TURN_ENDED}\n")).unwrap();
+        let mut tail = Tail::new(path.clone());
+        assert_eq!(tail.read_new_lines(), vec![CURSOR_LAST_STEP, CURSOR_TURN_ENDED]);
+
+        // Turn 2: the same bytes up to the end of the last step, then the
+        // prompt where `turn_ended` was. Longer than what it replaced, as it
+        // was live, so nothing about the length says anything changed.
+        std::fs::write(&path, format!("{CURSOR_LAST_STEP}\n{CURSOR_NEXT_PROMPT}\n")).unwrap();
+        assert!(CURSOR_NEXT_PROMPT.len() > CURSOR_TURN_ENDED.len());
+        assert_eq!(tail.read_new_lines(), vec![CURSOR_NEXT_PROMPT]);
+        // Read once, and the lines before it were never handed back again.
+        assert_eq!(tail.read_new_lines(), Vec::<String>::new());
+    }
+
+    /// The same rewrite with a replacement SHORTER than `turn_ended`, which
+    /// shrinks the file. The shrink rule alone would start over from zero and
+    /// hand the previous turn back a second time -- its start, its steps and
+    /// its end, all over again. Only the rewritten line is read.
+    #[test]
+    fn a_last_line_rewritten_shorter_is_read_again_without_the_rest() {
+        let path = scratch("rewritten-shorter");
+        std::fs::write(&path, format!("{CURSOR_LAST_STEP}\n{CURSOR_TURN_ENDED}\n")).unwrap();
+        let mut tail = Tail::new(path.clone());
+        assert_eq!(tail.read_new_lines(), vec![CURSOR_LAST_STEP, CURSOR_TURN_ENDED]);
+
+        let short = r#"{"role":"user"}"#;
+        assert!(short.len() < CURSOR_TURN_ENDED.len());
+        std::fs::write(&path, format!("{CURSOR_LAST_STEP}\n{short}\n")).unwrap();
+        assert_eq!(tail.read_new_lines(), vec![short]);
     }
 
     #[test]

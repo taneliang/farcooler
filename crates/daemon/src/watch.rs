@@ -5933,6 +5933,50 @@ mod tests {
         );
     }
 
+    /// Cursor's second turn, which read Idle from its first byte to its last.
+    ///
+    /// Cursor rewrites its transcript when a turn starts: the previous
+    /// `turn_ended` is removed and the new prompt written in its place (seen
+    /// live on 2026.09.02, 3,619 bytes becoming 3,911). Through the real tail,
+    /// the real parser and the real fold, the new turn has to be seen to
+    /// start -- before the fix the tail resumed mid-record, the fragment was
+    /// not JSON, and the log went on saying the turn had ended over a screen
+    /// that said `ctrl+c to stop`.
+    #[test]
+    fn cursor_rewriting_its_last_line_still_starts_the_next_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transcript.jsonl");
+        let step = r#"{"role":"assistant","message":{"content":[{"type":"text","text":"Finished both sleeps and wrote `note.md`."}]}}"#;
+        let ended = r#"{"type":"turn_ended","status":"success"}"#;
+        let prompt = r#"{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Thursday, Sep 24, 2026, 11:08 AM (UTC+8)</timestamp>\n<user_query>\nWithout using any tools, write a careful 400-word explanation of how Raft leader election handles split votes. Then run `sleep 40 && echo three` in the shell, then say done.\n</user_query>"}]}}"#;
+        std::fs::write(&path, format!("{step}\n{ended}\n")).unwrap();
+
+        let pane = PaneJoin {
+            preset: Some("cursor".to_string()),
+            pid: None,
+            cwd: "/tmp".to_string(),
+            title: String::new(),
+        };
+        let mut log = PaneLog::new();
+        log.tail = Some((Tail::new(path.clone()), LogFormat::Cursor));
+        log.turn = Some(LogTurn { running: true, failed: false, last_event_at: 4_000, background_agents: 0 });
+
+        let (log, _) = advance_log(log, &pane, 5_000, false, false, never_joined);
+        assert_eq!(log.turn.map(|t| t.running), Some(false), "turn 1 ended");
+
+        std::fs::write(&path, format!("{step}\n{prompt}\n")).unwrap();
+        let (log, _) = advance_log(log, &pane, 6_000, false, true, never_joined);
+        assert_eq!(
+            log.turn,
+            Some(LogTurn { running: true, failed: false, last_event_at: 6_000, background_agents: 0 }),
+            "turn 2 started"
+        );
+        assert_eq!(
+            resolved_without_a_question(AgentActivity::Working, log.turn, 6_000, "", "cursor-agent", "Mac", 0),
+            AgentActivity::Working
+        );
+    }
+
     /// A turn that DIED, read out of the file the agent really wrote.
     ///
     /// The finding this exists for: `TurnOutcome::Failed` was parsed correctly
