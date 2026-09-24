@@ -959,8 +959,9 @@ mod tests {
     /// and the system prompt, which `with_real_prompt_size` puts back as bulk.
     const MAIN_ROLLOUT_META: &str = r#"{"timestamp":"2026-09-24T03:03:31.658Z","ordinal":0,"type":"session_meta","payload":{"session_id":"01a0d15e-1f33-7e31-be39-3999d7ecd388","id":"01a0d15e-1f33-7e31-be39-3999d7ecd388","timestamp":"2026-09-24T03:03:21.685Z","cwd":"/Users/example/project","originator":"codex-tui","cli_version":"0.153.4","source":"cli","thread_source":"user","model_provider":"openai","base_instructions":{"text":"<system prompt omitted>"},"history_mode":"paginated","context_window":{"window_id":"01a0d15e-1f33-7e31-be39-39aaa5f1622f"},"git":"REDACTED"}}"#;
 
-    /// The first line of the guardian rollout the same codex opened 25 seconds
-    /// later, when it reviewed its first approval. Same redactions. The
+    /// The first line of the guardian rollout the same codex wrote 25 seconds
+    /// later, when it reviewed its first approval. Its file is named for the
+    /// session's start, `T11-03-21`, like the main one. Same redactions. The
     /// `source` object is the whole of the difference that matters, and
     /// `parent_thread_id` names the main rollout's session.
     const GUARDIAN_ROLLOUT_META: &str = r#"{"timestamp":"2026-09-24T03:03:56.280Z","type":"session_meta","payload":{"session_id":"01a0d15e-1f33-7e31-be39-3999d7ecd388","id":"01a0d15e-1f9a-7652-80db-ba141f86459f","parent_thread_id":"01a0d15e-1f33-7e31-be39-3999d7ecd388","timestamp":"2026-09-24T03:03:21.782Z","cwd":"/Users/example/project","originator":"codex-tui","cli_version":"0.153.4","source":{"subagent":{"other":"guardian"}},"thread_source":"guardian_review","model_provider":"openai","base_instructions":{"text":"<system prompt omitted>"},"history_mode":"legacy","multi_agent_version":"disabled","context_window":{"window_id":"01a0d15e-1f9a-7652-80db-ba258d65640a"},"git":"REDACTED"}}"#;
@@ -1000,7 +1001,7 @@ mod tests {
         let root = scratch("codex-guardian");
         let rollout_dir = root.join(".codex/sessions/2026/09/24");
         std::fs::create_dir_all(&rollout_dir).unwrap();
-        let guardian = rollout_dir.join("rollout-2026-09-24T11-03-56-01a0d15e-1f9a-7652-80db-ba141f86459f.jsonl");
+        let guardian = rollout_dir.join("rollout-2026-09-24T11-03-21-01a0d15e-1f9a-7652-80db-ba141f86459f.jsonl");
         std::fs::write(&guardian, format!("{}\n{GUARDIAN_REVIEW}", with_real_prompt_size(GUARDIAN_ROLLOUT_META))).unwrap();
         let main = rollout_dir.join("rollout-2026-09-24T11-03-21-01a0d15e-1f33-7e31-be39-3999d7ecd388.jsonl");
         std::fs::write(&main, format!("{}\n", with_real_prompt_size(MAIN_ROLLOUT_META))).unwrap();

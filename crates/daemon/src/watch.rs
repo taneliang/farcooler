@@ -919,6 +919,10 @@ struct Observed {
     /// byte-identical. See `promoted_by_title`.
     title: String,
     title_repeats: u8,
+    /// When the Working now published was carried by the screen alone over a
+    /// log that said the turn had ended, the `last_event_at` of that end.
+    /// `None` for any other Working. See `observe_led` and `went_unwritten`.
+    carried_past: Option<i64>,
 }
 
 /// Agreeing samples needed before a state change is published.
@@ -1007,15 +1011,12 @@ const STALE_LOG_MS: i64 = 30_000;
 /// and 18.5 seconds after, on the two turns timed. Two minutes is six times
 /// the longest seen.
 ///
-/// What each side of the bound costs. Too short, and a cursor turn whose
-/// prompt takes longer than this to reach its transcript reads Working, then
-/// Idle -- a Done, and a "finished" push -- before it has written anything,
-/// and Working again once it does. Too long, and the one case this rule
-/// cannot tell from a real turn holds a row on Working this long before
-/// folding it back to Done: a footer that goes blank for two samples running
-/// after the turn ends and then shows `esc to interrupt` again without the
-/// agent doing anything. Nobody has seen that happen; a stale footer seen
-/// live stays drawn, and that one never lets this rule fire at all.
+/// A guess from two timings, and it no longer has to be a good one: the Done
+/// that ends a Working carried past this bound with the log still silent is
+/// never announced (`Observed::went_unwritten`). Too short costs a cursor turn
+/// that is slow to write its prompt a Working-Done-Working flicker on the row
+/// and nothing on a phone. Too long costs a footer that blanked and came back
+/// on its own this long on Working before it folds back, again silently.
 const SCREEN_AHEAD_OF_LOG_MS: i64 = 120_000;
 
 /// How often a pane with no session log yet is looked up again.
@@ -1152,6 +1153,17 @@ impl LogFormat {
         }
     }
 
+    /// Whether this agent writes a turn's start down well after the turn has
+    /// visibly begun. Cursor-agent 2026.09.02 wrote its prompt 10 and 18.5
+    /// seconds after it was submitted; codex 0.153.4 wrote its rollout within
+    /// a second. Claude writes the prompt record as the turn begins, and a
+    /// claude screen that settles and says Working again is a background shell
+    /// through a window that narrowed and widened, not a new turn -- see
+    /// `a_claude_background_shell_through_a_narrow_window_is_finished_once`.
+    fn writes_turn_start_late(self) -> bool {
+        self == LogFormat::Cursor
+    }
+
     fn parse_line(self, line: &str) -> Vec<TurnEvent> {
         use farcooler_core::session_log::{claude, codex, cursor};
         match self {
@@ -1188,8 +1200,10 @@ struct PaneLog {
     /// is blocked, and a batch of events is only ever what arrived SINCE the
     /// last read.
     asked: Option<Ask>,
-    /// The last tick on which the screen had been at rest for `CONFIRMATIONS`
-    /// samples running -- not working, by stage 1's own reading.
+    /// The last tick on which the pane had been at rest for `CONFIRMATIONS`
+    /// samples running: not working by the `working` `advance_log` is given,
+    /// which is the screen's reading AFTER `promoted_by_title` -- a title
+    /// spinner on an idle footer counts as working, and so breaks a rest.
     ///
     /// Screen evidence rather than log evidence, and kept here because it is
     /// only ever asked about against the log: whether the screen settled AFTER
@@ -1211,6 +1225,8 @@ struct LogReading {
     turn: Option<LogTurn>,
     asked: Option<Ask>,
     rested_at: Option<i64>,
+    /// `LogFormat::writes_turn_start_late` for the file being read.
+    turn_start_late: bool,
 }
 
 /// Everything it takes to find one pane's session log.
@@ -1238,7 +1254,12 @@ impl PaneLog {
 
     /// Everything `resolved_activity` needs from this pane's follower.
     fn reading(&self) -> LogReading {
-        LogReading { turn: self.turn, asked: self.asked.clone(), rested_at: self.rested_at }
+        LogReading {
+            turn: self.turn,
+            asked: self.asked.clone(),
+            rested_at: self.rested_at,
+            turn_start_late: self.tail.as_ref().is_some_and(|(_, format)| format.writes_turn_start_late()),
+        }
     }
 
     /// Count one sample of stage 1's reading toward `rested_at`.
@@ -1520,9 +1541,7 @@ fn resolved_activity(
             // The one exception: a screen that settled after the log's last
             // word and has started working since is a turn the agent has not
             // written down yet -- see `screen_started_a_turn_the_log_has_not`.
-            if screen == AgentActivity::Working
-                && screen_started_a_turn_the_log_has_not(turn, reading.rested_at, now)
-            {
+            if screen_ahead_of_log(screen, reading, now).is_some() {
                 return AgentActivity::Working;
             }
             if screen != AgentActivity::None {
@@ -1550,7 +1569,7 @@ fn resolved_activity(
 ///   word is the previous turn's `turn_ended`. The footer went away when that
 ///   turn ended and came back.
 ///
-/// So the screen outranks an ended turn only once it has SETTLED -- been read
+/// So the screen outranks an ended cursor turn only once it has SETTLED -- been read
 /// as not working for `CONFIRMATIONS` samples running, the same bar a state
 /// change has to clear to be published -- strictly after the log's last
 /// event, and has said Working since. A stale footer never settles, so it
@@ -1561,14 +1580,29 @@ fn resolved_activity(
 /// case it cannot tell from a real turn -- a footer that went blank for two
 /// samples and then came back without the agent doing anything -- would
 /// otherwise hold the row on Working forever, which is the bug the ended-turn
-/// rung was built to close. Codex 0.153.4 wrote its rollout within a second
-/// of the prompt in the same probe, so for an agent that writes its turn
-/// start first the window closes as soon as that line is read; it exists for
-/// cursor.
+/// rung was built to close. Asked only for cursor -- see
+/// `screen_ahead_of_log` and `LogFormat::writes_turn_start_late`.
 fn screen_started_a_turn_the_log_has_not(turn: LogTurn, rested_at: Option<i64>, now: i64) -> bool {
     rested_at.is_some_and(|rested| {
         rested > turn.last_event_at && now.saturating_sub(rested) < SCREEN_AHEAD_OF_LOG_MS
     })
+}
+
+/// The end a screen-carried Working is being carried past, if this tick's
+/// screen outranks the log's ended turn -- `None` if it does not.
+///
+/// Only for an agent that writes its turn start late
+/// (`LogFormat::writes_turn_start_late`, cursor alone), only for the raw
+/// screen's Working, and only as `screen_started_a_turn_the_log_has_not`
+/// allows. Returned as the end's timestamp rather than a bool so the row can
+/// tell, when that Working ends, whether the log ever moved past it.
+fn screen_ahead_of_log(screen: AgentActivity, reading: &LogReading, now: i64) -> Option<i64> {
+    let turn = reading.turn?;
+    (reading.turn_start_late
+        && !turn.running
+        && screen == AgentActivity::Working
+        && screen_started_a_turn_the_log_has_not(turn, reading.rested_at, now))
+    .then_some(turn.last_event_at)
 }
 
 /// Whether an unresolved pane is worth looking a session log up for on this
@@ -2050,7 +2084,31 @@ impl Observed {
             card_settled: false,
             title: String::new(),
             title_repeats: 0,
+            carried_past: None,
         }
+    }
+
+    /// `observe`, remembering whether a Working it publishes was carried by the
+    /// screen alone -- `lead` is `screen_ahead_of_log` for this tick.
+    fn observe_led(&mut self, sample: AgentActivity, lead: Option<i64>, now: i64) -> Option<AgentActivity> {
+        let moved = self.observe(sample, now);
+        if moved == Some(AgentActivity::Working) {
+            self.carried_past = lead;
+        }
+        moved
+    }
+
+    /// Whether the turn ending now is one the log never recorded: the Working
+    /// before it was carried by the screen alone, and the log has not written
+    /// a line since the end it was carried past.
+    ///
+    /// Such a Done is not announced -- see `attention`. It is either the screen
+    /// being wrong (a footer that came back on its own) or an agent that took
+    /// longer than `SCREEN_AHEAD_OF_LOG_MS` to write its prompt down, and in
+    /// neither case did a turn the owner can read about finish. Its card still
+    /// comes down.
+    fn went_unwritten(&self, turn: Option<LogTurn>) -> bool {
+        self.carried_past.is_some_and(|end| turn.is_some_and(|t| !t.running && t.last_event_at == end))
     }
 
     /// Fold this tick's title in, returning how long it has been unchanged.
@@ -2443,7 +2501,14 @@ enum Attention {
 /// the transition site, it is silent by construction (the relay refuses to alert
 /// on it), and a live card that goes on updating for a watched pane is right:
 /// the phone in your pocket is not the screen you are looking at.
-fn attention(next: AgentActivity, watched: bool) -> Attention {
+///
+/// A `Done` that `Observed::went_unwritten` says the log never recorded
+/// retires as well, watched or not: no turn anyone can read about finished,
+/// so there is nothing to tell the owner, only a card to take down.
+fn attention(next: AgentActivity, watched: bool, unwritten: bool) -> Attention {
+    if unwritten && next == AgentActivity::Done {
+        return Attention::Retire;
+    }
     if !watched {
         return Attention::Announce;
     }
@@ -3868,6 +3933,11 @@ impl Watcher {
             // its turn went, and "we could not tell" must never render as an
             // alarm.
             let mut turn_failed = false;
+            // What the log said about the turn, and whether the screen alone
+            // carried a Working past it this tick -- `Observed::observe_led` and
+            // `went_unwritten`. Set in the same arm, for the same reason.
+            let mut log_turn = None;
+            let mut lead = None;
             // One clock for the whole of this pane's tick. The log's staleness
             // bound and the state clocks are answering questions about the same
             // instant, and reading the clock twice would let them disagree by
@@ -4026,6 +4096,8 @@ impl Watcher {
                         // ANNOUNCES that move is usually a later one, by which
                         // time the batch carrying the failure is long gone.
                         turn_failed = reading.turn.is_some_and(|t| t.failed);
+                        log_turn = reading.turn;
+                        lead = screen_ahead_of_log(screen_says, &reading, now);
                         // Log, then title, then screen — except that a screen
                         // saying Blocked beats all of them. See
                         // `resolved_activity`.
@@ -4086,7 +4158,7 @@ impl Watcher {
             let entry = state.entry(id).or_insert_with(|| Observed::begin(observed, now));
             let previous_state = entry.state;
 
-            let activity_moved = entry.observe(observed, now);
+            let activity_moved = entry.observe_led(observed, lead, now);
 
             // The one thing this loop knows that the review cache cannot: files
             // under this worktree are probably moving right now.
@@ -4217,7 +4289,7 @@ impl Watcher {
                 // has crossed the relay and buzzed a wrist. A claim of
                 // attention is made in advance and is therefore already true
                 // when the moment comes.
-                match attention(next, self.is_watched(id, now)) {
+                match attention(next, self.is_watched(id, now), record.went_unwritten(log_turn)) {
                     // Nothing goes out, and the live card comes down silently
                     // on the same batched request the orphan sweep uses — see
                     // `retire_cards` at the end of this pass for why one
@@ -6101,7 +6173,8 @@ mod tests {
     fn a_screen_that_starts_working_after_it_settled_outranks_an_ended_log() {
         let ended_at = 1_000_000;
         let ended = LogTurn { running: false, failed: false, last_event_at: ended_at, background_agents: 0 };
-        let rested = |at: Option<i64>| LogReading { turn: Some(ended), asked: None, rested_at: at };
+        let rested =
+            |at: Option<i64>| LogReading { turn: Some(ended), asked: None, rested_at: at, turn_start_late: true };
         let after = Some(ended_at + 5_000);
         let now = ended_at + 6_000;
         let resolve = |screen, reading: &LogReading, now, title| {
@@ -6142,6 +6215,11 @@ mod tests {
             AgentActivity::Idle,
             "past the bound the log has the last word again"
         );
+        // Cursor only. Claude and codex write the turn start as it begins, so
+        // for them a screen that settled and came back is something else --
+        // a background shell through a window that narrowed, for one.
+        let on_time = LogReading { turn_start_late: false, ..rested(after) };
+        assert_eq!(resolve(AgentActivity::Working, &on_time, now, ""), AgentActivity::Idle);
         // And nothing above it moves.
         assert_eq!(resolve(AgentActivity::Blocked, &rested(after), now, ""), AgentActivity::Blocked);
         assert_eq!(resolve(AgentActivity::None, &rested(after), now, ""), AgentActivity::None);
@@ -6191,17 +6269,24 @@ mod tests {
         // One tick: the screen as stage 1 reads it, then everything after.
         let tick = |log: PaneLog, entry: &mut Observed, now: i64, screen: AgentActivity| {
             let (log, _) = advance_log(log, &pane, now, false, screen == AgentActivity::Working, find);
-            let resolved = resolved_activity(screen, &log.reading(), now, "", "cursor-agent", "Mac", 0);
-            (log, entry.observe(resolved, now))
+            let reading = log.reading();
+            let resolved = resolved_activity(screen, &reading, now, "", "cursor-agent", "Mac", 0);
+            let moved = entry.observe_led(resolved, screen_ahead_of_log(screen, &reading, now), now);
+            // What the owner would be told, for anything that is not Working.
+            let told = moved.filter(|m| *m != AgentActivity::Working).map(|m| {
+                matches!(attention(m, false, entry.went_unwritten(reading.turn)), Attention::Announce)
+            });
+            (log, moved, told)
         };
 
         // Turn 1 ends, and the footer settles with it.
         std::fs::write(&path, format!("{step}\n{ended}\n")).unwrap();
         let mut published = Vec::new();
         for s in 1..=10 {
-            let (next, moved) = tick(log, &mut entry, start + s * 1_000, AgentActivity::Idle);
+            let (next, moved, told) = tick(log, &mut entry, start + s * 1_000, AgentActivity::Idle);
             log = next;
             published.extend(moved);
+            assert_ne!(told, Some(false), "turn 1 finishing is announced");
         }
         assert_eq!(published, vec![AgentActivity::Done], "turn 1 finished, once");
 
@@ -6209,7 +6294,7 @@ mod tests {
         // file that has not changed.
         let submitted = start + 11_000;
         for s in 0..19 {
-            let (next, moved) = tick(log, &mut entry, submitted + s * 1_000, AgentActivity::Working);
+            let (next, moved, _) = tick(log, &mut entry, submitted + s * 1_000, AgentActivity::Working);
             log = next;
             published.extend(moved);
         }
@@ -6220,13 +6305,26 @@ mod tests {
         // Cursor writes the prompt where `turn_ended` was.
         std::fs::write(&path, format!("{step}\n{prompt}\n")).unwrap();
         for s in 19..40 {
-            let (next, moved) = tick(log, &mut entry, submitted + s * 1_000, AgentActivity::Working);
+            let (next, moved, _) = tick(log, &mut entry, submitted + s * 1_000, AgentActivity::Working);
             log = next;
             published.extend(moved);
         }
         assert_eq!(log.turn.map(|t| t.running), Some(true), "the log caught up");
         assert_eq!(published, vec![AgentActivity::Done, AgentActivity::Working], "and nothing flickered");
         assert_eq!(entry.turn_started_at, clock, "one turn, one clock");
+
+        // And when turn 2 ends, it is announced like any other: the log moved
+        // past the end the screen carried the row over.
+        append(&path, ended);
+        let mut told_done = Vec::new();
+        for s in 40..45 {
+            let (next, moved, told) = tick(log, &mut entry, submitted + s * 1_000, AgentActivity::Idle);
+            log = next;
+            if moved == Some(AgentActivity::Done) {
+                told_done.push(told);
+            }
+        }
+        assert_eq!(told_done, vec![Some(true)], "turn 2 finished, and the owner is told");
     }
 
     /// The case the ended-turn rung exists for still holds with rest tracking
@@ -6271,14 +6369,36 @@ mod tests {
         assert_eq!(entry.turn_started_at, None);
     }
 
-    /// The price of the rule, pinned so it cannot quietly grow: a footer that
-    /// goes blank for two samples running after the turn ended and then comes
-    /// back without the agent doing anything. Nothing can tell that from a
-    /// turn the agent has not written down, so the row reads Working -- for
-    /// `SCREEN_AHEAD_OF_LOG_MS` and no longer, and then folds back to Done.
-    /// Never the stuck-on-Working bug, which is the one that must not return.
+    /// A claude turn that ends with a background shell still running, and a
+    /// phone that opens the pane: one "finished", not two.
+    ///
+    /// Every link is a checked-in capture or config:
+    /// - `· ↓ to manage` is a Working signature for claude, and claude draws
+    ///   it for a background SHELL (`claude-background-shell-main-idle-80col`).
+    ///   The log counts only background agents, so it says the turn ended and
+    ///   the row folds to Done -- correctly, and once.
+    /// - tmux runs `window-size latest`, so the phone opening the pane narrows
+    ///   the window. At 40 columns the mode line truncates to `· ← 3 age…`
+    ///   (`claude-background-agent-main-idle-40col`), and with only a shell
+    ///   there is no `◯` row: the screen reads not working. Two samples of that
+    ///   is a settle.
+    /// - Back on the Mac the window widens and the hint returns.
+    ///
+    /// A screen that settled after the end and says Working again must not be
+    /// read as a new claude turn: claude writes its turn start as it begins,
+    /// and there is nothing here for the log to be late about.
     #[test]
-    fn a_footer_that_blanks_twice_and_comes_back_is_believed_for_a_bounded_time() {
+    fn a_claude_background_shell_through_a_narrow_window_is_finished_once() {
+        let registry = farcooler_core::activity::Registry::built_in();
+        let wide = include_str!("../../core/captures/claude-background-shell-main-idle-80col.txt");
+        let mode_line = "  ⏵⏵ auto mode on · 1 shell · ← 3 agents · ↓ to manage                     /rc";
+        assert!(wide.contains(mode_line), "the capture's own mode line");
+        // The 80-column screen's mode line cut the way the 40-column capture
+        // cuts it.
+        let narrow = wide.replace(mode_line, "  ⏵⏵ auto mode on · 1 shell · ← 3 age…");
+        assert_eq!(registry.classify("claude", wide), AgentActivity::Working);
+        assert_eq!(registry.classify("claude", &narrow), AgentActivity::Idle);
+
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("session.jsonl");
         std::fs::write(&path, "").unwrap();
@@ -6298,14 +6418,76 @@ mod tests {
         append(&path, TURN_STARTED);
         append(&path, TURN_ENDED);
         let mut published = Vec::new();
+        let mut pushed = Vec::new();
+        for s in 1..=400 {
+            let now = start + s * 1_000;
+            // The phone looks for three seconds, forty seconds after the end.
+            let screen = if (40..43).contains(&s) { narrow.as_str() } else { wide };
+            let screen = registry.classify("claude", screen);
+            let (next, _) = advance_log(log, &pane, now, false, screen == AgentActivity::Working, find);
+            log = next;
+            let reading = log.reading();
+            let resolved = resolved_activity(screen, &reading, now, "", "claude", "Mac", 0);
+            let lead = screen_ahead_of_log(screen, &reading, now);
+            if let Some(moved) = entry.observe_led(resolved, lead, now) {
+                published.push(moved);
+                let unwritten = entry.went_unwritten(reading.turn);
+                if moved != AgentActivity::Working
+                    && matches!(attention(moved, false, unwritten), Attention::Announce)
+                {
+                    pushed.push((s, moved));
+                }
+            }
+        }
+        assert_eq!(pushed, vec![(2, AgentActivity::Done)], "one turn, one finished");
+        // And the row itself never went back to Working: for claude the rule
+        // does not apply at all, which is not the same as its Done going
+        // unannounced -- a Working row is a live card and a turn clock.
+        assert_eq!(published, vec![AgentActivity::Done], "claude behaves exactly as before the rule");
+    }
+
+    /// The price of the rule, and what keeps it from reaching a phone: a cursor
+    /// footer that goes blank for two samples running after the turn ended and
+    /// comes back without the agent doing anything -- or, the same thing seen
+    /// from the log, a prompt cursor takes longer than `SCREEN_AHEAD_OF_LOG_MS`
+    /// to write down. Nothing can tell either from a turn not written yet, so
+    /// the row reads Working for the bound and no longer, then folds back to
+    /// Done. That Done is never announced: the log did not move past the end
+    /// the screen carried it over, so no turn anyone can read about finished.
+    /// One "finished" for the one turn there was.
+    #[test]
+    fn a_turn_the_log_never_recorded_is_not_announced_as_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transcript.jsonl");
+        let ended = r#"{"type":"turn_ended","status":"success"}"#;
+        std::fs::write(&path, "").unwrap();
+        let pane = PaneJoin {
+            preset: Some("cursor".to_string()),
+            pid: None,
+            cwd: "/tmp".to_string(),
+            title: String::new(),
+        };
+        let find = |_: &PaneJoin| Some(path.clone());
+        let start = 1_000_000;
+        let mut log = PaneLog::new();
+        log.tail = Some((Tail::new(path.clone()), LogFormat::Cursor));
+        log.attempted_at = start;
+        log.turn = Some(LogTurn { running: true, failed: false, last_event_at: start, background_agents: 0 });
+        let mut entry = Observed::begin(AgentActivity::Working, start);
+
+        append(&path, ended);
+        let mut published = Vec::new();
+        let mut pushed = Vec::new();
         let mut working_from = None;
         for s in 1..=600 {
             let now = start + s * 1_000;
             let screen = if s == 30 || s == 31 { AgentActivity::Idle } else { AgentActivity::Working };
             let (next, _) = advance_log(log, &pane, now, false, screen == AgentActivity::Working, find);
             log = next;
-            let resolved = resolved_activity(screen, &log.reading(), now, "", "claude", "Mac", 0);
-            if let Some(moved) = entry.observe(resolved, now) {
+            let reading = log.reading();
+            let resolved = resolved_activity(screen, &reading, now, "", "cursor-agent", "Mac", 0);
+            let lead = screen_ahead_of_log(screen, &reading, now);
+            if let Some(moved) = entry.observe_led(resolved, lead, now) {
                 published.push(moved);
                 if moved == AgentActivity::Working {
                     working_from = Some(now);
@@ -6314,10 +6496,17 @@ mod tests {
                     let held = now - from;
                     assert!(held <= SCREEN_AHEAD_OF_LOG_MS, "held Working for {held}ms");
                 }
+                let unwritten = entry.went_unwritten(reading.turn);
+                if moved != AgentActivity::Working
+                    && matches!(attention(moved, false, unwritten), Attention::Announce)
+                {
+                    pushed.push((s, moved));
+                }
             }
         }
         assert_eq!(published, vec![AgentActivity::Done, AgentActivity::Working, AgentActivity::Done]);
         assert_eq!(entry.activity, AgentActivity::Done, "and it stays there");
+        assert_eq!(pushed, vec![(2, AgentActivity::Done)], "the real end, and only that");
     }
 
     /// A turn that DIED, read out of the file the agent really wrote.
@@ -6983,13 +7172,13 @@ mod tests {
     /// the way it did before any of this existed.
     #[test]
     fn an_unwatched_agent_is_announced_exactly_as_before() {
-        assert!(matches!(attention(AgentActivity::Done, false), Attention::Announce));
-        assert!(matches!(attention(AgentActivity::Blocked, false), Attention::Announce));
+        assert!(matches!(attention(AgentActivity::Done, false, false), Attention::Announce));
+        assert!(matches!(attention(AgentActivity::Blocked, false, false), Attention::Announce));
         // A turn that DIED is a `Done` like any other here: `attention` decides
         // whether to interrupt, and `notification` decides what the interruption
         // says. Keeping those apart is what stops a failed turn being silently
         // swallowed by a rule about attention.
-        assert!(matches!(attention(AgentActivity::Done, false), Attention::Announce));
+        assert!(matches!(attention(AgentActivity::Done, false, false), Attention::Announce));
     }
 
     /// The bug, as reported: a codex pane open on screen, a question asked, an
@@ -7001,7 +7190,7 @@ mod tests {
         // that ever ended one, and suppressing it without retiring would leave
         // a card reading "Working" over an agent that stopped. That is
         // `5398dba`'s bug reintroduced through a different door.
-        assert!(matches!(attention(AgentActivity::Done, true), Attention::Retire));
+        assert!(matches!(attention(AgentActivity::Done, true, false), Attention::Retire));
 
         // The agent asks a question you are already looking at. Nothing goes
         // out, and nothing comes down either: a blocked agent is MID-TURN, its
@@ -7009,7 +7198,7 @@ mod tests {
         // would remove the one notification this product exists for with
         // nothing able to put it back, since `Blocked -> Blocked` is not a
         // transition and pushes nothing.
-        assert!(matches!(attention(AgentActivity::Blocked, true), Attention::Hold));
+        assert!(matches!(attention(AgentActivity::Blocked, true, false), Attention::Hold));
     }
 
     /// A claim of attention that nobody has renewed stops being believed.
