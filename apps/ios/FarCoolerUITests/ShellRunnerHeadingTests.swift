@@ -61,9 +61,10 @@ final class ShellRunnerHeadingTests: XCTestCase {
         XCTAssertFalse(
             app.buttons["Switch to This Runner"].exists,
             "a connected runner was offered a switch to itself")
-        // Dismissed by tapping the menu's own button again rather than a point
-        // on the grid: a point on the grid is a card, and a card opens.
-        app.buttons["shell-section-menu-this-mac"].tap()
+        // Dismissed by a tap on the large title, not on the grid: a point on
+        // the grid is a card, and a card opens. Not on the menu's own button
+        // either — on iOS 26 an open menu makes that button unhittable.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.13)).tap()
 
         app.buttons["shell-section-menu-eu-runner-1"].tap()
         XCTAssertTrue(
@@ -80,29 +81,47 @@ final class ShellRunnerHeadingTests: XCTestCase {
     /// Either way the overview is still open afterwards. The drag starts on
     /// the top row with the grid at its top, which is exactly where the
     /// pull-down that closes the overview is armed.
+    ///
+    /// **Asserted on the ORDER, not on the dragged card's frame.** The first
+    /// version compared ws-0's frame before and after and passed for the wrong
+    /// reason: the press puts the card's context menu up first, and the lifted
+    /// preview reports a frame of its own. Frames captured through the run
+    /// showed the menu up and nothing moved. What a reorder changes is which
+    /// card is first, so that is what is read — after the menu has had time to
+    /// go, from two cards that are both in the grid.
+    ///
+    /// Coordinates rather than `press(forDuration:thenDragTo:)` on the target
+    /// element, for the same reason: once the menu dims the grid the target is
+    /// no longer hittable, and the element form did not carry the drag onto it.
     func testDraggingACardMovesItOnlyWhereTheOSCanReorder() throws {
         let app = launch()
         let first = app.buttons["shell-card-ws-0"]
+        let second = app.buttons["shell-card-ws-1"]
         let last = app.buttons["shell-card-ws-3"]
         XCTAssertTrue(first.waitForExistence(timeout: 15), "the grid never drew a card")
         XCTAssertTrue(last.waitForExistence(timeout: 5))
-        let before = first.frame
+        XCTAssertEqual(
+            first.frame.minY, second.frame.minY, accuracy: 1,
+            "the fixture no longer starts with ws-0 beside ws-1")
 
-        first.press(
-            forDuration: 1.0, thenDragTo: last, withVelocity: .slow,
-            thenHoldForDuration: 0.6)
+        let from = first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let to = last.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        from.press(
+            forDuration: 1.0, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.6)
         // The harness answers a drop after 300 ms, as a runner would after a
         // round trip; the pending order is drawn until then.
         Thread.sleep(forTimeInterval: 1.5)
 
         if #available(iOS 27, *) {
-            XCTAssertNotEqual(
-                first.frame.origin, before.origin,
-                "ws-0 was dragged onto ws-3 and did not move: \(app.debugDescription)")
+            XCTAssertGreaterThan(
+                first.frame.minY, second.frame.minY + 1,
+                "ws-0 was dragged onto ws-3's place and is still in the first row: "
+                    + app.debugDescription)
         } else {
             XCTAssertEqual(
-                first.frame.origin, before.origin,
+                first.frame.minY, second.frame.minY, accuracy: 1,
                 "a card moved on an OS with no reorder to keep it")
+            XCTAssertLessThan(first.frame.minX, second.frame.minX)
         }
         XCTAssertEqual(
             try state(app)["overview"], 1,
