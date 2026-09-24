@@ -389,15 +389,22 @@ fn open_files_for_pid(pid: i32) -> Vec<PathBuf> {
         .output();
     let Ok(out) = out else { return Vec::new() };
 
-    // `-Fn` is a field-per-line format: the block opens with a `p<pid>` line
-    // (not a path, and skipped by the tag check below), followed by one
-    // `n<path>` line per open file.
+    // `-Fn` is a field-per-line format: each process's block opens with a
+    // `p<pid>` line (not a path, and skipped by the tag check below), followed
+    // by one `n<path>` line per open file.
+    //
+    // A descriptor survives a fork, so a file one process opened is often
+    // open in its children too, and `lsof` names it once per process. Kept
+    // once, at its first place: a caller asking which files are open must not
+    // count one file as two, nor read its head twice.
+    let mut seen = HashSet::new();
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|line| {
             let (tag, value) = line.split_at(1.min(line.len()));
             (tag == "n").then(|| PathBuf::from(value))
         })
+        .filter(|path| seen.insert(path.clone()))
         .collect()
 }
 
@@ -952,6 +959,41 @@ mod tests {
         // sides rather than assert on a symlink this test does not control.
         let canonical_rollout = rollout.canonicalize().unwrap();
         assert_eq!(found.map(|p| p.canonicalize().unwrap()), Some(canonical_rollout));
+    }
+
+    /// A file open in two processes of the pane's subtree -- a parent and a
+    /// child that inherited the descriptor, which is what an ordinary fork
+    /// does -- is still one open file. `lsof -p` over the subtree reports it
+    /// once per process, and a caller counting rollouts must not see two.
+    ///
+    /// This is what failed on Linux: Ubuntu's `sh` is dash, which forks the
+    /// last command of `sh -c` where macOS's `sh` execs it, so the `sleep`
+    /// in `hold_files_open` is a second process holding both rollouts.
+    #[test]
+    fn a_file_held_by_a_parent_and_its_child_is_listed_once() {
+        let root = scratch("codex-inherited");
+        let held = root.join("held.jsonl");
+        std::fs::write(&held, "{}").unwrap();
+
+        // `& wait` forks the sleep on every `sh`, so both the spawned shell and
+        // its child hold fd 3 however the platform's `sh` treats a last command.
+        let script = format!("exec 3<{}\nsleep 30 &\nwait\n", held.display());
+        let mut child = std::process::Command::new("sh").arg("-c").arg(script).spawn().expect("spawn sh");
+        let pid = child.id() as i32;
+
+        let canonical = held.canonicalize().unwrap();
+        let holding = |open: &[PathBuf]| open.iter().filter(|p| p.canonicalize().ok().as_ref() == Some(&canonical)).count();
+        // Until the child exists and holds it too, or a look taken before the
+        // fork would pass this without testing anything.
+        let seen = poll_until(Duration::from_secs(5), || {
+            (process_subtree(pid).len() == 2).then(|| open_files_for_pid(pid)).filter(|open| holding(open) > 0)
+        });
+
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let seen = seen.expect("lsof sees the held file with the child in the subtree");
+        assert_eq!(holding(&seen), 1, "listed once, not once per process: {seen:?}");
     }
 
     /// The first line of a real codex 0.153.4 main rollout, from a session
