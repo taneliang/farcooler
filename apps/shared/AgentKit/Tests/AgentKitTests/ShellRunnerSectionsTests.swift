@@ -321,3 +321,47 @@ struct ShellRunnerSectionsTests {
         #expect(applied.workspaces.map(\.id) == ["l3", "g1", "l1", "g2", "l2"])
     }
 }
+
+/// Which rests move the selected runner.
+///
+/// The selection decides where the NEXT launch lands, so a rest that follows
+/// the wrong thing is a regression that outlives the process: one launch where
+/// the selected runner was slow to answer seats the shell on another runner's
+/// first worktree, and a rule that followed that landing would write it down
+/// as the choice — every launch after it lands there too.
+struct ShellSelectionTests {
+    private func follows(_ arrival: ShellArrival, every: Bool = true) -> Bool {
+        ShellSelection.follows(arrival, everyRunnerAtOnce: every, arrived: "B", selected: "A")
+    }
+
+    /// The launch landing is a race, not a choice.
+    @Test func theLandingAtLaunchIsNotFollowed() {
+        #expect(!follows(.appeared))
+    }
+
+    /// A worktree vanishing, or a runner answering, re-seats the shell;
+    /// nobody chose where.
+    @Test func aReseatIsNotFollowed() {
+        #expect(!follows(.reseated))
+    }
+
+    /// A notification tapped is not a person choosing a runner to work on.
+    @Test func aDeepLinkIsNotFollowed() {
+        #expect(!follows(.linked))
+    }
+
+    /// A swipe or a tap onto another runner's worktree is.
+    @Test func aMoveOntoAnotherRunnerIsFollowed() {
+        #expect(follows(.moved))
+        #expect(
+            !ShellSelection.follows(
+                .moved, everyRunnerAtOnce: true, arrived: "A", selected: "A"),
+            "already selected: nothing to write")
+    }
+
+    /// With one runner connected at a time, the selection IS which runner is
+    /// connected, and it only changes from a heading's Switch to This Runner.
+    @Test func withOneRunnerAtATimeNothingIsFollowed() {
+        #expect(!follows(.moved, every: false))
+    }
+}

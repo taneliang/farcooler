@@ -942,7 +942,12 @@ struct ShellScreen: View {
         // empty body: a sheet you can open and cannot use. See `acting`, which
         // falls back through the same selection that decides where a launch
         // lands.
-        .sheet(isPresented: $showNewWorkspace) {
+        // `startingOn` is spent when the sheet goes, however it goes. Left
+        // standing after a heading's sheet was cancelled, the next sheet opened
+        // from anywhere that does not set it — the zero-worktree screen's New
+        // Workspace — would open on THAT heading's runner, whose connection
+        // may since have been retired.
+        .sheet(isPresented: $showNewWorkspace, onDismiss: { startingOn = nil }) {
             if let connection = startingOn ?? acting {
                 NewWorkspaceView(
                     repositories: connection.repositories, connection: connection
@@ -952,7 +957,7 @@ struct ShellScreen: View {
                 }
             }
         }
-        .sheet(isPresented: $showQuickTask) {
+        .sheet(isPresented: $showQuickTask, onDismiss: { startingOn = nil }) {
             if let connection = startingOn ?? acting {
                 TaskComposerView(connection: connection)
             }
@@ -1421,7 +1426,11 @@ struct ShellScreen: View {
                     // the runner the two sheets already resolve to — see
                     // `acting`, which is what lets them work before the shell
                     // has come to rest on anything.
-                    Button("New Workspace") { showNewWorkspace = true }
+                    Button("New Workspace") {
+                        // The runner `acting` resolves to, never a heading's.
+                        startingOn = nil
+                        showNewWorkspace = true
+                    }
                         .disabled(acting == nil)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1466,20 +1475,18 @@ struct ShellScreen: View {
             // changes and on first appearance, which is exactly "a pane came
             // to rest" — a commit's silent re-seat included, because the
             // silence is about animation and not about change notification.
-            onRest: { at in
+            onRest: { at, arrival in
                 let tab = map.fleet.tab(at: at)
                 let arrived = tab.flatMap { map.refs[$0.id] }
+                // Read before `remember` spends it: a rest the link asked for
+                // is a move as far as the shell can tell, and only this screen
+                // took the request.
+                let linked = tab != nil && tab?.id == linkedTab
                 remember(arrived, leaving: restingRef, tab: tab?.id)
                 restingRef = arrived
                 markVisible(arrived)
-                follow(arrived)
+                follow(arrived, as: linked ? .linked : arrival)
             },
-            // The header over the live cards names the runner, but only when
-            // there is one runner for it to name. With several merged into one
-            // grid there is no single answer, and each card carries its own —
-            // see `ShellFleetMap.one`, which is where that condition is
-            // decided. A header saying one machine's name over another
-            // machine's worktrees is the one thing worse than no header.
             // A section per runner, each with its own menu — which is where the
             // runner menu that stood in the toolbar went. See
             // `ShellOverviewRunners`.
@@ -1586,22 +1593,25 @@ struct ShellScreen: View {
         hosts.selected = picked
     }
 
-    /// The selection follows where you are, with every runner connected.
+    /// The selection follows where you MOVE, with every runner connected.
     ///
     /// `RunnerStore.selected` still decides where a launch LANDS — see
     /// `onSelectedRunner` — and the runner menu was the only way to set it.
     /// With the menu gone, a launch would land forever on whatever it last
-    /// said. So the runner you come to rest on is the one selected, which is
-    /// "open where I was" said about the runner.
+    /// said. So a swipe or a tap onto another runner's worktree selects that
+    /// runner, which is "open where I was" said about the runner.
     ///
-    /// **Only with "Connect every runner at once" on.** Off, the selection is
-    /// which runner is CONNECTED, and a rest on a pane of the runner being
-    /// switched away from — mid-crossing, before its connection is retired —
-    /// would switch straight back. There the selection is only ever changed on
-    /// purpose, from a cached runner's heading.
-    private func follow(_ arrived: ShellPaneRef?) {
-        guard FleetSettings.allRunnersAtOnce, let arrived,
-            hosts.selected?.id != arrived.runner,
+    /// Which rests count is `ShellSelection.follows`, in AgentKit, and the
+    /// answer is only a move: never the landing at launch (a race between
+    /// runners, not a choice — following it made one slow launch permanent),
+    /// never a re-seat, never a deep link, and never with one runner at a
+    /// time.
+    private func follow(_ arrived: ShellPaneRef?, as arrival: ShellArrival) {
+        guard let arrived,
+            ShellSelection.follows(
+                arrival, everyRunnerAtOnce: FleetSettings.allRunnersAtOnce,
+                arrived: arrived.runner.uuidString,
+                selected: hosts.selected?.id.uuidString),
             let host = hosts.hosts.first(where: { $0.id == arrived.runner })
         else { return }
         hosts.selected = host

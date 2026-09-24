@@ -170,7 +170,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// Never fired mid-gesture. Two panes are on screen for the whole of a
     /// swipe and neither of them has arrived; `position` moves once, when the
     /// release lands.
-    private let onRest: ((ShellPosition) -> Void)?
+    private let onRest: ((ShellPosition, ShellArrival) -> Void)?
 
     /// Where the shell is. The one thing a commit re-seats.
     ///
@@ -588,7 +588,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         initial: ShellPosition,
         openingOnOverview: Bool = false,
         request: Binding<String?> = .constant(nil),
-        onRest: ((ShellPosition) -> Void)? = nil,
+        onRest: ((ShellPosition, ShellArrival) -> Void)? = nil,
         runnerSections: ShellOverviewRunners = ShellOverviewRunners(),
         @ViewBuilder runners: @escaping () -> Trouble = { EmptyView() },
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
@@ -982,7 +982,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // because the first pane the shell opens on is one nobody moved to and
         // is still the pane being read.
         .onAppear {
-            settle(position, in: fleet)
+            settle(position, in: fleet, as: .appeared)
             // On appear as well as on change, and the difference is a cold
             // launch. A card tapped before this app was running delivers its
             // URL, the connection answers, and the shell is mounted with the
@@ -992,7 +992,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
             // remove. See `FleetView.dropUnknownTerminal`.
             honorRequest()
         }
-        .onChange(of: position) { _, at in settle(at, in: fleet) }
+        .onChange(of: position) { _, at in settle(at, in: fleet, as: .moved) }
         // THE FLEET MOVED UNDER THE SHELL.
         //
         // Every poll, from every runner, rebuilds `fleet` whole — so this fires
@@ -1015,7 +1015,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
                 silent.disablesAnimations = true
                 withTransaction(silent) { position = seated }
             }
-            settle(seated, in: now)
+            settle(seated, in: now, as: .reseated)
         }
         .onChange(of: request) { _, _ in honorRequest() }
     }
@@ -1037,11 +1037,17 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     ///
     /// The fleet is passed rather than read off `self` because the caller that
     /// matters is `onChange(of: fleet)`, which is holding the new one.
-    private func settle(_ at: ShellPosition, in fleet: ShellFleet) {
+    ///
+    /// `arrival` says how, as far as the shell can tell: the first seat, a
+    /// re-seat under a fleet that changed, or a move. A deep link is a move
+    /// from here — `honorRequest` writes `position` like anything else — and
+    /// the caller, which took the request, is the one that can tell them apart.
+    /// See `ShellArrival`.
+    private func settle(_ at: ShellPosition, in fleet: ShellFleet, as arrival: ShellArrival) {
         let arrived = fleet.tab(at: at)?.id
         guard arrived != anchor else { return }
         anchor = arrived
-        onRest?(at)
+        onRest?(at, arrival)
     }
 
     /// The screen's frame, which is also the page's: everything in here is
@@ -1487,7 +1493,7 @@ extension ShellRootView where Actions == EmptyView, Trouble == EmptyView {
         initial: ShellPosition,
         openingOnOverview: Bool = false,
         request: Binding<String?> = .constant(nil),
-        onRest: ((ShellPosition) -> Void)? = nil,
+        onRest: ((ShellPosition, ShellArrival) -> Void)? = nil,
         runnerSections: ShellOverviewRunners = ShellOverviewRunners(),
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
         onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
