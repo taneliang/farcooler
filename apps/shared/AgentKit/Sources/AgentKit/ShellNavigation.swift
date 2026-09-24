@@ -403,11 +403,27 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// `ShellHarness` sets it on one fixture workspace so the absent case is
     /// reachable without a runner.
     var isPrimaryCheckout: Bool
+    /// The runner this worktree is on, by the runner's id, or nil for a fleet
+    /// that has no runner behind it at all — `ShellHarness`'s canned one.
+    ///
+    /// Not `server`, which is a LABEL and is nil for the local machine on
+    /// purpose: two runners can share a label, and the overview's sections and
+    /// a drag's request both have to name the machine a worktree is actually
+    /// on. See `ShellFleet.runnerSections`.
+    var runner: String?
+    /// Whether that runner keeps an order for this worktree.
+    ///
+    /// The daemon's `ordinal`, reduced to the one fact the phone needs from
+    /// it: a runner too old to store an order sends none, and a drag against
+    /// it would be accepted by nothing and put back on the next poll with no
+    /// error anywhere. False is the refusing answer, so a fixture or a runner
+    /// that says nothing gets no drag. See `ShellRunnerSection.canReorder`.
+    var keepsOrder: Bool
 
     init(
         id: String, name: String, server: String? = nil,
         tail: [String] = [], resume: Int? = nil, isHidden: Bool = false,
-        isPrimaryCheckout: Bool = false,
+        isPrimaryCheckout: Bool = false, runner: String? = nil, keepsOrder: Bool = false,
         tabs: [ShellTab]
     ) {
         self.id = id
@@ -418,6 +434,8 @@ struct ShellWorkspace: Identifiable, Hashable {
         self.resume = resume
         self.isHidden = isHidden
         self.isPrimaryCheckout = isPrimaryCheckout
+        self.runner = runner
+        self.keepsOrder = keepsOrder
     }
 
     /// The tab a deliberate arrival lands on: the remembered one where it
