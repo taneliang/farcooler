@@ -2019,10 +2019,18 @@ mod tests {
             "a conflict tells the caller to re-read and retry, which never ends: {err:?}"
         );
 
-        // And nothing was written on the way out, read back rather than
-        // assumed from the `Err`: the check runs inside the same transaction
-        // as the insert, so a half-applied refusal is the failure that would
-        // leave a task waiting on nothing at all.
+        // And nothing was written, read back rather than assumed from the
+        // `Err`.
+        //
+        // Precisely what this catches is worth stating, because it is narrower
+        // than "nothing was half-applied". `set_block` holds a `Transaction`
+        // and every early `return Err` drops it, so a refusal that ran BEFORE
+        // the commit rolls its work back and leaves the store looking exactly
+        // as it does here -- indistinguishable from outside, because nothing
+        // happened. What this assertion sees is a refusal that ends up BELOW
+        // the commit: a check moved down, or an insert moved up, so the edge
+        // is durable by the time the caller is told no. That is the reachable
+        // regression, and the `Err` alone is identical under it.
         assert!(
             store.blocks_for(a.id).unwrap().is_empty(),
             "a refused block leaves no edge behind"

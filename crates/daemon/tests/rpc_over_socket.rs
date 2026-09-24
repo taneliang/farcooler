@@ -3397,8 +3397,13 @@ async fn blocking_a_task_on_one_that_does_not_exist_is_refused_followably() {
     }
 
     // And nothing was written, read back over the wire rather than assumed
-    // from the refusal: a task left waiting on a row that does not exist is a
+    // from the refusal. A task left waiting on a row that does not exist is a
     // queue that stops moving with nothing anywhere saying why.
+    //
+    // As in the store's own test, this sees a refusal that lands below the
+    // commit rather than above it. A refusal inside the transaction rolls its
+    // work back, which leaves the board identical to a correct refusal --
+    // there is nothing there to tell apart, because nothing happened.
     let detail = task_detail(&mut client, task.id.clone()).await;
     assert!(detail.blocks.is_empty(), "a refused block leaves no edge: {:?}", detail.blocks);
 }

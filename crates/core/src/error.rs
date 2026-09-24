@@ -454,20 +454,111 @@ mod tests {
         assert_eq!(DomainError::CapabilityUnsupported { needed: "tasks" }.what(), "");
     }
 
-    /// What crosses is a word, not a screenful.
+    /// Every argument word this runner can actually send, read out of source.
     ///
-    /// The field is documented as something to switch on, and the guard that
-    /// keeps it that way is that nothing in it is long enough or private
-    /// enough to be mistaken for prose meant for a person. A path or a session
-    /// id could never appear -- `&'static str` means every value is a literal
-    /// in this source -- and this pins the rest.
+    /// `all_variants()` cannot answer this and it is worth saying why, because
+    /// the first version of the test below used it and could not fail. That
+    /// list holds ONE `InvalidArgument`, built here, carrying `"columns"` --
+    /// a word nothing emits. The hundred-odd real literals live in `validate`,
+    /// in the daemon's routes and in the store, and a sweep that never looked
+    /// at them proved a property of a seven-character fixture.
+    ///
+    /// A walk of the source tree, which is unusual and deliberate: this crate
+    /// defines the contract, so the check that every producer keeps it belongs
+    /// beside the contract rather than copied into each crate that has one.
+    /// `crates/` is found from this crate's own manifest directory.
+    ///
+    /// Crude on purpose, in the same spirit as `rpc.rs`'s scan of its own
+    /// method literals: a parser here would be a second thing that can be
+    /// wrong. It finds each field initializer that opens a string and reads to
+    /// the next quote, so a literal holding an escaped quote would be read
+    /// short -- which is why the sweep refuses a backslash outright rather
+    /// than trusting that none appears.
+    ///
+    /// The needle is assembled at runtime rather than written out, and that is
+    /// not a flourish: spelled as a literal it appears in this file, the sweep
+    /// finds ITSELF, and the first run failed on its own doc comment. Nothing
+    /// in this function may contain the sequence it looks for.
+    #[cfg(test)]
+    fn argument_words_in_source() -> Vec<(String, String)> {
+        let needle = format!("{}: {}", "what", '"');
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("this crate sits under crates/")
+            .to_path_buf();
+
+        let mut found = Vec::new();
+        let mut stack = vec![crates];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                let mut rest = text.as_str();
+                while let Some((_, after)) = rest.split_once(needle.as_str()) {
+                    let Some((word, tail)) = after.split_once('"') else { break };
+                    found.push((word.to_string(), path.display().to_string()));
+                    rest = tail;
+                }
+            }
+        }
+        found
+    }
+
+    /// The sweep can see the tree, so the test below can fail.
+    ///
+    /// A walk that found nothing -- a moved crate, a packaged build, a broken
+    /// path -- passes every assertion in it vacuously, which is exactly the
+    /// shape of the test this replaced. So the reach is asserted first, and
+    /// against the three crates that certainly hold producers.
     #[test]
-    fn an_argument_word_carries_nothing_private_and_nothing_long() {
-        for e in all_variants() {
-            let w = e.what();
-            assert!(!w.contains('/'), "{e:?} names a path");
-            assert!(!w.contains('\\'), "{e:?} names a path");
-            assert!(w.len() < 80, "{e:?} carries prose, not a word: {w:?}");
+    fn the_sweep_reaches_the_crates_that_produce_these_words() {
+        let found = argument_words_in_source();
+        assert!(found.len() > 50, "the sweep found only {} literals", found.len());
+        for crate_dir in ["crates/core", "crates/daemon", "crates/store"] {
+            assert!(
+                found.iter().any(|(_, file)| file.contains(crate_dir)),
+                "{crate_dir} produces these and the sweep never read it"
+            );
+        }
+    }
+
+    /// What crosses is one short line, and never a path.
+    ///
+    /// The field is documented as something to switch on rather than show, and
+    /// this is what keeps it honest across every producer in the tree. It does
+    /// NOT claim they are all single words -- a handful are phrases written
+    /// for whoever is reading a daemon log, which is why the contract says a
+    /// client maps the words it knows and writes its own sentence for the
+    /// rest. What it does pin is that none of them is a paragraph, and that no
+    /// path or session id can appear in one.
+    ///
+    /// Eighty characters because that is a line. The longest today is
+    /// sixty-one; the room above it is for a producer that has something more
+    /// to say, not for prose.
+    #[test]
+    fn every_argument_word_is_one_short_line_and_names_no_path() {
+        for (word, file) in argument_words_in_source() {
+            assert!(!word.is_empty(), "an empty argument word in {file}");
+            assert!(!word.contains('/'), "{word:?} names a path, in {file}");
+            assert!(!word.contains('\\'), "{word:?} carries an escape, in {file}");
+            assert!(!word.contains('\n'), "{word:?} is more than a line, in {file}");
+            assert!(
+                !word.contains("session"),
+                "{word:?} could name a session id, in {file}"
+            );
+            assert!(
+                word.len() <= 80,
+                "{word:?} is {} characters, which is prose and not a word, in {file}",
+                word.len()
+            );
         }
     }
 

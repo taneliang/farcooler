@@ -1427,7 +1427,7 @@ fn said_about(what: &str) -> Option<&'static str> {
 /// and `task block` guessed "those two tasks would end up waiting on each
 /// other" for all four. The runner names the argument now (`Error.what`), so
 /// `said_about` answers the ones this build knows and `invalid` answers the
-/// rest — which is exactly the old behaviour for a word this CLI is too old
+/// rest — which is exactly the old behavior for a word this CLI is too old
 /// to have heard of.
 fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
     let (code, what) = match err {
@@ -1960,7 +1960,7 @@ mod tests {
     /// A word this build has never heard of falls back rather than guesses.
     ///
     /// A runner newer than this CLI refuses things with words that are not in
-    /// `said_about`. The old behaviour -- the call site's own sentence -- is
+    /// `said_about`. The old behavior -- the call site's own sentence -- is
     /// the right answer for those, and inventing one from the word would put
     /// the runner's vocabulary on a screen.
     #[test]

