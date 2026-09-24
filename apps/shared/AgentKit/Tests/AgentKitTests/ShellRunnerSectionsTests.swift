@@ -178,6 +178,9 @@ struct ShellRunnerSectionsTests {
         let sections = Self.fleet().runnerSections([Self.laptop, Self.gpu])
         #expect(sections[1].reorder(moving: ["l1"], before: "g1") == nil)
         #expect(sections[0].reorder(moving: ["g2"], before: nil) == nil)
+        // And a drag of several cards that includes a foreign one: moving
+        // just the local half would be a drop nobody made.
+        #expect(sections[0].reorder(moving: ["l1", "g1"], before: nil) == nil)
     }
 
     @Test func aSectionThatCannotBeReorderedSendsNothing() {
