@@ -214,7 +214,7 @@ struct ShellFleetMap {
                     id: tabID(runner: runner, workspace: workspace.id, pane: pane),
                     title: terminal.label,
                     mark: mark(of: terminal, now: now),
-                    // The sort's own question, kept separate from the
+                    // The rank's own question, kept separate from the
                     // drawing's. See `ShellTab.wantsAttention`.
                     wantsAttention: terminal.agent.wantsAttention,
                     // Every terminal tab, and only a terminal tab. The Diff
@@ -230,8 +230,9 @@ struct ShellFleetMap {
         return (
             ShellWorkspace(
                 // The COMPOSITE, not the daemon's own id. This string is a
-                // SwiftUI identity — the overview gives each card `.id(_:)`
-                // and an accessibility identifier off it, and
+                // SwiftUI identity — the overview's `ForEach`es identify each
+                // card by it, a drag names the cards it moved by it, the card's
+                // accessibility identifier is built off it, and
                 // `ShellPaneTrack` remembers which workspace a retained pane
                 // belongs to by it — and it is what a screen resolves a
                 // runner from. The daemon's own id is on the `FleetEntry` in
@@ -1124,8 +1125,8 @@ struct ShellScreen: View {
     /// All of them were somewhere else, and all three had the same somewhere
     /// else: the pushed workspace list. It was a searchable screen of every
     /// workspace on the runner with a toolbar for starting work and the runner
-    /// switcher along its bottom, and the overview is that screen — sorted by
-    /// what needs you rather than by repository, with cards instead of rows.
+    /// switcher along its bottom, and the overview is that screen — a section
+    /// per runner in the order each runner keeps, with cards instead of rows.
     /// Two of them would be two answers to "what is on this runner".
     ///
     /// - This device's settings. The runner menu that stood here, and the

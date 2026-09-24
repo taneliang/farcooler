@@ -132,20 +132,20 @@ struct ShellHarness: View {
         CommandLine.arguments.contains("-shell-hidden")
     }
 
+    /// The one runner every canned workspace is on.
+    static let runner = "harness"
+
     /// `count` workspaces, with tab counts and states that vary the way a real
     /// fleet's do.
     ///
     /// Deliberately not `count` identical workspaces. The three things this
     /// fixture has to be able to show wrong are the crossing rule (a swipe off
     /// the end of a workspace), the ribbon (four different marks side by side)
-    /// and the overview sort (precedence lifting the loud ones) — and a fleet
-    /// where every workspace has two working tabs shows none of them. The
-    /// numbers come off the index so the fixture is reproducible: the same
-    /// flag always produces the same fleet, which is what makes a screenshot
-    /// comparable to the last one.
-    /// The one runner every canned workspace is on.
-    static let runner = "harness"
-
+    /// and the overview's cards (four different tails in a row, and a drag that
+    /// has something to move) — and a fleet where every workspace has two
+    /// working tabs shows none of them. The numbers come off the index so the
+    /// fixture is reproducible: the same flag always produces the same fleet,
+    /// which is what makes a screenshot comparable to the last one.
     static func canned(count: Int) -> ShellFleet {
         ShellFleet(
             workspaces: (0..<count).map { index in
@@ -183,7 +183,7 @@ struct ShellHarness: View {
                     // precedence group, and the overview sorted BY precedence
                     // then — so the grid read as forty cards all saying one
                     // sentence. It keeps each runner's order now, and the
-                    // coprime cycles are still what keep neighbours distinct.
+                    // coprime cycles are still what keep neighbors distinct.
                     // A different stride does not fix that: any linear
                     // function of `index` is CONSTANT within a residue class
                     // mod 4, so as long as the two cycles share a length the

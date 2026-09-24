@@ -304,8 +304,9 @@ private struct ShellCardStyle: ButtonStyle {
 private struct ShellOverviewCard: View {
     let workspace: ShellWorkspace
     /// Where this card sits in the fleet, which is the key its frame is
-    /// published under and the only stable name a grid this is sorted and
-    /// filtered has for it.
+    /// published under — the flight reads it back that way. Not its identity:
+    /// the grid identifies a card by `workspace.id`, which survives a poll
+    /// that inserts a worktree above it. See `ShellCard`.
     let index: Int
     let isCurrent: Bool
     /// How wide this cell is, from `ShellGrid.cardWidth`.
@@ -475,7 +476,7 @@ struct ShellHeaderAction: Identifiable {
 /// exactly one view: this one. None of it is part of the fleet — see
 /// `ShellServerGroup` on why a workspace with no connection behind it must
 /// never be in `ShellFleet.workspaces` — and all of it defaults to nothing, so
-/// a fixture that names no runners draws a grid of one unlabelled section.
+/// a fixture that names no runners draws a grid of one unlabeled section.
 struct ShellOverviewRunners {
     /// The runners this app is connected to, in the order the runner list is
     /// in. Each one is a section, and the cards in it are the fleet's
@@ -574,7 +575,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// the same seam `actions` is, for the same reason.
     ///
     /// The workspace and not its index: an index is a position in a fleet this
-    /// view is sorting and filtering, and the caller resolves these against a
+    /// view is grouping and filtering, and the caller resolves these against a
     /// `Connection` that has moved on at least once since the grid was built.
     var onToggleHidden: (ShellWorkspace) -> Void = { _ in }
     var onRemoveWorktree: (ShellWorkspace) -> Void = { _ in }
@@ -615,8 +616,9 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// any.
     ///
     /// **Why this screen and not some other.** The overview IS the fleet
-    /// screen: it lists every workspace on the runner, sorted by what needs
-    /// you, with a search field and a real navigation bar. That is what the
+    /// screen: it lists every workspace on every runner, a section per runner
+    /// in the order that runner keeps, with a search field and a real
+    /// navigation bar. That is what the
     /// pushed workspace list was, and the toolbar it had — a sparkle for
     /// "describe it", a plus for "fill in the form" — was on that screen
     /// because it was the one place work could be started from. It still is.
@@ -889,7 +891,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// A section's cards, reorderable where the section allows it.
     ///
     /// **iOS 27 only, and nothing at all before it.** `reorderable` is the
-    /// platform's own drag inside a lazy grid — lift, the neighbours making
+    /// platform's own drag inside a lazy grid — lift, the neighbors making
     /// room, the drop — and it does not exist on 26. What 26 gets is no
     /// reordering and nothing on screen that suggests any: no handle, no
     /// "Move" in a menu, a card that lifts only for its context menu. A

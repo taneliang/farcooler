@@ -10,7 +10,8 @@ import Foundation
 // swiping at it. The rules below are the ones that are wrong in ways a
 // screenshot cannot show: stepping off the end of a workspace, which axis a
 // gesture is leaning toward,
-// which end of the fleet rubber-bands, and the order the overview sorts in.
+// which end of the fleet rubber-bands, and which runner's section a card and a
+// drag belong to (`ShellRunnerSections.swift`).
 //
 // So the gesture state machine transcribed in
 // `.claude/agent/briefs/ios-shell-mechanics.md` is split in two. The numbers
@@ -274,9 +275,10 @@ struct ShellTab: Identifiable, Hashable {
     /// finished turn draws the middle-weight review ring rather than the heavy
     /// amber one — but it is still a workspace you should be shown first.
     /// `ShellWorkspace.precedence` is the only thing that reads this and the
-    /// only place the distinction matters; what a mark SAYS and what a list
-    /// SORTS BY are different questions, and folding them together is what
-    /// would silently demote every finished agent in the overview. Android's
+    /// only place the distinction matters; what a mark SAYS and what a rank
+    /// SAYS are different questions, and folding them together would silently
+    /// demote every finished agent a rung. (Nothing sorts by the rank today —
+    /// see `precedence`.) Android's
     /// `ShellTab` makes the same split for the same reason.
     var wantsAttention: Bool
 
@@ -319,8 +321,9 @@ struct ShellTab: Identifiable, Hashable {
 /// **The order is fixed and is never re-sorted by activity.** The ribbon under
 /// the workspace name is a map of the workspace, and a map whose landmarks
 /// move when something happens is not a map — you would have to read it every
-/// time instead of remembering it. Precedence sorts WORKSPACES in the
-/// overview; it never sorts tabs.
+/// time instead of remembering it. The same argument is why nothing sorts the
+/// overview's WORKSPACES by activity either: each runner's section is in the
+/// order that runner keeps.
 struct ShellWorkspace: Identifiable, Hashable {
     var id: String
     var name: String
@@ -536,8 +539,10 @@ enum ShellTrack: Hashable {
 /// The whole fleet, in the order the workspaces are shown.
 ///
 /// A plain array and not a dictionary: every rule below is about adjacency,
-/// and adjacency is the order. The caller owns that order and it does not
-/// change under a gesture — the overview sorts a COPY of the indices.
+/// and adjacency is the order. The caller owns that order — each runner's own,
+/// appended a runner at a time — and it does not change under a gesture. The
+/// overview groups a COPY of the indices by runner and never reorders the
+/// array; a drag changes it only by way of the runner's answer.
 struct ShellFleet: Hashable {
     var workspaces: [ShellWorkspace]
 
