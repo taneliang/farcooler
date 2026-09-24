@@ -1648,6 +1648,27 @@ final class Connection: ObservableObject {
         await refresh()
     }
 
+    /// Put these worktrees in this order on THIS runner, first one first.
+    ///
+    /// The whole section the overview drew, by the daemon's own ids — never
+    /// "move this one to N", and never another runner's ids: the runner
+    /// permutes exactly the rows it is named among the ranks they already hold
+    /// (`Store::reorder_workspaces`), and each runner keeps its own table. The
+    /// Mac's `DaemonClient.reorderWorkspaces` is the same call over the CLI.
+    /// Which ids go here is decided in AgentKit — see `ShellReorderRequest`.
+    ///
+    /// Refreshed on the way out whether it worked or not, and that is what the
+    /// overview's pending order relies on: when this returns, the fleet on
+    /// this connection is the runner's answer, so dropping the drawn order then
+    /// shows either the drop or — for a refusal — the card back where it was.
+    /// A refusal is otherwise swallowed, like `hideWorkspace`'s: the card going
+    /// back IS the sentence.
+    func reorderWorkspaces(_ workspaces: [String]) async {
+        guard workspaces.count > 1 else { return }
+        _ = try? await core.call("workspace.reorder", ["workspaces": workspaces])
+        await refresh()
+    }
+
     /// What asking to remove a worktree came back with — mirrors macOS's
     /// `DaemonClient.RemoveWorktreeResult` so both apps' UIs make the same
     /// three-way distinction.

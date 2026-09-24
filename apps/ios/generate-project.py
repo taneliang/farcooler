@@ -151,6 +151,12 @@ AGENTKIT_SOURCES = [
     # the iOS UI suite is compiled by CI and never executed. See
     # `ShellIdentityTests`.
     "ShellIdentity.swift",
+    # The overview sectioned by runner, and what a drag inside one section
+    # sends: which ids go to which runner, what a cached section allows, and
+    # the order drawn while a drop is in flight. Here for `ShellNavigation`'s
+    # reason — a drop sent to the wrong runner looks fine on screen. See
+    # `ShellRunnerSectionsTests`.
+    "ShellRunnerSections.swift",
     # What a phone says before it closes a terminal, and the rule for when it
     # says anything at all. Here for `ShellNavigation.swift`'s reason and for
     # one of its own: closing is irreversible — the pane is killed and the

@@ -35,6 +35,9 @@ struct ShellRunnerLabel: Identifiable, Hashable, Sendable {
     /// the merge — that is what keeps the grid from blanking while a laptop
     /// sleeps — but a drop on them would be a request with nowhere to go.
     var isAnswering: Bool = true
+    /// One line about how the link is, for the header: "Connected",
+    /// "Reconnecting". Nil draws nothing, which is what a fixture says.
+    var detail: String? = nil
 }
 
 /// One card in a section: which worktree, by the id that survives a poll, and

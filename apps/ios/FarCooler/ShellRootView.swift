@@ -82,16 +82,16 @@ import SwiftUI
 /// screen.
 struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     let fleet: ShellFleet
-    /// What to call the runner `fleet` is on, and the worktrees on the others.
+    /// The runners the overview sections the grid by, the worktrees on the
+    /// ones this app is not connected to, and what each heading offers.
     ///
-    /// Both reach exactly one view — `ShellOverview` — and neither is part of
-    /// the fleet. That is not an accident of plumbing, it is the rule:
-    /// `ShellPosition` indexes into `fleet.workspaces`, the bar walks it and
-    /// `ShellPaneTrack` mounts a pane for every tab it steps onto, so a
+    /// All of it reaches exactly one view — `ShellOverview` — and none of it
+    /// is part of the fleet. That is not an accident of plumbing, it is the
+    /// rule: `ShellPosition` indexes into `fleet.workspaces`, the bar walks it
+    /// and `ShellPaneTrack` mounts a pane for every tab it steps onto, so a
     /// workspace with no connection behind it must never be in that array.
     /// See `ShellServerGroup`, which says so at length.
-    private let liveServer: String?
-    private let elsewhere: [ShellServerGroup]
+    private let runnerSections: ShellOverviewRunners
     /// A card on another runner, tapped.
     private let onCross: (ShellServerGroup, ShellWorkspace) -> Void
     /// A card's context menu, spent. Both reach exactly one view —
@@ -589,8 +589,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         openingOnOverview: Bool = false,
         request: Binding<String?> = .constant(nil),
         onRest: ((ShellPosition) -> Void)? = nil,
-        liveServer: String? = nil,
-        elsewhere: [ShellServerGroup] = [],
+        runnerSections: ShellOverviewRunners = ShellOverviewRunners(),
         @ViewBuilder runners: @escaping () -> Trouble = { EmptyView() },
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
         onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
@@ -600,8 +599,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         @ViewBuilder pane: @escaping (ShellPaneSlot) -> Pane
     ) {
         self.fleet = fleet
-        self.liveServer = liveServer
-        self.elsewhere = elsewhere
+        self.runnerSections = runnerSections
         self.onCross = onCross
         self.onToggleHidden = onToggleHidden
         self.onRemoveWorktree = onRemoveWorktree
@@ -923,8 +921,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
                     // header, the `Done` and the search field are the three
                     // things that claim it has.
                     chrome: overview,
-                    liveServer: liveServer,
-                    elsewhere: elsewhere,
+                    runnerSections: runnerSections,
                     runners: runners,
                     search: $overviewSearch,
                     onOpen: open(workspace:),
@@ -1491,8 +1488,7 @@ extension ShellRootView where Actions == EmptyView, Trouble == EmptyView {
         openingOnOverview: Bool = false,
         request: Binding<String?> = .constant(nil),
         onRest: ((ShellPosition) -> Void)? = nil,
-        liveServer: String? = nil,
-        elsewhere: [ShellServerGroup] = [],
+        runnerSections: ShellOverviewRunners = ShellOverviewRunners(),
         onCross: @escaping (ShellServerGroup, ShellWorkspace) -> Void = { _, _ in },
         onToggleHidden: @escaping (ShellWorkspace) -> Void = { _ in },
         onRemoveWorktree: @escaping (ShellWorkspace) -> Void = { _ in },
@@ -1501,7 +1497,7 @@ extension ShellRootView where Actions == EmptyView, Trouble == EmptyView {
     ) {
         self.init(
             fleet: fleet, initial: initial, openingOnOverview: openingOnOverview,
-            request: request, onRest: onRest, liveServer: liveServer, elsewhere: elsewhere,
+            request: request, onRest: onRest, runnerSections: runnerSections,
             runners: { EmptyView() },
             onCross: onCross, onToggleHidden: onToggleHidden,
             onRemoveWorktree: onRemoveWorktree, onCloseTab: onCloseTab,

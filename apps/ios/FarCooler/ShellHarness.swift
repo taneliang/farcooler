@@ -39,8 +39,12 @@ struct ShellHarness: View {
     /// the sake of the store hanging off it.
     @StateObject private var connection = Connection()
 
+    /// The canned fleet, held rather than rebuilt, so a drag in the overview
+    /// has something to change: `reordered` is what a runner does with the
+    /// request, applied here in its place.
+    @State private var fleet = Self.fleet
+
     var body: some View {
-        let fleet = Self.fleet
         ZStack {
             // A ground for the glass to be glass against. The panes are text
             // on nothing, and glass over nothing has no material to sample —
@@ -59,8 +63,28 @@ struct ShellHarness: View {
                 // is exactly the state a screenshot most wants and a script
                 // least reliably produces.
                 openingOnOverview: CommandLine.arguments.contains("-shell-overview"),
-                liveServer: "this-mac",
-                elsewhere: Self.elsewhere,
+                runnerSections: ShellOverviewRunners(
+                    live: [ShellRunnerLabel(id: Self.runner, name: "this-mac")],
+                    elsewhere: Self.elsewhere,
+                    // A menu on each heading, so the heading is the height it
+                    // is in the app and the grid under it lands where it does
+                    // there. Nothing behind them: a fixture has no runner to
+                    // edit, and the one that would be reached is not this.
+                    liveActions: { _ in
+                        [ShellHeaderAction(title: "Edit Runner…", systemImage: "pencil") {}]
+                    },
+                    cachedActions: { _ in
+                        [ShellHeaderAction(
+                            title: "Switch to This Runner", systemImage: "arrow.left.arrow.right") {}]
+                    },
+                    // The runner's half of a drop, in the runner's place, and
+                    // a round trip's worth of waiting so the pending order is
+                    // what is on screen in between — the same wait a real
+                    // runner costs.
+                    onReorder: { request in
+                        try? await Task.sleep(for: .milliseconds(300))
+                        fleet = fleet.reordered(request)
+                    }),
                 onCross: { _, _ in }
             ) { slot in
                 ShellPanePlaceholder(slot: slot, changes: changesStore)
@@ -119,6 +143,9 @@ struct ShellHarness: View {
     /// numbers come off the index so the fixture is reproducible: the same
     /// flag always produces the same fleet, which is what makes a screenshot
     /// comparable to the last one.
+    /// The one runner every canned workspace is on.
+    static let runner = "harness"
+
     static func canned(count: Int) -> ShellFleet {
         ShellFleet(
             workspaces: (0..<count).map { index in
@@ -178,6 +205,10 @@ struct ShellHarness: View {
                     // or forty) is also what a real runner looks like — a
                     // repository has one checkout and many worktrees.
                     isPrimaryCheckout: index == 0,
+                    // One runner, which keeps an order: the grid draws one
+                    // section and a drag inside it is offered.
+                    runner: Self.runner,
+                    keepsOrder: true,
                     tabs: (0..<tabs).map { tab in
                         ShellTab(
                             id: "ws-\(index)-tab-\(tab)",

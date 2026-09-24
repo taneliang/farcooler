@@ -266,6 +266,13 @@ struct ShellFleetMap {
                 // from the connection at menu-build time, so the card and
                 // the daemon are reading one fact.
                 isPrimaryCheckout: workspace.isPrimaryCheckout,
+                // Which runner's section the card is drawn in, and which
+                // runner a drag in that section is sent to. The runner's ID,
+                // not `server`: that is a label, and nil on a one-runner grid.
+                runner: runner.uuidString,
+                // A runner that stores an order sends an ordinal; one too old
+                // to sends nothing, and a drag against it must not be offered.
+                keepsOrder: workspace.ordinal != nil,
                 tabs: tabs),
             refs
         )
@@ -695,12 +702,15 @@ struct ShellScreen: View {
     /// reach for `connection` now resolves one from the pane it is about. See
     /// `connection(_:)`, which is the one place that resolution happens.
     @ObservedObject var fleet: FleetStore
-    /// The runners this device knows, for the menu in the overview's toolbar.
+    /// The runners this device knows, for the overview's runner headings.
     ///
-    /// The app's only way to reach another runner, to correct the one it is on,
-    /// and to see this device's own key. It used to hang off `HostSwitcherBar`
-    /// at the bottom of the workspace list; the shell has no strip to put a bar
-    /// on, so the same menu is a toolbar item on the overview. See `RunnerMenu`.
+    /// The app's way to reach another runner, to correct one, and to reach
+    /// this device's settings. It used to be `RunnerMenu` in the overview's
+    /// top-left corner — a selector choosing which runner "the screen" was
+    /// about, on a grid that already lists every runner. What was per runner
+    /// is on that runner's heading now (`runnerActions`, `cachedActions`), and
+    /// what belongs to no runner is a Settings button in the toolbar and an
+    /// Add button under the last section.
     @ObservedObject var hosts: RunnerStore
     /// The terminal a tapped Live Activity card asked for, held by `FleetView`
     /// until this runner's fleet has it. See `requestedTab`.
@@ -792,6 +802,21 @@ struct ShellScreen: View {
     /// can close.
     @State private var editingRunner: Runner?
     @State private var authorizingDevice = false
+
+    /// The runner a heading asked to start work on, for the two sheets above.
+    ///
+    /// Set by a heading's New Workspace and Quick Task and cleared by the
+    /// toolbar's, which keep meaning what they always meant: the runner at
+    /// rest. Without it a heading's "New Workspace…" on `gpu-box-2` would open
+    /// a sheet for whichever runner happened to be on screen.
+    @State private var startingOn: Connection?
+    /// A runner's own settings, opened from its heading. It was reachable only
+    /// through this device's settings, and only for the runner at rest.
+    @State private var runnerSettings: RunnerSheet?
+    /// This device's settings, and the Add hub: the two things the old runner
+    /// menu offered that belong to no runner.
+    @State private var showSettings = false
+    @State private var showAdd = false
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -920,7 +945,7 @@ struct ShellScreen: View {
         // falls back through the same selection that decides where a launch
         // lands.
         .sheet(isPresented: $showNewWorkspace) {
-            if let connection = acting {
+            if let connection = startingOn ?? acting {
                 NewWorkspaceView(
                     repositories: connection.repositories, connection: connection
                 ) { repository, name, branch, adopt in
@@ -930,7 +955,7 @@ struct ShellScreen: View {
             }
         }
         .sheet(isPresented: $showQuickTask) {
-            if let connection = acting {
+            if let connection = startingOn ?? acting {
                 TaskComposerView(connection: connection)
             }
         }
@@ -950,6 +975,26 @@ struct ShellScreen: View {
         .sheet(isPresented: $authorizingDevice) {
             NavigationStack { AuthorizeView(runners: hosts) }
         }
+        // A runner's settings, from its heading. `RunnerSettingsView` is a
+        // pushed screen everywhere else and has no way off it of its own, so
+        // the sheet brings the stack and the Done.
+        .sheet(item: $runnerSettings) { sheet in
+            NavigationStack {
+                RunnerSettingsView(name: sheet.host.label, connection: sheet.connection)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { runnerSettings = nil }
+                        }
+                    }
+            }
+        }
+        // This device's settings — what the runner menu called "This Device…".
+        // Handed the runner at rest for the two rows that are about a runner,
+        // exactly as the menu did.
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { SettingsView(connection: resting, runners: hosts) }
+        }
+        .sheet(isPresented: $showAdd) { AddView(runners: hosts) }
         // The ceremony a card's menu starts, run from the screen rather than
         // from the card. Shared with the pane's own bar — see
         // `RemoveWorktreeFlow`.
@@ -1079,18 +1124,18 @@ struct ShellScreen: View {
 
     /// What this app puts in the overview's navigation bar, opposite `Done`.
     ///
-    /// All three were somewhere else, and all three had the same somewhere
+    /// All of them were somewhere else, and all three had the same somewhere
     /// else: the pushed workspace list. It was a searchable screen of every
     /// workspace on the runner with a toolbar for starting work and the runner
     /// switcher along its bottom, and the overview is that screen — sorted by
     /// what needs you rather than by repository, with cards instead of rows.
     /// Two of them would be two answers to "what is on this runner".
     ///
-    /// - The runner, and every way of changing it. See `RunnerMenu`.
-    /// - The link, but only when there is something wrong with it. That is
-    ///   the pane host's rule for the same chip, kept: a permanent
-    ///   "Connected" is noise, and this is the app's only manual reconnect now
-    ///   that the bar carrying it is gone from every connected screen.
+    /// - This device's settings. The runner menu that stood here, and the
+    ///   link chip beside it, were about ONE runner on a grid that lists all
+    ///   of them; what they offered is on each runner's heading now — see
+    ///   `runnerActions` — and this is the part of that menu that is about no
+    ///   runner at all.
     /// - A sparkle for "describe it" (`TaskComposerView`), a plain plus for
     ///   "fill in the form" (`NewWorkspaceView`) — the same two flows the Mac
     ///   keeps side by side, kept apart here by icon rather than by picking a
@@ -1110,21 +1155,29 @@ struct ShellScreen: View {
         // fleet-wide version of that sentence would be a chip that is amber
         // whenever any laptop anywhere is asleep. What says the same thing per
         // runner, next to the runner, is `RunnerStatusRow`.
-        if let resting {
-            RunnerMenu(hosts: hosts, connection: resting)
+        // This device's settings. The runner menu's "This Device…", and the
+        // only item from it that belongs to no runner and to nothing in the
+        // grid; the rest are on each runner's heading. A plain button, and not
+        // a menu: the corner is not a selector any more.
+        Button { showSettings = true } label: { Image(systemName: "gear") }
+            .accessibilityLabel("Settings")
+            .accessibilityIdentifier("shell-settings")
 
-            if resting.phase != .connected {
-                LinkStatusChip(connection: resting)
-            }
-        } else {
-            RunnerMenu(hosts: hosts, connection: nil)
+        Button {
+            startingOn = nil
+            showQuickTask = true
+        } label: {
+            Image(systemName: "sparkle")
         }
+        .accessibilityLabel("Quick Task")
 
-        Button { showQuickTask = true } label: { Image(systemName: "sparkle") }
-            .accessibilityLabel("Quick Task")
-
-        Button { showNewWorkspace = true } label: { Image(systemName: "plus") }
-            .accessibilityLabel("New Workspace")
+        Button {
+            startingOn = nil
+            showNewWorkspace = true
+        } label: {
+            Image(systemName: "plus")
+        }
+        .accessibilityLabel("New Workspace")
     }
 
     /// The runners this app is CURRENTLY talking to.
@@ -1166,6 +1219,123 @@ struct ShellScreen: View {
             // one would be a card whose tap can do nothing.
             .filter { !live.contains($0.runner) && known.contains($0.runner) }
             .map { $0.group() }
+            + unseen(besides: live)
+    }
+
+    /// A heading for every runner this device knows that is neither live nor
+    /// remembered — added and never reached, or never cached.
+    ///
+    /// Empty, and drawn anyway. Its heading is the only place left to switch
+    /// to it or correct it: the runner menu that used to list every runner is
+    /// gone, and a runner typed in wrong is exactly the one with nothing on it.
+    private func unseen(besides live: Set<String>) -> [ShellServerGroup] {
+        let remembered = Set(RunnerDirectoryStore.read().map(\.runner))
+        return hosts.hosts
+            .filter {
+                !live.contains($0.id.uuidString) && !remembered.contains($0.id.uuidString)
+            }
+            .map { ShellServerGroup(id: $0.id.uuidString, name: $0.label, workspaces: []) }
+    }
+
+    /// Each connected runner as the overview names it: its label, and one word
+    /// about its link — what the toolbar's link chip said, for the runner at
+    /// rest only, now said on every runner's heading.
+    private var liveLabels: [ShellRunnerLabel] {
+        fleet.runners.map { runner in
+            ShellRunnerLabel(
+                id: runner.host.id.uuidString, name: runner.host.label,
+                isAnswering: runner.connection.phase == .connected,
+                detail: Self.linkWord(runner.connection.phase))
+        }
+    }
+
+    /// The link chip's words, plus the one it left unsaid. A heading always
+    /// says something, so a heading that just stopped saying "Reconnecting"
+    /// is not a line that changed length under the cards.
+    static func linkWord(_ phase: Connection.Phase) -> String {
+        switch phase {
+        case .connected: return "Connected"
+        case .connecting: return "Connecting"
+        case .reconnecting: return "Reconnecting"
+        case .needsApproval: return "Not Trusted"
+        case .failed: return "Disconnected"
+        }
+    }
+
+    /// What a connected runner's heading offers: everything the runner menu
+    /// and the link chip offered about ONE runner, now about this one.
+    ///
+    /// - Starting work on it, which the toolbar can only do for the runner at
+    ///   rest.
+    /// - Its settings, which were two screens deep and only for the runner at
+    ///   rest.
+    /// - Reconnect, which was the link chip, drawn only when the runner at
+    ///   rest was not connected. Always offered here, for the chip's own
+    ///   reason: the tap has to work when the app believes the link is fine
+    ///   and the person holding the phone can see that it is not.
+    /// - Edit, which was "Edit This Runner…" and edited only the selected one.
+    private func runnerActions(_ label: ShellRunnerLabel) -> [ShellHeaderAction] {
+        guard let runner = fleet.runners.first(where: { $0.host.id.uuidString == label.id })
+        else { return [] }
+        let connection = runner.connection
+        return [
+            ShellHeaderAction(title: "New Workspace…", systemImage: "plus") {
+                startingOn = connection
+                showNewWorkspace = true
+            },
+            ShellHeaderAction(title: "Quick Task…", systemImage: "sparkle") {
+                startingOn = connection
+                showQuickTask = true
+            },
+            ShellHeaderAction(title: "Runner Settings…", systemImage: "slider.horizontal.3") {
+                runnerSettings = RunnerSheet(host: runner.host, connection: connection)
+            },
+            ShellHeaderAction(title: "Reconnect", systemImage: "arrow.clockwise") {
+                connection.reconnectNow()
+            },
+            ShellHeaderAction(title: "Edit Runner…", systemImage: "pencil") {
+                editingRunner = runner.host
+            },
+        ]
+    }
+
+    /// What a runner this app is not connected to offers: the runner menu's
+    /// switch, for this runner, and its edit.
+    ///
+    /// "Switch to This Runner" is the menu's old checkmark row, and it means
+    /// what it meant: select it, which with "Connect every runner at once"
+    /// turned off is the one runner this phone keeps a session with. With it
+    /// on, every known runner is live and no heading offers this.
+    private func cachedActions(_ group: ShellServerGroup) -> [ShellHeaderAction] {
+        guard let host = hosts.hosts.first(where: { $0.id.uuidString == group.id }) else {
+            return []
+        }
+        return [
+            ShellHeaderAction(
+                title: "Switch to This Runner", systemImage: "arrow.left.arrow.right"
+            ) {
+                hosts.selected = host
+            },
+            ShellHeaderAction(title: "Edit Runner…", systemImage: "pencil") {
+                editingRunner = host
+            },
+        ]
+    }
+
+    /// A drop in a runner's section, sent to that runner and nobody else.
+    ///
+    /// The ids are resolved back to the daemon's own through the map the grid
+    /// was built from, all or nothing — see `ShellReorderRequest.workspaceIDs`
+    /// — and the call goes down the connection the REQUEST names, never the
+    /// one at rest.
+    private func reorder(_ request: ShellReorderRequest, in map: ShellFleetMap) async {
+        guard let runner = UUID(uuidString: request.runner),
+            let connection = fleet.connection(for: runner),
+            let ids = request.workspaceIDs(resolving: { id in
+                map.entries[id].map { ($0.host.id.uuidString, $0.workspace.id) }
+            })
+        else { return }
+        await connection.reorderWorkspaces(ids)
     }
 
     /// What this screen is: a pane, a wait, or a runner with nothing on it.
@@ -1302,6 +1472,7 @@ struct ShellScreen: View {
                 remember(arrived, leaving: restingRef, tab: tab?.id)
                 restingRef = arrived
                 markVisible(arrived)
+                follow(arrived)
             },
             // The header over the live cards names the runner, but only when
             // there is one runner for it to name. With several merged into one
@@ -1309,8 +1480,16 @@ struct ShellScreen: View {
             // see `ShellFleetMap.one`, which is where that condition is
             // decided. A header saying one machine's name over another
             // machine's worktrees is the one thing worse than no header.
-            liveServer: fleet.runners.count == 1 ? fleet.runners[0].host.label : nil,
-            elsewhere: elsewhere,
+            // A section per runner, each with its own menu — which is where the
+            // runner menu that stood in the toolbar went. See
+            // `ShellOverviewRunners`.
+            runnerSections: ShellOverviewRunners(
+                live: liveLabels,
+                elsewhere: elsewhere,
+                liveActions: runnerActions,
+                cachedActions: cachedActions,
+                onReorder: { await reorder($0, in: map) },
+                onAdd: { showAdd = true }),
             // A row for every runner that is not simply answering, over the
             // grid it is about. This is the whole of what replaced four
             // full-screen phases: a laptop asleep in another room is a line of
@@ -1405,6 +1584,27 @@ struct ShellScreen: View {
         else { return }
         UserDefaults.standard.set("\(runner)/\(workspace)", forKey: Self.crossingKey)
         hosts.selected = picked
+    }
+
+    /// The selection follows where you are, with every runner connected.
+    ///
+    /// `RunnerStore.selected` still decides where a launch LANDS — see
+    /// `onSelectedRunner` — and the runner menu was the only way to set it.
+    /// With the menu gone, a launch would land forever on whatever it last
+    /// said. So the runner you come to rest on is the one selected, which is
+    /// "open where I was" said about the runner.
+    ///
+    /// **Only with "Connect every runner at once" on.** Off, the selection is
+    /// which runner is CONNECTED, and a rest on a pane of the runner being
+    /// switched away from — mid-crossing, before its connection is retired —
+    /// would switch straight back. There the selection is only ever changed on
+    /// purpose, from a cached runner's heading.
+    private func follow(_ arrived: ShellPaneRef?) {
+        guard FleetSettings.allRunnersAtOnce, let arrived,
+            hosts.selected?.id != arrived.runner,
+            let host = hosts.hosts.first(where: { $0.id == arrived.runner })
+        else { return }
+        hosts.selected = host
     }
 
     /// Which worktree a crossing was aimed at, spelled `runner/workspace`.
@@ -1645,4 +1845,13 @@ struct ShellScreen: View {
         pullRequest = BranchPullRequest(
             pr: mine?.pr, known: reply.prAnswered, repoURL: reply.repoUrl)
     }
+}
+
+/// A runner and its connection, for the one sheet that needs both and is
+/// presented by item: `Connection` is a class with no identity of its own to
+/// offer `sheet(item:)`.
+struct RunnerSheet: Identifiable {
+    let host: Runner
+    let connection: Connection
+    var id: UUID { host.id }
 }

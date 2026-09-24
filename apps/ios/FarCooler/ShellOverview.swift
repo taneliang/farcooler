@@ -454,6 +454,52 @@ private struct ShellElsewhereCard: View {
     }
 }
 
+/// One thing a runner's section header offers to do to that runner.
+///
+/// Data rather than a view builder, and that is a plumbing choice with a
+/// reason: the header is drawn by this file and the actions are the app's, the
+/// same seam `actions` is — but there is one menu PER RUNNER, and a builder per
+/// runner would be a fourth generic parameter threaded through `ShellRootView`
+/// to say "a title, a symbol and a closure".
+struct ShellHeaderAction: Identifiable {
+    let title: String
+    let systemImage: String
+    var role: ButtonRole? = nil
+    let perform: () -> Void
+    var id: String { title }
+}
+
+/// Everything the overview needs to know about runners and the shell does not.
+///
+/// One value rather than six parameters on `ShellRootView`, all of which reach
+/// exactly one view: this one. None of it is part of the fleet — see
+/// `ShellServerGroup` on why a workspace with no connection behind it must
+/// never be in `ShellFleet.workspaces` — and all of it defaults to nothing, so
+/// a fixture that names no runners draws a grid of one unlabelled section.
+struct ShellOverviewRunners {
+    /// The runners this app is connected to, in the order the runner list is
+    /// in. Each one is a section, and the cards in it are the fleet's
+    /// workspaces whose `runner` is that runner's id.
+    var live: [ShellRunnerLabel] = []
+    /// The runners this app knows and is NOT connected to, as it last saw
+    /// them. See `ShellServerGroup`.
+    var elsewhere: [ShellServerGroup] = []
+    /// What a live runner's header menu offers.
+    var liveActions: (ShellRunnerLabel) -> [ShellHeaderAction] = { _ in [] }
+    /// What a cached runner's header menu offers.
+    var cachedActions: (ShellServerGroup) -> [ShellHeaderAction] = { _ in [] }
+    /// A drop inside one runner's section, to be sent to that runner.
+    ///
+    /// Awaited, and the grid draws the drop until it returns — see
+    /// `ShellPendingOrders`. Whoever supplies this must have the fleet
+    /// re-read by the time it returns, which `Connection.reorderWorkspaces`
+    /// does.
+    var onReorder: (ShellReorderRequest) async -> Void = { _ in }
+    /// Adding a runner, or another device: the one thing the old runner menu
+    /// offered that belongs to no runner. Nil draws nothing.
+    var onAdd: (() -> Void)? = nil
+}
+
 /// The grid, its search, and the way out.
 ///
 /// A `LazyVGrid`, and the pane invariant does not reach here. The rule that
@@ -488,20 +534,17 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// release has resolved. What makes that affordable is that none of the
     /// three costs the grid a single point of layout — see each of them below.
     let chrome: Bool
-    /// What to call the runner these cards are on, or nil where there is
-    /// nothing to tell it apart from.
+    /// The runners, one section each, and what each section's header offers.
     ///
-    /// Drawn on a section header over the live cards and ONLY when there is a
-    /// second section under them. A heading that is always there is a heading
-    /// that stops being read — the same rule `ShellCardFace.subtitle` follows
-    /// when it leaves the local runner's name off a card.
-    var liveServer: String? = nil
-    /// The worktrees on the OTHER runners this app knows, as it last saw them.
-    ///
-    /// Cached, and they say so: see `ShellServerGroup`, and `RunnerDirectory`
-    /// for why they are cached rather than live. Empty is the ordinary case —
-    /// one runner, one section, no headings at all.
-    var elsewhere: [ShellServerGroup] = []
+    /// **Every runner has a heading now, even alone.** It used to be drawn only
+    /// when a second, cached section stood under it, on the argument that a
+    /// heading that is always there stops being read. What changed is that the
+    /// heading stopped being only a label: the runner menu that sat in the
+    /// top-left corner — which runner, edit it, its settings, reconnect — is
+    /// per runner, and the grid already lists every runner, so each of those
+    /// moved onto the heading of the runner it is about. See
+    /// `ShellOverviewRunners`.
+    var runnerSections = ShellOverviewRunners()
     /// A row for each runner that is not simply answering, drawn above the
     /// grid.
     ///
@@ -611,15 +654,36 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// makes for the same reason: a handover is arithmetic, not a state.
     @State private var pullFrom: CGFloat?
 
-    private var order: [Int] { fleet.overviewOrder(matching: search) }
+    /// Drops sent and not yet answered, drawn until they are. See
+    /// `ShellPendingOrders`.
+    ///
+    /// `@State` here and not on the screen, because it is a fact about what
+    /// this grid is DRAWING: the overview being unmounted mid-call loses
+    /// nothing, since the next mount reads a fleet the runner has answered
+    /// by then.
+    @State private var pending = ShellPendingOrders()
 
-    /// The worktrees this runner has been told to stop showing.
-    private var hidden: [Int] { fleet.hiddenOrder(matching: search) }
+    /// One section per connected runner, each in that runner's order. See
+    /// `ShellFleet.runnerSections`.
+    private var sections: [ShellRunnerSection] {
+        fleet.runnerSections(runnerSections.live, matching: search, pending: pending)
+    }
+
+    /// The worktrees the runners have been told to stop showing, as cards.
+    ///
+    /// Identified by workspace id, like a section's cards, rather than by
+    /// index — an index names a different worktree the moment a poll inserts
+    /// one above it.
+    private var hidden: [ShellCard] {
+        fleet.hiddenOrder(matching: search).map {
+            ShellCard(id: fleet.workspaces[$0].id, index: $0)
+        }
+    }
 
     /// The other runners worth drawing a section for. See
     /// `ShellServerGroup.arrange`: a group a search emptied is not a heading.
     private var groups: [ShellServerGroup] {
-        ShellServerGroup.arrange(elsewhere, matching: search)
+        ShellServerGroup.arrange(runnerSections.elsewhere, matching: search)
     }
 
     /// Whether the hidden section is open.
@@ -801,7 +865,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// Its own name because the empty state is now a case INSIDE the grid
     /// rather than a screen instead of one — see `gridBody`.
     private var hasCards: Bool {
-        !(order.isEmpty && hidden.isEmpty && groups.isEmpty)
+        !(sections.isEmpty && hidden.isEmpty && groups.isEmpty)
     }
 
     /// One card of the fleet this app is connected to. The same view for the
@@ -818,7 +882,51 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
             onOpen: { onOpen(index) },
             onToggleHidden: { onToggleHidden(workspace) },
             onRemoveWorktree: { onRemoveWorktree(workspace) })
-            .id(index)
+    }
+
+    /// A section's cards, reorderable where the section allows it.
+    ///
+    /// **iOS 27 only, and nothing at all before it.** `reorderable` is the
+    /// platform's own drag inside a lazy grid — lift, the neighbours making
+    /// room, the drop — and it does not exist on 26. What 26 gets is no
+    /// reordering and nothing on screen that suggests any: no handle, no
+    /// "Move" in a menu, a card that lifts only for its context menu. A
+    /// hand-built drag for one OS would be a second gesture over a grid that
+    /// already arbitrates a scroll, a tracked pull-down and a tap, and the one
+    /// that would have to be proved against all three.
+    ///
+    /// The `if` flips structural identity when `canReorder` does, which
+    /// rebuilds the section's cards. That happens on typing a search or a
+    /// runner dropping its link — never mid-flight, because a flight is never
+    /// in the air while the search field has a keyboard up — and a card is a
+    /// name and some dots; see this type's own note on why a card rebuilt is
+    /// cheap.
+    @ViewBuilder
+    private func liveCards(_ section: ShellRunnerSection, width: CGFloat) -> some View {
+        let cards = ForEach(section.cards) { card in liveCard(card.index, width: width) }
+        if #available(iOS 27, *), section.canReorder {
+            cards.reorderable(collectionID: section.id)
+        } else {
+            cards
+        }
+    }
+
+    /// A drop, spent: which section it landed in, what moved, and before what.
+    ///
+    /// Everything it decides is `ShellRunnerSection.reorder`'s — including
+    /// refusing a card carried into ANOTHER runner's section, which the
+    /// platform's container is happy to offer — and the only thing this adds is
+    /// drawing the drop while it is in flight.
+    private func drop(_ sources: [String], before target: String?, in collection: String) {
+        guard let section = sections.first(where: { $0.id == collection }),
+            let request = section.reorder(moving: sources, before: target)
+        else { return }
+        pending.begin(request)
+        let send = runnerSections.onReorder
+        Task { @MainActor in
+            await send(request)
+            pending.settle(request)
+        }
     }
 
     /// A section heading: the runner, and one line about how current it is.
@@ -828,21 +936,42 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// under it — which is right in a `List` of rows and wrong here, because
     /// the thing it would cover is the amber outline that says which workspace
     /// you are in.
-    private func header(_ name: String, detail: String?) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
-            Text(name)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if let detail {
-                Text(detail)
-                    // Mono for the same reason the card's subtitle is: this
-                    // half of the line is data about a machine.
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+    private func header(
+        _ name: String, detail: String?, isEmpty: Bool = false,
+        actions: [ShellHeaderAction] = []
+    ) -> some View {
+        HStack(alignment: .center, spacing: PaneMetrics.step) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let detail {
+                        Text(detail)
+                            // Mono for the same reason the card's subtitle
+                            // is: this half of the line is data about a
+                            // machine.
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                // A runner with nothing on it still has a heading — it is
+                // where that runner's actions are — and a heading over nothing
+                // has to say so, or it reads as cards that failed to load.
+                if isEmpty {
+                    Text("No worktrees")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("shell-section-\(name)")
+
             Spacer(minLength: 0)
+
+            if !actions.isEmpty { headerMenu(name, actions) }
         }
         // The whole width the grid was given, which is now the width the cards
         // span: the grid is padded to its margins and its columns fill what is
@@ -857,8 +986,42 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
         // slack out of the edges is what makes the compensation unnecessary.
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, PaneMetrics.card)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("shell-section-\(name)")
+    }
+
+    /// A runner's own menu, at the trailing end of its heading.
+    ///
+    /// What the top-left runner menu was, per runner: the grid already lists
+    /// every runner, so a selector choosing which one "the screen" was about
+    /// had stopped meaning anything — `FleetView`'s own note says the
+    /// multi-runner port removed the idea of a screen being about one runner.
+    ///
+    /// Chrome, and treated exactly like the toolbar's: faded and disabled
+    /// rather than removed while a lift is still only revealing the grid. The
+    /// heading is IN the grid, above cards a page may be flying to, so a menu
+    /// that came and went would be a heading that changed height under a
+    /// flight. Present always, it costs the grid the same points on every
+    /// frame; see `chrome`.
+    ///
+    /// 44 points square, which is the target floor and also what keeps every
+    /// heading one height whether or not its runner says anything under its
+    /// name.
+    private func headerMenu(_ name: String, _ actions: [ShellHeaderAction]) -> some View {
+        Menu {
+            ForEach(actions) { action in
+                Button(role: action.role, action: action.perform) {
+                    Label(action.title, systemImage: action.systemImage)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.body)
+                .frame(width: PaneMetrics.target, height: PaneMetrics.target)
+                .contentShape(.rect)
+        }
+        .opacity(chrome ? 1 : 0)
+        .disabled(!chrome)
+        .accessibilityLabel("\(name) Actions")
+        .accessibilityIdentifier("shell-section-menu-\(name)")
     }
 
     /// The way back from hiding, which is the whole reason this is a section
@@ -986,13 +1149,18 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                         count: columns),
                     spacing: PaneMetrics.card
                 ) {
-                    // The runner you are ON, first and unlabeled unless there is
-                    // something under it to tell it apart from.
-                    Section {
-                        ForEach(order, id: \.self) { index in liveCard(index, width: cardWidth) }
-                    } header: {
-                        if let liveServer, !groups.isEmpty {
-                            header(liveServer, detail: "Connected")
+                    // Every runner this app is connected to, a section each, in
+                    // the order the runner list is in and each in the order
+                    // its runner keeps — which is the order the Mac's sidebar
+                    // draws, because it is the same table.
+                    ForEach(sections) { section in
+                        Section {
+                            liveCards(section, width: cardWidth)
+                        } header: {
+                            header(
+                                section.runner.name, detail: section.runner.detail,
+                                isEmpty: section.cards.isEmpty,
+                                actions: runnerSections.liveActions(section.runner))
                         }
                     }
 
@@ -1000,8 +1168,8 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                     if !hidden.isEmpty {
                         Section {
                             if hiddenShown {
-                                ForEach(hidden, id: \.self) { index in
-                                    liveCard(index, width: cardWidth)
+                                ForEach(hidden) { card in
+                                    liveCard(card.index, width: cardWidth)
                                 }
                             }
                         } header: {
@@ -1024,16 +1192,43 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                                     .id("\(group.id)/\(workspace.id)")
                             }
                         } header: {
-                            header(group.name, detail: Self.lastSeen(group.lastSeen))
+                            // No drag here, and nothing that looks like one:
+                            // there is no connection to write an order to, so
+                            // these cards are not `reorderable` at all. What
+                            // the heading offers instead is the way to make
+                            // this runner live.
+                            header(
+                                group.name, detail: Self.lastSeen(group.lastSeen),
+                                isEmpty: group.order(matching: search).isEmpty,
+                                actions: runnerSections.cachedActions(group))
                         }
                     }
                 }
+                .modifier(ShellReorderContainer(drop: drop))
                 // The SAME number on all four sides, which is most of the point.
                 // The grid used to be padded vertically and not horizontally at
                 // all, so its side gaps were whatever a centered pair of fixed
                 // columns left over — 27 points on this phone against 16 above and
                 // below, and a different number on every other device.
                 .padding(PaneMetrics.edge)
+
+                // Below the last section, where a list of runners ends on this
+                // platform — the way Settings ends its accounts with "Add
+                // Account". The one thing the old runner menu offered that
+                // belongs to no runner, so it has no heading to live on. BELOW
+                // the grid, so it can never move a card a page is flying to.
+                if let onAdd = runnerSections.onAdd, search.isEmpty {
+                    Button(action: onAdd) {
+                        Label("Add Runner or Device…", systemImage: "plus")
+                            .frame(maxWidth: .infinity, minHeight: PaneMetrics.target)
+                    }
+                    .buttonStyle(.bordered)
+                    .opacity(chrome ? 1 : 0)
+                    .disabled(!chrome)
+                    .padding(.horizontal, PaneMetrics.edge)
+                    .padding(.bottom, PaneMetrics.edge)
+                    .accessibilityIdentifier("shell-add")
+                }
             }
         }
         .scrollDismissesKeyboard(.immediately)
@@ -1124,5 +1319,36 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                     // unlike the lift's it is passed through unnegated.
                     onPullEnded(down, value.velocity.height)
                 })
+    }
+}
+
+/// The platform's reorder container on iOS 27, and nothing before it.
+///
+/// Its own modifier because `reorderContainer` is iOS 27 API and the grid it
+/// goes on is not: an `if #available` has to sit somewhere, and in here it
+/// costs the grid nothing on 26.
+///
+/// One container over the whole grid with a collection per runner, rather than
+/// a container per section, because the platform decides which collection a
+/// card is over by where it is on screen and hands that back as
+/// `collectionID`. A card carried from one runner's section into another's
+/// therefore ARRIVES here — and is refused by `ShellRunnerSection.reorder`,
+/// which is where that rule is tested.
+private struct ShellReorderContainer: ViewModifier {
+    let drop: (_ sources: [String], _ before: String?, _ collection: String) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 27, *) {
+            content.reorderContainer(for: ShellCard.self, in: String.self) { difference in
+                let target: String?
+                switch difference.destination.position {
+                case .before(let id): target = id
+                case .end: target = nil
+                }
+                drop(difference.sources, target, difference.destination.collectionID)
+            }
+        } else {
+            content
+        }
     }
 }
