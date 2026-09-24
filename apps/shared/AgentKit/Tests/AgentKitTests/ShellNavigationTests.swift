@@ -1494,17 +1494,6 @@ struct ShellNavigationTests {
         let diff = ShellWorkspace(id: "f", name: "f", tabs: [Self.tab("f0", .unreadDiff)])
         #expect(diff.tabs[0].mark.attention == .toReview)
         #expect(diff.precedence == .unreadDiff, "a diff is not an agent asking for you")
-
-        // And the order they land in, which is what a person actually sees.
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "0", name: "quiet", tabs: [Self.tab("x", .idle)]),
-            diff,
-            done,
-            ShellWorkspace(id: "3", name: "blocked", tabs: [Self.tab("x", .needsYou)]),
-        ])
-        #expect(
-            fleet.overviewOrder().map { fleet.workspaces[$0].id } == ["d", "3", "f", "0"],
-            "done and blocked share the top rung, in fleet order; then the diff; then the quiet one")
     }
 
     /// An idle agent is not a stale one, and a workspace full of idle agents
@@ -1522,34 +1511,23 @@ struct ShellNavigationTests {
         #expect(gone.precedence == .working, "one tab we have not heard from is not the workspace")
     }
 
-    /// The overview is the fleet with the loud ones lifted, not a new
-    /// arrangement: equal precedence keeps fleet order.
-    @Test func theOverviewSortsByPrecedenceAndIsStable() {
-        let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "0", name: "working-a", tabs: [Self.tab("x", .working)]),
-            ShellWorkspace(id: "1", name: "needs", tabs: [Self.tab("x", .needsYou)]),
-            ShellWorkspace(id: "2", name: "working-b", tabs: [Self.tab("x", .working)]),
-            ShellWorkspace(id: "3", name: "stale", tabs: [Self.tab("x", .stale)]),
-            ShellWorkspace(id: "4", name: "diff", tabs: [Self.tab("x", .unreadDiff)]),
-            ShellWorkspace(id: "5", name: "needs-later", tabs: [Self.tab("x", .needsYou)]),
-        ])
-        #expect(fleet.overviewOrder() == [1, 5, 4, 3, 0, 2])
-    }
-
     /// Search is a substring over names, case- and diacritic-blind, and keeps
-    /// the precedence order it filters.
+    /// the order it filters — which is the runner's, not precedence's.
     @Test func searchFiltersByNameAndKeepsTheOrder() {
+        let runner = ShellRunnerLabel(id: "r", name: "r")
         let fleet = ShellFleet(workspaces: [
-            ShellWorkspace(id: "0", name: "feat/retries", tabs: [Self.tab("x", .working)]),
-            ShellWorkspace(id: "1", name: "fix/RETRY-storm", tabs: [Self.tab("x", .needsYou)]),
-            ShellWorkspace(id: "2", name: "chore/deps", tabs: [Self.tab("x", .working)]),
+            ShellWorkspace(id: "0", name: "feat/retries", runner: "r", tabs: [Self.tab("x", .working)]),
+            ShellWorkspace(
+                id: "1", name: "fix/RETRY-storm", runner: "r", tabs: [Self.tab("x", .needsYou)]),
+            ShellWorkspace(id: "2", name: "chore/deps", runner: "r", tabs: [Self.tab("x", .working)]),
         ])
-        #expect(fleet.overviewOrder(matching: "retr") == [1, 0])
-        #expect(fleet.overviewOrder(matching: "DEPS") == [2])
-        #expect(fleet.overviewOrder(matching: "nothing") == [])
-        #expect(
-            fleet.overviewOrder(matching: "   ") == fleet.overviewOrder(),
-            "a stray space must not empty the grid")
+        func order(_ query: String) -> [Int] {
+            fleet.runnerSections([runner], matching: query).first?.cards.map(\.index) ?? []
+        }
+        #expect(order("retr") == [0, 1])
+        #expect(order("DEPS") == [2])
+        #expect(order("nothing") == [])
+        #expect(order("   ") == [0, 1, 2], "a stray space must not empty the grid")
     }
 
     // MARK: - Hidden worktrees, and other runners
@@ -1568,28 +1546,25 @@ struct ShellNavigationTests {
                 id: "1", name: "put-away", isHidden: true, tabs: [Self.tab("x", .needsYou)]),
             ShellWorkspace(id: "2", name: "shown-b", tabs: [Self.tab("x", .working)]),
         ])
-        #expect(fleet.overviewOrder() == [0, 2])
         #expect(fleet.hiddenOrder() == [1])
         #expect(
             fleet.workspaces.count == 3,
             "hiding is a view preference; the workspace keeps its place in the fleet")
     }
 
-    /// Hiding must not reorder what is still showing. A hidden workspace that
-    /// outranks everything is exactly the case where a shared sort and a
-    /// separate one diverge.
-    @Test func theHiddenSectionUsesTheSameSortAndDoesNotDisturbTheRest() {
+    /// The hidden section keeps the runner's order too: nothing in the grid is
+    /// sorted by what an agent is doing.
+    @Test func theHiddenSectionKeepsFleetOrder() {
         let fleet = ShellFleet(workspaces: [
             ShellWorkspace(id: "0", name: "working", tabs: [Self.tab("x", .working)]),
             ShellWorkspace(
-                id: "1", name: "loud-but-hidden", isHidden: true,
-                tabs: [Self.tab("x", .needsYou)]),
+                id: "1", name: "quiet-hidden", isHidden: true, tabs: [Self.tab("x", .working)]),
             ShellWorkspace(id: "2", name: "diff", tabs: [Self.tab("x", .unreadDiff)]),
             ShellWorkspace(
-                id: "3", name: "quiet-hidden", isHidden: true, tabs: [Self.tab("x", .working)]),
+                id: "3", name: "loud-but-hidden", isHidden: true,
+                tabs: [Self.tab("x", .needsYou)]),
         ])
-        #expect(fleet.overviewOrder() == [2, 0])
-        #expect(fleet.hiddenOrder() == [1, 3], "the section sorts by precedence too")
+        #expect(fleet.hiddenOrder() == [1, 3], "the loud one is not lifted")
     }
 
     /// A worktree you hid is still a worktree you can ask for by name.
@@ -1599,14 +1574,13 @@ struct ShellNavigationTests {
             ShellWorkspace(
                 id: "1", name: "fix/RETRY-storm", isHidden: true, tabs: [Self.tab("x", .working)]),
         ])
-        #expect(fleet.overviewOrder(matching: "retr") == [0])
         #expect(fleet.hiddenOrder(matching: "retr") == [1])
         #expect(fleet.hiddenOrder(matching: "deps") == [])
     }
 
-    /// Another runner's group sorts its cards the way the live fleet sorts
-    /// its own, and leaves that runner's hidden worktrees out entirely.
-    @Test func aServerGroupSortsLikeTheFleetAndDropsHiddenWorktrees() {
+    /// Another runner's group keeps the order that runner had, the way a live
+    /// section does, and leaves that runner's hidden worktrees out entirely.
+    @Test func aServerGroupKeepsItsRunnersOrderAndDropsHiddenWorktrees() {
         let group = ShellServerGroup(
             id: "r1", name: "gpu-box-2",
             workspaces: [
@@ -1615,7 +1589,7 @@ struct ShellNavigationTests {
                 ShellWorkspace(
                     id: "c", name: "put-away", isHidden: true, tabs: [Self.tab("x", .needsYou)]),
             ])
-        #expect(group.order() == [1, 0])
+        #expect(group.order() == [0, 1], "the loud one is not lifted")
         #expect(group.order(matching: "work") == [0])
     }
 
@@ -1636,9 +1610,10 @@ struct ShellNavigationTests {
         #expect(arranged.map(\.name) == ["recent", "march", "never"])
     }
 
-    /// A header standing over no cards reads as a runner that has gone empty.
-    /// A search nothing on that runner matches must remove the header too.
-    @Test func aServerGroupWithNothingToShowIsNotDrawn() {
+    /// A runner with nothing to show still has a header — it is where that
+    /// runner's actions live — until a search is what emptied it: a header over
+    /// no cards during a search reads as a runner that has gone empty.
+    @Test func aServerGroupWithNothingToShowIsDrawnUntilASearchEmptiesIt() {
         let full = ShellServerGroup(
             id: "r1", name: "gpu-box-2",
             workspaces: [
@@ -1650,7 +1625,10 @@ struct ShellNavigationTests {
                 ShellWorkspace(
                     id: "b", name: "feat/queue", isHidden: true, tabs: [Self.tab("x", .working)])
             ])
-        #expect(ShellServerGroup.arrange([full, allHidden]).map(\.name) == ["gpu-box-2"])
+        #expect(
+            ShellServerGroup.arrange([full, allHidden]).map(\.name)
+                == ["eu-runner-1", "gpu-box-2"], "never seen, so by name")
+        #expect(ShellServerGroup.arrange([full, allHidden], matching: "queue").map(\.name) == ["gpu-box-2"])
         #expect(ShellServerGroup.arrange([full], matching: "queue").count == 1)
         #expect(ShellServerGroup.arrange([full], matching: "nothing").isEmpty)
     }

@@ -450,7 +450,15 @@ struct ShellWorkspace: Identifiable, Hashable {
         return resume
     }
 
-    /// Where this workspace sorts in the overview.
+    /// How loud this workspace is, as one rung.
+    ///
+    /// **Nothing sorts by this any more.** It was the overview's sort key, and
+    /// the overview is sectioned by runner in an order a person drags into
+    /// place now — a sort that lifted the loud ones would undo the drag the
+    /// next time an agent finished. The classification is kept, tested, because
+    /// it is the one place the attention rules below are written down and the
+    /// next surface that wants "which of these is asking for me" should read
+    /// it rather than restate it; delete it if nothing has by then.
     ///
     /// An empty workspace ranks as `working`, which is the "nothing to say"
     /// rank: it is not waiting on anybody, has no diff to read, and has no
@@ -1860,68 +1868,23 @@ extension ShellFleet {
 // MARK: - The overview
 
 extension ShellFleet {
-    /// The workspaces in the order the overview shows them, as indices into
-    /// `workspaces`.
-    ///
-    /// Indices and not values, because the current workspace's card is
-    /// outlined and "current" is an index — matching by id afterwards would be
-    /// a second way to say the same thing, and the two ways would eventually
-    /// disagree about a fleet holding two workspaces on one branch.
-    ///
-    /// **Stable.** Equal precedence keeps fleet order, so the overview is the
-    /// fleet with the loud ones lifted to the front rather than a new
-    /// arrangement to learn. See `rank`, which is where that is done.
-    /// **Hidden workspaces are not in it.** Hiding is a view preference the
-    /// daemon keeps per worktree, and the Mac has honored it in its sidebar
-    /// since the feature existed (`ContentView.swift:588-590`) — a phone that
-    /// drew them as ordinary cards was the one surface where hiding did
-    /// nothing at all. They are not gone, they are in `hiddenOrder`, which is
-    /// the section the grid puts them in.
-    func overviewOrder() -> [Int] {
-        rank(workspaces.indices.filter { !workspaces[$0].isHidden })
-    }
-
-    /// The hidden ones, in the same order, for the section that reveals them.
+    /// The hidden workspaces, in fleet order, for the section that reveals
+    /// them, as indices into `workspaces`.
     ///
     /// A section rather than a filter, which is the Mac's rule stated again:
     /// hiding is reversible, and something reversible needs a way back that is
     /// not a settings screen. See `HiddenWorktrees` on the Mac, which this is
-    /// the phone's half of.
+    /// the phone's half of. The shown ones are each runner's section — see
+    /// `runnerSections`.
+    ///
+    /// **Fleet order, and never precedence.** Everything in the grid used to be
+    /// sorted by what needed you, with the fleet's order as the tiebreak. The
+    /// grid is sectioned by runner now and a runner's order is something a
+    /// person drags into place, so a sort that lifted the loud ones would undo
+    /// the drag the next time an agent finished. `ShellWorkspace.precedence`
+    /// still classifies; nothing in the overview sorts by it.
     func hiddenOrder() -> [Int] {
-        rank(workspaces.indices.filter { workspaces[$0].isHidden })
-    }
-
-    /// Precedence, then fleet order. The one sort every list in the grid is
-    /// made with — the shown cards, the hidden section, and each other
-    /// runner's group — so revealing a section cannot reorder what was already
-    /// showing and no two sections can sort differently.
-    ///
-    /// **Stable.** Equal precedence keeps fleet order; `sorted(by:)` in Swift
-    /// is not guaranteed stable, hence the explicit tiebreak on the index.
-    ///
-    /// `static` and taking the workspaces, for the reason `matching` is:
-    /// `ShellServerGroup` holds workspaces that are not in any fleet and has
-    /// to sort them the same way.
-    static func rank(_ indices: [Int], of workspaces: [ShellWorkspace]) -> [Int] {
-        indices.sorted { a, b in
-            let pa = workspaces[a].precedence
-            let pb = workspaces[b].precedence
-            return pa == pb ? a < b : pa < pb
-        }
-    }
-
-    private func rank(_ indices: [Int]) -> [Int] {
-        ShellFleet.rank(indices, of: workspaces)
-    }
-
-    /// The same order, filtered by a search over workspace NAMES.
-    ///
-    /// Case- and diacritic-insensitive, and a substring rather than a prefix:
-    /// the names are branch-shaped (`feat/handle-retries-on-429`), so the word
-    /// somebody remembers is very often in the middle. An all-whitespace query
-    /// is an empty one — a stray space must not empty a grid of forty cards.
-    func overviewOrder(matching query: String) -> [Int] {
-        ShellFleet.matching(query, in: overviewOrder(), of: workspaces)
+        workspaces.indices.filter { workspaces[$0].isHidden }
     }
 
     /// The hidden ones a search matches.
@@ -2003,28 +1966,29 @@ struct ShellServerGroup: Identifiable, Hashable {
         self.workspaces = workspaces
     }
 
-    /// This group's cards, in the same order the live fleet's are in.
+    /// This group's cards, in the order the runner gave them.
     ///
-    /// Precedence first, then the order the runner gave them, and hidden ones
-    /// left out — the same three rules `ShellFleet.overviewOrder` follows,
-    /// because a grid where the sections sort differently is a grid you have
-    /// to read twice. Hidden ones are simply absent here rather than getting a
-    /// section of their own: the way back from hiding is on the runner the
-    /// worktree is on, and this section is not that runner.
+    /// The runner's own order and hidden ones left out — the same two rules a
+    /// live runner's section follows (`ShellFleet.runnerSections`), because a
+    /// grid where the sections sort differently is a grid you have to read
+    /// twice. Hidden ones are simply absent here rather than getting a section
+    /// of their own: the way back from hiding is on the runner the worktree is
+    /// on, and this section is not that runner.
     func order(matching query: String = "") -> [Int] {
-        let shown = ShellFleet.rank(
-            workspaces.indices.filter { !workspaces[$0].isHidden }, of: workspaces)
+        let shown = workspaces.indices.filter { !workspaces[$0].isHidden }
         return ShellFleet.matching(query, in: shown, of: workspaces)
     }
 
     /// The groups worth drawing, most recently seen first.
     ///
-    /// **A group with nothing to show is not a header.** An empty group is
-    /// either a runner whose worktrees are all hidden or, far more often, a
-    /// search that nothing in it matched — and a header standing over no cards
-    /// reads as a runner that has gone empty, which is a different and
-    /// alarming sentence. The same rule the live fleet follows: `content`
-    /// draws `ContentUnavailableView` rather than an empty grid.
+    /// **Every group while nothing is being searched for**, even one with
+    /// nothing to show: its header carries that runner's actions — switching
+    /// to it, and editing it — and those were a menu in the toolbar before the
+    /// grid had a header per runner. **A search drops a group it emptied**,
+    /// because a header standing over no cards while somebody is typing reads
+    /// as a runner that has gone empty, which is a different and alarming
+    /// sentence. The same rule the live sections follow; see
+    /// `ShellFleet.runnerSections`.
     ///
     /// Most recently seen first, then by name, so the order is stable across
     /// polls and puts the runner you were on ten minutes ago above the one you
@@ -2033,8 +1997,9 @@ struct ShellServerGroup: Identifiable, Hashable {
     static func arrange(_ groups: [ShellServerGroup], matching query: String = "")
         -> [ShellServerGroup]
     {
-        groups
-            .filter { !$0.order(matching: query).isEmpty }
+        let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return groups
+            .filter { !searching || !$0.order(matching: query).isEmpty }
             .sorted { a, b in
                 switch (a.lastSeen, b.lastSeen) {
                 case let (x?, y?) where x != y: return x > y
