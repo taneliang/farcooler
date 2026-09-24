@@ -455,10 +455,11 @@ struct AgentComposer: View {
     private func handleDrop(_ providers: [NSItemProvider]) {
         for provider in providers {
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { item, _ in
-                    guard let data = item as? Data,
-                        let url = URL(dataRepresentation: data, relativeTo: nil)
-                    else { return }
+                // `loadObject`, not `loadItem(forTypeIdentifier:)`, which the
+                // 27 SDKs deprecate. `URL` bridges, so this hands back the file
+                // URL itself rather than bytes to decode into one.
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.isFileURL else { return }
                     Task { @MainActor in attach(fileURL: url) }
                 }
             } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
