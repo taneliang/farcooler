@@ -34,11 +34,23 @@
 #
 # Any argument is passed to -only-testing. DEMO_HOST and SIMULATOR override the
 # defaults if you have moved the runner or want another device.
+#
+# SIMULATOR IS A NAME, NOT A RUNTIME. With no OS named, xcodebuild fills in
+# `OS:latest`, so `SIMULATOR="iPhone 17"` on a Mac with both the 26.5 and 27.0
+# runtimes installed runs on 27.0 — quietly, and the log only says so in the
+# destination line nobody reads. A run meant to prove the 26 path (the app's
+# deployment target) that does not name the OS has proved the newest one.
+# Name it with SIMULATOR_OS (not a bare OS, which other tools set):
+#
+#   SIMULATOR_OS=26.5 ./scripts/ios-ui-tests.sh FarCoolerUITests/ShellRunnerHeadingTests
+#
+# Unset, the destination is exactly what it always was.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 SIMULATOR="${SIMULATOR:-iPhone 17}"
+SIMULATOR_OS="${SIMULATOR_OS:-}"
 DEMO_HOST="${DEMO_HOST:-127.0.0.1:2222}"
 DEMO_USER="${DEMO_USER:-$(whoami)}"
 
@@ -55,7 +67,7 @@ done
 # invisible in xcodebuild's output — it surfaces four screens away as an app
 # that will not connect.
 echo "runner:    $DEMO_USER@$DEMO_HOST"
-echo "simulator: $SIMULATOR"
+echo "simulator: $SIMULATOR (OS: ${SIMULATOR_OS:-latest installed})"
 echo
 
 LOG="$(mktemp -t ios-ui-tests)"
@@ -72,7 +84,7 @@ env \
     xcodebuild test \
     -project apps/ios/FarCooler.xcodeproj \
     -scheme FarCooler \
-    -destination "platform=iOS Simulator,name=$SIMULATOR" \
+    -destination "platform=iOS Simulator,name=$SIMULATOR${SIMULATOR_OS:+,OS=$SIMULATOR_OS}" \
     ${ONLY[@]+"${ONLY[@]}"} 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 set -e
