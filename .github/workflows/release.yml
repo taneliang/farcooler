@@ -567,14 +567,30 @@ jobs:
             CODE_SIGNING_REQUIRED=YES \
             archive
 
-          xcodebuild -exportArchive \
-            -archivePath build/FarCooler.xcarchive \
-            -exportOptionsPlist apps/ios/ExportOptions.plist \
-            -exportPath build/export \
-            -allowProvisioningUpdates \
-            -authenticationKeyID "$APP_STORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+          # Up to three tries, for the same reason as canary.yml: the xcode-27
+          # preview runner has lost its network mid-export. Exporting is safe
+          # to repeat; the upload is not retried, since a second attempt after
+          # an upload that landed would be refused as a duplicate build.
+          for attempt in 1 2 3; do
+            rm -rf build/export
+            if xcodebuild -exportArchive \
+              -archivePath build/FarCooler.xcarchive \
+              -exportOptionsPlist apps/ios/ExportOptions.plist \
+              -exportPath build/export \
+              -allowProvisioningUpdates \
+              -authenticationKeyID "$APP_STORE_KEY_ID" \
+              -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
+              -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+            then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::export failed three times"
+              exit 1
+            fi
+            echo "::warning::export attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
 
           xcrun altool --upload-app -f build/export/FarCooler.ipa -t ios \
             --apiKey "$APP_STORE_KEY_ID" --apiIssuer "$APP_STORE_ISSUER_ID"

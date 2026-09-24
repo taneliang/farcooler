@@ -208,14 +208,35 @@ jobs:
             CODE_SIGN_IDENTITY="Apple Development" \
             CODE_SIGNING_REQUIRED=YES
 
-          xcodebuild -exportArchive \
-            -archivePath build/FarCooler.xcarchive \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath build/export \
-            -allowProvisioningUpdates \
-            -authenticationKeyID "$APP_STORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+          # Up to three tries, because the xcode-27 preview runner has lost its
+          # network mid-export: on 2026-09-24 it failed with "The Internet
+          # connection appears to be offline", then "No profiles for
+          # 'com.farcooler.ios.canary' were found", because the profile could
+          # not be downloaded. The same workflow passed on the next push.
+          # Exporting only reads the archive and fetches profiles, so
+          # repeating it is safe. The upload below is deliberately not
+          # retried: if an upload landed and then reported an error, a second
+          # attempt would be refused as a duplicate build.
+          for attempt in 1 2 3; do
+            rm -rf build/export
+            if xcodebuild -exportArchive \
+              -archivePath build/FarCooler.xcarchive \
+              -exportOptionsPlist ExportOptions.plist \
+              -exportPath build/export \
+              -allowProvisioningUpdates \
+              -authenticationKeyID "$APP_STORE_KEY_ID" \
+              -authenticationKeyIssuerID "$APP_STORE_ISSUER_ID" \
+              -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
+            then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::export failed three times"
+              exit 1
+            fi
+            echo "::warning::export attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
 
           xcrun altool --upload-app -f build/export/FarCooler.ipa -t ios \
             --apiKey "$APP_STORE_KEY_ID" --apiIssuer "$APP_STORE_ISSUER_ID"
