@@ -1011,9 +1011,23 @@ mod tests {
         // Until BOTH are visible, or a slow first `lsof` that has only seen
         // the guardian would pass this for the wrong reason.
         let both = poll_until(Duration::from_secs(5), || {
+            let t = std::time::Instant::now();
             let open = open_files_for_pid(pid);
+            eprintln!("DIAG lsof took {:?}, rollouts {:?}", t.elapsed(), open.iter().filter(|p| is_codex_rollout(p)).collect::<Vec<_>>());
             (open.iter().filter(|p| is_codex_rollout(p)).count() == 2).then_some(open)
         });
+        if both.is_none() {
+            let sh = |c: &str| {
+                let o = std::process::Command::new("sh").arg("-c").arg(c).output().unwrap();
+                format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))
+            };
+            eprintln!("DIAG subtree {:?}", process_subtree(pid));
+            eprintln!("DIAG raw lsof:\n{}", sh(&format!("lsof -p {pid} -Fn; echo exit=$?")));
+            eprintln!("DIAG lsof plain:\n{}", sh(&format!("lsof -p {pid}")));
+            eprintln!("DIAG proc fd:\n{}", sh(&format!("ls -l /proc/{pid}/fd; cat /proc/{pid}/cmdline | tr '\\0' ' '; echo; readlink /proc/{pid}/exe; ls -l /proc/self/fd")));
+            eprintln!("DIAG sh -c self:\n{}", sh(&format!("exec 3<{:?}\nexec 4<{:?}\nls -l /proc/self/fd /dev/fd", guardian, main)));
+            eprintln!("DIAG ls dir:\n{}", sh(&format!("ls -la {:?}; readlink -f /bin/sh; dpkg -l dash lsof | tail -2", rollout_dir)));
+        }
         let found = find_codex(Some(pid));
 
         let _ = child.kill();
