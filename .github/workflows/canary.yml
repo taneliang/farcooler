@@ -58,13 +58,22 @@ jobs:
 
   ios:
     name: iOS (internal TestFlight)
-    runs-on: macos-latest
+    # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
+    # Xcode 27 is only on this label, which GitHub calls a public preview.
+    # To go back, put `macos-latest` here again and drop the check step.
+    runs-on: xcode-27
     # Without the App Store key this cannot upload anything. Through `vars`, not
     # `secrets`: the `secrets` context is unavailable in an `if`, so
     # `secrets.X != ''` compares '' to '' and is ALWAYS false — it fails closed,
     # which is exactly why it looks like it works.
     if: vars.CANARY_TESTFLIGHT == 'true'
     steps:
+      # The label promises Xcode 27. This makes the log say which one, and
+      # stops the job if the image ever hands it a different major.
+      - name: Check the runner has Xcode 27
+        run: |
+          xcodebuild -version
+          xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
       - uses: actions/checkout@v4
         with:
           # `git rev-list --count HEAD` is the App Store build number, and a
@@ -229,7 +238,10 @@ jobs:
   # want an installable one.
   macos:
     name: macOS (signed disk image)
-    runs-on: macos-latest
+    # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
+    # Xcode 27 is only on this label, which GitHub calls a public preview.
+    # To go back, put `macos-latest` here again and drop the check step.
+    runs-on: xcode-27
     # Serialised behind the Linux build, which is a real cost paid for a real
     # reason — release.yml pays it too, and says why at length: the app carries
     # those binaries, so a Mac job that started before they existed would build
@@ -243,6 +255,12 @@ jobs:
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
       HAS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY != '' }}
     steps:
+      # The label promises Xcode 27. This makes the log say which one, and
+      # stops the job if the image ever hands it a different major.
+      - name: Check the runner has Xcode 27
+        run: |
+          xcodebuild -version
+          xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
