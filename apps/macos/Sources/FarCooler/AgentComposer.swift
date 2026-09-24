@@ -563,20 +563,26 @@ struct AgentComposer: View {
                 // submenu is unusable, which makes every option inside it
                 // unreachable. Sections say the same thing (this group of
                 // choices answers that question) in a control that works.
+                //
+                // Each section is an inline `Picker`, whose label becomes the
+                // section heading and whose selection is the menu item's own
+                // on-state. It used to be a `Label` with a "checkmark" symbol,
+                // which is an item IMAGE, and macOS 27 hides menu item images
+                // by default for anything linked on 26 or later: the menu kept
+                // working and stopped saying which option was current.
                 ForEach(overflowOptions) { option in
-                    Section(option.name) {
+                    Picker(
+                        option.name,
+                        selection: Binding(
+                            get: { option.currentValue },
+                            set: { choice in Task { await stream.setConfig(option.id, choice) } }
+                        )
+                    ) {
                         ForEach(option.options) { choice in
-                            Button {
-                                Task { await stream.setConfig(option.id, choice.id) }
-                            } label: {
-                                if choice.id == option.currentValue {
-                                    Label(choice.name, systemImage: "checkmark")
-                                } else {
-                                    Text(choice.name)
-                                }
-                            }
+                            Text(choice.name).tag(choice.id)
                         }
                     }
+                    .pickerStyle(.inline)
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
