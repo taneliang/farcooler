@@ -553,6 +553,10 @@ UI_TEST_SOURCES = [
     # cannot skip itself green when the demo daemon is down.
     "AgentDraftTests.swift",
     "ShellGestureTests.swift",
+    # The overview's runner headings and a drag inside a runner's section.
+    # Needs no runner: the harness answers a drop in the runner's place, so it
+    # cannot skip itself green when the demo daemon is down.
+    "ShellRunnerHeadingTests.swift",
     # Photographs the terminal renderer's own fixture and compares cells. Needs
     # no runner: the grid it draws is built in the app, so this one cannot skip
     # itself green when the demo daemon is down.

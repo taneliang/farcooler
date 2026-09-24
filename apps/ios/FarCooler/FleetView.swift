@@ -341,7 +341,8 @@ struct FleetView: View {
     /// three instead, in the same place with the same behavior. The bar is what
     /// makes each of them a screen you can leave. It is under these three and
     /// nothing else now: the connected screen is the shell, which is full bleed
-    /// and puts the same menu in its overview's toolbar. See `RunnerMenu`.
+    /// and puts each runner's actions on that runner's heading in the
+    /// overview. See `RunnerMenu`, and `ShellScreen.runnerActions`.
     private func escapable<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -385,8 +386,8 @@ struct FleetView: View {
     ///
     /// This used to be the inbox — a list of what on this runner was waiting on
     /// a person — with the shell behind a debug flag beside it. Both are gone:
-    /// the shell's overview IS the fleet screen — searchable,
-    /// precedence-sorted, needs-you first — and a second screen answering the
+    /// the shell's overview IS the fleet screen — searchable, a section per
+    /// runner in the order each runner keeps — and a second screen answering the
     /// same question with rows instead of cards was a second thing to keep
     /// true.
     private var connected: some View {
@@ -423,9 +424,9 @@ struct FleetView: View {
 /// escape hatch, and it was attached to the one screen you cannot reach when
 /// you need an escape hatch — the connected one. It is under the connecting,
 /// approval and failure screens now and under nothing else: the connected app
-/// is the shell, which is full bleed and has no room for a strip, and the same
-/// menu is a toolbar item on the shell's overview instead. See
-/// `RunnerMenu`, which is the half both of them share.
+/// is the shell, which is full bleed and has no room for a strip, and whose
+/// overview has a heading per runner that carries the same actions for that
+/// runner. See `RunnerMenu`, which is this bar's half.
 struct HostSwitcherBar: View {
     @ObservedObject var hosts: RunnerStore
     /// The connection whose state the chip shows, and which its tap retries.
@@ -465,17 +466,16 @@ struct HostSwitcherBar: View {
 /// Split out of `HostSwitcherBar` when the connected app stopped having a strip
 /// to put one on. The shell is full bleed: the only chrome it has is a piece of
 /// glass at the bottom that IS the workspace, and a second bar under it would
-/// be a second thing competing for the same edge. So the connected app carries
-/// this menu as a toolbar item on the overview — the screen that is the fleet,
-/// and therefore the screen that should say whose fleet it is — while the three
-/// pre-connected phases go on carrying the bar, because a screen with no fleet
-/// has no overview to put anything on.
+/// be a second thing competing for the same edge. The connected app carried
+/// this menu as a toolbar item on the overview for a while, and no longer does:
+/// the overview lists every runner, a section each, so a selector choosing
+/// which runner the screen was "about" had nothing left to choose. Each runner's
+/// actions are on its own heading there (`ShellScreen.runnerActions`), and this
+/// menu is what the three pre-connected phases carry, because a screen with no
+/// fleet has no overview to put anything on.
 ///
-/// One type rather than two copies, and that is the whole reason it exists.
-/// This is the app's only way to reach another runner, to correct the one it is
-/// on, and to reach this device's own key; two menus that had drifted apart
-/// would mean the door out of a dead connection and the door out of a live one
-/// offering different things.
+/// The door out of a dead connection. If an entry is added here, the headings
+/// want the same one — they are the door out of a live one.
 struct RunnerMenu: View {
     @ObservedObject var hosts: RunnerStore
     /// The runner this menu is standing over, for the settings sheet it opens.

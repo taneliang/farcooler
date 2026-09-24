@@ -607,8 +607,10 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// deliberate: `ShellOverview` is the grid, and the grid is the same grid
     /// whether it is standing on a real runner or on `ShellHarness`'s canned
     /// fleet. What goes here is everything that is a fact about THIS app —
-    /// which runner you are looking at, and the two ways of starting work —
-    /// and none of it means anything to a fixture. See
+    /// its settings, and the two ways of starting work — and none of it means
+    /// anything to a fixture. Which runner is NOT here any more: that was a
+    /// selector over a grid that lists every runner, and each runner's own
+    /// actions are on its heading now; see `runnerSections`. See
     /// `ShellScreen.overviewActions`, which is the only caller that passes
     /// any.
     ///

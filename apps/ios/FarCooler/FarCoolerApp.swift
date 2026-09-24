@@ -86,9 +86,9 @@ func UIDeviceName() -> String {
 ///
 /// So the host list appears exactly when it is the thing to do: when there are
 /// no hosts. Once there is one, the app lands on it, and switching runners
-/// moves to where you already go to switch terminals — see
-/// `RunnerMenu` in the shell overview's toolbar, which is the phone's
-/// equivalent of the Mac's sidebar.
+/// moves to where you already go to switch terminals — the shell overview,
+/// sectioned by runner with each runner's actions on its heading, which is the
+/// phone's equivalent of the Mac's sidebar.
 struct RootView: View {
     @StateObject private var hosts = RunnerStore()
 

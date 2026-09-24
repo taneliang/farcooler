@@ -3329,8 +3329,9 @@ private struct WorkingRow: View {
 /// name and leaving somebody to find out later that no runner was involved. The
 /// glass around it is real; only the words are canned.
 ///
-/// The runner menu in the overview's toolbar stands on an empty `RunnerStore`
-/// and says "No Runner", which is the truth about this launch.
+/// The overview's runner headings stand on an empty `RunnerStore`, so the
+/// fixture's section offers nothing to switch to, which is the truth about
+/// this launch.
 ///
 /// The Diff tab shows no unread ring: that comes from `Connection.inbox`, which
 /// is a separate round trip this stands nothing in for.

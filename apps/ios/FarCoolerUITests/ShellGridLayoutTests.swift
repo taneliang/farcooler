@@ -47,9 +47,9 @@ final class ShellGridLayoutTests: XCTestCase {
 
     /// The top row of cards, left to right.
     ///
-    /// Found by `minY` rather than by name: the grid is sorted by precedence,
-    /// so which workspaces are in the first row is a fact about the fixture's
-    /// marks and not something this file should have an opinion about.
+    /// Found by `minY` rather than by name: which workspaces are in the first
+    /// row is a fact about the fixture's order — which a drag can change — and
+    /// not something this file should have an opinion about.
     private func topRow(_ app: XCUIApplication) throws -> [XCUIElement] {
         let cards = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shell-card-"))

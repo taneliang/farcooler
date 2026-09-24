@@ -180,8 +180,10 @@ struct ShellHarness: View {
                     // count is the point rather than the stride.
                     //
                     // `index % 4` put an identical tail on every card in a
-                    // precedence group, and the overview sorts BY precedence —
-                    // so the grid read as forty cards all saying one sentence.
+                    // precedence group, and the overview sorted BY precedence
+                    // then — so the grid read as forty cards all saying one
+                    // sentence. It keeps each runner's order now, and the
+                    // coprime cycles are still what keep neighbours distinct.
                     // A different stride does not fix that: any linear
                     // function of `index` is CONSTANT within a residue class
                     // mod 4, so as long as the two cycles share a length the
