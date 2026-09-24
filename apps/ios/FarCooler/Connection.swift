@@ -822,6 +822,13 @@ final class Connection: ObservableObject {
             // which the app is connected and knows nothing.
             hasFleet = true
 
+            // What this daemon can do, asked once per connection, on its first
+            // fleet. The overview reads it to decide whether a runner's cards
+            // can be dragged — `workspace_order` — and until now nothing on
+            // the phone asked unless somebody opened Settings. A no-op once
+            // answered, and it swallows its own failure.
+            if daemon == nil { await loadDaemonBuild() }
+
             // One more poll has landed.
             //
             // Not a second clock and not a timer: a counter on the ONE loop
@@ -1833,10 +1840,9 @@ final class Connection: ObservableObject {
     /// them was a harness that drew none of that chrome. See
     /// `AgentLayoutHarness`.
     ///
-    /// `.connected` deliberately: the link chip in the overview's toolbar is
-    /// drawn only when the link is NOT healthy, and a harness left `.connecting`
-    /// would put a "reconnecting" chip on every screenshot of a screen whose
-    /// runner is fine.
+    /// `.connected` deliberately: the runner's heading in the overview says
+    /// how its link is, and a harness left `.connecting` would put
+    /// "Connecting" over every screenshot of a screen whose runner is fine.
     func standIn(on fleet: Fleet) {
         self.fleet = fleet
         hasFleet = true

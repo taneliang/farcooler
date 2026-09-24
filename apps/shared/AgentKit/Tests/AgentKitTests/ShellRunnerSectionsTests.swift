@@ -15,11 +15,11 @@ import Testing
 /// forward again a round trip later.
 struct ShellRunnerSectionsTests {
     private static func card(
-        _ id: String, on runner: String?, hidden: Bool = false, keepsOrder: Bool = true,
+        _ id: String, on runner: String?, hidden: Bool = false,
         loud: Bool = false
     ) -> ShellWorkspace {
         ShellWorkspace(
-            id: id, name: id, isHidden: hidden, runner: runner, keepsOrder: keepsOrder,
+            id: id, name: id, isHidden: hidden, runner: runner,
             tabs: [
                 ShellTab(
                     id: "\(id)/0", title: "claude",
@@ -30,8 +30,8 @@ struct ShellRunnerSectionsTests {
             ])
     }
 
-    private static let laptop = ShellRunnerLabel(id: "L", name: "laptop")
-    private static let gpu = ShellRunnerLabel(id: "G", name: "gpu-box-2")
+    private static let laptop = ShellRunnerLabel(id: "L", name: "laptop", keepsOrder: true)
+    private static let gpu = ShellRunnerLabel(id: "G", name: "gpu-box-2", keepsOrder: true)
 
     /// Two runners' worktrees, deliberately INTERLEAVED in the fleet.
     ///
@@ -120,19 +120,65 @@ struct ShellRunnerSectionsTests {
 
     /// The write has nowhere to go, so the card must not pretend it went.
     @Test func aRunnerThatIsNotAnsweringCannotBeReordered() {
-        let asleep = ShellRunnerLabel(id: "L", name: "laptop", isAnswering: false)
+        let asleep = ShellRunnerLabel(
+            id: "L", name: "laptop", isAnswering: false, keepsOrder: true)
         #expect(!Self.fleet().runnerSections([asleep])[0].canReorder)
     }
 
-    /// A runner too old to store an order sends no ordinal, and it would
-    /// accept nothing either: the drag would be put back on the next poll with
-    /// no error anywhere. See `farcooler_protocol::capability::WORKSPACE_ORDER`.
+    /// A runner that does not keep an order — no `workspace_order` in its
+    /// capabilities — draws a section with no drag in it. Which runners those
+    /// are is `ShellRunnerLabel.keepsOrder(daemon:)`, tested below.
     @Test func aRunnerThatStoresNoOrderCannotBeReordered() {
-        let fleet = ShellFleet(workspaces: [
-            Self.card("a", on: "L", keepsOrder: false),
-            Self.card("b", on: "L", keepsOrder: false),
-        ])
-        #expect(!fleet.runnerSections([Self.laptop])[0].canReorder)
+        let old = ShellRunnerLabel(id: "L", name: "laptop", keepsOrder: false)
+        #expect(!Self.fleet().runnerSections([old])[0].canReorder)
+    }
+
+    /// Two worktrees as `Session::fleet` puts them on the wire for a runner
+    /// that predates `workspace_order`.
+    ///
+    /// **`ordinal` is PRESENT, and 0.** It is a proto3 scalar with no
+    /// presence, prost decodes an old daemon's silence as 0, and
+    /// `crates/client/src/session.rs` emits `"ordinal": w.ordinal`
+    /// unconditionally — so "no ordinal" is not a thing the phone ever sees,
+    /// and a rule that waited for one would offer every old runner a drag.
+    private static func wire(ordinals: [Int]) throws -> [Workspace] {
+        let rows = ordinals.enumerated().map { index, ordinal in
+            """
+            {"id": "w\(index)", "short": "w\(index)", "task": "t\(index)", "branch": "b\(index)",
+             "state": "ready", "ordinal": \(ordinal), "terminals": []}
+            """
+        }
+        return try JSONDecoder().decode(
+            [Workspace].self, from: Data("[\(rows.joined(separator: ","))]".utf8))
+    }
+
+    /// **An old runner, all zeros and no `workspace_order`, is not offered a
+    /// drag.** It would accept nothing — `workspace.reorder` is unknown to it —
+    /// and the card would spring back with no error anywhere.
+    @Test func aRunnerWithoutTheWorkspaceOrderCapabilityKeepsNoOrder() throws {
+        let old = DaemonBuild(
+            version: "0.1.0+old", matches: true, platform: "macos",
+            capabilities: ["workspaces", "terminals", "watching"])
+        let workspaces = try Self.wire(ordinals: [0, 0])
+        #expect(
+            workspaces.allSatisfy { $0.ordinal == 0 },
+            "an old runner's ordinals arrive, as 0 — there is no absence to read")
+        #expect(!ShellRunnerLabel.keepsOrder(daemon: old))
+    }
+
+    /// The capability is the whole answer, and a runner nobody has asked yet
+    /// is refused until it has been asked rather than offered a drag on a
+    /// guess.
+    @Test func theWorkspaceOrderCapabilityIsWhatDecides() {
+        let new = DaemonBuild(
+            version: "0.1.0+new", matches: true, platform: "macos",
+            capabilities: ["workspaces", "terminals", "workspace_order"])
+        #expect(ShellRunnerLabel.keepsOrder(daemon: new))
+        #expect(!ShellRunnerLabel.keepsOrder(daemon: nil))
+        // A daemon so old it answered no capabilities at all is read as the
+        // two features that existed then — which does not include this.
+        let ancient = DaemonBuild(version: "0.0.1", matches: true, platform: "macos")
+        #expect(!ShellRunnerLabel.keepsOrder(daemon: ancient))
     }
 
     @Test func aSectionOfOneHasNothingToReorder() {

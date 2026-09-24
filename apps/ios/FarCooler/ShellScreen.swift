@@ -270,9 +270,6 @@ struct ShellFleetMap {
                 // runner a drag in that section is sent to. The runner's ID,
                 // not `server`: that is a label, and nil on a one-runner grid.
                 runner: runner.uuidString,
-                // A runner that stores an order sends an ordinal; one too old
-                // to sends nothing, and a drag against it must not be offered.
-                keepsOrder: workspace.ordinal != nil,
                 tabs: tabs),
             refs
         )
@@ -1245,7 +1242,9 @@ struct ShellScreen: View {
             ShellRunnerLabel(
                 id: runner.host.id.uuidString, name: runner.host.label,
                 isAnswering: runner.connection.phase == .connected,
-                detail: Self.linkWord(runner.connection.phase))
+                detail: Self.linkWord(runner.connection.phase),
+                // Asked of the runner as a whole — see the rule's own note.
+                keepsOrder: ShellRunnerLabel.keepsOrder(daemon: runner.connection.daemon))
         }
     }
 

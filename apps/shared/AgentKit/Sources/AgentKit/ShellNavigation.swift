@@ -411,19 +411,11 @@ struct ShellWorkspace: Identifiable, Hashable {
     /// a drag's request both have to name the machine a worktree is actually
     /// on. See `ShellFleet.runnerSections`.
     var runner: String?
-    /// Whether that runner keeps an order for this worktree.
-    ///
-    /// The daemon's `ordinal`, reduced to the one fact the phone needs from
-    /// it: a runner too old to store an order sends none, and a drag against
-    /// it would be accepted by nothing and put back on the next poll with no
-    /// error anywhere. False is the refusing answer, so a fixture or a runner
-    /// that says nothing gets no drag. See `ShellRunnerSection.canReorder`.
-    var keepsOrder: Bool
 
     init(
         id: String, name: String, server: String? = nil,
         tail: [String] = [], resume: Int? = nil, isHidden: Bool = false,
-        isPrimaryCheckout: Bool = false, runner: String? = nil, keepsOrder: Bool = false,
+        isPrimaryCheckout: Bool = false, runner: String? = nil,
         tabs: [ShellTab]
     ) {
         self.id = id
@@ -435,7 +427,6 @@ struct ShellWorkspace: Identifiable, Hashable {
         self.isHidden = isHidden
         self.isPrimaryCheckout = isPrimaryCheckout
         self.runner = runner
-        self.keepsOrder = keepsOrder
     }
 
     /// The tab a deliberate arrival lands on: the remembered one where it

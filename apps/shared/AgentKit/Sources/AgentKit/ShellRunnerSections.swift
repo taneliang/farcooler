@@ -38,6 +38,28 @@ struct ShellRunnerLabel: Identifiable, Hashable, Sendable {
     /// One line about how the link is, for the header: "Connected",
     /// "Reconnecting". Nil draws nothing, which is what a fixture says.
     var detail: String? = nil
+    /// Whether this runner keeps an order a drag can write to. See
+    /// `keepsOrder(daemon:)`. False is the refusing answer, so a fixture or a
+    /// runner that has said nothing gets no drag.
+    var keepsOrder: Bool = false
+
+    /// Whether a runner running this build keeps an order: whether it
+    /// advertises `workspace_order` (`farcooler_protocol::capability`).
+    ///
+    /// **The capability and never the ordinals.** `ordinal` is a proto3 scalar
+    /// with no presence, prost decodes an old daemon's silence as 0, and
+    /// `Session::fleet` puts `"ordinal"` on every workspace regardless — so a
+    /// runner too old to store an order looks, on the wire, exactly like a new
+    /// one whose ranks happen to be 0. This used to read `ordinal != nil`,
+    /// which was therefore true for every runner there has ever been, and an
+    /// old runner was offered a drag it answers with "unknown method" and a
+    /// card that springs back with no error anywhere.
+    ///
+    /// Nil — a runner nobody has asked yet — is refused, not guessed at.
+    /// `Connection.refresh` asks once per connection, on its first fleet.
+    static func keepsOrder(daemon: DaemonBuild?) -> Bool {
+        daemon?.can("workspace_order") ?? false
+    }
 }
 
 /// One card in a section: which worktree, by the id that survives a poll, and
@@ -66,8 +88,10 @@ struct ShellRunnerSection: Identifiable, Hashable {
     ///   drop among a subset is a drop whose meaning depends on cards nobody
     ///   can see.
     /// - **The runner is answering.** Otherwise the write has nowhere to go.
-    /// - **The runner keeps an order.** A runner too old to store one would
-    ///   accept nothing and put the card back on the next poll with no error.
+    /// - **The runner keeps an order**, which is its `workspace_order`
+    ///   capability — see `ShellRunnerLabel.keepsOrder(daemon:)`. A runner too
+    ///   old to store one would refuse the call and the card would spring back
+    ///   with no error.
     /// - **There are two cards.** One card has nowhere else to be.
     var canReorder: Bool
 
@@ -222,7 +246,7 @@ extension ShellFleet {
             }
             let canReorder =
                 !searching && runner.isAnswering && shown.count > 1
-                && shown.allSatisfy { workspaces[$0].keepsOrder }
+                && runner.keepsOrder
             return ShellRunnerSection(
                 runner: runner,
                 cards: shown.map { ShellCard(id: workspaces[$0].id, index: $0) },

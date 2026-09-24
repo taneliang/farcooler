@@ -64,7 +64,7 @@ struct ShellHarness: View {
                 // least reliably produces.
                 openingOnOverview: CommandLine.arguments.contains("-shell-overview"),
                 runnerSections: ShellOverviewRunners(
-                    live: [ShellRunnerLabel(id: Self.runner, name: "this-mac")],
+                    live: [ShellRunnerLabel(id: Self.runner, name: "this-mac", keepsOrder: true)],
                     elsewhere: Self.elsewhere,
                     // A menu on each heading, so the heading is the height it
                     // is in the app and the grid under it lands where it does
@@ -207,10 +207,9 @@ struct ShellHarness: View {
                     // or forty) is also what a real runner looks like — a
                     // repository has one checkout and many worktrees.
                     isPrimaryCheckout: index == 0,
-                    // One runner, which keeps an order: the grid draws one
-                    // section and a drag inside it is offered.
+                    // One runner: the grid draws one section. It keeps an
+                    // order — see the label below — so a drag is offered.
                     runner: Self.runner,
-                    keepsOrder: true,
                     tabs: (0..<tabs).map { tab in
                         ShellTab(
                             id: "ws-\(index)-tab-\(tab)",
