@@ -196,16 +196,33 @@ final class ShellBoardTests: XCTestCase {
             throw XCTSkip("The shell never rendered against \(user)@\(host); run ./scripts/demo-host.sh.")
         }
 
-        // Up past the last row, which is the only way into the overview.
+        // Up past the last row, which is the only way into the overview. The
+        // app reopens on whatever tab it was left on, and on a terminal the
+        // keyboard can be up with the bar riding on it, so it is put away
+        // first. Then a held lift, and if that did not arrive, a fling —
+        // `ShellGestureTests.flickBar`'s velocity, for its reason: a
+        // synthesized `.fast` is whatever the simulator negotiates.
         let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
-        for _ in 0..<3 where probe(app, "shell-state")["overview"] != "1" {
+        for attempt in 0..<4 where probe(app, "shell-state")["overview"] != "1" {
+            let hide = app.buttons[XCTestCase.terminalHideKeyboard]
+            if hide.exists, hide.isHittable { hide.tap() }
+            Thread.sleep(forTimeInterval: 0.5)
             let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            from.press(
-                forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -700)),
-                withVelocity: .slow, thenHoldForDuration: 0.5)
+            if attempt % 2 == 0 {
+                from.press(
+                    forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -700)),
+                    withVelocity: .slow, thenHoldForDuration: 0.5)
+            } else {
+                from.press(
+                    forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -400)),
+                    withVelocity: XCUIGestureVelocity(rawValue: 12000), thenHoldForDuration: 0)
+            }
+            Thread.sleep(forTimeInterval: 1)
         }
-        XCTAssertEqual(probe(app, "shell-state")["overview"], "1", "never reached the overview")
+        XCTAssertEqual(
+            probe(app, "shell-state")["overview"], "1",
+            "never reached the overview: \(probe(app, "shell-state"))")
 
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shell-board-"))
         // A failure and not a skip, once the runner has answered: the demo
