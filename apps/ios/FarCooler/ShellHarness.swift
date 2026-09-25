@@ -44,6 +44,13 @@ struct ShellHarness: View {
     /// request, applied here in its place.
     @State private var fleet = Self.fleet
 
+    /// The board a Board row opened, the tab its Agent button asked for, and
+    /// the tab being handed to the shell. `-shell-board` only; see
+    /// `HarnessBoard`, and `ShellScreen`'s `boardJump`, which this mirrors.
+    @State private var boardOpen = false
+    @State private var boardJump: String?
+    @State private var request: String?
+
     var body: some View {
         ZStack {
             // A ground for the glass to be glass against. The panes are text
@@ -63,8 +70,13 @@ struct ShellHarness: View {
                 // is exactly the state a screenshot most wants and a script
                 // least reliably produces.
                 openingOnOverview: CommandLine.arguments.contains("-shell-overview"),
+                request: $request,
                 runnerSections: ShellOverviewRunners(
                     live: [ShellRunnerLabel(id: Self.runner, name: "this-mac", keepsOrder: true)],
+                    // `-shell-board` puts a Board row over this runner's
+                    // cards; see `HarnessBoard`.
+                    boards: { _ in HarnessBoard.rows },
+                    onOpenBoard: { _, _ in boardOpen = true },
                     elsewhere: Self.elsewhere,
                     // A menu on each heading, so the heading is the height it
                     // is in the app and the grid under it lands where it does
@@ -91,6 +103,24 @@ struct ShellHarness: View {
             }
         }
         .preferredColorScheme(.dark)
+        // The production sheet, over canned rows: the same `TaskBoardView`
+        // `ShellScreen` presents, and the same close-then-land order.
+        .sheet(
+            isPresented: $boardOpen,
+            onDismiss: {
+                request = boardJump
+                boardJump = nil
+            }
+        ) {
+            TaskBoardView(
+                name: "overnight", board: HarnessBoard.board, unread: false,
+                speaksOfAgents: true, agents: HarnessBoard.agents(for:),
+                onJump: { agent in
+                    boardJump = agent.id
+                    boardOpen = false
+                },
+                onRefresh: {}, onDone: { boardOpen = false })
+        }
     }
 
     /// The review pane over `ChangesLayoutHarness`'s own canned change set, or
@@ -355,6 +385,87 @@ struct ShellHarness: View {
     ]
 
     private static let agents = ["claude", "codex", "shell", "aider"]
+}
+
+/// A board for `-shell-board`: one repository's worth of cards, and the
+/// harness's tabs standing in for the panes working them.
+///
+/// The Board row's counts come out of `RunnerBoards.rows` over these, not out
+/// of a literal, so what the harness draws is what the rule decides. An Agent
+/// button's id is a harness TAB id, which is what `ShellRootView.request`
+/// takes; in the app it is a terminal id and `ShellScreen.requestedTab` turns
+/// it into one.
+enum HarnessBoard {
+    static var isRequested: Bool { CommandLine.arguments.contains("-shell-board") }
+
+    /// A pane in the harness fleet, working a task or not.
+    struct Pane: TaskBoardPane {
+        var boardTaskID: String?
+        var boardState = "running"
+        var runsAgent = true
+        var tab: String
+        var title: String
+    }
+
+    static let panes: [Pane] = [
+        Pane(boardTaskID: "t-19", tab: "ws-1-tab-1", title: "claude in feat/queue-drain"),
+        Pane(boardTaskID: "t-20", tab: "ws-2-tab-1", title: "claude in fix/token-refresh"),
+        Pane(boardTaskID: "t-20", tab: "ws-2-tab-2", title: "codex in fix/token-refresh"),
+        // Dispatched, and its agent has gone: back at a shell, still running.
+        Pane(boardTaskID: "t-21", runsAgent: false, tab: "ws-3-tab-0", title: "shell"),
+    ]
+
+    private static func row(
+        _ n: Int, _ title: String, _ status: TaskStatus, _ acceptance: [Bool],
+        age: TimeInterval = 600
+    ) -> TaskRow {
+        TaskRow(
+            id: "t-\(n)", key: "-\(n)", title: title, status: status,
+            statusSince: Date().addingTimeInterval(-age),
+            acceptance: acceptance.enumerated().map {
+                TaskAcceptanceLine(id: "a\(n)-\($0.offset)", text: "line", met: $0.element)
+            })
+    }
+
+    static var board: TaskBoardModel {
+        let rows = [
+            row(19, "Board in the sidebar, cards that link to agents", .needsDecision,
+                [true, false, false]),
+            row(20, "A task board on iOS and Android", .inProgress,
+                [true, true, false, false, false]),
+            row(21, "Android’s board", .inProgress, [], age: 2 * 24 * 60 * 60),
+            row(18, "Acceptance progress on cards", .inReview, [true, true, true, true]),
+            row(17, "A board across every repository", .backlog, []),
+        ]
+        return TaskBoardModel(
+            columns: TaskBoardModel.order.map { status in
+                TaskBoardColumn(status: status, rows: rows.filter { $0.status == status })
+            })
+    }
+
+    static var rows: [RunnerBoardRow] {
+        guard isRequested else { return [] }
+        return RunnerBoards.rows(
+            repositories: [(id: "repo-overnight", name: "overnight")],
+            boards: ["repo-overnight": board],
+            panes: panes,
+            build: DaemonBuild(
+                version: "harness", matches: true, platform: "",
+                capabilities: ["workspaces", "terminals", "tasks", "terminal_task"]),
+            connected: true)
+    }
+
+    static func agents(for row: TaskRow) -> [BoardAgent] {
+        let live = row.livePanes(in: panes)
+        let titles = TaskAgentLink.menuTitles(live.map(\.title), shorts: live.map(\.tab))
+        return zip(live, titles).map { pane, title in
+            BoardAgent(
+                id: pane.tab, title: title,
+                mark: GlanceMark(
+                    attention: row.status == .needsDecision ? .needsYou : .quiet,
+                    core: row.status == .needsDecision ? .atAPrompt : .producing))
+        }
+    }
 }
 
 /// What a pane is in this commit: a name, and nothing behind it.

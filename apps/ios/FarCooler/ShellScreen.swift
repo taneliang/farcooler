@@ -343,7 +343,7 @@ struct ShellFleetMap {
     /// in principle. The core axis carries that distinction now, and `idle`,
     /// `none` and `unknown` land at a prompt rather than borrowing a claim
     /// that some agent somewhere is producing.
-    private static func mark(of terminal: Terminal, now: Date) -> GlanceMark {
+    static func mark(of terminal: Terminal, now: Date) -> GlanceMark {
         // Latched, both of them, and never dashed. `GlanceMark.Link` states
         // the rule — "blocked and to-review hold at any age; working and idle
         // go dashed" — and `FleetSnapshot.Confidence.isLatched` is the same
@@ -770,6 +770,25 @@ struct ShellScreen: View {
     /// to open.
     @State private var createdTerminal: String?
 
+    /// The board a Board row in the overview opened, if one is open.
+    ///
+    /// A sheet presented HERE for `authorizingDevice`'s reason: the overview's
+    /// own stack is unmounted the moment the grid stops showing.
+    @State private var boardSheet: BoardSheet?
+    /// The agent a board card asked for, until the board has gone.
+    ///
+    /// Held while the sheet closes and handed to `boardTerminal` by its
+    /// `onDismiss`, so the page grows out of the workspace's card in a grid you
+    /// can see rather than behind a sheet still on its way down — the Mac's
+    /// "close the board, then select" in the phone's own motion.
+    @State private var boardJump: String?
+    /// A terminal a board card asked for, until the shell has landed on it.
+    ///
+    /// The third asker `requestedTab` resolves, and treated like
+    /// `createdTerminal` rather than like a deep link: tapping Agent on a card
+    /// is somebody choosing that tab, and the workspace should remember it.
+    @State private var boardTerminal: String?
+
     /// Describe it, or fill in the form. Both were `WorkspaceListView`'s
     /// toolbar and are the overview's now — see `overviewActions`.
     @State private var showQuickTask = false
@@ -998,6 +1017,21 @@ struct ShellScreen: View {
             NavigationStack { SettingsView(connection: resting, runners: hosts) }
         }
         .sheet(isPresented: $showAdd) { AddView(runners: hosts) }
+        // A repository's board, from its Board row. Going to an agent closes
+        // it first and lands after — see `boardJump`.
+        .sheet(item: $boardSheet, onDismiss: landOnBoardJump) { sheet in
+            if let connection = fleet.runners.first(where: {
+                $0.host.id.uuidString == sheet.runner
+            })?.connection {
+                BoardSheetHost(
+                    sheet: sheet, connection: connection,
+                    onJump: { agent in
+                        boardJump = agent.id
+                        boardSheet = nil
+                    },
+                    onDone: { boardSheet = nil })
+            }
+        }
         // The ceremony a card's menu starts, run from the screen rather than
         // from the card. Shared with the pane's own bar — see
         // `RemoveWorktreeFlow`.
@@ -1470,6 +1504,7 @@ struct ShellScreen: View {
                         pendingTerminal = nil
                     }
                     createdTerminal = nil
+                    boardTerminal = nil
                 }),
             // The single writer. `ShellRootView` calls this when `position`
             // changes and on first appearance, which is exactly "a pane came
@@ -1492,6 +1527,11 @@ struct ShellScreen: View {
             // `ShellOverviewRunners`.
             runnerSections: ShellOverviewRunners(
                 live: liveLabels,
+                boards: boardRows,
+                onOpenBoard: { label, row in
+                    boardSheet = BoardSheet(
+                        runner: label.id, repository: row.repository, name: row.name)
+                },
                 elsewhere: elsewhere,
                 liveActions: runnerActions,
                 cachedActions: cachedActions,
@@ -1769,7 +1809,7 @@ struct ShellScreen: View {
     /// is — and giving it a second resolver would be a second place for "the
     /// shell does not actually have that tab" to be got wrong.
     private func requestedTab(in map: ShellFleetMap) -> String? {
-        guard let id = pendingTerminal ?? createdTerminal else { return nil }
+        guard let id = pendingTerminal ?? createdTerminal ?? boardTerminal else { return nil }
         // Across every runner, because a card carries a terminal id and no
         // host: the URL is `…://terminal/<id>` and always has been, so the only
         // way to answer "which runner is that on" is to look. One connection
@@ -1854,6 +1894,87 @@ struct ShellScreen: View {
         let mine = reply.links.first { $0.branch == workspace.branch }
         pullRequest = BranchPullRequest(
             pr: mine?.pr, known: reply.prAnswered, repoURL: reply.repoUrl)
+    }
+}
+
+extension ShellScreen {
+    /// A live runner's Board rows. `RunnerBoards.rows` decides them; this
+    /// only hands it what the runner's connection holds.
+    fileprivate func boardRows(_ label: ShellRunnerLabel) -> [RunnerBoardRow] {
+        guard
+            let connection = fleet.runners.first(where: {
+                $0.host.id.uuidString == label.id
+            })?.connection
+        else { return [] }
+        return RunnerBoards.rows(
+            repositories: connection.repositories.map { (id: $0.id, name: $0.displayName) },
+            boards: connection.boards,
+            panes: connection.fleet.workspaces.flatMap(\.terminals),
+            build: connection.daemon,
+            connected: connection.phase == .connected)
+    }
+
+    /// Hand the agent a card asked for to the shell, now that the board is
+    /// down.
+    ///
+    /// Spent a second later if the shell never took it — the pane went away
+    /// while the menu was open, or it is in a workspace the shell does not
+    /// draw — so a request nobody could honor does not stand waiting for a tab
+    /// that may appear much later and pull the screen to it.
+    fileprivate func landOnBoardJump() {
+        guard let id = boardJump else { return }
+        boardJump = nil
+        boardTerminal = id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            if boardTerminal == id { boardTerminal = nil }
+        }
+    }
+}
+
+/// One board sheet, watching the connection it reads from, so a board that
+/// moves while it is open redraws — a `task` notice re-reads it, and the
+/// fleet's panes are what the Agent buttons are drawn from.
+private struct BoardSheetHost: View {
+    let sheet: BoardSheet
+    @ObservedObject var connection: Connection
+    let onJump: (BoardAgent) -> Void
+    let onDone: () -> Void
+
+    var body: some View {
+        TaskBoardView(
+            name: sheet.name,
+            board: connection.boards[sheet.repository],
+            unread: connection.unreadBoards.contains(sheet.repository),
+            speaksOfAgents: TaskAgentLink.speaksOfAgents(
+                connected: connection.phase == .connected, build: connection.daemon),
+            agents: agents(for:),
+            onJump: onJump,
+            onRefresh: { await connection.readBoard(sheet.repository) },
+            onDone: onDone)
+            // Read on opening, whatever was last read: the row that opened
+            // this may be showing a count from before the last reconnect.
+            .task { await connection.readBoard(sheet.repository) }
+    }
+
+    /// The panes working `row` on this runner, in fleet order, each named
+    /// the way a menu item needs: the pane, then the workspace it is in.
+    private func agents(for row: TaskRow) -> [BoardAgent] {
+        let now = Date()
+        let found = connection.fleet.workspaces.flatMap { workspace in
+            let ordinals = workspace.ordinals()
+            return row.livePanes(in: workspace.terminals).map { terminal in
+                (
+                    terminal: terminal,
+                    title: "\(terminal.displayName(ordinal: ordinals[terminal.id])) in \(workspace.task)"
+                )
+            }
+        }
+        let titles = TaskAgentLink.menuTitles(found.map(\.title), shorts: found.map(\.terminal.short))
+        return zip(found, titles).map { pane, title in
+            BoardAgent(
+                id: pane.terminal.id, title: title,
+                mark: ShellFleetMap.mark(of: pane.terminal, now: now))
+        }
     }
 }
 

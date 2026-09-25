@@ -69,6 +69,8 @@ SOURCES = [
     # views are here.
     "ShellBar.swift",
     "ShellOverview.swift",
+    # One repository's board, opened from a Board row in the overview.
+    "TaskBoardView.swift",
     "ShellRootView.swift",
     # The other two thirds of what `ShellRootView.swift` used to be. One type,
     # three files: the container, the page's own layer, and the finger. The
@@ -393,6 +395,13 @@ AGENTKIT_SOURCES = [
     # every scroll test would skip rather than fail — so it is guarded by
     # `swift test --package-path apps/shared/AgentKit`, which CI does run.
     "TerminalScreenAsk.swift",
+    # The board: its model, which agent is on which card, and which
+    # repositories get a Board row in the overview. The Mac has drawn the first
+    # two since card -19; the phone draws the same cards off the same rules, so
+    # they are here rather than copied, and `swift test` is what checks them.
+    "TaskBoardModel.swift",
+    "TaskBoardAgents.swift",
+    "RunnerBoards.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #
@@ -564,6 +573,10 @@ UI_TEST_SOURCES = [
     # Needs no runner: the harness answers a drop in the runner's place, so it
     # cannot skip itself green when the demo daemon is down.
     "ShellRunnerHeadingTests.swift",
+    # A repository's board from its Board row, and a card's Agent button
+    # landing on the pane. Needs no runner: `-shell-board` puts a canned board
+    # on the harness's runner, so this one cannot skip itself green either.
+    "ShellBoardTests.swift",
     # Photographs the terminal renderer's own fixture and compares cells. Needs
     # no runner: the grid it draws is built in the app, so this one cannot skip
     # itself green when the demo daemon is down.

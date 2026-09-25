@@ -455,6 +455,75 @@ private struct ShellElsewhereCard: View {
     }
 }
 
+/// A repository's Board row, at the top of its runner's section.
+///
+/// The Mac's sidebar row, on a phone: the repository's name, the tasks an agent
+/// is on as a quiet count, and the tasks waiting on a decision in amber — both
+/// counts drawn only when they are more than zero, per `waitingSentence`'s
+/// rule, and both decided in `RunnerBoards`. Drawn on the card's own fill and
+/// corner so it reads as a thing in the grid you can open, and a full row wide
+/// because it is about the whole repository and not one worktree.
+private struct ShellBoardRow: View {
+    let board: RunnerBoardRow
+    let runner: String
+    let onOpen: () -> Void
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: PaneMetrics.step) {
+                Image(systemName: "checklist")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.tight) {
+                    Text(board.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("Board")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: PaneMetrics.step)
+                if board.agents > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "sparkle")
+                            .font(.caption2)
+                        Text("\(board.agents)")
+                    }
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                }
+                if board.decisions > 0 {
+                    Text("\(board.decisions)")
+                        .font(.system(.footnote, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(GlancePalette.amber(scheme))
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, PaneMetrics.card)
+            .frame(maxWidth: .infinity, minHeight: PaneMetrics.target, alignment: .leading)
+            .background(
+                TranscriptFill.container,
+                in: RoundedRectangle(cornerRadius: ShellMotion.cardRadius, style: .continuous))
+            .contentShape(.rect)
+        }
+        .buttonStyle(ShellCardStyle())
+        .dynamicTypeSize(...DynamicTypeSize.large)
+        // One element: the name, then the counts in words. The two numbers
+        // alone would be read as "2, 1" with nothing to say which is which.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(board.name) Board")
+        .accessibilityValue(board.spoken ?? "")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("shell-board-\(runner)-\(board.repository)")
+    }
+}
+
 /// One thing a runner's section header offers to do to that runner.
 ///
 /// Data rather than a view builder, and that is a plumbing choice with a
@@ -482,6 +551,12 @@ struct ShellOverviewRunners {
     /// in. Each one is a section, and the cards in it are the fleet's
     /// workspaces whose `runner` is that runner's id.
     var live: [ShellRunnerLabel] = []
+    /// Each live runner's Board rows, one per repository with a board — see
+    /// `RunnerBoards.rows`, which decides them. Drawn under the runner's
+    /// heading and above its workspaces, where the Mac's sidebar draws its
+    /// Board row above a repository's.
+    var boards: (ShellRunnerLabel) -> [RunnerBoardRow] = { _ in [] }
+    var onOpenBoard: (ShellRunnerLabel, RunnerBoardRow) -> Void = { _, _ in }
     /// The runners this app knows and is NOT connected to, as it last saw
     /// them. See `ShellServerGroup`.
     var elsewhere: [ShellServerGroup] = []
@@ -946,9 +1021,32 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// runners can share a label — two daemons on one box, or two boxes
     /// somebody named the same — which gave two headings one identifier, and
     /// a UI test asking for one of them whichever the query found first.
+    ///
+    /// `boards` are the runner's Board rows, drawn under its name and above its
+    /// cards — empty during a search, which is a search for a workspace. They
+    /// are chrome like the menu: faded and disabled while a lift is only
+    /// revealing the grid, never added or removed by it.
     private func header(
         _ name: String, runner: String, detail: String?, isEmpty: Bool = false,
-        actions: [ShellHeaderAction] = []
+        actions: [ShellHeaderAction] = [], boards: [RunnerBoardRow] = [],
+        onOpenBoard: @escaping (RunnerBoardRow) -> Void = { _ in }
+    ) -> some View {
+        VStack(alignment: .leading, spacing: PaneMetrics.step) {
+            headerLine(name, runner: runner, detail: detail, isEmpty: isEmpty, actions: actions)
+            ForEach(boards) { board in
+                ShellBoardRow(board: board, runner: runner) { onOpenBoard(board) }
+                    .opacity(chrome ? 1 : 0)
+                    .disabled(!chrome)
+            }
+        }
+        // The whole width the grid was given; see `headerLine`.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, PaneMetrics.card)
+    }
+
+    private func headerLine(
+        _ name: String, runner: String, detail: String?, isEmpty: Bool,
+        actions: [ShellHeaderAction]
     ) -> some View {
         HStack(alignment: .center, spacing: PaneMetrics.step) {
             VStack(alignment: .leading, spacing: 2) {
@@ -995,7 +1093,6 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
         // letter of the runner's name off the edge of the screen. Taking the
         // slack out of the edges is what makes the compensation unnecessary.
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, PaneMetrics.card)
     }
 
     /// A runner's own menu, at the trailing end of its heading.
@@ -1173,7 +1270,10 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                                 section.runner.name, runner: section.runner.id,
                                 detail: section.runner.detail,
                                 isEmpty: section.cards.isEmpty,
-                                actions: runnerSections.liveActions(section.runner))
+                                actions: runnerSections.liveActions(section.runner),
+                                boards: search.isEmpty
+                                    ? runnerSections.boards(section.runner) : [],
+                                onOpenBoard: { runnerSections.onOpenBoard(section.runner, $0) })
                         }
                     }
 

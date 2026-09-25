@@ -371,6 +371,7 @@ final class Connection: ObservableObject {
         await listenForFleetNews()
         await refresh()
         await loadRepositories()
+        await loadBoards()
         await loadThemes()
         startPolling()
     }
@@ -389,16 +390,31 @@ final class Connection: ObservableObject {
     private func listenForFleetNews() async {
         guard !listeningForNews else { return }
         listeningForNews = true
-        await core.startEvents { [weak self] _ in
-            // The notice itself is not read, and that is the design rather than
-            // laziness. Every one of them means "re-read it" and none carries a
-            // delta — see `FleetEvent` in `crates/client/src/session.rs` — so
-            // there is exactly one thing to do about any of them, and doing it
-            // from one place keeps ONE code path for reading state. An app that
-            // applied deltas would have to be right about reconciliation
-            // creating and deleting rows in the same pass, and about the CLI
-            // and an agent editing the same state from outside it.
-            Task { @MainActor in self?.fleetNewsArrived() }
+        await core.startEvents { [weak self] notice in
+            // The notice is read for one thing only: which BOARD to read
+            // again, if it names one. Every notice still means "re-read it"
+            // and none carries a delta — see `FleetEvent` in
+            // `crates/client/src/session.rs` — so the fleet is re-read from
+            // one place for all of them, and an app that applied deltas would
+            // have to be right about reconciliation creating and deleting
+            // rows in the same pass, and about the CLI and an agent editing
+            // the same state from outside it.
+            //
+            // A board is the exception because it is not in the fleet. A
+            // `task` notice names its repository so that one `task.list` is
+            // what it costs, and `resync` — the queue overflowed and said
+            // nothing more specific — is every board.
+            let event = notice["event"] as? String
+            let repository = notice["repository"] as? String
+            Task { @MainActor in
+                guard let self else { return }
+                switch event {
+                case "task": if let repository { await self.readBoard(repository) }
+                case "resync": await self.loadBoards()
+                default: break
+                }
+                self.fleetNewsArrived()
+            }
         }
     }
 
@@ -562,6 +578,7 @@ final class Connection: ObservableObject {
         // staying invisible to the pickers until relaunch is the failure the
         // Mac's `onReconnect` seeding exists to prevent.
         await loadRepositories()
+        await loadBoards()
         await loadThemes()
         startPolling()
     }
@@ -637,7 +654,14 @@ final class Connection: ObservableObject {
             // After two hours suspended, "connected" is a claim rather than a
             // fact. Testing it now beats waiting out a poll interval to find
             // out, and if it holds this is one round trip nobody notices.
-            Task { await refresh() }
+            //
+            // The boards too, and after the fleet: a board's news arrived
+            // while the process was suspended, if it arrived at all, and a
+            // board is read on its news and nothing else.
+            Task {
+                await refresh()
+                await loadBoards()
+            }
         case .reconnecting, .failed:
             reconnectNow()
         case .connecting, .needsApproval:
@@ -1117,6 +1141,74 @@ final class Connection: ObservableObject {
     func repositoryName(for workspace: Workspace) -> String? {
         guard let id = workspace.repository else { return nil }
         return repositoryNames[id]
+    }
+
+    // MARK: - Boards
+
+    /// Each repository's board, by repository id, as the runner last said it.
+    ///
+    /// Only boards that have been read: a repository with no entry has not
+    /// answered yet, which `RunnerBoards.rows` draws as no row rather than as
+    /// an empty board. Kept through a dropped link and a failed read, on the
+    /// same terms as `fleet` and `inbox` — a Needs Decision count that vanished
+    /// every time the Wi-Fi blinked would be a count nobody could trust.
+    @Published private(set) var boards: [String: TaskBoardModel] = [:]
+
+    /// Repositories whose last board read failed. The overview's row keeps
+    /// the last good board; the board itself says it could not read.
+    @Published private(set) var unreadBoards: Set<String> = []
+
+    /// Boards with a read crossing the network, and boards whose news arrived
+    /// while it was: one read at a time per board, and one more after it if
+    /// anything moved meanwhile — the Mac's `TaskBoardStore.reload` rule. A
+    /// manager moving six cards is six notices; the queue coalesces the ones
+    /// that are still waiting, and this folds the ones that arrive mid-read.
+    private var readingBoards: Set<String> = []
+    private var boardMovedAgain: Set<String> = []
+
+    /// Read every repository's board, on a runner that keeps one.
+    ///
+    /// On each new link, after the repositories are known; on the app coming
+    /// back to the foreground; and on `resync`. Otherwise a board is read on
+    /// its own news. Nothing here is on the poll: a board changes when
+    /// somebody writes to it, and every write is announced.
+    func loadBoards() async {
+        guard phase == .connected, daemon?.can("tasks") == true else { return }
+        for repository in repositories.map(\.id) {
+            await readBoard(repository)
+        }
+    }
+
+    /// Read one repository's board, or fold into the read already under way.
+    ///
+    /// Errors are swallowed as `loadInbox`'s are: a failed read keeps the last
+    /// good board and marks it unread, and must never be taken for a dropped
+    /// link — a runner refusing `task.list` would otherwise reconnect a
+    /// working session every time a card moved.
+    @discardableResult
+    func readBoard(_ repository: String) async -> Bool {
+        guard !readingBoards.contains(repository) else {
+            boardMovedAgain.insert(repository)
+            return true
+        }
+        readingBoards.insert(repository)
+        defer { readingBoards.remove(repository) }
+        var read = false
+        repeat {
+            boardMovedAgain.remove(repository)
+            guard phase == .connected, daemon?.can("tasks") == true else { return read }
+            if let data = try? await core.call("task.list", ["repository": repository]),
+                let board = try? TaskBoardModel.decode(data)
+            {
+                boards[repository] = board
+                unreadBoards.remove(repository)
+                read = true
+            } else {
+                unreadBoards.insert(repository)
+                read = false
+            }
+        } while boardMovedAgain.contains(repository)
+        return read
     }
 
     /// Read what every worktree on this runner has changed, in one call.

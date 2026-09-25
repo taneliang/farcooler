@@ -1,0 +1,135 @@
+import XCTest
+
+/// A repository's board, opened from the overview, and the way from a card to
+/// the agent working it.
+///
+/// **Why a UI test and not arithmetic.** Which repositories get a Board row,
+/// what its counts are, which panes work which card and what a card says are
+/// rules, and they are in `RunnerBoardsTests` and `TaskBoardAgentsTests` where
+/// `swift test` runs them. What is left is what no rule can see: that the row
+/// is actually drawn over the runner's cards, that tapping it opens the board,
+/// that the board lists Needs Decision first, and that an Agent button closes
+/// the board and lands the shell on that pane — through the shell's own
+/// `request`, the path a Live Activity's tap takes.
+///
+/// No runner and no daemon: `-shell-board` puts a canned board on the
+/// harness's runner (`HarnessBoard`), and its panes are the harness's tabs. So
+/// nothing here waits on a connection, and nothing skips: every wait that
+/// times out is a failure.
+final class ShellBoardTests: XCTestCase {
+    private func launch() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-shell-harness", "-shell-overview", "-shell-4", "-shell-board"]
+        app.launch()
+        return app
+    }
+
+    /// `ShellGestureTests`'s probes, read the same way, and never skipped: the
+    /// harness has no runner to be missing.
+    private func probe(_ app: XCUIApplication, _ identifier: String) -> [String: String] {
+        let probe = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        XCTAssertTrue(probe.waitForExistence(timeout: 30), "no \(identifier) in the tree")
+        var parsed: [String: String] = [:]
+        for field in (probe.value as? String ?? "").split(separator: " ") {
+            let halves = field.split(separator: "=")
+            guard halves.count == 2 else { continue }
+            parsed[String(halves[0])] = String(halves[1])
+        }
+        return parsed
+    }
+
+    private func boardRow(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons["shell-board-harness-repo-overnight"]
+    }
+
+    /// Wait until `tab`'s pane says it is the one on screen.
+    private func waitUntilVisible(_ app: XCUIApplication, _ tab: String) -> Bool {
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if probe(app, "shell-pane-\(tab)")["visible"] == "1" { return true }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return false
+    }
+
+    /// **The row is over the runner's cards, it says what the board holds, and
+    /// it opens the board — Needs Decision first.**
+    func testTheBoardRowOpensTheBoardNeedsDecisionFirst() throws {
+        let app = launch()
+        XCTAssertEqual(probe(app, "shell-state")["overview"], "1", "the harness did not open on the grid")
+
+        let row = boardRow(app)
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "no Board row: \(app.debugDescription)")
+        // The counts in words, because the digits alone say nothing about
+        // which is which. One task in Needs Decision; agents on two tasks
+        // (three panes, two of them on one task, and a dispatched shell that
+        // is not an agent).
+        XCTAssertEqual(row.value as? String, "1 task needs a decision, Agents are on 2 tasks")
+        // Above the runner's first card, which is what "above its
+        // workspaces" means on screen.
+        let firstCard = app.buttons["shell-card-ws-0"]
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5))
+        XCTAssertLessThan(row.frame.maxY, firstCard.frame.minY, "the Board row is not above the cards")
+
+        row.tap()
+        let decision = app.descendants(matching: .any)["board-section-needs_decision"]
+        let progress = app.descendants(matching: .any)["board-section-in_progress"]
+        XCTAssertTrue(decision.waitForExistence(timeout: 10), "the board did not open")
+        XCTAssertTrue(progress.exists)
+        XCTAssertLessThan(decision.frame.minY, progress.frame.minY, "Needs Decision is not first")
+        // No empty status is listed: nothing is in To Do on this board.
+        XCTAssertFalse(app.descendants(matching: .any)["board-section-todo"].exists)
+
+        // Acceptance, on the card, in AgentKit's words. A card's words are one
+        // element, so they are read off its label.
+        let card19 = app.descendants(matching: .any)["board-card--19"]
+        let card18 = app.descendants(matching: .any)["board-card--18"]
+        XCTAssertTrue(card19.exists && card18.exists, "the cards are not on the board")
+        XCTAssertTrue(card19.label.contains("1 of 3"), "-19's acceptance: \(card19.label)")
+        XCTAssertTrue(card18.label.contains("All 4 met"), "-18's acceptance: \(card18.label)")
+        // And the question it is waiting on, which only Needs Decision asks.
+        XCTAssertTrue(card19.label.contains("Answer to unblock this"), card19.label)
+        // In progress with nobody on it: said, quietly. The dispatched shell
+        // on it is not an agent.
+        XCTAssertTrue(app.descendants(matching: .any)["board-no-agent--21"].exists)
+        XCTAssertFalse(app.buttons["board-agent--21"].exists)
+    }
+
+    /// **One agent on a card is a button, and it lands on that agent's pane.**
+    func testTheAgentButtonClosesTheBoardAndLandsOnThePane() throws {
+        let app = launch()
+        XCTAssertTrue(boardRow(app).waitForExistence(timeout: 30), "no Board row")
+        boardRow(app).tap()
+
+        let agent = app.buttons["board-agent--19"]
+        XCTAssertTrue(agent.waitForExistence(timeout: 10), "-19 has no Agent button")
+        agent.tap()
+
+        XCTAssertTrue(
+            waitUntilVisible(app, "ws-1-tab-1"),
+            "the shell did not land on -19's agent: \(probe(app, "shell-pane-ws-1-tab-1"))")
+        XCTAssertEqual(probe(app, "shell-state")["overview"], "0", "the overview is still up")
+        XCTAssertFalse(app.descendants(matching: .any)["board"].exists, "the board is still up")
+    }
+
+    /// **Several agents on one card are a menu, and each item goes to its own
+    /// pane** — here the second of two, so a menu that always took the first
+    /// would fail.
+    func testSeveralAgentsOnOneCardAreAMenuOfPanes() throws {
+        let app = launch()
+        XCTAssertTrue(boardRow(app).waitForExistence(timeout: 30), "no Board row")
+        boardRow(app).tap()
+
+        let menu = app.buttons["board-agent--20"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "-20 has no agents control")
+        menu.tap()
+        let second = app.buttons["codex in fix/token-refresh"]
+        XCTAssertTrue(second.waitForExistence(timeout: 5), "the menu does not list the second agent")
+        XCTAssertTrue(app.buttons["claude in fix/token-refresh"].exists)
+        second.tap()
+
+        XCTAssertTrue(
+            waitUntilVisible(app, "ws-2-tab-2"),
+            "the shell did not land on the agent chosen: \(probe(app, "shell-pane-ws-2-tab-2"))")
+    }
+}
