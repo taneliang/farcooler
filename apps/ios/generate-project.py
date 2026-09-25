@@ -545,6 +545,9 @@ UI_TEST_SOURCES = [
     # Waits for the key to be tappable and fails, rather than skipping, when
     # the keyboard will not go. See its own note.
     "HideKeyboard.swift",
+    # The agent composer's Hide Keyboard key. Needs no runner: it stands on
+    # `-agent-layout-harness`, so it cannot skip itself green.
+    "ComposerKeyboardTests.swift",
     "ChangesPullRequestTests.swift",
     # A runner saved before `Runner.reach` existed still loads. Needs no runner
     # and no daemon: it seeds the old shape through the argument domain and

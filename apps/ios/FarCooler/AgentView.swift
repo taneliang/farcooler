@@ -2275,6 +2275,9 @@ private struct AgentComposer: View {
     /// Why the last attachment did not attach. Shown in the composer.
     @State private var attachmentError: String?
     @State private var fieldHeight: CGFloat = UIFont.preferredFont(forTextStyle: .body).lineHeight
+    /// Whether the message field is being typed in, which is when the
+    /// keyboard is up for it and Hide Keyboard has something to do.
+    @State private var typing = false
 
     private var token: ComposerToken { activeToken(in: text, cursor: cursor) }
 
@@ -2374,6 +2377,25 @@ private struct AgentComposer: View {
                     Spacer(minLength: PaneMetrics.step)
 
                     adapterBadge
+
+                    // The terminal's key row ends in this key, and so does
+                    // this row: the composer is docked above the keyboard, and
+                    // with it up the shell's bar is behind both, so putting
+                    // the keyboard away is the way back to the bar. Only while
+                    // the field is being typed in, because with the keyboard
+                    // down there is nothing for it to do.
+                    if typing {
+                        Button {
+                            KeyboardDismissal.now()
+                        } label: {
+                            Image(systemName: "keyboard.chevron.compact.down")
+                                .font(.system(size: 15))
+                                .frame(width: PaneMetrics.target, height: PaneMetrics.target)
+                                .contentShape(.rect)
+                        }
+                        .accessibilityLabel("Hide Keyboard")
+                        .accessibilityIdentifier("composer-hide-keyboard")
+                    }
                 }
                 // Grey, not accent.
                 //
@@ -2498,7 +2520,8 @@ private struct AgentComposer: View {
                     // character will land rather than a point above it.
                     .padding(.top, 2)
             }
-            ComposerTextView(text: $text, cursor: $cursor, measuredHeight: $fieldHeight)
+            ComposerTextView(
+                text: $text, cursor: $cursor, measuredHeight: $fieldHeight, isEditing: $typing)
                 .frame(height: fieldHeight)
         }
     }
@@ -2948,6 +2971,10 @@ private struct ComposerTextView: UIViewRepresentable {
     /// there, so this goes the same way round: text changes, then height
     /// changes, then layout happens.
     @Binding var measuredHeight: CGFloat
+    /// Whether this view is first responder. Written from the delegate's own
+    /// begin and end callbacks, so a resign from anywhere (Hide Keyboard, a
+    /// pane switch, `KeyboardDismissal`) reaches it.
+    @Binding var isEditing: Bool
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -3011,6 +3038,10 @@ private struct ComposerTextView: UIViewRepresentable {
             let binding = parent.$measuredHeight
             DispatchQueue.main.async { binding.wrappedValue = clamped }
         }
+
+        func textViewDidBeginEditing(_ textView: UITextView) { parent.isEditing = true }
+
+        func textViewDidEndEditing(_ textView: UITextView) { parent.isEditing = false }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             parent.cursor = ComposerTextView.characterOffset(
