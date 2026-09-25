@@ -1864,17 +1864,22 @@ async fn dispatch<L: DispatchLink>(
     let (workspace, workspace_name, made) = match (existing, &d.lane) {
         (Some((id, name)), _) => (id, name, None),
         (None, Lane::New { name, branch, base }) => {
+            // Fork-only where the runner can: `--new` is new work, and a
+            // plain create would check out a remote branch that happens to
+            // carry the name, starting the task on somebody else's commits.
+            // An older runner creates as it always did.
+            let fork_only = link
+                .capabilities()
+                .iter()
+                .any(|c| c == farcooler_protocol::capability::WORKSPACE_FORK_ONLY);
             let r = link
-                .call(with(
-                    req_for("workspace.create", uuid_of(&task.repository_id)),
-                    request::Payload::WorkspaceCreate(pb::WorkspaceCreate {
-                        task_name: name.clone(),
-                        branch: branch.clone(),
-                        base_revision: base.clone(),
-                        terminal_preset: String::new(),
-                        adopt_existing: false,
-                        fork_only: false,
-                    }),
+                .call(crate::workspace_create_request(
+                    uuid_of(&task.repository_id),
+                    name.clone(),
+                    branch.clone(),
+                    base.clone(),
+                    String::new(),
+                    fork_only,
                 ))
                 .await?;
             let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
@@ -2769,6 +2774,26 @@ mod tests {
         let Some(request::Payload::TaskSetStatus(s)) = &link.sent("task.set_status").payload else { panic!("status") };
         assert_eq!(s.status, pb_status(TaskStatus::InProgress));
         assert_eq!(s.actor, "manager");
+    }
+
+    /// `--new` is new work: made fork-only on a runner that can, so a remote
+    /// branch of the same name is refused rather than checked out; and on
+    /// one that can't, asked nothing it would refuse.
+    #[tokio::test]
+    async fn a_new_lane_is_fork_only_where_the_runner_can_do_it() {
+        for can in [true, false] {
+            let mut link = FakeLink::default();
+            if !can {
+                link.capabilities.retain(|c| c != farcooler_protocol::capability::WORKSPACE_FORK_ONLY);
+            }
+            let new = Lane::New { name: "fix-it".into(), branch: "fix/it".into(), base: "HEAD".into() };
+            run(&mut link, new).await.0.expect("dispatched");
+            let req = link.sent("workspace.create");
+            let Some(request::Payload::WorkspaceCreate(p)) = &req.payload else { panic!("payload") };
+            assert_eq!(p.fork_only, can);
+            assert_eq!(!req.required_capabilities.is_empty(), can, "{:?}", req.required_capabilities);
+            assert_eq!((p.task_name.as_str(), p.branch.as_str()), ("fix-it", "fix/it"));
+        }
     }
 
     #[tokio::test]
