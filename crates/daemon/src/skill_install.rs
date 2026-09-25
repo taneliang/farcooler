@@ -82,11 +82,9 @@ pub const PROJECT_SKILL_POLICY: &str = ".agents/skills/farcooler-manager/agents/
 /// subtract exactly what the installer writes and nothing else.
 pub const PROJECT_SKILL_FILES: &[&str] = &[PROJECT_SKILL, PROJECT_SKILL_POLICY];
 
-/// The skill's text, with `{{frontmatter}}` and `{{cli}}` still to fill.
-///
-/// A stub until the real body lands; the rendering around it is what this
-/// module's tests pin.
-const BODY: &str = "{{frontmatter}}\n# Managing this repository's board\n\nEvery command is `{{cli}}`.\n";
+/// The skill's text, with `{{frontmatter}}`, `{{cli}}` and `{{wait}}` still to
+/// fill. Kept as a file so it reads as what an agent reads.
+const BODY: &str = include_str!("../assets/manager/SKILL.md");
 
 /// The frontmatter every copy carries, differing only in `name`: claude
 /// namespaces a plugin's skill itself (`/farcooler:manager`), and codex and
@@ -104,6 +102,26 @@ fn frontmatter(name: &str) -> String {
          itself. Use only when the owner asks for the manager.\ndisable-model-invocation: true\n---\n"
     )
 }
+
+/// Whether anything can wake a manager that has ended its turn. Nothing can
+/// yet (see `WAIT_STEP`).
+pub const WAKE_LOOP_EXISTS: bool = false;
+
+/// Step 4 of the skill: stop, and say so honestly.
+///
+/// The spec's step 4 is "wait to be woken", and the wake loop that would do
+/// the waking needs Phase 3 of live-agent-sessions (typing into a running
+/// agent's pane when its screen is ready), which doesn't exist yet. Until it
+/// does, a manager that says "I'll check back" is making a promise nothing on
+/// the runner keeps, and the owner finds out by waiting. So the step tells the
+/// manager to end its turn and say what it's waiting on.
+///
+/// `the_skill_promises_no_wake_while_none_exists` holds this to that while
+/// `WAKE_LOOP_EXISTS` is false.
+pub const WAIT_STEP: &str = "Stop. Nothing will wake you: Far Cooler can't yet type into this pane when \
+the board changes. End your turn by telling the owner in one line what you're waiting on, and that \
+you'll look again when they next talk to you. Don't poll the board in a loop, don't sleep, and \
+don't say you'll check back.";
 
 /// codex's switch for the same thing, measured the same way.
 const CODEX_POLICY: &str = "policy:\n  allow_implicit_invocation: false\n";
@@ -138,7 +156,9 @@ pub fn render(harness: Harness, cli: &str) -> Vec<SkillFile> {
 
 /// The body with its frontmatter and CLI filled in.
 fn body(name: &str, cli: &str) -> String {
-    BODY.replace("{{frontmatter}}", &frontmatter(name)).replace("{{cli}}", cli)
+    BODY.replace("{{frontmatter}}", &frontmatter(name))
+        .replace("{{wait}}", WAIT_STEP)
+        .replace("{{cli}}", cli)
 }
 
 /// The word every marker carries.
@@ -409,6 +429,120 @@ mod tests {
         // codex's two files and cursor's one. A render that wrote nothing
         // would otherwise pass this by checking nothing.
         assert_eq!(checked, 3);
+    }
+
+    const ALL: [Harness; 3] = [Harness::Claude, Harness::Codex, Harness::Cursor];
+
+    /// The `SKILL.md` a harness gets, with `cli` filled in.
+    fn skill_body_with_cli(h: Harness, cli: &str) -> String {
+        render(h, cli)
+            .into_iter()
+            .find(|f| f.relative.ends_with("SKILL.md"))
+            .expect("every harness gets a SKILL.md")
+            .contents
+    }
+
+    fn skill_body(h: Harness) -> String {
+        skill_body_with_cli(h, "farcooler")
+    }
+
+    /// The two rules the spec says must be explicit, word for word, in every
+    /// harness's copy. A harness-specific render that dropped one would still
+    /// "have a skill".
+    #[test]
+    fn every_harness_states_both_rules() {
+        for h in ALL {
+            let body = skill_body(h);
+            assert!(body.contains("**Never execute a task yourself.**"), "{h:?}");
+            assert!(body.contains("**Writing it down is the work.**"), "{h:?}");
+        }
+    }
+
+    /// The owner's ruling: customization lives in the charter, which wins over
+    /// everything in the skill but the two rules. The skill text itself is
+    /// regenerated on every launch, so an edit to it is not where taste goes.
+    #[test]
+    fn the_charter_overrides_everything_but_the_two_rules() {
+        for h in ALL {
+            let body = skill_body(h);
+            assert!(
+                body.contains("The charter overrides anything in this skill except the two rules above."),
+                "{h:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_cli_path_is_filled_in_and_nothing_else_is_left_open() {
+        let cli = "'/Applications/Far Cooler.app/x/farcooler-preview'";
+        for h in ALL {
+            let body = skill_body_with_cli(h, cli);
+            assert!(body.contains(&format!("{cli} task list")), "{h:?}");
+            assert!(!body.contains("{{"), "{h:?}: an unfilled placeholder reached an agent");
+        }
+    }
+
+    /// Nothing wakes the manager yet, and nothing pushes a question to the
+    /// owner's phone. The day something does, this test forces whoever flips
+    /// `WAKE_LOOP_EXISTS` to rewrite `WAIT_STEP` too.
+    #[test]
+    fn the_skill_promises_no_wake_while_none_exists() {
+        const { assert!(!WAKE_LOOP_EXISTS) };
+        for h in ALL {
+            let body = skill_body(h).to_lowercase();
+            for promise in [
+                "will be woken",
+                "wake you when",
+                "i'll check back",
+                "i will check back",
+                "notify you",
+                "you'll be notified",
+                "i'll let you know",
+                "will notify",
+            ] {
+                assert!(!body.contains(promise), "{h:?} promises a wake: {promise}");
+            }
+            assert!(body.contains("nothing will wake you"), "{h:?}");
+            assert!(body.contains(&WAIT_STEP.to_lowercase()), "{h:?}");
+        }
+    }
+
+    /// A manager in an agent pane inherits `FARCOOLER_ACTOR=agent:<id>`, so a
+    /// write without the flag would be filed as a dispatched agent's.
+    #[test]
+    fn every_write_the_skill_shows_names_the_manager() {
+        let body = skill_body(Harness::Claude);
+        let writes: Vec<&str> = body
+            .lines()
+            .filter(|l| {
+                ["create", "set", "note", "ask", "block"]
+                    .iter()
+                    .any(|verb| l.contains(&format!("farcooler task {verb} ")))
+            })
+            .collect();
+        assert!(writes.len() >= 4, "the skill shows too few writes to be checked: {writes:?}");
+        for line in writes {
+            assert!(line.contains("--actor manager"), "a write that doesn't name the manager: {line}");
+        }
+    }
+
+    /// The spec wants the skill read in a minute.
+    #[test]
+    fn the_skill_is_short() {
+        let lines = skill_body(Harness::Claude).lines().count();
+        assert!(lines <= 120, "{lines} lines");
+    }
+
+    /// Not a check: the pressure harness's way to get the skill exactly as an
+    /// agent reads it, with `{{cli}}` pointing at its fake CLI.
+    /// `scripts/manager-skill-pressure/render-skill.sh` runs it.
+    #[test]
+    #[ignore = "a tool for scripts/manager-skill-pressure, not a check"]
+    fn render_for_the_pressure_harness() {
+        let cli = std::env::var("FAKE_CLI").expect("FAKE_CLI names the fake farcooler");
+        let out = std::env::var("SKILL_OUT").expect("SKILL_OUT names the file to write");
+        std::fs::write(out, skill_body_with_cli(Harness::Claude, &crate::service::shell_quote(&cli)))
+            .unwrap();
     }
 
     #[test]

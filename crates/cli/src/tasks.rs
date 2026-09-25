@@ -2002,4 +2002,91 @@ mod tests {
         assert_eq!(spoken_gap(7_200), "2h");
         assert_eq!(spoken_gap(259_200), "3d");
     }
+
+    /// Split a line the way a POSIX shell would for the simple cases the skill
+    /// uses: whitespace between words, and single or double quotes around one.
+    fn shell_words(line: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        let mut word = String::new();
+        let mut in_word = false;
+        let mut quote: Option<char> = None;
+        for c in line.chars() {
+            match (quote, c) {
+                (Some(q), c) if c == q => quote = None,
+                (Some(_), c) => word.push(c),
+                (None, '\'' | '"') => {
+                    quote = Some(c);
+                    in_word = true;
+                }
+                (None, c) if c.is_whitespace() => {
+                    if in_word {
+                        words.push(std::mem::take(&mut word));
+                        in_word = false;
+                    }
+                }
+                (None, c) => {
+                    word.push(c);
+                    in_word = true;
+                }
+            }
+        }
+        assert!(quote.is_none(), "an unclosed quote: {line}");
+        if in_word {
+            words.push(word);
+        }
+        words
+    }
+
+    /// Every `farcooler …` line inside a fenced block of the skill, with each
+    /// `<placeholder>` replaced by a word clap will take.
+    fn commands_the_skill_names() -> Vec<String> {
+        use farcooler_daemon::skill_install::{Harness, render};
+        let skill = render(Harness::Claude, "farcooler")
+            .into_iter()
+            .find(|f| f.relative.ends_with("SKILL.md"))
+            .expect("claude's copy has a SKILL.md")
+            .contents;
+        let mut fenced = false;
+        let mut found = Vec::new();
+        for line in skill.lines() {
+            if line.trim_start().starts_with("```") {
+                fenced = !fenced;
+                continue;
+            }
+            let line = line.trim();
+            if fenced && line.starts_with("farcooler ") {
+                let mut filled = String::new();
+                let mut rest = line;
+                while let Some(open) = rest.find('<') {
+                    let close = rest[open..].find('>').expect("an unclosed placeholder") + open;
+                    filled.push_str(&rest[..open]);
+                    filled.push('x');
+                    rest = &rest[close + 1..];
+                }
+                filled.push_str(rest);
+                found.push(filled);
+            }
+        }
+        found
+    }
+
+    /// The skill can't name a command the CLI doesn't have. An agent told
+    /// `task answer` finds out by failing, in front of the owner.
+    ///
+    /// Reads the skill exactly as the daemon renders it, and parses every
+    /// `farcooler …` line in a fenced block through the real clap tree.
+    #[test]
+    fn every_command_the_manager_skill_names_parses() {
+        use clap::Parser;
+        // The check can fail: a verb the CLI doesn't have is refused.
+        assert!(crate::Cli::try_parse_from(["farcooler", "task", "answer", "fc-1"]).is_err());
+
+        let commands = commands_the_skill_names();
+        assert!(commands.len() >= 8, "too few commands to be checking anything: {commands:?}");
+        for line in &commands {
+            if let Err(e) = crate::Cli::try_parse_from(shell_words(line)) {
+                panic!("the manager skill names a command the CLI refuses:\n  {line}\n{e}");
+            }
+        }
+    }
 }
