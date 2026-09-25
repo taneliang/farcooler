@@ -21,6 +21,8 @@ struct QuickCreateTests {
         var closed = 0
         /// What the start answers: nil is "started", a sentence is a failure.
         var failure: String?
+        /// Run while the start is in flight, before it answers.
+        var during: (@MainActor () -> Void)?
     }
 
     private func panel(_ outcome: Outcome, submission: TaskSubmission = TaskSubmission())
@@ -34,7 +36,9 @@ struct QuickCreateTests {
             onSubmit: { request in
                 outcome.started.append(request.description)
                 outcome.names.append(request.name)
-                return outcome.failure
+                outcome.during?()
+                if let failure = outcome.failure { return .failed(failure) }
+                return .started(name: request.name)
             },
             onResume: {},
             onClose: { outcome.closed += 1 },
@@ -88,6 +92,19 @@ struct QuickCreateTests {
         #expect(outcome.closed == 0, "the panel stays to say why")
         #expect(submission.failure == outcome.failure)
         #expect(!submission.starting)
+    }
+
+    /// ⏎, Esc while it starts, ⌘N again: the first start finishing must not
+    /// close the panel the person has just opened to write the next task.
+    @Test func aStartThatFinishesLateDoesNotCloseAPanelOpenedSince() async {
+        let outcome = Outcome()
+        let submission = TaskSubmission()
+        outcome.during = { submission.opened() }
+        await withDraft("Fix the flaky reconnect test") {
+            await panel(outcome, submission: submission).submit(keepOpen: false)
+        }
+        #expect(outcome.started.count == 1)
+        #expect(outcome.closed == 0, "a later opening is not this start's to close")
     }
 
     @Test func aDraftThatCannotStartNeitherStartsNorCloses() async {

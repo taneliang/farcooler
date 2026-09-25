@@ -626,6 +626,12 @@ fn launch_command_with_prompt(
     let build = |extras: &LaunchExtras| {
         with_pane_actor(terminal, preset, preset_command_with_hooks(preset, session_id, extras))
     };
+    // Trimmed first, the way the Mac trims its draft, and only THEN guarded:
+    // "update" and nine kilobytes of newlines has whitespace in it, so
+    // `guarded` would leave it alone — and the file form's `"$(cat …)"`
+    // strips trailing newlines, which would hand the agent a bare `update`.
+    // Trimming here covers every client, not only the one that trims.
+    let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
     extras.prompt = prompt.map(|p| LaunchPrompt::Inline(p.to_string()));
     let command = build(&extras);
     let Some(text) = prompt else { return command };
@@ -8606,6 +8612,20 @@ mod launch_prompt_tests {
                 argv_through(&command, program, "/bin/sh", "/bin/sh"),
                 format!("{flags},update the readme")
             );
+        }
+    }
+
+    /// A subcommand's name followed by enough newlines to go through the
+    /// file: a shell strips trailing newlines from `"$(cat …)"`, which would
+    /// leave the bare name. Trimmed before it is guarded, it cannot.
+    #[test]
+    fn a_subcommand_padded_with_newlines_is_still_not_run_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        for padded in [format!("update{}", "\n".repeat(9 * 1024)), "\n\t update \n".to_string()] {
+            let command = launch_command_with_prompt(
+                dir.path(), Uuid::now_v7(), "claude", None, LaunchExtras::NONE, Some(&padded));
+            let bare = command.split_once(" /").map(|(_, rest)| format!("/{rest}")).unwrap();
+            assert_eq!(argv_through(&bare, "claude", "/bin/sh", "/bin/sh"), ", update");
         }
     }
 

@@ -2321,13 +2321,14 @@ struct ContentView: View {
     /// whose `repositories` has not been re-read since a reconnect, and a
     /// lookup that finds nothing has to be answered with a refusal, not a
     /// fallback to this Mac.
-    private func startTask(_ request: TaskRequest) async -> String? {
+    private func startTask(_ request: TaskRequest) async -> TaskSubmission.Outcome {
         let host = request.host
         if let client = store.clients[host], client.state == .notInstalled {
-            return "Far Cooler isn’t installed on this runner, so the task wasn’t started."
+            return .failed("Far Cooler isn’t installed on this runner, so the task wasn’t started.")
         }
         guard store.refusal(for: host) == nil, let client = store.clients[host] else {
-            return "Can’t reach this runner right now, so the task wasn’t started. Try again once it’s back."
+            return .failed(
+                "Can’t reach this runner right now, so the task wasn’t started. Try again once it’s back.")
         }
         let outcome = await client.startTask(
             project: request.project,
@@ -2335,18 +2336,18 @@ struct ContentView: View {
             name: request.name,
             agent: request.preset.isEmpty ? Preferences.shared.defaultAgent : request.preset)
         switch outcome {
-        case .started(let workspace, let terminal):
+        case .started(let workspace, let terminal, let name):
             // By the ids the create calls returned, not by a later look at
             // the fleet — which, this soon, may not have the terminal yet.
             expanded.insert(workspace)
             selection = .terminal(host: host, workspace: workspace, terminal: terminal)
-            return nil
+            return .started(name: name)
         case .failed(let sentence, let workspace):
             if let workspace { reveal(workspace) }
             // After the selection change, which clears the banner. The panel
             // shows it when it is still open; this is for when it is not.
             if !showQuickCreate { errorBanner = sentence }
-            return sentence
+            return .failed(sentence)
         }
     }
 

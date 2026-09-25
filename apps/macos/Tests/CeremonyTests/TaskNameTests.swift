@@ -106,15 +106,23 @@ struct TaskNameTests {
     // MARK: - What a failed start says
 
     @Test func aFailedStartIsSaidInThisAppsWordsNeverTheRunners() {
-        let raw = "error: resource version is stale"
-        let generic = TaskFailure.sentence(for: raw)
+        let generic = TaskFailure.sentence(for: "error: resource version is stale\ncode: resource-conflict")
         #expect(!generic.contains("stale") && !generic.contains("error"), "\(generic)")
         #expect(generic.hasPrefix("Couldn’t start the task"))
         #expect(TaskFailure.sentence(for: nil) == generic)
 
-        let taken = TaskFailure.sentence(for: "error: branch already exists")
+        let taken = TaskFailure.sentence(for: "error: branch already exists\ncode: branch-exists")
         #expect(taken.contains("took that name"), "\(taken)")
-        #expect(TaskFailure.sentence(for: "error: worktree path already exists") == taken)
-        #expect(TaskFailure.sentence(for: "error: invalid argument: prompt is too long").contains("too long"))
+        #expect(TaskFailure.sentence(for: "error: worktree path already exists\ncode: worktree-exists") == taken)
+        #expect(TaskFailure.sentence(for: "error: tmux is unavailable\ncode: tmux-unavailable").contains("tmux"))
+    }
+
+    /// The code word decides, not the prose: a reworded message still maps,
+    /// and the old prose without a word does not.
+    @Test func aFailureIsRecognizedByItsCodeWordNotItsWording() {
+        let taken = TaskFailure.sentence(for: "error: a branch by that name is here already\ncode: branch-exists")
+        #expect(taken.contains("took that name"), "\(taken)")
+        let prose = TaskFailure.sentence(for: "error: branch already exists")
+        #expect(!prose.contains("took that name"), "\(prose)")
     }
 }

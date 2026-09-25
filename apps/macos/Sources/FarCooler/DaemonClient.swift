@@ -1367,7 +1367,9 @@ final class DaemonClient: ObservableObject {
         /// The workspace and its agent's terminal, by the ids the create calls
         /// returned — which is what the window selects, rather than whatever
         /// a later look at the fleet happens to hold.
-        case started(workspace: String, terminal: String)
+        /// `name` is the one it was made under: the panel's, or it with the
+        /// suffix `unique` added.
+        case started(workspace: String, terminal: String, name: String)
         /// A sentence for the panel, in this app's words. `workspace` is set
         /// when the worktree was made but its agent was not.
         case failed(String, workspace: String?)
@@ -1452,7 +1454,7 @@ final class DaemonClient: ObservableObject {
         }
 
         if !asArgument { typeWhenIdle(workspace: workspace.id, terminal: terminal.id, text: description) }
-        return .started(workspace: workspace.id, terminal: terminal.id)
+        return .started(workspace: workspace.id, terminal: terminal.id, name: name)
     }
 
     /// What `--json` on a create prints: the id of the thing made.
@@ -1880,8 +1882,22 @@ final class DaemonClient: ObservableObject {
         watchingTask?.cancel()
         watchingTask = nil
 
+        // The clock keeps running for as long as panes are on screen — while
+        // nobody is present too, sending nothing then. That is what brings a
+        // claim back within one tick of the person returning: a lapse for
+        // idleness ends with a key or the mouse, which is no fleet event and no
+        // selection change, and nothing else would ask again.
+        if !terminals.isEmpty {
+            watchingTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.watchingFloor))
+                guard !Task.isCancelled else { return }
+                self?.reportWatching(terminals)
+            }
+        }
+
         // Nothing claimed and nothing to take back: say nothing. This is every
-        // runner not in the detail pane, on every fleet event.
+        // runner not in the detail pane, on every fleet event, and every tick
+        // while nobody is there.
         if claim.isEmpty && watching.isEmpty { return }
 
         if changed || Date().timeIntervalSince(watchingSentAt) >= Self.watchingFloor {
@@ -1897,16 +1913,6 @@ final class DaemonClient: ObservableObject {
             Task { [weak self] in
                 _ = await self?.runRaw(["terminal", "watching"] + claim, background: true)
             }
-        }
-
-        // Nothing left to renew. A released claim is the end of it — the runner
-        // forgets it on its own within `WATCHED_TTL_MS` even if this last call
-        // never lands.
-        guard !claim.isEmpty else { return }
-        watchingTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.watchingFloor))
-            guard !Task.isCancelled else { return }
-            self?.reportWatching(terminals)
         }
     }
 

@@ -247,29 +247,43 @@ enum TaskPrompt {
 
 /// Starting a task went wrong: what the panel says about it.
 ///
-/// **The runner's words are not the sentence.** The CLI prints the daemon's
-/// `Display` text ("error: branch already exists"), written for a log. The
-/// few failures a task start can meet get a sentence here; anything else gets
-/// a plain one of its own. The draft stays in the panel either way, so nothing
-/// the person typed is lost to a failure this cannot name.
+/// **The runner's words are not the sentence, and not the key either.** The
+/// CLI prints the daemon's `Display` text ("error: branch already exists"),
+/// written for a log and free to be reworded. Under `--json` it also prints
+/// `code: <word>` — the stable machine word of `farcooler_core::error::word`
+/// — and that is what this switches on. Anything without a word it knows gets
+/// a plain sentence of its own. The draft stays in the panel either way, so
+/// nothing the person typed is lost to a failure this cannot name.
+///
+/// No word distinguishes the two prompt refusals (both are
+/// `invalid-argument`), and none needs to: the panel refuses both before
+/// asking (`TaskPrompt`), so one reaching here is the app sending what the
+/// runner will not take.
 enum TaskFailure {
+    /// The word on a `code:` line of the CLI's stderr, if there is one.
+    static func code(in message: String?) -> String? {
+        (message ?? "").split(whereSeparator: \.isNewline)
+            .lazy
+            .compactMap { line -> String? in
+                let line = line.trimmingCharacters(in: .whitespaces)
+                guard line.hasPrefix("code: ") else { return nil }
+                return String(line.dropFirst("code: ".count))
+            }
+            .first
+    }
+
     static func sentence(for message: String?) -> String {
-        let text = (message ?? "").lowercased()
-        if text.contains("branch already exists") || text.contains("worktree path already exists") {
-            return "Another task took that name a moment ago. Start it again for a new name."
+        switch code(in: message) {
+        case "branch-exists", "worktree-exists":
+            "Another task took that name a moment ago. Start it again for a new name."
+        case "tmux-unavailable":
+            "The runner can’t reach tmux. Far Cooler runs every agent inside it, so install tmux there and try again."
+        case "capability-unsupported":
+            "This runner’s Far Cooler is too old for this. Update it there, then try again."
+        case "invalid-argument":
+            "This runner couldn’t take the task as Far Cooler sent it. That’s a problem in the app, not in anything you typed."
+        default:
+            "Couldn’t start the task on this runner. Check that it’s reachable, then try again."
         }
-        if text.contains("prompt is too long") {
-            return TaskPrompt.problem(String(repeating: "x", count: TaskPrompt.maxBytes + 1))!
-        }
-        if text.contains("nul byte") {
-            return TaskPrompt.problem("\u{0}")!
-        }
-        if text.contains("tmux is unavailable") {
-            return "The runner can’t reach tmux. Far Cooler runs every agent inside it, so install tmux there and try again."
-        }
-        if text.contains("capability") || text.contains("newer far cooler") {
-            return "This runner’s Far Cooler is too old for this. Update it there, then try again."
-        }
-        return "Couldn’t start the task on this runner. Check that it’s reachable, then try again."
     }
 }

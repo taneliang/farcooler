@@ -143,7 +143,7 @@ struct StartTaskTests {
         let outcome = await start(client)
         let took = ContinuousClock.now - started
 
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new"))
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(took < .seconds(2), "returned once the terminal existed, not after a wait: \(took)")
         #expect(runner.made("terminal")?.contains("--prompt=\(Self.description)") == true)
         // Nothing is typed, then or later — the agent already has it. Idle
@@ -161,7 +161,7 @@ struct StartTaskTests {
         let outcome = await start(client)
         let took = ContinuousClock.now - started
 
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new"))
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(took < .seconds(2), "the typing no longer holds the window: \(took)")
         #expect(runner.made("terminal")?.contains { $0.hasPrefix("--prompt") } == false)
 
@@ -181,11 +181,12 @@ struct StartTaskTests {
 
     @Test func theWorkspaceIsTheOneItsCreateReturnedNotANewcomerInTheList() async {
         let runner = Runner(capabilities: Self.prompting)
-        runner.anotherNewWorkspace = true
+        // Absent while the client first reads the fleet, so a before-and-after
+        // guess would see TWO new workspaces during the start — and take the
+        // first, which is not ours.
         let client = await client(runner)
-        runner.anotherNewWorkspace = false
         let outcome = await startWithANewcomer(client, runner)
-        #expect(outcome == .started(workspace: "w-new", terminal: "t-new"))
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(runner.made("terminal")?.contains("wnew") == true)
     }
 
@@ -223,7 +224,10 @@ struct StartTaskTests {
             let runner = Runner(capabilities: Self.prompting)
             setUp(runner)
             let client = await client(runner)
-            _ = await start(client)
+            let outcome = await start(client)
+            #expect(
+                outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect-2"),
+                "the name it was made under comes back")
             let args = runner.made("workspace")?.filter { $0 != "--json" }
             #expect(args?[3] == "fix-flaky-reconnect-2", "\(args ?? [])")
             #expect(args?[5].hasSuffix("fix-flaky-reconnect-2") == true, "\(args ?? [])")
@@ -232,7 +236,7 @@ struct StartTaskTests {
 
     @Test func aWorkspaceThatCannotBeMadeSaysSoAndMakesNoAgent() async {
         let runner = Runner(capabilities: Self.prompting)
-        runner.workspaceCreateFails = "error: branch already exists"
+        runner.workspaceCreateFails = "error: branch already exists\ncode: branch-exists"
         let client = await client(runner)
         let outcome = await start(client)
         guard case .failed(let sentence, let workspace) = outcome else {
@@ -246,7 +250,7 @@ struct StartTaskTests {
 
     @Test func anAgentThatCannotBeStartedSaysSoAndNamesTheWorkspace() async {
         let runner = Runner(capabilities: Self.prompting)
-        runner.terminalCreateFails = "error: tmux is unavailable"
+        runner.terminalCreateFails = "error: tmux is unavailable\ncode: tmux-unavailable"
         let client = await client(runner)
         let outcome = await start(client)
         guard case .failed(let sentence, let workspace) = outcome else {
@@ -327,6 +331,27 @@ struct StartTaskTests {
         let runner = Runner(capabilities: ["workspaces", "terminals", "watching"])
         let calls = await watching(runner, presence: presence)
         #expect(!calls.contains { $0.contains("t1") }, "\(absent): \(calls)")
+    }
+
+    /// Idle for a minute, the claim lapses; a touch of the mouse brings it
+    /// back on the next tick — with no fleet event and no selection change,
+    /// which is how people watch an agent in a long tool call.
+    @Test func aClaimComesBackWithinATickOfThePersonReturning() async {
+        let runner = Runner(capabilities: ["workspaces", "terminals", "watching"])
+        let client = await client(runner)
+        var idle: TimeInterval = Presence.idleLimit + 1
+        client.presence = Presence(
+            appActive: { true }, screenAwake: { true }, sessionUnlocked: { true },
+            secondsSinceInput: { idle })
+        client.reportWatching(["t1"])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(!runner.watchingCalls.contains { $0.contains("t1") }, "nobody there yet")
+
+        idle = 1
+        for _ in 0..<40 where !runner.watchingCalls.contains(where: { $0.contains("t1") }) {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(runner.watchingCalls.contains { $0.contains("t1") }, "\(runner.watchingCalls)")
     }
 
     @Test func aRunnerThatIsNotConnectedIsNeverSentAHeartbeat() async {

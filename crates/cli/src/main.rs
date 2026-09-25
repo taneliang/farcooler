@@ -747,11 +747,34 @@ async fn main() {
 
     if let Err(e) = run().await {
         eprintln!("error: {e}");
+        if let Some(line) = error_code_line(e.as_ref(), std::env::args().any(|a| a == "--json")) {
+            eprintln!("{line}");
+        }
         std::process::exit(1);
     }
 }
 
 pub(crate) type Fallible = Result<(), Box<dyn std::error::Error>>;
+
+/// `code: <word>` on stderr under `--json`, when the daemon refused.
+///
+/// The line above it is the daemon's `Display` text, which is written for a
+/// log and may be reworded at any time. The word is the stable one
+/// (`farcooler_core::error::word`, `branch-exists`, `tmux-unavailable`, …) a
+/// client switches on to choose its own sentence — the Mac's ⌘N panel does.
+/// Only under `--json`, which is the machine-reading mode: a person reading
+/// the terminal has the sentence already.
+fn error_code_line(error: &(dyn std::error::Error + 'static), json: bool) -> Option<String> {
+    if !json {
+        return None;
+    }
+    match error.downcast_ref::<farcooler_transport::ClientError>()? {
+        farcooler_transport::ClientError::Daemon { code, .. } => {
+            Some(format!("code: {}", farcooler_core::error::word_for(*code)))
+        }
+        _ => None,
+    }
+}
 
 /// Pair, unpair, or report — on this runner or, with `--runner`, on another.
 ///
@@ -3268,6 +3291,20 @@ fn resolve<'a, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_carries_its_stable_code_word_under_json() {
+        let refused: Box<dyn std::error::Error> = Box::new(farcooler_transport::ClientError::Daemon {
+            code: farcooler_protocol::v1::ErrorCode::BranchExists as i32,
+            retryable: false,
+            message: "branch already exists".into(),
+            what: String::new(),
+        });
+        assert_eq!(error_code_line(refused.as_ref(), true).as_deref(), Some("code: branch-exists"));
+        assert_eq!(error_code_line(refused.as_ref(), false), None, "a person has the sentence");
+        let other: Box<dyn std::error::Error> = "no such workspace".into();
+        assert_eq!(error_code_line(other.as_ref(), true), None);
+    }
 
     #[test]
     fn a_terminal_created_with_a_prompt_names_the_capability_it_needs() {

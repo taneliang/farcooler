@@ -43,7 +43,7 @@ struct QuickCreate: View {
     /// together for exactly this reason: a repository chosen without its
     /// host, handed to whatever runner happens to be "current" downstream,
     /// is how a task starts on the wrong one with no error at all.
-    let onSubmit: (TaskRequest) async -> String?
+    let onSubmit: (TaskRequest) async -> TaskSubmission.Outcome
     let onResume: () -> Void
     let onClose: () -> Void
     /// What the CHOSEN runner says branch names start with.
@@ -186,7 +186,10 @@ struct QuickCreate: View {
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
         .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
         .frame(width: 560)
-        .onAppear { OnDeviceNamer.prewarm() }
+        .onAppear {
+            submission.opened()
+            OnDeviceNamer.prewarm()
+        }
         // A failure is about the text it was for; editing it clears it.
         .onChange(of: text) { _, _ in submission.failure = nil }
         // Named while typing, a moment after the typing stops: `.task(id:)`
@@ -296,13 +299,17 @@ struct QuickCreate: View {
         let request = TaskRequest(
             description: description, name: name, host: chosen.host,
             project: chosen.repository.id, preset: Agents.preset(agent: agent, model: model))
-        let started = await submission.run { await onSubmit(request) }
-        guard started else { return }
-        justCreated = WorktreeName.display(request.name)
+        // Which opening of the panel this is, so a start that finishes after
+        // the panel was closed and opened again cannot close the new one.
+        let opening = submission.opening
+        guard let startedAs = await submission.run({ await onSubmit(request) }) else { return }
+        // The name it was started under, which may carry a `-2` the panel
+        // could not know about.
+        justCreated = WorktreeName.display(startedAs)
         // Only if it is still the text that was started: the panel may have
         // been closed, reopened and written in while this was in flight.
         if description == request.description { text = "" }
-        if !keepOpen { onClose() }
+        if !keepOpen && submission.opening == opening { onClose() }
     }
 }
 
@@ -320,17 +327,35 @@ struct TaskRequest: Equatable {
 final class TaskSubmission: ObservableObject {
     @Published private(set) var starting = false
     @Published var failure: String?
+    /// Counts the panel's openings (`opened()`). A start remembers the one
+    /// it was made from and closes only that.
+    private(set) var opening = 0
 
-    /// Run `start` unless one is already running. `true` when it started the
-    /// task; a failure is kept in `failure` for the panel to show.
-    func run(_ start: () async -> String?) async -> Bool {
-        guard !starting else { return false }
+    /// How a start ended, as the panel needs it.
+    enum Outcome: Equatable {
+        /// Started, under this name — the panel's, or it with a suffix.
+        case started(name: String)
+        /// Not started, with the sentence to show.
+        case failed(String)
+    }
+
+    func opened() { opening += 1 }
+
+    /// Run `start` unless one is already running. The name it started under,
+    /// or nil; a failure is kept in `failure` for the panel to show.
+    func run(_ start: () async -> Outcome) async -> String? {
+        guard !starting else { return nil }
         starting = true
         failure = nil
-        let problem = await start()
+        let outcome = await start()
         starting = false
-        failure = problem
-        return problem == nil
+        switch outcome {
+        case .started(let name):
+            return name
+        case .failed(let sentence):
+            failure = sentence
+            return nil
+        }
     }
 }
 
