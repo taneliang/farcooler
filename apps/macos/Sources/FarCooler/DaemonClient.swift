@@ -1433,10 +1433,22 @@ final class DaemonClient: ObservableObject {
         // deciding on a nil build would type the task — the path gates break.
         if daemonBuild == nil { await readDaemonBuild() }
 
-        if let reusing, let existing = fleet.workspaces.first(where: { $0.id == reusing }) {
-            return await startAgent(
-                in: Created(id: existing.id, short: existing.short), name: name,
-                description: description, agent: agent, undelivered: undelivered)
+        if let reusing {
+            // Read fresh: the attempt that failed may in fact have made its
+            // agent (the link dropped after the runner did it), and the phone
+            // or another window may have opened one since. And a worktree
+            // removed since is found gone now, not by a create that fails.
+            await refresh()
+            if let existing = fleet.workspaces.first(where: { $0.id == reusing }) {
+                // Two agents in one tree write over each other. One already
+                // there is the task's: go to it, and start nothing.
+                if let running = existing.terminals.first(where: Self.isLiveAgent) {
+                    return .started(workspace: existing.id, terminal: running.id, name: name)
+                }
+                return await startAgent(
+                    in: Created(id: existing.id, short: existing.short), name: name,
+                    description: description, agent: agent, undelivered: undelivered)
+            }
         }
 
         // This runner's own prefix, read from the fleet it last refreshed — the
@@ -1496,6 +1508,13 @@ final class DaemonClient: ObservableObject {
         return await startAgent(
             in: workspace, name: name, description: description, agent: agent,
             undelivered: undelivered)
+    }
+
+    /// An agent's terminal that is running or on its way: not a shell, not a
+    /// changes pane, and not one that has ended.
+    static func isLiveAgent(_ terminal: Terminal) -> Bool {
+        !["shell", "changes"].contains(terminal.preset)
+            && [.running, .starting].contains(StateKind.parse(terminal.state))
     }
 
     /// The second half of `startTask`: the agent's terminal, in a worktree

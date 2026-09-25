@@ -354,6 +354,23 @@ struct StartTaskTests {
         #expect(terminals.count == 2 && terminals.last?.contains("wnew") == true, "\(terminals)")
     }
 
+    /// The failed attempt's agent was in fact made — the link dropped after
+    /// the runner did it — or somebody opened one there since. Starting again
+    /// goes to that agent and starts no second one in the same tree.
+    @Test func aRetryWhereAnAgentAlreadyRunsGoesToItAndStartsNoOther() async {
+        let runner = Runner(capabilities: Self.prompting)
+        let client = await client(runner)
+        // Made behind the client's back: its fleet hasn't seen either yet.
+        runner.workspaceMade = true
+        runner.terminalMade = true
+        let outcome = await client.startTask(
+            project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+            agent: "claude", reusing: "w-new")
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(runner.made("terminal") == nil, "no second agent")
+        #expect(runner.made("workspace") == nil, "and no second worktree")
+    }
+
     /// Removed since: a start from scratch, not an agent sent nowhere.
     @Test func aRetryWhoseWorktreeIsGoneMakesANewOne() async {
         let runner = Runner(capabilities: Self.prompting)
