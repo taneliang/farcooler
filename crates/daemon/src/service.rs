@@ -443,7 +443,7 @@ pub(crate) mod test_agent {
     /// The programs the refusal below looks for: the four agents
     /// `farcooler_core`'s registry identifies a pane by (`claude`, `codex`,
     /// `opencode`, `cursor-agent`) and the shim. One of these reaching tmux
-    /// without the stub directly in front of it is a real agent about to
+    /// without the stub earlier in the same command is a real agent about to
     /// start.
     const AGENTS: [&str; 5] = ["claude", "codex", "opencode", "cursor-agent", "agent-host"];
 
@@ -484,7 +484,7 @@ pub(crate) mod test_agent {
     /// The tmux boundary's check, run on every command a test is about to
     /// hand tmux: panics rather than start a real agent. Two ways in, both
     /// refused -- a command built under `real_names()`, and an agent's
-    /// program with no stub directly in front of it, which is what a new
+    /// program with no stub earlier in the same command, which is what a new
     /// launch path that forgot `agent_program` would write.
     ///
     /// Words are split on whitespace, quotes and the shell's own
@@ -494,7 +494,10 @@ pub(crate) mod test_agent {
     /// needs the stub before it in that same command. Everything after it
     /// there is the stub's arguments (`--preset claude`, a prompt that names
     /// an agent) and is not checked. A separator ends what a stub vouches
-    /// for, so a stubbed launch followed by `; codex` is refused.
+    /// for, so a stubbed launch followed by `; codex` is refused. Separators
+    /// are found without regard to quoting, so a prompt holding one and then
+    /// an agent's name (`'fix it; ask codex'`) is refused too -- the safe
+    /// direction, and no test's prompt does.
     ///
     /// **What it still cannot see:** a program named through a variable, an
     /// alias, `eval` or a wrapper script; and any agent not in `AGENTS`. It

@@ -132,9 +132,11 @@ impl LogWatcher {
             if matches!(*slot, Slot::Closed) {
                 return;
             }
-            *slot = Slot::Watching { _watcher: watcher };
-            drop(slot);
+            // The report goes in BEFORE the slot leaves `Registering`, under
+            // its lock: anyone who sees the registration finished must also
+            // see the report, or a drain taken in between misses it.
             sink.lock().unwrap_or_else(|e| e.into_inner()).extend(roots.into_iter().filter(|r| r.exists()));
+            *slot = Slot::Watching { _watcher: watcher };
         });
         if let Err(error) = spawned {
             tracing::warn!(?error, "could not start the thread that registers the log watch; falling back to no watching");
@@ -392,8 +394,13 @@ mod tests {
         let watcher = registered(vec![missing, real.clone()]);
         std::fs::write(real.join("session.jsonl"), "{}").unwrap();
 
+        let file = real.join("session.jsonl");
         let found = wait_for_drain(&watcher, Duration::from_secs(5));
-        assert!(!found.is_empty(), "the root that exists must still be watched");
+        let canonical_file = file.canonicalize().unwrap_or_else(|_| file.clone());
+        assert!(
+            found.iter().any(|p| p.canonicalize().unwrap_or_else(|_| p.clone()) == canonical_file),
+            "the root that exists must still be watched: expected {file:?} among {found:?}"
+        );
     }
 
     #[test]
