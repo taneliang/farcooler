@@ -17,6 +17,7 @@ import worker, {
   STATE_BUDGET,
   TRACE_ANCHOR_SLACK_S,
   cut,
+  traceAnchor,
 } from '../src/index'
 import { anonymousId, record } from '../src/analytics'
 import { fingerprintOf, parseEd25519 } from '../src/keys'
@@ -3224,6 +3225,26 @@ describe('/v1/notify and Live Activities', () => {
       }
     })
 
+    it('bounds a trace anchor at exactly the slack, against a fixed clock', () => {
+      // `now` injected, so no bucket boundary can move an edge under the test.
+      // 1,800,600 seconds is chosen so both edges sit exactly on a bucket
+      // boundary: + 600 is 1,801,200, five-minute bucket 6004 on the dot, and
+      // − 600 is 1,800,000, two-hour bucket 250 on the dot. So a slack one
+      // second narrower moves the newest edge and one second wider moves the
+      // oldest — the slack itself is pinned, not just the bucket it rounds to.
+      const now = 1_800_600 * 1000
+      expect(traceAnchor(6004, now)).toBe(6004)
+      expect(traceAnchor(6005, now)).toBe(null)
+      expect(traceAnchor(250, now)).toBe(250)
+      expect(traceAnchor(249, now)).toBe(null)
+      // Five minutes fast is inside the slack.
+      expect(traceAnchor(6003, now)).toBe(6003)
+      // Not a whole number, not a number, absurd.
+      expect(traceAnchor(6000.5, now)).toBe(null)
+      expect(traceAnchor('6000', now)).toBe(null)
+      expect(traceAnchor(2 ** 52, now)).toBe(null)
+    })
+
     it("refuses a trace anchor no runner's clock could have sent now", async () => {
       // An anchor is a claim about what time it is on the runner, and the card
       // puts every row on the grid the newest one sets — so one runner a day
@@ -3250,9 +3271,8 @@ describe('/v1/notify and Live Activities', () => {
         await send(ahead)
         expect(await stored()).toBe(null)
       }
-      // Just past the slack is past it.
-      await send(Math.floor((seconds + TRACE_ANCHOR_SLACK_S) / 300) + 1)
-      expect(await stored()).toBe(null)
+      // The exact edges are pinned against a fixed clock in the test below;
+      // this one only needs margins no bucket boundary can close.
       // Far behind: a day slow on the two-hour grid, and zero.
       for (const behind of [Math.floor((seconds - 86400) / 7200), 0]) {
         await send(behind)

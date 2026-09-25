@@ -1679,7 +1679,12 @@ export const TRACE_ANCHOR_SLACK_S = 10 * 60
 ///
 /// Applied on arrival only. A stored anchor rides with its stored trace and
 /// legitimately ages; it is not re-checked against a later `now`.
-function traceAnchor(value: unknown, now: number): number | null {
+///
+/// `now` is a parameter, in Unix milliseconds, rather than read here: the
+/// caller passes the one it stamps the row with, and a test passes a fixed one
+/// so the edges of the bound are checked exactly rather than across whatever
+/// bucket boundary the wall clock happens to be near. Exported for that test.
+export function traceAnchor(value: unknown, now: number): number | null {
   if (typeof value !== 'number' || !Number.isSafeInteger(value)) return null
   const seconds = Math.floor(now / 1000)
   const oldest = Math.floor((seconds - TRACE_ANCHOR_SLACK_S) / 7200)
