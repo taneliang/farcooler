@@ -112,7 +112,7 @@ struct TaskNameTests {
         #expect(TaskFailure.sentence(for: nil) == generic)
 
         let taken = TaskFailure.sentence(for: "error: branch already exists\ncode: branch-exists")
-        #expect(taken.contains("took that name"), "\(taken)")
+        #expect(taken.contains("already has a branch or folder"), "\(taken)")
         #expect(TaskFailure.sentence(for: "error: worktree path already exists\ncode: worktree-exists") == taken)
         #expect(TaskFailure.sentence(for: "error: tmux is unavailable\ncode: tmux-unavailable").contains("tmux"))
     }
@@ -121,8 +121,8 @@ struct TaskNameTests {
     /// and the old prose without a word does not.
     @Test func aFailureIsRecognizedByItsCodeWordNotItsWording() {
         let taken = TaskFailure.sentence(for: "error: a branch by that name is here already\ncode: branch-exists")
-        #expect(taken.contains("took that name"), "\(taken)")
+        #expect(taken.contains("already has a branch or folder"), "\(taken)")
         let prose = TaskFailure.sentence(for: "error: branch already exists")
-        #expect(!prose.contains("took that name"), "\(prose)")
+        #expect(!prose.contains("already has a branch or folder"), "\(prose)")
     }
 }

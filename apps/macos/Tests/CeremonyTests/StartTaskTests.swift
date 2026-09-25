@@ -234,6 +234,10 @@ struct StartTaskTests {
                 r.branchPrefix = "el/"
                 r.branches = [("el/fix-flaky-reconnect", "origin")]
             },
+            // Differing only in case: one loose ref, and one directory, on a
+            // Mac runner's disk.
+            { (r: Runner) in r.branches = [("Fix-Flaky-Reconnect", nil)] },
+            { (r: Runner) in r.existing = ["Fix-Flaky-Reconnect"] },
         ] {
             let runner = Runner(capabilities: Self.prompting)
             setUp(runner)
@@ -246,6 +250,28 @@ struct StartTaskTests {
             #expect(args?[3] == "fix-flaky-reconnect-2", "\(args ?? [])")
             #expect(args?[5].hasSuffix("fix-flaky-reconnect-2") == true, "\(args ?? [])")
         }
+    }
+
+    /// Taken by something neither list shows — a directory left under
+    /// `worktrees/` that no workspace owns, a branch fetched since the list
+    /// was read. Starting it again gets the next name, not the same refusal.
+    @Test(arguments: ["worktree-exists", "branch-exists"])
+    func aNameTheRunnerRefusedAsTakenIsNotTriedAgain(_ code: String) async {
+        let runner = Runner(capabilities: Self.prompting)
+        runner.workspaceCreateFails = "error: already exists\ncode: \(code)"
+        let client = await client(runner)
+        guard case .failed(let sentence, _) = await start(client) else {
+            Issue.record("expected a refusal")
+            return
+        }
+        #expect(sentence.contains("Start the task again"), "\(sentence)")
+
+        runner.workspaceCreateFails = nil
+        let outcome = await start(client)
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect-2"))
+        let creates = runner.calls.filter { $0.filter { $0 != "--json" }.starts(with: ["workspace", "create"]) }
+        #expect(creates.count == 2)
+        #expect(creates.last?.contains("fix-flaky-reconnect-2") == true, "\(creates)")
     }
 
     @Test func aWorkspaceThatCannotBeMadeSaysSoAndMakesNoAgent() async {

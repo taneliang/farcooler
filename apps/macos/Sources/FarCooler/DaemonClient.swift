@@ -1419,12 +1419,18 @@ final class DaemonClient: ObservableObject {
         else {
             return .failed(TaskFailure.sentence(for: listFailure), workspace: nil)
         }
-        let takenBranches = Set(branches.map(\.name))
+        // Compared without case. A Mac runner's disk ignores it, so `Fix-It`
+        // and `fix-it` are one loose ref and one directory there, and git's
+        // refusal of the second is one the list never showed. On a disk that
+        // minds, the cost is a `-2` nobody needed.
+        let takenBranches = Set(branches.map { $0.name.lowercased() })
         let takenDirectories = Set(
-            fleet.workspaces.map { URL(fileURLWithPath: $0.worktree).lastPathComponent })
+            fleet.workspaces.map { URL(fileURLWithPath: $0.worktree).lastPathComponent.lowercased() })
+        let refused = refusedTaskNames[project, default: []]
         let name = TaskName.unique(name) { candidate in
-            takenDirectories.contains(candidate)
-                || takenBranches.contains(Branch.slug(from: candidate, prefix: prefix))
+            takenDirectories.contains(candidate.lowercased())
+                || refused.contains(candidate.lowercased())
+                || takenBranches.contains(Branch.slug(from: candidate, prefix: prefix).lowercased())
         }
         let branch = Branch.slug(from: name, prefix: prefix)
 
@@ -1450,6 +1456,13 @@ final class DaemonClient: ObservableObject {
             ["--json", "workspace", "create", project, name, "--branch", branch, "--no-terminal"]
                 + (forkOnly ? ["--fork-only"] : []))
         guard let workspace = made.flatMap(Created.decode) else {
+            // Taken, by something neither list shows: a directory left behind
+            // under `worktrees/` that no workspace owns, or a branch that came
+            // in since the list was read. Remembered, so starting it again
+            // gets the next name rather than the same refusal forever.
+            if ["branch-exists", "worktree-exists"].contains(TaskFailure.code(in: makeFailure)) {
+                refusedTaskNames[project, default: []].insert(name.lowercased())
+            }
             return .failed(TaskFailure.sentence(for: makeFailure), workspace: nil)
         }
 
@@ -1471,6 +1484,12 @@ final class DaemonClient: ObservableObject {
         if !asArgument { typeWhenIdle(workspace: workspace.id, terminal: terminal.id, text: description) }
         return .started(workspace: workspace.id, terminal: terminal.id, name: name)
     }
+
+    /// Task names a create on this runner refused as taken, by project,
+    /// without case. Asked by `startTask`'s suffixing alongside the branch
+    /// list and the fleet, which can't see what made the refusal. Kept for
+    /// the life of the client: a name refused once is not worth trying again.
+    private var refusedTaskNames: [String: Set<String>] = [:]
 
     /// What `--json` on a create prints: the id of the thing made.
     private struct Created: Decodable {

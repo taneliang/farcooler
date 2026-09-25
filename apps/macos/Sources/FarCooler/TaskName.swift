@@ -275,7 +275,7 @@ enum TaskFailure {
     static func sentence(for message: String?) -> String {
         switch code(in: message) {
         case "branch-exists", "worktree-exists":
-            "Another task took that name a moment ago. Start it again for a new name."
+            "This runner already has a branch or folder with that name. Start the task again to use a different one."
         case "tmux-unavailable":
             "The runner can’t reach tmux. Far Cooler runs every agent inside it, so install tmux there and try again."
         case "capability-unsupported":
