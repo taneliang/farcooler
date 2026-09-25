@@ -1961,12 +1961,45 @@ async fn a_terminal_for_a_task_on_its_own_board_exports_the_key() {
     let workspace = a_workspace(&mut client, dir.path()).await;
     let task = create_task(&mut client, workspace.repository_id.clone(), "the work").await;
 
-    client.call(a_terminal_for(&workspace.id, &task.key)).await.expect("opened for its task");
+    let made = client.call(a_terminal_for(&workspace.id, &task.key)).await.expect("opened for its task");
+    let Some(result::Value::Terminal(terminal)) = made.value else { panic!("wrong result") };
+    assert_eq!(terminal.task_id.as_ref(), Some(&task.id), "and the terminal says which task, by id");
 
     let commands = start_commands(&h);
     assert!(
         commands.iter().any(|c| c.contains(&format!("FARCOOLER_TASK={}", task.key))),
         "the pane names its task: {commands:?}"
+    );
+}
+
+/// `join_active_group` makes the pane by splitting the focused one: the
+/// other of the two first launches, and the one `prefix %` takes.
+#[tokio::test]
+async fn a_terminal_split_into_the_layout_for_a_task_exports_the_key() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let task = create_task(&mut client, workspace.repository_id.clone(), "the work").await;
+    // A layout to join: one ordinary pane first.
+    client.call(a_terminal_for(&workspace.id, "")).await.expect("a first pane");
+
+    let mut split = a_terminal_for(&workspace.id, &task.key);
+    let Some(request::Payload::TerminalCreate(ref mut p)) = split.payload else { panic!("payload") };
+    p.join_active_group = true;
+    client.call(split).await.expect("split in, for its task");
+
+    let out = std::process::Command::new("tmux")
+        .args(["-L", &h.tmux_socket, "list-panes", "-a", "-F", "#{window_id} #{pane_start_command}"])
+        .output()
+        .expect("tmux");
+    let panes = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect::<Vec<_>>();
+    assert_eq!(panes.len(), 2, "{panes:?}");
+    let window = |line: &str| line.split_whitespace().next().unwrap_or_default().to_string();
+    assert_eq!(window(&panes[0]), window(&panes[1]), "a split, in the same window: {panes:?}");
+    assert!(
+        panes.iter().any(|c| c.contains(&format!("FARCOOLER_TASK={}", task.key))),
+        "the split pane names its task: {panes:?}"
     );
 }
 

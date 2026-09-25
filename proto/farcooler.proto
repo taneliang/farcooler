@@ -1099,6 +1099,12 @@ message Terminal {
   // three ways an adapter can fail to start were all rendered as an endless
   // spinner.
   optional string agent_failure = 36;
+  // The board task this terminal was opened for (`terminal.create`'s
+  // `task_key`, resolved), by id. Absent for a terminal opened for no task,
+  // and from a daemon older than the `terminal_task` capability. What
+  // `farcooler task dispatch` reads to refuse a second agent on a task whose
+  // first is still running.
+  optional bytes task_id = 37;
 }
 
 // What a pane is hosting.

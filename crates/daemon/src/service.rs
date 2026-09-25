@@ -2634,6 +2634,10 @@ impl Service {
 
         let ws = self.store.get_workspace(workspace_id)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
+        // Only an agent pane is opened FOR a task. A shell's record names
+        // none, so switching it to a chat later can't start exporting a key
+        // nobody dispatched it with.
+        let task = task.filter(|_| preset_runs_an_agent(command_preset));
 
         // 1. Commit the durable record with intent RUNNING, unconfirmed.
         let term = self.store.create_terminal_for_task(
@@ -2965,6 +2969,8 @@ impl Service {
 
         let ws = self.store.get_workspace(workspace_id)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
+        // See `create_terminal_with_prompt`: only an agent pane records a task.
+        let task = task.filter(|_| preset_runs_an_agent(command_preset));
         let pane = self.pane_of(target).await?;
         let (axis, before) = crate::layout::split_args(side);
 
@@ -5777,6 +5783,31 @@ mod pane_actor_tests {
         let command = pane_start_command(&svc, term.id).await;
         assert!(!command.contains(farcooler_core::pane_env::TASK), "{command}");
         assert!(!command.contains("re working"), "{command}");
+        // Nor does its record name the task: switched to a chat later, it
+        // would otherwise start exporting a key nobody dispatched it with.
+        assert_eq!(svc.store.get_terminal(term.id).unwrap().task_id, None);
+    }
+
+    /// The fourth launch path: a pane switched back to a terminal from a
+    /// chat. It keeps the key, just as a restart does.
+    #[tokio::test]
+    async fn a_pane_opened_for_a_task_names_it_after_switching_modes() {
+        let _stub = super::test_agent::stubbed();
+        let (_dir, svc, ws) = a_workspace().await;
+        let (task, key) = a_task(&svc, &ws);
+        let term = svc
+            .create_terminal_with_prompt(ws.id, "w", "claude", None, Some(task))
+            .await
+            .expect("a pane opened for a task");
+
+        svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains(super::test_agent::NOT_A_PROGRAM), "the stub: {command}");
+        assert!(
+            command.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)),
+            "a pane switched back to a terminal still names its task: {command}"
+        );
+        assert!(!command.contains("re working"), "and says nothing: {command}");
     }
 
     /// A task on another repository's board is refused before any pane or

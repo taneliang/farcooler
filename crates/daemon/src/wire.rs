@@ -223,6 +223,8 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         current_command: String::new(),
         pane_mode: pane_mode(t.pane_mode),
         agent_session_id: t.agent_session_id.clone(),
+        // The record's own, so this converter is the one that knows it.
+        task_id: t.task_id.map(id_bytes),
         // Left unset here for the same reason as `activity`: both describe a
         // live ACP session, and only the supervisor holding that session knows
         // them. A converter that guessed would report a mode the agent is not
