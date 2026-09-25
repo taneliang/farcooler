@@ -39,10 +39,10 @@ use crate::{
 
 /// The ticket a dispatched pane is working.
 ///
-/// **Nothing in this tree sets it yet**, and `farcooler_core::pane_env::TASK`
-/// says why: no dispatch here knows which task a pane was opened for, so a key
-/// is still typed. The daemon does now export `ACTOR_ENV`, so an unnamed write
-/// from an agent pane no longer files as a person.
+/// The daemon exports it for a pane opened for a task (`task dispatch`), from
+/// the terminal's record, so a restarted pane still names its ticket. See
+/// `farcooler_core::pane_env::TASK`. Any other pane has none, and its key is
+/// typed.
 ///
 /// Re-exported from `farcooler_core::pane_env` rather than spelled again:
 /// this end reads the names the daemon's end writes, and two literals for one
@@ -1067,12 +1067,9 @@ fn asked_fields(raw: Option<&str>) -> Result<Vec<String>, String> {
 
 /// The task a command is about: the one named, or the pane's own.
 ///
-/// `FARCOOLER_TASK` is the CONTRACT with whatever dispatches a pane, and as of
-/// this commit **nothing in this tree sets it** — no `Command::env`, no tmux
-/// export, nothing. Read that as a promise this side keeps and the other side
-/// does not yet: dispatch must export it, and until it does an agent names its
-/// own key like anybody else. It is worth having anyway, because an agent that
-/// has to be told its own ticket twice will eventually be told the wrong one.
+/// `FARCOOLER_TASK` is the contract with dispatch: the daemon exports it for
+/// a pane opened for a task (`task dispatch`), so an agent there never has to
+/// be told its own ticket twice and then be told the wrong one.
 ///
 /// An explicit key always wins: a pane may legitimately talk about another
 /// task, and a command that ignored its own argument would write to the wrong
@@ -1656,10 +1653,8 @@ mod tests {
         assert!(parsed["tasks"][0]["workspace_id"].is_null(), "a task with no lane says so");
     }
 
-    /// `FARCOOLER_TASK` is what a dispatched pane is MEANT to carry — nothing
-    /// in this tree sets it yet, so this pins the reading side of a contract
-    /// the writing side still owes. An agent that has to be told its own ticket
-    /// twice will eventually be told the wrong one.
+    /// `FARCOOLER_TASK` is what a dispatched pane carries (the daemon's
+    /// `with_pane_env`). This pins the reading side of that contract.
     #[test]
     fn a_task_argument_defaults_to_the_panes_own_task() {
         assert_eq!(resolve_key(None, Some("fc-42".to_string())), Some("fc-42".to_string()));

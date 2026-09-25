@@ -60,10 +60,11 @@ pub mod pane_env {
 
     /// The ticket this pane is working, as a task key.
     ///
-    /// **Nothing sets this yet.** There is no dispatch on this runner that
-    /// knows which task a pane was opened for — a terminal record has a
-    /// workspace, not a task — so the daemon has nothing honest to put here
-    /// and puts nothing. The CLI reads it, so the day something does know, one
-    /// export is the whole wiring.
+    /// `farcooler_daemon::service` exports it beside `ACTOR` for an agent
+    /// pane opened for a task (`farcooler task dispatch`, or `terminal create
+    /// --task`), on its first launch and on every relaunch after, reading the
+    /// key off the terminal's record (`terminals.task_id`). A pane opened for
+    /// no task gets nothing: a guessed key would file an agent's notes on
+    /// somebody else's ticket.
     pub const TASK: &str = "FARCOOLER_TASK";
 }

@@ -442,14 +442,46 @@ fn preset_runs_an_agent(preset: &str) -> bool {
 /// characters of hex and dashes, and `command` was already built to be handed
 /// to a shell.
 ///
-/// **`FARCOOLER_TASK` is deliberately not set.** A terminal record names a
-/// workspace, never a task, so there is no honest answer to put in it — see
-/// `farcooler_core::pane_env::TASK`.
-fn with_pane_actor(terminal: Uuid, preset: &str, command: String) -> String {
+/// **`FARCOOLER_TASK` beside it, when the terminal was opened for a task**
+/// (`terminals.task_id`, written by `task dispatch` through `terminal.create`).
+/// Every launch path passes the key it reads off the record, so a restart or a
+/// pane coming back from chat names the same task the first launch did. With
+/// no task on the record there is no honest answer, so nothing is exported:
+/// a guessed key files an agent's notes on somebody else's ticket. A key that
+/// is not a plain identifier (`pane_task_key`) is dropped rather than quoted.
+fn with_pane_env(terminal: Uuid, preset: &str, task_key: Option<&str>, command: String) -> String {
     if !preset_runs_an_agent(preset) {
         return command;
     }
-    format!("env {}=agent:{terminal} {command}", farcooler_core::pane_env::ACTOR)
+    let task = task_key
+        .filter(|k| is_safe_model(k))
+        .map(|k| format!(" {}={k}", farcooler_core::pane_env::TASK))
+        .unwrap_or_default();
+    format!("env {}=agent:{terminal}{task} {command}", farcooler_core::pane_env::ACTOR)
+}
+
+/// The first message of a pane opened for a task: where the brief is, and
+/// nothing else.
+///
+/// It carries no free text. The task on the board is the brief, and this
+/// says to read it, so the board stays the only place the work is described
+/// and a revised task is read fresh rather than replayed from a launch
+/// argument. It goes through the same first-launch path as any prompt
+/// (`launch_command_with_prompt`), so it is sent once: a restart exports the
+/// key again and says nothing.
+///
+/// `cli` is `shim_binary`'s path, `shell_quote`d, as the manager skill gets
+/// it: a bare `farcooler` on `PATH` can be another channel's CLI talking to
+/// another daemon.
+fn opening_prompt(cli: &str, key: &str) -> String {
+    format!(
+        "You're working {key} on this repository's Far Cooler board. Read the task first: \
+         {cli} task show {key}. If the main checkout has a .farcooler/manager.md, it's the \
+         owner's charter; follow it. Work to the task's acceptance items. Record each decision \
+         as you make it with {cli} task note {key} --kind decision --body \"<what, and why>\". \
+         If only the owner can decide something, ask with {cli} task ask {key} --body \
+         \"<the question>\" and stop. When you're done, move the task the way the charter says."
+    )
 }
 
 /// Where this daemon keeps the settings file it hands claude.
@@ -622,9 +654,10 @@ fn launch_command_with_prompt(
     session_id: Option<&str>,
     mut extras: LaunchExtras,
     prompt: Option<&str>,
+    task_key: Option<&str>,
 ) -> String {
     let build = |extras: &LaunchExtras| {
-        with_pane_actor(terminal, preset, preset_command_with_hooks(preset, session_id, extras))
+        with_pane_env(terminal, preset, task_key, preset_command_with_hooks(preset, session_id, extras))
     };
     // Trimmed first, the way the Mac trims its draft, and only THEN guarded:
     // "update" and nine kilobytes of newlines has whitespace in it, so
@@ -2513,7 +2546,7 @@ impl Service {
         title: &str,
         command_preset: &str,
     ) -> Result<models::Terminal> {
-        self.create_terminal_with_prompt(workspace_id, title, command_preset, None).await
+        self.create_terminal_with_prompt(workspace_id, title, command_preset, None, None).await
     }
 
     /// Create a terminal whose agent starts on `prompt`: claude, codex and
@@ -2529,12 +2562,18 @@ impl Service {
     ///
     /// On this launch only. `prompt` goes into this call's `LaunchExtras` and
     /// no other path sets one, so a restart never starts the task again.
+    ///
+    /// `task` is the board task this pane is opened to work (`task dispatch`).
+    /// It is recorded on the terminal, exported as `FARCOOLER_TASK` on this
+    /// launch and every later one, and an agent pane's first message becomes
+    /// `opening_prompt`, with any `prompt` given after it. See `opening_for`.
     pub async fn create_terminal_with_prompt(
         &self,
         workspace_id: Uuid,
         title: &str,
         command_preset: &str,
         prompt: Option<&str>,
+        task: Option<Uuid>,
     ) -> Result<models::Terminal> {
         validate::display_name(title)?;
         validate::command_preset(command_preset)?;
@@ -2544,15 +2583,17 @@ impl Service {
         }
 
         let ws = self.store.get_workspace(workspace_id)?;
+        let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
 
         // 1. Commit the durable record with intent RUNNING, unconfirmed.
-        let term = self.store.create_terminal(
+        let term = self.store.create_terminal_for_task(
             workspace_id,
             title,
             command_preset,
             TerminalIntent::Running,
             120,
             40,
+            task,
         )?;
 
         // A claude terminal gets its session id now, so that adopting it into
@@ -2597,7 +2638,8 @@ impl Service {
             command_preset,
             declared.as_deref(),
             extras,
-            prompt,
+            prompt.as_deref(),
+            task_key.as_deref(),
         );
         let created = self
             .tmux
@@ -2633,6 +2675,47 @@ impl Service {
         // derivation reports it truthfully until the user resolves it.
         tracing::warn!(terminal = %term.id, "created window did not verify");
         Ok(term)
+    }
+
+    /// The key a pane opened for `task` exports, and the first message it
+    /// starts on.
+    ///
+    /// The task has to be on `ws`'s own board: a pane in one repository filing
+    /// notes on another's ticket is the wrong-board write `tasks_with_key`
+    /// exists to refuse. An agent pane starts on `opening_prompt`, with the
+    /// caller's own `prompt`, if there is one, after it. A shell or a changes
+    /// pane gets neither, because nobody dispatched a person's shell (see
+    /// `preset_runs_an_agent`), so the caller's prompt is passed through
+    /// untouched, to be ignored as it always was.
+    fn opening_for(
+        &self,
+        ws: &models::Workspace,
+        preset: &str,
+        task: Option<Uuid>,
+        prompt: Option<&str>,
+    ) -> Result<(Option<String>, Option<String>)> {
+        let Some(task) = task else { return Ok((None, prompt.map(str::to_string))) };
+        let task = self.store.get_task(task)?;
+        if task.repository_id != ws.repository_id {
+            return Err(DomainError::InvalidArgument { what: "task_key" });
+        }
+        let key = Some(task.key).filter(|k| is_safe_model(k));
+        let Some(k) = key.as_deref().filter(|_| preset_runs_an_agent(preset)) else {
+            return Ok((key, prompt.map(str::to_string)));
+        };
+        let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+        let opening = opening_prompt(&cli, k);
+        let first = match prompt {
+            Some(p) => format!("{opening}\n\n{}", p.trim()),
+            None => opening,
+        };
+        Ok((key, Some(first)))
+    }
+
+    /// The key a relaunch of `term` exports: the one its first launch did.
+    fn pane_task_key(&self, term: &models::Terminal) -> Option<String> {
+        let key = self.store.get_task(term.task_id?).ok()?.key;
+        is_safe_model(&key).then_some(key)
     }
 
     /// Whether this pane is running Claude Code specifically, and so has a
@@ -2790,7 +2873,7 @@ impl Service {
         title: &str,
         command_preset: &str,
     ) -> Result<models::Terminal> {
-        self.split_terminal_with_prompt(workspace_id, target, side, title, command_preset, None)
+        self.split_terminal_with_prompt(workspace_id, target, side, title, command_preset, None, None)
             .await
     }
 
@@ -2805,6 +2888,7 @@ impl Service {
         title: &str,
         command_preset: &str,
         prompt: Option<&str>,
+        task: Option<Uuid>,
     ) -> Result<models::Terminal> {
         validate::display_name(title)?;
         validate::command_preset(command_preset)?;
@@ -2814,16 +2898,18 @@ impl Service {
         }
 
         let ws = self.store.get_workspace(workspace_id)?;
+        let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
         let pane = self.pane_of(target).await?;
         let (axis, before) = crate::layout::split_args(side);
 
-        let term = self.store.create_terminal(
+        let term = self.store.create_terminal_for_task(
             workspace_id,
             title,
             command_preset,
             TerminalIntent::Running,
             120,
             40,
+            task,
         )?;
         let term = self.mark_changes_pane(term, command_preset)?;
 
@@ -2862,7 +2948,8 @@ impl Service {
             command_preset,
             term.agent_session_id.as_deref(),
             extras,
-            prompt,
+            prompt.as_deref(),
+            task_key.as_deref(),
         );
         let created = self
             .tmux
@@ -2978,9 +3065,10 @@ impl Service {
         // last reported. That is precisely the silent disagreement between
         // record and runtime this whole design exists to prevent.
         let extras = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
-        let command = with_pane_actor(
+        let command = with_pane_env(
             id,
             &term.command_preset,
+            self.pane_task_key(&term).as_deref(),
             respawn_command(
                 user_home().as_deref(),
                 &term.command_preset,
@@ -3406,12 +3494,13 @@ impl Service {
         // writes that down. Reading `command_preset` here would leave exactly
         // that pane, the one most likely to be a dispatched agent, filing its
         // board writes as a person.
-        let command = with_pane_actor(
+        let command = with_pane_env(
             id,
             match pane_mode {
                 models::PaneMode::Agent => harness.as_deref().unwrap_or(&term.command_preset),
                 _ => &term.command_preset,
             },
+            self.pane_task_key(&term).as_deref(),
             command,
         );
 
@@ -5259,7 +5348,7 @@ mod pane_actor_tests {
     //! Every one of these goes through a `Service` method on a real tmux
     //! server and reads `#{pane_start_command}` back off the pane afterwards,
     //! because the failure being guarded is a WIRING failure and nothing else.
-    //! `with_pane_actor` returning the right string proves nothing about
+    //! `with_pane_env` returning the right string proves nothing about
     //! whether a launched pane got it — this tree has been silently reverted
     //! that way twice, once at `split_terminal` and once at
     //! `restart_terminal`, with a green suite pinning the builder both times.
@@ -5519,22 +5608,123 @@ mod pane_actor_tests {
         );
     }
 
-    /// `FARCOOLER_TASK` has no source, so nothing invents one.
+    /// A pane opened for no task still claims none.
     ///
-    /// A terminal record names a workspace and never a task. Exporting a
-    /// guessed key would be worse than exporting none: an agent would append
-    /// its notes to somebody else's ticket and the board would read as though
+    /// The point of the test this replaced (`no_pane_claims_a_ticket_nothing_knows`),
+    /// kept now that a terminal CAN name a task: a guessed key files an
+    /// agent's notes on somebody else's ticket, and the board reads as though
     /// the work had been done.
     #[tokio::test]
-    async fn no_pane_claims_a_ticket_nothing_knows() {
+    async fn a_pane_opened_for_no_task_claims_none() {
         let (_dir, svc, ws) = a_workspace().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         let command = pane_start_command(&svc, term.id).await;
         assert!(
             !command.contains(farcooler_core::pane_env::TASK),
-            "there is no honest answer for this yet: {command}"
+            "no task on the record, so none in the pane: {command}"
         );
+    }
+
+    /// A task on this workspace's board, and its key.
+    fn a_task(svc: &Service, ws: &models::Workspace) -> (Uuid, String) {
+        let task = svc
+            .store
+            .create_task(ws.repository_id, "a task", farcooler_store::models::Actor::User)
+            .expect("a task");
+        (task.id, task.key)
+    }
+
+    /// A pane opened for a task says so, and still says so after a restart,
+    /// which is the path most panes have taken by the end of a day.
+    ///
+    /// The record is written straight to the store and the pane is made by
+    /// the restart, so no agent is ever launched with a first message here:
+    /// this is the relaunch's wiring, read off the pane tmux was handed.
+    #[tokio::test]
+    async fn a_pane_opened_for_a_task_names_it_across_a_restart() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let (task, key) = a_task(&svc, &ws);
+        let term = svc
+            .store
+            .create_terminal_for_task(ws.id, "w", "claude", TerminalIntent::Running, 80, 24, Some(task))
+            .unwrap();
+
+        svc.restart_terminal(term.id).await.expect("restart");
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(
+            command.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)),
+            "a restarted pane names the task it was opened for: {command}"
+        );
+        assert!(command.contains(&expected(term.id)), "beside its own name: {command}");
+    }
+
+    /// The opening prompt is the first launch's alone. A restart that replayed
+    /// it would start the work over on top of the work.
+    ///
+    /// The one test here that launches an agent with a first message: a real
+    /// claude, in the fixture's fresh temporary repository, which claude has
+    /// never been told to trust, so it holds the message behind its trust
+    /// screen until the fixture's tmux server is torn down.
+    #[tokio::test]
+    async fn only_the_first_launch_is_told_what_to_do() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let (task, key) = a_task(&svc, &ws);
+        let term = svc
+            .create_terminal_with_prompt(ws.id, "w", "claude", None, Some(task))
+            .await
+            .expect("a pane opened for a task");
+        assert_eq!(svc.store.get_terminal(term.id).unwrap().task_id, Some(task), "on the record");
+
+        let first = pane_start_command(&svc, term.id).await;
+        // Quoted twice on its way into the pane, so an apostrophe reads back
+        // escaped; the words between them do not.
+        assert!(first.contains(&format!("re working {key} on this repository")), "told what to do: {first}");
+        assert!(first.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)), "{first}");
+
+        svc.restart_terminal(term.id).await.expect("restart");
+        let again = pane_start_command(&svc, term.id).await;
+        assert!(!again.contains("re working"), "a restart says nothing: {again}");
+        assert!(again.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)), "{again}");
+    }
+
+    /// A shell opened "for" a task is still a person's shell: nobody
+    /// dispatched it, so it exports no task and starts on no prompt.
+    #[tokio::test]
+    async fn a_shell_opened_for_a_task_exports_no_task_and_no_prompt() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let (task, _) = a_task(&svc, &ws);
+        let term = svc
+            .create_terminal_with_prompt(ws.id, "s", "shell", None, Some(task))
+            .await
+            .expect("a shell");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(!command.contains(farcooler_core::pane_env::TASK), "{command}");
+        assert!(!command.contains("re working"), "{command}");
+    }
+
+    /// A task on another repository's board is refused before any pane or
+    /// record exists.
+    #[tokio::test]
+    async fn a_task_from_another_board_opens_nothing() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let host = Uuid::now_v7();
+        let root = svc.store.create_repository_root(host, "/elsewhere", 0).unwrap();
+        let other = svc.store.create_repository(host, root.id, "Elsewhere", "/elsewhere/.git", "").unwrap().id;
+        svc.store.assign_task_key_prefix(other).unwrap();
+        let task = svc
+            .store
+            .create_task(other, "not here", farcooler_store::models::Actor::User)
+            .unwrap();
+        let before = svc.store.list_terminals_for_workspace(ws.id).unwrap().len();
+
+        let refused = svc.create_terminal_with_prompt(ws.id, "w", "shell", None, Some(task.id)).await;
+        assert!(
+            matches!(refused, Err(DomainError::InvalidArgument { what: "task_key" })),
+            "{refused:?}"
+        );
+        assert_eq!(svc.store.list_terminals_for_workspace(ws.id).unwrap().len(), before);
     }
 }
 
@@ -7309,7 +7499,7 @@ mod hook_file_tests {
         }
         let command = unquoted.as_str();
         // From the login shell on: the `env FARCOOLER_ACTOR=…` in front is
-        // `with_pane_actor`'s, and this probe is about claude's own argv.
+        // `with_pane_env`'s, and this probe is about claude's own argv.
         let shell = format!("{} -ilc", farcooler_core::shell::login_shell());
         let from_shell = command.find(&shell).map_or(command, |at| &command[at..]);
         let argv = super::preset_tests::claude_argv_through_both_shells(from_shell);
@@ -8580,6 +8770,46 @@ mod launch_prompt_tests {
         }
     }
 
+    /// A pane opened for a task starts on `opening_prompt`, through the same
+    /// first-launch path as any prompt: one exact argument for each agent,
+    /// under every shell, CLI path quotes and all. The CLI path is the
+    /// awkward part: an app bundle's path has a space in it.
+    #[test]
+    fn the_opening_prompt_arrives_as_one_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = shell_quote("/Applications/Far Cooler.app/Contents/MacOS/farcooler");
+        let opening = opening_prompt(&cli, "fc-1");
+        let cases = [
+            ("claude", "claude", String::new()),
+            ("codex", "codex", ",-c,check_for_update_on_startup=false".to_string()),
+            ("cursor", "cursor-agent", String::new()),
+        ];
+        let shells = shells();
+        for (preset, program, flags) in &cases {
+            let command = launch_command_with_prompt(
+                dir.path(), Uuid::now_v7(), preset, None, LaunchExtras::NONE, Some(&opening), Some("fc-1"));
+            assert!(command.starts_with("env "), "{command}");
+            assert!(command.contains(" FARCOOLER_TASK=fc-1 "), "{command}");
+            for outer in &shells {
+                for inner in &shells {
+                    assert_eq!(
+                        argv_through(&command, program, outer, inner),
+                        format!("{flags},{opening}"),
+                        "{preset} under {outer} then {inner}: {command}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A key that is not a plain identifier never reaches the `env` line,
+    /// which is not quoted.
+    #[test]
+    fn a_key_that_is_not_a_plain_identifier_is_not_exported() {
+        let command = with_pane_env(Uuid::now_v7(), "claude", Some("fc-1; rm -rf ~"), "claude".into());
+        assert!(!command.contains("FARCOOLER_TASK"), "{command}");
+    }
+
     #[test]
     fn a_prompt_that_starts_with_a_dash_is_not_read_as_a_flag() {
         let command = preset_command_with_hooks("claude", None, &inline("--help me with this"));
@@ -8623,7 +8853,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         for padded in [format!("update{}", "\n".repeat(9 * 1024)), "\n\t update \n".to_string()] {
             let command = launch_command_with_prompt(
-                dir.path(), Uuid::now_v7(), "claude", None, LaunchExtras::NONE, Some(&padded));
+                dir.path(), Uuid::now_v7(), "claude", None, LaunchExtras::NONE, Some(&padded), None);
             let bare = command.split_once(" /").map(|(_, rest)| format!("/{rest}")).unwrap();
             assert_eq!(argv_through(&bare, "claude", "/bin/sh", "/bin/sh"), ", update");
         }
@@ -8634,7 +8864,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::now_v7();
         let word = "u".repeat(20_000);
-        launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&word));
+        launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&word), None);
         assert_eq!(std::fs::read_to_string(prompt_file(dir.path(), id)).unwrap(), format!(" {word}"));
     }
 
@@ -8729,7 +8959,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::now_v7();
         let command =
-            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(AWKWARD));
+            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(AWKWARD), None);
         assert!(command.len() <= MAX_INLINE_LAUNCH_BYTES);
         assert!(!dir.path().join(format!("prompt-{id}")).exists(), "no file for a prompt that fits");
     }
@@ -8751,7 +8981,7 @@ mod launch_prompt_tests {
         let id = Uuid::now_v7();
         let prompt = long_prompt();
         let command =
-            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&prompt));
+            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&prompt), None);
         assert!(command.len() <= MAX_INLINE_LAUNCH_BYTES, "{} bytes", command.len());
 
         let file = dir.path().join(format!("prompt-{id}"));
@@ -8786,9 +9016,10 @@ mod launch_prompt_tests {
         assert!(!out.display().to_string().contains([' ', '\'', '\\']), "{}", out.display());
         let printf = format!("printf ,%s >{}", out.display());
 
-        let inline = with_pane_actor(
+        let inline = with_pane_env(
             Uuid::now_v7(),
             "claude",
+            None,
             preset_command_with_hooks("claude", None, &inline(&prompt)),
         );
         assert!(inline.len() > 16_384, "the inline form is past the ceiling: {}", inline.len());
@@ -8800,7 +9031,7 @@ mod launch_prompt_tests {
 
         let id = Uuid::now_v7();
         let command =
-            launch_command_with_prompt(&svc.root, id, "claude", None, LaunchExtras::NONE, Some(&prompt));
+            launch_command_with_prompt(&svc.root, id, "claude", None, LaunchExtras::NONE, Some(&prompt), None);
         svc.tmux
             .create_terminal_window(ws.id, id, "file", &ws.worktree_path, &command.replacen("claude", &printf, 1))
             .await

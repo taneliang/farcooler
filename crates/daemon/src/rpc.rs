@@ -1328,6 +1328,7 @@ impl Rpc {
                                 &p.title,
                                 &p.command_preset,
                                 p.prompt.as_deref(),
+                                None,
                             )
                             .await?;
                         return self.terminal_result(term.id).await;
@@ -1339,6 +1340,7 @@ impl Rpc {
                         &p.title,
                         &p.command_preset,
                         p.prompt.as_deref(),
+                        None,
                     )
                     .await?;
                 // A new terminal is a new tmux window, which IS a new layout —
