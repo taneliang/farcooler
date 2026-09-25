@@ -217,12 +217,14 @@ private struct AcceptanceLine: View {
     let progress: TaskAcceptanceProgress
 
     var body: some View {
-        Label {
-            Text(progress.sentence).monospacedDigit()
-        } icon: {
+        // An `HStack` and not a `Label`: inside a `List` a label's icon gets
+        // the row's icon column, which set the words a thumb's width away from
+        // the glyph they belong to.
+        HStack(spacing: 3) {
             Image(systemName: progress.isComplete ? "checkmark.circle.fill" : "checkmark.circle")
+            Text(progress.sentence).monospacedDigit()
         }
-        .labelStyle(.titleAndIcon)
+        .accessibilityElement(children: .ignore)
         .font(.caption.weight(progress.isComplete ? .medium : .regular))
         .foregroundStyle(progress.isComplete ? Color.accentColor : Color.secondary)
         .accessibilityLabel("Acceptance: \(progress.sentence)")

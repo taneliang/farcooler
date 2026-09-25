@@ -47,7 +47,9 @@ struct ShellHarness: View {
     /// The board a Board row opened, the tab its Agent button asked for, and
     /// the tab being handed to the shell. `-shell-board` only; see
     /// `HarnessBoard`, and `ShellScreen`'s `boardJump`, which this mirrors.
-    @State private var boardOpen = false
+    /// `-shell-board-open` opens it at launch, for a screenshot of the board
+    /// that needs no tap.
+    @State private var boardOpen = CommandLine.arguments.contains("-shell-board-open")
     @State private var boardJump: String?
     @State private var request: String?
 
