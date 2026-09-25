@@ -740,6 +740,20 @@ mod tests {
         assert!(!asks.contains("to .gitignore"), "{asks}");
     }
 
+    /// A manager unsure whether a dispatch took reads the board before
+    /// dispatching again: a pressure run (S10) planned to "do it again", which
+    /// would put a second agent on the task. And dispatching is one of the
+    /// things it may write.
+    #[test]
+    fn the_skill_checks_the_board_before_dispatching_again() {
+        for h in ALL {
+            // Read as prose: where a line wraps is not what's being checked.
+            let body = skill_body(h).split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(body.contains("before dispatching again"), "{h:?}");
+            assert!(body.contains("the agent panes dispatch opens"), "{h:?}");
+        }
+    }
+
     /// The spec wants the skill read in a minute.
     #[test]
     fn the_skill_is_short() {
