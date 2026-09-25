@@ -450,9 +450,16 @@ jobs:
           # canary shares one marketing version and the build number is the
           # commit count — so the filename says which commit you are holding,
           # which is the whole question a canary bug report has to answer.
-          hdiutil create -volname 'Far Cooler Canary' -srcfolder "$staging" \
-            -ov -format UDZO \
-            "Far Cooler-$(scripts/version.sh)-canary-$(scripts/version.sh build).dmg"
+          # Retried because the hosted runner's hdiutil intermittently fails
+          # with "Resource busy" (2026-09-25, run 36151036011); nothing in
+          # the image is at fault, and a second attempt succeeds.
+          dmg="Far Cooler-$(scripts/version.sh)-canary-$(scripts/version.sh build).dmg"
+          for attempt in 1 2 3; do
+            if hdiutil create -volname 'Far Cooler Canary' -srcfolder "$staging" \
+              -ov -format UDZO "$dmg"; then break; fi
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep 20
+          done
 
       - name: Notarise the disk image
         if: env.HAS_SIGN_IDENTITY == 'true'

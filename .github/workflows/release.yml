@@ -309,8 +309,14 @@ jobs:
           staging="$(mktemp -d)"
           ditto "$app" "$staging/$(basename "$app")"
           ln -s /Applications "$staging/Applications"
-          hdiutil create -volname 'Far Cooler' -srcfolder "$staging" \
-            -ov -format UDZO "Far Cooler-$(scripts/version.sh)-macos.dmg"
+          # Retried for the same hosted-runner "Resource busy" failure as
+          # the canary image.
+          for attempt in 1 2 3; do
+            if hdiutil create -volname 'Far Cooler' -srcfolder "$staging" \
+              -ov -format UDZO "Far Cooler-$(scripts/version.sh)-macos.dmg"; then break; fi
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep 20
+          done
 
       # Notarised SEPARATELY from the app inside it, and both are notarised on
       # purpose. Stapling only the image leaves the app that gets dragged out
