@@ -425,6 +425,67 @@ mod tests {
         assert_eq!(before.modified().unwrap(), after.modified().unwrap(), "the file was rewritten");
     }
 
+    /// Two writes at once in one process, the way two panes launching
+    /// together each write the plugin. Every write lands whole and none fails:
+    /// with one temporary name per process, one write's rename takes the
+    /// other's file away and that write fails.
+    #[test]
+    fn two_writes_at_once_both_land_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("SKILL.md");
+        let texts = ["a".repeat(256 * 1024), "b".repeat(256 * 1024)];
+        std::thread::scope(|scope| {
+            for text in &texts {
+                let path = &path;
+                scope.spawn(move || {
+                    for _ in 0..200 {
+                        write_atomically(path, text).expect("a write failed");
+                    }
+                });
+            }
+        });
+        let now = std::fs::read_to_string(&path).unwrap();
+        assert!(texts.contains(&now), "a torn file of {} bytes", now.len());
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(left.len(), 1, "temporary files were left behind: {left:?}");
+    }
+
+    /// A copy the owner saves between the first read and the rename is kept.
+    /// The save is simulated inside the check itself, the last moment before
+    /// the rename would happen.
+    #[test]
+    fn a_save_that_lands_mid_install_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(PROJECT_SKILL);
+        install_file(&path, &signed("# v1\n"));
+        let before = std::fs::read(&path).ok();
+        let wrote = write_through_temp(&path, &signed("# v2\n"), || {
+            std::fs::write(&path, "the owner's save\n").unwrap();
+            std::fs::read(&path).ok() == before
+        })
+        .unwrap();
+        assert!(!wrote);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "the owner's save\n");
+    }
+
+    /// `crosses_a_symlink` sees a link at any depth, the file included, and
+    /// nothing in a plain tree or one that doesn't exist yet.
+    #[test]
+    fn a_link_anywhere_on_the_way_is_seen() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!crosses_a_symlink(root.path(), PROJECT_SKILL), "nothing exists yet");
+        std::fs::create_dir_all(root.path().join(PROJECT_SKILL).parent().unwrap()).unwrap();
+        assert!(!crosses_a_symlink(root.path(), PROJECT_SKILL), "plain directories");
+        std::os::unix::fs::symlink("/nonexistent", root.path().join(PROJECT_SKILL)).unwrap();
+        assert!(crosses_a_symlink(root.path(), PROJECT_SKILL), "the file is a link");
+
+        let linked = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::create_dir(linked.path().join(".agents")).unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), linked.path().join(".agents/skills")).unwrap();
+        assert!(crosses_a_symlink(linked.path(), PROJECT_SKILL), "a directory on the way is a link");
+    }
+
     /// A newer Far Cooler replaces a copy an older one wrote and nobody edited.
     #[test]
     fn an_unedited_older_copy_is_replaced() {
