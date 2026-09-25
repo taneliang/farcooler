@@ -597,6 +597,12 @@ struct StartTaskTests {
             try? await Task.sleep(for: .milliseconds(100))
         }
         #expect(runner.seenCalls == [["terminal", "seen", "tnew"]])
+        // The seen above came from a renewal tick, so the clock has run. On a
+        // runner without `watching` it asks nothing: no claim, and no
+        // invocation spawned on that clock to be refused each time.
+        if !watching {
+            #expect(runner.watchingCalls.isEmpty, "\(runner.watchingCalls)")
+        }
     }
 
     @Test func aRunnerThatIsNotConnectedIsNeverSentAHeartbeat() async {
