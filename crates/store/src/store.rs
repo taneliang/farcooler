@@ -600,14 +600,33 @@ impl Store {
         columns: u32,
         rows: u32,
     ) -> Result<Terminal> {
+        self.create_terminal_for_task(workspace_id, title, command_preset, intent, columns, rows, None)
+    }
+
+    /// `create_terminal`, recording the task the terminal is opened for.
+    ///
+    /// In the same INSERT rather than a write after it, so there is no moment
+    /// at which the pane exists and its task does not. A task id that names no
+    /// task is refused by the foreign key.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_terminal_for_task(
+        &self,
+        workspace_id: Uuid,
+        title: &str,
+        command_preset: &str,
+        intent: TerminalIntent,
+        columns: u32,
+        rows: u32,
+        task_id: Option<Uuid>,
+    ) -> Result<Terminal> {
         let id = Uuid::now_v7();
         self.conn()
             .execute(
                 r#"INSERT INTO terminals
                  (id, workspace_id, title, command_preset, intent, runtime_confirmed,
                   exit_code, exit_signal, lease_generation, epoch,
-                  "columns", "rows", resource_version)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, ?6, ?7, 1)"#,
+                  "columns", "rows", resource_version, task_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, ?6, ?7, 1, ?8)"#,
                 params![
                     uuid_blob(id),
                     uuid_blob(workspace_id),
@@ -616,6 +635,7 @@ impl Store {
                     intent as i32,
                     columns,
                     rows,
+                    task_id.map(uuid_blob),
                 ],
             )
             .map_err(map_err)?;
@@ -635,6 +655,7 @@ impl Store {
             resource_version: 1,
             pane_mode: PaneMode::Terminal,
             agent_session_id: None,
+            task_id,
         })
     }
 
@@ -643,7 +664,7 @@ impl Store {
             .query_row(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
-                          "columns", "rows", resource_version, pane_mode, agent_session_id
+                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
                    FROM terminals WHERE id = ?1"#,
                 params![uuid_blob(id)],
                 row_to_terminal,
@@ -657,7 +678,7 @@ impl Store {
             .prepare(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
-                          "columns", "rows", resource_version, pane_mode, agent_session_id
+                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
                    FROM terminals WHERE workspace_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -693,7 +714,7 @@ impl Store {
             .prepare(
                 r#"SELECT id, workspace_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
-                          "columns", "rows", resource_version, pane_mode, agent_session_id
+                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
                    FROM terminals WHERE agent_session_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -943,11 +964,60 @@ mod tests {
             // new one. The conversation itself is never stored.
             "pane_mode",
             "agent_session_id",
+            // Intent again: the task this pane was opened to work.
+            "task_id",
         ];
         assert_eq!(cols.len(), expected.len(), "unexpected column set: {cols:?}");
         for e in expected {
             assert!(cols.iter().any(|c| c == e), "missing expected column {e}, have {cols:?}");
         }
+    }
+
+    // ---- the task a terminal was opened for ----
+
+    /// A repository, a workspace in it, and a task on its board.
+    fn a_lane_with_a_task(s: &Store) -> (Uuid, Uuid) {
+        let repo = s.register_repository_for_test("Far Cooler");
+        let ws = s.create_workspace(repo, "feat/x", "/wt/terminal-task", false).unwrap();
+        let task = s.create_task_for_test(repo, "a task");
+        (ws.id, task)
+    }
+
+    #[test]
+    fn a_terminal_created_for_a_task_reads_it_back() {
+        let s = store();
+        let (ws, task) = a_lane_with_a_task(&s);
+        let made = s
+            .create_terminal_for_task(ws, "w", "claude", TerminalIntent::Running, 80, 24, Some(task))
+            .unwrap();
+        assert_eq!(made.task_id, Some(task));
+        assert_eq!(s.get_terminal(made.id).unwrap().task_id, Some(task), "read back from disk");
+        assert_eq!(
+            s.list_terminals_for_workspace(ws).unwrap()[0].task_id,
+            Some(task),
+            "and through the listing every launch path reads"
+        );
+
+        let plain = s.create_terminal(ws, "p", "shell", TerminalIntent::Running, 80, 24).unwrap();
+        assert_eq!(s.get_terminal(plain.id).unwrap().task_id, None);
+    }
+
+    /// A terminal outlives its ticket. Deleting the task must neither fail on
+    /// the foreign key nor leave the terminal naming a task that is gone.
+    #[test]
+    fn deleting_the_task_leaves_the_terminal_and_forgets_the_link() {
+        let s = store();
+        let (ws, task) = a_lane_with_a_task(&s);
+        let term = s
+            .create_terminal_for_task(ws, "w", "claude", TerminalIntent::Running, 80, 24, Some(task))
+            .unwrap();
+
+        s.conn()
+            .execute("DELETE FROM tasks WHERE id = ?1", params![uuid_blob(task)])
+            .expect("a task with a terminal opened for it can still be deleted");
+
+        let after = s.get_terminal(term.id).expect("the terminal is still there");
+        assert_eq!(after.task_id, None, "and names no task that is gone");
     }
 
     /// `migrate.rs`'s own append-only tests build a bare connection and turn

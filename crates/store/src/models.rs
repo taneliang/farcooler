@@ -187,6 +187,9 @@ pub struct Terminal {
     pub resource_version: u64,
     pub pane_mode: PaneMode,
     pub agent_session_id: Option<String>,
+    /// The task this terminal was opened for, if it was opened for one. Set
+    /// at creation and never moved; `None` again if the task is deleted.
+    pub task_id: Option<Uuid>,
 }
 
 pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
@@ -206,6 +209,7 @@ pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
         resource_version: row.get::<_, i64>(12)? as u64,
         pane_mode: PaneMode::from_i64(row.get(13)?),
         agent_session_id: row.get(14)?,
+        task_id: get_optional_uuid(row, 15)?,
     })
 }
 

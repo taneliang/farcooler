@@ -22,6 +22,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0008_drop_task_name,
     migration_0009_workspace_order,
     migration_0010_the_board,
+    migration_0011_terminal_task,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -529,6 +530,23 @@ fn migration_0010_the_board(tx: &Transaction) -> rusqlite::Result<()> {
     )
 }
 
+/// The task a terminal was opened for, when it was opened for one.
+///
+/// A column rather than an answer derived from the workspace: a task names a
+/// workspace, but several tasks can share one lane, so "the task in this
+/// workspace" has no single answer. A restart has to export the key the first
+/// launch did, so the first launch has to write it down.
+///
+/// `ON DELETE SET NULL`: a terminal outlives the ticket it was opened for.
+/// Deleting the task (by hand, or with its repository) forgets the link and
+/// leaves the pane alone, rather than refusing the delete or taking a running
+/// agent's record with it.
+fn migration_0011_terminal_task(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE terminals ADD COLUMN task_id BLOB REFERENCES tasks(id) ON DELETE SET NULL;",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -913,5 +931,46 @@ mod tests {
             "INSERT INTO repositories VALUES (x'04', x'02', x'01', 'r2', '/r2/.git', '', 1, 'fc');",
         );
         assert!(second.is_err(), "a second repository claiming the same prefix is refused");
+    }
+
+    /// A database written before dispatch opens, gains the column, and keeps
+    /// its terminals, each opened for no task.
+    #[test]
+    fn a_database_from_before_dispatch_gains_terminal_task_id() {
+        let mut conn = open();
+        {
+            let tx = conn.transaction().unwrap();
+            for m in &MIGRATIONS[..10] {
+                m(&tx).unwrap();
+            }
+            tx.execute_batch(
+                "INSERT INTO meta (key, value) VALUES ('schema_version', '10');
+                 INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+                 INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
+                 INSERT INTO workspaces (id, repository_id, branch, worktree_path, hidden, creation_failed, resource_version)
+                     VALUES (x'05', x'03', 'main', '/r', 0, 0, 1);
+                 INSERT INTO terminals (id, workspace_id, title, command_preset, intent, runtime_confirmed,
+                     lease_generation, epoch, \"columns\", \"rows\", resource_version)
+                     VALUES (x'06', x'05', 'old', 'claude', 1, 0, 0, 0, 80, 24, 1);",
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(read_schema_version(&conn).unwrap(), 10);
+
+        migrate(&mut conn, 10).unwrap();
+
+        let columns: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('terminals') WHERE name='task_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(columns, 1, "terminals gained task_id");
+        let task: Option<Vec<u8>> = conn
+            .query_row("SELECT task_id FROM terminals WHERE id = x'06'", [], |r| r.get(0))
+            .expect("the old terminal is still there");
+        assert_eq!(task, None, "a terminal from before dispatch was opened for no task");
     }
 }
