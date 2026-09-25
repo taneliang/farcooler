@@ -2086,15 +2086,12 @@ impl Service {
             &remote,
         )?;
 
-        // Unlike the reconcile call below, this is NOT best-effort: a
-        // repository with no task key prefix does not get one later (see
-        // `Store::assign_task_key_prefix` — this is the only call site, and
-        // it exists for exactly this moment; migration 12 gave one only to
-        // the repositories registered before the board), so every board this
-        // repository will ever have depends on this succeeding here. `?`
-        // propagates a failure as the registration's own failure, rather
-        // than logging and returning a repository that would silently emit
-        // "-1", "-2" task keys with no prefix forever.
+        // Unlike the reconcile call below, this is NOT best-effort: the
+        // prefix is derived from the name as registered, here. `?`
+        // propagates a failure as the registration's own failure rather than
+        // returning a repository without one. (Should that row outlive the
+        // failure, `Store::next_task_key` claims a prefix before its first
+        // key, so it still never mints "-1".)
         let prefix = self.store.assign_task_key_prefix(repository.id)?;
         tracing::info!(repository = %repository.id, %prefix, "assigned a task key prefix");
         // Re-read rather than patching the struct in hand: `assign_task_key_prefix`

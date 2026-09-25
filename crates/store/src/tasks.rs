@@ -155,7 +155,15 @@ impl Store {
     /// repository row, never derived from its current name; see this
     /// module's doc for why.
     pub fn next_task_key(&self, repo: Uuid) -> Result<String> {
-        let prefix = self.get_repository(repo)?.task_key_prefix;
+        let mut prefix = self.get_repository(repo)?.task_key_prefix;
+        // A repository with no prefix claims one before its first key, by
+        // registration's own rule, rather than minting `-1`: a key a command
+        // line reads as a flag. Registration assigns one, but only after the
+        // repository row is already committed, so a registration that failed
+        // in between leaves a row that would otherwise mint `-1` forever.
+        if prefix.is_empty() {
+            prefix = self.assign_task_key_prefix(repo)?;
+        }
 
         // A plain aggregate query always returns exactly one row, even when
         // nothing matches the WHERE clause -- it is the aggregate itself
@@ -2612,6 +2620,25 @@ mod prefixless_boards {
 
         assert_eq!(store.next_task_key(id(10)).unwrap(), "ov-3");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A repository that never got a prefix (created, then its registration
+    /// failed before the prefix was assigned) claims one at its first task,
+    /// by registration's rule, and never mints `-1`.
+    #[test]
+    fn a_repository_with_no_prefix_claims_one_at_its_first_key() {
+        let store = Store::open_in_memory().unwrap();
+        let host = Uuid::now_v7();
+        let root = store.create_repository_root(host, "/r", 0).unwrap();
+        let taken = store.create_repository(host, root.id, "Far Cooler", "/r/a/.git", "").unwrap().id;
+        store.assign_task_key_prefix(taken).unwrap();
+        let bare = store.create_repository(host, root.id, "Far Cry", "/r/b/.git", "").unwrap().id;
+        assert_eq!(store.get_repository(bare).unwrap().task_key_prefix, "");
+
+        let first = store.create_task(bare, "first", Actor::User).unwrap();
+        assert_eq!(first.key, "fc2-1", "a real prefix, by the collision rule, not -1");
+        assert_eq!(store.get_repository(bare).unwrap().task_key_prefix, "fc2", "and it is stored");
+        assert_eq!(store.create_task(bare, "second", Actor::User).unwrap().key, "fc2-2");
     }
 
     /// The old key still names its task: the note above says `-1`, and a pane
