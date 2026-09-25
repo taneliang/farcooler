@@ -1,0 +1,21 @@
+-- Where each row's trace sits in time: the absolute index of its newest bucket.
+--
+-- Additive only, same as 0002 through 0008 and for the same reason: the previous
+-- worker is still serving requests while a deploy rolls out, and a runner older
+-- than this column never sends the key. NULL is what such a row has, and a card
+-- that meets it packs that row's trace from the newest end, exactly as every
+-- card did before this column existed.
+--
+-- **A column beside `trace`, never read out of it.** The 66 bytes behind
+-- `trace` are a shape — a width code and thirteen counts per series — and say
+-- how much, never when. The daemon sends the missing number as its own JSON
+-- field, `traceAnchor`, precisely so that this service can keep treating
+-- `trace` as opaque: a relay that decoded the base64 to find a timestamp would
+-- be a third copy of an encoding that already has two ends.
+--
+-- The index is in units of the trace's OWN width (five minutes, thirty or two
+-- hours, per byte 0 of the blob), so it means nothing apart from the trace it
+-- was sent with. That is why the two move together: a notice that carries a
+-- trace replaces both — its anchor, or NULL from a runner too old to send one —
+-- and a notice with no trace keeps both. See `rememberAgent`.
+ALTER TABLE live_activities ADD COLUMN trace_anchor INTEGER;

@@ -3148,6 +3148,69 @@ describe('/v1/notify and Live Activities', () => {
       expect(stored?.insertions).toBe(null)
     })
 
+    it("carries each row's trace anchor beside its trace, and never apart from it", async () => {
+      // The one number the blob does not carry — where its newest bucket sits
+      // in time — as its own key, so the relay can keep the blob opaque. It is
+      // an index in units of the trace's own width, so it is only true of the
+      // blob it arrived with: stored with it, replaced with it, kept with it.
+      const calls = watchFetch()
+      const first = 'EQ'.repeat(44)
+      const second = 'Eg'.repeat(44)
+      await ready()
+      await running('term-1')
+      const row = () => {
+        const updates = pushes(calls).filter(call => call.body.aps?.event === 'update')
+        return updates[updates.length - 1].body.aps['content-state'].rows[0]
+      }
+      const stored = () =>
+        env.DB.prepare(
+          `SELECT trace, trace_anchor FROM live_activities WHERE terminal = 't1'`,
+        ).first<any>()
+
+      await post(
+        '/v1/notify',
+        { title: 'a', terminal: 't1', status: 'blocked', trace: first, traceAnchor: 5_960_000 },
+        'mine',
+      )
+      // A NUMBER on the card, because the card's decoder reads an integer.
+      expect(row().traceAnchor).toBe(5_960_000)
+      expect(await stored()).toEqual({ trace: first, trace_anchor: 5_960_000 })
+
+      // No trace on this notice, so no new answer for either — and an anchor
+      // that arrives alone is not allowed to move the old blob in time.
+      await post(
+        '/v1/notify',
+        { title: 'a', terminal: 't1', status: 'blocked', traceAnchor: 1 },
+        'mine',
+      )
+      expect(row().trace).toBe(first)
+      expect(row().traceAnchor).toBe(5_960_000)
+      expect(await stored()).toEqual({ trace: first, trace_anchor: 5_960_000 })
+
+      // A new trace from a runner too old to anchor it. The old anchor must NOT
+      // carry forward onto the new blob: that would place every bucket of the
+      // row by a number measured with a different trace.
+      await post(
+        '/v1/notify',
+        { title: 'a', terminal: 't1', status: 'blocked', trace: second },
+        'mine',
+      )
+      expect(row().trace).toBe(second)
+      expect('traceAnchor' in row()).toBe(false)
+      expect(await stored()).toEqual({ trace: second, trace_anchor: null })
+
+      // Anything but a whole, non-negative, safe integer is no anchor, which
+      // the card reads as the drawing it had before anchors existed.
+      for (const bogus of ['5960000', 5_960_000.5, -1, 2 ** 60]) {
+        await post(
+          '/v1/notify',
+          { title: 'a', terminal: 't1', status: 'blocked', trace: first, traceAnchor: bogus },
+          'mine',
+        )
+        expect(await stored()).toEqual({ trace: first, trace_anchor: null })
+      }
+    })
+
     it('keeps a count on the row when a later notice measures nothing', async () => {
       // Absent means "no new answer", not "un-measured". A `working` tick that
       // arrives while the runner has not re-probed the worktree must not blank
@@ -3341,6 +3404,7 @@ describe('/v1/notify and Live Activities', () => {
             deletions: 999999,
             commits: 255,
             trace: 'A'.repeat(88),
+            traceAnchor: Number.MAX_SAFE_INTEGER,
           },
           'mine',
         )
@@ -3420,6 +3484,9 @@ describe('/v1/notify and Live Activities', () => {
       deletions: 999999,
       commits: 255,
       trace: 'A'.repeat(88),
+      // The widest anchor the relay accepts, not a realistic one: sixteen
+      // digits where a runner sends seven.
+      traceAnchor: Number.MAX_SAFE_INTEGER,
     })
 
     it('starts a card for a maximal fleet inside the payload APNs will accept', async () => {
@@ -3471,6 +3538,7 @@ describe('/v1/notify and Live Activities', () => {
         deletions: 999999,
         commits: 255,
         trace: 'A'.repeat(88),
+        traceAnchor: Number.MAX_SAFE_INTEGER,
       }))
       expect(starts.length).toBe(1)
       expect(bytes(starts[0].body)).toBeLessThan(4096)

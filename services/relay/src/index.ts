@@ -892,6 +892,19 @@ interface Notification {
   /// that already has two ends — `farcooler_core::trace::Trace::encode` and
   /// `AgentKit.ActivityTrace`.
   trace?: string
+  /// Where `trace`'s newest bucket sits in time: its absolute index, the Unix
+  /// second it began divided by the trace's own width. See
+  /// `farcooler_core::trace::Trace::anchor`.
+  ///
+  /// **The reason `trace` can stay opaque.** The blob is a shape and says how
+  /// much, never when; the card needs the when to put several rows on one axis.
+  /// So the daemon sends it here, as a number beside the blob, and this service
+  /// stores and forwards it without looking inside either — see
+  /// `traceAnchor()`, and migration 0009.
+  ///
+  /// Meaningless without the trace it came with, since the index is in units of
+  /// that trace's width. The two are stored and carried forward together.
+  traceAnchor?: number
 }
 
 interface Device {
@@ -1319,6 +1332,10 @@ const ROW_QUIET_AFTER_MS = 60 * 60 * 1000
 /// the real maximum and four is a design choice inside it, which is the opposite
 /// of the manifest ceiling that was written as fifteen and measured at four.
 ///
+/// The trace's anchor (migration 0009) adds `,"traceAnchor":5960000` — 22
+/// bytes for a seven-digit index — making the worst row 421, and
+/// `(4096 - 689) / 421` is still 8.
+///
 /// `STATE_BUDGET` is what enforces the measurement rather than trusting it.
 const ROWS_SHOWN = 4
 
@@ -1423,6 +1440,7 @@ interface AgentRow {
   deletions: number | null
   commits: number | null
   trace: string | null
+  trace_anchor: number | null
   started_at: number | null
   status_since: number | null
   updated_at: number
@@ -1486,7 +1504,7 @@ async function readFleet(env: Env, account: string, now: number): Promise<AgentR
 
   const rows = await env.DB.prepare(
     `SELECT terminal, label, machine, status, detail, insertions, deletions, commits,
-            trace, started_at, status_since, updated_at
+            trace, trace_anchor, started_at, status_since, updated_at
      FROM live_activities WHERE account_id = ?`,
   )
     .bind(account)
@@ -1513,6 +1531,14 @@ async function readFleet(env: Env, account: string, now: number): Promise<AgentR
 /// Counts COALESCE rather than overwrite. A notice that measured nothing this
 /// tick has not un-measured what the last one found; absent means "no new
 /// answer", and the row keeps the last real one until the runner has another.
+///
+/// **The trace's anchor does NOT coalesce on its own.** It is an index in units
+/// of the trace's own width, so it is only true of the blob it arrived with. A
+/// notice that carries a trace replaces the anchor too — with its own, or with
+/// NULL from a runner too old to send one — and a notice with no trace keeps
+/// both. Coalescing it separately would, after a runner downgrade, pair a fresh
+/// blob with a stale index and place every bucket of that row wrong, with
+/// nothing to say so.
 async function rememberAgent(
   env: Env,
   account: string,
@@ -1543,6 +1569,9 @@ async function rememberAgent(
     deletions: numeric(body.deletions) ?? prior?.deletions ?? null,
     commits: numeric(body.commits) ?? prior?.commits ?? null,
     trace: trace(body.trace) ?? prior?.trace ?? null,
+    trace_anchor: trace(body.trace) !== null
+      ? traceAnchor(body.traceAnchor)
+      : (prior?.trace_anchor ?? null),
     started_at: state.startedAt ?? null,
     // Only when the tier actually moves. See above.
     status_since: prior && prior.status === status ? (prior.status_since ?? now) : now,
@@ -1553,8 +1582,8 @@ async function rememberAgent(
     `INSERT INTO live_activities
        (id, account_id, terminal, update_token, environment, updated_at,
         label, machine, status, detail, insertions, deletions, commits, trace,
-        started_at, status_since)
-     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        trace_anchor, started_at, status_since)
+     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (account_id, terminal)
      DO UPDATE SET updated_at = excluded.updated_at,
                    label = excluded.label,
@@ -1565,6 +1594,9 @@ async function rememberAgent(
                    deletions = COALESCE(excluded.deletions, live_activities.deletions),
                    commits = COALESCE(excluded.commits, live_activities.commits),
                    trace = COALESCE(excluded.trace, live_activities.trace),
+                   trace_anchor = CASE WHEN excluded.trace IS NULL
+                                       THEN live_activities.trace_anchor
+                                       ELSE excluded.trace_anchor END,
                    started_at = excluded.started_at,
                    status_since = excluded.status_since`,
   )
@@ -1590,6 +1622,9 @@ async function rememberAgent(
       numeric(body.deletions),
       numeric(body.commits),
       trace(body.trace),
+      // Bound as sent. The `CASE` above is what ignores it when this notice
+      // carried no trace, since the blob it would sit beside is the old one.
+      traceAnchor(body.traceAnchor),
       mine.started_at,
       mine.status_since,
     )
@@ -1605,6 +1640,19 @@ async function rememberAgent(
 /// column, and through it the APNs payload, any size it likes.
 function trace(value: unknown): string | null {
   return typeof value === 'string' && value ? value.slice(0, 128) : null
+}
+
+/// A trace anchor the daemon actually sent, or NULL.
+///
+/// A whole number and nothing else: an index of five-minute buckets since 1970
+/// is seven digits today, and a two-hour one six. `Number.isSafeInteger` keeps
+/// a float, a string or anything past 2^53 out of a column the card reads as an
+/// integer — a value it cannot read costs that row its placement, and it falls
+/// back to packing from the newest end, which is the old drawing and not a
+/// wrong one. Negative is refused for the same reason zero is kept: it is a
+/// Unix time before 1970, which no runner's clock reports.
+function traceAnchor(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
 }
 
 /// A count the daemon actually sent, or NULL.
@@ -1721,6 +1769,8 @@ function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
       ...(row.started_at !== null ? { startedAt: row.started_at } : {}),
       updatedAt: row.updated_at,
       ...(row.trace ? { trace: row.trace } : {}),
+      // Never without the trace it places. See migration 0009.
+      ...(row.trace && row.trace_anchor !== null ? { traceAnchor: row.trace_anchor } : {}),
     })
     if (new TextEncoder().encode(JSON.stringify({ ...state, rows })).length > STATE_BUDGET) {
       rows.pop()

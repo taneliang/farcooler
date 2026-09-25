@@ -348,6 +348,13 @@ export interface ActivityRow {
   /// reads. Absent for an agent with no history the trace can see, which is
   /// deliberately not the same as thirteen quiet buckets.
   trace?: string
+  /// Where `trace`'s newest bucket sits in time: its absolute index, in units
+  /// of the trace's own width. What lets the card put every row's buckets on
+  /// one grid rather than packing each from its newest end. Absent without a
+  /// trace, and for a runner too old to send one — which the card reads as
+  /// "pack from the newest end", the drawing it had before this existed. See
+  /// migration 0009 and `AgentKit.AgentCardLayout`.
+  traceAnchor?: number
 }
 
 /// What is fixed for the life of an install's card, which is now almost nothing.
