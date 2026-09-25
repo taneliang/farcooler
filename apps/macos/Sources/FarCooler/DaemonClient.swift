@@ -854,7 +854,13 @@ final class DaemonClient: ObservableObject {
             // default from `AboutSheet`'s, which is reading a pair that ships
             // together and has no such case.
             matches: body["buildsMatch"] as? Bool ?? false,
-            platform: body["platform"] as? String ?? "")
+            platform: body["platform"] as? String ?? "",
+            // What that runner can do, which `status --json` has carried
+            // since capabilities existed and this read never passed on — so
+            // `can(_:)` saw an empty set and answered as for a daemon older
+            // than capabilities: workspaces and terminals, nothing else.
+            // `reportWatching`'s gate was therefore closed on every Mac.
+            capabilities: Set(body["capabilities"] as? [String] ?? []))
     }
 
     /// Replace the daemon on this runner with the build this app ships.
