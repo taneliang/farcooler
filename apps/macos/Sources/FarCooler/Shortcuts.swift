@@ -66,7 +66,7 @@ enum Shortcut {
                 // listed here as well as below because the sheet promises
                 // every shortcut in the menu bar. `ShortcutSheetTests` holds
                 // it to that.
-                Item(keys: "⇧⌘Z", action: "Zoom the focused pane; again to come back"),
+                Item(keys: "⇧⌘↩", action: "Zoom the focused pane; again to come back"),
                 Item(keys: "⇧⌘Space", action: "Next arrangement"),
             ]
         ),

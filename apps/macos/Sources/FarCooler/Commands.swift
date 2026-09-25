@@ -146,8 +146,15 @@ struct FarCoolerCommands: Commands {
             Button("Split Down  ⌃B \"") { TileCommand.splitDown.post() }
             Button("Move Pane Out  ⌃B !") { TileCommand.breakPane.post() }
             Divider()
+            // ⇧⌘↩ rather than ⇧⌘Z, which is Edit ▸ Redo on every Mac and was
+            // bound here twice over: the menu bar showed ⇧⌘Z in two menus, and
+            // which one a keypress reached depended on whether the field you
+            // were typing in had anything to redo. ⇧⌘↩ is what iTerm2 uses for
+            // the same idea, and nothing standard holds it.
+            // `ShortcutSheetTests` now refuses a chord the system's own menus
+            // already use.
             Button("Zoom Pane  ⌃B z") { TileCommand.zoom.post() }
-                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .keyboardShortcut(.return, modifiers: [.command, .shift])
             Button("Next Arrangement  ⌃B space") { TileCommand.cycle.post() }
                 .keyboardShortcut(.space, modifiers: [.command, .shift])
             // Double-clicking a divider evens out the two panes it separates.

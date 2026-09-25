@@ -38,6 +38,7 @@ struct PaletteField: NSViewRepresentable {
         let view = PaletteTextView()
         view.delegate = context.coordinator
         view.isRichText = false
+        FieldUndo.enable(view)
         view.drawsBackground = false
         view.font = .systemFont(ofSize: 14)
         view.textContainerInset = NSSize(width: 0, height: 2)
@@ -60,7 +61,7 @@ struct PaletteField: NSViewRepresentable {
     }
 
     func updateNSView(_ view: PaletteTextView, context: Context) {
-        if view.string != text { view.string = text }
+        if view.string != text { context.coordinator.undo.replace(view, with: text) }
         view.placeholder = placeholder
         apply(view)
     }
@@ -93,6 +94,11 @@ struct PaletteField: NSViewRepresentable {
         weak var previous: NSResponder?
 
         init(_ parent: PaletteField) { self.parent = parent }
+
+        /// This field's own undo. See `FieldUndo`.
+        let undo = FieldUndo()
+
+        func undoManager(for view: NSTextView) -> UndoManager? { undo.manager }
 
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }

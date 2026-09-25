@@ -33,6 +33,7 @@ struct Composer: NSViewRepresentable {
         view.onSubmit = onSubmit
         view.onCancel = onCancel
         view.isRichText = false
+        FieldUndo.enable(view)
         view.drawsBackground = false
         view.font = .systemFont(ofSize: 14)
         view.textContainerInset = NSSize(width: 0, height: 3)
@@ -51,7 +52,7 @@ struct Composer: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? SubmittingTextView else { return }
-        if view.string != text { view.string = text }
+        if view.string != text { context.coordinator.undo.replace(view, with: text) }
         view.onSubmit = onSubmit
         view.onCancel = onCancel
         view.placeholder = placeholder
@@ -72,6 +73,11 @@ struct Composer: NSViewRepresentable {
         weak var view: SubmittingTextView?
 
         init(_ parent: Composer) { self.parent = parent }
+
+        /// This field's own undo. See `FieldUndo`.
+        let undo = FieldUndo()
+
+        func undoManager(for view: NSTextView) -> UndoManager? { undo.manager }
 
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }

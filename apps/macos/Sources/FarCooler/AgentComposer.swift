@@ -840,6 +840,7 @@ private struct AgentComposerField: NSViewRepresentable {
         let view = ComposerTextView()
         view.delegate = context.coordinator
         view.isRichText = false
+        FieldUndo.enable(view)
         // The standard growing-text-view configuration, and it is what makes
         // `Coordinator.report(_:)` mean anything: the text view tracks the
         // width it is given and grows only downward, so its used height IS the
@@ -875,7 +876,7 @@ private struct AgentComposerField: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? ComposerTextView else { return }
         if view.string != text {
-            view.string = text
+            context.coordinator.undo.replace(view, with: text)
             let location = text.utf16Location(ofCharacterOffset: cursor)
             view.setSelectedRange(NSRange(location: location, length: 0))
         }
@@ -925,6 +926,11 @@ private struct AgentComposerField: NSViewRepresentable {
         var focused: Bool?
 
         init(_ parent: AgentComposerField) { self.parent = parent }
+
+        /// This field's own undo. See `FieldUndo`.
+        let undo = FieldUndo()
+
+        func undoManager(for view: NSTextView) -> UndoManager? { undo.manager }
 
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
