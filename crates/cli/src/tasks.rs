@@ -2106,9 +2106,11 @@ mod tests {
             }
             // clap takes these as plain strings and they are refused only when
             // run, so the literal values the skill writes are checked here too.
+            // Both spellings: `--status done` and `--status=done`.
             let words = shell_words(line);
-            for pair in words.windows(2) {
-                let (flag, value) = (pair[0].as_str(), pair[1].as_str());
+            let spaced = words.windows(2).map(|pair| (pair[0].as_str(), pair[1].as_str()));
+            let joined = words.iter().filter_map(|w| w.split_once('=')).filter(|(f, _)| f.starts_with("--"));
+            for (flag, value) in spaced.chain(joined) {
                 if value == "x" {
                     continue;
                 }
