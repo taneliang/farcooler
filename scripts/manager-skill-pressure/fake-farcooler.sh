@@ -6,11 +6,14 @@
 # JSON array to $FAKE_LOG. Reads print canned text from $FAKE_BOARD:
 #
 #   task list ...           -> $FAKE_BOARD/list.txt
-#   task show <key> ...     -> $FAKE_BOARD/<key>.txt
+#   task show <key> ...     -> $FAKE_BOARD/<key>.txt, else the task's row in
+#                              list.txt, else a task this world created
 #   workspace list ...      -> $FAKE_BOARD/workspaces.json
 #   task search ...         -> $FAKE_BOARD/search.txt
 #
-# Writes print one plausible line and exit 0. `--help` is handed to the real
+# Writes print one plausible line and exit 0. `task create` hands out a new key
+# each time -- fc-9, fc-10, ... -- from the counter $FAKE_BOARD/next-key, and
+# records it in $FAKE_BOARD/created.txt so `task show` answers for it. `--help` is handed to the real
 # CLI named by $REAL_FARCOOLER when there is one, so a baseline agent sees the
 # real command tree; clap answers `--help` without reaching a daemon.
 set -u
@@ -42,11 +45,45 @@ set -- ${args[@]+"${args[@]}"}
 
 show_file() { if [ -f "$1" ]; then cat "$1"; else echo "$2"; fi; }
 
+# `task show <key>`: the world's own file for the key when it has one, then the
+# key's row in list.txt (KEY STATUS AGE TITLE), then a task created here.
+show_task() {
+  local key=$1
+  if [ -n "$key" ] && [ -f "$FAKE_BOARD/$key.txt" ]; then cat "$FAKE_BOARD/$key.txt"; return; fi
+  local row
+  row=$(awk -v k="$key" '$1 == k && k != "KEY" { print; exit }' "$FAKE_BOARD/list.txt" 2>/dev/null)
+  if [ -n "$key" ] && [ -n "$row" ]; then
+    echo "$row" | awk '{ t = $4; for (i = 5; i <= NF; i++) t = t " " $i; print $1 "  " t; print "status: " $2 }'
+    return
+  fi
+  row=$(awk -F '\t' -v k="$key" '$1 == k { print; exit }' "$FAKE_BOARD/created.txt" 2>/dev/null)
+  if [ -n "$key" ] && [ -n "$row" ]; then
+    printf '%s  %s\nstatus: backlog\n' "$key" "$(echo "$row" | cut -f2)"
+    return
+  fi
+  echo "no task $key"
+}
+
+# `task create`: the next key from the world's counter, starting at fc-9.
+create_task() {
+  local n
+  n=$(cat "$FAKE_BOARD/next-key" 2>/dev/null || echo 9)
+  echo $((n + 1)) > "$FAKE_BOARD/next-key"
+  local title="" prev="" a
+  for a in "$@"; do
+    case "$a" in --title=*) title=${a#--title=} ;; esac
+    [ "$prev" = "--title" ] && title=$a
+    prev=$a
+  done
+  printf 'fc-%s\t%s\n' "$n" "$title" >> "$FAKE_BOARD/created.txt"
+  echo "fc-$n  created"
+}
+
 case "${1:-} ${2:-}" in
   "task list")      show_file "$FAKE_BOARD/list.txt" "no tasks" ;;
-  "task show")      show_file "$FAKE_BOARD/${3:-none}.txt" "no task ${3:-}" ;;
+  "task show")      show_task "${3:-}" ;;
   "task search")    show_file "$FAKE_BOARD/search.txt" "no notes match" ;;
-  "task create")    echo "fc-9  created" ;;
+  "task create")    create_task "$@" ;;
   "task set")       echo "${3:-fc-?}  updated" ;;
   "task note")      echo "${3:-fc-?}  noted" ;;
   "task ask")       echo "${3:-fc-?}  needs decision" ;;

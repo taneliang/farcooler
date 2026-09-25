@@ -133,7 +133,9 @@ not run yet: S8 needs a scripted multi-turn owner, driven by hand.
 The fake CLI gives every `task create` the key `fc-9` and never applies a
 write, so an agent that reads the board back sees none of its work. Most
 runs noticed and said so; none retried. It doesn't affect scoring, which
-reads the log.
+reads the log. (Since fixed in part: creates now get distinct keys from `fc-9` up,
+and `task show` answers for a created task and for any task `task list`
+shows. Other writes are still not applied.)
 
 ## Dispatch round (Tasks 7-11)
 
