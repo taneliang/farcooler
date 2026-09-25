@@ -1473,9 +1473,11 @@ final class DaemonClient: ObservableObject {
         // `--fork-only` where the runner has it: the branch list above is a
         // moment old, and a `git fetch` since — an agent in a sibling worktree
         // does them — can bring in a remote branch of this very name, which a
-        // plain create would check out. The runner refuses that instead
-        // (`branch-exists`), holding its repository lock. An older runner has
-        // only the list's word for it. `"workspace_fork_only"` is
+        // plain create would check out. The runner refuses a name a remote
+        // already has (`branch-exists`), and otherwise cuts the branch from
+        // the base's own commit — so even a fetch that lands after its check
+        // gives a new branch, never a checkout. An older runner has only the
+        // list's word for it. `"workspace_fork_only"` is
         // `farcooler_protocol::capability::WORKSPACE_FORK_ONLY`.
         let forkOnly = daemonBuild?.can("workspace_fork_only") ?? false
         let (made, makeFailure) = await runRaw(

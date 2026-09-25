@@ -268,9 +268,18 @@ pub async fn create_worktree(
 /// rather than checked out.
 ///
 /// For a client that made the name up — the Mac's ⌘N task — where a checkout
-/// would start the task on somebody's commits. Asked here, under the caller's
-/// repository lock, because a client's own look at the branch list is a
-/// moment older than the create: a `git fetch` in between brings the name in.
+/// would start the task on somebody's commits.
+///
+/// **What makes this safe against a fetch is the create, not a lock.** The
+/// caller's repository lock only orders this daemon's own creates; an agent
+/// in a sibling worktree can `git fetch` at any moment, including between the
+/// remote check below and the `worktree add`. But with `fork_only` there is
+/// never a tracking start point: the create is `worktree add -b <branch>
+/// <dest> <commit>`, a new branch cut from the base's resolved SHA, and
+/// nothing in it can guess a remote branch or check one out. A name fetched
+/// in that gap gets a new local branch beside the remote one — still a
+/// fork. The check itself is what turns a name already there into a
+/// refusal the client can act on.
 pub async fn create_worktree_with(
     repo: &Path,
     branch: &str,

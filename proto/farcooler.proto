@@ -1404,8 +1404,10 @@ message WorkspaceCreate {
   // name up for a new task: the task would start on somebody's commits
   // with no word said. A client can check the branch list first, but a
   // `git fetch` between that read and this create brings the name in
-  // anyway; only the daemon, holding the repository lock, can close that
-  // window. Ignored with `adopt_existing`, which is the opposite request.
+  // anyway. Set, the daemon never takes a remote branch as the start point:
+  // the branch is cut from the base's resolved commit, so a name fetched at
+  // any moment still gets a new branch, never a checkout. Ignored with
+  // `adopt_existing`, which is the opposite request.
   //
   // Gated by the `workspace_fork_only` capability, and a client that sets it
   // names that capability in `Request.required_capabilities`: an older
