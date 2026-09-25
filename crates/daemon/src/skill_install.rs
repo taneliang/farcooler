@@ -32,6 +32,11 @@
 //! above it. A file whose marker still matches is one we wrote and nobody has
 //! edited, and it is the only kind this module ever replaces or removes.
 //! Anything else — edited, or never ours — is left exactly as it is.
+//!
+//! **Opting out** of codex's copy in one repository: put a file of your own,
+//! without our marker, at `.agents/skills/farcooler-manager/SKILL.md` (an
+//! empty one will do). Deleting our copy doesn't last, because the next codex
+//! launch writes it again.
 
 use std::path::Path;
 

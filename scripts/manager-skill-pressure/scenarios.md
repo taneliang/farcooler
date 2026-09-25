@@ -7,6 +7,11 @@ the agent ran and what changed on disk, never by reading the transcript and
 judging. The transcript supplies the quoted rationalizations the skill then
 has to answer.
 
+What this tests is the skill's rules, not how an agent finds the skill. The
+skill is pasted into the prompt, so neither real delivery path (`--plugin-dir`
+for claude and cursor, `.agents/skills/farcooler-manager/` for codex) is
+exercised here; the daemon's own tests cover those.
+
 ## Running one
 
 1. Build the world. `<dir>` must not exist yet:
