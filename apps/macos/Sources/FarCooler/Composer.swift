@@ -87,6 +87,13 @@ final class SubmittingTextView: NSTextView {
     var placeholder: String = "" { didSet { needsDisplay = true } }
 
     override func keyDown(with event: NSEvent) {
+        // An input method is composing — Japanese, Chinese, Korean — and
+        // Return commits its candidate. That Return is the input method's,
+        // not a send: taking it would start a task from half-composed text.
+        if hasMarkedText() {
+            super.keyDown(with: event)
+            return
+        }
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         if isReturn && !event.modifierFlags.contains(.shift) {
             onSubmit?(event.modifierFlags.contains(.option))
@@ -132,6 +139,14 @@ enum Agents {
 
     static func agent(_ id: String) -> Agent {
         all.first { $0.id == id } ?? all[0]
+    }
+
+    /// Whether this preset's agent takes its first message as a launch
+    /// argument: claude, codex and cursor, the three the daemon hands a
+    /// prompt to. Anything else ignores `--prompt`, so it is typed instead.
+    static func takesPrompt(preset: String) -> Bool {
+        let agent = preset.split(separator: ":", maxSplits: 1).first.map(String.init) ?? preset
+        return ["claude", "codex", "cursor"].contains(agent)
     }
 
     /// The preset string the daemon expects: `agent` or `agent:model`.

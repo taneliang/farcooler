@@ -19,6 +19,12 @@ import SwiftUI
 /// (242ec102); in use, the one-task case is the common one, and a panel left
 /// on top of the task you just started is in the way of looking at it. The
 /// burst is still one key away.
+///
+/// **Closing waits for the task to exist.** The draft is kept, and the panel
+/// stays, until the agent's terminal has been made; a start that fails leaves
+/// both, with a sentence saying why. Before, the panel cleared the draft the
+/// moment ⏎ was pressed, and a start that then failed took the task with it
+/// and said nothing.
 struct QuickCreate: View {
     /// Every runner's repositories, tagged the same way `FleetStore.repositories`
     /// tags them. Carried together rather than flattened to a bare `[Repository]`
@@ -26,9 +32,10 @@ struct QuickCreate: View {
     /// `NewWorkspaceSheet`, which tags the same way for the same reason.
     let projects: [(host: String, repository: Repository)]
     @Binding var project: String
-    /// Description, name, host, project, preset. Returns once queued, not
-    /// finished. `name` is the one the footer showed. The panel closes itself afterwards unless ⌥⏎ asked it not
-    /// to, through `onClose` — the same way Esc closes it.
+    /// Start the task. Returns once its agent's terminal exists — `nil` — or
+    /// with the sentence to show when it could not be started. `name` is the
+    /// one the footer showed. The panel closes itself on success unless ⌥⏎
+    /// asked it not to, through `onClose` — the same way Esc closes it.
     ///
     /// `host` comes from `chosen` below, the same picker selection that
     /// resolved `project` — not re-derived by the caller from `project`
@@ -36,7 +43,7 @@ struct QuickCreate: View {
     /// together for exactly this reason: a repository chosen without its
     /// host, handed to whatever runner happens to be "current" downstream,
     /// is how a task starts on the wrong one with no error at all.
-    let onSubmit: (String, String, String, String, String) -> Void
+    let onSubmit: (TaskRequest) async -> String?
     let onResume: () -> Void
     let onClose: () -> Void
     /// What the CHOSEN runner says branch names start with.
@@ -50,6 +57,9 @@ struct QuickCreate: View {
     /// Who names the task. The on-device model where this Mac has one, and
     /// the heuristic otherwise; a test hands in its own.
     var namer: TaskNamer = .onDevice
+    /// Whether a start is in flight and how the last one failed. Owned by
+    /// the caller so it outlives the panel being closed and reopened.
+    @ObservedObject var submission: TaskSubmission
 
     /// The draft survives closing the panel.
     ///
@@ -124,8 +134,20 @@ struct QuickCreate: View {
     /// daemon's sixty-scalar ceiling, but the ceiling is checked where the
     /// name is decided rather than assumed from a cut made somewhere else.
     private var canSubmit: Bool {
-        chosen != nil && description.contains { $0.isLetter || $0.isNumber }
+        chosen != nil && hasWords && TaskPrompt.problem(description) == nil
             && WorktreeName.isValid(name)
+    }
+
+    private var hasWords: Bool { description.contains { $0.isLetter || $0.isNumber } }
+
+    /// Why ⏎ would do nothing, when there is text and it would. Said rather
+    /// than left to be discovered.
+    private var reason: String? {
+        guard !description.isEmpty else { return nil }
+        if !hasWords { return "Add a word to start a task." }
+        if let problem = TaskPrompt.problem(description) { return problem }
+        if chosen == nil { return "Pick a project to start the task in." }
+        return nil
     }
 
     var body: some View {
@@ -139,13 +161,22 @@ struct QuickCreate: View {
                 Composer(
                     text: $text,
                     placeholder: "What do you want done?",
-                    onSubmit: { keepOpen in submit(keepOpen: keepOpen) },
+                    onSubmit: { keepOpen in Task { await submit(keepOpen: keepOpen) } },
                     onCancel: onClose
                 )
                 .frame(height: composerHeight)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
+
+            if let failure = submission.failure {
+                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 8)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Divider()
             footer
@@ -156,6 +187,8 @@ struct QuickCreate: View {
         .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
         .frame(width: 560)
         .onAppear { OnDeviceNamer.prewarm() }
+        // A failure is about the text it was for; editing it clears it.
+        .onChange(of: text) { _, _ in submission.failure = nil }
         // Named while typing, a moment after the typing stops: `.task(id:)`
         // cancels the previous one on every keystroke, so only a pause asks
         // the model anything.
@@ -179,7 +212,12 @@ struct QuickCreate: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            if let created = justCreated, text.isEmpty {
+            if submission.starting {
+                ProgressView().controlSize(.mini)
+                Text("Starting…").foregroundStyle(.secondary)
+            } else if let reason {
+                Text(reason).foregroundStyle(.secondary).lineLimit(1)
+            } else if let created = justCreated, text.isEmpty {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 Text("Started \(created)").foregroundStyle(.secondary)
             } else if text.isEmpty {
@@ -234,29 +272,65 @@ struct QuickCreate: View {
             }
             .labelsHidden().fixedSize().controlSize(.small)
 
-            Text(canSubmit ? "↩ start  ⌥↩ start, keep open" : "⇧↩ newline")
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 12) {
+                if canSubmit {
+                    Text("↩ Start")
+                    Text("⌥↩ Start and Keep Open")
+                } else {
+                    Text("⇧↩ New Line")
+                }
+            }
+            .foregroundStyle(.tertiary)
         }
         .font(.system(size: 11))
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
     }
 
-    /// Start the task, then close unless `keepOpen`. Not private so a test
+    /// Start the task; once it exists, clear the draft and close unless
+    /// `keepOpen`. A failure keeps both and shows why. Not private so a test
     /// can press ⏎ without a window.
-    func submit(keepOpen: Bool) {
-        // The same gate the footer shows, not a weaker one. ⏎ is the only way
-        // in here, and a name the daemon refuses would clear the draft on its
-        // way to a failure nothing on screen reports.
+    func submit(keepOpen: Bool) async {
+        // The same gate the footer shows, not a weaker one.
         guard canSubmit, let chosen else { return }
-        onSubmit(
-            description, name, chosen.host, chosen.repository.id,
-            Agents.preset(agent: agent, model: model))
-
-        justCreated = WorktreeName.display(name)
-        // Cleared only on success, which is also what clears the draft.
-        text = ""
+        let request = TaskRequest(
+            description: description, name: name, host: chosen.host,
+            project: chosen.repository.id, preset: Agents.preset(agent: agent, model: model))
+        let started = await submission.run { await onSubmit(request) }
+        guard started else { return }
+        justCreated = WorktreeName.display(request.name)
+        // Only if it is still the text that was started: the panel may have
+        // been closed, reopened and written in while this was in flight.
+        if description == request.description { text = "" }
         if !keepOpen { onClose() }
+    }
+}
+
+/// One task to start, as the panel decided it.
+struct TaskRequest: Equatable {
+    var description: String
+    var name: String
+    var host: String
+    var project: String
+    var preset: String
+}
+
+/// A task start in flight, and how the last one ended.
+@MainActor
+final class TaskSubmission: ObservableObject {
+    @Published private(set) var starting = false
+    @Published var failure: String?
+
+    /// Run `start` unless one is already running. `true` when it started the
+    /// task; a failure is kept in `failure` for the panel to show.
+    func run(_ start: () async -> String?) async -> Bool {
+        guard !starting else { return false }
+        starting = true
+        failure = nil
+        let problem = await start()
+        starting = false
+        failure = problem
+        return problem == nil
     }
 }
 

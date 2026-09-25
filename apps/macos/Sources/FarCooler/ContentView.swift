@@ -68,6 +68,9 @@ struct ContentView: View {
     @State private var showAbout = false
     @State private var query = ""
     @State private var showQuickCreate = false
+    /// The ⌘N panel's start in flight, kept here so it survives the panel
+    /// closing and reopening.
+    @StateObject private var taskSubmission = TaskSubmission()
     @AppStorage("tasks.lastProject") private var lastProject = ""
     /// The terminal that was open when the app last closed, as
     /// `host/workspace/terminal`.
@@ -358,18 +361,17 @@ struct ContentView: View {
                 QuickCreate(
                     projects: store.repositories,
                     project: $lastProject,
-                    onSubmit: { description, name, host, project, preset in
-                        lastProject = project
-                        startTask(
-                            description: description, name: name, host: host, project: project,
-                            agent: preset)
+                    onSubmit: { request in
+                        lastProject = request.project
+                        return await startTask(request)
                     },
                     onResume: {
                         showQuickCreate = false
                         showResumeBranch = true
                     },
                     onClose: { showQuickCreate = false },
-                    branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" }
+                    branchPrefix: { host in store.clients[host]?.fleet.branchPrefix ?? "" },
+                    submission: taskSubmission
                 )
                 .padding(.top, 14)
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -2319,21 +2321,32 @@ struct ContentView: View {
     /// whose `repositories` has not been re-read since a reconnect, and a
     /// lookup that finds nothing has to be answered with a refusal, not a
     /// fallback to this Mac.
-    private func startTask(
-        description: String, name: String, host: String, project: String, agent: String
-    ) {
-        Task {
-            if let why = store.refusal(for: host) {
-                errorBanner = "Cannot do that: \(why)"
-                return
-            }
-            guard let client = store.clients[host] else { return }
-            let created = await client.startTask(
-                project: project,
-                description: description,
-                name: name,
-                agent: agent.isEmpty ? Preferences.shared.defaultAgent : agent)
-            reveal(created)
+    private func startTask(_ request: TaskRequest) async -> String? {
+        let host = request.host
+        if let client = store.clients[host], client.state == .notInstalled {
+            return "Far Cooler isn’t installed on this runner, so the task wasn’t started."
+        }
+        guard store.refusal(for: host) == nil, let client = store.clients[host] else {
+            return "Can’t reach this runner right now, so the task wasn’t started. Try again once it’s back."
+        }
+        let outcome = await client.startTask(
+            project: request.project,
+            description: request.description,
+            name: request.name,
+            agent: request.preset.isEmpty ? Preferences.shared.defaultAgent : request.preset)
+        switch outcome {
+        case .started(let workspace, let terminal):
+            // By the ids the create calls returned, not by a later look at
+            // the fleet — which, this soon, may not have the terminal yet.
+            expanded.insert(workspace)
+            selection = .terminal(host: host, workspace: workspace, terminal: terminal)
+            return nil
+        case .failed(let sentence, let workspace):
+            if let workspace { reveal(workspace) }
+            // After the selection change, which clears the banner. The panel
+            // shows it when it is still open; this is for when it is not.
+            if !showQuickCreate { errorBanner = sentence }
+            return sentence
         }
     }
 
@@ -2350,7 +2363,7 @@ struct ContentView: View {
     private func resume(branch: String, host: String, project: String, agent: String) {
         Task {
             if let why = store.refusal(for: host) {
-                errorBanner = "Cannot do that: \(why)"
+                errorBanner = "Can’t do that because \(why)."
                 return
             }
             guard let client = store.clients[host] else { return }

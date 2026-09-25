@@ -84,6 +84,10 @@ final class DaemonClient: ObservableObject {
         watchResignations()
     }
 
+    /// Who is at this Mac, for `reportWatching`. A test holds any part of it
+    /// false.
+    var presence: Presence = .live
+
     /// Answers every CLI call in place of the CLI, when set. For tests only:
     /// it is what lets a suite drive `startTask` against a runner whose agent
     /// never becomes idle, without a runner.
@@ -1358,9 +1362,23 @@ final class DaemonClient: ObservableObject {
         return workspace.id
     }
 
+    /// How starting a task ended.
+    enum TaskStart: Equatable {
+        /// The workspace and its agent's terminal, by the ids the create calls
+        /// returned — which is what the window selects, rather than whatever
+        /// a later look at the fleet happens to hold.
+        case started(workspace: String, terminal: String)
+        /// A sentence for the panel, in this app's words. `workspace` is set
+        /// when the worktree was made but its agent was not.
+        case failed(String, workspace: String?)
+    }
+
     /// Start a task: a worktree, an agent in it, and the description as the
-    /// agent's first message. Returns the workspace as soon as its terminal
-    /// exists, so the window can go there while the agent is still starting.
+    /// agent's first message. Returns as soon as the agent's terminal exists,
+    /// so the window can go there while the agent is still starting — and
+    /// returns a FAILURE, in words the panel shows, whenever it does not
+    /// exist. Nothing here fails silently: the panel keeps the draft until
+    /// this says `.started`.
     ///
     /// **The description is the agent's launch argument** on a runner that has
     /// `launch_prompt`. claude, codex and cursor each hold an initial prompt
@@ -1370,60 +1388,78 @@ final class DaemonClient: ObservableObject {
     /// read as blocked, this gave up, and the person accepted the gate to find
     /// an empty prompt box.
     ///
-    /// A runner too old for that still gets it typed, as before, but in a
-    /// detached task after this returns — see `typeWhenIdle`. Nothing waits on
-    /// that any more, so the window does not either.
+    /// A runner too old for that, or an agent that takes no prompt argument,
+    /// still gets it typed, but in a detached task after this returns — see
+    /// `typeWhenIdle`. Nothing waits on that any more, so the window does not
+    /// either.
     ///
     /// `name` is the short name the panel showed (`TaskName`): the worktree's
-    /// directory, and so its sidebar row, and the branch is a slug of it. The
-    /// one thing added here is a `-2` when a worktree of that name already
-    /// exists, which the daemon would otherwise refuse.
+    /// directory, and so its sidebar row, and the branch is a slug of it.
+    /// **A new task never lands on an existing branch**: a name whose
+    /// directory, local branch or remote branch already exists gets `-2`,
+    /// `-3` … first. The daemon checks a remote-only branch OUT rather than
+    /// forking it, which would start the task on somebody's old commits.
     func startTask(project: String, description: String, name: String, agent: String) async
-        -> String?
+        -> TaskStart
     {
+        if let problem = TaskPrompt.problem(description) { return .failed(problem, workspace: nil) }
+
         // This runner's own prefix, read from the fleet it last refreshed — the
         // same value the composer previewed, so the branch that gets made is the
         // branch the user was shown.
         let prefix = fleet.branchPrefix ?? ""
-        let taken = Set(fleet.workspaces.map { URL(fileURLWithPath: $0.worktree).lastPathComponent })
-        let name = TaskName.unique(name, taken: taken)
+        let (listing, listFailure) = await runRaw(["workspace", "branches", project, "--json"])
+        guard let listing,
+            let branches = try? JSONDecoder().decode(BranchList.self, from: listing).branches
+        else {
+            return .failed(TaskFailure.sentence(for: listFailure), workspace: nil)
+        }
+        let takenBranches = Set(branches.map(\.name))
+        let takenDirectories = Set(
+            fleet.workspaces.map { URL(fileURLWithPath: $0.worktree).lastPathComponent })
+        let name = TaskName.unique(name) { candidate in
+            takenDirectories.contains(candidate)
+                || takenBranches.contains(Branch.slug(from: candidate, prefix: prefix))
+        }
         let branch = Branch.slug(from: name, prefix: prefix)
 
-        let before = Set(fleet.workspaces.map(\.id))
         // `--no-terminal`, because this creates its own agent terminal a few
         // lines below. Without it a task would come up with an unused shell
-        // sitting beside the agent that is doing the work.
-        _ = await run([
-            "workspace", "create", project, name, "--branch", branch, "--no-terminal",
+        // sitting beside the agent that is doing the work. `--json`, so what
+        // comes back names THIS workspace — two tasks started close together
+        // would otherwise each guess the other's from a before-and-after diff.
+        let (made, makeFailure) = await runRaw([
+            "--json", "workspace", "create", project, name, "--branch", branch, "--no-terminal",
         ])
-        await refresh()
-
-        guard let workspace = fleet.workspaces.first(where: { !before.contains($0.id) }) else {
-            return nil
+        guard let workspace = made.flatMap(Created.decode) else {
+            return .failed(TaskFailure.sentence(for: makeFailure), workspace: nil)
         }
 
+        // Asked, if the first status read has not landed yet: deciding on a
+        // nil build would type the task — the path gates break.
+        if daemonBuild == nil { await readDaemonBuild() }
         // `"launch_prompt"` is `farcooler_protocol::capability::LAUNCH_PROMPT`.
-        // Read at the moment of asking: `daemonBuild` is nil until the first
-        // status read lands, which reads as "not yet" and types instead.
-        let asArgument = daemonBuild?.can("launch_prompt") ?? false
-        _ = await run(
-            Self.taskTerminalArguments(
-                workspace: workspace.short, agent: agent,
-                prompt: asArgument ? description : nil))
+        let asArgument =
+            (daemonBuild?.can("launch_prompt") ?? false) && Agents.takesPrompt(preset: agent)
+        let (terminalMade, terminalFailure) = await runRaw(
+            ["--json"]
+                + Self.taskTerminalArguments(
+                    workspace: workspace.short, agent: agent,
+                    prompt: asArgument ? description : nil))
         await refresh()
-
-        if !asArgument,
-            let terminal = fleet.workspaces
-                .first(where: { $0.id == workspace.id })?
-                .terminals.first(where: { $0.preset == agent || $0.title == agent })
-        {
-            let (workspaceID, terminalID) = (workspace.id, terminal.id)
-            Task { [weak self] in
-                await self?.typeWhenIdle(
-                    workspace: workspaceID, terminal: terminalID, text: description)
-            }
+        guard let terminal = terminalMade.flatMap(Created.decode) else {
+            return .failed(TaskFailure.sentence(for: terminalFailure), workspace: workspace.id)
         }
-        return workspace.id
+
+        if !asArgument { typeWhenIdle(workspace: workspace.id, terminal: terminal.id, text: description) }
+        return .started(workspace: workspace.id, terminal: terminal.id)
+    }
+
+    /// What `--json` on a create prints: the id of the thing made.
+    private struct Created: Decodable {
+        var id: String
+        var short: String
+        static func decode(_ data: Data) -> Created? { try? JSONDecoder().decode(Created.self, from: data) }
     }
 
     /// The `terminal create` that starts a task's agent, with the description
@@ -1445,25 +1481,31 @@ final class DaemonClient: ObservableObject {
     ///
     /// Unchanged from when it was the whole of `startTask`, except that it no
     /// longer holds the window up. Up to a minute: a cold agent on a slow
-    /// machine is not a failure. `[weak self]` at the call site and the
-    /// optional chain here are what end it for a runner that was removed.
-    private func typeWhenIdle(workspace: String, terminal: String, text: String) async {
-        for _ in 0..<120 {
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            await refresh()
-            let current = fleet.workspaces
-                .first(where: { $0.id == workspace })?
-                .terminals.first(where: { $0.id == terminal })
-            guard let current else { return }
-            if current.agent == .idle {
-                await send(terminal: current.short, text: text)
-                return
+    /// machine is not a failure.
+    ///
+    /// `self` is re-taken weakly on every pass rather than held for the whole
+    /// minute: a runner removed while this waits has its client released, and
+    /// the next pass finds nothing and stops — rather than polling, and
+    /// perhaps typing into, a runner nothing shows anymore.
+    private func typeWhenIdle(workspace: String, terminal: String, text: String) {
+        Task { [weak self] in
+            for _ in 0..<120 {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self, !Task.isCancelled else { return }
+                await self.refresh()
+                let current = self.fleet.workspaces
+                    .first(where: { $0.id == workspace })?
+                    .terminals.first(where: { $0.id == terminal })
+                guard let current else { return }
+                if current.agent == .idle {
+                    await self.send(terminal: current.short, text: text)
+                    return
+                }
+                // It asked something before we got a word in — a trust prompt,
+                // or a resume dialog. Stop rather than typing a task
+                // description into a yes/no question.
+                if current.agent == .blocked { return }
             }
-            // It asked something before we got a word in — a trust prompt, or a
-            // resume dialog. Stop rather than typing a task description into a
-            // yes/no question.
-            if current.agent == .blocked { return }
         }
     }
 
@@ -1823,15 +1865,24 @@ final class DaemonClient: ObservableObject {
         // time. `daemonBuild` is nil until the first status read lands, which
         // reads as "not yet" and is retried by the next claim.
         guard daemonBuild?.can("watching") ?? false else { return }
-        // A window that is not frontmost is not showing anybody anything, and
-        // saying otherwise would suppress the notification that exists for
-        // precisely that case. `ContentView.markVisibleSeen` gates on this too;
-        // it is repeated here because the renewal below fires on its own clock,
-        // long after the call that armed it.
-        let claim = NSApp.isActive ? terminals : []
+        // Never an ssh attempt for a heartbeat to a runner that is not up: the
+        // runner ages every claim out on its own (`WATCHED_TTL_MS`), so
+        // nothing is owed to one that went away.
+        guard state == .connected else { return }
+        // Only for somebody actually there (`Presence`): frontmost, display
+        // awake, session unlocked, and a key or the mouse touched within the
+        // last minute. A claim for an empty chair is a notification the
+        // person never gets. Asked here as well as by the caller because the
+        // renewal below fires on its own clock, long after the call that
+        // armed it.
+        let claim = presence.isPresent ? terminals : []
         let changed = claim != watching
         watchingTask?.cancel()
         watchingTask = nil
+
+        // Nothing claimed and nothing to take back: say nothing. This is every
+        // runner not in the detail pane, on every fleet event.
+        if claim.isEmpty && watching.isEmpty { return }
 
         if changed || Date().timeIntervalSince(watchingSentAt) >= Self.watchingFloor {
             // Stamped before the call and stamped even when it fails, on the
@@ -1840,8 +1891,11 @@ final class DaemonClient: ObservableObject {
             // that answers it. The floor is a floor on ATTEMPTS.
             watching = claim
             watchingSentAt = Date()
+            // `runRaw`, and its message dropped: a heartbeat that failed is
+            // nobody's news, and `run` would leave it in `lastError` for the
+            // next unrelated action's banner to show.
             Task { [weak self] in
-                _ = await self?.run(["terminal", "watching"] + claim, background: true)
+                _ = await self?.runRaw(["terminal", "watching"] + claim, background: true)
             }
         }
 
@@ -1870,12 +1924,18 @@ final class DaemonClient: ObservableObject {
     /// that resigning could reach. This is also what makes the renewal above
     /// safe to leave running: whichever of the two notices first, the claim
     /// goes.
+    ///
+    /// And the moment the person goes: display sleep, the lock screen or a
+    /// switch to another user (`ScreenState.personLeft`), for the same reason.
     private func watchResignations() {
         resignObserver = NotificationCenter.default
             .publisher(for: NSApplication.didResignActiveNotification)
+            .merge(with: NotificationCenter.default.publisher(for: ScreenState.personLeft))
             .sink { [weak self] _ in
                 Task { @MainActor in self?.reportWatching([]) }
             }
+        // Created now, so it has been listening since launch.
+        _ = ScreenState.shared
     }
 
     /// Delete a terminal's record. Refused by the daemon while it is running.

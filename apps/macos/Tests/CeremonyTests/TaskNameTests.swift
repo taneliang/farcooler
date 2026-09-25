@@ -41,6 +41,9 @@ struct TaskNameTests {
         #expect(TaskName.heuristic("can you do this for me please") == "can-you-do-this")
         #expect(TaskName.heuristic("日本語のテスト") == "task")
         #expect(TaskName.heuristic("naïve café") == "naive-cafe")
+        // An apostrophe joins a word rather than splitting it.
+        #expect(TaskName.heuristic("Don't break the build") == "dont-break-build")
+        #expect(TaskName.heuristic("it’s broken again") == "broken")
     }
 
     @Test func aModelsDecoratedAnswerIsReadAsWords() {
@@ -48,6 +51,8 @@ struct TaskNameTests {
         #expect(TaskName.fromModel("Diff View - Load - Huge Files.") == "diff-view-load-huge")
         #expect(TaskName.fromModel("tmux-window-retry\nThis names the task.") == "tmux-window-retry")
         #expect(TaskName.fromModel("   ") == nil)
+        #expect(TaskName.fromModel("Here is the name: fix-bug") == "fix-bug")
+        #expect(TaskName.fromModel("the settings toggle") == "settings-toggle")
         #expect(
             TaskName.fromModel("I would name this task something about fixing the flaky test for you")
                 == nil, "a sentence is not a name")
@@ -57,6 +62,7 @@ struct TaskNameTests {
         #expect(TaskName.unique("fix-it", taken: []) == "fix-it")
         #expect(TaskName.unique("fix-it", taken: ["fix-it"]) == "fix-it-2")
         #expect(TaskName.unique("fix-it", taken: ["fix-it", "fix-it-2"]) == "fix-it-3")
+        #expect(TaskName.unique("fix-it") { ["fix-it", "fix-it-2"].contains($0) } == "fix-it-3")
         let long = "memory-leak-renderer-abc"  // 24
         let next = TaskName.unique(long, taken: [long])
         #expect(next.count <= TaskName.maxLength && next.hasSuffix("-2"), "\(next)")
@@ -95,5 +101,20 @@ struct TaskNameTests {
             timeout: .seconds(1))
         #expect(await rambling.name(for: "add a dark mode toggle") == "add-dark-mode-toggle")
         #expect(await TaskNamer(model: nil).name(for: "add a dark mode toggle") == "add-dark-mode-toggle")
+    }
+
+    // MARK: - What a failed start says
+
+    @Test func aFailedStartIsSaidInThisAppsWordsNeverTheRunners() {
+        let raw = "error: resource version is stale"
+        let generic = TaskFailure.sentence(for: raw)
+        #expect(!generic.contains("stale") && !generic.contains("error"), "\(generic)")
+        #expect(generic.hasPrefix("Couldn’t start the task"))
+        #expect(TaskFailure.sentence(for: nil) == generic)
+
+        let taken = TaskFailure.sentence(for: "error: branch already exists")
+        #expect(taken.contains("took that name"), "\(taken)")
+        #expect(TaskFailure.sentence(for: "error: worktree path already exists") == taken)
+        #expect(TaskFailure.sentence(for: "error: invalid argument: prompt is too long").contains("too long"))
     }
 }

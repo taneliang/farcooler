@@ -46,7 +46,11 @@ enum TaskName {
     /// sidebar as dashes. Folding first keeps `naïve` as `naive` rather than
     /// losing it.
     static func words(_ text: String) -> [String] {
-        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .init(identifier: "en_US"))
+        // Apostrophes out first, both kinds: "don't" is one word, `dont`,
+        // and not `don` and `t`.
+        text.replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\u{2019}", with: "")
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .init(identifier: "en_US"))
             .lowercased()
             .split { !($0.isASCII && ($0.isLetter || $0.isNumber)) }
             .map(String.init)
@@ -83,29 +87,36 @@ enum TaskName {
     /// A model's answer as a name, or nil when there is nothing usable in it.
     ///
     /// Models decorate — "fix - reconnect - test", a trailing period, a line
-    /// of explanation — so only the first line is read, and it is run through
-    /// the same `words` and `pack` as the heuristic. More words than a name
-    /// has is a sentence, not a name, and is refused.
+    /// of explanation, "Here is the name: fix-bug" — so only the first line
+    /// is read, only what follows its last colon, and it goes through the same
+    /// `words`, filler filter and `pack` as the heuristic. More words than a
+    /// name has is a sentence, not a name, and is refused.
     static func fromModel(_ answer: String) -> String? {
         let line = answer.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-        let found = words(line)
+        let tail = line.split(separator: ":", omittingEmptySubsequences: false).last.map(String.init) ?? ""
+        let found = words(tail)
         guard !found.isEmpty, found.count <= maxWords * 2 else { return nil }
-        let name = pack(found)
+        let meaningful = found.filter { !fillerWords.contains($0) }
+        let name = pack(meaningful.isEmpty ? found : meaningful)
         return name.isEmpty ? nil : name
     }
 
-    /// `name`, or `name-2`, `name-3` … when a worktree already has it. Still
+    /// `name`, or `name-2`, `name-3` … when `isTaken` says it is. Still
     /// within `maxLength`: the stem is cut to make room for the suffix.
-    static func unique(_ name: String, taken: Set<String>) -> String {
-        guard taken.contains(name) else { return name }
+    static func unique(_ name: String, isTaken: (String) -> Bool) -> String {
+        guard isTaken(name) else { return name }
         for n in 2... {
             let suffix = "-\(n)"
             var stem = String(name.prefix(maxLength - suffix.count))
             while stem.hasSuffix("-") { stem.removeLast() }
             let candidate = stem + suffix
-            if !taken.contains(candidate) { return candidate }
+            if !isTaken(candidate) { return candidate }
         }
         return name
+    }
+
+    static func unique(_ name: String, taken: Set<String>) -> String {
+        unique(name) { taken.contains($0) }
     }
 }
 
@@ -113,7 +124,7 @@ enum TaskName {
 ///
 /// **The deadline is hard.** A model that has not answered by `timeout` is
 /// abandoned and the heuristic is used; the call returns at the deadline
-/// whether or not the model notices it was cancelled. The race is two
+/// whether or not the model notices it was canceled. The race is two
 /// unstructured tasks and a continuation resumed exactly once, rather than a
 /// task group, because a task group waits for every child on the way out —
 /// a model call that ignored cancellation would hold the name, and the
@@ -179,8 +190,9 @@ struct TaskNamer: Sendable {
     ///
     /// No `#available` check: `FoundationModels` is macOS 26.0 and so is this
     /// app's deployment target. What varies between Macs is availability, and
-    /// that is asked at runtime.
-    static let onDevice = TaskNamer(model: OnDeviceNamer.model())
+    /// that is asked at runtime — every time the panel opens, not once per
+    /// launch, so a model that finishes downloading is used from then on.
+    static var onDevice: TaskNamer { TaskNamer(model: OnDeviceNamer.model()) }
 }
 
 /// The on-device model's half of `TaskNamer`.
@@ -195,8 +207,10 @@ enum OnDeviceNamer {
         guard SystemLanguageModel.default.availability == .available else { return nil }
         return { description in
             let session = LanguageModelSession(instructions: instructions)
+            // The start of it: a name is in the first few sentences, and a
+            // pasted log would overflow the model's context and fail anyway.
             let response = try await session.respond(
-                to: description,
+                to: String(description.prefix(500)),
                 options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 16))
             return response.content
         }
@@ -207,5 +221,55 @@ enum OnDeviceNamer {
     static func prewarm() {
         guard SystemLanguageModel.default.availability == .available else { return }
         LanguageModelSession(instructions: instructions).prewarm()
+    }
+}
+
+/// Whether a description can be handed to an agent at all, checked before
+/// anything is created so the refusal is a sentence in the panel rather than a
+/// half-made task.
+///
+/// The daemon's own two refusals, mirrored (`validate_launch_prompt` in
+/// `crates/daemon/src/service.rs`): at most 100 KiB, which is under Linux's
+/// 128 KiB ceiling on one argument, and no NUL, which no argument can hold.
+enum TaskPrompt {
+    static let maxBytes = 100 * 1024
+
+    static func problem(_ description: String) -> String? {
+        if description.utf8.count > maxBytes {
+            return "This task is too long to hand to an agent. Shorten it to under 100 KB and try again."
+        }
+        if description.contains("\u{0}") {
+            return "This task contains a character an agent can’t be given. Remove it and try again."
+        }
+        return nil
+    }
+}
+
+/// Starting a task went wrong: what the panel says about it.
+///
+/// **The runner's words are not the sentence.** The CLI prints the daemon's
+/// `Display` text ("error: branch already exists"), written for a log. The
+/// few failures a task start can meet get a sentence here; anything else gets
+/// a plain one of its own. The draft stays in the panel either way, so nothing
+/// the person typed is lost to a failure this cannot name.
+enum TaskFailure {
+    static func sentence(for message: String?) -> String {
+        let text = (message ?? "").lowercased()
+        if text.contains("branch already exists") || text.contains("worktree path already exists") {
+            return "Another task took that name a moment ago. Start it again for a new name."
+        }
+        if text.contains("prompt is too long") {
+            return TaskPrompt.problem(String(repeating: "x", count: TaskPrompt.maxBytes + 1))!
+        }
+        if text.contains("nul byte") {
+            return TaskPrompt.problem("\u{0}")!
+        }
+        if text.contains("tmux is unavailable") {
+            return "The runner can’t reach tmux. Far Cooler runs every agent inside it, so install tmux there and try again."
+        }
+        if text.contains("capability") || text.contains("newer far cooler") {
+            return "This runner’s Far Cooler is too old for this. Update it there, then try again."
+        }
+        return "Couldn’t start the task on this runner. Check that it’s reachable, then try again."
     }
 }
