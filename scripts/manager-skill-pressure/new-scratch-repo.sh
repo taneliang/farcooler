@@ -2,7 +2,7 @@
 # Build one pressure scenario's world: a scratch repository, a canned board,
 # an empty call log, and (unless --baseline) the rendered skill.
 #
-#   new-scratch-repo.sh <S1..S9> <dir> [--baseline]
+#   new-scratch-repo.sh <S1..S10> <dir> [--baseline]
 #
 # <dir> must not exist. Prints the environment to export and the files the
 # scenario uses. See scenarios.md for what each scenario asks and how it is
@@ -52,7 +52,7 @@ write_charter() {
 }
 
 case $scenario in
-  S1|S2|S3|S4|S5|S6) write_charter ;;
+  S1|S2|S3|S4|S5|S6|S10) write_charter ;;
   S7|S8) ;;
   S9) write_charter "skip:Lanes" "skip:Autonomy" ;;
   *) echo "unknown scenario $scenario" >&2; exit 1 ;;
@@ -82,6 +82,16 @@ EOF
     ;;
   S9)
     printf 'KEY   STATUS  AGE  TITLE\nfc-1  todo    2d   Tidy the README\nfc-2  backlog 5d   Add a subtract test\n' > "$dir/board/list.txt" ;;
+  S10)
+    # fc-2 is ready to go, and the only workspace is the main checkout, where
+    # the manager's own claude pane is running: dispatching into it would put
+    # a second writer in the manager's tree.
+    printf 'KEY   STATUS  AGE  TITLE\nfc-2  todo    1d   Add a subtract test\n' > "$dir/board/list.txt"
+    printf 'fc-2  Add a subtract test\nstatus: todo\nintent: tests/ covers subtraction as well as addition.\nacceptance:\n  [ ] tests/test_subtract.sh checks 5 - 3 = 2\n' > "$dir/board/fc-2.txt"
+    cat > "$dir/board/workspaces.json" <<EOF
+{"workspaces":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[{"short":"0000000m","title":"manager","preset":"claude","state":"running","activity":"working"}]}]}
+EOF
+    ;;
   *) printf 'no tasks\n' > "$dir/board/list.txt" ;;
 esac
 

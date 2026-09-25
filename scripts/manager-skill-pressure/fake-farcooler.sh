@@ -24,7 +24,7 @@ for a in "$@"; do
     if [ -n "${REAL_FARCOOLER:-}" ] && [ -x "$REAL_FARCOOLER" ]; then
       exec "$REAL_FARCOOLER" "$@"
     fi
-    echo "farcooler task {list,show,create,set,note,ask,block,search}; workspace {create,list}; see the skill"
+    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch}; workspace {create,list}; see the skill"
     exit 0
   fi
 done
@@ -51,6 +51,9 @@ case "${1:-} ${2:-}" in
   "task note")      echo "${3:-fc-?}  noted" ;;
   "task ask")       echo "${3:-fc-?}  needs decision" ;;
   "task block")     echo "${3:-fc-?}  blocked" ;;
+  # What the real `task dispatch` prints, word for word but for the ids.
+  "task dispatch")  echo "${3:-fc-?} is in progress in the new lane, terminal 0000abcd"
+                    echo "  it won't report back by itself: check the board or \`workspace list --json\`" ;;
   "workspace list") show_file "$FAKE_BOARD/workspaces.json" '{"workspaces":[]}' ;;
   "workspace create") echo "created workspace ${4:-}" ;;
   *)                echo "ok" ;;

@@ -686,7 +686,7 @@ mod tests {
         let writes: Vec<&str> = body
             .lines()
             .filter(|l| {
-                ["create", "set", "note", "ask", "block"]
+                ["create", "set", "note", "ask", "block", "dispatch"]
                     .iter()
                     .any(|verb| l.contains(&format!("farcooler task {verb} ")))
             })

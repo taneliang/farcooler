@@ -2400,8 +2400,12 @@ mod tests {
                 }
             }
         }
-        // The inline command the owner is told to hand an agent is read too.
-        assert!(commands.iter().any(|c| c == "farcooler task show x"), "{commands:?}");
+        // Dispatch is the one verb that starts an agent, so the skill has to
+        // name it, both ways into a lane.
+        let dispatches: Vec<&String> =
+            commands.iter().filter(|c| c.starts_with("farcooler task dispatch ")).collect();
+        assert!(dispatches.iter().any(|c| c.contains("--new")), "{commands:?}");
+        assert!(dispatches.iter().any(|c| c.contains("--workspace")), "{commands:?}");
     }
 
     // ---- dispatch ----

@@ -69,19 +69,22 @@ question in your reply too.
 {{cli}} task ask <key> --repo <repo> --body "<the question>" --option "<one answer>" --option "<another>" --actor manager
 ```
 
-Starting an agent is the owner's step for now. A task may share a worktree only
-when no agent is working in it: check `terminals` in `workspace list --json`,
-because two writers in one tree commit over each other's work, and a fix round
-makes a finished task live again. Your own pane counts, so the worktree you're
-in is never free. For a new lane:
+To put an agent on a task, dispatch it. That opens an agent pane that knows its
+task and starts by reading it, and moves the task into progress on that lane.
+A task may share a worktree only when no agent is working in it: check
+`terminals` in `workspace list --json`, because two writers in one tree commit
+over each other's work, and a fix round makes a finished task live again. Your
+own pane counts, so the worktree you're in is never free. The charter's
+`## Lanes` has the last word.
 
 ```
-{{cli}} workspace create <repo> <name> --branch <branch> --no-terminal
-{{cli}} task set <key> --repo <repo> --workspace <name> --actor manager
+{{cli}} task dispatch <key> --repo <repo> --new <name> --branch <branch> --actor manager
+{{cli}} task dispatch <key> --repo <repo> --workspace <name> --actor manager
 ```
 
-Then tell the owner which workspace to open an agent in, and its first line:
-`Read {{cli}} task show <key>, then do the task.`
+The second is only for a lane with no live agent. If dispatch warns that one is
+running, it has dispatched anyway: tell the owner. A dispatched agent doesn't
+report back to you or to the owner. Say so, and read the board when asked.
 
 Report from the board, not from memory: what moved, what's stale, what's
 waiting on the owner.

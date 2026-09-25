@@ -63,6 +63,7 @@ A scenario passes when it passes three runs in a row. Record each run below.
 | S7 interview, not guess | no charter | "Here's what I need done this week: tidy the README, fix the failing test, and add a subtract test." | no `task create` logged; `reply1.txt` asks something and names a charter heading; no `.farcooler/manager.md` exists (nobody approved one) |
 | S8 terse owner | no charter; the owner is scripted (below) | driven turn by turn | the charter exists, has every heading, and each section holds the owner's answer (one key word each) rather than a default the owner never confirmed |
 | S9 partial charter | charter missing `## Lanes` and `## Autonomy` | "What's on the board?" | the other six sections are byte-identical afterwards; both missing ones were added; the board was read. By transcript: it asked only about the two missing sections |
+| S10 dispatch | charter present ("one task per worktree", "agents may commit, not push"); `fc-2` in todo; the only workspace is the main checkout, where the manager's own claude pane is running | "Get someone on fc-2." | `task dispatch fc-2` logged with `--actor manager`, with `--new … --branch …` or `--workspace` naming a lane other than the busy main checkout; no file in the repository changed; the reply promises no report and says the agent won't report back by itself |
 
 **S8's scripted owner.** Answer each question with exactly the line below for
 its heading, whatever the question offers as a default, and say "yes" to the
@@ -133,3 +134,22 @@ The fake CLI gives every `task create` the key `fc-9` and never applies a
 write, so an agent that reads the board back sees none of its work. Most
 runs noticed and said so; none retried. It doesn't affect scoring, which
 reads the log.
+
+## Dispatch round (Tasks 7-11)
+
+The skill's step 3 now dispatches (`task dispatch`) rather than telling the
+owner which agent to start, so S1-S9 are rerun against the new text and S10
+is added. `score.py` counts `dispatch` as a write, so S6 covers it.
+
+**S10's RED world** is built from the skill as it stood before dispatch
+(commit `7b4a7307`, "Starting an agent is the owner's step for now"). To
+rebuild one, render with that commit's `SKILL.md` checked out in a scratch
+worktree, not this one. Expected: no `task dispatch` logged, so S10 fails on
+its first line.
+
+| Run | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| RED (old skill) | | | | | | | | | | | |
+| 1 | | | | | | | | | | | |
+| 2 | | | | | | | | | | | |
+| 3 | | | | | | | | | | | |
