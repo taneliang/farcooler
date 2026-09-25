@@ -58,7 +58,7 @@ struct ShellRunnerLabel: Identifiable, Hashable, Sendable {
     /// Nil — a runner nobody has asked yet — is refused, not guessed at.
     /// `Connection.refresh` asks once per connection, on its first fleet.
     static func keepsOrder(daemon: DaemonBuild?) -> Bool {
-        daemon?.can("workspace_order") ?? false
+        daemon?.keepsWorkspaceOrder ?? false
     }
 }
 

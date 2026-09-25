@@ -176,6 +176,18 @@ public struct DaemonBuild: Equatable, Sendable {
         return capabilities.contains(capability)
     }
 
+    /// Whether this runner keeps an order a drag can write to: whether it
+    /// advertises `workspace_order` (`farcooler_protocol::capability`).
+    ///
+    /// On the build rather than on either app's view, so the Mac's sidebar and
+    /// the phone's overview ask the one question in the one spelling. The Mac
+    /// used to ask nothing and offered a drag to every runner; one too old to
+    /// store a rank answers the reorder with "unknown method", and the row
+    /// springs back on the next read with nothing said anywhere. See
+    /// `ShellRunnerLabel.keepsOrder(daemon:)` for why the capability and never
+    /// the ordinals.
+    public var keepsWorkspaceOrder: Bool { can("workspace_order") }
+
     /// The same build, spelled the way the app spells its own.
     ///
     /// The daemon reports `0.1.0+d8c3877-dirty` while the app says

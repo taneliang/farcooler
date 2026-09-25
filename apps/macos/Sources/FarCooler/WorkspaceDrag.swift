@@ -53,6 +53,27 @@ final class WorkspaceDrag: ObservableObject {
 
     private var token = 0
 
+    /// Whether a worktree row can be picked up at all.
+    ///
+    /// Two conditions, and a row that fails either offers no drag, rather
+    /// than a drag that does nothing when it lands:
+    ///
+    /// - The runner can take a write right now (`usable`). One already known
+    ///   to be unreachable would take the request nowhere.
+    /// - The runner keeps an order (`DaemonBuild.keepsWorkspaceOrder`). One
+    ///   too old to store a rank answers `workspace reorder` with "unknown
+    ///   method", and the row springs back on the next read with nothing said
+    ///   anywhere. A runner whose build has not been read yet is refused, not
+    ///   guessed at: the read lands within a round trip of every link coming
+    ///   up, so the handle appears a moment late rather than a drag failing.
+    ///
+    /// Static and free of the view so it can be tested; `WorkspaceSection`
+    /// holds only the answer. The phone asks the same capability through
+    /// `ShellRunnerLabel.keepsOrder(daemon:)`.
+    nonisolated static func offersDrag(usable: Bool, runner: DaemonBuild?) -> Bool {
+        usable && (runner?.keepsWorkspaceOrder ?? false)
+    }
+
     func begin(_ workspace: String) {
         dragged = workspace
         landing = nil
@@ -139,5 +160,35 @@ struct WorkspaceDropTarget: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         WorkspaceDrag.shared.drop(on: workspace, edge(info))
+    }
+}
+
+/// A worktree row as a drag source, or not one at all.
+///
+/// A branch rather than an `.onDrag` that hands back an empty provider when it
+/// should refuse, which was the old refusal for an unreachable runner. Whether
+/// the system still lifts a drag image off the row for an empty provider is
+/// AppKit's decision, not this file's; a row that is not a drag source at all
+/// leaves nothing to decide.
+///
+/// The branch changes the row's identity only when its runner's answer changes,
+/// which is once per link at most: when its build is first read, or when it
+/// goes unreachable and comes back.
+struct WorkspaceDragSource: ViewModifier {
+    let workspace: String
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.onDrag {
+                MainActor.assumeIsolated { WorkspaceDrag.shared.begin(workspace) }
+                // Carries the id only so the system will start a drag at all;
+                // the payload that is actually read is in `WorkspaceDrag`. See
+                // its docs.
+                return NSItemProvider(object: workspace as NSString)
+            }
+        } else {
+            content
+        }
     }
 }

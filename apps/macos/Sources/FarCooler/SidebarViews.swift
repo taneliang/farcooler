@@ -108,6 +108,12 @@ struct WorkspaceSection: View {
     /// already known to be unreachable are dimmed and inert rather than
     /// left to fail silently or hang on a dead connection.
     var usable: Bool = true
+    /// Whether this row can be dragged into a new place in the sidebar.
+    ///
+    /// Decided by `WorkspaceDrag.offersDrag(usable:runner:)` where the runner's
+    /// build is known, and false by default: a row nobody said could move
+    /// offers no drag.
+    var reorderable: Bool = false
 
     /// Diff status for this worktree, when the fleet inbox has been read.
     ///
@@ -392,13 +398,12 @@ struct WorkspaceSection: View {
         // drop target of their own — that gesture tiles two panes together — and
         // two overlapping targets accepting the same type is how a drop lands on
         // whichever one happened to win the hit test.
-        .onDrag {
-            guard usable else { return NSItemProvider() }
-            MainActor.assumeIsolated { WorkspaceDrag.shared.begin(workspace.id) }
-            // Carries the id only so the system will start a drag at all; the
-            // payload that is actually read is in `WorkspaceDrag`. See its docs.
-            return NSItemProvider(object: workspace.id as NSString)
-        }
+        //
+        // Offered only when `reorderable` says so, and ABSENT otherwise rather
+        // than a drag that goes nowhere: a runner too old to keep an order
+        // used to be handed a drag it answered with "unknown method", and the
+        // row sprang back with nothing said. See `WorkspaceDrag.offersDrag`.
+        .modifier(WorkspaceDragSource(workspace: workspace.id, enabled: reorderable))
         .onDrop(
             of: [.text],
             delegate: WorkspaceDropTarget(workspace: workspace.id, height: headerHeight))

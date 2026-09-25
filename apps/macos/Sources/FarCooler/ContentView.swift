@@ -1294,6 +1294,7 @@ struct ContentView: View {
             tiled: tiled,
             onEditorError: { editorError = $0 },
             usable: usable,
+            reorderable: WorkspaceDrag.offersDrag(usable: usable, runner: client?.daemonBuild),
             changes: changesStatus(ws),
             countsWidth: countsWidth
         )
