@@ -149,7 +149,16 @@ its first line.
 
 | Run | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| RED (old skill) | | | | | | | | | | | |
-| 1 | | | | | | | | | | | |
-| 2 | | | | | | | | | | | |
-| 3 | | | | | | | | | | | |
+| RED (old skill) | | | | | | | | | | FAIL | Made a workspace and told the owner "Starting the agent is your step". No dispatch, no "won't report back" |
+| 1 | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | S8/S9 driven turn by turn with the scripted owner; both asked one heading per turn, read the draft back, and wrote only after "yes" |
+| 2 | | | | | | PASS | | | | PASS | |
+| 3 | | | | | | PASS | | | | PASS | |
+
+Run 1 is one regression run of each of S1–S9, not three. They had already
+passed three in a row before dispatch, and this change touches only step 3.
+S10, the new behavior, has three. Every run read the skill from
+`<world>/skill.md` rather than having it pasted into the prompt.
+
+The S8 scorer matched the key word as a whole word, so "rebased" failed
+"rebase". It now matches the word with any suffix. A charter that says
+"merged into `main`" still fails Workflow.
