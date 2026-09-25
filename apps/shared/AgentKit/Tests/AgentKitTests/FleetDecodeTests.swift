@@ -292,6 +292,7 @@ struct FleetDecodeTests {
               "runtime_healthy": true,
               "live_panes": 1,
               "fleetTrace": "BASE64",
+              "fleetTraceAnchor": 5960000,
               "workspaces": [
                 {
                   "id": "w", "short": "w", "task": "t", "branch": "b",
@@ -310,6 +311,7 @@ struct FleetDecodeTests {
 
         let fleet = try Self.decodeFleet(json)
         #expect(fleet.fleetTrace == wire)
+        #expect(fleet.fleetTraceAnchor == 5_960_000, "`Session::fleet` spells it `fleetTraceAnchor`")
         let terminal = try #require(fleet.workspaces.first?.terminals.first)
         #expect(terminal.activityTrace == wire)
         // And it is a trace this build will draw, rather than 66 bytes that
@@ -337,6 +339,7 @@ struct FleetDecodeTests {
     @Test func aFleetWithNoTraceKeysDecodesAsAbsent() throws {
         let fleet = try Self.decodeFleet()
         #expect(fleet.fleetTrace == nil)
+        #expect(fleet.fleetTraceAnchor == nil)
         let terminal = try #require(fleet.workspaces.first?.terminals.first)
         #expect(terminal.activityTrace == nil)
         #expect(ActivityTrace(terminal.activityTrace) == nil)

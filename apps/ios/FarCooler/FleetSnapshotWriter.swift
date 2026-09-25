@@ -110,7 +110,10 @@ enum FleetSnapshotWriter {
             // spans of time and adding them adds unlike things. The daemon holds
             // every ring and can pick one width across all of them. See
             // `FleetSnapshot.fleetTrace`.
-            fleetTrace: fleet.fleetTrace)
+            fleetTrace: fleet.fleetTrace,
+            // Where that sum sits in time, so the merge across runners can
+            // place it rather than pack it. See `ActivityTrace.summing(anchored:)`.
+            fleetTraceAnchor: fleet.fleetTraceAnchor)
         publication.record(runner: runner, snapshot: mine)
         publish(at: now)
     }

@@ -45,7 +45,10 @@ import Foundation
 ///   that did not. Nil only when nobody answered at all, because nil means "not
 ///   told" and one modern runner reporting 3 is being told something.
 /// - **`fleetTrace`** is summed onto one axis by `ActivityTrace.summing`, which
-///   is where that arithmetic and what it costs are written down.
+///   is where that arithmetic and what it costs are written down — placing
+///   each runner by its `fleetTraceAnchor` where it sent one, and where the
+///   poll that brought it could vouch for it (`ActivityTrace.trusted`, against
+///   that snapshot's own `capturedAt`).
 public struct FleetPublication {
     /// One runner's own projection, as its connection last polled it.
     private struct Contribution {
@@ -138,13 +141,24 @@ public struct FleetPublication {
 
         let counted = contributions.compactMap(\.snapshot.reviewsWaiting)
 
+        let fleet = ActivityTrace.summing(
+            anchored: contributions.compactMap { contribution in
+                ActivityTrace(contribution.snapshot.fleetTrace).map { trace in
+                    (
+                        trace,
+                        ActivityTrace.trusted(
+                            contribution.snapshot.fleetTraceAnchor, span: trace.span,
+                            heardAt: contribution.snapshot.capturedAt)
+                    )
+                }
+            })
+
         return FleetSnapshot(
             agents: contributions.flatMap(\.snapshot.agents),
             capturedAt: now,
             complete: complete,
             reviewsWaiting: counted.isEmpty ? nil : counted.reduce(0, +),
-            fleetTrace: ActivityTrace.summing(
-                contributions.compactMap { ActivityTrace($0.snapshot.fleetTrace) }
-            )?.encoded)
+            fleetTrace: fleet?.trace.encoded,
+            fleetTraceAnchor: fleet?.anchor)
     }
 }

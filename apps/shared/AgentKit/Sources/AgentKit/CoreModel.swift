@@ -66,12 +66,17 @@ struct Fleet: Decodable {
     /// `Terminal.activityTrace`, including the last paragraph of its comment:
     /// `Session::fleet` sends no key for this yet either.
     var fleetTrace: Data?
+    /// Where `fleetTrace`'s newest bucket sits in time.
+    /// `TerminalList.fleet_trace_anchor`, sent by `Session::fleet` as a number
+    /// beside the base64 and only with it. See `FleetSnapshot.fleetTraceAnchor`.
+    var fleetTraceAnchor: Int?
 
     enum CodingKeys: String, CodingKey {
         case runtimeHealthy = "runtime_healthy"
         case livePanes = "live_panes"
         case workspaces
         case fleetTrace
+        case fleetTraceAnchor
     }
 
     static let empty = Fleet(runtimeHealthy: false, livePanes: 0, workspaces: [])

@@ -166,9 +166,13 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         // throwing.
         trace = ((try? container.decodeIfPresent(String.self, forKey: .trace)) ?? nil)
             .flatMap { Data(base64Encoded: $0) }
-        // An integer or nothing. Anything else is a row packed from its newest
-        // end, which is the old drawing and not a wrong one — never a throw.
-        traceAnchor = number(.traceAnchor)
+        // An integer in `0...anchorLimit` or nothing. Anything else is a row
+        // packed from its newest end, which is the old drawing and not a wrong
+        // one — never a throw, and never a number the placement arithmetic
+        // could overflow on.
+        traceAnchor = number(.traceAnchor).flatMap {
+            (0...ActivityTrace.anchorLimit).contains($0) ? $0 : nil
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -328,22 +332,31 @@ public struct AgentCardLayout: Sendable, Equatable {
         let read = drawn.map { ActivityTrace($0.trace) }
         let axis = Self.axis(of: read)
         span = axis
+        // Each row's anchor, if its runner's clock could have produced it by
+        // the time the relay heard from it — see `ActivityTrace.trusted`. One
+        // runner a day fast must not push every other row off the card.
+        let anchors = zip(read, drawn).map { trace, row in
+            trace.flatMap {
+                ActivityTrace.trusted(row.traceAnchor, span: $0.span, heardAt: row.updatedAt)
+            }
+        }
         // And the column the card's newest column IS, in absolute time, from
         // the rows that say where they are. Nil when none does — every row then
         // packs from its newest end, which is the card before anchors existed.
         let newest = axis.flatMap { axis in
-            Self.newest(of: zip(read, drawn).map { ($0, $1.traceAnchor) }, on: axis)
+            Self.newest(of: zip(read, anchors).map { ($0, $1) }, on: axis)
         }
 
-        rows = zip(drawn, read).map { row, trace in
-            Row(
+        rows = zip(zip(drawn, read), anchors).map { pair, anchor in
+            let (row, trace) = pair
+            return Row(
                 row: row,
                 mark: GlanceMark(status: row.status, confidence: row.confidence(at: now)),
                 name: Self.name(of: row),
                 detail: row.detail,
                 diff: Self.diff(insertions: row.insertions, deletions: row.deletions),
                 footnote: Self.footnote(row, at: now),
-                trace: axis.flatMap { Self.drawn(trace, anchor: row.traceAnchor, on: $0, newest: newest) })
+                trace: axis.flatMap { Self.drawn(trace, anchor: anchor, on: $0, newest: newest) })
         }
 
         // Two separate populations, added once. `more` is the fleet minus the
@@ -404,7 +417,14 @@ public struct AgentCardLayout: Sendable, Equatable {
     }
 
     /// The absolute index, in `axis` buckets, of the card's newest column: the
-    /// newest bucket any ANCHORED row reaches.
+    /// newest bucket any ANCHORED row reaches. Its anchors have been through
+    /// `ActivityTrace.trusted` first, so a runner whose clock runs ahead of
+    /// the relay's by more than the slack cannot set it.
+    ///
+    /// **Runners' wall clocks are an input to placement now**, where packing
+    /// never read them. A runner three minutes fast draws its row one
+    /// five-minute column ahead of its neighbors. `trusted` bounds how far;
+    /// inside the bound the error is the clock's, and it shows.
     ///
     /// **The newest row sets it, so every other row is placed against the
     /// freshest word the card has.** A row whose runner last spoke longer ago
@@ -429,10 +449,15 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// One row's trace as the card draws it.
     ///
     /// Placed exactly when both the row and the card know where they are in
-    /// time. Otherwise — a runner too old to send an anchor, or a card where no
-    /// row has one — packed from its newest end onto the axis, which puts its
-    /// newest bucket in the card's newest column: the drawing every card had
-    /// before, right to within one column and blind to skew.
+    /// time. Otherwise — a runner too old to send an anchor, an anchor
+    /// `trusted` refused, or a card where no row has one — packed from its
+    /// newest end onto the axis, which puts its newest bucket in the card's
+    /// newest column: the drawing every card had before, right to within one
+    /// column and blind to skew.
+    ///
+    /// Nil for a placed row with nothing left in the window: its whole history
+    /// is older than the card's thirteen columns, and it draws as no trace
+    /// rather than as thirteen quiet buckets nobody measured.
     static func drawn(
         _ trace: ActivityTrace?, anchor: Int?, on axis: ActivityTrace.Span, newest: Int?
     ) -> ActivityTrace? {

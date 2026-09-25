@@ -333,4 +333,75 @@ struct FleetTraceSumTests {
 
         #expect(summed?.code(12) == UInt16.max)
     }
+
+    // MARK: - Anchored: several runners placed on one grid
+
+    private var powers: [UInt16] { [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096] }
+    private var fives: [UInt16] { [UInt16](repeating: 5, count: 13) }
+
+    /// Two runners' fleet traces, each placed by its anchor. The five-minute
+    /// one is anchored at 6002 — the third bucket of half hour 1000 — and the
+    /// thirty-minute one at 998, two half hours behind it.
+    ///
+    /// By hand: the five-minute runner lands 1+2+4+8 in column 10, 16…512 in 11
+    /// and 1024+2048+4096 in 12; the other lands its thirteen fives two columns
+    /// early, in columns 0…10, its two oldest off the left. Packing both from
+    /// the newest end would have put 8064 and a five in column 12.
+    @Test func anchoredRunnersArePlacedNotPacked() throws {
+        let summed = try #require(
+            ActivityTrace.summing(anchored: [
+                (trace(span: .hour, code: powers, commits: noCommits), 6002),
+                (trace(span: .sixHours, code: fives, commits: noCommits), 998),
+            ]))
+        #expect(summed.trace.span == .sixHours)
+        #expect(summed.trace.code(12) == 7168)
+        #expect(summed.trace.code(11) == 1008)
+        #expect(summed.trace.code(10) == 15 + 5)
+        for column in 0...9 { #expect(summed.trace.code(column) == 5, "column \(column)") }
+        // Every input was anchored, so the sum is, at the newest column.
+        #expect(summed.anchor == 1000)
+    }
+
+    /// One runner too old to anchor its trace: that one is packed as before,
+    /// and the sum carries no anchor, since not every bucket in it is placed.
+    @Test func aSumWithAnUnanchoredRunnerHasNoAnchor() throws {
+        let summed = try #require(
+            ActivityTrace.summing(anchored: [
+                (trace(span: .hour, code: powers, commits: noCommits), 6002),
+                (trace(span: .sixHours, code: fives, commits: noCommits), nil),
+            ]))
+        #expect(summed.trace.code(12) == 7168 + 5)
+        #expect(summed.anchor == nil)
+    }
+
+    /// End to end through the publication: each runner's anchor is checked
+    /// against the poll that brought it, so one whose clock runs a day ahead is
+    /// packed rather than allowed to set the axis — which would have pushed the
+    /// other runner's history off the Island entirely.
+    @Test func thePublicationTrustsOnlyAnchorsItsPollsCouldVouchFor() {
+        // `now` is Unix second 1,000,000: five-minute bucket 3333, half hour 555.
+        // 3332 is the third five-minute bucket of half hour 555, like 6002 above.
+        func runner(_ trace: ActivityTrace, anchor: Int) -> FleetSnapshot {
+            FleetSnapshot(
+                agents: [], capturedAt: Date(timeIntervalSince1970: 1_000_000), complete: true,
+                fleetTrace: trace.encoded, fleetTraceAnchor: anchor)
+        }
+        var honest = FleetPublication()
+        honest.record(runner: "a", snapshot: runner(trace(span: .hour, code: powers, commits: noCommits), anchor: 3332))
+        honest.record(runner: "b", snapshot: runner(trace(span: .sixHours, code: fives, commits: noCommits), anchor: 553))
+        let merged = honest.merged(at: Date(timeIntervalSince1970: 1_000_000))
+        let placed = ActivityTrace(merged.fleetTrace)
+        #expect(placed?.code(12) == 7168)
+        #expect(placed?.code(10) == 20)
+        #expect(merged.fleetTraceAnchor == 555)
+
+        var skewed = FleetPublication()
+        skewed.record(runner: "a", snapshot: runner(trace(span: .hour, code: powers, commits: noCommits), anchor: 3332))
+        // A day ahead of the poll that brought it.
+        skewed.record(runner: "b", snapshot: runner(trace(span: .sixHours, code: fives, commits: noCommits), anchor: 555 + 48))
+        let kept = skewed.merged(at: Date(timeIntervalSince1970: 1_000_000))
+        let fleet = ActivityTrace(kept.fleetTrace)
+        #expect(fleet?.code(12) == 7168 + 5, "the fast runner's anchor set the axis")
+        #expect(kept.fleetTraceAnchor == nil)
+    }
 }

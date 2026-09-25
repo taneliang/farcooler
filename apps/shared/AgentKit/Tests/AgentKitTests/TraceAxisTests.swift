@@ -370,9 +370,9 @@ struct TraceAxisTests {
             {"terminal":"a","label":"a","machine":"m","status":"working","detail":"",
              "blocked":0,"review":0,"working":2,"more":0,
              "rows":[{"terminal":"a","label":"quick","status":"working","detail":"",
-                      "trace":"\(short.base64EncodedString())","traceAnchor":6002},
+                      "trace":"\(short.base64EncodedString())","traceAnchor":6002,"updatedAt":1800600},
                      {"terminal":"b","label":"old","status":"working","detail":"",
-                      "trace":"\(long.base64EncodedString())","traceAnchor":998}]}
+                      "trace":"\(long.base64EncodedString())","traceAnchor":998,"updatedAt":1800600}]}
             """
         let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
         let card = try #require(AgentCardLayout(state: state))
@@ -406,7 +406,7 @@ struct TraceAxisTests {
             {"terminal":"a","label":"a","machine":"m","status":"working","detail":"",
              "blocked":0,"review":0,"working":2,"more":0,
              "rows":[{"terminal":"a","label":"quick","status":"working","detail":"",
-                      "trace":"\(short.base64EncodedString())","traceAnchor":6002},
+                      "trace":"\(short.base64EncodedString())","traceAnchor":6002,"updatedAt":1800600},
                      {"terminal":"b","label":"old","status":"working","detail":"",
                       "trace":"\(long.base64EncodedString())"}]}
             """
@@ -432,5 +432,115 @@ struct TraceAxisTests {
         let lenient = try JSONDecoder().decode(AgentCardRow.self, from: Data(odd.utf8))
         #expect(lenient.traceAnchor == nil)
         #expect(lenient.terminal == "t")
+    }
+
+    // MARK: - An anchor is a clock, and a clock can be wrong
+
+    /// Two rows as the relay sends them, the second with its own anchor and
+    /// updatedAt. Anchor 6002 on the five-minute grid is Unix second 1,800,600,
+    /// and that is when the relay heard from both.
+    private func card(second: String) throws -> AgentCardLayout {
+        let short = ActivityTraceTests.encoded(
+            code: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096], width: 0)
+        let json = """
+            {"terminal":"a","label":"a","machine":"m","status":"working","detail":"",
+             "blocked":0,"review":0,"working":2,"more":0,
+             "rows":[{"terminal":"a","label":"quick","status":"working","detail":"",
+                      "trace":"\(short.base64EncodedString())","traceAnchor":6002,
+                      "updatedAt":1800600},
+                     \(second)]}
+            """
+        let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
+        return try #require(AgentCardLayout(state: state))
+    }
+
+    /// A thirty-minute row of fives, anchored at `anchor` and heard at 1,800,600.
+    private func fives(anchor: Int) -> String {
+        let long = ActivityTraceTests.encoded(code: [UInt16](repeating: 5, count: 13), width: 1)
+        return """
+            {"terminal":"b","label":"other","status":"working","detail":"",
+             "trace":"\(long.base64EncodedString())","traceAnchor":\(anchor),"updatedAt":1800600}
+            """
+    }
+
+    /// **A runner a day fast must not erase the card.** Its anchor, half hour
+    /// 1048, claims a bucket that starts a day after the relay heard from it,
+    /// so it is ignored: that row is packed as it was before anchors, and the
+    /// honest row keeps its exact placement. Trusted, 1048 would have become the
+    /// card's newest column and pushed every bucket of the other row off the
+    /// left edge.
+    @Test func aRunnerFarAheadDoesNotSetTheCardsNewestColumn() throws {
+        let card = try card(second: fives(anchor: 1000 + 48))
+        let quick = try #require(card.rows.first?.trace, "the honest row was pushed off the card")
+        #expect(quick.code(12) == 7168)
+        #expect(quick.code(11) == 1008)
+        #expect(quick.code(10) == 15)
+        let ahead = try #require(card.rows.last?.trace)
+        for column in 0..<ActivityTrace.buckets { #expect(ahead.code(column) == 5) }
+    }
+
+    /// **A runner a day slow erases only itself**, and draws as NO trace rather
+    /// than as thirteen quiet buckets. Half hour 952 is forty-eight columns
+    /// before the card's newest, so not one of its buckets is in the window —
+    /// it has told the card nothing about these six and a half hours.
+    @Test func aRunnerFarBehindDrawsAsAbsentAndErasesNobodyElse() throws {
+        let card = try card(second: fives(anchor: 1000 - 48))
+        let quick = try #require(card.rows.first?.trace)
+        #expect(quick.code(12) == 7168)
+        #expect(quick.code(11) == 1008)
+        #expect(quick.code(10) == 15)
+        #expect(card.rows.last?.trace == nil, "a row with nothing in the window is absent, not quiet")
+    }
+
+    /// `placed` itself: nothing landed is nil, and something landed that was
+    /// zero is thirteen measured buckets and draws.
+    @Test func aPlacedTraceWithNothingInTheWindowIsNil() throws {
+        let quiet = try #require(ActivityTrace(ActivityTraceTests.encoded(width: 1)))
+        // Thirteen columns behind: the newest bucket is one left of column 0.
+        #expect(quiet.placed(on: .sixHours, anchor: 987, newest: 1000) == nil)
+        // Twelve behind: the newest bucket is column 0, so it landed — as zero.
+        let edge = try #require(quiet.placed(on: .sixHours, anchor: 988, newest: 1000))
+        for column in 0..<ActivityTrace.buckets { #expect(edge.code(column) == 0) }
+    }
+
+    /// The bound itself, at its edge. Anchor `a` at width `w` names a bucket
+    /// starting at `a * w`, which may be at most `anchorSlack` past `heardAt`.
+    @Test func anAnchorIsTrustedUpToTheSlackAndNoFurther() {
+        let heard = Date(timeIntervalSince1970: 1_800_600)
+        // (1_800_600 + 600) / 300 = 6004.
+        #expect(ActivityTrace.trusted(6004, span: .hour, heardAt: heard) == 6004)
+        #expect(ActivityTrace.trusted(6005, span: .hour, heardAt: heard) == nil)
+        // (1_800_600 + 600) / 1800 = 1000.66…, so 1000.
+        #expect(ActivityTrace.trusted(1000, span: .sixHours, heardAt: heard) == 1000)
+        #expect(ActivityTrace.trusted(1001, span: .sixHours, heardAt: heard) == nil)
+        // Nothing to check it against, so nothing to trust.
+        #expect(ActivityTrace.trusted(6000, span: .hour, heardAt: nil) == nil)
+        #expect(ActivityTrace.trusted(-1, span: .hour, heardAt: heard) == nil)
+    }
+
+    /// **Extreme values cost a row its placement, never the card.** This runs
+    /// in a Live Activity extension, where an arithmetic trap is the whole card
+    /// gone. Each of these would overflow somewhere without its guard.
+    @Test func extremeAnchorsNeverTrap() throws {
+        let trace = try #require(ActivityTrace(ActivityTraceTests.encoded(width: 0)))
+        #expect(trace.placed(on: .day, anchor: Int.min, newest: 0) == nil)
+        #expect(trace.placed(on: .day, anchor: Int.max, newest: Int.max) == nil)
+        #expect(trace.placed(on: .day, anchor: 0, newest: Int.max) == nil)
+        #expect(
+            ActivityTrace.trusted(
+                ActivityTrace.anchorLimit, span: .day,
+                heardAt: Date(timeIntervalSince1970: .greatestFiniteMagnitude)) == nil)
+        #expect(
+            ActivityTrace.trusted(
+                ActivityTrace.anchorLimit, span: .day, heardAt: Date(timeIntervalSince1970: 1e15))
+                == nil)
+
+        // And the decoder keeps anything outside `0...anchorLimit` off the row.
+        for wire in ["-1", "9007199254740993", "\(Int.max)"] {
+            let json = #"{"terminal":"t","traceAnchor":WIRE}"#.replacingOccurrences(
+                of: "WIRE", with: wire)
+            let row = try JSONDecoder().decode(AgentCardRow.self, from: Data(json.utf8))
+            #expect(row.traceAnchor == nil, "\(wire) reached the row")
+        }
     }
 }

@@ -345,15 +345,26 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// fleet trace.
     public var fleetTrace: Data?
 
+    /// Where `fleetTrace`'s newest bucket sits in time: its absolute index, in
+    /// units of its own width. `TerminalList.fleet_trace_anchor`, carried
+    /// beside the bytes and never folded into them.
+    ///
+    /// What lets `FleetPublication` sum several runners' fleet traces onto one
+    /// axis exactly — see `ActivityTrace.summing(anchored:)`. Nil from a daemon
+    /// older than the field and in a snapshot written before it, and the sum
+    /// then packs that runner from its newest end, as it always did.
+    public var fleetTraceAnchor: Int?
+
     public init(
         agents: [Agent], capturedAt: Date, complete: Bool, reviewsWaiting: Int? = nil,
-        fleetTrace: Data? = nil
+        fleetTrace: Data? = nil, fleetTraceAnchor: Int? = nil
     ) {
         self.agents = agents
         self.capturedAt = capturedAt
         self.complete = complete
         self.reviewsWaiting = reviewsWaiting
         self.fleetTrace = fleetTrace
+        self.fleetTraceAnchor = fleetTraceAnchor
     }
 
     /// Nothing known yet. `complete` is false, which is the honest answer
@@ -741,8 +752,8 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             // — which this process cannot do. Carried means the compact Island
             // keeps drawing the last summed history rather than blanking each
             // time an unrelated agent notifies; the trace is history, and
-            // history does not stop being true.
-            fleetTrace: fleetTrace)
+            // history does not stop being true. Its anchor rides with it.
+            fleetTrace: fleetTrace, fleetTraceAnchor: fleetTraceAnchor)
     }
 
     /// Whether two fleets say the same thing about the same agents, in the same
@@ -1055,14 +1066,29 @@ public struct ActivityTrace: Sendable, Equatable {
     /// any row reaches, which is how `AgentCardLayout` chooses it — and is
     /// dropped rather than drawn in the wrong place if a caller passes less.
     ///
+    /// **Nil when not one bucket lands in the window.** A row whose whole
+    /// history is older than the card's thirteen columns has told the card
+    /// nothing about them, and thirteen zeroes would be thirteen measurements
+    /// of quiet nobody made — "absent is not thirteen quiet buckets", the rule
+    /// `init?` keeps for the wire. A row where some buckets land and all of
+    /// them are zero is different: those zeroes were measured, and they draw.
+    ///
+    /// Nil too for an anchor or a `newest` outside `0...anchorLimit`, which no
+    /// runner's clock produces and which the arithmetic below must never be
+    /// asked to trap on — this runs in a Live Activity extension, where a trap
+    /// is the whole card gone.
+    ///
     /// Returns `self` unchanged for an axis finer than this trace, or one that
     /// is not a whole multiple of it: neither can be placed without splitting a
     /// bucket, which is `rebucketed`'s refusal too.
-    public func placed(on axis: Span, anchor: Int, newest: Int) -> ActivityTrace {
+    public func placed(on axis: Span, anchor: Int, newest: Int) -> ActivityTrace? {
         guard axis.bucketSeconds >= span.bucketSeconds,
             axis.bucketSeconds % span.bucketSeconds == 0
         else { return self }
+        guard (0...Self.anchorLimit).contains(anchor), (0...Self.anchorLimit).contains(newest)
+        else { return nil }
         let per = axis.bucketSeconds / span.bucketSeconds
+        var landed = false
 
         // Wider accumulators than the fields, for `rebucketed`'s reason.
         var code = [UInt32](repeating: 0, count: Self.buckets)
@@ -1072,11 +1098,53 @@ public struct ActivityTrace: Sendable, Equatable {
             let absolute = anchor - (Self.buckets - 1) + bucket
             let column = (Self.buckets - 1) - (newest - Self.floorDiv(absolute, per))
             guard (0..<Self.buckets).contains(column) else { continue }
+            landed = true
             code[column] += UInt32(self.code(bucket))
             output[column] += UInt32(self.output(bucket))
             commits[column] += UInt32(self.commits(bucket))
         }
+        guard landed else { return nil }
         return Self.encoded(code: code, output: output, commits: commits, span: axis)
+    }
+
+    /// The largest anchor this build will place: 2^53.
+    ///
+    /// Far past any real one — a five-minute index is seven digits until 2065 —
+    /// and the same ceiling the relay's `Number.isSafeInteger` applies. What it
+    /// buys is arithmetic that cannot overflow: every subtraction and division
+    /// in `placed` and `trusted` then stays inside `Int`'s range.
+    public static let anchorLimit = 1 << 53
+
+    /// How far a runner's clock may run ahead of the moment it was heard from
+    /// before its anchor is ignored, in seconds. The relay's
+    /// `TRACE_ANCHOR_SLACK_S`, and ten minutes for its reasons.
+    public static let anchorSlack = 10 * 60
+
+    /// The anchor, if it could be true of a trace heard at `heardAt`; nil
+    /// otherwise, and the trace is then packed as if it had none.
+    ///
+    /// **One runner's clock must not decide the whole card.** An anchor is
+    /// `now.div_euclid(width)` on the runner's own clock, and the newest one on
+    /// a card sets the column every other row is placed against — so a runner a
+    /// day fast would push every other row off the left edge. The bucket an
+    /// anchor names STARTS no later than the runner's `now`, and the runner's
+    /// `now` is no later than when its word was heard: `AgentCardRow.updatedAt`
+    /// on the relay's clock, or the phone's own poll for a fleet trace. So an
+    /// anchor whose bucket starts after `heardAt + anchorSlack` is a clock that
+    /// is wrong, and it is ignored. A kept trace only ever grows OLDER than
+    /// `heardAt`, never newer, so this bound holds for one carried forward too.
+    ///
+    /// Compared by division, not by `anchor * width`, which is past `Int` for
+    /// an anchor near the limit.
+    ///
+    /// Nil for no anchor, no `heardAt`, a negative anchor, or one past
+    /// `anchorLimit`.
+    public static func trusted(_ anchor: Int?, span: Span, heardAt: Date?) -> Int? {
+        guard let anchor, (0...anchorLimit).contains(anchor), let heardAt else { return nil }
+        let heard = heardAt.timeIntervalSince1970
+        guard heard.isFinite, abs(heard) < Double(anchorLimit) else { return nil }
+        let latest = floorDiv(Int(heard.rounded(.down)) + anchorSlack, span.bucketSeconds)
+        return anchor <= latest ? anchor : nil
     }
 
     /// Which `axis` bucket, by absolute index, holds the bucket `anchor` indexes
@@ -1145,15 +1213,51 @@ public struct ActivityTrace: Sendable, Equatable {
     /// Nil for no inputs. One input is returned unchanged, which is the
     /// single-runner case and is byte-for-byte what the daemon sent.
     public static func summing(_ traces: [ActivityTrace]) -> ActivityTrace? {
-        guard let coarsest = traces.map(\.span).max(by: { $0.bucketSeconds < $1.bucketSeconds })
+        summing(anchored: traces.map { ($0, nil) })?.trace
+    }
+
+    /// Several runners' fleet traces on one axis, each placed by its anchor
+    /// where it has one.
+    ///
+    /// `TerminalList.fleet_trace_anchor` is the number `summing(_:)` lacked:
+    /// with it, every runner's buckets land in the columns they belong to —
+    /// `placed(on:anchor:newest:)`, against the newest column any runner
+    /// reaches — instead of each being packed from its newest end. A runner
+    /// with no anchor (older than the field, or one `trusted` refused) is
+    /// packed as before, into the newest column.
+    ///
+    /// The result carries an anchor only when every input did, since only then
+    /// is every one of its buckets where it says it is. A runner whose whole
+    /// trace falls off the left of the window adds nothing, which is what it
+    /// has to say about these thirteen columns.
+    ///
+    /// Runners' wall clocks are an input here, as they are on the card —
+    /// bounded by `trusted`, which callers apply first.
+    public static func summing(
+        anchored traces: [(trace: ActivityTrace, anchor: Int?)]
+    ) -> (trace: ActivityTrace, anchor: Int?)? {
+        guard
+            let coarsest = traces.map(\.trace.span).max(by: { $0.bucketSeconds < $1.bucketSeconds })
         else { return nil }
         guard traces.count > 1 else { return traces[0] }
+
+        let newest = traces.compactMap { input -> Int? in
+            guard let anchor = input.anchor else { return nil }
+            return column(of: anchor, at: input.trace.span, on: coarsest)
+        }.max()
 
         var code = [UInt32](repeating: 0, count: Self.buckets)
         var output = [UInt32](repeating: 0, count: Self.buckets)
         var commits = [UInt32](repeating: 0, count: Self.buckets)
-        for trace in traces {
-            let axis = trace.rebucketed(to: coarsest)
+        for (trace, anchor) in traces {
+            let axis: ActivityTrace
+            if let anchor, let newest {
+                guard let placed = trace.placed(on: coarsest, anchor: anchor, newest: newest)
+                else { continue }
+                axis = placed
+            } else {
+                axis = trace.rebucketed(to: coarsest)
+            }
             for bucket in 0..<Self.buckets {
                 // `UInt32` to add in, `UInt16`/`UInt8` to write out, for
                 // `rebucketed`'s reason: the producer saturates on the way to
@@ -1165,7 +1269,11 @@ public struct ActivityTrace: Sendable, Equatable {
                 commits[bucket] += UInt32(axis.commits(bucket))
             }
         }
-        return encoded(code: code, output: output, commits: commits, span: coarsest)
+        let everyoneAnchored = traces.allSatisfy { $0.anchor != nil }
+        return (
+            encoded(code: code, output: output, commits: commits, span: coarsest),
+            everyoneAnchored ? newest : nil
+        )
     }
 
     /// Three series and a span, as the wire's 66 bytes.
