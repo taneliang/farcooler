@@ -230,10 +230,39 @@ struct StartTaskTests {
         let say = { TaskFailure.undelivered(name: "fix-it", $0) }
         #expect(say(.askedFirst).contains("once you’ve answered"))
         #expect(say(.neverReady).contains("after a minute"))
-        #expect(say(.gone).contains("closed before it got your task"))
-        #expect(say(.notTyped).hasPrefix("Couldn’t type your task"))
+        #expect(say(.gone).contains("closed before it got what you typed"))
+        #expect(say(.notTyped).hasPrefix("Couldn’t type what you asked for"))
         for cause: TaskFailure.Undelivered in [.askedFirst, .neverReady, .gone, .notTyped] {
             #expect(say(cause).contains("“fix it”") && say(cause).contains("clipboard"))
+        }
+    }
+
+    /// Nothing the ⌘N path says calls the request a "task".
+    ///
+    /// A task is a card on the board now, with a row of its own above every
+    /// repository's workspaces, and ⌘N puts nothing there: it makes a
+    /// workspace and starts an agent. Every sentence this path can put in
+    /// front of someone is walked here, so one that drifts back to "your task"
+    /// fails rather than reintroducing the two meanings side by side.
+    @Test func noNewWorkspaceSentenceCallsTheRequestATask() {
+        var sentences: [String] = [
+            TaskPrompt.problem(String(repeating: "a", count: TaskPrompt.maxBytes + 1)) ?? "",
+            TaskPrompt.problem("a\u{0}b") ?? "",
+        ]
+        for cause: TaskFailure.Undelivered in [.askedFirst, .neverReady, .gone, .notTyped] {
+            sentences.append(TaskFailure.undelivered(name: "fix-it", cause))
+        }
+        for code in [
+            "branch-exists", "worktree-exists", "tmux-unavailable", "capability-unsupported",
+            "invalid-argument", "something-new",
+        ] {
+            sentences.append(TaskFailure.sentence(for: "error: x\ncode: \(code)"))
+        }
+        sentences.append(TaskFailure.sentence(for: nil))
+        #expect(!sentences.contains(""), "a refusal came back empty")
+        for sentence in sentences {
+            let words = sentence.lowercased().split { !$0.isLetter }
+            #expect(!words.contains("task") && !words.contains("tasks"), "\(sentence)")
         }
     }
 
@@ -329,7 +358,7 @@ struct StartTaskTests {
             Issue.record("expected a refusal")
             return
         }
-        #expect(sentence.contains("Start the task again"), "\(sentence)")
+        #expect(sentence.contains("Start again"), "\(sentence)")
 
         runner.workspaceCreateFails = nil
         let outcome = await start(client)

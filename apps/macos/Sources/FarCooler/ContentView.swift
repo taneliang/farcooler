@@ -1080,7 +1080,7 @@ struct ContentView: View {
                 .font(.system(size: 26))
                 .foregroundStyle(.tertiary)
             Text("No workspaces").font(.callout.weight(.medium))
-            Text("A workspace is one worktree and branch for one task.")
+            Text("A workspace is a worktree and branch of its own.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -1602,7 +1602,7 @@ struct ContentView: View {
         ContentUnavailableView {
             Label("Select a workspace", systemImage: "rectangle.split.3x1")
         } description: {
-            Text("Each workspace is one worktree and branch for one task.")
+            Text("Each workspace is a worktree and branch of its own.")
         } actions: {
             if !store.repositories.isEmpty {
                 Button("New Workspace") {
@@ -2375,11 +2375,11 @@ struct ContentView: View {
     private func startTask(_ request: TaskRequest) async -> TaskSubmission.Outcome {
         let host = request.host
         if let client = store.clients[host], client.state == .notInstalled {
-            return .failed("Far Cooler isn’t installed on this runner, so the task wasn’t started.")
+            return .failed("Far Cooler isn’t installed on this runner, so the agent wasn’t started.")
         }
         guard store.refusal(for: host) == nil, let client = store.clients[host] else {
             return .failed(
-                "Can’t reach this runner right now, so the task wasn’t started. Try again once it’s back.")
+                "Can’t reach this runner right now, so the agent wasn’t started. Try again once it’s back.")
         }
         let outcome = await client.startTask(
             project: request.project,

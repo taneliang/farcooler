@@ -39,7 +39,7 @@ struct TaskNameTests {
 
     @Test func aDescriptionOfNothingButFillerStillHasAName() {
         #expect(TaskName.heuristic("can you do this for me please") == "can-you-do-this")
-        #expect(TaskName.heuristic("日本語のテスト") == "task")
+        #expect(TaskName.heuristic("日本語のテスト") == "workspace")
         #expect(TaskName.heuristic("naïve café") == "naive-cafe")
         // An apostrophe joins a word rather than splitting it.
         #expect(TaskName.heuristic("Don't break the build") == "dont-break-build")
@@ -108,7 +108,7 @@ struct TaskNameTests {
     @Test func aFailedStartIsSaidInThisAppsWordsNeverTheRunners() {
         let generic = TaskFailure.sentence(for: "error: resource version is stale\ncode: resource-conflict")
         #expect(!generic.contains("stale") && !generic.contains("error"), "\(generic)")
-        #expect(generic.hasPrefix("Couldn’t start the task"))
+        #expect(generic.hasPrefix("Couldn’t start the agent"))
         #expect(TaskFailure.sentence(for: nil) == generic)
 
         let taken = TaskFailure.sentence(for: "error: branch already exists\ncode: branch-exists")

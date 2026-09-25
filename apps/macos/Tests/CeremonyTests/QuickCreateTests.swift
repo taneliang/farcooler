@@ -87,7 +87,7 @@ struct QuickCreateTests {
 
     @Test func aStartThatFailsKeepsTheDraftAndThePanelAndSaysWhy() async {
         let outcome = Outcome()
-        outcome.failure = "Can’t reach this runner right now, so the task wasn’t started."
+        outcome.failure = "Can’t reach this runner right now, so the agent wasn’t started."
         let submission = TaskSubmission()
         await withDraft("Fix the flaky reconnect test") {
             await panel(outcome, submission: submission).submit(keepOpen: false)

@@ -113,7 +113,7 @@ struct NewWorkspaceSheet: View {
     var body: some View {
         SheetFrame(
             title: "New Workspace",
-            subtitle: "A worktree and branch for one task.",
+            subtitle: "A worktree and branch of its own.",
             confirmTitle: "Create",
             canConfirm: canCreate,
             working: working,
@@ -169,7 +169,7 @@ struct NewWorkspaceSheet: View {
                     "Branch", text: $branch,
                     prompt: Text(
                         suggestedBranch.isEmpty
-                            ? branchPrefix(choice?.host ?? "") + "my-task" : suggestedBranch))
+                            ? branchPrefix(choice?.host ?? "") + "my-change" : suggestedBranch))
 
                 TextField("Base revision", text: $base, prompt: Text("HEAD"))
             }

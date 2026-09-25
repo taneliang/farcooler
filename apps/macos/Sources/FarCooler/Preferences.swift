@@ -374,7 +374,7 @@ struct SettingsView: View {
         Form {
             Section {
                 Setting("⌘T opens a plain shell.") {
-                    Picker("New tasks start with", selection: $preferences.defaultAgent) {
+                    Picker("New workspaces start with", selection: $preferences.defaultAgent) {
                         Text("Claude Code").tag("claude")
                         Text("Codex").tag("codex")
                         Text("Cursor").tag("cursor")

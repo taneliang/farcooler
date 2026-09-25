@@ -76,12 +76,13 @@ enum TaskName {
     /// "Please fix the flaky reconnect test in the iOS app" is
     /// `fix-flaky-reconnect-test`. A description that is nothing but filler
     /// keeps its own first words rather than coming out empty, and one with no
-    /// word a directory can hold at all is `task`.
+    /// word a directory can hold at all is `workspace` — not `task`, which is
+    /// a card on the board.
     static func heuristic(_ description: String) -> String {
         let all = words(description)
         let meaningful = all.filter { !fillerWords.contains($0) }
         let name = pack(meaningful.isEmpty ? all : meaningful)
-        return name.isEmpty ? "task" : name
+        return name.isEmpty ? "workspace" : name
     }
 
     /// A model's answer as a name, or nil when there is nothing usable in it.
@@ -236,10 +237,10 @@ enum TaskPrompt {
 
     static func problem(_ description: String) -> String? {
         if description.utf8.count > maxBytes {
-            return "This task is too long to hand to an agent. Shorten it to under 100 KB and try again."
+            return "This is too long to hand to an agent. Shorten it to under 100 KB and try again."
         }
         if description.contains("\u{0}") {
-            return "This task contains a character an agent can’t be given. Remove it and try again."
+            return "This contains a character an agent can’t be given. Remove it and try again."
         }
         return nil
     }
@@ -291,28 +292,28 @@ enum TaskFailure {
         let task = "“\(WorktreeName.display(name))”"
         switch cause {
         case .askedFirst:
-            return "The agent in \(task) asked a question first, so your task is on the clipboard. Paste it in once you’ve answered."
+            return "The agent in \(task) asked a question first, so what you typed is on the clipboard. Paste it in once you’ve answered."
         case .neverReady:
-            return "The agent in \(task) wasn’t ready for your task after a minute. It’s on the clipboard, so you can paste it in when the agent is ready."
+            return "The agent in \(task) wasn’t ready after a minute. What you typed is on the clipboard, so you can paste it in when the agent is ready."
         case .gone:
-            return "The agent in \(task) closed before it got your task. It’s on the clipboard, so you can start another and paste it in."
+            return "The agent in \(task) closed before it got what you typed. It’s on the clipboard, so you can start another and paste it in."
         case .notTyped:
-            return "Couldn’t type your task into the agent in \(task). It’s on the clipboard, so you can paste it in yourself."
+            return "Couldn’t type what you asked for into the agent in \(task). It’s on the clipboard, so you can paste it in yourself."
         }
     }
 
     static func sentence(for message: String?) -> String {
         switch code(in: message) {
         case "branch-exists", "worktree-exists":
-            "This runner already has a branch or folder with that name. Start the task again to use a different one."
+            "This runner already has a branch or folder with that name. Start again to use a different one."
         case "tmux-unavailable":
             "The runner can’t reach tmux. Far Cooler runs every agent inside it, so install tmux there and try again."
         case "capability-unsupported":
             "This runner’s Far Cooler is too old for this. Update it there, then try again."
         case "invalid-argument":
-            "This runner couldn’t take the task as Far Cooler sent it. That’s a problem in the app, not in anything you typed."
+            "This runner couldn’t take the request as Far Cooler sent it. That’s a problem in the app, not in anything you typed."
         default:
-            "Couldn’t start the task on this runner. Check that it’s reachable, then try again."
+            "Couldn’t start the agent on this runner. Check that it’s reachable, then try again."
         }
     }
 }
