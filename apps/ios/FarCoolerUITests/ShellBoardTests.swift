@@ -132,4 +132,123 @@ final class ShellBoardTests: XCTestCase {
             waitUntilVisible(app, "ws-2-tab-2"),
             "the shell did not land on the agent chosen: \(probe(app, "shell-pane-ws-2-tab-2"))")
     }
+
+    /// **Tapping a card opens it: its intent, each acceptance line with its
+    /// tick, and the same Agent button, which still lands on the pane.**
+    func testACardOpensToItsIntentAcceptanceAndAgent() throws {
+        let app = launch()
+        XCTAssertTrue(boardRow(app).waitForExistence(timeout: 30), "no Board row")
+        boardRow(app).tap()
+
+        let card = app.buttons["board-card--19"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "-19's card is not a button")
+        card.tap()
+
+        let detail = app.descendants(matching: .any)["board-detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 10), "the card did not open")
+        let heading = app.descendants(matching: .any)["board-detail-heading"]
+        XCTAssertTrue(heading.label.contains("Board in the sidebar"), heading.label)
+        XCTAssertTrue(heading.label.contains("Needs Decision"), heading.label)
+        let intent = app.descendants(matching: .any)["board-detail-intent"]
+        XCTAssertTrue(intent.exists, "no intent")
+        XCTAssertTrue(intent.label.contains("Why task 19 exists"), intent.label)
+        // Every line, each with its own tick: the first holds, the other two
+        // do not. A detail that drew the count and not the lines, or ticked
+        // every line, fails here.
+        let lines = (0..<3).map { app.descendants(matching: .any)["board-acceptance-a19-\($0)"] }
+        XCTAssertTrue(lines.allSatisfy(\.exists), "not every acceptance line is drawn")
+        XCTAssertEqual(lines.map { $0.value as? String }, ["Met", "Not met", "Not met"])
+        XCTAssertEqual(lines[1].label, "Line 2 of task 19 holds")
+
+        let agent = app.buttons["board-agent--19"]
+        XCTAssertTrue(agent.waitForExistence(timeout: 5), "the opened card has no Agent button")
+        agent.tap()
+        XCTAssertTrue(
+            waitUntilVisible(app, "ws-1-tab-1"),
+            "the opened card's Agent did not land: \(probe(app, "shell-pane-ws-1-tab-1"))")
+    }
+
+    // MARK: - The real path, against the demo runner
+
+    /// **Overview → Board row → card → Agent lands on the pane the runner
+    /// dispatched for that task, through the app's own wiring.**
+    ///
+    /// Everything above drives the harness, whose Agent ids are tab ids handed
+    /// straight to the shell. This drives what the app does with a real
+    /// runner: `Connection` reading `task.list`, the fleet's `taskId`,
+    /// `RunnerBoards.rows` over live panes, `BoardSheetHost`, and
+    /// `ShellScreen.requestedTab` turning a terminal id into a tab.
+    ///
+    /// Needs `./scripts/demo-host.sh`, whose board fixture is one task and a
+    /// `boarding` workspace with one `claude` pane opened for it — a stand-in
+    /// that sleeps, never the real one. Skipped, naming why, when no runner
+    /// answers, like every other demo-runner test; once one has, every step
+    /// is an assertion, the Board row included.
+    func testTheRealBoardRowLandsOnTheDispatchedPane() throws {
+        let app = XCUIApplication()
+        let user = ProcessInfo.processInfo.environment["DEMO_USER"] ?? ""
+        let host = ProcessInfo.processInfo.environment["DEMO_HOST"] ?? "127.0.0.1:2222"
+        app.launchArguments += ["-farcoolerDemoHost", "\(user)@\(host)"]
+        app.launch()
+
+        let shell = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        guard shell.waitForExistence(timeout: 180) else {
+            throw XCTSkip("The shell never rendered against \(user)@\(host); run ./scripts/demo-host.sh.")
+        }
+
+        // Up past the last row, which is the only way into the overview.
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
+        for _ in 0..<3 where probe(app, "shell-state")["overview"] != "1" {
+            let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            from.press(
+                forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -700)),
+                withVelocity: .slow, thenHoldForDuration: 0.5)
+        }
+        XCTAssertEqual(probe(app, "shell-state")["overview"], "1", "never reached the overview")
+
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shell-board-"))
+        // A failure and not a skip, once the runner has answered: the demo
+        // script this suite is run against makes the board, and a row that
+        // never came is the app not reading it — the one thing this test is
+        // for. (If the script could not make the fixture safely it says so,
+        // and this is where that shows.)
+        XCTAssertTrue(
+            rows.firstMatch.waitForExistence(timeout: 30),
+            "no Board row from the demo runner; did ./scripts/demo-host.sh make its board?")
+        let row = rows.firstMatch
+        XCTAssertEqual(row.label, "scrollback Board")
+        XCTAssertTrue(
+            (row.value as? String ?? "").contains("An agent is on 1 task"),
+            "the row does not count the stand-in agent: \(row.value ?? "nil")")
+        row.tap()
+
+        let card = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                "board-card-", "Demo board task")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 15), "the demo task is not on the board")
+        let key = String(card.identifier.dropFirst("board-card-".count))
+        card.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["board-detail"].waitForExistence(timeout: 10),
+            "the card did not open")
+
+        let agent = app.buttons["board-agent-\(key)"]
+        XCTAssertTrue(agent.waitForExistence(timeout: 10), "the opened card has no Agent button")
+        agent.tap()
+
+        // Landed: the overview is gone and the bar names the workspace the
+        // dispatched pane is in, on that pane's tab. `boarding` holds the
+        // Changes tab, the shell its creation opened, then the stand-in agent
+        // — so tab 2, and not the shell a plain "open the workspace" might
+        // have rested on.
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline, probe(app, "shell-state")["overview"] != "0" {
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        let state = probe(app, "shell-state")
+        XCTAssertEqual(state["overview"], "0", "the overview is still up: \(state)")
+        XCTAssertTrue(bar.label.contains("boarding"), "landed on \(bar.label), not boarding")
+        XCTAssertEqual(state["tab"], "2", "not on the dispatched pane's tab: \(state)")
+    }
 }

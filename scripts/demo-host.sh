@@ -307,7 +307,42 @@ RENDER="$DIR/fence-line/target/release/demo-fence-line"
 # and codex would then read and write your real config from a demo pane. (The
 # daemon itself never pre-trusts under an explicit FARCOOLER_HOME; see
 # `codex_trust`.)
+#
+# PATH as well, and for the board fixture below: it opens a `claude` pane, and
+# the daemon finds a program on its own PATH first. The PATH this script was run
+# with is yours, and on a machine with Claude Code installed it names the real
+# one — so the daemon gets only what it needs (tmux, git, the system) and the
+# session's own `~/.local/bin`, where the one `claude` is the stand-in. Panes
+# inherit this PATH through tmux: without that last entry a dispatched pane
+# exits 127, which is safe and useless. See `STAND_IN`.
+STAND_IN="$SESSION_HOME/.local/bin/claude"
+DAEMON_PATH=$(printf '%s\n' "$(dirname "$(command -v tmux)")" "$(dirname "$(command -v git)")" \
+    /usr/bin /bin /usr/sbin /sbin "$(dirname "$STAND_IN")" | awk '!seen[$0]++' | paste -sd: -)
+mkdir -p "$(dirname "$STAND_IN")"
+# Sleeps rather than exits, so the pane stays a live agent the board can link
+# to. It reads nothing, runs nothing, and costs nothing.
+#
+# It also has to LOOK like an agent to the runner, which reads a pane's
+# command off the first process in its tty's foreground group. The daemon
+# launches an agent as `<login shell> -c env … <login shell> -ilc 'claude …'`,
+# and a fish that was handed `-c` does no job control: a plain `exec sleep`
+# stays in the wrapper's group, the pane reads as `fish`, and no board could
+# call it an agent. So the stand-in takes a group of its own and the terminal
+# with it, as a shell with job control would have given it, and runs as
+# `claude` by argv — which is what the runner reads.
+cat > "$STAND_IN" <<'STANDIN'
+#!/bin/sh
+# The demo runner's claude: a stand-in, never the real one. See demo-host.sh.
+exec /usr/bin/perl -MPOSIX -e '
+    setpgid(0, 0);
+    $SIG{TTOU} = "IGNORE";
+    if (open(my $tty, "+<", "/dev/tty")) { tcsetpgrp(fileno($tty), getpgrp()); }
+    exec { "/bin/sleep" } "claude", "86400";
+'
+STANDIN
+chmod +x "$STAND_IN"
 env HOME="$SESSION_HOME" CODEX_HOME="$SESSION_HOME/.codex" FARCOOLER_HOME="$FC_HOME" \
+    PATH="$DAEMON_PATH" \
     nohup "$TARGET/farcoolerd" >"$DIR/daemon.log" 2>&1 &
 echo $! > "$DIR/daemon.pid"
 echo "$TARGET/farcoolerd" > "$DIR/daemon.pid.cmd"
@@ -552,6 +587,47 @@ fi
 # The Rust xcframeworks in apps/ios/Frameworks are NOT rebuilt by this: they are
 # whatever `scripts/build-ios-frameworks.sh` last produced. Run that first if the
 # thing you changed is in `crates/`.
+# A board, and an agent on it: one task on the demo repository's board, and a
+# workspace `boarding` whose one pane was opened for that task — a `claude`
+# pane, which is what `task dispatch` opens, running the stand-in above. This
+# is what lets `ShellBoardTests.testTheRealBoardRowLandsOnTheDispatchedPane` go
+# overview → Board row → card → Agent → that pane through the app's own path.
+#
+# Only if `claude` really resolves to the stand-in for the daemon. If it does
+# not, the fixture is skipped and says so, and that test skips: a demo that
+# might start somebody's real Claude Code on a prompt is not a fixture.
+RESOLVED=$(env -i HOME="$SESSION_HOME" PATH="$DAEMON_PATH" \
+    sh -c 'command -v claude' 2>/dev/null || true)
+if [ "$RESOLVED" = "$STAND_IN" ]; then
+    BOARD_KEY=$(fc --json task list --repo "$REPO_ID" \
+        | jq -r 'first(.tasks[] | select(.title=="Demo board task") | .key) // empty')
+    if [ -z "$BOARD_KEY" ]; then
+        BOARD_KEY=$(fc --json task create --repo "$REPO_ID" --title "Demo board task" \
+            --intent "Something for the phone's board to show, with an agent on it." \
+            --accept "The Board row shows" --accept "The card opens" | jq -r '.key // empty')
+    fi
+    if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=="boarding") | .id) // empty')" ]; then
+        fc workspace create "$REPO_ID" boarding --branch demo/boarding >/dev/null
+    fi
+    BOARDING=$(fc --json workspace list \
+        | jq -r 'first(.workspaces[] | select(.task=="boarding") | .id) // empty')
+    # A pane from an earlier run whose stand-in has since exited is removed
+    # rather than left beside the new one: the test lands on the live pane by
+    # its tab, and a dead one ahead of it would move that tab.
+    for dead in $(fc --json workspace list \
+        | jq -r '.workspaces[] | select(.task=="boarding") | .terminals[] | select(.taskId != null and .state != "running") | .id'); do
+        fc terminal remove "$dead" >/dev/null 2>&1 || true
+    done
+    ON_TASK=$(fc --json workspace list \
+        | jq -r 'first(.workspaces[] | select(.task=="boarding") | .terminals[] | select(.taskId != null and .state == "running") | .id) // empty')
+    if [ -n "$BOARD_KEY" ] && [ -n "$BOARDING" ] && [ -z "$ON_TASK" ]; then
+        fc terminal create "$BOARDING" --preset claude --task "$BOARD_KEY" >/dev/null || true
+    fi
+    echo "        and a board: task $BOARD_KEY with a stand-in agent in workspace 'boarding'"
+else
+    echo "        (no board fixture: claude resolves to '${RESOLVED:-nothing}', not the stand-in)"
+fi
+
 echo "building the iOS app…"
 xcodebuild -project apps/ios/FarCooler.xcodeproj -scheme FarCooler \
     -configuration Debug \
