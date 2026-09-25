@@ -15,7 +15,8 @@ import SwiftUI
 // `TaskBoardAgents`, `RunnerBoards`), so this phone and the Mac say the same
 // thing about the same card. This file draws.
 //
-// Read-only in this phase. Moving a card and answering a question are writes
+// Tapping a card pushes it (`TaskCardDetail`): intent, every acceptance line
+// with its tick, and the same Agent control. Read-only in this phase. Moving a card and answering a question are writes
 // with their own rules, and they come with the screen that makes them.
 
 /// A pane a card can go to, as the board draws it.
@@ -54,8 +55,13 @@ struct TaskBoardView: View {
     let onRefresh: () async -> Void
     let onDone: () -> Void
 
+    /// The card pushed over the list, by task id. An id and not a row, so the
+    /// card that is open redraws from the board as it is now when a notice
+    /// re-reads it — and closes itself if the task leaves the board.
+    @State private var path: [String] = []
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle(name)
                 .navigationBarTitleDisplayMode(.inline)
@@ -68,6 +74,22 @@ struct TaskBoardView: View {
                     }
                 }
                 .refreshable { await onRefresh() }
+                .navigationDestination(for: String.self) { id in
+                    if let row = board?.rows.first(where: { $0.id == id }) {
+                        let live = speaksOfAgents ? agents(row) : []
+                        TaskCardDetail(
+                            row: row, live: live,
+                            presence: row.agentPresence(
+                                livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
+                            onJump: onJump)
+                    } else {
+                        ContentUnavailableView {
+                            Label("Not on This Board", systemImage: "checklist")
+                        } description: {
+                            Text("This task isn’t on the board anymore.")
+                        }
+                    }
+                }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board")
@@ -117,6 +139,7 @@ struct TaskBoardView: View {
                             live: live,
                             presence: row.agentPresence(
                                 livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
+                            onOpen: { path.append(row.id) },
                             onJump: onJump)
                     }
                 } header: {
@@ -160,55 +183,166 @@ private struct TaskBoardCardRow: View {
     let row: TaskRow
     let live: [BoardAgent]
     let presence: TaskAgentPresence
+    let onOpen: () -> Void
     let onJump: (BoardAgent) -> Void
 
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack(alignment: .top, spacing: PaneMetrics.step) {
-            VStack(alignment: .leading, spacing: PaneMetrics.tight) {
-                HStack(spacing: PaneMetrics.tight) {
-                    // Mono, because a key is typed into a terminal, and the
-                    // brief's rule is that mono means data.
-                    Text(row.key)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    if row.staleness == .stale {
-                        Image(systemName: "clock")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .accessibilityHidden(true)
-                    }
-                }
-                Text(row.title)
-                    .font(.subheadline)
-                    .lineLimit(3)
-                if let ask = row.callToAction {
-                    // Amber, because Needs Decision is the one status waiting
-                    // on the person reading — which is what amber means here.
-                    Text(ask)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(GlancePalette.amber(scheme))
-                }
-                if let note = row.stalenessNote(at: Date()) {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let progress = row.acceptanceProgress {
-                    AcceptanceLine(progress: progress)
-                }
+            // The card's words are the way into it, and the Agent control
+            // beside them is its own button. Two buttons in one row and not a
+            // `NavigationLink` row: a link makes the whole row one control, and
+            // the Agent button inside it would stop being one.
+            Button(action: onOpen) {
+                words
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
             // One element for the card's words, and the control beside it its
             // own: an identifier on the `HStack` would be pushed down onto the
             // Agent button too and rename it.
             .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens the task")
             .accessibilityIdentifier("board-card-\(row.key)")
 
             AgentControl(key: row.key, live: live, presence: presence, onJump: onJump)
         }
         .padding(.vertical, 2)
+    }
+
+    private var words: some View {
+        VStack(alignment: .leading, spacing: PaneMetrics.tight) {
+            HStack(spacing: PaneMetrics.tight) {
+                // Mono, because a key is typed into a terminal, and the
+                // brief's rule is that mono means data.
+                Text(row.key)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                if row.staleness == .stale {
+                    Image(systemName: "clock")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+            }
+            Text(row.title)
+                .font(.subheadline)
+                .lineLimit(3)
+            if let ask = row.callToAction {
+                // Amber, because Needs Decision is the one status waiting
+                // on the person reading — which is what amber means here.
+                Text(ask)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(GlancePalette.amber(scheme))
+            }
+            if let note = row.stalenessNote(at: Date()) {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let progress = row.acceptanceProgress {
+                AcceptanceLine(progress: progress)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+    }
+}
+
+/// One card, opened: what it is, why, what "done" means, and the way to its
+/// agent. Read-only — every field here is what `task.list` already carried, so
+/// opening a card costs no round trip.
+private struct TaskCardDetail: View {
+    let row: TaskRow
+    let live: [BoardAgent]
+    let presence: TaskAgentPresence
+    let onJump: (BoardAgent) -> Void
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: PaneMetrics.tight) {
+                    Text(row.key)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Text(row.title)
+                        .font(.headline)
+                    Text(row.status.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let ask = row.callToAction {
+                        Text(ask)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(GlancePalette.amber(scheme))
+                    }
+                    if let note = row.stalenessNote(at: Date()) {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("board-detail-heading")
+
+                if presence != .unsaid {
+                    HStack {
+                        Text("Agent")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        AgentControl(key: row.key, live: live, presence: presence, onJump: onJump)
+                    }
+                }
+            }
+
+            if !row.intent.isEmpty {
+                Section("Intent") {
+                    Text(row.intent)
+                        .font(.subheadline)
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("board-detail-intent")
+                }
+            }
+
+            if let progress = row.acceptanceProgress {
+                Section {
+                    ForEach(row.acceptance) { line in
+                        let met = line.met
+                        HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
+                            Image(systemName: met ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(met ? Color.accentColor : Color.secondary)
+                            Text(line.text)
+                                .font(.subheadline)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(line.text)
+                        .accessibilityValue(met ? "Met" : "Not met")
+                        .accessibilityIdentifier("board-acceptance-\(line.id)")
+                    }
+                } header: {
+                    HStack {
+                        Text("Acceptance")
+                        Spacer()
+                        Text(progress.sentence)
+                            .monospacedDigit()
+                    }
+                }
+            }
+
+            if !row.labels.isEmpty {
+                Section("Labels") {
+                    Text(row.labels.joined(separator: ", "))
+                        .font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(row.key)
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("board-detail")
     }
 }
 

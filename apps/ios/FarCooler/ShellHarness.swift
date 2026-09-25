@@ -424,8 +424,11 @@ enum HarnessBoard {
         TaskRow(
             id: "t-\(n)", key: "-\(n)", title: title, status: status,
             statusSince: Date().addingTimeInterval(-age),
+            intent: "Why task \(n) exists, in the words of whoever filed it.",
             acceptance: acceptance.enumerated().map {
-                TaskAcceptanceLine(id: "a\(n)-\($0.offset)", text: "line", met: $0.element)
+                TaskAcceptanceLine(
+                    id: "a\(n)-\($0.offset)", text: "Line \($0.offset + 1) of task \(n) holds",
+                    met: $0.element)
             })
     }
 
