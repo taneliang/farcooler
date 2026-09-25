@@ -770,6 +770,11 @@ fn is_cursor(preset: &str) -> bool {
     preset.split_once(':').map_or(preset, |(agent, _)| agent) == "cursor"
 }
 
+/// Whether `preset` launches codex, in any of its model variants.
+fn is_codex(preset: &str) -> bool {
+    preset.split_once(':').map_or(preset, |(agent, _)| agent) == "codex"
+}
+
 /// The largest prompt `terminal.create` accepts: 100 KiB.
 ///
 /// Below Linux's ceiling on ONE argument string, `MAX_ARG_STRLEN`, which is
@@ -2655,6 +2660,11 @@ impl Service {
         // cursor's `--trust`, for a worktree this runner made for a new task.
         // See `LaunchExtras::trust_workspace`.
         let trust_workspace = is_cursor(preset) && self.forked_this_worktree(Path::new(worktree));
+        // codex's, on the same line: codex has no flag, so its repository gets
+        // the entry codex's own trust screen writes. See `codex_trust`.
+        if is_codex(preset) && self.forked_this_worktree(Path::new(worktree)) {
+            crate::codex_trust::trust_for_worktree(Path::new(worktree));
+        }
         LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None }
     }
 
@@ -2662,7 +2672,8 @@ impl Service {
     /// directory under its own `worktrees/`, whose git admin directory
     /// carries this install's fork mark (`git::mark_forked`).
     ///
-    /// The line cursor's `--trust` is drawn on. Trusting a directory is a
+    /// The line cursor's `--trust` is drawn on, and codex's trust entry
+    /// (`codex_trust`). Trusting a directory is a
     /// decision about its contents — cursor's trust is what lets a project's
     /// own `.cursor/` configuration (MCP servers, hooks, rules) load. A branch
     /// this runner forked from the person's repository holds that
@@ -9339,6 +9350,44 @@ mod launch_prompt_tests {
         assert!(!trusts(&climb.display().to_string()), "..");
         // Nor the holder itself.
         assert!(!trusts(&svc.root.join("worktrees").display().to_string()), "holder");
+    }
+
+    /// codex's trust is drawn on cursor's line: its repository is written
+    /// into codex's config for a worktree this install forked, and for nothing
+    /// else. The config here is a throwaway home (`codex_trust::test_home`),
+    /// never the owner's.
+    #[tokio::test]
+    async fn codex_trust_is_only_for_a_worktree_this_install_forked_for_a_new_task() {
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::codex_trust::test_home::set(home.path());
+        let config = home.path().join("config.toml");
+        let entries = || -> Vec<String> {
+            let text = std::fs::read_to_string(&config).unwrap_or_default();
+            let doc: toml_edit::DocumentMut = text.parse().unwrap();
+            doc.get("projects")
+                .and_then(|p| p.as_table_like())
+                .map(|p| p.iter().map(|(k, _)| k.to_string()).collect())
+                .unwrap_or_default()
+        };
+
+        // Not the repository's own checkout, and not cursor or claude.
+        svc.prepare_launch_hooks("codex", &ws.worktree_path);
+        let made = svc.create_workspace(ws.repository_id, "fix-it", "fix-it", "HEAD").await.unwrap();
+        svc.prepare_launch_hooks("cursor", &made.worktree_path);
+        svc.prepare_launch_hooks("claude", &made.worktree_path);
+        assert_eq!(entries(), Vec::<String>::new());
+
+        // An adopted branch is somebody's commits, and is not trusted either.
+        git::git(Path::new(&ws.worktree_path), &["branch", "theirs"]).await.unwrap();
+        let adopted = svc.adopt_branch(ws.repository_id, "theirs").await.unwrap();
+        svc.prepare_launch_hooks("codex", &adopted.worktree_path);
+        assert_eq!(entries(), Vec::<String>::new());
+
+        // A new task's worktree: its repository's main checkout, resolved.
+        svc.prepare_launch_hooks("codex:gpt-5.6-terra", &made.worktree_path);
+        let main = Path::new(&ws.worktree_path).canonicalize().unwrap();
+        assert_eq!(entries(), vec![main.display().to_string()]);
     }
 
     #[test]

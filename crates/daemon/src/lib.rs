@@ -2,6 +2,7 @@
 pub mod agent_supervisor;
 pub mod allowlist;
 pub mod change_set;
+pub mod codex_trust;
 pub mod enrollment;
 pub mod fanout;
 pub mod file_diff;

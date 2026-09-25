@@ -100,6 +100,10 @@ ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["allo
 # Already in the lock at this version, through `tempfile` and
 # `alacritty_terminal` — an edge, not a tree.
 rustix = { version = "1", features = ["fs", "process"] }
+# Adding codex's own trust entry to `~/.codex/config.toml` without disturbing
+# the rest of the owner's file. See `codex_trust`. Already a workspace
+# dependency, through `farcooler-core`'s own config writer.
+toml_edit.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
