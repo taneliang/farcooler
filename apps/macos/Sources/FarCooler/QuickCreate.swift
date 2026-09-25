@@ -8,8 +8,9 @@ import SwiftUI
 /// Nine interactions before the first useful word, which is long enough to lose
 /// the thought that started it.
 ///
-/// Everything in that list except the last item is derivable. The description
-/// cut short names the worktree, the branch is a slug of it, the project is the
+/// Everything in that list except the last item is derivable. A few words of
+/// the description name the worktree (`TaskName`, asked of the on-device model
+/// where there is one), the branch is a slug of that name, the project is the
 /// one you were last in, and the agent is a preference. So there is one field,
 /// and what you type in it becomes the agent's first message.
 ///
@@ -25,8 +26,8 @@ struct QuickCreate: View {
     /// `NewWorkspaceSheet`, which tags the same way for the same reason.
     let projects: [(host: String, repository: Repository)]
     @Binding var project: String
-    /// Description, host, project, preset. Returns once queued, not
-    /// finished. The panel closes itself afterwards unless ⌥⏎ asked it not
+    /// Description, name, host, project, preset. Returns once queued, not
+    /// finished. `name` is the one the footer showed. The panel closes itself afterwards unless ⌥⏎ asked it not
     /// to, through `onClose` — the same way Esc closes it.
     ///
     /// `host` comes from `chosen` below, the same picker selection that
@@ -35,7 +36,7 @@ struct QuickCreate: View {
     /// together for exactly this reason: a repository chosen without its
     /// host, handed to whatever runner happens to be "current" downstream,
     /// is how a task starts on the wrong one with no error at all.
-    let onSubmit: (String, String, String, String) -> Void
+    let onSubmit: (String, String, String, String, String) -> Void
     let onResume: () -> Void
     let onClose: () -> Void
     /// What the CHOSEN runner says branch names start with.
@@ -46,6 +47,9 @@ struct QuickCreate: View {
     /// reason `onSubmit` carries the host — a repository resolved without it is
     /// how work starts on the wrong runner with no error at all.
     var branchPrefix: (String) -> String = { _ in "" }
+    /// Who names the task. The on-device model where this Mac has one, and
+    /// the heuristic otherwise; a test hands in its own.
+    var namer: TaskNamer = .onDevice
 
     /// The draft survives closing the panel.
     ///
@@ -57,6 +61,10 @@ struct QuickCreate: View {
     @AppStorage("tasks.model") private var model = ""
 
     @State private var justCreated: String?
+    /// The namer's answer, and the description it answered for. Asked while
+    /// you type (see `body`'s `.task`), so ⏎ never waits for a model: the
+    /// name it sends is whichever the footer shows at that moment.
+    @State private var named: (description: String, name: String)?
 
     /// The project `project` names, or nil if it names nothing any runner
     /// currently has.
@@ -85,16 +93,22 @@ struct QuickCreate: View {
         return "\(entry.repository.displayName) — \(host)"
     }
 
-    private var branch: String {
-        Branch.slug(from: text, prefix: branchPrefix(chosen?.host ?? ""))
+    private var description: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// The name this task will carry, derived the same way `startTask` derives
-    /// the one it sends — a description cut to a title. It is a directory now
-    /// rather than a stored string, so what this becomes is what the sidebar
-    /// row says for as long as the worktree exists.
+    /// The branch follows the name, so the directory and the branch agree.
+    private var branch: String {
+        Branch.slug(from: name, prefix: branchPrefix(chosen?.host ?? ""))
+    }
+
+    /// The name this task will carry: the namer's answer for exactly this
+    /// description when it has one, the heuristic until then. It is a
+    /// directory rather than a stored string, so what this becomes is what
+    /// the sidebar row says for as long as the worktree exists.
     private var name: String {
-        Branch.title(from: text)
+        if let named, named.description == description { return named.name }
+        return TaskName.heuristic(description)
     }
 
     /// The worktree about to be created, which is the only thing naming this
@@ -104,13 +118,14 @@ struct QuickCreate: View {
         return WorktreeName.path(repository: chosen.repository.displayName, name: name)
     }
 
-    /// A description of nothing but punctuation is a description the daemon
-    /// will refuse: it leaves no directory behind once slugged. `Branch.title`
-    /// keeps this well under the sixty-scalar ceiling, but the ceiling is
-    /// checked where the name is decided rather than assumed from a cut made
-    /// somewhere else.
+    /// A description of nothing but punctuation is not a task. Any letter or
+    /// digit, in any script, is — a description with no word a directory can
+    /// hold is still named (`task`). `TaskName` keeps the name well under the
+    /// daemon's sixty-scalar ceiling, but the ceiling is checked where the
+    /// name is decided rather than assumed from a cut made somewhere else.
     private var canSubmit: Bool {
-        chosen != nil && WorktreeName.isValid(name)
+        chosen != nil && description.contains { $0.isLetter || $0.isNumber }
+            && WorktreeName.isValid(name)
     }
 
     var body: some View {
@@ -140,6 +155,19 @@ struct QuickCreate: View {
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
         .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
         .frame(width: 560)
+        .onAppear { OnDeviceNamer.prewarm() }
+        // Named while typing, a moment after the typing stops: `.task(id:)`
+        // cancels the previous one on every keystroke, so only a pause asks
+        // the model anything.
+        .task(id: description) {
+            let asked = description
+            guard !asked.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let answer = await namer.name(for: asked)
+            guard !Task.isCancelled else { return }
+            named = (asked, answer)
+        }
     }
 
     /// Grows with the prompt, up to a point.
@@ -217,13 +245,12 @@ struct QuickCreate: View {
     /// Start the task, then close unless `keepOpen`. Not private so a test
     /// can press ⏎ without a window.
     func submit(keepOpen: Bool) {
-        let description = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // The same gate the footer shows, not a weaker one. ⏎ is the only way
         // in here, and a name the daemon refuses would clear the draft on its
         // way to a failure nothing on screen reports.
         guard canSubmit, let chosen else { return }
         onSubmit(
-            description, chosen.host, chosen.repository.id,
+            description, name, chosen.host, chosen.repository.id,
             Agents.preset(agent: agent, model: model))
 
         justCreated = WorktreeName.display(name)
@@ -324,17 +351,5 @@ enum Branch {
         }
         while out.hasSuffix("-") { out.removeLast() }
         return prefix + (out.isEmpty ? "task" : out)
-    }
-
-    /// A short human title, for a sidebar row.
-    static func title(from text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > 42 else { return trimmed }
-        // Cut on a word boundary rather than mid-word.
-        let cut = trimmed.prefix(42)
-        if let space = cut.lastIndex(of: " ") {
-            return String(cut[..<space]) + "…"
-        }
-        return String(cut) + "…"
     }
 }

@@ -1373,17 +1373,21 @@ final class DaemonClient: ObservableObject {
     /// A runner too old for that still gets it typed, as before, but in a
     /// detached task after this returns — see `typeWhenIdle`. Nothing waits on
     /// that any more, so the window does not either.
-    func startTask(project: String, description: String, agent: String) async -> String? {
+    ///
+    /// `name` is the short name the panel showed (`TaskName`): the worktree's
+    /// directory, and so its sidebar row, and the branch is a slug of it. The
+    /// one thing added here is a `-2` when a worktree of that name already
+    /// exists, which the daemon would otherwise refuse.
+    func startTask(project: String, description: String, name: String, agent: String) async
+        -> String?
+    {
         // This runner's own prefix, read from the fleet it last refreshed — the
         // same value the composer previewed, so the branch that gets made is the
         // branch the user was shown.
         let prefix = fleet.branchPrefix ?? ""
-        let branch = await MainActor.run { Branch.slug(from: description, prefix: prefix) }
-        // The positional is the worktree's name now rather than a description
-        // of the task, which is why a whole prompt is cut down before it is
-        // sent: it is about to become a directory, and the composer previewed
-        // the path it makes.
-        let name = await MainActor.run { Branch.title(from: description) }
+        let taken = Set(fleet.workspaces.map { URL(fileURLWithPath: $0.worktree).lastPathComponent })
+        let name = TaskName.unique(name, taken: taken)
+        let branch = Branch.slug(from: name, prefix: prefix)
 
         let before = Set(fleet.workspaces.map(\.id))
         // `--no-terminal`, because this creates its own agent terminal a few

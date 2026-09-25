@@ -16,6 +16,7 @@ import Testing
 struct QuickCreateTests {
     private final class Outcome {
         var started: [String] = []
+        var names: [String] = []
         var closed = 0
     }
 
@@ -25,9 +26,13 @@ struct QuickCreateTests {
         return QuickCreate(
             projects: [(host: "", repository: repository)],
             project: .constant("r1"),
-            onSubmit: { description, _, _, _ in outcome.started.append(description) },
+            onSubmit: { description, name, _, _, _ in
+                outcome.started.append(description)
+                outcome.names.append(name)
+            },
             onResume: {},
-            onClose: { outcome.closed += 1 })
+            onClose: { outcome.closed += 1 },
+            namer: TaskNamer(model: nil))
     }
 
     private func withDraft(_ draft: String, _ body: () -> Void) {
@@ -47,6 +52,9 @@ struct QuickCreateTests {
             #expect(UserDefaults.standard.string(forKey: "tasks.draft") == "")
         }
         #expect(outcome.started == ["Fix the flaky reconnect test"])
+        // The short name, not the description: the directory and the sidebar
+        // row are this, and the agent still gets every word above.
+        #expect(outcome.names == ["fix-flaky-reconnect-test"])
         #expect(outcome.closed == 1)
     }
 

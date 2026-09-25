@@ -23,6 +23,8 @@ struct StartTaskTests {
         var workspaceMade = false
         var terminalMade = false
         var activity: String?
+        /// Worktree directories already on the runner, beside the main checkout.
+        var existing: [String] = []
 
         init(capabilities: [String]) { self.capabilities = capabilities }
 
@@ -59,10 +61,17 @@ struct StartTaskTests {
                     "worktree": "/tmp/repo", "state": "active", "terminals": [],
                 ]
             ]
+            for (index, directory) in existing.enumerated() {
+                workspaces.append([
+                    "id": "w-old\(index)", "short": "wold\(index)", "task": directory,
+                    "branch": directory, "worktree": "/tmp/worktrees/repo/\(directory)",
+                    "state": "active", "terminals": [],
+                ])
+            }
             if workspaceMade {
                 workspaces.append([
-                    "id": "w-new", "short": "wnew", "task": "fix-flaky-test", "branch": "fix",
-                    "worktree": "/tmp/worktrees/repo/fix", "state": "active",
+                    "id": "w-new", "short": "wnew", "task": "new", "branch": "new",
+                    "worktree": "/tmp/worktrees/repo/new", "state": "active",
                     "terminals": terminals,
                 ])
             }
@@ -74,6 +83,7 @@ struct StartTaskTests {
 
         var sent: [[String]] { calls.filter { $0.starts(with: ["terminal", "send"]) } }
         var terminalCreate: [String]? { calls.first { $0.starts(with: ["terminal", "create"]) } }
+        var workspaceCreate: [String]? { calls.first { $0.starts(with: ["workspace", "create"]) } }
     }
 
     /// A client wired to `runner`, connected, with the runner's build read.
@@ -97,7 +107,8 @@ struct StartTaskTests {
 
         let started = ContinuousClock.now
         let workspace = await client.startTask(
-            project: "repo", description: Self.description, agent: "claude")
+            project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+            agent: "claude")
         let took = ContinuousClock.now - started
 
         #expect(workspace == "w-new")
@@ -117,7 +128,8 @@ struct StartTaskTests {
 
         let started = ContinuousClock.now
         let workspace = await client.startTask(
-            project: "repo", description: Self.description, agent: "claude")
+            project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+            agent: "claude")
         let took = ContinuousClock.now - started
 
         #expect(workspace == "w-new")
@@ -130,6 +142,30 @@ struct StartTaskTests {
             try? await Task.sleep(for: .milliseconds(100))
         }
         #expect(runner.sent.first == ["terminal", "send", "tnew", Self.description])
+    }
+
+    @Test func theWorktreeAndItsBranchAreTheShortNameNotTheDescription() async {
+        let runner = Runner(capabilities: ["workspaces", "terminals", "launch_prompt"])
+        let client = await client(runner)
+        _ = await client.startTask(
+            project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+            agent: "claude")
+        #expect(
+            runner.workspaceCreate == [
+                "workspace", "create", "repo", "fix-flaky-reconnect", "--branch",
+                "fix-flaky-reconnect", "--no-terminal",
+            ])
+    }
+
+    @Test func aNameAWorktreeAlreadyHasGetsANumber() async {
+        let runner = Runner(capabilities: ["workspaces", "terminals", "launch_prompt"])
+        runner.existing = ["fix-flaky-reconnect"]
+        let client = await client(runner)
+        _ = await client.startTask(
+            project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+            agent: "claude")
+        #expect(runner.workspaceCreate?[3] == "fix-flaky-reconnect-2")
+        #expect(runner.workspaceCreate?[5] == "fix-flaky-reconnect-2")
     }
 
     @Test func aPromptThatStartsWithADashIsStillOneArgument() {

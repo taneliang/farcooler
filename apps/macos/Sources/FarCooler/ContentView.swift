@@ -358,9 +358,11 @@ struct ContentView: View {
                 QuickCreate(
                     projects: store.repositories,
                     project: $lastProject,
-                    onSubmit: { description, host, project, preset in
+                    onSubmit: { description, name, host, project, preset in
                         lastProject = project
-                        startTask(description: description, host: host, project: project, agent: preset)
+                        startTask(
+                            description: description, name: name, host: host, project: project,
+                            agent: preset)
                     },
                     onResume: {
                         showQuickCreate = false
@@ -2317,7 +2319,9 @@ struct ContentView: View {
     /// whose `repositories` has not been re-read since a reconnect, and a
     /// lookup that finds nothing has to be answered with a refusal, not a
     /// fallback to this Mac.
-    private func startTask(description: String, host: String, project: String, agent: String) {
+    private func startTask(
+        description: String, name: String, host: String, project: String, agent: String
+    ) {
         Task {
             if let why = store.refusal(for: host) {
                 errorBanner = "Cannot do that: \(why)"
@@ -2327,6 +2331,7 @@ struct ContentView: View {
             let created = await client.startTask(
                 project: project,
                 description: description,
+                name: name,
                 agent: agent.isEmpty ? Preferences.shared.defaultAgent : agent)
             reveal(created)
         }
