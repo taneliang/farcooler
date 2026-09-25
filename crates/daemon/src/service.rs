@@ -345,7 +345,7 @@ pub fn preset_command_with_hooks(
         "claude" => {
             format!(
                 "{shell} -ilc {}",
-                shell_quote(&format!("claude{flag}{session}{settings}{prompt}"))
+                shell_quote(&format!("{}{flag}{session}{settings}{prompt}", claude_program()))
             )
         }
         // `shell_quote` around the payload now, for claude's reason: the
@@ -383,6 +383,56 @@ pub fn preset_command_with_hooks(
         // all. A preset is chosen from a list; anything else is a bug or an
         // attempt.
         _ => format!("{shell} -il"),
+    }
+}
+
+/// The program claude's launch arm runs: `claude`, always, outside tests.
+///
+/// Under test a thread may swap it for a name no binary has
+/// (`test_agent::stubbed`), so a test can open a real pane through the real
+/// launch path, read back the command tmux was handed, and never start an
+/// agent. That matters most for a pane opened for a task: its first message
+/// tells the agent to run board commands, through a CLI that can reach
+/// whichever daemon is on this machine.
+fn claude_program() -> &'static str {
+    #[cfg(test)]
+    if let Some(stub) = test_agent::STUB.with(|s| s.get()) {
+        return stub;
+    }
+    "claude"
+}
+
+#[cfg(test)]
+pub(crate) mod test_agent {
+    use std::cell::Cell;
+
+    /// A name that is not a program anywhere. A shell handed it prints
+    /// "unknown command" and runs nothing.
+    pub(crate) const NOT_A_PROGRAM: &str = "farcooler-test-stub-not-an-agent";
+
+    thread_local! {
+        pub(crate) static STUB: Cell<Option<&'static str>> = const { Cell::new(None) };
+    }
+
+    /// Stub claude on this thread until the guard drops. A thread-local, so
+    /// tests on other threads keep building the real command. `#[tokio::test]`
+    /// runs its future on the test's own thread, so every command built while
+    /// it awaits a `Service` call is built here.
+    pub(crate) fn stubbed() -> Guard {
+        assert!(
+            farcooler_core::programs::find(NOT_A_PROGRAM).is_none(),
+            "{NOT_A_PROGRAM} exists on this machine; the stub would run it"
+        );
+        STUB.with(|s| s.set(Some(NOT_A_PROGRAM)));
+        Guard
+    }
+
+    pub(crate) struct Guard;
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            STUB.with(|s| s.set(None));
+        }
     }
 }
 
@@ -5659,6 +5709,7 @@ mod pane_actor_tests {
     /// this is the relaunch's wiring, read off the pane tmux was handed.
     #[tokio::test]
     async fn a_pane_opened_for_a_task_names_it_across_a_restart() {
+        let _stub = super::test_agent::stubbed();
         let (_dir, svc, ws) = a_workspace().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
@@ -5678,12 +5729,17 @@ mod pane_actor_tests {
     /// The opening prompt is the first launch's alone. A restart that replayed
     /// it would start the work over on top of the work.
     ///
-    /// The one test here that launches an agent with a first message: a real
-    /// claude, in the fixture's fresh temporary repository, which claude has
-    /// never been told to trust, so it holds the message behind its trust
-    /// screen until the fixture's tmux server is torn down.
+    /// **No agent is started.** claude's program is stubbed on this thread
+    /// (`test_agent::stubbed`) with a name that is not a program, so the pane
+    /// runs `<login shell> -ilc 'farcooler-test-stub-not-an-agent … <prompt>'`,
+    /// the shell reports an unknown command, and nothing ever reads the
+    /// message. That is airtight in a way a trust screen is not: the message
+    /// tells an agent to run board commands through a CLI that, from a test
+    /// binary, is whatever `farcooler` is on PATH, and so the live daemon.
+    /// The stub is checked in the pane itself, not assumed.
     #[tokio::test]
     async fn only_the_first_launch_is_told_what_to_do() {
+        let _stub = super::test_agent::stubbed();
         let (_dir, svc, ws) = a_workspace().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
@@ -5693,6 +5749,8 @@ mod pane_actor_tests {
         assert_eq!(svc.store.get_terminal(term.id).unwrap().task_id, Some(task), "on the record");
 
         let first = pane_start_command(&svc, term.id).await;
+        assert!(first.contains(super::test_agent::NOT_A_PROGRAM), "the stub, not claude: {first}");
+        assert!(!first.contains("'claude "), "no real agent was started: {first}");
         // Quoted twice on its way into the pane, so an apostrophe reads back
         // escaped; the words between them do not.
         assert!(first.contains(&format!("re working {key} on this repository")), "told what to do: {first}");
@@ -5700,6 +5758,7 @@ mod pane_actor_tests {
 
         svc.restart_terminal(term.id).await.expect("restart");
         let again = pane_start_command(&svc, term.id).await;
+        assert!(again.contains(super::test_agent::NOT_A_PROGRAM), "still the stub: {again}");
         assert!(!again.contains("re working"), "a restart says nothing: {again}");
         assert!(again.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)), "{again}");
     }
