@@ -196,6 +196,30 @@ jobs:
           fi
           tmux -V
 
+      # fish, because it is a login shell people have and the one whose quoting
+      # differs: inside single quotes it reads `\\` and `\'`, which sh does not.
+      # A pane's command is parsed by the login shell, so the daemon's launch
+      # tests run every quoting case through fish as well as sh, bash and zsh
+      # — and with `CI` set, a missing fish FAILS them rather than skipping
+      # its half (`launch_prompt_tests::shells`). Bounded like tmux above.
+      # Ubuntu's fish is 3.7 and Homebrew's is 4.x; the launch needs 3.4 or
+      # later for `"$(…)"`.
+      - name: Install fish
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if ! command -v fish >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+              sudo apt-get $APT_OPTS update
+              sudo apt-get $APT_OPTS install -y fish
+            else
+              brew install fish
+            fi
+          fi
+          fish --version
+
       # The ACP adapters are `npx` packages, which need only node and a network
       # — both of which the runner already has. These three are spawned BY NAME
       # instead, so the binary has to be on PATH before anything can hand shake

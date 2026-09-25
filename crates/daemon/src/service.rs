@@ -203,23 +203,27 @@ pub const MAX_INLINE_LAUNCH_BYTES: usize = 8 * 1024;
 
 /// The prompt as the last word of an agent's `-ilc` payload, or nothing.
 ///
-/// Inline, it is one `shell_quote`d word. From a file it is
-/// `"$(cat <file> && rm -f <file>)"`: one word in every shell this runs
-/// under (POSIX shells and fish 3.4 or later both keep a double-quoted
-/// command substitution whole, newlines included), and the file is gone once
-/// the agent has it, so a runtime directory does not collect every long
-/// prompt anyone ever sent. Both forms trim nothing but the trailing newlines
-/// command substitution always drops.
+/// Inline, it is one `shell_quote`d word — which also puts it in argv, where
+/// `ps` and tmux's `pane_start_command` show it to anyone who can read this
+/// user's processes. On a Mac that is this user; on a shared Linux runner,
+/// `ps` shows argv to every account. The file form is private at rest (0600)
+/// but ends up in argv the same way, because an argument is what these CLIs
+/// take. A prompt should hold nothing its author would not type into a
+/// terminal on that runner.
 ///
-/// A prompt that starts with `-` gets a space in front, in both forms. All
-/// three CLIs parse their arguments with a library that reads a leading dash
-/// as a flag, so "--help me with this" would print help, and "-p fix it"
-/// would run claude in print mode, rather than start the task. A leading space
-/// is nothing to the agent reading the message.
+/// From a file it is `"$(cat <file> && rm -f <file>)"`: one word in every
+/// shell this runs under (POSIX shells and fish 3.4 or later both keep a
+/// double-quoted command substitution whole, newlines included). **Removing
+/// the file there is safe**: the substitution has read the whole of it
+/// before the agent is exec'd, and the agent is handed the text, never the
+/// path, so nothing ever reads the file after that line. Both forms trim
+/// nothing but the trailing newlines command substitution always drops.
+///
+/// The text goes through `guarded` first; see there.
 fn prompt_argument(prompt: Option<&LaunchPrompt>) -> String {
     match prompt {
         None => String::new(),
-        Some(LaunchPrompt::Inline(text)) => format!(" {}", shell_quote(&dash_guarded(text))),
+        Some(LaunchPrompt::Inline(text)) => format!(" {}", shell_quote(&guarded(text))),
         Some(LaunchPrompt::File(path)) => {
             let path = shell_quote(&path.display().to_string());
             format!(" \"$(cat {path} && rm -f {path})\"")
@@ -227,9 +231,26 @@ fn prompt_argument(prompt: Option<&LaunchPrompt>) -> String {
     }
 }
 
-/// `text`, with a space in front when it would otherwise read as a flag.
-fn dash_guarded(text: &str) -> std::borrow::Cow<'_, str> {
-    if text.starts_with('-') { format!(" {text}").into() } else { text.into() }
+/// `text`, with a space in front when an argument parser could read it as
+/// something other than a prompt.
+///
+/// Two ways it could. A leading `-` is a flag: "--help me" prints help and
+/// "-p fix it" runs claude in print mode. And a first positional that is
+/// exactly a subcommand's name runs that subcommand: "update" updates claude
+/// or codex, "logout" signs cursor out, "apply" has codex `git apply` its last
+/// diff into the tree (each listed in its own `--help`).
+///
+/// A space in front, rather than `--`. None of the three documents `--` in
+/// `--help`, and commander (claude, cursor) still matches the first operand
+/// against its commands after one. Both parsers compare a subcommand by
+/// exact equality and a flag by its leading `-`; a word that begins with a
+/// space is neither, under any parser, and an agent reading the message does
+/// not see it. Only a prompt that could collide is touched: one with no
+/// whitespace in it at all (a subcommand name has none), or one starting with
+/// a dash. "update the readme" is already not a subcommand's name.
+fn guarded(text: &str) -> std::borrow::Cow<'_, str> {
+    let collides = text.starts_with('-') || !text.contains(char::is_whitespace);
+    if collides { format!(" {text}").into() } else { text.into() }
 }
 
 /// codex's startup update check, off. See the `"codex"` arm of
@@ -561,9 +582,16 @@ fn is_cursor(preset: &str) -> bool {
     preset.split_once(':').map_or(preset, |(agent, _)| agent) == "cursor"
 }
 
-/// The largest prompt `terminal.create` accepts: 256 KiB, a quarter of the
-/// control envelope's ceiling, and far more than anyone types.
-pub const MAX_LAUNCH_PROMPT_BYTES: usize = 256 * 1024;
+/// The largest prompt `terminal.create` accepts: 100 KiB.
+///
+/// Below Linux's ceiling on ONE argument string, `MAX_ARG_STRLEN`, which is
+/// 32 pages — 128 KiB — and applies however the text got there: a prompt past
+/// it passes every check here, is written to its file, is read back by the
+/// shell and then fails `execve` with E2BIG, and the pane shows "Argument list
+/// too long" and exits. Linux runners are supported, so the cap is Linux's,
+/// with a margin for the guard's space and for UTF-8 counted in bytes. The
+/// Mac checks the same number before it asks (`QuickCreate`).
+pub const MAX_LAUNCH_PROMPT_BYTES: usize = 100 * 1024;
 
 /// A prompt that can become a process argument. A NUL cannot: argv strings
 /// are NUL-terminated, so the text after it would be cut off without a word.
@@ -604,8 +632,8 @@ fn launch_command_with_prompt(
     if command.len() <= MAX_INLINE_LAUNCH_BYTES {
         return command;
     }
-    let path = runtime_dir.join(format!("prompt-{terminal}"));
-    extras.prompt = match write_private_file(&path, &dash_guarded(text)) {
+    let path = prompt_file(runtime_dir, terminal);
+    extras.prompt = match write_private_file(&path, &guarded(text)) {
         Ok(()) => Some(LaunchPrompt::File(path)),
         Err(e) => {
             tracing::warn!(error = %e, "could not write a long prompt to a file; the agent starts without it");
@@ -613,6 +641,17 @@ fn launch_command_with_prompt(
         }
     };
     build(&extras)
+}
+
+/// Where a terminal's long prompt waits for its launch to read it.
+fn prompt_file(runtime_dir: &Path, terminal: Uuid) -> PathBuf {
+    runtime_dir.join(format!("prompt-{terminal}"))
+}
+
+/// Remove a prompt file nothing will read: its window was never made. A
+/// prompt is somebody's words and should not outlive its one use.
+fn remove_prompt_file(runtime_dir: &Path, terminal: Uuid) {
+    let _ = std::fs::remove_file(prompt_file(runtime_dir, terminal));
 }
 
 /// Write `text` to `path`, readable by this user only.
@@ -1848,11 +1887,18 @@ impl Service {
         // from the base. Rolling back compares this against the worktree's
         // HEAD, so a second `resolve_revision` here would refuse to remove the
         // very worktree it had just made.
-        let base_commit = git::create_worktree(&repo_path, branch, base_revision, &dest).await?;
+        let created = git::create_worktree(&repo_path, branch, base_revision, &dest).await?;
+        let base_commit = created.commit;
         // Claim it before anyone can adopt it. Another install sharing this
         // host sees the same worktree in `git worktree list` and would
         // otherwise take it for its own fleet.
         git::mark_owner(&dest, &self.install_id).await;
+        // And say whether it is a NEW branch, which is what cursor's
+        // `--trust` is drawn on (`forked_this_worktree`). A branch checked
+        // out from a remote carries somebody's commits, and is not marked.
+        if created.forked {
+            git::mark_forked(&dest, &self.install_id).await;
+        }
 
         match self.store.create_workspace(repository_id, branch, &dest.to_string_lossy(), false) {
             Ok(ws) => {
@@ -2411,29 +2457,47 @@ impl Service {
         // The manager skill: a plugin in the runtime directory, handed over as
         // `--plugin-dir` to claude and to cursor, which both take the flag.
         let plugin_dir = takes_plugin_dir(preset).then(|| write_plugin(&self.root)).flatten();
-        // cursor's `--trust`, for a worktree this runner made. See
-        // `LaunchExtras::trust_workspace`.
-        let trust_workspace = is_cursor(preset) && self.made_this_worktree(Path::new(worktree));
+        // cursor's `--trust`, for a worktree this runner made for a new task.
+        // See `LaunchExtras::trust_workspace`.
+        let trust_workspace = is_cursor(preset) && self.forked_this_worktree(Path::new(worktree));
         LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None }
     }
 
-    /// Whether `worktree` is one this runner made: a directory under its own
-    /// `worktrees/`, which is where `worktree_dest` puts every worktree
-    /// `workspace create` and `workspace adopt` make, and nothing else does.
+    /// Whether `worktree` is one this install made for a new task: a real
+    /// directory under its own `worktrees/`, whose git admin directory
+    /// carries this install's fork mark (`git::mark_forked`).
     ///
     /// The line cursor's `--trust` is drawn on. Trusting a directory is a
-    /// decision about its contents; a worktree Far Cooler checked out of a
-    /// repository the person registered holds that repository's own commits,
-    /// and the person asked for the trust screen to be gone there. A main
-    /// checkout, or a worktree somebody made by hand somewhere else, is left
-    /// to cursor to ask about, as it always has been.
+    /// decision about its contents — cursor's trust is what lets a project's
+    /// own `.cursor/` configuration (MCP servers, hooks, rules) load. A branch
+    /// this runner forked from the person's repository holds that
+    /// repository's own commits and nothing else yet, and the person asked for
+    /// the trust screen to be gone there. Everything else is left to cursor to
+    /// ask about, as it always has been:
     ///
-    /// Canonical on both sides, for the `/var` and `/private/var` reason
-    /// `canonical_or_raw` gives.
-    fn made_this_worktree(&self, worktree: &Path) -> bool {
-        let ours = canonical_or_raw(&self.root.join("worktrees").display().to_string());
-        let path = canonical_or_raw(&worktree.display().to_string());
-        path != ours && path.starts_with(&ours)
+    /// - an ADOPTED branch, or one `create` checked out because a remote
+    ///   already had the name — somebody else's commits, possibly a
+    ///   colleague's config;
+    /// - a main checkout, a worktree made by hand, one from before the mark;
+    /// - a path that does not exist. tmux starts a pane whose directory is
+    ///   missing in `$HOME`, so trusting a missing worktree would trust the
+    ///   home directory. `canonicalize` has to succeed — no raw-path
+    ///   fallback, which would also let a `..` through a component-wise
+    ///   `starts_with`.
+    ///
+    /// The mark is in git's admin directory, not the working tree: nothing a
+    /// branch carries can put it there, and `git worktree remove` takes it
+    /// away with the worktree.
+    fn forked_this_worktree(&self, worktree: &Path) -> bool {
+        let (Ok(ours), Ok(path)) =
+            (self.root.join("worktrees").canonicalize(), worktree.canonicalize())
+        else {
+            return false;
+        };
+        path.is_dir()
+            && path != ours
+            && path.starts_with(&ours)
+            && git::forked_by(&path).as_deref() == Some(self.install_id.as_str())
     }
 
     /// Create a terminal: a tagged tmux window running the preset.
@@ -2535,6 +2599,8 @@ impl Service {
             .await;
 
         if let Err(e) = created {
+            // No pane will ever read a prompt file for this terminal.
+            remove_prompt_file(&self.root, term.id);
             // Creation never established a live runtime.
             let _ = self.store.update_terminal(
                 term.id,
@@ -2800,6 +2866,7 @@ impl Service {
         let pane_id = match created {
             Ok(id) => id,
             Err(e) => {
+                remove_prompt_file(&self.root, term.id);
                 let _ = self.store.update_terminal(
                     term.id,
                     term.resource_version,
@@ -8451,6 +8518,12 @@ mod launch_prompt_tests {
             .collect();
         match farcooler_core::programs::find("fish") {
             Some(fish) => found.push(fish.display().to_string()),
+            // CI installs fish (ci.yml, "Install fish") so this half runs
+            // where it counts; a CI run without it is a broken runner, not a
+            // reason to pass without the one shell that differs.
+            None if std::env::var_os("CI").is_some() => {
+                panic!("fish is not installed, and CI must run the fish half of this test")
+            }
             None => eprintln!("fish is not installed here; the fish half of this test did not run"),
         }
         found
@@ -8507,6 +8580,44 @@ mod launch_prompt_tests {
         assert_eq!(argv_through(&command, "claude", "/bin/sh", "/bin/sh"), ", --help me with this");
     }
 
+    /// Each CLI runs a subcommand whose name is its first positional:
+    /// "update" updates claude or codex, "logout" signs cursor out, "apply"
+    /// has codex `git apply` its last diff. A one-word prompt reaches every
+    /// agent as a word no subcommand is named — and so does a leading dash.
+    #[test]
+    fn a_prompt_that_names_a_subcommand_is_not_run_as_one() {
+        let cases = [
+            ("claude", "claude", String::new()),
+            ("codex", "codex", ",-c,check_for_update_on_startup=false".to_string()),
+            ("cursor", "cursor-agent", String::new()),
+        ];
+        for (preset, program, flags) in &cases {
+            for word in ["update", "logout", "apply", "-x"] {
+                let command = preset_command_with_hooks(preset, None, &inline(word));
+                assert_eq!(
+                    argv_through(&command, program, "/bin/sh", "/bin/sh"),
+                    format!("{flags}, {word}"),
+                    "{preset} {word}"
+                );
+            }
+            // A sentence cannot be a subcommand's name, and is left alone.
+            let command = preset_command_with_hooks(preset, None, &inline("update the readme"));
+            assert_eq!(
+                argv_through(&command, program, "/bin/sh", "/bin/sh"),
+                format!("{flags},update the readme")
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_prompt_that_names_a_subcommand_is_guarded_in_its_file_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        let word = "u".repeat(20_000);
+        launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&word));
+        assert_eq!(std::fs::read_to_string(prompt_file(dir.path(), id)).unwrap(), format!(" {word}"));
+    }
+
     #[test]
     fn a_preset_that_takes_no_prompt_is_launched_without_one() {
         for preset in ["shell", "aider", CHANGES_PRESET] {
@@ -8558,25 +8669,39 @@ mod launch_prompt_tests {
     }
 
     #[tokio::test]
-    async fn cursor_trust_is_decided_by_who_made_the_worktree() {
+    async fn cursor_trust_is_only_for_a_worktree_this_install_forked_for_a_new_task() {
         let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
-        // The fixture's workspace is the repository's own checkout, which
-        // Far Cooler did not make.
-        assert!(!svc.prepare_launch_hooks("cursor", &ws.worktree_path).trust_workspace);
+        let trusts = |path: &str| svc.prepare_launch_hooks("cursor", path).trust_workspace;
 
-        let ours = svc.root.join("worktrees").join("repo").join("fix-it");
-        std::fs::create_dir_all(&ours).unwrap();
-        let ours = ours.display().to_string();
-        assert!(svc.prepare_launch_hooks("cursor", &ours).trust_workspace);
-        assert!(svc.prepare_launch_hooks("cursor:auto", &ours).trust_workspace);
-        assert!(!svc.prepare_launch_hooks("claude", &ours).trust_workspace);
-        // The directory that holds them is not itself a worktree.
-        let holder = svc.root.join("worktrees").display().to_string();
-        assert!(!svc.made_this_worktree(Path::new(&holder)));
-        // Nor is a sibling whose name merely starts the same way.
-        let sibling = svc.root.join("worktrees-else").join("x");
-        std::fs::create_dir_all(&sibling).unwrap();
-        assert!(!svc.made_this_worktree(&sibling));
+        // A new task's worktree: a new branch, cut here. Trusted — and only
+        // for cursor.
+        let made = svc.create_workspace(ws.repository_id, "fix-it", "fix-it", "HEAD").await.unwrap();
+        assert!(trusts(&made.worktree_path));
+        assert!(svc.prepare_launch_hooks("cursor:auto", &made.worktree_path).trust_workspace);
+        assert!(!svc.prepare_launch_hooks("claude", &made.worktree_path).trust_workspace);
+
+        // An adopted branch is somebody's commits, and is not.
+        git::git(Path::new(&ws.worktree_path), &["branch", "theirs"]).await.unwrap();
+        let adopted = svc.adopt_branch(ws.repository_id, "theirs").await.unwrap();
+        assert!(!trusts(&adopted.worktree_path), "adopted");
+
+        // The repository's own checkout is not.
+        assert!(!trusts(&ws.worktree_path), "main checkout");
+
+        // A directory under `worktrees/` that nothing marked is not.
+        let by_hand = svc.root.join("worktrees").join("repo").join("by-hand");
+        std::fs::create_dir_all(&by_hand).unwrap();
+        assert!(!trusts(&by_hand.display().to_string()), "unmarked");
+
+        // A worktree that has gone is not — tmux would start it in `$HOME`.
+        let gone = made.worktree_path.clone();
+        std::fs::remove_dir_all(&gone).unwrap();
+        assert!(!trusts(&gone), "missing");
+        // Nor a missing path that climbs back out with `..`.
+        let climb = svc.root.join("worktrees").join("nope").join("..").join("..");
+        assert!(!trusts(&climb.display().to_string()), "..");
+        // Nor the holder itself.
+        assert!(!trusts(&svc.root.join("worktrees").display().to_string()), "holder");
     }
 
     #[test]
@@ -8673,6 +8798,18 @@ mod launch_prompt_tests {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         assert!(!svc.root.join(format!("prompt-{id}")).exists(), "the launch removed its file");
+    }
+
+    /// Linux refuses any single argv string over `MAX_ARG_STRLEN`, 128 KiB,
+    /// with E2BIG — after the file was read and removed, so the task is lost.
+    /// The cap has to leave room for the guard's space.
+    #[test]
+    fn the_largest_prompt_accepted_still_fits_one_linux_argument() {
+        const MAX_ARG_STRLEN: usize = 32 * 4096;
+        let largest = "x".repeat(MAX_LAUNCH_PROMPT_BYTES);
+        assert!(validate_launch_prompt(&largest).is_ok());
+        assert!(guarded(&largest).len() < MAX_ARG_STRLEN);
+        const { assert!(MAX_LAUNCH_PROMPT_BYTES + 28 * 1024 <= MAX_ARG_STRLEN, "a margin under 128 KiB") };
     }
 
     #[test]

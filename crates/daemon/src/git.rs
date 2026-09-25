@@ -171,6 +171,16 @@ pub async fn remotes_with_branch(repo: &Path, branch: &str) -> Result<Vec<String
     Ok(remotes)
 }
 
+/// What `create_worktree` made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedWorktree {
+    /// The commit the worktree was started at.
+    pub commit: String,
+    /// A new branch cut from the base, as opposed to a remote branch that
+    /// already had the name and was checked out with its commits.
+    pub forked: bool,
+}
+
 /// The worktree transaction.
 ///
 /// Validates, refuses collisions, then creates branch and worktree in one git
@@ -200,7 +210,7 @@ pub async fn create_worktree(
     branch: &str,
     base_revision: &str,
     destination: &Path,
-) -> Result<String> {
+) -> Result<CreatedWorktree> {
     if branch_exists(repo, branch).await? {
         return Err(DomainError::BranchExists);
     }
@@ -243,7 +253,7 @@ pub async fn create_worktree(
         // worktree together, so a failure leaves neither.
         return Err(DomainError::OperationFailed);
     }
-    Ok(commit)
+    Ok(CreatedWorktree { commit, forked: tracking.is_none() })
 }
 
 /// A branch you could resume work on.
@@ -526,7 +536,8 @@ mod tests {
         init_repo(&d);
         let dest = sibling("create");
 
-        create_worktree(&d, "feature/x", "HEAD", &dest).await.unwrap();
+        let created = create_worktree(&d, "feature/x", "HEAD", &dest).await.unwrap();
+        assert!(created.forked, "a name nobody had is a new branch");
 
         assert!(dest.join("README.md").exists(), "worktree checked out");
         assert!(branch_exists(&d, "feature/x").await.unwrap());
@@ -588,7 +599,9 @@ mod tests {
         add_remote_branch(&d, "origin", "feat-branch", "dwim");
         let dest = sibling("dwim");
 
-        let commit = create_worktree(&d, "feat-branch", "HEAD", &dest).await.unwrap();
+        let created = create_worktree(&d, "feat-branch", "HEAD", &dest).await.unwrap();
+        let commit = created.commit;
+        assert!(!created.forked, "checked out, not forked: it carries their commits");
 
         assert_eq!(commit, head_of(&d, "refs/remotes/origin/feat-branch"), "started from theirs");
         assert_ne!(commit, head_of(&d, "refs/heads/main"), "and not from HEAD");
@@ -616,7 +629,7 @@ mod tests {
         add_remote_branch(&d, "origin", "feat-branch", "dwimbase");
         let dest = sibling("dwimbase");
 
-        let commit = create_worktree(&d, "feat-branch", "main", &dest).await.unwrap();
+        let commit = create_worktree(&d, "feat-branch", "main", &dest).await.unwrap().commit;
 
         assert_eq!(commit, head_of(&d, "refs/heads/main"));
         assert_ne!(commit, head_of(&d, "refs/remotes/origin/feat-branch"));
@@ -639,7 +652,7 @@ mod tests {
             remotes_with_branch(&d, "feat-branch").await.unwrap(),
             vec!["origin".to_string(), "upstream".to_string()]
         );
-        let commit = create_worktree(&d, "feat-branch", "HEAD", &dest).await.unwrap();
+        let commit = create_worktree(&d, "feat-branch", "HEAD", &dest).await.unwrap().commit;
         assert_eq!(commit, head_of(&d, "HEAD"), "neither remote was chosen");
 
         let _ = std::fs::remove_dir_all(&dest);
@@ -655,7 +668,7 @@ mod tests {
         add_remote_branch(&d, "origin", "feat-branch", "dwimnew");
         let dest = sibling("dwimnew");
 
-        let commit = create_worktree(&d, "something-else", "HEAD", &dest).await.unwrap();
+        let commit = create_worktree(&d, "something-else", "HEAD", &dest).await.unwrap().commit;
 
         assert_eq!(commit, head_of(&d, "HEAD"));
         let upstream = SyncCommand::new("git")
@@ -881,6 +894,43 @@ pub async fn mark_owner(worktree: &Path, install_id: &str) {
         }
         Err(e) => tracing::warn!(error = ?e, "could not locate the worktree admin dir"),
     }
+}
+
+/// The marker saying this install forked the worktree's branch, new, for it.
+const FORKED_MARKER: &str = "farcooler-forked";
+
+/// Record that `worktree`'s branch was cut new by `install_id`, rather than
+/// checked out with somebody's commits. Read by `forked_by`; cursor's
+/// `--trust` is drawn on it. Best effort, like `mark_owner`: a mark that could
+/// not be written costs the trust skip, and cursor asks as it always did.
+pub async fn mark_forked(worktree: &Path, install_id: &str) {
+    match admin_dir(worktree).await {
+        Ok(dir) => {
+            if let Err(e) = std::fs::write(dir.join(FORKED_MARKER), install_id) {
+                tracing::warn!(error = %e, "could not mark a forked worktree");
+            }
+        }
+        Err(e) => tracing::warn!(error = ?e, "could not locate the worktree admin dir"),
+    }
+}
+
+/// Which install forked this worktree's branch, if one did.
+///
+/// Synchronous, because a launch is built synchronously: it reads the
+/// linked worktree's `.git` FILE (`gitdir: <admin dir>`) rather than asking
+/// git. A main checkout has a `.git` directory, not a file, and so is never
+/// forked — which is right, nobody forked it.
+pub fn forked_by(worktree: &Path) -> Option<String> {
+    let pointer = std::fs::read_to_string(worktree.join(".git")).ok()?;
+    let admin = pointer.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
+    let admin = if Path::new(admin).is_absolute() {
+        PathBuf::from(admin)
+    } else {
+        worktree.join(admin)
+    };
+    let mark = std::fs::read_to_string(admin.join(FORKED_MARKER)).ok()?;
+    let mark = mark.trim();
+    (!mark.is_empty()).then(|| mark.to_string())
 }
 
 /// Which install owns a worktree, if any claims it.

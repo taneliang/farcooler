@@ -1632,6 +1632,21 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
             let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
+            // `--json` names what was made, so a client acts on THIS
+            // workspace rather than guessing it from a list read before and
+            // after — two creates in flight at once make that guess wrong.
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "id": uuid_of(&ws.id).to_string(),
+                        "short": short_bytes(&ws.id),
+                        "branch": ws.branch,
+                        "worktree": ws.worktree_path,
+                    })
+                );
+                return Ok(());
+            }
             println!("created workspace {}  {}", short_bytes(&ws.id), ws.task_name);
             println!("  branch   {}", ws.branch);
             if let Some(path) = &ws.worktree_path {
@@ -2194,7 +2209,14 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
-            println!("created terminal {}  {}", short_bytes(&t.id), t.title);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "id": uuid_of(&t.id).to_string(), "short": short_bytes(&t.id) })
+                );
+            } else {
+                println!("created terminal {}  {}", short_bytes(&t.id), t.title);
+            }
         }
 
         TerminalCmd::Stop { terminal } => {
