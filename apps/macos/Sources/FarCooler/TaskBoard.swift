@@ -312,7 +312,9 @@ struct BoardAgents {
     static func on(
         _ workspaces: [Workspace], state: HostState, build: DaemonBuild?
     ) -> BoardAgents {
-        guard state == .connected, build?.can("terminal_task") == true else { return .none }
+        // The rule is AgentKit's, so this board and the phone's cannot drift.
+        guard TaskAgentLink.speaksOfAgents(connected: state == .connected, build: build)
+        else { return .none }
         return BoardAgents(workspaces: workspaces, runnerRecordsTasks: true)
     }
 
