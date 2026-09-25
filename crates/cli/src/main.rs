@@ -488,43 +488,53 @@ enum RepoCmd {
     List,
 }
 
+/// `workspace create`'s words, as clap parsed them.
+///
+/// A struct rather than the variant's own fields so the command's arm hands
+/// it to `workspace_create_from_args` whole: nothing between the parse and
+/// the request is a list of positional arguments that could be put in the
+/// wrong order — `no_terminal` and `fork_only` are two adjacent `bool`s —
+/// while a test of that function stayed green.
+#[derive(clap::Args)]
+struct CreateArgs {
+    repo: String,
+    /// What to call the worktree. Becomes its directory, and cannot be
+    /// changed afterwards: at most 60 characters, and at least one of them
+    /// a letter or a number.
+    name: String,
+    #[arg(long)]
+    branch: String,
+    #[arg(long, default_value = "HEAD")]
+    base: String,
+    /// What to run in the terminal the new worktree opens with.
+    ///
+    /// A worktree with nothing in it is a directory, so this defaults to a
+    /// shell — the same default `terminal create` uses, and for the same
+    /// reason: you open a terminal and type into it.
+    #[arg(long, default_value = "shell")]
+    terminal: String,
+    /// Create the worktree with no terminal at all.
+    ///
+    /// For a caller about to create its own. The Mac app's task flow does
+    /// exactly this, and would otherwise leave every task with an unused
+    /// shell sitting beside its agent.
+    #[arg(long, conflicts_with = "terminal")]
+    no_terminal: bool,
+    /// Only ever a new branch: refuse, rather than check out, a name a
+    /// local branch or any remote already has.
+    ///
+    /// Without it, a name that exists only on one remote is checked out
+    /// from there when `--base` is `HEAD`. For a caller that made the
+    /// name up for new work, which would otherwise start on somebody
+    /// else's commits. Needs a runner new enough to have it.
+    #[arg(long)]
+    fork_only: bool,
+}
+
 #[derive(Subcommand)]
 enum WorkspaceCmd {
     /// Create a worktree and branch for one task.
-    Create {
-        repo: String,
-        /// What to call the worktree. Becomes its directory, and cannot be
-        /// changed afterwards: at most 60 characters, and at least one of them
-        /// a letter or a number.
-        name: String,
-        #[arg(long)]
-        branch: String,
-        #[arg(long, default_value = "HEAD")]
-        base: String,
-        /// What to run in the terminal the new worktree opens with.
-        ///
-        /// A worktree with nothing in it is a directory, so this defaults to a
-        /// shell — the same default `terminal create` uses, and for the same
-        /// reason: you open a terminal and type into it.
-        #[arg(long, default_value = "shell")]
-        terminal: String,
-        /// Create the worktree with no terminal at all.
-        ///
-        /// For a caller about to create its own. The Mac app's task flow does
-        /// exactly this, and would otherwise leave every task with an unused
-        /// shell sitting beside its agent.
-        #[arg(long, conflicts_with = "terminal")]
-        no_terminal: bool,
-        /// Only ever a new branch: refuse, rather than check out, a name a
-        /// local branch or any remote already has.
-        ///
-        /// Without it, a name that exists only on one remote is checked out
-        /// from there when `--base` is `HEAD`. For a caller that made the
-        /// name up for new work, which would otherwise start on somebody
-        /// else's commits. Needs a runner new enough to have it.
-        #[arg(long)]
-        fork_only: bool,
-    },
+    Create(CreateArgs),
     /// Show the fleet with freshly derived state.
     List,
     /// Resume work on a branch that already exists.
@@ -1694,13 +1704,9 @@ pub(crate) fn workspace_create_request(
 /// can go from the argv a client sends to the request the daemon gets.
 fn workspace_create_from_args(
     repository: uuid::Uuid,
-    name: String,
-    branch: String,
-    base: String,
-    terminal: String,
-    no_terminal: bool,
-    fork_only: bool,
+    args: CreateArgs,
 ) -> farcooler_protocol::v1::Request {
+    let CreateArgs { repo: _, name, branch, base, terminal, no_terminal, fork_only } = args;
     let terminal = if no_terminal { String::new() } else { terminal };
     workspace_create_request(repository, name, branch, base, terminal, fork_only)
 }
@@ -1708,20 +1714,10 @@ fn workspace_create_from_args(
 async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
     match cmd {
-        WorkspaceCmd::Create { repo, name, branch, base, terminal, no_terminal, fork_only } => {
+        WorkspaceCmd::Create(args) => {
             let repos = list_repositories(&mut link).await?;
-            let target = resolve_repository(&repos, &repo)?;
-            let r = link
-                .call(workspace_create_from_args(
-                    uuid_of(&target.id),
-                    name,
-                    branch,
-                    base,
-                    terminal,
-                    no_terminal,
-                    fork_only,
-                ))
-                .await?;
+            let target = resolve_repository(&repos, &args.repo)?;
+            let r = link.call(workspace_create_from_args(uuid_of(&target.id), args)).await?;
             let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
@@ -3454,20 +3450,35 @@ mod tests {
             "--no-terminal", "--fork-only",
         ];
         let cli = Cli::try_parse_from(argv).expect("the Mac's argv parses");
-        let Command::Workspace(WorkspaceCmd::Create {
-            repo, name, branch, base, terminal, no_terminal, fork_only,
-        }) = cli.command
-        else {
-            panic!("workspace create")
-        };
-        assert_eq!(repo, "repo");
-        let req = workspace_create_from_args(
-            uuid::Uuid::now_v7(), name, branch, base, terminal, no_terminal, fork_only);
+        let Command::Workspace(WorkspaceCmd::Create(args)) = cli.command else { panic!("workspace create") };
+        assert_eq!(args.repo, "repo");
+        // What the command's own arm passes: the parsed struct, whole.
+        let req = workspace_create_from_args(uuid::Uuid::now_v7(), args);
         assert_eq!(req.required_capabilities, [farcooler_protocol::capability::WORKSPACE_FORK_ONLY]);
         let Some(request::Payload::WorkspaceCreate(p)) = req.payload else { panic!("payload") };
         assert!(p.fork_only);
         assert_eq!((p.task_name.as_str(), p.branch.as_str()), ("fix-it", "el/fix-it"));
         assert!(p.terminal_preset.is_empty(), "--no-terminal");
+
+        // Each flag reaches its own field: one without the other, both ways.
+        // The Mac sends both, so its argv alone can't tell them apart.
+        for (flags, fork_only, preset) in [
+            (&["--fork-only"][..], true, "shell"),
+            (&["--no-terminal"][..], false, ""),
+            (&[][..], false, "shell"),
+        ] {
+            let argv = ["farcooler", "workspace", "create", "repo", "n", "--branch", "b"]
+                .into_iter()
+                .chain(flags.iter().copied());
+            let Command::Workspace(WorkspaceCmd::Create(args)) =
+                Cli::try_parse_from(argv).expect("parses").command
+            else {
+                panic!("workspace create")
+            };
+            let req = workspace_create_from_args(uuid::Uuid::now_v7(), args);
+            let Some(request::Payload::WorkspaceCreate(p)) = req.payload else { panic!("payload") };
+            assert_eq!((p.fork_only, p.terminal_preset.as_str()), (fork_only, preset), "{flags:?}");
+        }
     }
 
     #[test]
