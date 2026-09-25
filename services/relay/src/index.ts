@@ -1333,8 +1333,9 @@ const ROW_QUIET_AFTER_MS = 60 * 60 * 1000
 /// of the manifest ceiling that was written as fifteen and measured at four.
 ///
 /// The trace's anchor (migration 0009) adds `,"traceAnchor":5960000` — 22
-/// bytes for a seven-digit index — making the worst row 421, and
-/// `(4096 - 689) / 421` is still 8.
+/// bytes, because `traceAnchor()` refuses anything newer than the current
+/// five-minute bucket and that index is seven digits until 2065 — making the
+/// worst row 421, and `(4096 - 689) / 421` is still 8.
 ///
 /// `STATE_BUDGET` is what enforces the measurement rather than trusting it.
 const ROWS_SHOWN = 4
@@ -1570,7 +1571,7 @@ async function rememberAgent(
     commits: numeric(body.commits) ?? prior?.commits ?? null,
     trace: trace(body.trace) ?? prior?.trace ?? null,
     trace_anchor: trace(body.trace) !== null
-      ? traceAnchor(body.traceAnchor)
+      ? traceAnchor(body.traceAnchor, now)
       : (prior?.trace_anchor ?? null),
     started_at: state.startedAt ?? null,
     // Only when the tier actually moves. See above.
@@ -1624,7 +1625,7 @@ async function rememberAgent(
       trace(body.trace),
       // Bound as sent. The `CASE` above is what ignores it when this notice
       // carried no trace, since the blob it would sit beside is the old one.
-      traceAnchor(body.traceAnchor),
+      traceAnchor(body.traceAnchor, now),
       mine.started_at,
       mine.status_since,
     )
@@ -1642,17 +1643,48 @@ function trace(value: unknown): string | null {
   return typeof value === 'string' && value ? value.slice(0, 128) : null
 }
 
-/// A trace anchor the daemon actually sent, or NULL.
+/// How far a runner's clock may disagree with this worker's before its trace
+/// anchor is refused, in seconds.
 ///
-/// A whole number and nothing else: an index of five-minute buckets since 1970
-/// is seven digits today, and a two-hour one six. `Number.isSafeInteger` keeps
-/// a float, a string or anything past 2^53 out of a column the card reads as an
-/// integer — a value it cannot read costs that row its placement, and it falls
-/// back to packing from the newest end, which is the old drawing and not a
-/// wrong one. Negative is refused for the same reason zero is kept: it is a
-/// Unix time before 1970, which no runner's clock reports.
-function traceAnchor(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+/// **Ten minutes.** An anchor is `now.div_euclid(width)` on the RUNNER's
+/// clock, so it is also a claim about what time it is there, and the card puts
+/// every row on the grid the newest anchor sets. A clock a day fast would push
+/// every other row off the left of the card; a clock a day slow would push its
+/// own row off. Ten minutes is far more than an NTP-disciplined clock drifts
+/// plus a notice's time in flight, so a healthy runner is never refused — and
+/// it is two five-minute columns, so the worst a runner inside it can do is
+/// draw its row two columns early or late on a `1h` card, and less than one on
+/// the wider ones. Outside it the anchor is dropped and the row is packed from
+/// its newest end, which is the drawing before anchors existed.
+///
+/// The card applies the same number against the relay's own `updatedAt`, from
+/// the other side — see `AgentKit.ActivityTrace.anchorSlack`.
+export const TRACE_ANCHOR_SLACK_S = 10 * 60
+
+/// A trace anchor the daemon actually sent, and could have sent at `now`, or
+/// NULL.
+///
+/// A whole number and nothing else. `Number.isSafeInteger` keeps a float or a
+/// string out of a column the card reads as an integer.
+///
+/// **Bounded by this worker's clock without decoding the blob.** The index is
+/// in units of the trace's own width, which is in byte 0 of the base64 and
+/// stays there unread — so the bound is the one that holds at EVERY width: no
+/// fresher than the newest five-minute bucket and no staler than the oldest
+/// two-hour one, each widened by `TRACE_ANCHOR_SLACK_S`. That refuses a clock
+/// days off and an absurd number like 2^52 outright; the tighter per-width
+/// check is the card's, which can read the width. It also caps the column at
+/// seven digits until 2065, which is what the payload arithmetic on
+/// `ROWS_SHOWN` prices.
+///
+/// Applied on arrival only. A stored anchor rides with its stored trace and
+/// legitimately ages; it is not re-checked against a later `now`.
+function traceAnchor(value: unknown, now: number): number | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) return null
+  const seconds = Math.floor(now / 1000)
+  const oldest = Math.floor((seconds - TRACE_ANCHOR_SLACK_S) / 7200)
+  const newest = Math.floor((seconds + TRACE_ANCHOR_SLACK_S) / 300)
+  return value >= oldest && value <= newest ? value : null
 }
 
 /// A count the daemon actually sent, or NULL.

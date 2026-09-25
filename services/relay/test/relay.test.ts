@@ -11,11 +11,21 @@ import wranglerToml from '../wrangler.toml?raw'
 // `spells both channels the way the Android app creates them`.
 import notifierKt from '../../../apps/android/app/src/main/java/com/farcooler/notify/Notifier.kt?raw'
 
-import worker, { ALERT_BODY_BUDGET, ALERT_TITLE_BUDGET, STATE_BUDGET, cut } from '../src/index'
+import worker, {
+  ALERT_BODY_BUDGET,
+  ALERT_TITLE_BUDGET,
+  STATE_BUDGET,
+  TRACE_ANCHOR_SLACK_S,
+  cut,
+} from '../src/index'
 import { anonymousId, record } from '../src/analytics'
 import { fingerprintOf, parseEd25519 } from '../src/keys'
 import { androidChannel, sendLiveActivity, topicMismatch } from '../src/push'
 import { verifySession } from '../src/workos'
+
+/// The newest trace anchor the relay accepts right now: this five-minute
+/// bucket, plus the slack. The widest value a maximal payload can carry.
+const widestAnchor = () => Math.floor((Date.now() / 1000 + TRACE_ANCHOR_SLACK_S) / 300)
 
 /// What the relay must never get wrong.
 ///
@@ -3156,6 +3166,9 @@ describe('/v1/notify and Live Activities', () => {
       const calls = watchFetch()
       const first = 'EQ'.repeat(44)
       const second = 'Eg'.repeat(44)
+      // This five-minute bucket, on this worker's clock, which is what a
+      // healthy runner sends.
+      const anchor = Math.floor(Date.now() / 1000 / 300)
       await ready()
       await running('term-1')
       const row = () => {
@@ -3169,23 +3182,23 @@ describe('/v1/notify and Live Activities', () => {
 
       await post(
         '/v1/notify',
-        { title: 'a', terminal: 't1', status: 'blocked', trace: first, traceAnchor: 5_960_000 },
+        { title: 'a', terminal: 't1', status: 'blocked', trace: first, traceAnchor: anchor },
         'mine',
       )
       // A NUMBER on the card, because the card's decoder reads an integer.
-      expect(row().traceAnchor).toBe(5_960_000)
-      expect(await stored()).toEqual({ trace: first, trace_anchor: 5_960_000 })
+      expect(row().traceAnchor).toBe(anchor)
+      expect(await stored()).toEqual({ trace: first, trace_anchor: anchor })
 
       // No trace on this notice, so no new answer for either — and an anchor
       // that arrives alone is not allowed to move the old blob in time.
       await post(
         '/v1/notify',
-        { title: 'a', terminal: 't1', status: 'blocked', traceAnchor: 1 },
+        { title: 'a', terminal: 't1', status: 'blocked', traceAnchor: anchor - 1 },
         'mine',
       )
       expect(row().trace).toBe(first)
-      expect(row().traceAnchor).toBe(5_960_000)
-      expect(await stored()).toEqual({ trace: first, trace_anchor: 5_960_000 })
+      expect(row().traceAnchor).toBe(anchor)
+      expect(await stored()).toEqual({ trace: first, trace_anchor: anchor })
 
       // A new trace from a runner too old to anchor it. The old anchor must NOT
       // carry forward onto the new blob: that would place every bucket of the
@@ -3199,15 +3212,59 @@ describe('/v1/notify and Live Activities', () => {
       expect('traceAnchor' in row()).toBe(false)
       expect(await stored()).toEqual({ trace: second, trace_anchor: null })
 
-      // Anything but a whole, non-negative, safe integer is no anchor, which
-      // the card reads as the drawing it had before anchors existed.
-      for (const bogus of ['5960000', 5_960_000.5, -1, 2 ** 60]) {
+      // Anything but a whole number is no anchor, which the card reads as the
+      // drawing it had before anchors existed.
+      for (const bogus of [String(anchor), anchor + 0.5]) {
         await post(
           '/v1/notify',
           { title: 'a', terminal: 't1', status: 'blocked', trace: first, traceAnchor: bogus },
           'mine',
         )
         expect(await stored()).toEqual({ trace: first, trace_anchor: null })
+      }
+    })
+
+    it("refuses a trace anchor no runner's clock could have sent now", async () => {
+      // An anchor is a claim about what time it is on the runner, and the card
+      // puts every row on the grid the newest one sets — so one runner a day
+      // fast would push every other row off the card. The bound holds at every
+      // width without decoding the blob: no newer than this five-minute bucket,
+      // no older than this two-hour one, each widened by the slack.
+      watchFetch()
+      await ready()
+      await running('term-1')
+      const seconds = Math.floor(Date.now() / 1000)
+      const stored = () =>
+        env.DB.prepare(`SELECT trace_anchor FROM live_activities WHERE terminal = 't1'`)
+          .first<any>()
+          .then(row => row?.trace_anchor)
+      const send = (traceAnchor: number) =>
+        post(
+          '/v1/notify',
+          { title: 'a', terminal: 't1', status: 'blocked', trace: 'EQ'.repeat(44), traceAnchor },
+          'mine',
+        )
+
+      // Far ahead: a day fast on the five-minute grid, and an absurd number.
+      for (const ahead of [Math.floor((seconds + 86400) / 300), 2 ** 52]) {
+        await send(ahead)
+        expect(await stored()).toBe(null)
+      }
+      // Just past the slack is past it.
+      await send(Math.floor((seconds + TRACE_ANCHOR_SLACK_S) / 300) + 1)
+      expect(await stored()).toBe(null)
+      // Far behind: a day slow on the two-hour grid, and zero.
+      for (const behind of [Math.floor((seconds - 86400) / 7200), 0]) {
+        await send(behind)
+        expect(await stored()).toBe(null)
+      }
+
+      // Healthy runners at every width are kept: this five-minute bucket, this
+      // half hour, this two-hour bucket.
+      for (const width of [300, 1800, 7200]) {
+        const fresh = Math.floor(seconds / width)
+        await send(fresh)
+        expect(await stored()).toBe(fresh)
       }
     })
 
@@ -3404,7 +3461,7 @@ describe('/v1/notify and Live Activities', () => {
             deletions: 999999,
             commits: 255,
             trace: 'A'.repeat(88),
-            traceAnchor: Number.MAX_SAFE_INTEGER,
+            traceAnchor: widestAnchor(),
           },
           'mine',
         )
@@ -3484,9 +3541,8 @@ describe('/v1/notify and Live Activities', () => {
       deletions: 999999,
       commits: 255,
       trace: 'A'.repeat(88),
-      // The widest anchor the relay accepts, not a realistic one: sixteen
-      // digits where a runner sends seven.
-      traceAnchor: Number.MAX_SAFE_INTEGER,
+      // The widest anchor the relay accepts, which is also a realistic one.
+      traceAnchor: widestAnchor(),
     })
 
     it('starts a card for a maximal fleet inside the payload APNs will accept', async () => {
@@ -3538,7 +3594,7 @@ describe('/v1/notify and Live Activities', () => {
         deletions: 999999,
         commits: 255,
         trace: 'A'.repeat(88),
-        traceAnchor: Number.MAX_SAFE_INTEGER,
+        traceAnchor: widestAnchor(),
       }))
       expect(starts.length).toBe(1)
       expect(bytes(starts[0].body)).toBeLessThan(4096)
