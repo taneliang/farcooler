@@ -284,7 +284,7 @@ pub async fn create_worktree_with(
     if destination.exists() {
         return Err(DomainError::WorktreeExists);
     }
-    if fork_only &&!remotes_with_branch(repo, branch).await?.is_empty() {
+    if fork_only && !remotes_with_branch(repo, branch).await?.is_empty() {
         return Err(DomainError::BranchExists);
     }
 
