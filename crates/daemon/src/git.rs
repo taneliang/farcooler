@@ -77,7 +77,20 @@ pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
 /// mid-scroll leaves a `git diff` running on the runner for as long as it likes,
 /// once per abandoned request.
 pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
-    let child = Command::new("git")
+    run_bounded(std::ffi::OsStr::new("git"), GIT_TIMEOUT, cwd, args).await
+}
+
+/// `git_bytes`, with the program and the timeout named. So a test can put a
+/// program that isn't there, or one that never answers, where git would be,
+/// and watch what a caller does with the failure; nothing else runs anything
+/// but git through here.
+pub(crate) async fn run_bounded(
+    program: &std::ffi::OsStr,
+    timeout: Duration,
+    cwd: &Path,
+    args: &[&str],
+) -> Result<GitBytes> {
+    let child = Command::new(program)
         .current_dir(cwd)
         .args(args)
         .stdin(Stdio::null())
@@ -86,7 +99,7 @@ pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
         .kill_on_drop(true)
         .output();
 
-    let out = match tokio::time::timeout(GIT_TIMEOUT, child).await {
+    let out = match tokio::time::timeout(timeout, child).await {
         Ok(Ok(out)) => out,
         Ok(Err(e)) => {
             tracing::warn!(error = %e, "failed to spawn git");
@@ -435,10 +448,11 @@ pub async fn rollback_worktree(
 /// into every worktree this runner makes, and `Service::prepare_launch_hooks`
 /// puts one of the two into any worktree a codex or cursor pane is opened in —
 /// including the checkout the user works in every day, which Far Cooler did not
-/// make. This answer is what `removal_needs_confirmation` reads, so without the
-/// subtraction a workspace created a second ago and never touched by anyone
-/// would demand the user type its name back to remove it, on the strength of
-/// files Far Cooler wrote and the user has never seen.
+/// make. `removal_needs_confirmation` derives this same answer from the one
+/// `git status` its hooks check also reads, so without the subtraction a
+/// workspace created a second ago and never touched by anyone would demand
+/// the user type its name back to remove it, on the strength of files Far
+/// Cooler wrote and the user has never seen.
 ///
 /// Only an UNTRACKED copy is subtracted (`hook_install::hide_our_untracked`).
 /// A hooks file the repository commits is never one Far Cooler wrote, so a

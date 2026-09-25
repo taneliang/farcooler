@@ -895,7 +895,7 @@ fn takes_plugin_dir(preset: &str) -> bool {
 ///
 /// Never fails, like `install_project_hooks`: a worktree we can't write
 /// costs this agent the skill and nothing else.
-fn install_project_skill(worktree: &Path, harness: crate::skill_install::Harness) {
+async fn install_project_skill(worktree: &Path, harness: crate::skill_install::Harness) {
     use crate::skill_install::{Holds, Installed, crosses_a_symlink, holds, install_file, render};
     let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
     for file in render(harness, &cli) {
@@ -914,14 +914,14 @@ fn install_project_skill(worktree: &Path, harness: crate::skill_install::Harness
             tracing::info!(path = %path.display(), "leaving somebody's skill file alone");
             continue;
         }
-        if git_tracks(worktree, file.relative) {
+        if git_tracks_without_blocking(worktree, file.relative).await {
             tracing::info!(
                 path = %path.display(),
                 "the repository tracks this file; leaving the manager skill out of it"
             );
             continue;
         }
-        if !exclude_locally(worktree, file.relative) {
+        if !exclude_locally(worktree, file.relative).await {
             tracing::warn!(
                 path = %path.display(),
                 "could not tell git to ignore the manager skill; not writing it"
@@ -934,32 +934,22 @@ fn install_project_skill(worktree: &Path, harness: crate::skill_install::Harness
     }
 }
 
-/// Whether git tracks `relative` in `worktree`.
-///
-/// `git ls-files --error-unmatch` exits 0 for a tracked path and 1 for one it
-/// doesn't know. Anything else — git missing, a directory git refuses as
-/// unsafe (`safe.directory`), a corrupt index — answers yes: when we can't
-/// tell, we don't write.
-fn git_tracks(worktree: &Path, relative: &str) -> bool {
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["ls-files", "--error-unmatch", "--", relative])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_or(true, |status| status.code() != Some(1))
+/// Whether git tracks `relative` in `worktree`, for the launch paths: through
+/// `git::git_bytes`, so it holds no runtime thread while git runs, and a git
+/// that hangs (a slow filesystem, an fsmonitor hook) is killed at
+/// `git::GIT_TIMEOUT` instead of pinning a worker.
+async fn git_tracks_without_blocking(worktree: &Path, relative: &str) -> bool {
+    tracked_by(git::git_bytes(worktree, &["ls-files", "--", relative]).await)
 }
 
-/// `git_tracks`, for the async launch paths: through `git::git`, so it holds
-/// no runtime thread while git runs, and a git that hangs (a slow filesystem,
-/// an fsmonitor hook) is killed at `git::GIT_TIMEOUT` instead of pinning a
-/// worker. The same answers: a path in the index is tracked, and anything but
-/// a clean "not in the index" (git missing, a directory that isn't a
-/// repository or that `safe.directory` refuses, a timeout) counts as tracked.
-async fn git_tracks_without_blocking(worktree: &Path, relative: &str) -> bool {
-    match git::git(worktree, &["ls-files", "--", relative]).await {
-        Ok(out) if out.ok => !out.stdout.trim().is_empty(),
+/// What `git ls-files -- <path>` says about tracking. A path in the index is
+/// tracked, and anything but a clean "not in the index" (git missing, a
+/// directory that isn't a repository or that `safe.directory` refuses, a
+/// corrupt index, a timeout) counts as tracked: when we can't tell, we don't
+/// write.
+fn tracked_by(answer: Result<git::GitBytes>) -> bool {
+    match answer {
+        Ok(out) if out.ok => !out.stdout.trim_ascii().is_empty(),
         _ => true,
     }
 }
@@ -974,17 +964,11 @@ async fn git_tracks_without_blocking(worktree: &Path, relative: &str) -> bool {
 /// pattern at a worktree's root, and the whole path names our file and nothing
 /// beside it, so a file of the owner's own in the same directory is still
 /// reported. An exclude line hides nothing git already tracks.
-fn exclude_locally(worktree: &Path, relative: &str) -> bool {
-    let Ok(out) = std::process::Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["rev-parse", "--git-common-dir"])
-        .stderr(std::process::Stdio::null())
-        .output()
-    else {
+async fn exclude_locally(worktree: &Path, relative: &str) -> bool {
+    let Ok(out) = git::git_bytes(worktree, &["rev-parse", "--git-common-dir"]).await else {
         return false;
     };
-    if !out.status.success() {
+    if !out.ok {
         return false;
     }
     // Bytes, not text: a path that isn't UTF-8 must name the directory git
@@ -1055,12 +1039,15 @@ async fn holds_an_unseen_skill_file(worktree: &Path) -> bool {
 /// opened codex there, or entries they added to ours. `git worktree remove
 /// --force` deletes it either way, so removal asks. A tracked copy needs none
 /// of this: `is_dirty` reports its changes, and its committed bytes survive in
-/// the branch. A git we can't ask means we ask the owner instead.
-async fn holds_an_unseen_hook_file(worktree: &Path) -> bool {
+/// the branch.
+///
+/// Read off `status`, `git status` as git reports it
+/// (`change_set::working_tree_as_git_reports_it`), the same answer
+/// `removal_needs_confirmation` derives dirtiness from: one git process and
+/// one snapshot for both. `socket` is this runner's hook socket, which is how
+/// an entry of ours under an older CLI path is still known for ours.
+fn holds_an_unseen_hook_file(worktree: &Path, status: &crate::change_set::WorkingTree, socket: &Path) -> bool {
     use crate::hook_install::{PROJECT_HOOK_FILES, holds_only_ours};
-    let Ok(status) = crate::change_set::working_tree_as_git_reports_it(worktree).await else {
-        return true;
-    };
     for file in &status.untracked {
         let relative = file.path.as_str();
         // Through a link, the file lives somewhere removal doesn't reach.
@@ -1068,7 +1055,7 @@ async fn holds_an_unseen_hook_file(worktree: &Path) -> bool {
             continue;
         }
         match std::fs::read(worktree.join(relative)) {
-            Ok(bytes) if holds_only_ours(&String::from_utf8_lossy(&bytes)) => {}
+            Ok(bytes) if holds_only_ours(&String::from_utf8_lossy(&bytes), socket) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             _ => return true,
         }
@@ -2526,12 +2513,21 @@ impl Service {
         // here would skip the confirmation on exactly the repositories where
         // something is already wrong.
         let worktree = std::path::Path::new(&ws.worktree_path);
-        if git::is_dirty(worktree).await.unwrap_or(true) {
+        // One `git status` for both of the next two answers. It is a full
+        // `--untracked-files=all` scan, which in a worktree holding a large
+        // untracked tree (a `target/`, a `node_modules/`) is the slow part of
+        // this whole check.
+        let Ok(mut status) = crate::change_set::working_tree_as_git_reports_it(worktree).await else {
+            return Ok(true);
+        };
+        // What `git::is_dirty` subtracts: an untracked hooks file holding
+        // anything besides our registrations.
+        if holds_an_unseen_hook_file(worktree, &status, &hook_ingress::HookIngress::socket_path(&self.root)) {
             return Ok(true);
         }
-        // What `is_dirty` subtracts: an untracked hooks file holding anything
-        // besides our registrations.
-        if holds_an_unseen_hook_file(worktree).await {
+        // `git::is_dirty`'s answer, from the same snapshot.
+        crate::hook_install::hide_our_untracked(&mut status);
+        if status.is_dirty() {
             return Ok(true);
         }
         // What git is told to ignore: an edited copy of the manager skill.
@@ -2725,7 +2721,7 @@ impl Service {
         }
         // The manager skill codex reads from the worktree, on the same act.
         if let Some(harness) = project_skill_for(preset) {
-            install_project_skill(Path::new(worktree), harness);
+            install_project_skill(Path::new(worktree), harness).await;
         }
         // claude's half, unchanged, and gated by the same `starts_with` that
         // gates minting a session id, for the same reason: `--settings` is
@@ -7875,10 +7871,10 @@ mod hook_file_tests {
         let _ = std::fs::remove_dir_all(&elsewhere);
     }
 
-    /// The launch paths' tracked check answers like `git_tracks`, "can't
-    /// tell" included.
+    /// The launch paths' tracked check: tracked, untracked, and "can't tell"
+    /// counted as tracked.
     #[tokio::test]
-    async fn the_tracked_check_without_blocking_answers_like_git_tracks() {
+    async fn the_tracked_check_without_blocking_answers_what_git_says() {
         let bare = tempfile::tempdir().unwrap();
         assert!(git_tracks_without_blocking(bare.path(), crate::hook_install::CODEX_HOOKS).await, "not a repository");
         let repo = scratch("tracks");
@@ -7888,6 +7884,44 @@ mod hook_file_tests {
         let out = git::git(&repo, &["add", "--", crate::hook_install::CODEX_HOOKS]).await.unwrap();
         assert!(out.ok, "{}", out.stderr);
         assert!(git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS).await, "in the index");
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// m7: no git at all is "can't tell", and so tracked. The program is
+    /// named, not looked up on `PATH`, so this changes nothing for any other
+    /// test running beside it.
+    #[tokio::test]
+    async fn a_missing_git_counts_as_tracked() {
+        let repo = scratch("no-git");
+        let missing = repo.join("no-such-git");
+        let answer =
+            git::run_bounded(missing.as_os_str(), git::GIT_TIMEOUT, &repo, &["ls-files", "--", "x"]).await;
+        assert!(answer.is_err(), "a program that isn't there is an error, not an answer");
+        assert!(tracked_by(answer), "and that error reads as tracked");
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// m7: a git that never answers is killed at the timeout, and that is
+    /// "can't tell" too. A script that `exec`s `sleep` stands in for git, so
+    /// the process the timeout kills is the sleep itself.
+    #[tokio::test]
+    async fn a_git_that_never_answers_is_cut_off_and_counts_as_tracked() {
+        use std::os::unix::fs::PermissionsExt;
+        let repo = scratch("hung-git");
+        let hung = repo.join("hung-git");
+        std::fs::write(&hung, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        std::fs::set_permissions(&hung, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        let answer = git::run_bounded(
+            hung.as_os_str(),
+            std::time::Duration::from_millis(200),
+            &repo,
+            &["ls-files", "--", "x"],
+        )
+        .await;
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "cut off, not waited out");
+        assert!(answer.is_err(), "a timeout is an error, not an answer");
+        assert!(tracked_by(answer), "and that error reads as tracked");
         let _ = std::fs::remove_dir_all(&repo);
     }
 
@@ -8603,6 +8637,47 @@ mod launch_hook_install_tests {
         assert!(svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "their entry would be lost");
     }
 
+    /// m1 through the launch door: the owner put a command of theirs inside
+    /// our `Stop` entry, and opening codex again must neither delete it nor
+    /// touch the file. Removal asks, because the file is theirs now too.
+    #[tokio::test]
+    async fn a_command_the_owner_put_inside_our_entry_survives_the_next_launch() {
+        let (_dir, svc, ws) = a_workspace().await;
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+        let mut doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(codex_hooks(&ws)).unwrap()).unwrap();
+        doc["hooks"]["Stop"][0]["hooks"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({ "type": "command", "command": "say done" }));
+        let edited = serde_json::to_string_pretty(&doc).unwrap();
+        std::fs::write(codex_hooks(&ws), &edited).unwrap();
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("another codex pane");
+
+        assert_eq!(std::fs::read_to_string(codex_hooks(&ws)).unwrap(), edited, "left exactly as the owner has it");
+        assert!(svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "their command would be lost");
+    }
+
+    /// m3: our entries from a CLI that has since moved still name this
+    /// runner's socket, so they are ours. Removal doesn't ask about them, and
+    /// the next launch replaces them with entries at the CLI's current path.
+    #[tokio::test]
+    async fn our_entries_from_a_cli_that_moved_are_still_ours() {
+        let (_dir, svc, ws) = a_workspace().await;
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+        let now = std::fs::read_to_string(codex_hooks(&ws)).unwrap();
+        let current = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+        let moved = now.replace(&current, "'/Users/x/Downloads/Far Cooler.app/Contents/MacOS/farcooler'");
+        assert_ne!(moved, now, "the fixture names the old path");
+        std::fs::write(codex_hooks(&ws), &moved).unwrap();
+
+        assert!(!svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "nothing here is the user's");
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("another codex pane");
+        assert_eq!(std::fs::read_to_string(codex_hooks(&ws)).unwrap(), now, "replaced by entries at today's path");
+    }
+
     /// The review's scenario: the owner's own untracked hooks file in a
     /// checkout the reconciler adopted, with our entries merged in when they
     /// opened codex there. Removing the worktree would delete their file.
@@ -9112,19 +9187,19 @@ mod project_skill_tests {
 
     /// A git that runs and can't answer — here, a directory that isn't a
     /// repository — is "can't tell", and "can't tell" means don't write.
-    #[test]
-    fn a_git_that_cannot_answer_counts_as_tracked() {
+    #[tokio::test]
+    async fn a_git_that_cannot_answer_counts_as_tracked() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(git_tracks(dir.path(), PROJECT_SKILL), "exit 128 read as untracked");
+        assert!(git_tracks_without_blocking(dir.path(), PROJECT_SKILL).await, "exit 128 read as untracked");
     }
 
     /// And the other side of it: a repository that doesn't know the path
     /// exits 1, which is the one answer that means untracked.
-    #[test]
-    fn a_path_git_does_not_know_is_untracked() {
+    #[tokio::test]
+    async fn a_path_git_does_not_know_is_untracked() {
         let dir = tempfile::tempdir().unwrap();
         git_in(dir.path(), &["init", "-q"]);
-        assert!(!git_tracks(dir.path(), PROJECT_SKILL));
+        assert!(!git_tracks_without_blocking(dir.path(), PROJECT_SKILL).await);
     }
 
     /// Opening codex in a checkout Far Cooler didn't make writes the skill
