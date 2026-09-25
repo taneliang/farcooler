@@ -364,6 +364,10 @@ final class Connection: ObservableObject {
 
         guard mine == attempt else { return }
         phase = .connected
+        // Whatever build answered before belongs to the previous link, and
+        // `start` is also how this connection is pointed at a different
+        // runner. See `forgetDaemonBuild`.
+        forgetDaemonBuild()
         await listenForFleetNews()
         await refresh()
         await loadRepositories()
@@ -546,6 +550,9 @@ final class Connection: ObservableObject {
 
         guard case .reconnecting = phase else { return }
         phase = .connected
+        // Before `refresh`, which reads it again on its first fleet. See
+        // `forgetDaemonBuild`.
+        forgetDaemonBuild()
         // Before the reads below, so anything watching for a new link learns
         // about it in the same turn the link exists.
         reconnectGeneration += 1
@@ -759,7 +766,26 @@ final class Connection: ObservableObject {
     /// Cached because it cannot change while connected — a daemon that
     /// restarted is a connection that dropped — and because the settings screen
     /// should not cost a round trip every time it opens.
+    ///
+    /// Once per LINK, which is the half that was missing: nothing cleared it,
+    /// so the first answer stood for the life of the process. A runner
+    /// upgraded while this app was running reconnected and went on being
+    /// described by its old build, and every gate on its capabilities (a drag
+    /// in the overview, `watching`) stayed shut until the app was relaunched.
     @Published private(set) var daemon: DaemonBuild?
+
+    /// Drop the build read over the previous link, so the next `refresh`
+    /// asks again.
+    ///
+    /// Called the moment a link comes up, by `start` and `reconnect` alike,
+    /// and not when it goes down: a runner that is reconnecting keeps showing
+    /// what it last was, which is what the Mac's `DaemonClient.daemonBuild`
+    /// does for the same reason. Between here and the read landing, a
+    /// capability gate answers as for a runner nobody has asked, which is the
+    /// refusing answer, for one round trip.
+    private func forgetDaemonBuild() {
+        daemon = nil
+    }
 
     func loadDaemonBuild() async {
         guard phase == .connected, daemon == nil else { return }
