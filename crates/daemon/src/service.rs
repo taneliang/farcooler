@@ -746,8 +746,8 @@ fn install_project_hooks(worktree: &Path, socket: &Path) {
     // a file written under a name nothing filters just quietly becomes the
     // user's uncommitted work.
     use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
-    install_project_hook_file(&worktree.join(CODEX_HOOKS), socket, merge_codex);
-    install_project_hook_file(&worktree.join(CURSOR_HOOKS), socket, merge_cursor);
+    install_project_hook_file(worktree, CODEX_HOOKS, socket, merge_codex);
+    install_project_hook_file(worktree, CURSOR_HOOKS, socket, merge_cursor);
     // Not the manager skill. codex's copy is written when a codex pane is
     // opened (`prepare_launch_hooks`), so a worktree only claude or cursor
     // ever runs in never holds a document none of them reads.
@@ -1070,7 +1070,16 @@ fn project_hook_file_for(preset: &str) -> Option<(&'static str, MergeHooks)> {
 /// So a file that is present and is not a JSON object is left exactly as it
 /// is. Losing the live view is recoverable; replacing a file we do not own is
 /// a support incident somebody finds out about days later.
-fn install_project_hook_file(path: &Path, socket: &Path, merge: MergeHooks) {
+///
+/// The other guard is git. A hooks file the repository tracks is the team's,
+/// and our registrations name this runner's CLI path: written into a tracked
+/// file they become a change in `git status`, and the next `git commit -a`
+/// commits them. So a tracked file is never written, and that agent reports
+/// nothing in that repository. `git_tracks` counts "can't tell" as tracked.
+/// It runs only when there is something to write, so the ordinary launch,
+/// where the file already says this, spawns nothing.
+fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Path, merge: MergeHooks) {
+    let path = &worktree.join(relative);
     let existing = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -1117,6 +1126,14 @@ fn install_project_hook_file(path: &Path, socket: &Path, merge: MergeHooks) {
     // here with one. A missing or empty file arrives as `{}`, which no merge
     // ever produces, so the first install always writes.
     if merged == starting {
+        return;
+    }
+
+    if git_tracks(worktree, relative) {
+        tracing::info!(
+            path = %path.display(),
+            "the repository tracks this hooks file; leaving it alone, so this agent reports nothing here"
+        );
         return;
     }
 
@@ -2639,7 +2656,8 @@ impl Service {
     async fn prepare_launch_hooks(&self, preset: &str, worktree: &str) -> LaunchExtras {
         if let Some((relative, merge)) = project_hook_file_for(preset) {
             install_project_hook_file(
-                &Path::new(worktree).join(relative),
+                Path::new(worktree),
+                relative,
                 &hook_ingress::HookIngress::socket_path(&self.root),
                 merge,
             );
@@ -7648,6 +7666,16 @@ mod hook_file_tests {
             Uuid::now_v7()
         ));
         std::fs::create_dir_all(&dir).expect("scratch dir");
+        // A repository, as every worktree is: the installer asks git whether
+        // it tracks a hooks file, and a directory git can't answer for is
+        // "tracked", so nothing would be written into a bare directory.
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["init", "-q"])
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git init in {}", dir.display());
         dir
     }
 
@@ -8382,6 +8410,36 @@ mod launch_hook_install_tests {
             "their file is untouched"
         );
         assert_eq!(term.command_preset, "codex");
+    }
+
+    /// A hooks file the repository COMMITS is the team's, not a place for
+    /// ours. Writing our registrations into it would put this runner's CLI
+    /// path into the next commit of anyone who runs `git commit -a`. So a
+    /// codex or cursor launch leaves a tracked copy byte for byte as it was,
+    /// and that agent is quiet in this repository.
+    #[tokio::test]
+    async fn a_tracked_hooks_file_is_left_exactly_as_the_repository_has_it() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let worktree = Path::new(&ws.worktree_path);
+        let codex = r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"./scripts/team-hook.sh"}]}]}}"#;
+        let cursor = r#"{"version":1,"hooks":{"stop":[{"command":"./scripts/team-hook.sh"}]}}"#;
+        for (path, text) in [(codex_hooks(&ws), codex), (cursor_hooks(&ws), cursor)] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text).unwrap();
+        }
+        let who = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
+        let add = [&who[..], &["add", "--", crate::hook_install::CODEX_HOOKS, crate::hook_install::CURSOR_HOOKS]].concat();
+        let commit = [&who[..], &["commit", "-qm", "the team's hooks"]].concat();
+        for args in [add, commit] {
+            let out = git::git(worktree, &args).await.expect("git runs");
+            assert!(out.ok, "git {args:?}: {}", out.stderr);
+        }
+
+        svc.create_terminal(ws.id, "one", "codex:gpt-5.6-sol").await.expect("a codex pane");
+        svc.create_terminal(ws.id, "two", "cursor").await.expect("a cursor pane");
+
+        assert_eq!(std::fs::read_to_string(codex_hooks(&ws)).unwrap(), codex, "codex's tracked file");
+        assert_eq!(std::fs::read_to_string(cursor_hooks(&ws)).unwrap(), cursor, "cursor's tracked file");
     }
 
     /// "First launch" is not tracked, and this is what lets it not be.

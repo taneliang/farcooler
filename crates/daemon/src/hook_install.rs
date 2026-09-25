@@ -102,26 +102,54 @@ pub const CODEX_HOOKS: &str = ".codex/hooks.json";
 pub const CURSOR_HOOKS: &str = ".cursor/hooks.json";
 pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
 
-/// `PROJECT_HOOK_FILES` as git pathspecs that subtract them from an answer.
+/// The `PROJECT_HOOK_FILES` that git does not track in `worktree`, as git
+/// pathspecs that subtract them from an answer.
+///
+/// Only the untracked ones. A hooks file the repository commits is the team's
+/// (the installer never writes one; see `service::install_project_hook_file`),
+/// so any change to it is somebody's work: it has to show in the diff view,
+/// and it has to make `removal_needs_confirmation` ask before `git worktree
+/// remove --force` throws it away. Subtracting it by path hid exactly that.
+///
+/// Per worktree, because tracking is: one branch can commit `.codex/hooks.json`
+/// while its sibling doesn't. That is also why this is a pathspec and not a
+/// line in `info/exclude`, which every checkout of the repository shares, and
+/// which once hid an owner's own untracked hooks file in their main checkout
+/// from their commits.
+///
+/// A git that can't answer (it won't run, times out, or refuses the directory)
+/// gets no exclusion for either file. When we can't tell, a file shows as the
+/// user's change rather than being hidden, the same direction
+/// `service::git_tracks` takes.
 ///
 /// Not the manager skill's files (`skill_install::PROJECT_SKILL_FILES`). Those
 /// are hidden by git itself, through a line in the repository's
 /// `info/exclude` (`service::exclude_locally`), which also keeps `git add -A`
-/// from committing them. A pathspec here would hide them by path, whoever
-/// wrote the bytes, and so would hide an owner's edit, and any change to a
-/// tracked copy, from the diff view and from the removal check.
+/// from committing them.
 ///
 /// A pathspec rather than a filter over `git status` output, because git's own
 /// matching is the only thing that gets this right. `git status --porcelain`
-/// collapses a wholly-untracked directory to one entry — `?? .codex/`, never
-/// `?? .codex/hooks.json` — so a filter comparing whole lines against these
+/// collapses a wholly-untracked directory to one entry (`?? .codex/`, never
+/// `?? .codex/hooks.json`), so a filter comparing whole lines against these
 /// paths would match nothing at all and silently do nothing. It is also
 /// conservative in the direction that matters: with a file of the user's own
 /// beside ours, git reports the directory again and their file is not hidden.
 ///
-/// The caller puts `--` in front of these.
-pub fn project_hook_exclusions() -> Vec<String> {
-    PROJECT_HOOK_FILES.iter().map(|p| format!(":(exclude){p}")).collect()
+/// One `git ls-files` for both files, since `is_dirty` and `working_tree` are
+/// asked often. The caller puts `--` in front of these.
+pub async fn project_hook_exclusions(worktree: &Path) -> Vec<String> {
+    let mut args = vec!["ls-files", "-z", "--"];
+    args.extend(PROJECT_HOOK_FILES);
+    let tracked = match crate::git::git_bytes(worktree, &args).await {
+        Ok(out) if out.ok => out.stdout,
+        _ => return Vec::new(),
+    };
+    let tracked: Vec<&[u8]> = tracked.split(|b| *b == 0).collect();
+    PROJECT_HOOK_FILES
+        .iter()
+        .filter(|p| !tracked.contains(&p.as_bytes()))
+        .map(|p| format!(":(exclude){p}"))
+        .collect()
 }
 
 /// The path this binary was launched as, resolved the same way the shim's
@@ -629,5 +657,14 @@ mod tests {
             command.contains("--socket '/tmp/My Projects/h.sock'"),
             "the space-bearing path is quoted as one word: {command}"
         );
+    }
+
+    /// "Can't tell" is tracked: a directory git won't answer for gets no
+    /// exclusion, so a hooks file there shows as the user's change instead of
+    /// being hidden.
+    #[tokio::test]
+    async fn a_git_that_cannot_answer_excludes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(project_hook_exclusions(dir.path()).await, Vec::<String>::new());
     }
 }

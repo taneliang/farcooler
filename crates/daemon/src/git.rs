@@ -440,12 +440,16 @@ pub async fn rollback_worktree(
 /// demand the user type its name back to remove it, on the strength of files
 /// Far Cooler wrote and the user has never seen.
 ///
+/// Only an UNTRACKED copy is subtracted (`project_hook_exclusions`). A hooks
+/// file the repository commits is never one Far Cooler wrote, so an edit to it
+/// is the user's work and counts here like any other.
+///
 /// Git's own pathspec, rather than a filter over these lines: `--porcelain`
 /// collapses a wholly-untracked directory into one entry (`?? .codex/`), so
 /// there is no line here to compare against a file path in the first place.
 pub async fn is_dirty(worktree: &Path) -> Result<bool> {
     let mut args = vec!["status".to_string(), "--porcelain".to_string(), "--".to_string()];
-    args.extend(crate::hook_install::project_hook_exclusions());
+    args.extend(crate::hook_install::project_hook_exclusions(worktree).await);
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     let r = git(worktree, &borrowed).await?;
     if !r.ok {
@@ -758,6 +762,57 @@ mod tests {
         assert!(dest.join("scratch.txt").exists(), "the user's work survives");
 
         let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The data-loss half of the tracked-hooks ruling, as the scratch-repo
+    /// reproduction: a repository that COMMITS `.codex/hooks.json`, with that
+    /// file edited. The edit is the user's work. It must show in the diff view
+    /// and count as dirt, because `removal_needs_confirmation` reads this, and
+    /// `git worktree remove --force` would otherwise take the edit with it.
+    ///
+    /// An untracked `.cursor/hooks.json` beside it stays hidden: the exclusion
+    /// is decided per file, not dropped for the whole repository.
+    #[tokio::test]
+    async fn an_edit_to_a_tracked_hooks_file_is_the_users_change() {
+        let d = scratch("tracked-hooks");
+        init_repo(&d);
+        std::fs::create_dir_all(d.join(".codex")).unwrap();
+        std::fs::write(d.join(".codex/hooks.json"), "{\"hooks\":{}}\n").unwrap();
+        for args in [vec!["add", "--", ".codex/hooks.json"], vec!["commit", "-qm", "codex hooks"]] {
+            let status = SyncCommand::new("git").current_dir(&d).args(&args).status().unwrap();
+            assert!(status.success(), "git {args:?}");
+        }
+        std::fs::create_dir_all(d.join(".cursor")).unwrap();
+        std::fs::write(d.join(".cursor/hooks.json"), "{\"version\":1}\n").unwrap();
+        assert!(!is_dirty(&d).await.unwrap(), "committed and untouched, beside an untracked copy of ours");
+
+        std::fs::write(d.join(".codex/hooks.json"), "{\"hooks\":{\"Stop\":[]}}\n").unwrap();
+
+        assert!(is_dirty(&d).await.unwrap(), "an edit to a tracked hooks file is uncommitted work");
+        let tree = crate::change_set::working_tree(&d).await.unwrap();
+        let unstaged: Vec<&str> = tree.unstaged.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(unstaged, [".codex/hooks.json"], "the diff view lists the edit");
+        assert!(tree.untracked.is_empty(), "the untracked copy is still ours to hide: {:?}", tree.untracked);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The case the exclusion exists for, which the per-file answer must keep:
+    /// a checkout whose only new files are the two Far Cooler writes is clean,
+    /// to `is_dirty` and to the diff view alike.
+    #[tokio::test]
+    async fn untracked_hooks_files_of_ours_are_still_not_the_users_work() {
+        let d = scratch("untracked-hooks");
+        init_repo(&d);
+        for relative in crate::hook_install::PROJECT_HOOK_FILES {
+            let path = d.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "{}\n").unwrap();
+        }
+
+        assert!(!is_dirty(&d).await.unwrap(), "nothing here is the user's");
+        let tree = crate::change_set::working_tree(&d).await.unwrap();
+        assert!(!tree.is_dirty(), "and the diff view opens empty: {tree:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
