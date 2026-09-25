@@ -513,6 +513,12 @@ struct TraceAxisTests {
         // (1_800_600 + 600) / 1800 = 1000.66…, so 1000.
         #expect(ActivityTrace.trusted(1000, span: .sixHours, heardAt: heard) == 1000)
         #expect(ActivityTrace.trusted(1001, span: .sixHours, heardAt: heard) == nil)
+        // One second earlier, `heard + 600` is one second short of bucket
+        // 6004's start, so 6004 is refused. This is the case that catches a
+        // WIDER slack; the pair above catches a narrower one.
+        let early = Date(timeIntervalSince1970: 1_800_599)
+        #expect(ActivityTrace.trusted(6003, span: .hour, heardAt: early) == 6003)
+        #expect(ActivityTrace.trusted(6004, span: .hour, heardAt: early) == nil)
         // Nothing to check it against, so nothing to trust.
         #expect(ActivityTrace.trusted(6000, span: .hour, heardAt: nil) == nil)
         #expect(ActivityTrace.trusted(-1, span: .hour, heardAt: heard) == nil)

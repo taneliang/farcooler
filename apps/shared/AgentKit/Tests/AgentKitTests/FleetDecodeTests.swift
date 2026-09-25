@@ -87,6 +87,22 @@ struct FleetDecodeTests {
     }
     """
 
+    /// What the iPhone writer records for one runner keeps the fleet trace's
+    /// anchor beside the trace. Dropped, the Dynamic Island's sum across
+    /// runners would pack every runner from its newest end again, silently.
+    @Test func aRunnersProjectionKeepsItsFleetTraceAnchor() throws {
+        let json = Self.fleetJSON.replacingOccurrences(
+            of: #""runtime_healthy""#,
+            with: #""fleetTrace": "EAAA", "fleetTraceAnchor": 5960000, "runtime_healthy""#)
+        let fleet = try Self.decodeFleet(json)
+        let mine = FleetSnapshot(
+            runner: fleet, agents: [], capturedAt: Date(timeIntervalSince1970: 0),
+            reviewsWaiting: nil)
+        #expect(mine.fleetTraceAnchor == 5_960_000)
+        #expect(mine.fleetTrace == fleet.fleetTrace)
+        #expect(mine.complete)
+    }
+
     static func decodeFleet(_ json: String = fleetJSON) throws -> Fleet {
         try JSONDecoder().decode(Fleet.self, from: Data(json.utf8))
     }

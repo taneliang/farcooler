@@ -1232,10 +1232,15 @@ public struct ActivityTrace: Sendable, Equatable {
     /// has to say about these thirteen columns.
     ///
     /// Runners' wall clocks are an input here, as they are on the card —
-    /// bounded by `trusted`, which callers apply first.
+    /// bounded by `trusted`, which callers apply first. An anchor outside
+    /// `0...anchorLimit` is treated as none whoever the caller is, so it can
+    /// neither set the axis nor push every runner out of it.
     public static func summing(
-        anchored traces: [(trace: ActivityTrace, anchor: Int?)]
+        anchored inputs: [(trace: ActivityTrace, anchor: Int?)]
     ) -> (trace: ActivityTrace, anchor: Int?)? {
+        let traces = inputs.map { input in
+            (trace: input.trace, anchor: input.anchor.flatMap { (0...anchorLimit).contains($0) ? $0 : nil })
+        }
         guard
             let coarsest = traces.map(\.trace.span).max(by: { $0.bucketSeconds < $1.bucketSeconds })
         else { return nil }

@@ -99,21 +99,20 @@ enum FleetSnapshotWriter {
             snapshotAgent(terminal, machine: machine, at: now)
         }
         // THIS runner's projection, which used to be the whole file.
+        //
+        // The fleet trace comes off `fleet` with its anchor: the rows summed at
+        // ONE width, as the runner summed them. Not added up here out of the
+        // per-agent traces above, and that is arithmetic rather than
+        // deference: each row snapped to the shortest of §04's three windows
+        // that held its own activity, so bucket 4 of a five-minute row and
+        // bucket 4 of a two-hour row are different spans of time and adding
+        // them adds unlike things. The daemon holds every ring and can pick one
+        // width across all of them. See `FleetSnapshot.fleetTrace`, and
+        // `FleetSnapshot.init(runner:agents:capturedAt:reviewsWaiting:)` for
+        // why the trace and its anchor are read there and not here.
         let mine = FleetSnapshot(
-            agents: agents, capturedAt: now, complete: true,
-            reviewsWaiting: reviewsWaiting(inbox),
-            // The fleet's rows summed at ONE width, as the runner summed them.
-            // Not added up here out of the per-agent traces above, and that is
-            // arithmetic rather than deference: each row snapped to the shortest
-            // of §04's three windows that held its own activity, so bucket 4 of
-            // a five-minute row and bucket 4 of a two-hour row are different
-            // spans of time and adding them adds unlike things. The daemon holds
-            // every ring and can pick one width across all of them. See
-            // `FleetSnapshot.fleetTrace`.
-            fleetTrace: fleet.fleetTrace,
-            // Where that sum sits in time, so the merge across runners can
-            // place it rather than pack it. See `ActivityTrace.summing(anchored:)`.
-            fleetTraceAnchor: fleet.fleetTraceAnchor)
+            runner: fleet, agents: agents, capturedAt: now,
+            reviewsWaiting: reviewsWaiting(inbox))
         publication.record(runner: runner, snapshot: mine)
         publish(at: now)
     }

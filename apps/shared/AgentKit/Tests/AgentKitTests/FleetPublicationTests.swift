@@ -374,6 +374,19 @@ struct FleetTraceSumTests {
         #expect(summed.anchor == nil)
     }
 
+    /// An anchor outside `0...anchorLimit` is no anchor, whoever passes it: it
+    /// neither sets the axis — which would push the honest runner out of the
+    /// window and sum to thirteen measured zeroes — nor anchors the result.
+    @Test func anOutOfRangeAnchorIsIgnoredBySumming() throws {
+        let summed = try #require(
+            ActivityTrace.summing(anchored: [
+                (trace(span: .hour, code: powers, commits: noCommits), 6002),
+                (trace(span: .sixHours, code: fives, commits: noCommits), Int.max),
+            ]))
+        #expect(summed.trace.code(12) == 7168 + 5)
+        #expect(summed.anchor == nil)
+    }
+
     /// End to end through the publication: each runner's anchor is checked
     /// against the poll that brought it, so one whose clock runs a day ahead is
     /// packed rather than allowed to set the axis — which would have pushed the

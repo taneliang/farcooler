@@ -82,6 +82,23 @@ struct Fleet: Decodable {
     static let empty = Fleet(runtimeHealthy: false, livePanes: 0, workspaces: [])
 }
 
+extension FleetSnapshot {
+    /// One runner's own projection, from the fleet it just polled.
+    ///
+    /// **The fleet trace and its anchor come off `fleet` together, here**, and
+    /// not at the call site. The anchor is optional on `FleetSnapshot.init`, so
+    /// a writer that forgot it would still compile and every surface would
+    /// quietly go back to packing each runner from its newest end. Here it is
+    /// one line a test can see: `aRunnersProjectionKeepsItsFleetTraceAnchor`.
+    init(runner fleet: Fleet, agents: [Agent], capturedAt: Date, reviewsWaiting: Int?) {
+        self.init(
+            agents: agents, capturedAt: capturedAt, complete: true,
+            reviewsWaiting: reviewsWaiting,
+            fleetTrace: fleet.fleetTrace,
+            fleetTraceAnchor: fleet.fleetTraceAnchor)
+    }
+}
+
 struct Workspace: Decodable, Identifiable, Hashable {
     var id: String
     var short: String
