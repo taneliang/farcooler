@@ -105,7 +105,8 @@ def main():
                    "## Lanes": "three", "## Autonomy": "push", "## Anything else": "prod"}
         for h, word in answers.items():
             body = section(text, h).lower()
-            check(f"S8 {h[3:]} holds the owner's answer ({word!r})", word in body, body[:120])
+            found = re.search(rf"\b{re.escape(word)}\b", body) is not None
+            check(f"S8 {h[3:]} holds the owner's answer ({word!r})", found, body[:120])
     elif scenario == "S9":
         charter = (repo / ".farcooler" / "manager.md").read_text()
         original = subprocess.run(["git", "-C", str(repo), "show", "HEAD:.farcooler/manager.md"],

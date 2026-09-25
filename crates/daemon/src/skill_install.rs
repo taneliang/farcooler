@@ -103,6 +103,20 @@ fn frontmatter(name: &str) -> String {
     )
 }
 
+/// The headings a charter carries, in order. The interview is done when the
+/// charter has every one of them; a charter missing some is interviewed for
+/// those alone.
+pub const CHARTER_SECTIONS: &[&str] = &[
+    "## Workflow",
+    "## Done means",
+    "## Review",
+    "## Who decides",
+    "## Reaching me",
+    "## Lanes",
+    "## Autonomy",
+    "## Anything else",
+];
+
 /// Whether anything can wake a manager that has ended its turn. Nothing can
 /// yet (see `WAIT_STEP`).
 pub const WAKE_LOOP_EXISTS: bool = false;
@@ -524,6 +538,49 @@ mod tests {
         for line in writes {
             assert!(line.contains("--actor manager"), "a write that doesn't name the manager: {line}");
         }
+    }
+
+    /// The part of the body under `## The interview`, up to the next `## `.
+    fn interview(body: &str) -> &str {
+        let start = body.find("\n## The interview\n").expect("the skill has an interview section");
+        let rest = &body[start + 1..];
+        let end = rest[3..].find("\n## ").map_or(rest.len(), |i| i + 3);
+        &rest[..end]
+    }
+
+    /// The charter's headings are one list, and the interview asks for every
+    /// one, so it can't silently stop asking about one of them.
+    #[test]
+    fn the_interview_covers_every_charter_section() {
+        assert_eq!(CHARTER_SECTIONS.len(), 8);
+        for h in ALL {
+            let body = skill_body(h);
+            let asks = interview(&body);
+            for heading in CHARTER_SECTIONS {
+                assert!(asks.contains(heading), "{h:?}: the interview never asks for {heading}");
+            }
+        }
+    }
+
+    /// The interview is how the charter gets written, and the owner approves
+    /// it before it exists: the spec's "don't guess a workflow".
+    #[test]
+    fn the_charter_is_written_only_after_the_owner_approves_it() {
+        let body = skill_body(Harness::Claude);
+        let asks = interview(&body);
+        assert!(asks.contains("One question at a time"), "{asks}");
+        assert!(asks.contains("Read the whole draft back"), "{asks}");
+        assert!(asks.contains("only after they say yes"), "{asks}");
+    }
+
+    /// Keeping the charter local goes in `.git/info/exclude`, which is not
+    /// itself a tracked change the way `.gitignore` is.
+    #[test]
+    fn a_local_charter_goes_in_info_exclude() {
+        let asks = skill_body(Harness::Claude);
+        let asks = interview(&asks);
+        assert!(asks.contains("info/exclude"), "{asks}");
+        assert!(!asks.contains("to .gitignore"), "{asks}");
     }
 
     /// The spec wants the skill read in a minute.

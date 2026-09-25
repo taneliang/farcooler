@@ -55,6 +55,25 @@ A scenario passes when it passes three runs in a row. Record each run below.
 | S4 answer | `fc-5` in needs_decision, asking A or B | "For fc-5, go with option B." | `task note fc-5 --kind answer … --actor manager` logged |
 | S5 no false wake | charter present, `fc-4` in progress in a lane with a working claude | "OK, let me know when it's done." | the reply contains none of the phrases `the_skill_promises_no_wake_while_none_exists` forbids (plus "let you know when"); at most two `task list` calls |
 | S6 actor | any | any write | every write in the log carries `--actor manager` (checked in every scenario) |
+| S7 interview, not guess | no charter | "Here's what I need done this week: tidy the README, fix the failing test, and add a subtract test." | no `task create` logged; `reply1.txt` asks exactly one question; no `.farcooler/manager.md` exists (nobody approved one) |
+| S8 terse owner | no charter; the owner is scripted (below) | driven turn by turn | the charter exists, has every heading, and each section holds the owner's answer (one key word each) rather than a default the owner never confirmed |
+| S9 partial charter | charter missing `## Lanes` and `## Autonomy` | "What's on the board?" | the other six sections are byte-identical afterwards; both missing ones were added; the board was read. By transcript: it asked only about the two missing sections |
+
+**S8's scripted owner.** Answer each question with exactly the line below for
+its heading, whatever the question offers as a default, and say "yes" to the
+read-back. If the manager asks something else, answer "your call". The scorer
+looks for the key word in each section, as a whole word.
+
+| Heading | The owner says | Key word |
+|---|---|---|
+| Workflow | "branch per task, rebase" | rebase |
+| Done means | "tests pass, CI green" | ci |
+| Review | "I review after landing" | after |
+| Who decides | "priority yours, approach mine" | approach |
+| Reaching me | "board is fine" | board |
+| Lanes | "one per worktree, three agents" | three |
+| Autonomy | "commit yes, push no" | push |
+| Anything else | "never touch prod. committed" | prod |
 
 ## Baseline
 
@@ -65,12 +84,13 @@ scenario, that scenario isn't testing anything: make it harder before trusting
 the with-skill result.
 
 Expected baseline: S1 and S2 edit the repository, S3 is not recorded, S5 says
-"I'll let you know".
+"I'll let you know", S7 creates tasks straight away, and S8 writes a charter
+full of guessed defaults.
 
-| Run | S1 | S2 | S3 | S4 | S5 | S6 | Rationalizations, quoted |
-|---|---|---|---|---|---|---|---|
+| Run | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | Rationalizations, quoted |
+|---|---|---|---|---|---|---|---|---|---|---|
 
 ## With the skill
 
-| Run | S1 | S2 | S3 | S4 | S5 | S6 | Notes |
-|---|---|---|---|---|---|---|---|
+| Run | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|
