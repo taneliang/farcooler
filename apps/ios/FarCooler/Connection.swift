@@ -364,9 +364,9 @@ final class Connection: ObservableObject {
 
         guard mine == attempt else { return }
         phase = .connected
-        // Whatever build answered before belongs to the previous link, and
-        // `start` is also how this connection is pointed at a different
-        // runner. See `forgetDaemonBuild`.
+        // Whatever build answered before belongs to the previous link: a
+        // `retry` restarts this same runner through here. See
+        // `forgetDaemonBuild`.
         forgetDaemonBuild()
         await listenForFleetNews()
         await refresh()
@@ -785,12 +785,22 @@ final class Connection: ObservableObject {
     /// refusing answer, for one round trip.
     private func forgetDaemonBuild() {
         daemon = nil
+        daemonLink += 1
     }
+
+    /// Which link `daemon` is being read for. Bumped by `forgetDaemonBuild`,
+    /// so a read that set out on the previous link and answers after the new
+    /// one came up is dropped rather than installing the old build over the
+    /// clear. A dropped transport should fail that call first; this is what
+    /// holds when it does not.
+    private var daemonLink = 0
 
     func loadDaemonBuild() async {
         guard phase == .connected, daemon == nil else { return }
+        let link = daemonLink
         guard let data = try? await core.call("host"),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            link == daemonLink
         else { return }
         daemon = DaemonBuild(
             version: body["daemonVersion"] as? String ?? "unknown",
