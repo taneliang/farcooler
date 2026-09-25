@@ -184,7 +184,7 @@ fn digest(text: &str) -> String {
 
 /// `body`, then a last line naming the sha256 of `body`, as an HTML comment
 /// a Markdown reader doesn't render.
-fn sign_markdown(body: &str) -> String {
+pub(crate) fn sign_markdown(body: &str) -> String {
     format!("{body}<!-- {MARKER}{} -->\n", digest(body))
 }
 

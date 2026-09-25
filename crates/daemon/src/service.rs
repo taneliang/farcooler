@@ -401,6 +401,72 @@ fn install_project_hooks(worktree: &Path, socket: &Path) {
     use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
     install_project_hook_file(&worktree.join(CODEX_HOOKS), socket, merge_codex);
     install_project_hook_file(&worktree.join(CURSOR_HOOKS), socket, merge_cursor);
+    // The manager skill, on the same act: both agents' copies, which share
+    // one `SKILL.md`, so cursor's install finds codex's already there.
+    install_project_skill(worktree, crate::skill_install::Harness::Codex);
+    install_project_skill(worktree, crate::skill_install::Harness::Cursor);
+}
+
+/// The agent whose copy of the manager skill a preset's pane reads from the
+/// worktree, or `None` for one that reads none there. claude's copy is a
+/// plugin in the runtime directory (`write_claude_plugin`). Matched on the
+/// agent exactly, like `project_hook_file_for`.
+fn project_skill_for(preset: &str) -> Option<crate::skill_install::Harness> {
+    use crate::skill_install::Harness;
+    match preset.split_once(':').map_or(preset, |(agent, _)| agent) {
+        "codex" => Some(Harness::Codex),
+        "cursor" => Some(Harness::Cursor),
+        _ => None,
+    }
+}
+
+/// Write one agent's copy of the manager skill into a worktree, under the
+/// rules the hooks files follow and one more.
+///
+/// - `skill_install::install_file` writes a missing file and replaces only an
+///   unedited copy of ours. An edited copy, or a file we never wrote, is left
+///   alone.
+/// - **A file git tracks is never written.** `project_hook_exclusions` hides
+///   these paths from `git::is_dirty` and the diff view, so a change we made
+///   to a committed file would be a change to somebody's work that nothing on
+///   the runner would ever show them. Asked of git only when a write is
+///   actually due, so the ordinary launch, where the file already says this,
+///   spawns nothing.
+///
+/// Never fails, like `install_project_hooks`: a worktree we can't write
+/// costs this agent the skill and nothing else.
+fn install_project_skill(worktree: &Path, harness: crate::skill_install::Harness) {
+    use crate::skill_install::{Installed, install_file, render};
+    let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+    for file in render(harness, &cli) {
+        let path = worktree.join(file.relative);
+        if std::fs::read(&path).is_ok_and(|now| now == file.contents.as_bytes()) {
+            continue;
+        }
+        if git_tracks(worktree, file.relative) {
+            tracing::info!(
+                path = %path.display(),
+                "the repository tracks this file; leaving the manager skill out of it"
+            );
+            continue;
+        }
+        if let Installed::LeftAlone(why) = install_file(&path, &file.contents) {
+            tracing::info!(path = %path.display(), why, "leaving somebody's skill file alone");
+        }
+    }
+}
+
+/// Whether git tracks `relative` in `worktree`. A git that can't be run
+/// answers yes: when we can't tell, we don't write.
+fn git_tracks(worktree: &Path, relative: &str) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["ls-files", "--error-unmatch", "--", relative])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_or(true, |status| status.success())
 }
 
 /// The one project-local hooks file this preset's agent reads, or `None` for
@@ -1981,6 +2047,13 @@ impl Service {
     /// anybody pointed Far Cooler at. The trigger is an act — this agent, in
     /// this worktree, because somebody opened it.
     ///
+    /// **The manager skill rides on the same act.** claude's copy is a plugin
+    /// in the runtime directory, returned as `LaunchExtras::plugin_dir` beside
+    /// the settings file; codex's and cursor's are written into this worktree
+    /// by `install_project_skill`, for this pane's agent only. Nothing of it is
+    /// user-level. See `skill_install` for how each agent was measured
+    /// finding it.
+    ///
     /// Never fails, in either half. A read-only mount, a `.cursor` that is a
     /// file, a hooks file we cannot parse, a runtime directory we cannot write
     /// — each of those costs the live view for that agent in that worktree and
@@ -1992,6 +2065,11 @@ impl Service {
                 &hook_ingress::HookIngress::socket_path(&self.root),
                 merge,
             );
+        }
+        // The manager skill codex and cursor read from the worktree, on the
+        // same act and for the same agent.
+        if let Some(harness) = project_skill_for(preset) {
+            install_project_skill(Path::new(worktree), harness);
         }
         // claude's half, unchanged, and gated by the same `starts_with` that
         // gates minting a session id, for the same reason: `--settings` is
@@ -7420,5 +7498,174 @@ mod launch_hook_install_tests {
         for expected in ["create_terminal", "split_terminal", "restart_terminal", "set_pane_mode"] {
             assert!(covered.contains(&expected), "{expected} was not walked at all: {covered:?}");
         }
+    }
+}
+
+/// The manager skill in a worktree: written on the same two acts as the hooks
+/// files (making a worktree, and opening a codex or cursor pane in one), and
+/// hidden from `git::is_dirty` and the diff view the same way.
+#[cfg(test)]
+mod project_skill_tests {
+    use super::*;
+    use crate::skill_install::{PROJECT_SKILL, PROJECT_SKILL_POLICY};
+
+    use super::restart_wiring_tests::a_workspace;
+
+    fn skill(ws: &models::Workspace) -> PathBuf {
+        Path::new(&ws.worktree_path).join(PROJECT_SKILL)
+    }
+
+    fn policy(ws: &models::Workspace) -> PathBuf {
+        Path::new(&ws.worktree_path).join(PROJECT_SKILL_POLICY)
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// The whole reason `PROJECT_HOOK_FILES` is subtracted, for the skill: a
+    /// worktree Far Cooler just made, and nobody touched, must not read as
+    /// dirty or demand a typed confirmation to remove.
+    #[tokio::test]
+    async fn a_fresh_worktree_with_our_skill_in_it_is_not_dirty() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .create_workspace(repo, "skill", "feat/skill", "HEAD")
+            .await
+            .expect("a workspace");
+
+        // A filter, not an absence: both files really are there.
+        let text = std::fs::read_to_string(skill(&ws)).expect("the skill was written");
+        assert!(text.contains("**Never execute a task yourself.**"), "{text}");
+        assert!(policy(&ws).exists(), "and codex's policy beside it");
+
+        let worktree = Path::new(&ws.worktree_path);
+        assert!(!git::is_dirty(worktree).await.expect("dirt check"), "Far Cooler's own files are not work");
+        let tree = crate::change_set::working_tree(worktree).await.expect("the diff view");
+        assert!(
+            !format!("{tree:?}").contains(".agents"),
+            "and the diff view doesn't show them: {tree:?}"
+        );
+    }
+
+    /// The user's own file in `.agents/` still shows as their work. The
+    /// exclusion is our two paths, never the directory.
+    #[tokio::test]
+    async fn a_file_of_the_users_beside_our_skill_is_still_reported() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .create_workspace(repo, "skill", "feat/skill", "HEAD")
+            .await
+            .expect("a workspace");
+        let worktree = Path::new(&ws.worktree_path);
+        std::fs::write(worktree.join(".agents/skills/notes.md"), "mine").unwrap();
+
+        assert!(git::is_dirty(worktree).await.expect("dirt check"), "their file is uncommitted work");
+        let tree = crate::change_set::working_tree(worktree).await.expect("the diff view");
+        assert!(format!("{tree:?}").contains("notes.md"), "and the diff view shows it: {tree:?}");
+    }
+
+    /// Opening codex in a checkout Far Cooler didn't make writes the skill
+    /// there, the act the ruling allows. Read back from disk.
+    #[tokio::test]
+    async fn opening_codex_puts_the_skill_in_that_worktree() {
+        let (_dir, svc, ws) = a_workspace().await;
+        assert!(!skill(&ws).exists(), "the reconciler adopts without writing");
+
+        svc.create_terminal(ws.id, "agent", "codex:gpt-5.6-sol").await.expect("a codex pane");
+
+        let text = std::fs::read_to_string(skill(&ws)).expect("the skill, in this worktree");
+        assert!(text.starts_with("---\nname: farcooler-manager\n"), "{text}");
+        let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+        assert!(text.contains(&format!("{cli} task list")), "naming this runner's CLI: {text}");
+        let yaml = std::fs::read_to_string(policy(&ws)).expect("codex's policy");
+        assert!(yaml.contains("allow_implicit_invocation: false"), "{yaml}");
+    }
+
+    /// cursor reads the same `SKILL.md` and never reads codex's policy, so it
+    /// gets the one file and not the other.
+    #[tokio::test]
+    async fn opening_cursor_puts_only_the_skill_there() {
+        let (_dir, svc, ws) = a_workspace().await;
+
+        svc.create_terminal(ws.id, "agent", "cursor").await.expect("a cursor pane");
+
+        let text = std::fs::read_to_string(skill(&ws)).expect("the skill");
+        assert!(text.contains("disable-model-invocation: true"), "{text}");
+        assert!(!policy(&ws).exists(), "codex's policy is for codex");
+    }
+
+    /// A restart is a launch, the same as for the hooks: a worktree cleaned
+    /// out between the two gets the skill back.
+    #[tokio::test]
+    async fn a_restarted_codex_pane_puts_the_skill_back() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+        std::fs::remove_file(skill(&ws)).expect("take the skill away");
+
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        assert!(skill(&ws).exists(), "a restarted pane gets the skill again");
+    }
+
+    /// And opening a shell or claude there writes nothing into the
+    /// repository: claude's copy lives in the runtime directory.
+    #[tokio::test]
+    async fn opening_claude_or_a_shell_writes_no_skill_into_the_repository() {
+        let (_dir, svc, ws) = a_workspace().await;
+
+        svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+        svc.create_terminal(ws.id, "plain", "shell").await.expect("a shell pane");
+
+        assert!(!Path::new(&ws.worktree_path).join(".agents").exists());
+        assert!(svc.root.join(crate::skill_install::CLAUDE_PLUGIN_DIR).exists(), "claude's own copy");
+    }
+
+    /// A user's own skill survives, and so does an edited copy of ours: the
+    /// ownership rule, reached through the real call site.
+    #[tokio::test]
+    async fn a_worktree_that_already_has_skills_keeps_them() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let theirs = Path::new(&ws.worktree_path).join(".agents/skills/other/SKILL.md");
+        std::fs::create_dir_all(theirs.parent().unwrap()).unwrap();
+        std::fs::write(&theirs, "theirs\n").unwrap();
+        let edited = crate::skill_install::sign_markdown("an older copy\n").replace("older", "edited");
+        std::fs::create_dir_all(skill(&ws).parent().unwrap()).unwrap();
+        std::fs::write(skill(&ws), &edited).unwrap();
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+
+        assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "theirs\n");
+        assert_eq!(std::fs::read_to_string(skill(&ws)).unwrap(), edited, "an edited copy is theirs now");
+    }
+
+    /// A repository that TRACKS the file gets nothing written into it. The
+    /// exclusion that hides our files from `is_dirty` and the diff view would
+    /// hide our change to a tracked one too, so a write there is a change to
+    /// somebody's committed file that nothing on the runner would ever show
+    /// them. The tracked copy here is an unedited one of ours, so the
+    /// ownership rule alone would replace it: only the tracked check stops it.
+    #[tokio::test]
+    async fn a_skill_file_git_tracks_is_never_written() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let worktree = Path::new(&ws.worktree_path);
+        let committed = crate::skill_install::sign_markdown("an older copy, committed\n");
+        std::fs::create_dir_all(skill(&ws).parent().unwrap()).unwrap();
+        std::fs::write(skill(&ws), &committed).unwrap();
+        git_in(worktree, &["add", "-f", PROJECT_SKILL]);
+        git_in(worktree, &["commit", "-q", "-m", "a skill somebody committed"]);
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+
+        assert_eq!(std::fs::read_to_string(skill(&ws)).unwrap(), committed, "a tracked file is left alone");
+        // The untracked policy beside it is still ours to write.
+        assert!(policy(&ws).exists());
     }
 }
