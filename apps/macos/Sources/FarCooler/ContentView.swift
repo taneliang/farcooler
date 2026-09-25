@@ -2361,7 +2361,8 @@ struct ContentView: View {
             project: request.project,
             description: request.description,
             name: request.name,
-            agent: request.preset.isEmpty ? Preferences.shared.defaultAgent : request.preset)
+            agent: request.preset.isEmpty ? Preferences.shared.defaultAgent : request.preset,
+            reusing: request.workspace)
         switch outcome {
         case .started(let workspace, let terminal, let name):
             // By the ids the create calls returned, not by a later look at
@@ -2369,12 +2370,18 @@ struct ContentView: View {
             expanded.insert(workspace)
             selection = .terminal(host: host, workspace: workspace, terminal: terminal)
             return .started(name: name)
-        case .failed(let sentence, let workspace):
-            if let workspace { reveal(workspace) }
+        case .failed(let sentence, let made):
+            if let made { reveal(made.id) }
             // After the selection change, which clears the banner. The panel
             // shows it when it is still open; this is for when it is not.
             if !showQuickCreate { errorBanner = sentence }
-            return .failed(sentence)
+            // The worktree it made, so starting again goes on in it.
+            return .failed(
+                sentence,
+                left: made.map {
+                    TaskSubmission.Left(
+                        host: host, project: request.project, workspace: $0.id, name: $0.name)
+                })
         }
     }
 

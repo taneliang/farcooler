@@ -1370,9 +1370,17 @@ final class DaemonClient: ObservableObject {
         /// `name` is the one it was made under: the panel's, or it with the
         /// suffix `unique` added.
         case started(workspace: String, terminal: String, name: String)
-        /// A sentence for the panel, in this app's words. `workspace` is set
-        /// when the worktree was made but its agent was not.
-        case failed(String, workspace: String?)
+        /// A sentence for the panel, in this app's words. `made` is set when
+        /// the worktree was made but its agent was not.
+        case failed(String, made: MadeWorkspace?)
+    }
+
+    /// A task's worktree that exists without its agent: what a start that got
+    /// halfway leaves, and what starting it again goes on from.
+    struct MadeWorkspace: Equatable {
+        var id: String
+        /// The name it was made under, suffix included.
+        var name: String
     }
 
     /// Start a task: a worktree, an agent in it, and the description as the
@@ -1404,10 +1412,27 @@ final class DaemonClient: ObservableObject {
     /// on a runner that has it, the create is also `--fork-only`, and a name
     /// that arrived since the list was read is refused rather than checked
     /// out.
-    func startTask(project: String, description: String, name: String, agent: String) async
-        -> TaskStart
-    {
-        if let problem = TaskPrompt.problem(description) { return .failed(problem, workspace: nil) }
+    ///
+    /// **`reusing` is a worktree an earlier start made and could not start an
+    /// agent in** (`.failed(_, made:)`): the agent is started there, under
+    /// `name`, and nothing new is made. Starting again used to make a second
+    /// worktree, `name-2`, and leave the first without an agent. A `reusing`
+    /// the fleet no longer has — removed since — is a start from scratch.
+    func startTask(
+        project: String, description: String, name: String, agent: String,
+        reusing: String? = nil
+    ) async -> TaskStart {
+        if let problem = TaskPrompt.problem(description) { return .failed(problem, made: nil) }
+        // Asked, if the first status read has not landed yet: the create and
+        // the terminal are both decided on what this runner can do, and
+        // deciding on a nil build would type the task — the path gates break.
+        if daemonBuild == nil { await readDaemonBuild() }
+
+        if let reusing, let existing = fleet.workspaces.first(where: { $0.id == reusing }) {
+            return await startAgent(
+                in: Created(id: existing.id, short: existing.short), name: name,
+                description: description, agent: agent)
+        }
 
         // This runner's own prefix, read from the fleet it last refreshed — the
         // same value the composer previewed, so the branch that gets made is the
@@ -1417,7 +1442,7 @@ final class DaemonClient: ObservableObject {
         guard let listing,
             let branches = try? JSONDecoder().decode(BranchList.self, from: listing).branches
         else {
-            return .failed(TaskFailure.sentence(for: listFailure), workspace: nil)
+            return .failed(TaskFailure.sentence(for: listFailure), made: nil)
         }
         // Compared without case. A Mac runner's disk ignores it, so `Fix-It`
         // and `fix-it` are one loose ref and one directory there, and git's
@@ -1433,10 +1458,6 @@ final class DaemonClient: ObservableObject {
                 || takenBranches.contains(Branch.slug(from: candidate, prefix: prefix).lowercased())
         }
         let branch = Branch.slug(from: name, prefix: prefix)
-
-        // Asked, if the first status read has not landed yet: both the create
-        // and the terminal below are decided on what this runner can do.
-        if daemonBuild == nil { await readDaemonBuild() }
 
         // `--no-terminal`, because this creates its own agent terminal a few
         // lines below. Without it a task would come up with an unused shell
@@ -1463,11 +1484,17 @@ final class DaemonClient: ObservableObject {
             if ["branch-exists", "worktree-exists"].contains(TaskFailure.code(in: makeFailure)) {
                 refusedTaskNames[project, default: []].insert(name.lowercased())
             }
-            return .failed(TaskFailure.sentence(for: makeFailure), workspace: nil)
+            return .failed(TaskFailure.sentence(for: makeFailure), made: nil)
         }
+        return await startAgent(in: workspace, name: name, description: description, agent: agent)
+    }
 
-        // Deciding on a nil build would type the task — the path gates break —
-        // so the build was asked for above if it had not landed yet.
+    /// The second half of `startTask`: the agent's terminal, in a worktree
+    /// that exists, with the description as its launch argument where the
+    /// runner takes one and typed in once it is idle where it doesn't.
+    private func startAgent(in workspace: Created, name: String, description: String, agent: String)
+        async -> TaskStart
+    {
         // `"launch_prompt"` is `farcooler_protocol::capability::LAUNCH_PROMPT`.
         let asArgument =
             (daemonBuild?.can("launch_prompt") ?? false) && Agents.takesPrompt(preset: agent)
@@ -1478,7 +1505,9 @@ final class DaemonClient: ObservableObject {
                     prompt: asArgument ? description : nil))
         await refresh()
         guard let terminal = terminalMade.flatMap(Created.decode) else {
-            return .failed(TaskFailure.sentence(for: terminalFailure), workspace: workspace.id)
+            return .failed(
+                TaskFailure.sentence(for: terminalFailure),
+                made: MadeWorkspace(id: workspace.id, name: name))
         }
 
         if !asArgument { typeWhenIdle(workspace: workspace.id, terminal: terminal.id, text: description) }

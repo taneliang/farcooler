@@ -117,8 +117,19 @@ struct QuickCreate: View {
     /// directory rather than a stored string, so what this becomes is what
     /// the sidebar row says for as long as the worktree exists.
     private var name: String {
+        if let leftover { return leftover.name }
         if let named, named.description == description { return named.name }
         return TaskName.heuristic(description)
+    }
+
+    /// A worktree the last start made in the chosen project without starting
+    /// its agent. Starting again goes on in it, under its name, rather than
+    /// making another beside it.
+    private var leftover: TaskSubmission.Left? {
+        guard let left = submission.left, let chosen, left.host == chosen.host,
+            left.project == chosen.repository.id
+        else { return nil }
+        return left
     }
 
     /// The worktree about to be created, which is the only thing naming this
@@ -191,7 +202,12 @@ struct QuickCreate: View {
             OnDeviceNamer.prewarm()
         }
         // A failure is about the text it was for; editing it clears it.
-        .onChange(of: text) { _, _ in submission.failure = nil }
+        // Emptying it is starting on something else, so a worktree the last
+        // start left behind is no longer this draft's to go on in.
+        .onChange(of: text) { _, _ in
+            submission.failure = nil
+            if description.isEmpty { submission.forgetLeft() }
+        }
         // Named while typing, a moment after the typing stops: `.task(id:)`
         // cancels the previous one on every keystroke, so only a pause asks
         // the model anything.
@@ -298,7 +314,8 @@ struct QuickCreate: View {
         guard canSubmit, let chosen else { return }
         let request = TaskRequest(
             description: description, name: name, host: chosen.host,
-            project: chosen.repository.id, preset: Agents.preset(agent: agent, model: model))
+            project: chosen.repository.id, preset: Agents.preset(agent: agent, model: model),
+            workspace: leftover?.workspace)
         // Which opening of the panel this is, so a start that finishes after
         // the panel was closed and opened again cannot close the new one.
         let opening = submission.opening
@@ -320,6 +337,9 @@ struct TaskRequest: Equatable {
     var host: String
     var project: String
     var preset: String
+    /// A worktree an earlier start made and could not start the agent in,
+    /// to start it in now instead of making another. `name` is its name.
+    var workspace: String? = nil
 }
 
 /// A task start in flight, and how the last one ended.
@@ -330,16 +350,31 @@ final class TaskSubmission: ObservableObject {
     /// Counts the panel's openings (`opened()`). A start remembers the one
     /// it was made from and closes only that.
     private(set) var opening = 0
+    /// The worktree the last start made without starting its agent, until a
+    /// start succeeds or the draft is emptied. The panel starts the next
+    /// attempt in it (`TaskRequest.workspace`) rather than making another.
+    @Published private(set) var left: Left?
+
+    /// A worktree made for a task whose agent did not start, and where.
+    struct Left: Equatable {
+        var host: String
+        var project: String
+        var workspace: String
+        var name: String
+    }
 
     /// How a start ended, as the panel needs it.
     enum Outcome: Equatable {
         /// Started, under this name — the panel's, or it with a suffix.
         case started(name: String)
-        /// Not started, with the sentence to show.
-        case failed(String)
+        /// Not started, with the sentence to show, and the worktree it made
+        /// on the way when it made one.
+        case failed(String, left: Left? = nil)
     }
 
     func opened() { opening += 1 }
+
+    func forgetLeft() { left = nil }
 
     /// Run `start` unless one is already running. The name it started under,
     /// or nil; a failure is kept in `failure` for the panel to show.
@@ -351,9 +386,13 @@ final class TaskSubmission: ObservableObject {
         starting = false
         switch outcome {
         case .started(let name):
+            left = nil
             return name
-        case .failed(let sentence):
+        case .failed(let sentence, let madeNow):
             failure = sentence
+            // Kept through a failure that made nothing — a runner out of
+            // reach says nothing about the worktree still being there.
+            if let madeNow { left = madeNow }
             return nil
         }
     }

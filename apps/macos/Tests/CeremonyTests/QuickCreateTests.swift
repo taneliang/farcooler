@@ -18,6 +18,9 @@ struct QuickCreateTests {
     private final class Outcome {
         var started: [String] = []
         var names: [String] = []
+        var requests: [TaskRequest] = []
+        /// The worktree a failure made, when it made one.
+        var left: TaskSubmission.Left?
         var closed = 0
         /// What the start answers: nil is "started", a sentence is a failure.
         var failure: String?
@@ -36,8 +39,9 @@ struct QuickCreateTests {
             onSubmit: { request in
                 outcome.started.append(request.description)
                 outcome.names.append(request.name)
+                outcome.requests.append(request)
                 outcome.during?()
-                if let failure = outcome.failure { return .failed(failure) }
+                if let failure = outcome.failure { return .failed(failure, left: outcome.left) }
                 return .started(name: request.name)
             },
             onResume: {},
@@ -105,6 +109,40 @@ struct QuickCreateTests {
         }
         #expect(outcome.started.count == 1)
         #expect(outcome.closed == 0, "a later opening is not this start's to close")
+    }
+
+    /// The worktree was made and the agent wasn't: ⏎ again goes on in that
+    /// worktree, under its name, rather than making another.
+    @Test func aRetryAfterTheAgentFailedGoesOnInTheWorktreeItMade() async {
+        let outcome = Outcome()
+        outcome.failure = "The runner can’t reach tmux."
+        outcome.left = .init(host: "", project: "r1", workspace: "w-made", name: "fix-flaky-2")
+        let submission = TaskSubmission()
+        await withDraft("Fix the flaky reconnect test") {
+            let panel = panel(outcome, submission: submission)
+            await panel.submit(keepOpen: false)
+            outcome.failure = nil
+            await panel.submit(keepOpen: false)
+        }
+        #expect(outcome.requests.count == 2)
+        #expect(outcome.requests.first?.workspace == nil, "the first start makes one")
+        #expect(outcome.requests.last?.workspace == "w-made")
+        #expect(outcome.requests.last?.name == "fix-flaky-2", "under the name it was made with")
+        #expect(submission.left == nil, "started, so nothing is left over")
+    }
+
+    /// A worktree left in one project is nothing to a start in another.
+    @Test func aWorktreeLeftInAnotherProjectIsNotReused() async {
+        let outcome = Outcome()
+        let submission = TaskSubmission()
+        _ = await submission.run {
+            .failed("No.", left: .init(host: "", project: "r2", workspace: "w-made", name: "x"))
+        }
+        await withDraft("Fix the flaky reconnect test") {
+            await panel(outcome, submission: submission).submit(keepOpen: false)
+        }
+        #expect(outcome.requests.first?.workspace == nil)
+        #expect(outcome.requests.first?.name == "fix-flaky-reconnect-test")
     }
 
     @Test func aDraftThatCannotStartNeitherStartsNorCloses() async {

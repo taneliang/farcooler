@@ -279,11 +279,11 @@ struct StartTaskTests {
         runner.workspaceCreateFails = "error: branch already exists\ncode: branch-exists"
         let client = await client(runner)
         let outcome = await start(client)
-        guard case .failed(let sentence, let workspace) = outcome else {
+        guard case .failed(let sentence, let made) = outcome else {
             Issue.record("expected a failure, got \(outcome)")
             return
         }
-        #expect(workspace == nil)
+        #expect(made == nil)
         #expect(!sentence.contains("error:") && !sentence.contains("already exists"), "\(sentence)")
         #expect(runner.made("terminal") == nil)
     }
@@ -293,12 +293,46 @@ struct StartTaskTests {
         runner.terminalCreateFails = "error: tmux is unavailable\ncode: tmux-unavailable"
         let client = await client(runner)
         let outcome = await start(client)
-        guard case .failed(let sentence, let workspace) = outcome else {
+        guard case .failed(let sentence, let made) = outcome else {
             Issue.record("expected a failure, got \(outcome)")
             return
         }
-        #expect(workspace == "w-new")
+        #expect(made == .init(id: "w-new", name: "fix-flaky-reconnect"))
         #expect(sentence.contains("tmux") && !sentence.contains("error:"), "\(sentence)")
+    }
+
+    /// The worktree was made and its agent was not: starting again starts the
+    /// agent THERE, rather than making `-2` beside it and leaving the first
+    /// without one.
+    @Test func aRetryStartsTheAgentInTheWorktreeTheFailedStartMade() async {
+        let runner = Runner(capabilities: Self.prompting)
+        runner.terminalCreateFails = "error: tmux is unavailable\ncode: tmux-unavailable"
+        let client = await client(runner)
+        guard case .failed(_, let made?) = await start(client) else {
+            Issue.record("expected a failure that made a worktree")
+            return
+        }
+
+        runner.terminalCreateFails = nil
+        let outcome = await client.startTask(
+            project: "repo", description: Self.description, name: made.name, agent: "claude",
+            reusing: made.id)
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        let creates = runner.calls.filter { $0.filter { $0 != "--json" }.starts(with: ["workspace", "create"]) }
+        #expect(creates.count == 1, "one worktree, made once: \(creates)")
+        let terminals = runner.calls.filter { $0.filter { $0 != "--json" }.starts(with: ["terminal", "create"]) }
+        #expect(terminals.count == 2 && terminals.last?.contains("wnew") == true, "\(terminals)")
+    }
+
+    /// Removed since: a start from scratch, not an agent sent nowhere.
+    @Test func aRetryWhoseWorktreeIsGoneMakesANewOne() async {
+        let runner = Runner(capabilities: Self.prompting)
+        let client = await client(runner)
+        let outcome = await client.startTask(
+            project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+            agent: "claude", reusing: "w-removed")
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(runner.made("workspace") != nil)
     }
 
     @Test func aTaskTooLongForAnAgentIsRefusedBeforeAnythingIsMade() async {
