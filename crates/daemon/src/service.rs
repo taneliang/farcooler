@@ -2636,7 +2636,7 @@ impl Service {
     /// file, a hooks file we cannot parse, a runtime directory we cannot write
     /// — each of those costs the live view for that agent in that worktree and
     /// nothing else. A pane that opens quiet beats a pane that will not open.
-    fn prepare_launch_hooks(&self, preset: &str, worktree: &str) -> LaunchExtras {
+    async fn prepare_launch_hooks(&self, preset: &str, worktree: &str) -> LaunchExtras {
         if let Some((relative, merge)) = project_hook_file_for(preset) {
             install_project_hook_file(
                 &Path::new(worktree).join(relative),
@@ -2662,8 +2662,9 @@ impl Service {
         let trust_workspace = is_cursor(preset) && self.forked_this_worktree(Path::new(worktree));
         // codex's, on the same line: codex has no flag, so its repository gets
         // the entry codex's own trust screen writes. See `codex_trust`.
+        // Only for this channel's own install; see `codex_trust::skip_reason`.
         if is_codex(preset) && self.forked_this_worktree(Path::new(worktree)) {
-            crate::codex_trust::trust_for_worktree(Path::new(worktree));
+            crate::codex_trust::trust_for_worktree(&self.root, Path::new(worktree)).await;
         }
         LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None }
     }
@@ -2673,7 +2674,11 @@ impl Service {
     /// carries this install's fork mark (`git::mark_forked`).
     ///
     /// The line cursor's `--trust` is drawn on, and codex's trust entry
-    /// (`codex_trust`). Trusting a directory is a
+    /// (`codex_trust`). The two reach differently: cursor's flag trusts this
+    /// one launch in this one directory, while codex's entry is the
+    /// repository's, so after it codex also opens without asking in the main
+    /// checkout and in an adopted worktree of that repository, exactly as one
+    /// Enter on codex's own screen would. Trusting a directory is a
     /// decision about its contents — cursor's trust is what lets a project's
     /// own `.cursor/` configuration (MCP servers, hooks, rules) load. A branch
     /// this runner forked from the person's repository holds that
@@ -2798,7 +2803,7 @@ impl Service {
         let term = self.mark_changes_pane(term, command_preset)?;
 
         // 2. Create and tag the window.
-        let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
+        let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path).await;
         let command = launch_command_with_prompt(
             &self.root,
             term.id,
@@ -3138,7 +3143,7 @@ impl Service {
         // makes — so it gets the same settings file. It read `preset_command`
         // until this line was found: splitting is how most panes on a runner
         // are made, so most claude panes reported nothing at all.
-        let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
+        let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path).await;
         let command = launch_command_with_prompt(
             &self.root,
             term.id,
@@ -3263,7 +3268,7 @@ impl Service {
         // the socket, and the pane's activity would sit frozen at whatever it
         // last reported. That is precisely the silent disagreement between
         // record and runtime this whole design exists to prevent.
-        let extras = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
+        let extras = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path).await;
         let command = with_pane_env(
             id,
             &term.command_preset,
@@ -3599,7 +3604,7 @@ impl Service {
                 // answer, however it got there. See `respawn_command`.
                 let sid = session_id.clone().unwrap_or_default();
                 let extras =
-                    self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
+                    self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path).await;
                 respawn_command(
                     user_home().as_deref(),
                     &term.command_preset,
@@ -9319,48 +9324,53 @@ mod launch_prompt_tests {
     #[tokio::test]
     async fn cursor_trust_is_only_for_a_worktree_this_install_forked_for_a_new_task() {
         let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
-        let trusts = |path: &str| svc.prepare_launch_hooks("cursor", path).trust_workspace;
+        let trusts = {
+            let svc = svc.clone();
+            move |path: String| {
+                let svc = svc.clone();
+                async move { svc.prepare_launch_hooks("cursor", &path).await.trust_workspace }
+            }
+        };
 
         // A new task's worktree: a new branch, cut here. Trusted — and only
         // for cursor.
         let made = svc.create_workspace(ws.repository_id, "fix-it", "fix-it", "HEAD").await.unwrap();
-        assert!(trusts(&made.worktree_path));
-        assert!(svc.prepare_launch_hooks("cursor:auto", &made.worktree_path).trust_workspace);
-        assert!(!svc.prepare_launch_hooks("claude", &made.worktree_path).trust_workspace);
+        assert!(trusts(made.worktree_path.clone()).await);
+        assert!(svc.prepare_launch_hooks("cursor:auto", &made.worktree_path).await.trust_workspace);
+        assert!(!svc.prepare_launch_hooks("claude", &made.worktree_path).await.trust_workspace);
 
         // An adopted branch is somebody's commits, and is not.
         git::git(Path::new(&ws.worktree_path), &["branch", "theirs"]).await.unwrap();
         let adopted = svc.adopt_branch(ws.repository_id, "theirs").await.unwrap();
-        assert!(!trusts(&adopted.worktree_path), "adopted");
+        assert!(!trusts(adopted.worktree_path.clone()).await, "adopted");
 
         // The repository's own checkout is not.
-        assert!(!trusts(&ws.worktree_path), "main checkout");
+        assert!(!trusts(ws.worktree_path.clone()).await, "main checkout");
 
         // A directory under `worktrees/` that nothing marked is not.
         let by_hand = svc.root.join("worktrees").join("repo").join("by-hand");
         std::fs::create_dir_all(&by_hand).unwrap();
-        assert!(!trusts(&by_hand.display().to_string()), "unmarked");
+        assert!(!trusts(by_hand.display().to_string()).await, "unmarked");
 
         // A worktree that has gone is not — tmux would start it in `$HOME`.
         let gone = made.worktree_path.clone();
         std::fs::remove_dir_all(&gone).unwrap();
-        assert!(!trusts(&gone), "missing");
+        assert!(!trusts(gone).await, "missing");
         // Nor a missing path that climbs back out with `..`.
         let climb = svc.root.join("worktrees").join("nope").join("..").join("..");
-        assert!(!trusts(&climb.display().to_string()), "..");
+        assert!(!trusts(climb.display().to_string()).await, "..");
         // Nor the holder itself.
-        assert!(!trusts(&svc.root.join("worktrees").display().to_string()), "holder");
+        assert!(!trusts(svc.root.join("worktrees").display().to_string()).await, "holder");
     }
 
     /// codex's trust is drawn on cursor's line: its repository is written
     /// into codex's config for a worktree this install forked, and for nothing
-    /// else. The config here is a throwaway home (`codex_trust::test_home`),
-    /// never the owner's.
+    /// else, and only by a daemon on its channel's default home. The config
+    /// here is a throwaway home (`codex_trust::test_home`), never the owner's.
     #[tokio::test]
     async fn codex_trust_is_only_for_a_worktree_this_install_forked_for_a_new_task() {
         let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
         let home = tempfile::tempdir().unwrap();
-        let _home = crate::codex_trust::test_home::set(home.path());
         let config = home.path().join("config.toml");
         let entries = || -> Vec<String> {
             let text = std::fs::read_to_string(&config).unwrap_or_default();
@@ -9370,22 +9380,32 @@ mod launch_prompt_tests {
                 .map(|p| p.iter().map(|(k, _)| k.to_string()).collect())
                 .unwrap_or_default()
         };
-
-        // Not the repository's own checkout, and not cursor or claude.
-        svc.prepare_launch_hooks("codex", &ws.worktree_path);
         let made = svc.create_workspace(ws.repository_id, "fix-it", "fix-it", "HEAD").await.unwrap();
-        svc.prepare_launch_hooks("cursor", &made.worktree_path);
-        svc.prepare_launch_hooks("claude", &made.worktree_path);
+
+        // A daemon whose home isn't its channel's default (a scratch daemon,
+        // a test) writes nothing, even for a forked worktree.
+        let elsewhere = tempfile::tempdir().unwrap();
+        {
+            let _home = crate::codex_trust::test_home::set(home.path(), elsewhere.path());
+            svc.prepare_launch_hooks("codex", &made.worktree_path).await;
+            assert_eq!(entries(), Vec::<String>::new(), "not the default install");
+        }
+
+        let _home = crate::codex_trust::test_home::set(home.path(), &svc.root);
+        // Not the repository's own checkout, and not cursor or claude.
+        svc.prepare_launch_hooks("codex", &ws.worktree_path).await;
+        svc.prepare_launch_hooks("cursor", &made.worktree_path).await;
+        svc.prepare_launch_hooks("claude", &made.worktree_path).await;
         assert_eq!(entries(), Vec::<String>::new());
 
         // An adopted branch is somebody's commits, and is not trusted either.
         git::git(Path::new(&ws.worktree_path), &["branch", "theirs"]).await.unwrap();
         let adopted = svc.adopt_branch(ws.repository_id, "theirs").await.unwrap();
-        svc.prepare_launch_hooks("codex", &adopted.worktree_path);
+        svc.prepare_launch_hooks("codex", &adopted.worktree_path).await;
         assert_eq!(entries(), Vec::<String>::new());
 
         // A new task's worktree: its repository's main checkout, resolved.
-        svc.prepare_launch_hooks("codex:gpt-5.6-terra", &made.worktree_path);
+        svc.prepare_launch_hooks("codex:gpt-5.6-terra", &made.worktree_path).await;
         let main = Path::new(&ws.worktree_path).canonicalize().unwrap();
         assert_eq!(entries(), vec![main.display().to_string()]);
     }

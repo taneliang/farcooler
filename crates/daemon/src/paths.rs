@@ -33,10 +33,19 @@ pub fn runtime_dir() -> Result<PathBuf> {
 /// tests and scratch daemons get an isolated home, and the channel is only
 /// consulted when nobody has named a directory outright.
 pub fn runtime_dir_for(channel: farcooler_protocol::Channel) -> Result<PathBuf> {
-    use farcooler_protocol::Channel;
     if let Ok(over) = std::env::var("FARCOOLER_HOME") {
         return Ok(PathBuf::from(over));
     }
+    default_runtime_dir_for(channel)
+}
+
+/// Where a channel's install lives when nobody has named a directory: the
+/// same answer as `runtime_dir_for` with `FARCOOLER_HOME` ignored.
+///
+/// For telling the install an app runs from apart from a scratch daemon,
+/// a demo host or a test, which all name their own home. See `codex_trust`.
+pub fn default_runtime_dir_for(channel: farcooler_protocol::Channel) -> Result<PathBuf> {
+    use farcooler_protocol::Channel;
     let app = match channel {
         Channel::Stable => "FarCooler",
         Channel::Preview => "FarCoolerPreview",

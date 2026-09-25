@@ -302,7 +302,12 @@ RENDER="$DIR/fence-line/target/release/demo-fence-line"
 # which on any machine running Far Cooler matches the daemon serving the user's
 # real repositories: the demo then started nothing, and the simulator was pointed
 # at a live fleet by a script whose whole promise is that it touches nothing.
-env HOME="$SESSION_HOME" FARCOOLER_HOME="$FC_HOME" \
+#
+# CODEX_HOME as well as HOME: an exported CODEX_HOME survives the HOME override,
+# and codex would then read and write your real config from a demo pane. (The
+# daemon itself never pre-trusts under an explicit FARCOOLER_HOME; see
+# `codex_trust`.)
+env HOME="$SESSION_HOME" CODEX_HOME="$SESSION_HOME/.codex" FARCOOLER_HOME="$FC_HOME" \
     nohup "$TARGET/farcoolerd" >"$DIR/daemon.log" 2>&1 &
 echo $! > "$DIR/daemon.pid"
 echo "$TARGET/farcoolerd" > "$DIR/daemon.pid.cmd"
@@ -361,7 +366,7 @@ done
 # Every CLI call below reaches THAT daemon, and no other. Both variables are set
 # inside the function rather than in front of it, because assignments in front of
 # a shell function can outlive the call.
-fc() { env HOME="$SESSION_HOME" FARCOOLER_HOME="$FC_HOME" "$TARGET/farcooler" "$@"; }
+fc() { env HOME="$SESSION_HOME" CODEX_HOME="$SESSION_HOME/.codex" FARCOOLER_HOME="$FC_HOME" "$TARGET/farcooler" "$@"; }
 
 # ---------------------------------------------------------------------------
 # Something to look at. A daemon with no repositories shows an empty fleet.
@@ -600,6 +605,9 @@ mkdir -p "$DIR"
 #                   access depends on.
 #   FARCOOLER_HOME  which fleet answers. Left unset, the session opens the real
 #                   one for this channel.
+#   CODEX_HOME      codex's home, set outright because an exported
+#                   CODEX_HOME would otherwise outlive HOME's override and
+#                   point this demo's codex panes at your real config.
 #   PATH            an ssh command runs no login shell, so its PATH is the
 #                   system default and Homebrew is not on it. The relay to the
 #                   already-running daemon needs nothing from PATH — but if that
@@ -613,7 +621,7 @@ mkdir -p "$DIR"
 # on PATH is not what either of them resolves.
 SESSION_PATH=$(printf '%s\n' "$(dirname "$(command -v tmux)")" "$(dirname "$(command -v git)")" \
     /usr/bin /bin /usr/sbin /sbin | awk '!seen[$0]++' | paste -sd: -)
-PREFIX="environment=\"HOME=$SESSION_HOME\",environment=\"FARCOOLER_HOME=$FC_HOME\",environment=\"PATH=$SESSION_PATH\""
+PREFIX="environment=\"HOME=$SESSION_HOME\",environment=\"CODEX_HOME=$SESSION_HOME/.codex\",environment=\"FARCOOLER_HOME=$FC_HOME\",environment=\"PATH=$SESSION_PATH\""
 
 # Written by the shipped renderer, and the two lines it can write are the whole
 # point of this script. The program the forced command names comes back on the
