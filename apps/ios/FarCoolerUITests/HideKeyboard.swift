@@ -18,7 +18,8 @@ import XCTest
 extension XCTestCase {
     /// The terminal's key row's key. See `TerminalKeyRow`.
     static let terminalHideKeyboard = "terminal-hide-keyboard"
-    /// The agent composer's. See `ComposerKeyRow`.
+    /// The agent composer's, at the end of its control row. See
+    /// `AgentComposer` in `AgentView.swift`.
     static let composerHideKeyboard = "composer-hide-keyboard"
 
     /// Wait for a key row's Hide Keyboard key to be on screen and tappable,

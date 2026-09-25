@@ -34,5 +34,10 @@ final class FieldUndo {
     func replace(_ view: NSTextView, with text: String) {
         manager.removeAllActions()
         view.string = text
+        // And start the next typing afresh. The text view coalesces keystrokes
+        // into the typing action it last registered, which is one of the
+        // actions just thrown away; without this, what is typed after a submit
+        // can go into that discarded action and ⌘Z has nothing to undo.
+        view.breakUndoCoalescing()
     }
 }

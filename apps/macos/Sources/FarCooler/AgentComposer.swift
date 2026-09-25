@@ -995,7 +995,10 @@ final class ComposerTextView: NSTextView {
         // The composer holds first responder for the whole pane, so a shortcut
         // attached only to the buttons would be dead exactly when a user is
         // most likely to reach for it — mid-sentence, with the agent waiting.
-        if event.modifierFlags.contains(.command) {
+        //
+        // ⌘ and nothing else. `.contains(.command)` also let ⇧⌘↩ approve,
+        // which nobody was told about and which is Zoom Pane's chord now.
+        if event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command {
             switch Int(event.keyCode) {
             case 36, 76:  // Return, keypad Enter
                 if let onApprove { onApprove(); return }
