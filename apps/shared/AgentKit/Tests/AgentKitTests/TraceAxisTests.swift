@@ -321,7 +321,7 @@ struct TraceAxisTests {
         let fine = try #require(
             ActivityTrace(ActivityTraceTests.encoded(code: code, width: 0)))
 
-        let placed = fine.placed(on: .sixHours, anchor: 6002, newest: 1000)
+        let placed = try #require(fine.placed(on: .sixHours, anchor: 6002, newest: 1000))
         #expect(placed.span == .sixHours)
         // 1024 + 2048 + 4096, sources 10…12.
         #expect(placed.code(12) == 7168)

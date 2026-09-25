@@ -401,7 +401,8 @@ struct FleetTraceSumTests {
         skewed.record(runner: "b", snapshot: runner(trace(span: .sixHours, code: fives, commits: noCommits), anchor: 555 + 48))
         let kept = skewed.merged(at: Date(timeIntervalSince1970: 1_000_000))
         let fleet = ActivityTrace(kept.fleetTrace)
-        #expect(fleet?.code(12) == 7168 + 5, "the fast runner's anchor set the axis")
+        // 7168 placed, plus the fast runner's five packed into the newest column.
+        #expect(fleet?.code(12) == 7173, "the fast runner's anchor set the axis")
         #expect(kept.fleetTraceAnchor == nil)
     }
 }
