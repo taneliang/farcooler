@@ -289,10 +289,10 @@ struct BoardAgents {
     /// the workspaces are the last ones read before the link went, kept so
     /// the sidebar stays put, and the agents in them may have exited since.
     ///
-    /// `.connected` and not `state.refusal == nil`, which is the weaker test
-    /// `FleetStore.remerge` uses: a dead runner spends most of an outage in
-    /// `.reconnecting` between attempts, and that gate let the frozen pills
-    /// blink back on for every one of them.
+    /// `.connected` and not `state.refusal == nil`: a dead runner spends most
+    /// of an outage in `.reconnecting` between attempts, and that gate let the
+    /// frozen pills blink back on for every one of them. `FleetStore.reading`
+    /// counts the status bar's live panes by the same rule.
     static func on(
         _ workspaces: [Workspace], state: HostState, build: DaemonBuild?
     ) -> BoardAgents {

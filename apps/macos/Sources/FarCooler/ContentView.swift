@@ -1177,16 +1177,17 @@ struct ContentView: View {
                 //
                 // "N live" beside it already says the fleet is alive, and the
                 // per-runner dots to the right still name anyone who isn't.
+                //
+                // Red only for `runtimeDown`. With no runner connected the bar
+                // says so in neutral words rather than "tmux unavailable" in
+                // red: a runner between reconnection attempts is not known to
+                // have lost anything. See `FleetStore.Reading`.
                 Circle()
-                    .fill(store.fleet.runtimeHealthy ? Color.secondary : Color.red)
+                    .fill(store.reading.isTrouble ? Color.red : Color.secondary)
                     .frame(width: 7, height: 7)
-                Text(
-                    store.fleet.runtimeHealthy
-                        ? "\(store.fleet.livePanes) live"
-                        : "tmux unavailable"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text(store.reading.sentence)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 // The dot above is an OR across every runner, deliberately —
                 // ANDing would turn the bar red every time one laptop was

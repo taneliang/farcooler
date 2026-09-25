@@ -170,41 +170,106 @@ final class FleetStore: ObservableObject {
         }
     }
 
+    /// What the status bar may say about the fleet's panes.
+    ///
+    /// Three answers, not two, because "how many panes are live" has a third
+    /// honest reply: this app can't say. Only a runner that is `.connected`
+    /// right now has a count worth adding up; one that is connecting,
+    /// reconnecting, unreachable or not installed has only the last fleet it
+    /// read before the link went, and the agents in it may have exited since.
+    /// Reporting that as live is hands on deck that went home; reporting it
+    /// as "tmux unavailable" in red is a death nobody saw. So a fleet with no
+    /// runner connected says neither.
+    enum Reading: Equatable {
+        /// At least one connected runner has tmux: this many panes, across
+        /// the connected runners only.
+        case live(Int)
+        /// Runners are connected, and not one of them can reach tmux.
+        case runtimeDown
+        /// Nothing is known yet: every runner is still on its first read.
+        case connecting
+        /// No runner is connected, and at least one has been lost or refused.
+        /// Neither a count nor a failure — see above.
+        case unsaid
+
+        /// The words beside the dot.
+        var sentence: String {
+            switch self {
+            case .live(let count): return "\(count) live"
+            case .runtimeDown: return "tmux unavailable"
+            case .connecting: return "Connecting…"
+            case .unsaid: return "Not connected"
+            }
+        }
+
+        /// Red only for the one reading that is a failure someone saw.
+        var isTrouble: Bool { self == .runtimeDown }
+    }
+
+    /// The reading from each runner's state and the last fleet it read.
+    ///
+    /// Gated on `.connected`, not on `state.refusal == nil`, which is what this
+    /// used to test. A runner that stays down spends most of its outage in
+    /// `.reconnecting`, not `.unreachable`: each retry's `refresh()` fails and
+    /// sets `.unreachable`, then the event stream that follows it dies and its
+    /// `onEnd` resets the state to `.reconnecting` for the whole backoff wait
+    /// — up to 30 s. `refusal` is nil there, so the dead runner's last count
+    /// and its last `runtimeHealthy` came back for every one of those waits.
+    /// `BoardAgents.on` fixed the same thing for the board's pills the same
+    /// way.
+    static func reading(of runners: [(state: HostState, fleet: Fleet)]) -> Reading {
+        let connected = runners.filter { $0.state == .connected }.map(\.fleet)
+        guard connected.isEmpty else {
+            // Healthy is an OR across the connected runners, and the count is
+            // every connected runner's, healthy or not — see `unhealthyHosts`
+            // for why the OR stays an OR, and for how the bar names a runner
+            // it leaves out.
+            guard connected.contains(where: \.runtimeHealthy) else { return .runtimeDown }
+            return .live(connected.reduce(0) { $0 + $1.livePanes })
+        }
+        return runners.allSatisfy { $0.state == .connecting } ? .connecting : .unsaid
+    }
+
+    /// See `Reading`.
+    @Published private(set) var reading: Reading = .connecting
+
     /// One list from N.
     ///
     /// An unreachable runner still contributes its last good rows — that is
     /// what keeps your mental map of the fleet stable while a laptop sleeps. A
     /// runner that has never connected contributes none, and appears only as a
     /// header with its state.
+    ///
+    /// Its panes are not counted, though, and its tmux health does not speak
+    /// for the fleet: see `reading(of:)`. `fleet.livePanes` and
+    /// `fleet.runtimeHealthy` here are the connected runners' only, so that
+    /// nothing reading them can take a stale `true` for a live one. Without
+    /// that, a single lost runner with a stale `runtimeHealthy == true` could
+    /// keep the whole bar reading well while the only runner actually
+    /// answering has no tmux at all.
     private func remerge() {
-        var merged: [Workspace] = []
-        var live = 0
-        var healthy = false
-        for target in hosts {
-            guard let client = clients[target] else { continue }
-            merged.append(contentsOf: client.fleet.workspaces)
-            // Not counted once a runner is known unreachable or never
-            // installed: `client.fleet.livePanes` and `client.fleet.runtimeHealthy`
-            // are then whatever was last read before it went quiet, not a live
-            // reading, and letting either in reports hands on deck — or tmux
-            // health — that in fact went home. Without this gate on `healthy`,
-            // a single unreachable runner with a stale `runtimeHealthy == true`
-            // could keep the whole bar reading well while the only runner
-            // actually answering has no tmux at all; on a fleet of one, the
-            // sole daemon dying would still show a healthy dot and "0 live".
-            //
-            // This said "paint the whole bar green" and "a green dot", which
-            // was literal until the status bar's healthy dot went neutral —
-            // green there meant `Status.done`, and it was the last permanent
-            // green in the app. The argument is untouched by that: what the
-            // gate prevents is a stale `true`, and the dot the stale `true`
-            // wins is the wrong dot whichever color it is.
-            if client.state.refusal == nil {
-                live += client.fleet.livePanes
-                if client.fleet.runtimeHealthy { healthy = true }
-            }
+        let merged = Self.merge(
+            hosts.compactMap { clients[$0] }.map { (state: $0.state, fleet: $0.fleet) })
+        fleet = merged.fleet
+        if reading != merged.reading { reading = merged.reading }
+    }
+
+    /// `remerge`'s arithmetic, apart from the clients it reads, so it can be
+    /// asked about: every runner's rows in order, and the connected runners'
+    /// count and health only.
+    static func merge(_ runners: [(state: HostState, fleet: Fleet)])
+        -> (fleet: Fleet, reading: Reading)
+    {
+        let reading = reading(of: runners)
+        let healthy: Bool, live: Int
+        switch reading {
+        case .live(let count): (healthy, live) = (true, count)
+        case .runtimeDown, .connecting, .unsaid: (healthy, live) = (false, 0)
         }
-        fleet = Fleet(runtimeHealthy: healthy, livePanes: live, workspaces: merged)
+        let fleet = Fleet(
+            runtimeHealthy: healthy, livePanes: live,
+            workspaces: runners.flatMap(\.fleet.workspaces))
+        return (fleet, reading)
     }
 
     /// Runners that are not fully healthy right now, for the status bar to
