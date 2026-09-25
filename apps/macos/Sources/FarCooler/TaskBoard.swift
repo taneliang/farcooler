@@ -235,7 +235,7 @@ struct BoardAgents {
 ///
 /// Not a sheet any more. A sheet sat over the agents it was orchestrating, so
 /// going to one closed the board and coming back meant opening it again; here
-/// it is a place in the sidebar like any workspace, and ⌘[ or a click on its
+/// it is a place in the sidebar like any workspace, and ⇧⌘B or a click on its
 /// row brings it back.
 struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore
@@ -530,7 +530,11 @@ private struct AgentPill: View {
                 } label: {
                     label(for: live)
                 }
-                .menuStyle(.borderlessButton)
+                // `.button` with a plain button style, so the menu draws the
+                // same capsule as the single pill instead of AppKit's own
+                // borderless chrome.
+                .menuStyle(.button)
+                .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Go to one of the agents on this task")
