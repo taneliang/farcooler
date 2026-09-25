@@ -174,7 +174,7 @@ enum PaletteIndex {
 
         // Scoped to the pane actually being looked at, so it never floats
         // free of the terminal it would act on — unlike "new terminal" and
-        // "new task" below, which have an obvious home even with nothing
+        // "new workspace" below, which have an obvious home even with nothing
         // selected, this one has none without a terminal to name.
         if let currentTerminal, let owner = workspaces.first(where: { workspace in
             workspace.terminals.contains { $0.id == currentTerminal.id }
@@ -212,7 +212,7 @@ enum PaletteIndex {
             PaletteEntry(
                 id: "new-task",
                 action: .newTask(described),
-                title: described.isEmpty ? "New Task…" : "New Task “\(described)”",
+                title: described.isEmpty ? "New Workspace…" : "New Workspace “\(described)”",
                 detail: "Describe it and go",
                 symbol: "sparkle",
                 kind: "action"))

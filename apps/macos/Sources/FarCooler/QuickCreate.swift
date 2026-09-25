@@ -155,9 +155,9 @@ struct QuickCreate: View {
     /// than left to be discovered.
     private var reason: String? {
         guard !description.isEmpty else { return nil }
-        if !hasWords { return "Add a word to start a task." }
+        if !hasWords { return "Add a word to say what you want done." }
         if let problem = TaskPrompt.problem(description) { return problem }
-        if chosen == nil { return "Pick a project to start the task in." }
+        if chosen == nil { return "Pick a project for the new workspace." }
         return nil
     }
 

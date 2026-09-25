@@ -80,7 +80,13 @@ struct FarCoolerCommands: Commands {
             Button("New Terminal") { AppCommand.newTerminal.post() }
                 .keyboardShortcut("t", modifiers: .command)
             // ⌘N, the plainest shortcut in the app, for the thing it is for.
-            Button("New Task…") { AppCommand.newWorkspace.post() }
+            //
+            // "New Workspace…" and not "New Task…", which it was until the
+            // board moved into the sidebar: this makes a worktree and starts an
+            // agent in it, and puts nothing on the board. With a Board row
+            // above every repository's workspaces, "task" on this item would
+            // name the other thing.
+            Button("New Workspace…") { AppCommand.newWorkspace.post() }
                 .keyboardShortcut("n", modifiers: .command)
             Button("Add Repository…") { AppCommand.addRepository.post() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -90,8 +96,8 @@ struct FarCoolerCommands: Commands {
         //
         // ⇧⌘B rather than a bare ⌘B, which is the sidebar's on every Mac and
         // is not up for grabs. Repository-scoped, like the board itself: it
-        // opens the board of whatever the sidebar is showing, and of the only
-        // repository there is when nothing is selected.
+        // selects the Board row of whatever the sidebar is showing, and of the
+        // only repository there is when nothing is selected.
         CommandGroup(after: .toolbar) {
             Button("Show Board") { AppCommand.showBoard.post() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])

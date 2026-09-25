@@ -107,9 +107,11 @@ enum Shortcut {
             ]
         ),
         (
-            "Tasks",
+            // "Projects" rather than "Tasks": ⌘N makes a workspace, and a task
+            // is a card on the board, which ⇧⌘B is the way to.
+            "Projects",
             [
-                Item(keys: "⌘N", action: "New task — describe it and go"),
+                Item(keys: "⌘N", action: "New workspace — describe what you want done and go"),
                 Item(keys: "⇧⌘B", action: "Show this project’s board"),
                 Item(keys: "⇧⌘R", action: "Add Repository"),
                 Item(keys: "⇧⌘E", action: "Open this worktree in your editor"),
@@ -118,7 +120,7 @@ enum Shortcut {
         (
             "App",
             [
-                Item(keys: "⌘P", action: "Go to anything — a terminal, a workspace, a new task"),
+                Item(keys: "⌘P", action: "Go to a terminal or a workspace, or start a new one"),
                 Item(keys: "⌘B", action: "Show or hide the sidebar"),
                 Item(keys: "⌘F", action: "Find a workspace or agent"),
                 Item(keys: "⌘,", action: "Settings"),
