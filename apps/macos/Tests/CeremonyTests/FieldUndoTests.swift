@@ -12,6 +12,7 @@ import Testing
 @MainActor
 struct FieldUndoTests {
     /// What each field's coordinator is, as far as undo goes.
+    @MainActor
     final class Delegate: NSObject, NSTextViewDelegate {
         let undo = FieldUndo()
         func undoManager(for view: NSTextView) -> UndoManager? { undo.manager }

@@ -68,6 +68,7 @@ struct Composer: NSViewRepresentable {
         return min(max(ceil(rect.height) + 6, minHeight), maxHeight)
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         let parent: Composer
         weak var view: SubmittingTextView?

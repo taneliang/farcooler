@@ -19,6 +19,7 @@ import AppKit
 ///   inside AppKit. `replace(_:with:)` forgets them first.
 /// - Forgetting them must not wipe the undo history of every other field in
 ///   the window, which is what clearing the window's manager would do.
+@MainActor
 final class FieldUndo {
     let manager = UndoManager()
 

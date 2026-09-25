@@ -88,6 +88,7 @@ struct PaletteField: NSViewRepresentable {
         }
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         let parent: PaletteField
         /// Whoever had the keyboard before the panel opened.

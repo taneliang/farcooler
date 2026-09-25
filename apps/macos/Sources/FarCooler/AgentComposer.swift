@@ -920,6 +920,7 @@ private struct AgentComposerField: NSViewRepresentable {
         view.onReject = onReject
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         let parent: AgentComposerField
         weak var view: ComposerTextView?
