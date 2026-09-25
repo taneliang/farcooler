@@ -102,10 +102,14 @@ pub const CODEX_HOOKS: &str = ".codex/hooks.json";
 pub const CURSOR_HOOKS: &str = ".cursor/hooks.json";
 pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
 
-/// Every file Far Cooler writes into a worktree, as git pathspecs that
-/// subtract them from an answer: `PROJECT_HOOK_FILES`, and the manager skill's
-/// `skill_install::PROJECT_SKILL_FILES`. One function for both, so the two
-/// installers and the two filters that read this can't drift apart.
+/// `PROJECT_HOOK_FILES` as git pathspecs that subtract them from an answer.
+///
+/// Not the manager skill's files (`skill_install::PROJECT_SKILL_FILES`). Those
+/// are hidden by git itself, through a line in the repository's
+/// `info/exclude` (`service::exclude_locally`), which also keeps `git add -A`
+/// from committing them. A pathspec here would hide them by path, whoever
+/// wrote the bytes, and so would hide an owner's edit, and any change to a
+/// tracked copy, from the diff view and from the removal check.
 ///
 /// A pathspec rather than a filter over `git status` output, because git's own
 /// matching is the only thing that gets this right. `git status --porcelain`
@@ -117,11 +121,7 @@ pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
 ///
 /// The caller puts `--` in front of these.
 pub fn project_hook_exclusions() -> Vec<String> {
-    PROJECT_HOOK_FILES
-        .iter()
-        .chain(crate::skill_install::PROJECT_SKILL_FILES)
-        .map(|p| format!(":(exclude){p}"))
-        .collect()
+    PROJECT_HOOK_FILES.iter().map(|p| format!(":(exclude){p}")).collect()
 }
 
 /// The path this binary was launched as, resolved the same way the shim's

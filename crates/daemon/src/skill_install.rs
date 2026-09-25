@@ -80,9 +80,10 @@ pub const PROJECT_SKILL_POLICY: &str = ".agents/skills/farcooler-manager/agents/
 
 /// Every file Far Cooler writes into a worktree for the skill.
 ///
-/// `hook_install::project_hook_exclusions` reads this beside
-/// `PROJECT_HOOK_FILES`, so `git::is_dirty` and `change_set::working_tree`
-/// subtract exactly what the installer writes and nothing else.
+/// Each is added to the repository's `info/exclude` before it is written
+/// (`service::exclude_locally`), and `service::holds_an_unseen_skill_file`
+/// reads this list so that removing a worktree still asks when one of them
+/// holds something that isn't an unedited copy of ours.
 pub const PROJECT_SKILL_FILES: &[&str] = &[PROJECT_SKILL, PROJECT_SKILL_POLICY];
 
 /// The skill's text, with `{{frontmatter}}`, `{{cli}}` and `{{wait}}` still to
@@ -228,6 +229,55 @@ fn ownership(text: &str) -> Ownership {
     }
 }
 
+/// What sits at one of our paths, read the way `install_file` reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Holds {
+    /// Nothing is there.
+    Nothing,
+    /// An unedited copy of ours, of this Far Cooler or an older one.
+    OursUnedited,
+    /// Anything else: an edited copy, a file we never wrote, or something we
+    /// can't read. Somebody's, and not ours to lose or replace.
+    Somebodys,
+}
+
+/// What `path` holds. `Somebodys` for anything we can't read, a directory
+/// included, because every caller would rather ask than guess.
+pub fn holds(path: &Path) -> Holds {
+    match std::fs::read(path) {
+        Ok(bytes) => match ownership(&String::from_utf8_lossy(&bytes)) {
+            Ownership::OursUnedited => Holds::OursUnedited,
+            Ownership::Edited | Ownership::NotOurs => Holds::Somebodys,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Holds::Nothing,
+        Err(_) => Holds::Somebodys,
+    }
+}
+
+/// Whether `relative` under `root` passes through a symbolic link: any
+/// directory on the way, or the file itself. Every component that exists is
+/// asked with `symlink_metadata`, which doesn't follow the link it is asked
+/// about. A component that doesn't exist yet ends the walk, since nothing
+/// below it exists either.
+///
+/// A repository whose `.agents` links to a shared or user-level skills
+/// directory would otherwise have our copy written into that directory, which
+/// is outside the worktree and outside anything Far Cooler was asked to touch.
+/// A `SKILL.md` that is itself a link is somebody's arrangement, and replacing
+/// it with a file would undo it.
+pub fn crosses_a_symlink(root: &Path, relative: &str) -> bool {
+    let mut at = root.to_path_buf();
+    for part in Path::new(relative).components() {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => return true,
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+    false
+}
+
 /// Write `contents` to `path` unless somebody else's file is there.
 ///
 /// - A missing file is written.
@@ -242,9 +292,13 @@ fn ownership(text: &str) -> Ownership {
 ///   ours to touch.
 ///
 /// The write goes through a temporary file beside the target and a rename, so
-/// a harness that reads the skill mid-write never sees half of one.
+/// a harness that reads the skill mid-write never sees half of one. The file
+/// is read again just before the rename, and a save that landed since the
+/// first read is kept rather than overwritten. That narrows the window between
+/// deciding and replacing to one read; it doesn't close it, and nothing short
+/// of a lock every editor honors could.
 pub fn install_file(path: &Path, contents: &str) -> Installed {
-    match std::fs::read(path) {
+    let before = match std::fs::read(path) {
         Ok(existing) => {
             if existing == contents.as_bytes() {
                 return Installed::Unchanged;
@@ -254,12 +308,15 @@ pub fn install_file(path: &Path, contents: &str) -> Installed {
                 Ownership::Edited => return Installed::LeftAlone("edited"),
                 Ownership::NotOurs => return Installed::LeftAlone("not ours"),
             }
+            Some(existing)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(_) => return Installed::LeftAlone("unreadable"),
-    }
-    match write_atomically(path, contents) {
-        Ok(()) => Installed::Wrote,
+    };
+    let unmoved = || std::fs::read(path).ok() == before;
+    match write_through_temp(path, contents, unmoved) {
+        Ok(true) => Installed::Wrote,
+        Ok(false) => Installed::LeftAlone("changed while writing"),
         Err(e) => {
             tracing::warn!(error = %e, path = %path.display(), "could not write the manager skill");
             Installed::Failed
@@ -269,12 +326,31 @@ pub fn install_file(path: &Path, contents: &str) -> Installed {
 
 /// Write through a sibling temporary file and a rename.
 pub(crate) fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
+    write_through_temp(path, contents, || true).map(|_| ())
+}
+
+/// Tells one write's temporary file from another's in the same process.
+static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Write `contents` to a temporary file beside `path`, then rename it over
+/// `path` if `still` says to, and say whether it did.
+///
+/// The temporary name carries the process id and a count of writes in this
+/// process, so no two writes share one: two panes launching at once in one
+/// daemon, each writing the plugin, would otherwise truncate the file the
+/// other was about to rename.
+fn write_through_temp(path: &Path, contents: &str, still: impl FnOnce() -> bool) -> std::io::Result<bool> {
     let dir = path.parent().ok_or(std::io::ErrorKind::InvalidInput)?;
     std::fs::create_dir_all(dir)?;
     let name = path.file_name().ok_or(std::io::ErrorKind::InvalidInput)?.to_string_lossy();
-    let temp = dir.join(format!(".{name}.farcooler-{}.tmp", std::process::id()));
+    let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp = dir.join(format!(".{name}.farcooler-{}-{write}.tmp", std::process::id()));
     std::fs::write(&temp, contents)?;
-    std::fs::rename(&temp, path).inspect_err(|_| {
+    if !still() {
+        let _ = std::fs::remove_file(&temp);
+        return Ok(false);
+    }
+    std::fs::rename(&temp, path).map(|()| true).inspect_err(|_| {
         let _ = std::fs::remove_file(&temp);
     })
 }

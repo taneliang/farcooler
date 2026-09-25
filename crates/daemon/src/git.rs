@@ -421,10 +421,9 @@ pub async fn rollback_worktree(
 /// Uncommitted or untracked changes present.
 ///
 /// The files Far Cooler itself wrote into the worktree are subtracted first.
-/// `install_project_hooks` puts `.codex/hooks.json`, `.cursor/hooks.json` and
-/// the manager skill under `.agents/skills/farcooler-manager/` into every
-/// worktree this runner makes, and `Service::prepare_launch_hooks` puts one
-/// agent's share of them into any worktree a codex or cursor pane is opened in —
+/// `install_project_hooks` puts `.codex/hooks.json` and `.cursor/hooks.json`
+/// into every worktree this runner makes, and `Service::prepare_launch_hooks`
+/// puts one of the two into any worktree a codex or cursor pane is opened in —
 /// including the checkout the user works in every day, which Far Cooler did not
 /// make. This answer is what `removal_needs_confirmation` reads, so without the
 /// exclusion a workspace created a second ago and never touched by anyone would
