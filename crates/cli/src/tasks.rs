@@ -1609,27 +1609,22 @@ impl DispatchLink for Link {
 /// The error the refusal that stopped a dispatch deserves.
 type Refusal = Box<dyn std::error::Error>;
 
-/// A preset `task dispatch` can start: one that runs an agent.
+/// A preset `task dispatch` can start: claude, codex or cursor, the agents
+/// that are told the task on their first launch.
 ///
-/// A shell or a changes pane "dispatched" would move the task into progress
-/// beside a pane nobody is working in, so they're refused before anything is
-/// asked of the runner. So is a preset the daemon would refuse to run and
-/// replace with a login shell (the same `is_safe_model` gate as its
-/// `preset_runs_an_agent`): `claude opus` is a typo, not an agent.
+/// Anything else, whether a shell, the changes view, another program or a
+/// typo like `cluade`, would move the task into progress beside a pane that
+/// never reads it, so it's refused before anything is asked of the runner.
+/// The list is `farcooler_core::pane_env::TASK_AGENTS`, the same one the
+/// daemon refuses a task by, so the two can't disagree.
 fn agent_preset(preset: &str) -> Result<(), String> {
-    let head = preset.split_once(':').map_or(preset, |(a, _)| a);
-    let plain = |s: &str| {
-        !s.is_empty()
-            && s.len() <= 64
-            && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-    };
-    if head == "shell" || head == "changes" || !plain(head) {
-        return Err(format!(
-            "--preset {preset:?} doesn't start an agent, so nobody would be working the task. \
-             use claude, codex or cursor"
-        ));
+    if farcooler_core::pane_env::takes_a_task(preset) {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "--preset {preset:?} isn't an agent a task can be dispatched to. use {}",
+        farcooler_core::pane_env::TASK_AGENTS.join(", ")
+    ))
 }
 
 /// The workspace `needle` names on `repository`, by name first, then by id.
@@ -1709,9 +1704,32 @@ fn move_task_requests(task: &pb::Task, workspace: Uuid, actor: Actor) -> [pb::Re
     ]
 }
 
-/// A running agent pane: the only kind that is working anything.
+/// A running agent pane in a lane: the only kind that is writing there. Any
+/// preset but a person's shell or the changes view; a lane is busy whatever
+/// agent is in it.
 fn working(t: &pb::Terminal) -> bool {
-    t.state == pb::TerminalState::Running as i32 && agent_preset(&t.command_preset).is_ok()
+    let head = t.command_preset.split_once(':').map_or(t.command_preset.as_str(), |(a, _)| a);
+    t.state == pb::TerminalState::Running as i32 && head != "shell" && head != "changes"
+}
+
+/// A pane opened for `task` that may still be working it. Running, and also
+/// starting (a dispatch racing one still coming up) and unknown (the runner
+/// can't see its panes right now): when it can't be told, it's taken as
+/// live, and `--again` is how to say a second agent is meant anyway.
+fn working_on(t: &pb::Terminal, task: &[u8]) -> bool {
+    use pb::TerminalState::{Running, Starting, Unknown};
+    t.task_id.as_deref() == Some(task)
+        && [Running as i32, Starting as i32, Unknown as i32].contains(&t.state)
+}
+
+/// `farcooler task show <key>`, with a key that starts with `-` after `--`,
+/// where clap won't read it as a flag.
+fn show_command(key: &str) -> String {
+    if key.starts_with('-') {
+        format!("farcooler task show -- {key}")
+    } else {
+        format!("farcooler task show {key}")
+    }
 }
 
 /// `farcooler task set …` finishing a move `dispatch` couldn't, with the
@@ -1738,7 +1756,9 @@ fn pane_refused(e: ClientError) -> String {
             "this runner's Far Cooler can't open a pane for a task yet. update it and try again".into()
         }
         "not-found" => "that workspace isn't on this runner any more".into(),
-        "invalid-argument" if what == "command_preset" => "that isn't a preset this runner can start".into(),
+        "invalid-argument" if what == "command_preset" => {
+            "this runner opens a pane for a task only with claude, codex or cursor".into()
+        }
         _ => refused(e, "that pane could not be opened").to_string(),
     }
 }
@@ -1795,14 +1815,15 @@ async fn dispatch<L: DispatchLink>(
     let live: Vec<String> = terminals
         .items
         .iter()
-        .filter(|t| working(t) && t.task_id.as_deref() == Some(task.id.as_ref()))
+        .filter(|t| working_on(t, &task.id))
         .map(|t| format!("terminal {} in {}", short_bytes(&t.id), name_of(&t.workspace_id)))
         .collect();
     if !live.is_empty() && !d.again {
         return Err(format!(
-            "{key} already has an agent working it ({}). read the board (`farcooler task show {key}`) \
-             before dispatching it again, and pass --again only if a second agent is what you want",
+            "{key} already has an agent working it ({}). read the board (`{}`) before \
+             dispatching it again, and pass --again only if a second agent is what you want",
             live.join(", "),
+            show_command(&task.key),
             key = task.key,
         )
         .into());
@@ -2599,6 +2620,8 @@ mod tests {
         workspaces: Vec<pb::Workspace>,
         terminals: Vec<pb::Terminal>,
         refuse: Option<(&'static str, &'static str)>,
+        /// The argument a refusal names (`Error.what`).
+        refuse_what: &'static str,
         sent: Vec<pb::Request>,
     }
 
@@ -2609,6 +2632,7 @@ mod tests {
                 workspaces: vec![lane(LANE, "lane", REPO)],
                 terminals: Vec::new(),
                 refuse: None,
+                refuse_what: "",
                 sent: Vec::new(),
             }
         }
@@ -2632,7 +2656,12 @@ mod tests {
                 .into_iter()
                 .find(|c| farcooler_core::error::word_for(*c as i32) == word)
                 .expect("a code this fake knows") as i32;
-                return Err(ClientError::Daemon { code, retryable: false, message: String::new(), what: String::new() });
+                return Err(ClientError::Daemon {
+                    code,
+                    retryable: false,
+                    message: String::new(),
+                    what: self.refuse_what.into(),
+                });
             }
             let value = match method.as_str() {
                 "workspace.list" => result::Value::WorkspaceList(pb::WorkspaceList { items: self.workspaces.clone() }),
@@ -2778,18 +2807,46 @@ mod tests {
         assert!(!said.contains("--workspace"), "the lane already moved: {said}");
     }
 
-    /// I1: a preset that runs no agent is refused before anything is sent.
+    /// I1/N1: only claude, codex or cursor, the agents told the task, can
+    /// be dispatched to. Anything else, a typo included, is refused before
+    /// anything is sent, so the task isn't moved.
     #[tokio::test]
-    async fn a_preset_that_starts_no_agent_is_refused_before_anything_is_sent() {
-        for preset in ["shell", "changes", "claude opus", "shell:x"] {
+    async fn a_preset_that_isnt_told_the_task_is_refused_before_anything_is_sent() {
+        for preset in ["cluade", "gemini", "bash", "shell", "changes", "claude opus", "shell:x"] {
             let mut link = FakeLink::default();
             let said = run_as(&mut link, &fc_2(), existing(), preset, false).await.0.expect_err(preset);
-            assert!(said.contains("doesn't start an agent"), "{preset}: {said}");
+            assert!(said.contains("isn't an agent a task can be dispatched to"), "{preset}: {said}");
+            assert!(said.contains("use claude, codex, cursor"), "{preset}: {said}");
             assert!(link.sent.is_empty(), "{preset}: {:?}", link.methods());
         }
         for preset in ["claude", "codex:gpt-5", "cursor"] {
             assert!(agent_preset(preset).is_ok(), "{preset}");
         }
+    }
+
+    /// The CLI's list is the daemon's: one constant, and every name on it is
+    /// accepted here. (The daemon's tests hold that constant to the launch
+    /// arms that really pass the first message.)
+    #[test]
+    fn the_cli_dispatches_to_exactly_the_daemons_list() {
+        for agent in farcooler_core::pane_env::TASK_AGENTS {
+            assert!(agent_preset(agent).is_ok(), "{agent}");
+        }
+        assert_eq!(farcooler_core::pane_env::TASK_AGENTS, ["claude", "codex", "cursor"]);
+    }
+
+    /// And when the runner refuses the preset itself (an older CLI's list,
+    /// say), the board isn't moved and the reason is readable.
+    #[tokio::test]
+    async fn a_preset_the_runner_refuses_leaves_the_board_as_it_was() {
+        let mut link = FakeLink {
+            refuse: Some(("terminal.create", "invalid-argument")),
+            refuse_what: "command_preset",
+            ..Default::default()
+        };
+        let said = run(&mut link, existing()).await.0.expect_err("refused");
+        assert!(said.contains("only with claude, codex or cursor"), "{said}");
+        assert!(!link.methods().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
     }
 
     /// I2: a runner that can't open a pane for a task is found out before
@@ -2844,6 +2901,17 @@ mod tests {
         let mut link = working();
         run_as(&mut link, &fc_2(), existing(), "claude", true).await.0.expect("--again dispatches");
 
+        // Starting, or unknown because the runner can't see its panes right
+        // now: taken as live, so a second dispatch still needs --again.
+        for state in [pb::TerminalState::Starting, pb::TerminalState::Unknown] {
+            let mut pane = agent(elsewhere, "claude", Some(TASK));
+            pane.state = state as i32;
+            let mut link = FakeLink { terminals: vec![pane], ..Default::default() };
+            let said = run(&mut link, existing()).await.0.expect_err("can't tell, so refused");
+            assert!(said.contains("already has an agent working it"), "{state:?}: {said}");
+            assert!(link.writes().is_empty(), "{state:?}: {:?}", link.methods());
+        }
+
         // An agent on ANOTHER task, or a stopped pane for this one, isn't one.
         let mut stopped = agent(elsewhere, "claude", Some(TASK));
         stopped.state = pb::TerminalState::Exited as i32;
@@ -2884,6 +2952,18 @@ mod tests {
         run_as(&mut link, &task, Lane::Existing("fix".into()), "claude", false).await.0.expect("its own fix");
         let Some(request::Payload::TaskUpdate(u)) = &link.sent("task.update").payload else { panic!("update") };
         assert_eq!(u.workspace_id.as_deref(), Some(id_bytes(LANE).as_ref()));
+
+        // A second dispatch of it is refused with a `task show` that parses.
+        let mut link = FakeLink { terminals: vec![agent(LANE, "claude", Some(TASK))], ..Default::default() };
+        let said = run_as(&mut link, &task, existing(), "claude", false).await.0.expect_err("live");
+        assert!(said.contains("`farcooler task show -- -1`"), "{said}");
+        assert!(!said.contains("task show -1"), "{said}");
+        {
+            use clap::Parser;
+            let cli = crate::Cli::try_parse_from(show_command("-1").split(' ')).expect("it parses");
+            let crate::Command::Task(TaskCmd::Show { key, .. }) = cli.command else { panic!("task show") };
+            assert_eq!(key.as_deref(), Some("-1"));
+        }
 
         // And the key goes after `--` in the command that finishes a move.
         let mut link = FakeLink { refuse: Some(("task.set_status", "resource-conflict")), ..Default::default() };

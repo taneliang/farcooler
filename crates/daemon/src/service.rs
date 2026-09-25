@@ -2640,10 +2640,6 @@ impl Service {
 
         let ws = self.store.get_workspace(workspace_id)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
-        // Only an agent pane is opened FOR a task. A shell's record names
-        // none, so switching it to a chat later can't start exporting a key
-        // nobody dispatched it with.
-        let task = task.filter(|_| preset_runs_an_agent(command_preset));
 
         // 1. Commit the durable record with intent RUNNING, unconfirmed.
         let term = self.store.create_terminal_for_task(
@@ -2755,7 +2751,19 @@ impl Service {
         prompt: Option<&str>,
     ) -> Result<(Option<String>, Option<String>)> {
         let Some(task) = task else { return Ok((None, prompt.map(str::to_string))) };
-        let task = self.store.get_task(task)?;
+        // Only an agent that is told the task can be opened for one. Anything
+        // else would export the key beside a program that never reads it (a
+        // typo, a shell, an agent with no launch prompt), and the board would
+        // say somebody is working a task nobody is. See `TASK_AGENTS`.
+        if !farcooler_core::pane_env::takes_a_task(preset) {
+            return Err(DomainError::InvalidArgument { what: "command_preset" });
+        }
+        // Deleted since the caller resolved it: the key is what was wrong,
+        // not the workspace a bare `NotFound` would read as.
+        let task = self.store.get_task(task).map_err(|e| match e {
+            DomainError::NotFound => DomainError::InvalidArgument { what: "task_key" },
+            other => other,
+        })?;
         if task.repository_id != ws.repository_id {
             return Err(DomainError::InvalidArgument { what: "task_key" });
         }
@@ -2975,8 +2983,6 @@ impl Service {
 
         let ws = self.store.get_workspace(workspace_id)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
-        // See `create_terminal_with_prompt`: only an agent pane records a task.
-        let task = task.filter(|_| preset_runs_an_agent(command_preset));
         let pane = self.pane_of(target).await?;
         let (axis, before) = crate::layout::split_args(side);
 
@@ -5694,10 +5700,12 @@ mod pane_actor_tests {
     /// the work had been done.
     #[tokio::test]
     async fn a_pane_opened_for_no_task_claims_none() {
+        let _stub = super::test_agent::stubbed();
         let (_dir, svc, ws) = a_workspace().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains(super::test_agent::NOT_A_PROGRAM), "the stub, not claude: {command}");
         assert!(
             !command.contains(farcooler_core::pane_env::TASK),
             "no task on the record, so none in the pane: {command}"
@@ -5775,23 +5783,25 @@ mod pane_actor_tests {
         assert!(again.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)), "{again}");
     }
 
-    /// A shell opened "for" a task is still a person's shell: nobody
-    /// dispatched it, so it exports no task and starts on no prompt.
+    /// Only an agent that is told the task can be opened for one: a typo,
+    /// another program, a shell or the changes view would export the key
+    /// beside something that never reads it, and the board would say
+    /// somebody is working the task. Refused before a record or a pane exists.
     #[tokio::test]
-    async fn a_shell_opened_for_a_task_exports_no_task_and_no_prompt() {
+    async fn only_an_agent_that_is_told_the_task_can_be_opened_for_one() {
         let (_dir, svc, ws) = a_workspace().await;
         let (task, _) = a_task(&svc, &ws);
-        let term = svc
-            .create_terminal_with_prompt(ws.id, "s", "shell", None, Some(task))
-            .await
-            .expect("a shell");
-
-        let command = pane_start_command(&svc, term.id).await;
-        assert!(!command.contains(farcooler_core::pane_env::TASK), "{command}");
-        assert!(!command.contains("re working"), "{command}");
-        // Nor does its record name the task: switched to a chat later, it
-        // would otherwise start exporting a key nobody dispatched it with.
-        assert_eq!(svc.store.get_terminal(term.id).unwrap().task_id, None);
+        for preset in ["cluade", "gemini", "bash", "shell", "changes", "fcprobe", "claude opus"] {
+            let before = svc.store.list_terminals_for_workspace(ws.id).unwrap().len();
+            let refused = svc.create_terminal_with_prompt(ws.id, "w", preset, None, Some(task)).await;
+            assert!(
+                matches!(refused, Err(DomainError::InvalidArgument { what: "command_preset" })),
+                "{preset}: {refused:?}"
+            );
+            assert_eq!(svc.store.list_terminals_for_workspace(ws.id).unwrap().len(), before, "{preset}");
+        }
+        // With no task, any preset still opens as it always did.
+        svc.create_terminal_with_prompt(ws.id, "s", "shell", None, None).await.expect("a shell");
     }
 
     /// The fourth launch path: a pane switched back to a terminal from a
@@ -5831,7 +5841,9 @@ mod pane_actor_tests {
             .unwrap();
         let before = svc.store.list_terminals_for_workspace(ws.id).unwrap().len();
 
-        let refused = svc.create_terminal_with_prompt(ws.id, "w", "shell", None, Some(task.id)).await;
+        // claude, so the board check is what refuses it; it refuses before
+        // any pane exists, so no agent is started.
+        let refused = svc.create_terminal_with_prompt(ws.id, "w", "claude", None, Some(task.id)).await;
         assert!(
             matches!(refused, Err(DomainError::InvalidArgument { what: "task_key" })),
             "{refused:?}"
@@ -8929,6 +8941,24 @@ mod launch_prompt_tests {
         assert!(command.contains(" FARCOOLER_TASK=-1 "), "{command}");
         // An ordinary key is still written out.
         assert!(opening_prompt("farcooler", "fc-1").contains("farcooler task show fc-1."));
+    }
+
+    /// `TASK_AGENTS` is the daemon's and the CLI's one list of what a task
+    /// can be dispatched to. Held here to the launch arms that really pass the
+    /// first message: every one of them does, and a plain identifier that
+    /// isn't one of them (the `other` arm) doesn't.
+    #[test]
+    fn the_agents_a_task_goes_to_are_the_ones_told_it() {
+        for agent in farcooler_core::pane_env::TASK_AGENTS {
+            let command = preset_command_with_hooks(agent, None, &inline("PROBE-7731"));
+            assert!(command.contains("PROBE-7731"), "{agent} is dispatched to and never told: {command}");
+            assert!(farcooler_core::pane_env::takes_a_task(&format!("{agent}:some-model")), "{agent}");
+        }
+        for other in ["gemini", "bash", "aider", "fcprobe"] {
+            assert!(!farcooler_core::pane_env::takes_a_task(other), "{other}");
+            let command = preset_command_with_hooks(other, None, &inline("PROBE-7731"));
+            assert!(!command.contains("PROBE-7731"), "{other} would be told, so it could take a task: {command}");
+        }
     }
 
     /// A key that is not a plain identifier never reaches the `env` line,

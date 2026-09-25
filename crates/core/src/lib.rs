@@ -67,4 +67,22 @@ pub mod pane_env {
     /// no task gets nothing: a guessed key would file an agent's notes on
     /// somebody else's ticket.
     pub const TASK: &str = "FARCOOLER_TASK";
+
+    /// The agents a pane can be opened FOR a task with: the three that take
+    /// an initial prompt as their launch argument, so they are told the task
+    /// on their first launch. Any other preset would export the key beside a
+    /// program that never reads it, or a person's shell, and the board would
+    /// say somebody is working a task nobody is.
+    ///
+    /// One list for both ends: the daemon refuses a task for anything else
+    /// (`terminal.create`), and `farcooler task dispatch` refuses it before
+    /// asking. The daemon's tests hold this list to the launch arms that
+    /// really pass the prompt.
+    pub const TASK_AGENTS: &[&str] = &["claude", "codex", "cursor"];
+
+    /// Whether `preset` (`claude`, `codex:gpt-5`, …) is one of `TASK_AGENTS`.
+    pub fn takes_a_task(preset: &str) -> bool {
+        let head = preset.split_once(':').map_or(preset, |(agent, _)| agent);
+        TASK_AGENTS.contains(&head)
+    }
 }

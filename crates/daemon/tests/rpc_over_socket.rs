@@ -1953,54 +1953,36 @@ fn start_commands(h: &Harness) -> Vec<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 
+/// A task is dispatched only to an agent that is told it: claude, codex or
+/// cursor (`farcooler_core::pane_env::TASK_AGENTS`). Anything else, a typo
+/// included, is refused and names the argument, and nothing is opened.
+///
+/// The terminal that IS opened for a task is tested in `rpc.rs`'s own tests,
+/// where a stub stands in for the agent: this harness would start the real
+/// one, with a first message telling it to work the task.
 #[tokio::test]
-async fn a_terminal_for_a_task_on_its_own_board_exports_the_key() {
+async fn a_task_is_only_opened_with_an_agent_that_is_told_it() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
     let workspace = a_workspace(&mut client, dir.path()).await;
     let task = create_task(&mut client, workspace.repository_id.clone(), "the work").await;
+    let before = terminals(&mut client).await.len();
 
-    let made = client.call(a_terminal_for(&workspace.id, &task.key)).await.expect("opened for its task");
-    let Some(result::Value::Terminal(terminal)) = made.value else { panic!("wrong result") };
-    assert_eq!(terminal.task_id.as_ref(), Some(&task.id), "and the terminal says which task, by id");
-
-    let commands = start_commands(&h);
-    assert!(
-        commands.iter().any(|c| c.contains(&format!("FARCOOLER_TASK={}", task.key))),
-        "the pane names its task: {commands:?}"
-    );
-}
-
-/// `join_active_group` makes the pane by splitting the focused one: the
-/// other of the two first launches, and the one `prefix %` takes.
-#[tokio::test]
-async fn a_terminal_split_into_the_layout_for_a_task_exports_the_key() {
-    let h = start(Scope::HostAdmin).await;
-    let mut client = connect(&h).await;
-    let dir = tempfile::tempdir().unwrap();
-    let workspace = a_workspace(&mut client, dir.path()).await;
-    let task = create_task(&mut client, workspace.repository_id.clone(), "the work").await;
-    // A layout to join: one ordinary pane first.
-    client.call(a_terminal_for(&workspace.id, "")).await.expect("a first pane");
-
-    let mut split = a_terminal_for(&workspace.id, &task.key);
-    let Some(request::Payload::TerminalCreate(ref mut p)) = split.payload else { panic!("payload") };
-    p.join_active_group = true;
-    client.call(split).await.expect("split in, for its task");
-
-    let out = std::process::Command::new("tmux")
-        .args(["-L", &h.tmux_socket, "list-panes", "-a", "-F", "#{window_id} #{pane_start_command}"])
-        .output()
-        .expect("tmux");
-    let panes = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect::<Vec<_>>();
-    assert_eq!(panes.len(), 2, "{panes:?}");
-    let window = |line: &str| line.split_whitespace().next().unwrap_or_default().to_string();
-    assert_eq!(window(&panes[0]), window(&panes[1]), "a split, in the same window: {panes:?}");
-    assert!(
-        panes.iter().any(|c| c.contains(&format!("FARCOOLER_TASK={}", task.key))),
-        "the split pane names its task: {panes:?}"
-    );
+    for preset in ["cluade", "gemini", "bash", "fcprobe", "shell"] {
+        let mut create = a_terminal_for(&workspace.id, &task.key);
+        let Some(request::Payload::TerminalCreate(ref mut p)) = create.payload else { panic!("payload") };
+        p.command_preset = preset.into();
+        match client.call(create).await {
+            Err(ClientError::Daemon { code, what, .. }) => {
+                assert_eq!(code, ErrorCode::InvalidArgument as i32, "{preset}");
+                assert_eq!(what, "command_preset", "{preset}");
+            }
+            other => panic!("{preset} must be refused for a task: {other:?}"),
+        }
+    }
+    assert_eq!(terminals(&mut client).await.len(), before, "nothing was opened");
+    assert!(start_commands(&h).is_empty(), "no pane: {:?}", start_commands(&h));
 }
 
 /// A key that exists, but on another repository's board, is refused and names
