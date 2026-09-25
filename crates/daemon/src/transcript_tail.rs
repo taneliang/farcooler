@@ -132,11 +132,22 @@ impl TranscriptTail {
     /// `notify::recommended_watcher`, `Watcher::watch` all run here, inline,
     /// with no `.await` between them. Measured in the sandbox this was built
     /// against, watch registration alone has taken as long as ~11 seconds
-    /// under load. `hook_ingress::HookIngress::start_transcript_tail` is
-    /// where that is accounted for -- it runs this inside `tokio::spawn` and
-    /// `spawn_blocking` rather than on `serve`'s own task, which is this
-    /// function's caller's problem to solve, not this function's to pretend
-    /// does not exist.
+    /// under load, and on a machine whose `fseventsd` is backed up (an Xcode
+    /// build, an XProtect scan) `FSEventStreamStart` has been sampled
+    /// blocking for MINUTES inside `register_with_server`.
+    /// `hook_ingress::HookIngress::start_transcript_tail` is where the
+    /// blocking is accounted for -- it runs this inside `tokio::spawn` and
+    /// `spawn_blocking` rather than on `serve`'s own task.
+    ///
+    /// **Delivery never waits for that registration.** The polling thread is
+    /// spawned BEFORE the watch is registered, and the watcher is handed to
+    /// it afterwards, once it exists. An earlier version registered first
+    /// and spawned second, so nothing polled until `watch()` returned: a
+    /// line appended during a stalled registration went undelivered for as
+    /// long as the stall lasted, which is what made
+    /// `service::hook_wiring_tests`' two transcript tests fail whenever the
+    /// machine's `fseventsd` was busy -- and what a real user on a loaded
+    /// machine would have seen as a chat with no prose in it.
     ///
     /// `from` is the caller's choice and not derived here on purpose. The
     /// caller knows why it is starting a tail at this moment -- a session
@@ -147,6 +158,29 @@ impl TranscriptTail {
     pub fn follow<S>(&self, path: PathBuf, from: u64, on_text: S, alive: Arc<AtomicBool>) -> bool
     where
         S: Fn(String) + Send + Sync + 'static,
+    {
+        self.follow_registering(path, from, on_text, alive, watch_directory)
+    }
+
+    /// `follow`, with the watch registration passed in, so a test can stand
+    /// in a registration that stalls -- the one condition the product has to
+    /// survive and a healthy test machine never produces on its own.
+    ///
+    /// `register` runs on the calling thread AFTER the polling thread is
+    /// already running, and whatever it returns is handed to that thread to
+    /// keep alive. `None` means polling alone, as it always has.
+    fn follow_registering<S, R, W>(
+        &self,
+        path: PathBuf,
+        from: u64,
+        on_text: S,
+        alive: Arc<AtomicBool>,
+        register: R,
+    ) -> bool
+    where
+        S: Fn(String) + Send + Sync + 'static,
+        R: FnOnce(&Path, &Path, std::sync::mpsc::Sender<()>) -> Option<W>,
+        W: Send + 'static,
     {
         let mut offset = from;
         // What is already on disk when this starts is read once before any
@@ -165,62 +199,24 @@ impl TranscriptTail {
         // and held for the life of the spawned loop below regardless of
         // whether that watcher ever exists. Without it, a failed
         // `recommended_watcher` or a failed `watch()` -- the exact cases
-        // this function now degrades gracefully from rather than refusing
+        // this function degrades gracefully from rather than refusing
         // outright -- drops the only `Sender` there is, `rx` reports
-        // `Disconnected` on the very next call, and the "poll-only" fallback
-        // this whole change exists to provide would itself never run a
-        // second time.
+        // `Disconnected` on every call without waiting, and the poll-only
+        // fallback becomes a busy loop.
         let keep_alive_tx = tx.clone();
-        let watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if res.is_ok() {
-                let _ = tx.send(());
-            }
-        }) {
-            Ok(mut w) => {
-                // The DIRECTORY, not the file. Codex does not open its
-                // rollout until the first turn is submitted
-                // (`docs/agent-session-logs.md`, "Which file belongs to
-                // which pane"), so a tail can start before the file exists
-                // -- and even once it exists, a watch on the file alone
-                // would miss a truncate-and-replace, which some editors and
-                // log rotators do instead of an in-place append.
-                match w.watch(&parent, RecursiveMode::Recursive) {
-                    Ok(()) => Some(w),
-                    Err(error) => {
-                        // NOT fatal -- see this function's own doc. A
-                        // directory nobody has written into yet, or one that
-                        // does not exist for either agent's reason above, is
-                        // the ordinary case for a first payload, not a
-                        // fault, so this stays below `warn!`.
-                        tracing::debug!(
-                            ?error,
-                            path = %parent.display(),
-                            "could not watch this transcript's directory; falling back to polling alone"
-                        );
-                        None
-                    }
-                }
-            }
-            Err(error) => {
-                tracing::warn!(
-                    ?error,
-                    path = %path.display(),
-                    "could not build a filesystem watcher; falling back to polling alone"
-                );
-                None
-            }
-        };
+        // How the watcher reaches the loop once `register` has built it --
+        // see this function's doc on why the loop cannot wait for it.
+        let (watcher_tx, watcher_rx) = std::sync::mpsc::channel::<W>();
 
+        let loop_path = path.clone();
         std::thread::spawn(move || {
-            // Keeping `watcher` alive is this closure's whole job for as
-            // long as it runs, when there is one to keep: a
-            // `notify::Watcher` stops watching the moment it is dropped
-            // (`log_watch.rs`'s own `LogWatcher` carries the same note about
-            // its field), and this is the last place that still holds it
-            // once `follow` has returned. `None` here is a no-op to hold and
-            // means every wakeup below comes from `WAIT_POLL_FALLBACK`
-            // rather than a real event.
-            let _watcher = watcher;
+            // Keeping the watcher alive is this thread's job for as long as
+            // it runs, once there is one: a `notify::Watcher` stops watching
+            // the moment it is dropped (`log_watch.rs`'s own `LogWatcher`
+            // carries the same note about its field). `None` until
+            // `register` returns, and forever when it fails; every wakeup
+            // then comes from `WAIT_POLL_FALLBACK` rather than a real event.
+            let mut _watcher: Option<W> = None;
             // See `keep_alive_tx`'s own doc above: held so `rx` never
             // disconnects on its own, which is what makes `alive` -- checked
             // below -- the only thing that can end this loop.
@@ -233,24 +229,79 @@ impl TranscriptTail {
                 // The `Result` is not matched on. `Ok` means a real event
                 // fired; `Err(Timeout)` means `WAIT_POLL_FALLBACK` elapsed
                 // with nothing; `Err(Disconnected)` cannot happen while
-                // `_keep_alive_tx` above is held, but treating it as a
-                // reason to stop here would resurrect exactly the dead exit
-                // condition this loop used to have before `alive` existed --
-                // every one of the three is answered the same way: read
-                // whatever is new, then check `alive` again at the top.
-                // Every event on the directory triggers a read, not only
-                // ones that name this exact path -- the three platform
-                // backends do not agree on which paths one event carries for
-                // a rename or a coalesced burst (`log_watch.rs` makes the
-                // same call, for the same reason), and the cost of
-                // over-triggering, like the cost of the periodic fallback
-                // itself, is one cheap no-op read against an unchanged
-                // offset.
+                // `_keep_alive_tx` above is held -- every one of the three
+                // is answered the same way: read whatever is new, then check
+                // `alive` again at the top. Every event on the directory
+                // triggers a read, not only ones that name this exact path
+                // -- the three platform backends do not agree on which
+                // paths one event carries for a rename or a coalesced burst
+                // (`log_watch.rs` makes the same call, for the same reason),
+                // and the cost of over-triggering, like the cost of the
+                // periodic fallback itself, is one cheap no-op read against
+                // an unchanged offset.
                 let _ = rx.recv_timeout(WAIT_POLL_FALLBACK);
-                read_new_lines(&path, &mut offset, &on_text);
+                if let Ok(watcher) = watcher_rx.try_recv() {
+                    _watcher = Some(watcher);
+                }
+                read_new_lines(&loop_path, &mut offset, &on_text);
             }
         });
+
+        // Only now, with the loop above already polling. If the loop has
+        // ended by the time this returns (`alive` went false during a long
+        // stall), the send fails and the watcher is dropped right here,
+        // which is exactly what should happen to it.
+        if let Some(watcher) = register(&path, &parent, tx) {
+            let _ = watcher_tx.send(watcher);
+        }
         true
+    }
+}
+
+/// Watch `parent` -- the transcript's DIRECTORY, not the file -- and send on
+/// `tx` for every event. `None` when no watch could be set up, which is not
+/// fatal: see `TranscriptTail::follow`'s own doc.
+///
+/// The directory rather than the file because codex does not open its
+/// rollout until the first turn is submitted (`docs/agent-session-logs.md`,
+/// "Which file belongs to which pane"), so a tail can start before the file
+/// exists -- and even once it exists, a watch on the file alone would miss a
+/// truncate-and-replace, which some editors and log rotators do instead of
+/// an in-place append.
+fn watch_directory(
+    path: &Path,
+    parent: &Path,
+    tx: std::sync::mpsc::Sender<()>,
+) -> Option<notify::RecommendedWatcher> {
+    let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if res.is_ok() {
+            let _ = tx.send(());
+        }
+    }) {
+        Ok(w) => w,
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                path = %path.display(),
+                "could not build a filesystem watcher; falling back to polling alone"
+            );
+            return None;
+        }
+    };
+    match watcher.watch(parent, RecursiveMode::Recursive) {
+        Ok(()) => Some(watcher),
+        Err(error) => {
+            // NOT fatal -- see `follow`'s own doc. A directory nobody has
+            // written into yet, or one that does not exist for either
+            // agent's reason above, is the ordinary case for a first
+            // payload, not a fault, so this stays below `warn!`.
+            tracing::debug!(
+                ?error,
+                path = %parent.display(),
+                "could not watch this transcript's directory; falling back to polling alone"
+            );
+            None
+        }
     }
 }
 
@@ -588,6 +639,96 @@ mod tests {
             "the poll fallback alone must still find this, since nothing ever re-registered a watch \
              once the directory existed"
         );
+    }
+
+    /// The flake `service::hook_wiring_tests`' two transcript tests had,
+    /// reduced to its cause: `follow` used to register its watch BEFORE it
+    /// started polling, so a registration that stalled -- `FSEventStreamStart`
+    /// has been sampled blocking for minutes on a machine whose `fseventsd`
+    /// is backed up -- held every delivery back for as long as it stalled.
+    /// The registration here never finishes until the test says so; a line
+    /// appended meanwhile must still arrive on the poll fallback alone.
+    #[test]
+    fn a_stalled_watch_registration_does_not_hold_up_delivery() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, "").expect("seed");
+
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = { let seen = seen.clone(); move |t: String| seen.lock().unwrap().push(t) };
+        let alive = Arc::new(AtomicBool::new(true));
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+
+        let starter = std::thread::spawn({
+            let (path, alive) = (path.clone(), alive.clone());
+            move || {
+                TranscriptTail::new().follow_registering(path, 0, sink, alive, move |_, _, _| {
+                    entered_tx.send(()).unwrap();
+                    let _ = release_rx.recv_timeout(Duration::from_secs(30));
+                    None::<()>
+                })
+            }
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).expect("follow never reached its watch registration");
+
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).expect("open");
+        writeln!(f, "{{\"type\":\"message\",\"role\":\"assistant\",\"text\":\"hello\"}}").expect("append");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while seen.lock().unwrap().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let delivered = seen.lock().unwrap().clone();
+
+        release_tx.send(()).unwrap();
+        assert!(starter.join().unwrap(), "follow reports the tail started");
+        alive.store(false, Ordering::Relaxed);
+        assert_eq!(
+            delivered,
+            ["hello"],
+            "a line appended while the watch registration was still stalled must be delivered by the \
+             poll fallback within a few seconds, not once the registration finally returns"
+        );
+    }
+
+    /// The watcher a registration returns is kept alive by the tail for as
+    /// long as the tail runs, and let go once it stops. Delivery alone cannot
+    /// show the first half -- the poll fallback delivers with or without a
+    /// watch -- so this watches the watcher itself.
+    #[test]
+    fn the_registered_watcher_lives_exactly_as_long_as_the_tail() {
+        use std::time::{Duration, Instant};
+
+        struct Probe(Arc<AtomicBool>);
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        let dropped = Arc::new(AtomicBool::new(false));
+        let alive = Arc::new(AtomicBool::new(true));
+        let probe = Probe(dropped.clone());
+        assert!(TranscriptTail::new().follow_registering(path, 0, |_| {}, alive.clone(), move |_, _, _| Some(probe)));
+
+        // Past two polls, by which point the loop has certainly taken the
+        // watcher off its channel.
+        std::thread::sleep(WAIT_POLL_FALLBACK * 2 + Duration::from_millis(500));
+        assert!(!dropped.load(Ordering::Relaxed), "the tail dropped its watcher while it was still running");
+
+        alive.store(false, Ordering::Relaxed);
+        let deadline = Instant::now() + WAIT_POLL_FALLBACK * 3;
+        while !dropped.load(Ordering::Relaxed) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(dropped.load(Ordering::Relaxed), "a stopped tail must let its watcher go");
     }
 
     // -- assistant_text: the decode `follow` runs every line through --
