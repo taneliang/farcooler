@@ -1016,9 +1016,16 @@ final class DaemonClient: ObservableObject {
 
     @Published var repositories: [Repository] = []
 
+    /// Whether `repositories` is a list this runner actually gave, rather than
+    /// the empty one a client starts with or a read that failed to decode.
+    /// What tells "that project is gone" from "not listed yet".
+    @Published private(set) var repositoriesListed = false
+
     func refreshRepositories() async {
         guard let data = await run(["repo", "list", "--json"], background: true) else { return }
-        repositories = (try? JSONDecoder().decode(RepositoryList.self, from: data))?.repositories ?? []
+        let decoded = try? JSONDecoder().decode(RepositoryList.self, from: data)
+        repositories = decoded?.repositories ?? []
+        repositoriesListed = decoded != nil
     }
 
     /// Allowlisted roots, so the app can tell whether a chosen repository is

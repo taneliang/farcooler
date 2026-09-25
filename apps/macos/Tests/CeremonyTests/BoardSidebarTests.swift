@@ -215,7 +215,11 @@ struct BoardSidebarTests {
         let store = TaskBoardStore(client: client, repository: Self.repository(Self.repoA))
 
         async let first: Void = store.readIfNeverRead()
-        try? await Task.sleep(for: .milliseconds(10))
+        // Until the first read is actually in flight — not a guessed sleep.
+        for _ in 0..<500 where reads.inFlight == 0 {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(reads.inFlight == 1)
         for _ in 0..<3 {
             client.boardMoved(TaskEvent(repository: Self.repoA, actor: "agent:x"))
             await store.reloadIfMoved()
@@ -234,17 +238,20 @@ struct BoardSidebarTests {
         DaemonBuild(version: "0.1.0", matches: true, platform: "macos", capabilities: capabilities)
     }
 
-    /// A refused runner's workspaces are the last ones read before it went
-    /// quiet. The agents in them may have exited since, so the board says
-    /// nothing about agents there: no pill, no "No Agent", no count.
-    /// `FleetStore.remerge` gates the live-pane count on the same test.
-    @Test func aRefusedRunnerSaysNothingAboutAgents() {
+    /// A runner that isn't connected right now has workspaces that are the
+    /// last ones read before the link went. The agents in them may have
+    /// exited since, so the board says nothing about agents there: no pill,
+    /// no "No Agent", no count. `.reconnecting` included — a dead runner
+    /// spends most of an outage there between attempts.
+    @Test func aRunnerThatIsntConnectedSaysNothingAboutAgents() {
         let fleet = [Self.workspace("lane", [Self.terminal("agent")])]
         let board = TaskBoardModel(columns: [
             TaskBoardColumn(status: .inProgress, rows: [Self.row()])
         ])
         let recording = Self.build(["tasks", "terminal_task"])
-        for state: HostState in [.unreachable(reason: "gone"), .notInstalled] {
+        for state: HostState in [
+            .unreachable(reason: "gone"), .notInstalled, .connecting, .reconnecting(attempt: 1),
+        ] {
             let agents = BoardAgents.on(fleet, state: state, build: recording)
             #expect(agents.live(for: Self.row()).isEmpty, "\(state)")
             #expect(agents.presence(for: Self.row()) == .unsaid, "\(state)")
@@ -254,12 +261,10 @@ struct BoardSidebarTests {
                 BoardAgents.on([], state: state, build: recording).presence(for: Self.row())
                     == .unsaid, "\(state)")
         }
-        // Answering, or not known to be down: it says.
-        for state: HostState in [.connected, .connecting, .reconnecting(attempt: 1)] {
-            let agents = BoardAgents.on(fleet, state: state, build: recording)
-            #expect(agents.presence(for: Self.row()) == .agents(1), "\(state)")
-            #expect(agents.tasksWithAgents(on: board) == 1, "\(state)")
-        }
+        // Connected: it says.
+        let connected = BoardAgents.on(fleet, state: .connected, build: recording)
+        #expect(connected.presence(for: Self.row()) == .agents(1))
+        #expect(connected.tasksWithAgents(on: board) == 1)
         // And a runner that doesn't record tasks never does.
         #expect(
             BoardAgents.on(fleet, state: .connected, build: Self.build(["tasks"]))

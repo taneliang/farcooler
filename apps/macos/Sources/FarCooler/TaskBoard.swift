@@ -284,15 +284,19 @@ struct BoardAgents {
     /// "can't say": no pills, no "No Agent", and no count in the sidebar.
     ///
     /// Two gates. The runner has to record which pane works which task
-    /// (`terminal_task`), and it has to be answering: a refused runner's
-    /// workspaces are the last ones read before it went quiet, kept so the
-    /// sidebar stays put, and the agents in them may have exited since.
-    /// `FleetStore.remerge` refuses a refused runner's live-pane count for
-    /// the same reason, with the same test, `state.refusal == nil`.
+    /// (`terminal_task`), and it has to be connected right now. Anything
+    /// else — connecting, reconnecting, unreachable, not installed — means
+    /// the workspaces are the last ones read before the link went, kept so
+    /// the sidebar stays put, and the agents in them may have exited since.
+    ///
+    /// `.connected` and not `state.refusal == nil`, which is the weaker test
+    /// `FleetStore.remerge` uses: a dead runner spends most of an outage in
+    /// `.reconnecting` between attempts, and that gate let the frozen pills
+    /// blink back on for every one of them.
     static func on(
         _ workspaces: [Workspace], state: HostState, build: DaemonBuild?
     ) -> BoardAgents {
-        guard state.refusal == nil, build?.can("terminal_task") == true else { return .none }
+        guard state == .connected, build?.can("terminal_task") == true else { return .none }
         return BoardAgents(workspaces: workspaces, runnerRecordsTasks: true)
     }
 

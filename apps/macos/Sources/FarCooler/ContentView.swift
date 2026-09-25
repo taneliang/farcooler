@@ -781,6 +781,19 @@ struct ContentView: View {
             state: client.state, build: client.daemonBuild)
     }
 
+    /// Why a selected board can't be drawn, said only as far as this app
+    /// knows it: "gone" only from a runner that is answering and has listed
+    /// its projects without it.
+    private func missingBoardSentence(host: String) -> String {
+        guard let client = store.clients[host] else {
+            return "The runner this board was on isn’t in Far Cooler anymore."
+        }
+        guard client.state == .connected, client.repositoriesListed else {
+            return "Far Cooler is still loading this runner’s projects."
+        }
+        return "This project isn’t on its runner anymore. Choose another board in the sidebar."
+    }
+
     /// Go to a pane a card offered, as the fleet has it now. See
     /// `BoardPane.landing`: its workspace when the pane has gone, and the
     /// board with a sentence when the workspace has too.
@@ -1561,10 +1574,7 @@ struct ContentView: View {
                 ContentUnavailableView {
                     Label("This board isn’t here", systemImage: "checklist")
                 } description: {
-                    Text(
-                        store.clients[host] == nil
-                            ? "The runner it was on isn’t in Far Cooler any more."
-                            : "Its project isn’t on this runner any more, or the runner hasn’t listed it yet.")
+                    Text(missingBoardSentence(host: host))
                 }
             }
 
@@ -2262,7 +2272,7 @@ struct ContentView: View {
                 // Already there — unless "there" has gone, which is said
                 // rather than answered with nothing.
                 if store.clients[host]?.repositories.contains(where: { $0.id == id }) != true {
-                    errorBanner = "That project’s board is gone. Choose another in the sidebar."
+                    errorBanner = missingBoardSentence(host: host)
                 }
             } else if let target = boardTarget {
                 selection = .board(host: target.host, repository: target.repository.id)
