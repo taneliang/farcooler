@@ -117,6 +117,9 @@ struct StartTaskTests {
     private func client(_ runner: Runner) async -> DaemonClient {
         let client = DaemonClient(target: "")
         client.commandRunnerForTesting = { args in runner.answer(args) }
+        // Never this Mac's own pasteboard: a typing path left running by a
+        // test gives up after a minute, and would put a task on it.
+        client.copyToClipboard = { _ in }
         await client.refresh()
         for _ in 0..<100 where client.daemonBuild == nil {
             try? await Task.sleep(for: .milliseconds(10))
@@ -170,6 +173,29 @@ struct StartTaskTests {
             try? await Task.sleep(for: .milliseconds(100))
         }
         #expect(runner.sent.first == ["terminal", "send", "tnew", Self.description])
+    }
+
+    /// The typing path meets an agent that asks something first — a trust
+    /// screen — and gives up. The task goes on the clipboard and the window
+    /// is told, rather than the task simply not being there.
+    @Test func aTaskThatCannotBeTypedIsPutOnTheClipboardAndSaid() async {
+        let runner = Runner(capabilities: ["workspaces", "terminals"])
+        runner.activity = "blocked"
+        let client = await client(runner)
+        var clipboard: [String] = []
+        client.copyToClipboard = { clipboard.append($0) }
+        var said: [String] = []
+        let outcome = await client.startTask(
+            project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+            agent: "claude", undelivered: { said.append($0) })
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+
+        for _ in 0..<50 where said.isEmpty { try? await Task.sleep(for: .milliseconds(100)) }
+        #expect(clipboard == [Self.description])
+        #expect(said.count == 1)
+        #expect(said.first?.contains("clipboard") == true && said.first?.contains("fix flaky reconnect") == true,
+                "\(said)")
+        #expect(runner.sent.isEmpty, "nothing typed into the question")
     }
 
     @Test func anAgentThatTakesNoPromptArgumentIsTypedInstead() async {

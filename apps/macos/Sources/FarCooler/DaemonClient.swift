@@ -1418,9 +1418,12 @@ final class DaemonClient: ObservableObject {
     /// `name`, and nothing new is made. Starting again used to make a second
     /// worktree, `name-2`, and leave the first without an agent. A `reusing`
     /// the fleet no longer has — removed since — is a start from scratch.
+    ///
+    /// `undelivered` hears, in a sentence for the window, when the typing path
+    /// gives up: the description is on the clipboard by then.
     func startTask(
         project: String, description: String, name: String, agent: String,
-        reusing: String? = nil
+        reusing: String? = nil, undelivered: (@MainActor (String) -> Void)? = nil
     ) async -> TaskStart {
         if let problem = TaskPrompt.problem(description) { return .failed(problem, made: nil) }
         // Asked, if the first status read has not landed yet: the create and
@@ -1431,7 +1434,7 @@ final class DaemonClient: ObservableObject {
         if let reusing, let existing = fleet.workspaces.first(where: { $0.id == reusing }) {
             return await startAgent(
                 in: Created(id: existing.id, short: existing.short), name: name,
-                description: description, agent: agent)
+                description: description, agent: agent, undelivered: undelivered)
         }
 
         // This runner's own prefix, read from the fleet it last refreshed — the
@@ -1486,15 +1489,18 @@ final class DaemonClient: ObservableObject {
             }
             return .failed(TaskFailure.sentence(for: makeFailure), made: nil)
         }
-        return await startAgent(in: workspace, name: name, description: description, agent: agent)
+        return await startAgent(
+            in: workspace, name: name, description: description, agent: agent,
+            undelivered: undelivered)
     }
 
     /// The second half of `startTask`: the agent's terminal, in a worktree
     /// that exists, with the description as its launch argument where the
     /// runner takes one and typed in once it is idle where it doesn't.
-    private func startAgent(in workspace: Created, name: String, description: String, agent: String)
-        async -> TaskStart
-    {
+    private func startAgent(
+        in workspace: Created, name: String, description: String, agent: String,
+        undelivered: (@MainActor (String) -> Void)?
+    ) async -> TaskStart {
         // `"launch_prompt"` is `farcooler_protocol::capability::LAUNCH_PROMPT`.
         let asArgument =
             (daemonBuild?.can("launch_prompt") ?? false) && Agents.takesPrompt(preset: agent)
@@ -1510,7 +1516,11 @@ final class DaemonClient: ObservableObject {
                 made: MadeWorkspace(id: workspace.id, name: name))
         }
 
-        if !asArgument { typeWhenIdle(workspace: workspace.id, terminal: terminal.id, text: description) }
+        if !asArgument {
+            typeWhenIdle(
+                workspace: workspace.id, terminal: terminal.id, text: description, name: name,
+                undelivered: undelivered)
+        }
         return .started(workspace: workspace.id, terminal: terminal.id, name: name)
     }
 
@@ -1552,7 +1562,16 @@ final class DaemonClient: ObservableObject {
     /// minute: a runner removed while this waits has its client released, and
     /// the next pass finds nothing and stops — rather than polling, and
     /// perhaps typing into, a runner nothing shows anymore.
-    private func typeWhenIdle(workspace: String, terminal: String, text: String) {
+    ///
+    /// **Giving up is said, and the text is kept.** An agent that asks
+    /// something first, isn't idle within the minute, or goes away is never
+    /// typed into; the description goes on the clipboard and `undelivered`
+    /// gets a sentence saying so. It used to stop without a word, after the
+    /// panel had already let go of the draft — the task simply wasn't there.
+    private func typeWhenIdle(
+        workspace: String, terminal: String, text: String, name: String,
+        undelivered: (@MainActor (String) -> Void)?
+    ) {
         Task { [weak self] in
             for _ in 0..<120 {
                 try? await Task.sleep(for: .milliseconds(500))
@@ -1561,7 +1580,10 @@ final class DaemonClient: ObservableObject {
                 let current = self.fleet.workspaces
                     .first(where: { $0.id == workspace })?
                     .terminals.first(where: { $0.id == terminal })
-                guard let current else { return }
+                guard let current else {
+                    self.keepUndelivered(text, name: name, undelivered)
+                    return
+                }
                 if current.agent == .idle {
                     await self.send(terminal: current.short, text: text)
                     return
@@ -1569,9 +1591,29 @@ final class DaemonClient: ObservableObject {
                 // It asked something before we got a word in — a trust prompt,
                 // or a resume dialog. Stop rather than typing a task
                 // description into a yes/no question.
-                if current.agent == .blocked { return }
+                if current.agent == .blocked {
+                    self.keepUndelivered(text, name: name, undelivered)
+                    return
+                }
             }
+            guard let self, !Task.isCancelled else { return }
+            self.keepUndelivered(text, name: name, undelivered)
         }
+    }
+
+    /// The task was never typed: onto the clipboard, and said.
+    private func keepUndelivered(
+        _ text: String, name: String, _ undelivered: (@MainActor (String) -> Void)?
+    ) {
+        copyToClipboard(text)
+        undelivered?(TaskFailure.undelivered(name: name))
+    }
+
+    /// Where a task that couldn't be typed goes. The general pasteboard; a
+    /// test holds its own.
+    var copyToClipboard: @MainActor (String) -> Void = { text in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     /// Type text into a terminal and press return.

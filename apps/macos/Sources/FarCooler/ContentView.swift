@@ -2362,7 +2362,10 @@ struct ContentView: View {
             description: request.description,
             name: request.name,
             agent: request.preset.isEmpty ? Preferences.shared.defaultAgent : request.preset,
-            reusing: request.workspace)
+            reusing: request.workspace,
+            // After the start has returned and the panel has let go of the
+            // draft, so it's said over the pane instead.
+            undelivered: { sentence in errorBanner = sentence })
         switch outcome {
         case .started(let workspace, let terminal, let name):
             // By the ids the create calls returned, not by a later look at

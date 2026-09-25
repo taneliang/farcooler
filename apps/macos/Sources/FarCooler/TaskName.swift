@@ -272,6 +272,12 @@ enum TaskFailure {
             .first
     }
 
+    /// A task started on a runner too old to take it at launch, whose agent
+    /// was never ready to have it typed in. It's on the clipboard by then.
+    static func undelivered(name: String) -> String {
+        "Couldn’t give the task to the agent in “\(WorktreeName.display(name))”. It’s on the clipboard, so you can paste it in when the agent is ready."
+    }
+
     static func sentence(for message: String?) -> String {
         switch code(in: message) {
         case "branch-exists", "worktree-exists":
