@@ -298,15 +298,24 @@ pub enum TaskCmd {
     /// on the board is the brief. Nothing reports back by itself; read the
     /// board, or `workspace list --json`, to see how it's going.
     ///
-    /// Into an existing workspace (`--workspace`), or a new one (`--new` and
-    /// `--branch`). A workspace that already has an agent running gets a
-    /// warning and is dispatched into anyway: two writers in one worktree
-    /// commit over each other's work, and whether that's acceptable is the
-    /// caller's call.
+    /// Into an existing workspace of the task's repository (`--workspace`),
+    /// or a new one (`--new` and `--branch`). A workspace that already has an
+    /// agent running gets a warning and is dispatched into anyway: two
+    /// writers in one worktree commit over each other's work, and whether
+    /// that's acceptable is the caller's call. A task whose own agent is still
+    /// running is refused, unless `--again` says a second one is meant.
+    ///
+    /// The agent is told to read the task once, on its first launch. A
+    /// restart doesn't tell it again, so if a pane is restarted before its
+    /// agent ever got going (it stopped at a trust question, say), tell it to
+    /// run `farcooler task show` yourself.
+    ///
+    /// A key that starts with `-` goes after `--`: `task dispatch --workspace
+    /// lane -- -1`.
     Dispatch {
         /// A key like `fc-42`.
         key: String,
-        /// The workspace to work in, by name or id.
+        /// The workspace to work in, by name or id, in the task's repository.
         #[arg(long, required_unless_present = "new", conflicts_with = "new")]
         workspace: Option<String>,
         /// Make a new workspace with this name for the task.
@@ -331,6 +340,9 @@ pub enum TaskCmd {
         /// says.
         #[arg(long)]
         actor: Option<String>,
+        /// Dispatch even though the task already has an agent working it.
+        #[arg(long)]
+        again: bool,
     },
 }
 
@@ -556,19 +568,19 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             println!("{}  {}  {}", task.key, status_word(task.status), truncate(&task.title, 60));
         }
 
-        TaskCmd::Dispatch { key, workspace, new, branch, base, preset, repo, actor } => {
+        TaskCmd::Dispatch { key, workspace, new, branch, base, preset, repo, actor, again } => {
+            // Before anything is asked of the runner: see `agent_preset`.
+            agent_preset(&preset)?;
             let actor = actor_for(actor.as_deref())?;
             let task = find_task(&mut link, repo.as_deref(), &key).await?;
             let lane = match (workspace, new, branch) {
-                (Some(named), _, _) => {
-                    Lane::Existing(crate::resolve_workspace_id(&mut link, &named).await?, named)
-                }
+                (Some(named), _, _) => Lane::Existing(named),
                 (None, Some(name), Some(branch)) => Lane::New { name, branch, base },
                 // clap requires one of the two, and `--new` requires `--branch`.
                 _ => return Err("name a workspace with --workspace, or a new one with --new and --branch".into()),
             };
-            let mut calls = OverTheLink { link: &mut link, actor };
-            let done = dispatch(&mut calls, &task, lane, &preset, &mut |w| eprintln!("{w}")).await?;
+            let asked = Dispatch { task: &task, lane, preset: &preset, actor, again };
+            let done = dispatch(&mut link, asked, &mut |w| eprintln!("{w}")).await?;
             if json {
                 println!(
                     "{}",
@@ -1547,11 +1559,11 @@ fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
 // Dispatch: a pane that is already working a task
 // ---------------------------------------------------------------------------
 
-/// Where a dispatched task works.
+/// Where a dispatched task is asked to work, as the caller named it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Lane {
-    /// A workspace that exists, by id, with the name it was asked for by.
-    Existing(Uuid, String),
+    /// A workspace that exists, by name or id, on the task's own repository.
+    Existing(String),
     /// A workspace to make, on the task's repository.
     New { name: String, branch: String, base: String },
 }
@@ -1565,185 +1577,327 @@ struct Dispatched {
     terminal_short: String,
 }
 
-/// The four calls a dispatch makes. A trait so the order, and what a failure
-/// at each step leaves behind, can be pinned without a daemon: no test in this
-/// crate starts one.
-trait DispatchCalls {
-    /// `workspace.create` on `repository`, with no terminal. The id, and the
-    /// name to print.
-    async fn make_workspace(
-        &mut self,
-        repository: Uuid,
-        name: &str,
-        branch: &str,
-        base: &str,
-    ) -> Result<(Uuid, String), Box<dyn std::error::Error>>;
-    /// The titles of agent panes already running in `workspace`.
-    async fn agents_running(&mut self, workspace: Uuid) -> Result<Vec<String>, Box<dyn std::error::Error>>;
-    /// `terminal.create` for the task, by key. The terminal's id and short id.
-    async fn open_pane(
-        &mut self,
-        workspace: Uuid,
-        preset: &str,
-        key: &str,
-    ) -> Result<(Uuid, String), Box<dyn std::error::Error>>;
-    /// Put the task on `workspace`'s lane and move it into progress.
-    async fn move_task(&mut self, task: &pb::Task, workspace: Uuid) -> Fallible;
+/// What `task dispatch` was asked to do, once the task is found.
+struct Dispatch<'a> {
+    task: &'a pb::Task,
+    lane: Lane,
+    preset: &'a str,
+    actor: Actor,
+    /// `--again`: a second agent on a task whose first is still running.
+    again: bool,
 }
 
-/// `task dispatch`, in order: the lane, a look for a busy one, the pane, and
-/// only then the board.
+/// The one seam between `dispatch` and a runner: send a request, get its
+/// answer. Everything `dispatch` sends is built in `dispatch` itself, so a
+/// test that fakes this sees the real requests, keys and actors and all. No
+/// test in this crate starts a daemon.
+trait DispatchLink {
+    /// What the runner said it can do, in its handshake.
+    fn capabilities(&self) -> Vec<String>;
+    async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError>;
+}
+
+impl DispatchLink for Link {
+    fn capabilities(&self) -> Vec<String> {
+        self.daemon_capabilities().to_vec()
+    }
+    async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError> {
+        Link::call(self, req).await
+    }
+}
+
+/// The error the refusal that stopped a dispatch deserves.
+type Refusal = Box<dyn std::error::Error>;
+
+/// A preset `task dispatch` can start: one that runs an agent.
+///
+/// A shell or a changes pane "dispatched" would move the task into progress
+/// beside a pane nobody is working in, so they're refused before anything is
+/// asked of the runner. So is a preset the daemon would refuse to run and
+/// replace with a login shell (the same `is_safe_model` gate as its
+/// `preset_runs_an_agent`): `claude opus` is a typo, not an agent.
+fn agent_preset(preset: &str) -> Result<(), String> {
+    let head = preset.split_once(':').map_or(preset, |(a, _)| a);
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 64
+            && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    };
+    if head == "shell" || head == "changes" || !plain(head) {
+        return Err(format!(
+            "--preset {preset:?} doesn't start an agent, so nobody would be working the task. \
+             use claude, codex or cursor"
+        ));
+    }
+    Ok(())
+}
+
+/// The workspace `needle` names on `repository`, by name first, then by id.
+///
+/// Only that repository's: a task on one board worked in another
+/// repository's worktree is a wrong-board write, and with prefixless keys
+/// (`-1` on two boards) the runner would resolve the key on the OTHER board
+/// and open a pane working a different task. A name or id that is on this
+/// runner but in another repository says so.
+fn lane_on_board(
+    workspaces: &[pb::Workspace],
+    repository: &[u8],
+    needle: &str,
+) -> Result<(Uuid, String), String> {
+    let mine: Vec<pb::Workspace> =
+        workspaces.iter().filter(|w| w.repository_id.as_ref() == repository).cloned().collect();
+    let by_name: Vec<&pb::Workspace> = mine.iter().filter(|w| w.task_name == needle).collect();
+    if let [w] = by_name.as_slice() {
+        return Ok((uuid_of(&w.id), w.task_name.clone()));
+    }
+    if let Ok(w) = crate::resolve(&mine, needle, |w| &w.id, "workspace") {
+        return Ok((uuid_of(&w.id), w.task_name.clone()));
+    }
+    let elsewhere = workspaces.iter().any(|w| {
+        w.repository_id.as_ref() != repository
+            && (w.task_name == needle || crate::resolve(std::slice::from_ref(w), needle, |w| &w.id, "workspace").is_ok())
+    });
+    Err(if elsewhere {
+        format!("{needle:?} is a workspace in another repository. a task is worked on its own repository")
+    } else {
+        format!("no workspace called {needle:?} in this task's repository")
+    })
+}
+
+/// `terminal.create` for the task, by key, naming the capability the key
+/// needs. The pane is titled with the key.
+fn open_pane_request(workspace: Uuid, preset: &str, key: &str) -> pb::Request {
+    crate::terminal_create_request(
+        workspace,
+        key.to_string(),
+        preset.to_string(),
+        false,
+        None,
+        Some(key.to_string()),
+    )
+}
+
+/// The two writes that put the task on its lane and into progress, in that
+/// order, each as `actor`. Every field of the update is sent back as it was
+/// but the lane: see the WARNING in `TaskCmd::Set` about a row from
+/// `task.list`.
+fn move_task_requests(task: &pb::Task, workspace: Uuid, actor: Actor) -> [pb::Request; 2] {
+    let id = uuid_of(&task.id);
+    [
+        with(
+            req_for("task.update", id),
+            request::Payload::TaskUpdate(pb::TaskUpdate {
+                task_id: id_bytes(id),
+                expected_version: task.resource_version,
+                title: task.title.clone(),
+                intent: task.intent.clone(),
+                acceptance: task.acceptance.clone(),
+                constraints: task.constraints.clone(),
+                labels: task.labels.clone(),
+                workspace_id: Some(id_bytes(workspace)),
+                actor: actor.to_string(),
+            }),
+        ),
+        with(
+            req_for("task.set_status", id),
+            request::Payload::TaskSetStatus(pb::TaskSetStatus {
+                task_id: id_bytes(id),
+                status: pb_status(TaskStatus::InProgress),
+                actor: actor.to_string(),
+            }),
+        ),
+    ]
+}
+
+/// A running agent pane: the only kind that is working anything.
+fn working(t: &pb::Terminal) -> bool {
+    t.state == pb::TerminalState::Running as i32 && agent_preset(&t.command_preset).is_ok()
+}
+
+/// `farcooler task set …` finishing a move `dispatch` couldn't, with the
+/// key after `--` when it would otherwise read as a flag.
+fn finish_command(task: &pb::Task, rest: &str) -> String {
+    let repo = short_bytes(&task.repository_id);
+    if task.key.starts_with('-') {
+        format!("farcooler task set --repo {repo} {rest} -- {}", task.key)
+    } else {
+        format!("farcooler task set {} --repo {repo} {rest}", task.key)
+    }
+}
+
+/// A refusal of `terminal.create`, in this command's words rather than the
+/// board's: the board's `refused` would call a missing workspace "that task"
+/// and a runner without `terminal_task` "older than the board".
+fn pane_refused(e: ClientError) -> String {
+    let (code, what) = match &e {
+        ClientError::Daemon { code, what, .. } => (*code, what.clone()),
+        _ => return refused(e, "that pane could not be opened").to_string(),
+    };
+    match farcooler_core::error::word_for(code) {
+        "capability-unsupported" => {
+            "this runner's Far Cooler can't open a pane for a task yet. update it and try again".into()
+        }
+        "not-found" => "that workspace isn't on this runner any more".into(),
+        "invalid-argument" if what == "command_preset" => "that isn't a preset this runner can start".into(),
+        _ => refused(e, "that pane could not be opened").to_string(),
+    }
+}
+
+/// `task dispatch`, in order: everything that can refuse, then the lane,
+/// the pane, and only then the board.
+///
+/// **Refusals first.** A preset that isn't an agent, a runner that can't
+/// open a pane for a task, a lane in another repository, and a task whose
+/// agent is still running (without `--again`) are each refused before
+/// anything is made, so a refusal leaves nothing behind.
 ///
 /// **The pane before the board.** A task moved into progress beside a pane
 /// that failed to open reads as somebody working it when nobody is, and that
 /// is the lie the board most needs never to tell. So a refused pane leaves
-/// the board exactly as it was. The other failure is the honest one: the
-/// pane is running and the board didn't move. That is said, with the pane
-/// named, and is an error, but the pane is left alone, because stopping an
-/// agent that is already working would lose its work to tidy the board.
+/// the board exactly as it was, and says so when `--new` already made a
+/// workspace for it. The other failure is the honest one: the pane is
+/// running and the board didn't move, or moved only halfway. That is said,
+/// with the pane named and the command that finishes the move, and is an
+/// error, but the pane is left alone, because stopping an agent that is
+/// already working would lose its work to tidy the board.
 ///
-/// A busy lane is a warning, not a refusal: the spec makes the lane the
-/// manager's call, and the manager needs to hear about it to make it.
-async fn dispatch<C: DispatchCalls>(
-    calls: &mut C,
-    task: &pb::Task,
-    lane: Lane,
-    preset: &str,
+/// A busy lane, and a task in a state nobody dispatches from (done, in
+/// review, waiting on the owner), are warnings, not refusals: the spec makes
+/// those the manager's call, and the manager needs to hear about them to
+/// make it.
+async fn dispatch<L: DispatchLink>(
+    link: &mut L,
+    d: Dispatch<'_>,
     warn: &mut dyn FnMut(String),
-) -> Result<Dispatched, Box<dyn std::error::Error>> {
-    let (workspace, workspace_name) = match lane {
-        Lane::Existing(id, name) => (id, name),
-        Lane::New { name, branch, base } => {
-            calls.make_workspace(uuid_of(&task.repository_id), &name, &branch, &base).await?
-        }
+) -> Result<Dispatched, Refusal> {
+    let task = d.task;
+    agent_preset(d.preset)?;
+    if !link.capabilities().iter().any(|c| c == farcooler_protocol::capability::TERMINAL_TASK) {
+        return Err("this runner's Far Cooler can't open a pane for a task yet. update it and try again".into());
+    }
+
+    let r = link.call(req("workspace.list")).await.map_err(|e| refused(e, "the workspaces could not be read"))?;
+    let result::Value::WorkspaceList(workspaces) = expect_value(r.value, "workspaces")? else {
+        return Err("the daemon returned the wrong resource".into());
     };
-    let running = calls.agents_running(workspace).await?;
-    if !running.is_empty() {
+    let existing = match &d.lane {
+        Lane::Existing(needle) => Some(lane_on_board(&workspaces.items, &task.repository_id, needle)?),
+        Lane::New { .. } => None,
+    };
+
+    let r = link.call(req("terminal.list")).await.map_err(|e| refused(e, "the terminals could not be read"))?;
+    let result::Value::TerminalList(terminals) = expect_value(r.value, "terminals")? else {
+        return Err("the daemon returned the wrong resource".into());
+    };
+    let name_of = |ws: &[u8]| {
+        workspaces.items.iter().find(|w| w.id.as_ref() == ws).map_or_else(|| short_bytes(ws), |w| w.task_name.clone())
+    };
+    let live: Vec<String> = terminals
+        .items
+        .iter()
+        .filter(|t| working(t) && t.task_id.as_deref() == Some(task.id.as_ref()))
+        .map(|t| format!("terminal {} in {}", short_bytes(&t.id), name_of(&t.workspace_id)))
+        .collect();
+    if !live.is_empty() && !d.again {
+        return Err(format!(
+            "{key} already has an agent working it ({}). read the board (`farcooler task show {key}`) \
+             before dispatching it again, and pass --again only if a second agent is what you want",
+            live.join(", "),
+            key = task.key,
+        )
+        .into());
+    }
+    if let Some((id, name)) = &existing {
+        let busy: Vec<String> = terminals
+            .items
+            .iter()
+            .filter(|t| working(t) && uuid_of(&t.workspace_id) == *id)
+            .map(|t| t.title.clone())
+            .collect();
+        if !busy.is_empty() {
+            warn(format!(
+                "warning: {name} already has an agent running ({}). two agents in one worktree \
+                 commit over each other's work",
+                busy.join(", ")
+            ));
+        }
+    }
+    if let Some(TaskStatus::Done | TaskStatus::Cancelled | TaskStatus::InReview | TaskStatus::NeedsDecision) =
+        status_of(task.status)
+    {
         warn(format!(
-            "warning: {workspace_name} already has an agent running ({}). two agents in one \
-             worktree commit over each other's work",
-            running.join(", ")
+            "warning: {} is {}. dispatching it anyway moves it back into progress",
+            task.key,
+            status_word(task.status)
         ));
     }
-    let (terminal, terminal_short) = calls.open_pane(workspace, preset, &task.key).await?;
-    if let Err(e) = calls.move_task(task, workspace).await {
+
+    let (workspace, workspace_name, made) = match (existing, &d.lane) {
+        (Some((id, name)), _) => (id, name, None),
+        (None, Lane::New { name, branch, base }) => {
+            let r = link
+                .call(with(
+                    req_for("workspace.create", uuid_of(&task.repository_id)),
+                    request::Payload::WorkspaceCreate(pb::WorkspaceCreate {
+                        task_name: name.clone(),
+                        branch: branch.clone(),
+                        base_revision: base.clone(),
+                        terminal_preset: String::new(),
+                        adopt_existing: false,
+                    }),
+                ))
+                .await?;
+            let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            (uuid_of(&ws.id), ws.task_name.clone(), Some(branch.clone()))
+        }
+        (None, Lane::Existing(_)) => unreachable!("an existing lane was resolved above"),
+    };
+
+    let opened = match link.call(open_pane_request(workspace, d.preset, &task.key)).await {
+        Ok(r) => match expect_value(r.value, "terminal")? {
+            result::Value::Terminal(t) => t,
+            _ => return Err("the daemon returned the wrong resource".into()),
+        },
+        Err(e) => {
+            let why = pane_refused(e);
+            return Err(match made {
+                Some(branch) => format!(
+                    "{why}. the workspace {workspace_name} (branch {branch}) was made for {key} and \
+                     is still there: dispatch into it with --workspace {workspace_name}, or remove it \
+                     with `farcooler workspace remove-worktree {workspace_name}`, which keeps the branch",
+                    key = task.key,
+                ),
+                None => why,
+            }
+            .into());
+        }
+    };
+    let (terminal, terminal_short) = (uuid_of(&opened.id), short_bytes(&opened.id));
+
+    let [update, status] = move_task_requests(task, workspace, d.actor);
+    let pane = format!("terminal {terminal_short} is working {} in {workspace_name}", task.key);
+    let actor = d.actor.to_string();
+    if let Err(e) = link.call(update).await {
         return Err(format!(
-            "terminal {terminal_short} is working {key} in {workspace_name}, but the board didn't \
-             move: {e}. move it with `farcooler task set {key} --workspace {workspace} --status \
-             in_progress`",
+            "{pane}, but the board didn't move: {}. move it with `{}`",
+            refused(e, "that task could not be put on the lane"),
+            finish_command(task, &format!("--workspace {workspace} --status in_progress --actor {actor}")),
+        )
+        .into());
+    }
+    if let Err(e) = link.call(status).await {
+        return Err(format!(
+            "{pane}, and {key} is on that lane, but it's still {}: {}. move it with `{}`",
+            status_word(task.status),
+            refused(e, "that is not a status this runner knows"),
+            finish_command(task, &format!("--status in_progress --actor {actor}")),
             key = task.key,
         )
         .into());
     }
     Ok(Dispatched { workspace, workspace_name, terminal, terminal_short })
-}
-
-/// Whether a preset runs an agent: anything but a person's shell or the
-/// changes view. The daemon's `preset_runs_an_agent`, from this side.
-fn runs_an_agent(preset: &str) -> bool {
-    let head = preset.split_once(':').map_or(preset, |(a, _)| a);
-    head != "shell" && head != "changes"
-}
-
-/// `DispatchCalls` against a real runner.
-struct OverTheLink<'a> {
-    link: &'a mut Link,
-    actor: Actor,
-}
-
-impl DispatchCalls for OverTheLink<'_> {
-    async fn make_workspace(
-        &mut self,
-        repository: Uuid,
-        name: &str,
-        branch: &str,
-        base: &str,
-    ) -> Result<(Uuid, String), Box<dyn std::error::Error>> {
-        let r = self
-            .link
-            .call(with(
-                req_for("workspace.create", repository),
-                request::Payload::WorkspaceCreate(pb::WorkspaceCreate {
-                    task_name: name.to_string(),
-                    branch: branch.to_string(),
-                    base_revision: base.to_string(),
-                    terminal_preset: String::new(),
-                    adopt_existing: false,
-                }),
-            ))
-            .await?;
-        let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
-            return Err("the daemon returned the wrong resource".into());
-        };
-        Ok((uuid_of(&ws.id), ws.task_name))
-    }
-
-    async fn agents_running(&mut self, workspace: Uuid) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let terminals = crate::list_terminals(self.link, Some(workspace)).await?;
-        Ok(terminals
-            .into_iter()
-            .filter(|t| t.state == pb::TerminalState::Running as i32 && runs_an_agent(&t.command_preset))
-            .map(|t| t.title)
-            .collect())
-    }
-
-    async fn open_pane(
-        &mut self,
-        workspace: Uuid,
-        preset: &str,
-        key: &str,
-    ) -> Result<(Uuid, String), Box<dyn std::error::Error>> {
-        let req = crate::terminal_create_request(
-            workspace,
-            key.to_string(),
-            preset.to_string(),
-            false,
-            None,
-            Some(key.to_string()),
-        );
-        let r = self.link.call(req).await.map_err(|e| refused(e, "that pane could not be opened"))?;
-        let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
-            return Err("the daemon returned the wrong resource".into());
-        };
-        Ok((uuid_of(&t.id), short_bytes(&t.id)))
-    }
-
-    async fn move_task(&mut self, task: &pb::Task, workspace: Uuid) -> Fallible {
-        let id = uuid_of(&task.id);
-        // Every field sent back as it was but the lane: see the WARNING in
-        // `TaskCmd::Set` about a row from `task.list`.
-        let r = self
-            .link
-            .call(with(
-                req_for("task.update", id),
-                request::Payload::TaskUpdate(pb::TaskUpdate {
-                    task_id: id_bytes(id),
-                    expected_version: task.resource_version,
-                    title: task.title.clone(),
-                    intent: task.intent.clone(),
-                    acceptance: task.acceptance.clone(),
-                    constraints: task.constraints.clone(),
-                    labels: task.labels.clone(),
-                    workspace_id: Some(id_bytes(workspace)),
-                    actor: self.actor.to_string(),
-                }),
-            ))
-            .await
-            .map_err(|e| refused(e, "that task could not be put on the lane"))?;
-        expect_value(r.value, "task")?;
-        self.link
-            .call(with(
-                req_for("task.set_status", id),
-                request::Payload::TaskSetStatus(pb::TaskSetStatus {
-                    task_id: id_bytes(id),
-                    status: pb_status(TaskStatus::InProgress),
-                    actor: self.actor.to_string(),
-                }),
-            ))
-            .await
-            .map_err(|e| refused(e, "that is not a status this runner knows"))?;
-        Ok(())
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2410,154 +2564,354 @@ mod tests {
 
     // ---- dispatch ----
 
-    /// Every call a dispatch makes, in order, with a failure on demand.
-    #[derive(Default)]
-    struct Recorded {
-        calls: Vec<String>,
-        busy: Vec<String>,
-        refuse_pane: bool,
-        refuse_move: bool,
-    }
-
+    const REPO: [u8; 16] = [0xa; 16];
+    const OTHER_REPO: [u8; 16] = [0xb; 16];
+    const LANE: Uuid = Uuid::from_u128(0x1a);
     const MADE: Uuid = Uuid::from_u128(0xabc);
     const PANE: Uuid = Uuid::from_u128(0xdef);
+    const TASK: Uuid = Uuid::from_u128(0x7a5);
 
-    impl DispatchCalls for Recorded {
-        async fn make_workspace(
-            &mut self,
-            _repository: Uuid,
-            name: &str,
-            branch: &str,
-            base: &str,
-        ) -> Result<(Uuid, String), Box<dyn std::error::Error>> {
-            self.calls.push(format!("make {name} {branch} {base}"));
-            Ok((MADE, name.to_string()))
+    fn lane(id: Uuid, name: &str, repository: [u8; 16]) -> pb::Workspace {
+        pb::Workspace {
+            id: id_bytes(id),
+            task_name: name.into(),
+            repository_id: repository.to_vec().into(),
+            ..Default::default()
         }
-        async fn agents_running(&mut self, workspace: Uuid) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-            self.calls.push(format!("look {workspace}"));
-            Ok(self.busy.clone())
+    }
+
+    fn agent(workspace: Uuid, title: &str, task: Option<Uuid>) -> pb::Terminal {
+        pb::Terminal {
+            id: id_bytes(Uuid::now_v7()),
+            workspace_id: id_bytes(workspace),
+            title: title.into(),
+            command_preset: "claude".into(),
+            state: pb::TerminalState::Running as i32,
+            task_id: task.map(id_bytes),
+            ..Default::default()
         }
-        async fn open_pane(
-            &mut self,
-            workspace: Uuid,
-            preset: &str,
-            key: &str,
-        ) -> Result<(Uuid, String), Box<dyn std::error::Error>> {
-            self.calls.push(format!("pane {workspace} {preset} {key}"));
-            if self.refuse_pane {
-                return Err("that pane could not be opened".into());
+    }
+
+    /// A runner, faked at the one seam `dispatch` has: every request it is
+    /// sent is kept, and answered from canned lists, or refused by method.
+    struct FakeLink {
+        capabilities: Vec<String>,
+        workspaces: Vec<pb::Workspace>,
+        terminals: Vec<pb::Terminal>,
+        refuse: Option<(&'static str, &'static str)>,
+        sent: Vec<pb::Request>,
+    }
+
+    impl Default for FakeLink {
+        fn default() -> Self {
+            FakeLink {
+                capabilities: farcooler_protocol::capability::ALL.iter().map(|c| c.to_string()).collect(),
+                workspaces: vec![lane(LANE, "lane", REPO)],
+                terminals: Vec::new(),
+                refuse: None,
+                sent: Vec::new(),
             }
-            Ok((PANE, "0000def".to_string()))
         }
-        async fn move_task(&mut self, task: &pb::Task, workspace: Uuid) -> Fallible {
-            self.calls.push(format!("move {} {workspace}", task.key));
-            if self.refuse_move {
-                return Err("this task changed while you were reading it".into());
+    }
+
+    impl DispatchLink for FakeLink {
+        fn capabilities(&self) -> Vec<String> {
+            self.capabilities.clone()
+        }
+        async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError> {
+            let method = req.method.clone();
+            self.sent.push(req);
+            if let Some((refused, word)) = self.refuse
+                && refused == method
+            {
+                let code = [
+                    pb::ErrorCode::CapabilityUnsupported,
+                    pb::ErrorCode::ResourceConflict,
+                    pb::ErrorCode::InvalidArgument,
+                ]
+                .into_iter()
+                .find(|c| farcooler_core::error::word_for(*c as i32) == word)
+                .expect("a code this fake knows") as i32;
+                return Err(ClientError::Daemon { code, retryable: false, message: String::new(), what: String::new() });
             }
-            Ok(())
+            let value = match method.as_str() {
+                "workspace.list" => result::Value::WorkspaceList(pb::WorkspaceList { items: self.workspaces.clone() }),
+                "terminal.list" => result::Value::TerminalList(pb::TerminalList {
+                    items: self.terminals.clone(),
+                    ..Default::default()
+                }),
+                "workspace.create" => result::Value::Workspace(lane(MADE, "fix-it", REPO)),
+                "terminal.create" => result::Value::Terminal(pb::Terminal { id: id_bytes(PANE), ..Default::default() }),
+                "task.update" | "task.set_status" => result::Value::Task(fc_2()),
+                other => panic!("dispatch sent {other}, which this fake doesn't expect"),
+            };
+            Ok(pb::Result { value: Some(value) })
+        }
+    }
+
+    impl FakeLink {
+        fn methods(&self) -> Vec<&str> {
+            self.sent.iter().map(|r| r.method.as_str()).collect()
+        }
+        fn writes(&self) -> Vec<&str> {
+            self.methods().into_iter().filter(|m| !m.ends_with(".list")).collect()
+        }
+        fn sent(&self, method: &str) -> &pb::Request {
+            self.sent.iter().find(|r| r.method == method).unwrap_or_else(|| panic!("{method} was not sent"))
         }
     }
 
     fn fc_2() -> pb::Task {
-        pb::Task { key: "fc-2".into(), title: "the work".into(), ..Default::default() }
+        pb::Task {
+            id: id_bytes(TASK),
+            key: "fc-2".into(),
+            title: "the work".into(),
+            repository_id: REPO.to_vec().into(),
+            status: pb_status(TaskStatus::Todo),
+            ..Default::default()
+        }
     }
 
-    async fn run(calls: &mut Recorded, lane: Lane) -> (Result<Dispatched, String>, Vec<String>) {
+    async fn run_as(
+        link: &mut FakeLink,
+        task: &pb::Task,
+        lane: Lane,
+        preset: &str,
+        again: bool,
+    ) -> (Result<Dispatched, String>, Vec<String>) {
         let mut warned = Vec::new();
-        let done = dispatch(calls, &fc_2(), lane, "claude", &mut |w| warned.push(w))
-            .await
-            .map_err(|e| e.to_string());
+        let asked = Dispatch { task, lane, preset, actor: Actor::Manager, again };
+        let done = dispatch(link, asked, &mut |w| warned.push(w)).await.map_err(|e| e.to_string());
         (done, warned)
     }
 
-    #[tokio::test]
-    async fn dispatch_opens_a_pane_that_names_the_task() {
-        let lane = Uuid::from_u128(7);
-        let mut calls = Recorded::default();
-        run(&mut calls, Lane::Existing(lane, "lane".into())).await.0.expect("dispatched");
-        assert!(calls.calls.contains(&format!("pane {lane} claude fc-2")), "{:?}", calls.calls);
-        // And the request that pane is opened with carries the key, and the
-        // capability without which an older runner would drop it.
-        let req = crate::terminal_create_request(lane, "fc-2".into(), "claude".into(), false, None, Some("fc-2".into()));
-        let Some(request::Payload::TerminalCreate(p)) = req.payload else { panic!("payload") };
-        assert_eq!(p.task_key.as_deref(), Some("fc-2"));
-        assert_eq!(req.required_capabilities, [farcooler_protocol::capability::TERMINAL_TASK]);
+    async fn run(link: &mut FakeLink, lane: Lane) -> (Result<Dispatched, String>, Vec<String>) {
+        run_as(link, &fc_2(), lane, "claude", false).await
     }
 
+    fn existing() -> Lane {
+        Lane::Existing("lane".into())
+    }
+
+    /// The pane is asked for with the task's key, and the capability without
+    /// which an older runner would drop the key. Read off the request
+    /// `dispatch` really sent.
+    #[tokio::test]
+    async fn dispatch_opens_a_pane_that_names_the_task() {
+        let mut link = FakeLink::default();
+        run(&mut link, existing()).await.0.expect("dispatched");
+        let req = link.sent("terminal.create");
+        assert_eq!(req.target_resource_id.as_deref(), Some(id_bytes(LANE).as_ref()));
+        assert_eq!(req.required_capabilities, [farcooler_protocol::capability::TERMINAL_TASK]);
+        let Some(request::Payload::TerminalCreate(p)) = &req.payload else { panic!("payload") };
+        assert_eq!(p.task_key.as_deref(), Some("fc-2"));
+        assert_eq!(p.command_preset, "claude");
+    }
+
+    /// Onto the lane, then into progress: both writes sent, in that order,
+    /// both filed under the actor dispatch was run as.
     #[tokio::test]
     async fn dispatch_moves_the_task_onto_the_lane_and_into_progress() {
-        let mut calls = Recorded::default();
+        let mut link = FakeLink::default();
         let (done, warned) = run(
-            &mut calls,
+            &mut link,
             Lane::New { name: "fix-it".into(), branch: "fix/it".into(), base: "HEAD".into() },
         )
         .await;
-        let done = done.expect("dispatched");
         assert_eq!(
-            calls.calls,
-            [
-                "make fix-it fix/it HEAD".to_string(),
-                format!("look {MADE}"),
-                format!("pane {MADE} claude fc-2"),
-                format!("move fc-2 {MADE}"),
-            ],
-            "the new lane is the one the pane opens in and the task moves onto"
+            done.expect("dispatched"),
+            Dispatched { workspace: MADE, workspace_name: "fix-it".into(), terminal: PANE, terminal_short: short_bytes(&id_bytes(PANE)) }
         );
-        assert_eq!(done, Dispatched {
-            workspace: MADE,
-            workspace_name: "fix-it".into(),
-            terminal: PANE,
-            terminal_short: "0000def".into(),
-        });
-        assert!(warned.is_empty(), "a fresh lane is not busy: {warned:?}");
+        assert!(warned.is_empty(), "{warned:?}");
+        assert_eq!(link.writes(), ["workspace.create", "terminal.create", "task.update", "task.set_status"]);
+
+        let Some(request::Payload::TaskUpdate(u)) = &link.sent("task.update").payload else { panic!("update") };
+        assert_eq!(u.workspace_id.as_deref(), Some(id_bytes(MADE).as_ref()), "onto the new lane");
+        assert_eq!(u.actor, "manager");
+        let Some(request::Payload::TaskSetStatus(s)) = &link.sent("task.set_status").payload else { panic!("status") };
+        assert_eq!(s.status, pb_status(TaskStatus::InProgress));
+        assert_eq!(s.actor, "manager");
     }
 
     #[tokio::test]
     async fn dispatch_into_a_busy_lane_warns_and_still_dispatches() {
-        let lane = Uuid::from_u128(7);
-        let mut calls = Recorded { busy: vec!["claude".into()], ..Default::default() };
-        let (done, warned) = run(&mut calls, Lane::Existing(lane, "lane".into())).await;
+        let mut link = FakeLink { terminals: vec![agent(LANE, "claude", None)], ..Default::default() };
+        let (done, warned) = run(&mut link, existing()).await;
         done.expect("the lane is the caller's call, so it still dispatches");
         assert_eq!(warned.len(), 1, "{warned:?}");
         assert!(warned[0].contains("lane already has an agent running (claude)"), "{warned:?}");
-        assert!(calls.calls.contains(&format!("move fc-2 {lane}")), "{:?}", calls.calls);
+        assert!(link.writes().contains(&"task.set_status"), "{:?}", link.methods());
+
+        // A shell there is a person, not an agent.
+        let mut shell = agent(LANE, "zsh", None);
+        shell.command_preset = "shell".into();
+        let mut link = FakeLink { terminals: vec![shell], ..Default::default() };
+        assert!(run(&mut link, existing()).await.1.is_empty(), "a shell is nobody working");
     }
 
     /// The board never says somebody is working a task nobody is.
     #[tokio::test]
     async fn a_refused_terminal_leaves_the_board_as_it_was() {
-        let mut calls = Recorded { refuse_pane: true, ..Default::default() };
-        let (done, _) = run(&mut calls, Lane::Existing(Uuid::from_u128(7), "lane".into())).await;
+        let mut link = FakeLink { refuse: Some(("terminal.create", "invalid-argument")), ..Default::default() };
+        let (done, _) = run(&mut link, existing()).await;
         assert!(done.is_err(), "a pane that didn't open is a failed dispatch");
-        assert!(
-            !calls.calls.iter().any(|c| c.starts_with("move")),
-            "the task was moved for a pane that never opened: {:?}",
-            calls.calls
-        );
+        assert!(!link.methods().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
     }
 
     /// The other failure: the pane is working and the board didn't move.
-    /// Said, with the pane named and the command that finishes the job, and
-    /// the pane left alone.
     #[tokio::test]
     async fn a_board_that_did_not_move_names_the_pane_that_is_working() {
-        let mut calls = Recorded { refuse_move: true, ..Default::default() };
-        let (done, _) = run(&mut calls, Lane::Existing(Uuid::from_u128(7), "lane".into())).await;
-        let said = done.expect_err("an unmoved board is an error");
-        assert!(said.contains("terminal 0000def is working fc-2 in lane"), "{said}");
-        assert!(said.contains("farcooler task set fc-2 --workspace"), "{said}");
+        let mut link = FakeLink { refuse: Some(("task.update", "resource-conflict")), ..Default::default() };
+        let said = run(&mut link, existing()).await.0.expect_err("an unmoved board is an error");
+        let short = short_bytes(&id_bytes(PANE));
+        assert!(said.contains(&format!("terminal {short} is working fc-2 in lane, but the board didn't move")), "{said}");
+        assert!(said.contains("farcooler task set fc-2 --repo"), "{said}");
+        assert!(said.contains("--status in_progress --actor manager"), "{said}");
+    }
+
+    /// Halfway: on the lane, but still in its old status. Said as that.
+    #[tokio::test]
+    async fn a_board_that_moved_halfway_says_which_half() {
+        let mut link = FakeLink { refuse: Some(("task.set_status", "resource-conflict")), ..Default::default() };
+        let said = run(&mut link, existing()).await.0.expect_err("half a move is an error");
+        assert!(said.contains("fc-2 is on that lane, but it's still todo"), "{said}");
+        assert!(!said.contains("--workspace"), "the lane already moved: {said}");
+    }
+
+    /// I1: a preset that runs no agent is refused before anything is sent.
+    #[tokio::test]
+    async fn a_preset_that_starts_no_agent_is_refused_before_anything_is_sent() {
+        for preset in ["shell", "changes", "claude opus", "shell:x"] {
+            let mut link = FakeLink::default();
+            let said = run_as(&mut link, &fc_2(), existing(), preset, false).await.0.expect_err(preset);
+            assert!(said.contains("doesn't start an agent"), "{preset}: {said}");
+            assert!(link.sent.is_empty(), "{preset}: {:?}", link.methods());
+        }
+        for preset in ["claude", "codex:gpt-5", "cursor"] {
+            assert!(agent_preset(preset).is_ok(), "{preset}");
+        }
+    }
+
+    /// I2: a runner that can't open a pane for a task is found out before
+    /// `--new` makes a worktree and a branch it would leave behind.
+    #[tokio::test]
+    async fn a_runner_without_terminal_task_is_refused_before_anything_is_made() {
+        let mut link = FakeLink {
+            capabilities: vec![farcooler_protocol::capability::TASKS.into()],
+            ..Default::default()
+        };
+        let said = run(&mut link, Lane::New { name: "n".into(), branch: "b".into(), base: "HEAD".into() })
+            .await
+            .0
+            .expect_err("refused");
+        assert!(said.contains("can't open a pane for a task yet"), "{said}");
+        assert!(!said.contains("older than the board"), "{said}");
+        assert!(link.sent.is_empty(), "{:?}", link.methods());
+    }
+
+    /// I2: a pane refused after `--new` made a workspace names it, and both
+    /// ways on.
+    #[tokio::test]
+    async fn a_pane_refused_after_a_new_workspace_names_what_was_made() {
+        let mut link = FakeLink { refuse: Some(("terminal.create", "capability-unsupported")), ..Default::default() };
+        let said = run(&mut link, Lane::New { name: "fix-it".into(), branch: "fix/it".into(), base: "HEAD".into() })
+            .await
+            .0
+            .expect_err("refused");
+        assert!(said.contains("can't open a pane for a task yet"), "{said}");
+        assert!(said.contains("the workspace fix-it (branch fix/it) was made for fc-2"), "{said}");
+        assert!(said.contains("--workspace fix-it"), "{said}");
+        assert!(said.contains("farcooler workspace remove-worktree fix-it"), "{said}");
+        assert!(!link.methods().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
+    }
+
+    /// I3: a task whose agent is still running isn't dispatched a second
+    /// time unless that's what `--again` says is wanted.
+    #[tokio::test]
+    async fn a_task_whose_agent_is_running_is_not_dispatched_again_by_accident() {
+        let elsewhere = Uuid::from_u128(0x2b);
+        let working = || FakeLink {
+            workspaces: vec![lane(LANE, "lane", REPO), lane(elsewhere, "first", REPO)],
+            terminals: vec![agent(elsewhere, "claude", Some(TASK))],
+            ..Default::default()
+        };
+        let mut link = working();
+        let said = run(&mut link, existing()).await.0.expect_err("refused");
+        assert!(said.contains("fc-2 already has an agent working it"), "{said}");
+        assert!(said.contains("in first"), "{said}");
+        assert!(link.writes().is_empty(), "{:?}", link.methods());
+
+        let mut link = working();
+        run_as(&mut link, &fc_2(), existing(), "claude", true).await.0.expect("--again dispatches");
+
+        // An agent on ANOTHER task, or a stopped pane for this one, isn't one.
+        let mut stopped = agent(elsewhere, "claude", Some(TASK));
+        stopped.state = pb::TerminalState::Exited as i32;
+        let mut link = FakeLink {
+            terminals: vec![stopped, agent(elsewhere, "claude", Some(Uuid::from_u128(9)))],
+            ..Default::default()
+        };
+        run(&mut link, existing()).await.0.expect("nobody is working fc-2");
+    }
+
+    /// I6: the lane has to be in the task's own repository, looked up there
+    /// alone. The legacy case: two repositories that missed their prefix
+    /// both have a `-1`, and a lane of the other one is named.
+    #[tokio::test]
+    async fn a_lane_in_another_repository_is_refused_even_for_a_prefixless_key() {
+        let theirs = Uuid::from_u128(0x3c);
+        let task = pb::Task { key: "-1".into(), ..fc_2() };
+        let mut link = FakeLink {
+            workspaces: vec![lane(LANE, "lane", REPO), lane(theirs, "their-lane", OTHER_REPO)],
+            ..Default::default()
+        };
+        let said = run_as(&mut link, &task, Lane::Existing("their-lane".into()), "claude", false)
+            .await
+            .0
+            .expect_err("another repository's lane");
+        assert!(said.contains("is a workspace in another repository"), "{said}");
+        let by_id = short_bytes(&id_bytes(theirs));
+        let said = run_as(&mut link, &task, Lane::Existing(by_id), "claude", false).await.0.expect_err("by id too");
+        assert!(said.contains("another repository"), "{said}");
+        assert!(link.writes().is_empty(), "{:?}", link.methods());
+
+        // Two repositories each with a lane called `fix`: the task's is the
+        // one meant, not a refusal for being ambiguous.
+        let mut link = FakeLink {
+            workspaces: vec![lane(theirs, "fix", OTHER_REPO), lane(LANE, "fix", REPO)],
+            ..Default::default()
+        };
+        run_as(&mut link, &task, Lane::Existing("fix".into()), "claude", false).await.0.expect("its own fix");
+        let Some(request::Payload::TaskUpdate(u)) = &link.sent("task.update").payload else { panic!("update") };
+        assert_eq!(u.workspace_id.as_deref(), Some(id_bytes(LANE).as_ref()));
+
+        // And the key goes after `--` in the command that finishes a move.
+        let mut link = FakeLink { refuse: Some(("task.set_status", "resource-conflict")), ..Default::default() };
+        let said = run_as(&mut link, &task, existing(), "claude", false).await.0.expect_err("half");
+        assert!(said.contains("--actor manager -- -1`"), "{said}");
+    }
+
+    /// M5: dispatching a task from a state nobody dispatches from is said.
+    #[tokio::test]
+    async fn dispatching_a_finished_task_warns() {
+        let task = pb::Task { status: pb_status(TaskStatus::Done), ..fc_2() };
+        let mut link = FakeLink::default();
+        let (done, warned) = run_as(&mut link, &task, existing(), "claude", false).await;
+        done.expect("still the caller's call");
+        assert!(warned.iter().any(|w| w.contains("fc-2 is done")), "{warned:?}");
     }
 
     #[test]
     fn dispatch_needs_a_lane_and_a_new_one_needs_a_branch() {
         use clap::Parser;
         let parses = |args: &[&str]| {
-            crate::Cli::try_parse_from(["farcooler", "task", "dispatch", "fc-2"].iter().chain(args)).is_ok()
+            crate::Cli::try_parse_from(["farcooler", "task", "dispatch"].iter().chain(args)).is_ok()
         };
-        assert!(parses(&["--workspace", "lane"]));
-        assert!(parses(&["--new", "fix-it", "--branch", "fix/it", "--actor", "manager"]));
-        assert!(!parses(&[]), "a lane is required");
-        assert!(!parses(&["--new", "fix-it"]), "a new lane needs a branch");
-        assert!(!parses(&["--workspace", "lane", "--new", "fix-it", "--branch", "b"]), "one lane");
+        assert!(parses(&["fc-2", "--workspace", "lane"]));
+        assert!(parses(&["fc-2", "--new", "fix-it", "--branch", "fix/it", "--actor", "manager", "--again"]));
+        assert!(parses(&["--workspace", "lane", "--", "-1"]), "a prefixless key after --");
+        assert!(!parses(&["fc-2"]), "a lane is required");
+        assert!(!parses(&["fc-2", "--new", "fix-it"]), "a new lane needs a branch");
+        assert!(!parses(&["fc-2", "--workspace", "lane", "--new", "fix-it", "--branch", "b"]), "one lane");
     }
 }
