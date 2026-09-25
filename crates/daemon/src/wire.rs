@@ -217,6 +217,7 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // client that polls and a client that is pushed to cannot end up
         // holding different histories for one terminal.
         activity_trace: Default::default(),
+        activity_trace_anchor: None,
         activity_changed_at: None,
         turn_started_at: None,
         blocked_question: None,

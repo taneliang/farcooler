@@ -2834,6 +2834,32 @@ async fn a_terminal_list_carries_the_activity_trace_and_the_fleet_sum() {
     assert_eq!(newest_code, 4, "the upper half did not survive the wire");
     assert_eq!(newest_output, 9, "the lower half did not survive the wire");
 
+    // The anchor beside it: the newest bucket's absolute index, at the width
+    // byte 0 declares (five minutes, for a trace this young). Bounded by the
+    // clock on either side of the call rather than equal to one reading, so a
+    // five-minute boundary crossed mid-test cannot make this flaky.
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
+    assert_eq!(trace[0] & 0x0f, 0, "a trace this young is on the five-minute width");
+    let anchor = listed[0].activity_trace_anchor.expect("the row's anchor never reached the wire");
+    assert!(
+        (now / 300..=after / 300).contains(&anchor),
+        "{anchor} is not the newest five-minute bucket between {now} and {after}"
+    );
+    assert_eq!(
+        opened[0].activity_trace_anchor, None,
+        "a terminal with no trace has nothing for an anchor to place"
+    );
+    // And the push path's copy, which is what the relay is sent: the same
+    // number off the same ring, or the card and the app would place one
+    // terminal's history in two different columns.
+    let stats = h.watcher.card_stats(id);
+    assert_eq!(stats.trace.len(), ENCODED_LEN);
+    let pushed = stats.trace_anchor.expect("the notice's anchor is missing");
+    assert!((now / 300..=after / 300 + 1).contains(&pushed), "{pushed} is not the newest bucket");
+
     // And the fleet sum on the same reply.
     let result = client.call(request("terminal.list")).await.expect("terminal.list");
     let Some(result::Value::TerminalList(list)) = result.value else { panic!("wrong result") };

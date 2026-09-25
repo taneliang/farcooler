@@ -1075,6 +1075,28 @@ message Terminal {
   //  — which is the true statement, since a commit belongs to the worktree and
   //  not to a pane. A repository with reflogs disabled shows none.
   bytes activity_trace = 35;
+  // Where `activity_trace`'s newest bucket sits on the absolute grid: its
+  // index, `unix_seconds.div_euclid(width)` at the width byte 0 declares. The
+  // thirteen buckets are then indices `anchor - 12` through `anchor`, oldest
+  // first, and bucket `k` is `[k * width, (k + 1) * width)` in Unix seconds.
+  // See `farcooler_core::trace::Trace::anchor`.
+  //
+  // **The trace is a shape and this is where it is.** The 66 bytes say how
+  // much, never when, so a client drawing several traces on one axis — the
+  // lock screen card's rows — could only pack a finer trace from the newest
+  // end, a column too new at worst, and could not tell two traces encoded
+  // minutes apart from two encoded together. With this it places every
+  // bucket exactly.
+  //
+  // A field of its own rather than bytes in the encoding, deliberately: that
+  // would be an `ENCODING_VERSION` bump, and an old client must draw nothing
+  // for a version it does not know. Here an old client ignores the field and
+  // draws what it always drew.
+  //
+  // Absent exactly when `activity_trace` is empty, and from a daemon older
+  // than this field — in which case a client packs from the newest end, as
+  // before. Changes only when a bucket boundary is crossed, like the bytes.
+  optional int64 activity_trace_anchor = 38;
 
   // Why this pane is in agent mode with no agent in it.
   //

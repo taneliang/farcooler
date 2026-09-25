@@ -2206,7 +2206,9 @@ impl Rpc {
         // everything above it: the ring is the only copy, and a client that
         // lists terminals and then watches events must not be handed two
         // different histories of one pane. See `Watcher::trace`.
-        message.activity_trace = self.watcher.trace(view.terminal.id).into();
+        let (trace, anchor) = self.watcher.trace(view.terminal.id);
+        message.activity_trace = trace.into();
+        message.activity_trace_anchor = anchor;
         // The compact ladder, computed from everything just set above — see
         // `wire::apply_rungs` for why it has to run last, and why the signal
         // line is handed to it rather than read off the message.

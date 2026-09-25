@@ -258,6 +258,23 @@ struct Notification<'a> {
     /// `farcooler_core::trace::Trace::encode`.
     #[serde(skip_serializing_if = "Option::is_none")]
     trace: Option<String>,
+    /// Where `trace`'s newest bucket sits on the absolute grid, as a NUMBER:
+    /// its index, `now.div_euclid(width)`. See
+    /// `farcooler_core::trace::Trace::anchor`.
+    ///
+    /// **Its own key, never folded into the base64.** The relay stores and
+    /// forwards `trace` without decoding it, and it must keep not decoding it —
+    /// a relay that parsed the blob would be a third copy of an encoding that
+    /// has two ends. So the one number the card's shared axis needs travels
+    /// beside the blob, where the relay can carry it as a column.
+    ///
+    /// Renamed on the wire for `startedAt`'s reason: the other end reads
+    /// `body.traceAnchor`, and a `trace_anchor` key would arrive there as
+    /// `undefined` with nothing to say so.
+    ///
+    /// Skipped exactly when `trace` is: an anchor for no bytes anchors nothing.
+    #[serde(rename = "traceAnchor", skip_serializing_if = "Option::is_none")]
+    trace_anchor: Option<i64>,
 }
 
 /// What one call to `notify` is about.
@@ -290,6 +307,24 @@ pub struct Outgoing<'a> {
     /// the one place that knows this crosses an HTTP wire is the one that
     /// spells it.
     pub trace: &'a [u8],
+    /// `trace`'s newest bucket on the absolute grid, sampled at the same
+    /// moment. See `Notification::trace_anchor`.
+    pub trace_anchor: Option<i64>,
+}
+
+/// The trace's bytes as the body spells them: base64, or no key for none.
+fn wire_trace(trace: &[u8]) -> Option<String> {
+    (!trace.is_empty()).then(|| farcooler_core::base64::encode(trace))
+}
+
+/// The anchor as the body spells it: only beside the bytes it anchors.
+///
+/// Whatever the caller handed in. An anchor with no trace would give the relay a
+/// column that says where a trace is for a row that has none — and the relay
+/// carries a stored anchor forward with its stored trace, so a lone one could
+/// end up beside a blob it was never measured with.
+fn wire_anchor(trace: &[u8], anchor: Option<i64>) -> Option<i64> {
+    anchor.filter(|_| !trace.is_empty())
 }
 
 /// Send one, or quietly do nothing if this runner was never paired.
@@ -310,6 +345,7 @@ pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoin
         deletions,
         commits,
         trace,
+        trace_anchor,
     } = notice;
     let url = format!("{}/v1/notify", pairing.relay.trim_end_matches('/'));
     let result = client
@@ -327,7 +363,8 @@ pub async fn notify(client: &reqwest::Client, pairing: &Pairing, notice: Outgoin
             insertions,
             deletions,
             commits,
-            trace: (!trace.is_empty()).then(|| farcooler_core::base64::encode(trace)),
+            trace: wire_trace(trace),
+            trace_anchor: wire_anchor(trace, trace_anchor),
         })
         .send()
         .await;
@@ -464,7 +501,7 @@ mod tests {
     /// part worth guarding is not the sending — it is the JSON, which three
     /// separate programs have to agree about.
     fn body(started_at: Option<i64>) -> serde_json::Value {
-        stats_body(started_at, None, None, None, &[])
+        stats_body(started_at, None, None, None, &[], None)
     }
 
     /// The same body with a row's numbers on it. See `Notification::insertions`.
@@ -474,6 +511,7 @@ mod tests {
         deletions: Option<u32>,
         commits: Option<u32>,
         trace: &[u8],
+        trace_anchor: Option<i64>,
     ) -> serde_json::Value {
         serde_json::to_value(Notification {
             title: "claude",
@@ -487,7 +525,8 @@ mod tests {
             insertions,
             deletions,
             commits,
-            trace: (!trace.is_empty()).then(|| farcooler_core::base64::encode(trace)),
+            trace: wire_trace(trace),
+            trace_anchor: wire_anchor(trace, trace_anchor),
         })
         .expect("serialize")
     }
@@ -526,7 +565,7 @@ mod tests {
         // that still renders and says less — the kind of failure nobody
         // reports.
         let trace = vec![0x10u8; farcooler_core::trace::ENCODED_LEN];
-        let sent = stats_body(None, Some(142), Some(37), Some(4), &trace);
+        let sent = stats_body(None, Some(142), Some(37), Some(4), &trace, Some(5_960_000));
         assert_eq!(sent["insertions"], serde_json::json!(142));
         assert_eq!(sent["deletions"], serde_json::json!(37));
         assert_eq!(sent["commits"], serde_json::json!(4));
@@ -542,15 +581,27 @@ mod tests {
             "the relay stores this string and the widget decodes it; it has to round trip"
         );
 
+        // The anchor is its own key and a NUMBER, beside the blob and never
+        // inside it: the relay carries it as a column without decoding base64,
+        // and the card's decoder reads it with `try?` as an integer, so a string
+        // here would cost the shared axis without costing anything visible.
+        assert_eq!(sent["traceAnchor"], serde_json::json!(5_960_000_i64));
+        assert!(sent.get("trace_anchor").is_none(), "the relay reads `traceAnchor`: {sent}");
+
         // Absent is not zero, on every one of them. A worktree nobody has
         // probed and one with no base have both said nothing, and a card
         // drawing `+0 −0` over either would report a measurement nobody made.
         // A trace is the same shape of claim: no bytes means no history seen,
         // where sixty-six zeroes would mean thirteen buckets of observed quiet.
-        let quiet = stats_body(None, None, None, None, &[]);
-        for key in ["insertions", "deletions", "commits", "trace"] {
+        let quiet = stats_body(None, None, None, None, &[], None);
+        for key in ["insertions", "deletions", "commits", "trace", "traceAnchor"] {
             assert!(quiet.get(key).is_none(), "nothing measured `{key}`, so no key: {quiet}");
         }
+
+        // And an anchor is never sent without the bytes it anchors, whatever
+        // the caller handed in.
+        let lone = stats_body(None, None, None, None, &[], Some(5_960_000));
+        assert!(lone.get("traceAnchor").is_none(), "an anchor for no trace: {lone}");
     }
 
     #[test]

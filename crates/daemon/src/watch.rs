@@ -210,6 +210,11 @@ pub struct CardStats {
     /// has no history the trace can see — see `farcooler_core::trace::encode`,
     /// where empty and thirteen zeroes are deliberately not the same thing.
     pub trace: Vec<u8>,
+    /// Where `trace`'s newest bucket sits on the absolute grid. See
+    /// `farcooler_core::trace::Trace::anchor`. Read at the same `now` as the
+    /// bytes, which is the whole of its correctness: an anchor from one tick
+    /// beside bytes from the next would place every bucket one column off.
+    pub trace_anchor: Option<i64>,
 }
 
 /// What, if anything, is worth waking a phone for.
@@ -2695,6 +2700,7 @@ impl Watcher {
                     deletions: stats.deletions,
                     commits: stats.commits,
                     trace: &stats.trace,
+                    trace_anchor: stats.trace_anchor,
                 },
             )
             .await;
@@ -2834,11 +2840,16 @@ impl Watcher {
     /// terminal. That is the rule every other field in `wire::terminal`
     /// follows, and the reason this is a method here rather than a computation
     /// at either call site.
-    pub fn trace(&self, terminal: Uuid) -> Vec<u8> {
+    ///
+    /// The anchor comes back beside the bytes and off the SAME `now`, which is
+    /// why one method answers both: read a moment apart across a bucket
+    /// boundary, the pair would place every bucket one column off. See
+    /// `farcooler_core::trace::Trace::anchor`.
+    pub fn trace(&self, terminal: Uuid) -> (Vec<u8>, Option<i64>) {
         let now = now_millis() / 1000;
         match self.drawn_trace(terminal, now) {
-            Some(trace) => trace.encode(now),
-            None => Vec::new(),
+            Some(trace) => (trace.encode(now), trace.anchor(now)),
+            None => (Vec::new(), None),
         }
     }
 
@@ -2900,6 +2911,7 @@ impl Watcher {
             // ring has not been observed rather than observed doing nothing, and
             // the row says nothing about commits either way.
             commits: trace.as_ref().map(|t| t.commits(now)),
+            trace_anchor: trace.as_ref().and_then(|t| t.anchor(now)),
             trace: trace.map(|t| t.encode(now)).unwrap_or_default(),
         }
     }
@@ -4413,7 +4425,9 @@ impl Watcher {
             // because a trace is history and an `Observed` is one moment — but
             // through the SAME method the poll path calls, so the two cannot
             // hand a client different histories of one pane.
-            message.activity_trace = self.trace(terminal).into();
+            let (trace, anchor) = self.trace(terminal);
+            message.activity_trace = trace.into();
+            message.activity_trace_anchor = anchor;
             // How the last turn went, which `apply_rungs` below narrows into
             // the glyph and the headline. Without it a turn that died reaches
             // every client as an ordinary `done`.

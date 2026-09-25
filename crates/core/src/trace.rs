@@ -317,6 +317,37 @@ impl Trace {
         out
     }
 
+    /// Where the newest of `encode`'s thirteen buckets sits on the absolute
+    /// grid: `now.div_euclid(width)`, at the width `encode` picks.
+    ///
+    /// **The one number the 66 bytes do not carry.** The encoding is a width
+    /// code and thirteen counts per series — a shape. It says how much, never
+    /// when, and a client drawing several traces on ONE axis needs the when: a
+    /// five-minute trace summed onto thirty-minute columns lands a column too
+    /// new unless the client knows which five minutes of the half hour its
+    /// newest bucket was, and two traces encoded by two runners a while apart
+    /// look identical to two encoded together. With this, bucket `i` of the
+    /// thirteen (oldest first) is the one whose absolute index is
+    /// `anchor - 12 + i`, which is the span
+    /// `[(anchor - 12 + i) * width, (anchor - 11 + i) * width)` in Unix
+    /// seconds, and every row of a card can be put on one grid exactly.
+    ///
+    /// Beside the bytes rather than in them, on purpose: a fifth field in the
+    /// encoding is a version bump, and by the encoding's own rule an old client
+    /// then draws nothing at all. A client that knows nothing of this field
+    /// ignores it and draws what it always drew.
+    ///
+    /// It moves exactly when the bytes' buckets do — on a boundary — so it
+    /// costs nothing of the property the module header is about: two polls
+    /// inside one bucket still say the same thing.
+    ///
+    /// `None` exactly when `encode` is empty. A trace with nothing in it has no
+    /// newest bucket to anchor, and a number with no bytes beside it would be
+    /// an anchor for nothing.
+    pub fn anchor(&self, now: i64) -> Option<i64> {
+        self.width(now).map(|width| now.div_euclid(width))
+    }
+
     /// The trace as the wire carries it: 66 fixed bytes, or none at all.
     ///
     /// # Layout
@@ -624,6 +655,46 @@ mod tests {
     fn an_empty_trace_encodes_to_nothing() {
         let trace = Trace::new();
         assert!(trace.encode(AFTERNOON).is_empty());
+    }
+
+    /// An anchor with no bytes beside it would anchor nothing, so there is none.
+    #[test]
+    fn an_empty_trace_has_no_anchor() {
+        let trace = Trace::new();
+        assert_eq!(trace.anchor(AFTERNOON), None);
+    }
+
+    /// **The anchor is the newest bucket's absolute index, at the width the
+    /// bytes were encoded at** — never at `BASE_WIDTH` and never a second.
+    ///
+    /// Hand-computed against `AFTERNOON = 1_788_000_000`: that is 5,960,000
+    /// five-minute buckets exactly, 993,333 and a third thirty-minute ones, and
+    /// 248,333 and a third two-hour ones. An anchor taken at the wrong width
+    /// would be off by a factor of six or twenty-four, which a client would
+    /// read as a trace from another decade.
+    #[test]
+    fn the_anchor_is_the_newest_bucket_at_the_encoded_width() {
+        let at = |ago: i64| {
+            let mut trace = Trace::new();
+            trace.record(AFTERNOON - ago, Sample::output(1));
+            trace.tick(AFTERNOON);
+            (trace.encode(AFTERNOON)[0] & 0x0f, trace.anchor(AFTERNOON))
+        };
+        assert_eq!(at(60), (0, Some(5_960_000)));
+        assert_eq!(at(3 * 3600), (1, Some(993_333)));
+        assert_eq!(at(20 * 3600), (2, Some(248_333)));
+    }
+
+    /// The anchor moves when the buckets do and never otherwise, so it costs
+    /// nothing of the property `two_polls_inside_one_bucket_encode_the_same_bytes`
+    /// guards.
+    #[test]
+    fn the_anchor_moves_on_a_boundary_and_only_there() {
+        let mut trace = Trace::new();
+        let edge = (AFTERNOON / BASE_WIDTH) * BASE_WIDTH;
+        trace.record(edge, Sample::output(1));
+        assert_eq!(trace.anchor(edge), trace.anchor(edge + BASE_WIDTH - 1));
+        assert_eq!(trace.anchor(edge + BASE_WIDTH), trace.anchor(edge).map(|a| a + 1));
     }
 
     #[test]
