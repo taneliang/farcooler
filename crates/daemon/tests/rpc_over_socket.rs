@@ -2855,15 +2855,38 @@ async fn a_terminal_list_carries_the_activity_trace_and_the_fleet_sum() {
     // And the push path's copy, which is what the relay is sent: the same
     // number off the same ring, or the card and the app would place one
     // terminal's history in two different columns.
+    //
+    // The clock is read again AFTER the call, so the range is exactly the
+    // buckets `card_stats` could have been in: an anchor one bucket ahead of
+    // its bytes — the one-column error this exists to remove — falls outside
+    // it, away from a boundary.
     let stats = h.watcher.card_stats(id);
+    let later = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
     assert_eq!(stats.trace.len(), ENCODED_LEN);
     let pushed = stats.trace_anchor.expect("the notice's anchor is missing");
-    assert!((now / 300..=after / 300 + 1).contains(&pushed), "{pushed} is not the newest bucket");
+    assert!(
+        (now / 300..=later / 300).contains(&pushed),
+        "{pushed} is not the newest five-minute bucket between {now} and {later}"
+    );
 
-    // And the fleet sum on the same reply.
+    // And the fleet sum on the same reply, with its own anchor on the same
+    // terms: the newest bucket at the width its byte 0 declares.
     let result = client.call(request("terminal.list")).await.expect("terminal.list");
+    let last = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
     let Some(result::Value::TerminalList(list)) = result.value else { panic!("wrong result") };
     assert_eq!(list.fleet_trace.len(), ENCODED_LEN, "the fleet trace never reached the wire");
+    assert_eq!(list.fleet_trace[0] & 0x0f, 0, "a fleet this young is on the five-minute width");
+    let fleet_anchor = list.fleet_trace_anchor.expect("the fleet trace's anchor never reached the wire");
+    assert!(
+        (now / 300..=last / 300).contains(&fleet_anchor),
+        "{fleet_anchor} is not the newest five-minute bucket between {now} and {last}"
+    );
     let fleet_output = u16::from_le_bytes([
         list.fleet_trace[output_at + (BUCKETS - 1) * 2],
         list.fleet_trace[output_at + 1 + (BUCKETS - 1) * 2],

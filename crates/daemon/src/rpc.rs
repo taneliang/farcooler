@@ -1058,11 +1058,12 @@ impl Rpc {
                 // Sent on the whole-fleet listing only. A filtered list is one
                 // workspace, and a fleet figure beside it would be a number
                 // about terminals the reply does not contain.
-                let fleet_trace =
-                    if filter.is_none() { self.watcher.fleet_trace() } else { Vec::new() };
+                let (fleet_trace, fleet_trace_anchor) =
+                    if filter.is_none() { self.watcher.fleet_trace() } else { (Vec::new(), None) };
                 Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList {
                     items,
                     fleet_trace: fleet_trace.into(),
+                    fleet_trace_anchor,
                 }))
             }
 
@@ -1640,6 +1641,7 @@ impl Rpc {
                 Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList {
                     items: Vec::new(),
                     fleet_trace: Default::default(),
+                    fleet_trace_anchor: None,
                 }))
             }
 
@@ -1651,6 +1653,7 @@ impl Rpc {
                 Ok(result::Value::TerminalList(farcooler_protocol::v1::TerminalList {
                     items: Vec::new(),
                     fleet_trace: Default::default(),
+                    fleet_trace_anchor: None,
                 }))
             }
 
@@ -2206,9 +2209,7 @@ impl Rpc {
         // everything above it: the ring is the only copy, and a client that
         // lists terminals and then watches events must not be handed two
         // different histories of one pane. See `Watcher::trace`.
-        let (trace, anchor) = self.watcher.trace(view.terminal.id);
-        message.activity_trace = trace.into();
-        message.activity_trace_anchor = anchor;
+        self.watcher.stamp_trace(&mut message, view.terminal.id);
         // The compact ladder, computed from everything just set above — see
         // `wire::apply_rungs` for why it has to run last, and why the signal
         // line is handed to it rather than read off the message.

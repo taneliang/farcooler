@@ -871,8 +871,12 @@ impl Session {
             // Every pane's trace added together at one width, summed by the
             // daemon. Same encoding and the same absent-not-empty rule as a
             // terminal's own. See the comment on `activityTrace` above.
-            "fleetTrace": (!list.fleet_trace.is_empty())
-                .then(|| farcooler_core::base64::encode(&list.fleet_trace)),
+            "fleetTrace": fleet_trace(&list),
+            // Where that trace's newest bucket sits in time: its absolute
+            // index, a NUMBER, beside the base64 rather than in it. What lets
+            // a phone polling several runners sum their fleet traces onto one
+            // axis exactly. Absent with the trace, and from an older daemon.
+            "fleetTraceAnchor": fleet_trace_anchor(&list),
             "workspaces": items,
         }))
     }
@@ -2038,8 +2042,40 @@ fn terminal_label(s: TerminalState) -> &'static str {
     }
 }
 
+/// The fleet's trace as `fleet` spells it: base64, or no key for none.
+fn fleet_trace(list: &farcooler_protocol::v1::TerminalList) -> Option<String> {
+    (!list.fleet_trace.is_empty()).then(|| farcooler_core::base64::encode(&list.fleet_trace))
+}
+
+/// The fleet trace's anchor as `fleet` spells it: only beside the bytes it
+/// anchors, whatever the daemon sent. See `TerminalList.fleet_trace_anchor`.
+fn fleet_trace_anchor(list: &farcooler_protocol::v1::TerminalList) -> Option<i64> {
+    list.fleet_trace_anchor.filter(|_| !list.fleet_trace.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
+    /// The fleet trace's anchor reaches the app as its own number, and never
+    /// without the trace it anchors.
+    #[test]
+    fn the_fleet_traces_anchor_travels_only_with_the_trace() {
+        let list = farcooler_protocol::v1::TerminalList {
+            items: Vec::new(),
+            fleet_trace: vec![0x10; farcooler_core::trace::ENCODED_LEN].into(),
+            fleet_trace_anchor: Some(5_960_000),
+        };
+        assert_eq!(super::fleet_trace_anchor(&list), Some(5_960_000));
+        assert_eq!(super::fleet_trace(&list).map(|t| t.len()), Some(88));
+
+        let bare = farcooler_protocol::v1::TerminalList {
+            items: Vec::new(),
+            fleet_trace: Default::default(),
+            fleet_trace_anchor: Some(5_960_000),
+        };
+        assert_eq!(super::fleet_trace_anchor(&bare), None, "an anchor for no trace");
+        assert_eq!(super::fleet_trace(&bare), None);
+    }
+
     use super::*;
 
     /// Serializes the tests that move the tunnel library's process-wide DERP

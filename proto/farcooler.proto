@@ -1190,6 +1190,19 @@ message TerminalList {
   // Legitimate as a sum because it stays within a channel: code with code,
   // output with output. Never sum the two halves together.
   bytes fleet_trace = 2;
+  // Where `fleet_trace`'s newest bucket sits on the absolute grid, exactly as
+  // `Terminal.activity_trace_anchor` is for a terminal's trace: its index,
+  // `unix_seconds.div_euclid(width)` at the width byte 0 declares, read at the
+  // same moment as the bytes.
+  //
+  // For the one client that adds fleet traces together: a phone polling
+  // several runners sums theirs onto one axis for the Dynamic Island, and each
+  // runner encoded its own at its own moment. Without this it packs each from
+  // its newest end, a column too new at worst.
+  //
+  // Absent exactly when `fleet_trace` is empty, and from a daemon older than
+  // this field. No encoding version bump, for `activity_trace_anchor`'s reason.
+  optional int64 fleet_trace_anchor = 3;
 }
 
 enum TerminalIntent {

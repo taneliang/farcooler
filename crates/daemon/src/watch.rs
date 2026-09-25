@@ -2845,12 +2845,20 @@ impl Watcher {
     /// why one method answers both: read a moment apart across a bucket
     /// boundary, the pair would place every bucket one column off. See
     /// `farcooler_core::trace::Trace::anchor`.
-    pub fn trace(&self, terminal: Uuid) -> (Vec<u8>, Option<i64>) {
+    ///
+    /// **Written onto the message here, both fields at once**, rather than
+    /// handed back for each finisher to assign. The push path has no test that
+    /// can reach it — `announce` runs off the sampling loop — so the only way
+    /// to guarantee it sets the anchor is for it to call the same line the
+    /// tested poll path calls.
+    pub fn stamp_trace(&self, message: &mut farcooler_protocol::v1::Terminal, terminal: Uuid) {
         let now = now_millis() / 1000;
-        match self.drawn_trace(terminal, now) {
+        let (bytes, anchor) = match self.drawn_trace(terminal, now) {
             Some(trace) => (trace.encode(now), trace.anchor(now)),
             None => (Vec::new(), None),
-        }
+        };
+        message.activity_trace = bytes.into();
+        message.activity_trace_anchor = anchor;
     }
 
     /// One terminal's ring with its worktree's commit marks folded in.
@@ -2927,7 +2935,11 @@ impl Watcher {
     ///
     /// Commits come off the workspace rings and so are added once each, not
     /// once per pane sharing the worktree. See `commit_traces`.
-    pub fn fleet_trace(&self) -> Vec<u8> {
+    ///
+    /// With its anchor, off the same `now`, for `stamp_trace`'s reason: a phone
+    /// polling several runners sums their fleet traces onto one axis, and
+    /// without the anchor it can only pack each from its newest end.
+    pub fn fleet_trace(&self) -> (Vec<u8>, Option<i64>) {
         let now = now_millis() / 1000;
         let mut fleet = farcooler_core::trace::Trace::new();
         let mut any = false;
@@ -2940,9 +2952,9 @@ impl Watcher {
             any = true;
         }
         if !any {
-            return Vec::new();
+            return (Vec::new(), None);
         }
-        fleet.encode(now)
+        (fleet.encode(now), fleet.anchor(now))
     }
 
     /// The upper half and the axis, for one workspace that was just probed.
@@ -4425,9 +4437,7 @@ impl Watcher {
             // because a trace is history and an `Observed` is one moment — but
             // through the SAME method the poll path calls, so the two cannot
             // hand a client different histories of one pane.
-            let (trace, anchor) = self.trace(terminal);
-            message.activity_trace = trace.into();
-            message.activity_trace_anchor = anchor;
+            self.stamp_trace(&mut message, terminal);
             // How the last turn went, which `apply_rungs` below narrows into
             // the glyph and the headline. Without it a turn that died reaches
             // every client as an ordinary `done`.
