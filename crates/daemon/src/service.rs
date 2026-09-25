@@ -440,10 +440,12 @@ pub(crate) mod test_agent {
     /// `shell_quote` and every login shell's own parse the same way.
     pub(crate) const PROGRAM: &str = "/bin/sh -c exec\\ /bin/sleep\\ 600 farcooler-test-stub-agent";
 
-    /// The program words the refusal below looks for: the three agent CLIs
-    /// and the shim. A word in this list reaching tmux without `MARKER`
-    /// before it is a real agent about to start.
-    const AGENTS: [&str; 4] = ["claude", "codex", "cursor-agent", "agent-host"];
+    /// The programs the refusal below looks for: the four agents
+    /// `farcooler_core`'s registry identifies a pane by (`claude`, `codex`,
+    /// `opencode`, `cursor-agent`) and the shim. One of these reaching tmux
+    /// without the stub directly in front of it is a real agent about to
+    /// start.
+    const AGENTS: [&str; 5] = ["claude", "codex", "opencode", "cursor-agent", "agent-host"];
 
     thread_local! {
         pub(crate) static REAL: Cell<bool> = const { Cell::new(false) };
@@ -482,23 +484,51 @@ pub(crate) mod test_agent {
     /// The tmux boundary's check, run on every command a test is about to
     /// hand tmux: panics rather than start a real agent. Two ways in, both
     /// refused -- a command built under `real_names()`, and an agent's
-    /// program word with no stub in front of it, which is what a new launch
-    /// path that forgot `agent_program` would write.
+    /// program with no stub directly in front of it, which is what a new
+    /// launch path that forgot `agent_program` would write.
+    ///
+    /// Words are split on whitespace, quotes and the shell's own
+    /// punctuation, and compared by basename, so `/opt/homebrew/bin/claude`,
+    /// `claude;` and `$(command -v claude)` are all `claude`. The first agent
+    /// in each command -- the text between two of the shell's separators --
+    /// needs the stub before it in that same command. Everything after it
+    /// there is the stub's arguments (`--preset claude`, a prompt that names
+    /// an agent) and is not checked. A separator ends what a stub vouches
+    /// for, so a stubbed launch followed by `; codex` is refused.
+    ///
+    /// **What it still cannot see:** a program named through a variable, an
+    /// alias, `eval` or a wrapper script; and any agent not in `AGENTS`. It
+    /// is the backstop. `agent_program` stubbing every launch builder is the
+    /// protection.
     pub(crate) fn refuse_a_real_agent(command: &str) {
         assert!(
             !REAL.with(|r| r.get()),
             "a test built this command with test_agent::real_names() and then launched it; \
              real names are for checking a builder's string, never for a pane: {command}"
         );
-        let words: Vec<&str> =
-            command.split(|c: char| c.is_whitespace() || c == '\'' || c == '"').filter(|w| !w.is_empty()).collect();
-        for (i, word) in words.iter().enumerate() {
-            assert!(
-                !AGENTS.contains(word) || words[..i].contains(&MARKER),
-                "a daemon unit test was about to start a real `{word}` in a tmux pane. Every launch \
-                 names its program through `agent_program`, which stubs it under test; this one did \
-                 not: {command}"
-            );
+        // One command at a time: a separator ends what a stub in front of it
+        // can vouch for.
+        for segment in command.split(|c: char| ";&|()<>$`\n".contains(c)) {
+            let words: Vec<&str> = segment
+                .split(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+                .filter(|w| !w.is_empty())
+                .collect();
+            for (i, word) in words.iter().enumerate() {
+                let program = word.rsplit('/').next().unwrap_or(word);
+                if !AGENTS.contains(&program) {
+                    continue;
+                }
+                assert!(
+                    words[..i].contains(&MARKER),
+                    "a daemon unit test was about to start a real `{program}` in a tmux pane. Every launch \
+                     names its program through `agent_program`, which stubs it under test; this one did \
+                     not: {command}"
+                );
+                // Everything after a stubbed agent in this command is its
+                // arguments -- `--preset claude`, a prompt that names an
+                // agent -- which the stub never reads.
+                break;
+            }
         }
     }
 }
@@ -4520,8 +4550,18 @@ mod test_agent_tests {
         for (what, command) in every_agent_launch() {
             assert!(!command.contains(test_agent::MARKER), "{what} is the real program under real_names: {command}");
             let refused = std::panic::catch_unwind(|| test_agent::refuse_a_real_agent(&command));
-            assert!(refused.is_err(), "{what} would have started for real: {command}");
+            // By the guard, not by the word check, which would refuse most
+            // of these on its own and so could hide a guard that does nothing.
+            let message = refused
+                .err()
+                .and_then(|p| p.downcast::<String>().ok())
+                .unwrap_or_else(|| panic!("{what} would have started for real: {command}"));
+            assert!(message.contains("test_agent::real_names()"), "{what} refused for another reason: {message}");
         }
+        // A command with no agent in it at all: only the guard can refuse it.
+        let shell = farcooler_core::shell::login_shell();
+        let refused = std::panic::catch_unwind(|| test_agent::refuse_a_real_agent(&format!("{shell} -il")));
+        assert!(refused.is_err(), "anything built under real_names() is refused at the boundary");
     }
 
     /// The content check alone, with no guard held: a program word that was
@@ -4536,12 +4576,22 @@ mod test_agent_tests {
             format!("env A=b {shell} -ilc 'codex resume x'"),
             format!("{shell} -ilc 'cursor-agent --trust'"),
             "'/Applications/Far Cooler.app/Contents/MacOS/farcooler' agent-host --terminal x".to_string(),
+            format!("{shell} -ilc '/opt/homebrew/bin/claude --resume x'"),
+            format!("{shell} -ilc 'claude;'"),
+            format!("{shell} -ilc \"$(command -v codex) resume x\""),
+            format!("{shell} -ilc 'opencode'"),
+            // A stubbed launch does not excuse a real one after it.
+            format!("{shell} -ilc '{} claude; codex'", test_agent::PROGRAM),
         ] {
             let refused = std::panic::catch_unwind(|| test_agent::refuse_a_real_agent(&command));
             assert!(refused.is_err(), "not refused: {command}");
         }
         test_agent::refuse_a_real_agent(&format!("{shell} -il"));
-        test_agent::refuse_a_real_agent(&format!("{shell} -ilc '{} claude --prompt \"ask claude\"'", test_agent::PROGRAM));
+        test_agent::refuse_a_real_agent(&format!("{shell} -ilc '{} claude --prompt \"ask codex\"'", test_agent::PROGRAM));
+        test_agent::refuse_a_real_agent(&format!(
+            "{} '/Applications/Far Cooler.app/Contents/MacOS/farcooler' agent-host --terminal x",
+            test_agent::PROGRAM
+        ));
     }
 }
 
