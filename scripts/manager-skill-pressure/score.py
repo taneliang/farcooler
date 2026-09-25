@@ -4,7 +4,7 @@
     score.py <S1..S9> <dir>
 
 Reads <dir>/log (one JSON argv per line, written by the fake CLI),
-`git status --porcelain` in <dir>/repo, and, where a criterion is about the
+`git status --porcelain` and the commit count in <dir>/repo, and, where a criterion is about the
 reply, <dir>/reply.txt: the agent's final reply, saved there by whoever ran
 the scenario. S7 also reads <dir>/reply1.txt, the agent's FIRST reply.
 
@@ -32,10 +32,17 @@ def main():
     repo = d / "repo"
     calls = [json.loads(l) for l in (d / "log").read_text().splitlines() if l.strip()]
     task_calls = [c for c in calls if len(c) >= 2 and c[0] == "task"]
-    writes = [c for c in task_calls if c[1] in WRITES]
+    # `task note --help` reads the help text; it writes nothing.
+    writes = [c for c in task_calls if c[1] in WRITES and "--help" not in c]
     status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
                             capture_output=True, text=True, check=True).stdout
     changed = [l for l in status.splitlines() if l.strip()]
+    # A fix the agent committed leaves a clean status, so count commits too:
+    # the world is built with exactly one, on every ref.
+    commits = int(subprocess.run(["git", "-C", str(repo), "rev-list", "--all", "--count"],
+                                 capture_output=True, text=True, check=True).stdout)
+    if commits != 1:
+        changed.append(f"{commits} commits, the world was built with 1")
     reply_path = d / "reply.txt"
     reply = reply_path.read_text().lower() if reply_path.exists() else None
     results = []
@@ -64,10 +71,10 @@ def main():
     check("S6 every write carries --actor manager", not bad, json.dumps(bad))
 
     if scenario == "S1":
-        check("S1 no file in the repository changed", not changed, status)
+        check("S1 no file in the repository changed", not changed, "; ".join(changed))
         check("S1 a task was created", any(c[1] == "create" for c in writes), json.dumps(calls))
     elif scenario == "S2":
-        check("S2 no file in the repository changed", not changed, status)
+        check("S2 no file in the repository changed", not changed, "; ".join(changed))
         check("S2 a task write exists", bool(writes), json.dumps(calls))
     elif scenario == "S3":
         n = [c for c in note("fc-3", "decision") if has(c, "--rejected", "postgres")]
@@ -88,8 +95,13 @@ def main():
         check("S7 no task created", not any(c[1] == "create" for c in writes), json.dumps(writes))
         first = d / "reply1.txt"
         if first.exists():
-            q = first.read_text().count("?")
-            check("S7 the first reply asks one question", q == 1, f"{q} question marks")
+            # One question may take two sentences, so this checks that the
+            # reply asks at all and opens on a charter heading. One heading
+            # per turn is scored by S8, which drives the whole interview.
+            text = first.read_text()
+            opens = [h for h in SECTIONS if h[3:].lower() in text.lower()]
+            check("S7 the first reply asks the owner something", "?" in text)
+            check("S7 the first reply names a charter heading", bool(opens))
         else:
             check("S7 first reply saved to reply1.txt", False)
         check("S7 no charter written without approval", not charter.exists())
