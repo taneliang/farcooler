@@ -532,6 +532,55 @@ final class TerminalScrollTests: XCTestCase {
         )
     }
 
+    /// **The key row's Hide Keyboard key puts the keyboard away.**
+    ///
+    /// The ruling on the bar behind the keyboard (the bar stays where it is,
+    /// because an un-opted-out `GeometryReader` once made a terminal 0 points
+    /// tall) makes dismissing the keyboard the way back to the bar, so the
+    /// key that does it has to be there, be called something, and work.
+    ///
+    /// Asserted on the key itself as well as on the keyboard. XCUITest can
+    /// attach a hardware keyboard to the simulator, and then no software
+    /// keyboard is ever up and `app.keyboards.count == 0` holds before the tap
+    /// as well as after it. The key row is the input accessory whatever
+    /// keyboard is attached, so it is there only while the terminal is first
+    /// responder, and its going is what proves the tap resigned it.
+    func testTheHideKeyboardKeyPutsTheKeyboardAway() throws {
+        let app = launch()
+        let surface = try openATerminalInTheShell(app)
+
+        // A pane raises the keyboard when it appears; a tap is the fallback
+        // for a run where it has not yet.
+        let hide = app.buttons["terminal-hide-keyboard"]
+        if !hide.waitForExistence(timeout: 10) { surface.tap() }
+        XCTAssertTrue(
+            hide.waitForExistence(timeout: 10),
+            "the terminal's key row never appeared, so there was no keyboard to hide: "
+                + app.debugDescription)
+        XCTAssertEqual(hide.label, "Hide Keyboard")
+        // Waited for, not read once. The row exists as soon as the pane is
+        // first responder, but while the keyboard is still sliding in the key
+        // has no frame on screen yet: measured, a tap then was synthesized at
+        // {-1, -1} and landed nowhere, and the keyboard stayed up.
+        let tappable = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in hide.isHittable }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [tappable], timeout: 10), .completed,
+            "the Hide Keyboard key is in the tree but never became tappable")
+        let softwareKeyboardWasUp = app.keyboards.count > 0
+
+        hide.tap()
+
+        let gone = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in !hide.exists && app.keyboards.count == 0 },
+            object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [gone], timeout: 10), .completed,
+            "after Hide Keyboard: key row \(hide.exists ? "still up" : "gone"), "
+                + "\(app.keyboards.count) keyboard(s) "
+                + "(a software keyboard was \(softwareKeyboardWasUp ? "" : "not ")up before)")
+    }
+
     /// **A finger put down on a coasting pane stops it, and that touch is not
     /// also the tap that raises the keyboard.**
     ///
@@ -564,7 +613,7 @@ final class TerminalScrollTests: XCTestCase {
         // NOT raise the keyboard" assertion below vacuous — true whether or
         // not the interrupting tap behaved, because something else already
         // put a keyboard up before either tap ran.
-        let dismiss = app.buttons["keyboard.chevron.compact.down"]
+        let dismiss = app.buttons["terminal-hide-keyboard"]
         if dismiss.exists { dismiss.tap() }
         let down = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in app.keyboards.count == 0 }, object: nil)
@@ -1323,7 +1372,7 @@ final class TerminalScrollTests: XCTestCase {
         // With the keyboard down, so the strip below the grid is the shell's
         // furniture rather than the key row. The pane raises the keyboard on
         // appear; the key row's own button is the way back down.
-        let dismiss = app.buttons["keyboard.chevron.compact.down"]
+        let dismiss = app.buttons["terminal-hide-keyboard"]
         if dismiss.exists { dismiss.tap() }
         let down = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in app.keyboards.count == 0 }, object: nil)
@@ -1447,7 +1496,7 @@ final class TerminalScrollTests: XCTestCase {
         //
         // Waited for on `isHittable` rather than on the keyboard being gone,
         // because the question is exactly "can this drag reach the bar".
-        let dismiss = app.buttons["keyboard.chevron.compact.down"]
+        let dismiss = app.buttons["terminal-hide-keyboard"]
         if dismiss.exists { dismiss.tap() }
         let reachable = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in bar.isHittable }, object: nil)
@@ -1682,7 +1731,7 @@ final class TerminalScrollTests: XCTestCase {
 
         // The keyboard down first: with one up the correct answer is the
         // keyboard's top edge, which is the other test.
-        let dismiss = app.buttons["keyboard.chevron.compact.down"]
+        let dismiss = app.buttons["terminal-hide-keyboard"]
         if dismiss.exists { dismiss.tap() }
 
         // Waited for by watching the GRID, not by asking whether a keyboard
@@ -1750,7 +1799,7 @@ final class TerminalScrollTests: XCTestCase {
 
         // The pane raises the keyboard on appear; tapping the grid asks again
         // for a run that arrived with it down.
-        let dismiss = app.buttons["keyboard.chevron.compact.down"]
+        let dismiss = app.buttons["terminal-hide-keyboard"]
         if !dismiss.waitForExistence(timeout: 5) {
             surface.tap()
             _ = dismiss.waitForExistence(timeout: 10)

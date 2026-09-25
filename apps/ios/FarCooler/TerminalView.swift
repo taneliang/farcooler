@@ -1580,7 +1580,13 @@ private struct TerminalKeyRow: View {
             // thing standing in the way of: it lives above the keyboard, so it
             // goes when the keyboard does, and without a way to dismiss from
             // here there is nowhere else to ask from.
+            //
+            // Named, because a symbol's name is not something to say to a
+            // person. The identifier is what a test asks for and the label is
+            // what VoiceOver says, so changing the words never loses the key.
             key(action: onDismiss) { glyph("keyboard.chevron.compact.down") }
+                .accessibilityLabel("Hide Keyboard")
+                .accessibilityIdentifier("terminal-hide-keyboard")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
