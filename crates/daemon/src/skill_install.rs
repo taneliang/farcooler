@@ -751,6 +751,8 @@ mod tests {
             let body = skill_body(h).split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(body.contains("before dispatching again"), "{h:?}");
             assert!(body.contains("the agent panes dispatch opens"), "{h:?}");
+            // The CLI's refusal offers --again; only the owner can take it up.
+            assert!(body.contains("pass `--again` only if the owner asked for a second agent"), "{h:?}");
         }
     }
 

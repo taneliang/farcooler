@@ -83,8 +83,8 @@ again. Your own pane counts. `--preset` picks claude, codex or cursor.
 
 A busy lane is warned about, not refused: tell the owner. If a dispatch seems
 not to have taken, read `task show <key>` and `workspace list --json` before
-dispatching again: a second dispatch is a second agent on the task. A
-dispatched agent doesn't report back to you or the owner. Say so.
+dispatching again, and pass `--again` only if the owner asked for a second
+agent. A dispatched agent doesn't report back to you or the owner. Say so.
 
 Report from the board, not from memory: what moved, what's stale, what's
 waiting on the owner.
