@@ -188,9 +188,15 @@ final class FleetStore: ObservableObject {
         case runtimeDown
         /// Nothing is known yet: every runner is still on its first read.
         case connecting
-        /// No runner is connected, and at least one has been lost or refused.
-        /// Neither a count nor a failure — see above.
+        /// No runner is connected, and at least one has been lost or
+        /// refused. Neither a count nor a failure — see above.
         case unsaid
+        /// No runner is connected, and every one that has answered at all
+        /// said Far Cooler isn't installed there: the runners, by name, "" for
+        /// this Mac. Said, because it is the one reason here with something
+        /// to do about it, and "Not connected" would hide it — on a fleet of
+        /// one the trouble dots that would name it are hidden.
+        case notInstalled([String])
 
         /// The words beside the dot.
         var sentence: String {
@@ -199,6 +205,11 @@ final class FleetStore: ObservableObject {
             case .runtimeDown: return "tmux unavailable"
             case .connecting: return "Connecting…"
             case .unsaid: return "Not connected"
+            case .notInstalled(let runners) where runners.count == 1:
+                let runner = runners[0].isEmpty ? "this Mac" : runners[0]
+                return "Far Cooler isn’t installed on \(runner)"
+            case .notInstalled(let runners):
+                return "Far Cooler isn’t installed on \(runners.count) runners"
             }
         }
 
@@ -217,7 +228,7 @@ final class FleetStore: ObservableObject {
     /// and its last `runtimeHealthy` came back for every one of those waits.
     /// `BoardAgents.on` fixed the same thing for the board's pills the same
     /// way.
-    static func reading(of runners: [(state: HostState, fleet: Fleet)]) -> Reading {
+    static func reading(of runners: [(host: String, state: HostState, fleet: Fleet)]) -> Reading {
         let connected = runners.filter { $0.state == .connected }.map(\.fleet)
         guard connected.isEmpty else {
             // Healthy is an OR across the connected runners, and the count is
@@ -227,7 +238,14 @@ final class FleetStore: ObservableObject {
             guard connected.contains(where: \.runtimeHealthy) else { return .runtimeDown }
             return .live(connected.reduce(0) { $0 + $1.livePanes })
         }
-        return runners.allSatisfy { $0.state == .connecting } ? .connecting : .unsaid
+        let answered = runners.filter { $0.state != .connecting }
+        if answered.isEmpty { return .connecting }
+        // Neutral like `.unsaid`, not red: a runner without Far Cooler has
+        // lost nothing, and the trouble dot paints it `.secondary` too.
+        if answered.allSatisfy({ $0.state == .notInstalled }) {
+            return .notInstalled(answered.map(\.host))
+        }
+        return .unsaid
     }
 
     /// See `Reading`.
@@ -249,7 +267,7 @@ final class FleetStore: ObservableObject {
     /// answering has no tmux at all.
     private func remerge() {
         let merged = Self.merge(
-            hosts.compactMap { clients[$0] }.map { (state: $0.state, fleet: $0.fleet) })
+            hosts.compactMap { host in clients[host].map { (host, $0.state, $0.fleet) } })
         fleet = merged.fleet
         if reading != merged.reading { reading = merged.reading }
     }
@@ -257,14 +275,14 @@ final class FleetStore: ObservableObject {
     /// `remerge`'s arithmetic, apart from the clients it reads, so it can be
     /// asked about: every runner's rows in order, and the connected runners'
     /// count and health only.
-    static func merge(_ runners: [(state: HostState, fleet: Fleet)])
+    static func merge(_ runners: [(host: String, state: HostState, fleet: Fleet)])
         -> (fleet: Fleet, reading: Reading)
     {
         let reading = reading(of: runners)
         let healthy: Bool, live: Int
         switch reading {
         case .live(let count): (healthy, live) = (true, count)
-        case .runtimeDown, .connecting, .unsaid: (healthy, live) = (false, 0)
+        case .runtimeDown, .connecting, .unsaid, .notInstalled: (healthy, live) = (false, 0)
         }
         let fleet = Fleet(
             runtimeHealthy: healthy, livePanes: live,

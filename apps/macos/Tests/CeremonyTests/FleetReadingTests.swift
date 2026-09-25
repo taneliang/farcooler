@@ -32,7 +32,7 @@ struct FleetReadingTests {
     @Test func onlyConnectedRunnersAreCounted() {
         for state in Self.notConnected {
             let reading = FleetStore.reading(of: [
-                (.connected, Self.fleet(live: 2)), (state, Self.fleet(live: 5)),
+                ("", .connected, Self.fleet(live: 2)), ("", state, Self.fleet(live: 5)),
             ])
             #expect(reading == .live(2), "\(state)")
         }
@@ -43,8 +43,8 @@ struct FleetReadingTests {
     @Test func aStaleHealthyRunnerDoesNotSpeakForTheFleet() {
         for state in Self.notConnected {
             let reading = FleetStore.reading(of: [
-                (.connected, Self.fleet(healthy: false, live: 0)),
-                (state, Self.fleet(healthy: true, live: 5)),
+                ("", .connected, Self.fleet(healthy: false, live: 0)),
+                ("", state, Self.fleet(healthy: true, live: 5)),
             ])
             #expect(reading == .runtimeDown, "\(state)")
         }
@@ -55,8 +55,8 @@ struct FleetReadingTests {
     /// saying that through the whole retry cycle — `.unreachable` after a
     /// failed read and `.reconnecting` during the wait read the same.
     @Test func aLoneRunnerThatIsDownCantSay() {
-        for state: HostState in [.reconnecting(attempt: 3), .unreachable(reason: "gone"), .notInstalled] {
-            let reading = FleetStore.reading(of: [(state, Self.fleet(live: 4))])
+        for state: HostState in [.reconnecting(attempt: 3), .unreachable(reason: "gone")] {
+            let reading = FleetStore.reading(of: [("", state, Self.fleet(live: 4))])
             #expect(reading == .unsaid, "\(state)")
             #expect(!reading.isTrouble, "\(state)")
             #expect(reading.sentence == "Not connected", "\(state)")
@@ -66,12 +66,12 @@ struct FleetReadingTests {
     /// Before any runner has answered, the bar says it's connecting, not that
     /// anything is broken.
     @Test func nothingAnsweredYetIsConnecting() {
-        let reading = FleetStore.reading(of: [(.connecting, .empty), (.connecting, .empty)])
+        let reading = FleetStore.reading(of: [("", .connecting, .empty), ("", .connecting, .empty)])
         #expect(reading == .connecting)
         #expect(!reading.isTrouble)
         // One runner lost among ones still connecting: not "Connecting…".
         #expect(
-            FleetStore.reading(of: [(.connecting, .empty), (.reconnecting(attempt: 1), .empty)])
+            FleetStore.reading(of: [("", .connecting, .empty), ("", .reconnecting(attempt: 1), .empty)])
                 == .unsaid)
     }
 
@@ -79,11 +79,11 @@ struct FleetReadingTests {
     /// them has tmux.
     @Test func connectedRunnersSpeak() {
         let live = FleetStore.reading(of: [
-            (.connected, Self.fleet(live: 2)), (.connected, Self.fleet(healthy: false, live: 1)),
+            ("", .connected, Self.fleet(live: 2)), ("", .connected, Self.fleet(healthy: false, live: 1)),
         ])
         #expect(live == .live(3))
         #expect(live.sentence == "3 live")
-        let down = FleetStore.reading(of: [(.connected, Self.fleet(healthy: false, live: 0))])
+        let down = FleetStore.reading(of: [("", .connected, Self.fleet(healthy: false, live: 0))])
         #expect(down == .runtimeDown)
         #expect(down.isTrouble)
         #expect(down.sentence == "tmux unavailable")
@@ -95,8 +95,8 @@ struct FleetReadingTests {
     /// doesn't move.
     @Test func theMergedFleetCountsOnlyConnectedRunnersButKeepsEveryRow() {
         let merged = FleetStore.merge([
-            (.connected, Self.fleet(healthy: false, live: 1, rows: ["here"])),
-            (.reconnecting(attempt: 2), Self.fleet(healthy: true, live: 5, rows: ["there"])),
+            ("", .connected, Self.fleet(healthy: false, live: 1, rows: ["here"])),
+            ("", .reconnecting(attempt: 2), Self.fleet(healthy: true, live: 5, rows: ["there"])),
         ])
         #expect(merged.reading == .runtimeDown)
         #expect(merged.fleet.runtimeHealthy == false)
@@ -104,10 +104,37 @@ struct FleetReadingTests {
         #expect(merged.fleet.workspaces.map(\.id) == ["here", "there"])
 
         let live = FleetStore.merge([
-            (.connected, Self.fleet(live: 1, rows: ["here"])),
-            (.reconnecting(attempt: 2), Self.fleet(live: 5, rows: ["there"])),
+            ("", .connected, Self.fleet(live: 1, rows: ["here"])),
+            ("", .reconnecting(attempt: 2), Self.fleet(live: 5, rows: ["there"])),
         ])
         #expect(live.fleet.runtimeHealthy == true)
         #expect(live.fleet.livePanes == 1)
+    }
+
+    /// A runner that answered and has no Far Cooler says so, by name — not
+    /// the generic "Not connected", which would hide the one reason here
+    /// there is something to do about. Neutral, like its trouble dot.
+    @Test func aRunnerWithoutFarCoolerIsNamed() {
+        let remote = FleetStore.reading(of: [("gpu-box", .notInstalled, .empty)])
+        #expect(remote == .notInstalled(["gpu-box"]))
+        #expect(remote.sentence == "Far Cooler isn’t installed on gpu-box")
+        #expect(remote.sentence != FleetStore.Reading.unsaid.sentence)
+        #expect(!remote.isTrouble)
+
+        #expect(
+            FleetStore.reading(of: [("", .notInstalled, .empty)]).sentence
+                == "Far Cooler isn’t installed on this Mac")
+        // One still connecting doesn't hide it; it has nothing to say yet.
+        #expect(
+            FleetStore.reading(of: [("", .connecting, .empty), ("gpu-box", .notInstalled, .empty)])
+                == .notInstalled(["gpu-box"]))
+        #expect(
+            FleetStore.reading(of: [("a", .notInstalled, .empty), ("b", .notInstalled, .empty)])
+                .sentence == "Far Cooler isn’t installed on 2 runners")
+        // One lost among them: that one might come back with it. Generic.
+        #expect(
+            FleetStore.reading(of: [
+                ("a", .notInstalled, .empty), ("b", .reconnecting(attempt: 1), .empty),
+            ]) == .unsaid)
     }
 }
