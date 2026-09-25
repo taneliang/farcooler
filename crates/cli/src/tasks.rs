@@ -215,10 +215,13 @@ pub enum TaskCmd {
         #[arg(long)]
         actor: Option<String>,
     },
-    /// Ask the user something, and summon them.
+    /// Ask the user something, and move the task to needs decision.
+    ///
+    /// This marks the board and nothing more: no notification reaches the
+    /// user's phone, so tell them the question too.
     ///
     /// One command rather than two, because a question that does not move the
-    /// task is a task that asks and summons nobody — and a task moved to
+    /// task is one nobody looking at the board will find — and a task moved to
     /// `needs_decision` with no question on it tells whoever arrives nothing.
     Ask {
         /// A key like `fc-42`, or the last eight of a task's id. Defaults to
