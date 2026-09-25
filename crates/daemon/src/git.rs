@@ -1134,4 +1134,58 @@ mod worktree_tests {
         assert_eq!(detached.branch, None);
         assert!(!detached.head.is_empty(), "it still has a commit");
     }
+
+    /// A repository and one linked worktree beside it, `side`, on a new branch.
+    async fn a_linked_worktree(dir: &Path) -> (PathBuf, PathBuf) {
+        let repo = dir.join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        for args in [
+            vec!["init", "-q", "-b", "main", "."],
+            vec!["config", "user.email", "t@example.com"],
+            vec!["config", "commit.gpgsign", "false"],
+            vec!["config", "user.name", "t"],
+            vec!["commit", "-q", "--allow-empty", "-m", "base"],
+        ] {
+            git(&repo, &args).await.unwrap();
+        }
+        let side = dir.join("side");
+        git(&repo, &["worktree", "add", "-q", "-b", "side", side.to_str().unwrap()]).await.unwrap();
+        (repo, side)
+    }
+
+    /// The mark names the install that wrote it, whichever that was. The
+    /// comparison against this install's id is the caller's
+    /// (`forked_this_worktree`), and its own test writes another install's
+    /// mark.
+    #[tokio::test]
+    async fn forked_by_names_the_install_that_marked_it_and_nothing_unmarked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, side) = a_linked_worktree(dir.path()).await;
+
+        assert_eq!(forked_by(&side), None, "unmarked");
+        assert_eq!(forked_by(&repo), None, "a main checkout has a .git directory, not a file");
+        mark_forked(&side, "install-b").await;
+        assert_eq!(forked_by(&side).as_deref(), Some("install-b"));
+    }
+
+    /// git 2.48 and later can write the pointer relative to the worktree
+    /// (`worktree.useRelativePaths`). Read against the worktree, not against
+    /// whatever directory the daemon happens to run in.
+    #[tokio::test]
+    async fn forked_by_follows_a_relative_gitdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_repo, side) = a_linked_worktree(dir.path()).await;
+        mark_forked(&side, "install-a").await;
+
+        let pointer = std::fs::read_to_string(side.join(".git")).unwrap();
+        let admin = pointer.trim().strip_prefix("gitdir:").unwrap().trim().to_string();
+        let tail = Path::new(&admin)
+            .strip_prefix(dir.path().canonicalize().unwrap())
+            .or_else(|_| Path::new(&admin).strip_prefix(dir.path()))
+            .expect("the admin dir is under the test's directory")
+            .to_path_buf();
+        std::fs::write(side.join(".git"), format!("gitdir: ../{}\n", tail.display())).unwrap();
+
+        assert_eq!(forked_by(&side).as_deref(), Some("install-a"));
+    }
 }

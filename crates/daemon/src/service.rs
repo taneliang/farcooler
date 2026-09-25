@@ -9941,6 +9941,18 @@ mod launch_prompt_tests {
         assert!(svc.prepare_launch_hooks("cursor:auto", &made.worktree_path).await.trust_workspace);
         assert!(!svc.prepare_launch_hooks("claude", &made.worktree_path).await.trust_workspace);
 
+        // Forked by ANOTHER install sharing this host is not ours to trust:
+        // the mark has to name this one.
+        let theirs =
+            svc.create_workspace(ws.repository_id, "not-ours", "not-ours", "HEAD").await.unwrap();
+        git::mark_forked(Path::new(&theirs.worktree_path), "another-install").await;
+        assert_eq!(
+            git::forked_by(Path::new(&theirs.worktree_path)).as_deref(),
+            Some("another-install"),
+            "the mark was rewritten, so a false below is the comparison's"
+        );
+        assert!(!trusts(theirs.worktree_path.clone()).await, "another install's mark");
+
         // An adopted branch is somebody's commits, and is not.
         git::git(Path::new(&ws.worktree_path), &["branch", "theirs"]).await.unwrap();
         let adopted = svc.adopt_branch(ws.repository_id, "theirs").await.unwrap();
