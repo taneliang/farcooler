@@ -71,7 +71,7 @@ shown_key() {
   shift 2
   while [ $# -gt 0 ]; do
     case "$1" in
-      --repo|--fields|--runner|--host) shift 2 ;;
+      --repo|--fields|--notes|--runner|--host) shift; [ $# -gt 0 ] && shift ;;
       -*) shift ;;
       *) echo "$1"; return ;;
     esac
@@ -89,10 +89,15 @@ create_task() {
     if [ $tries -gt 500 ]; then echo "fake farcooler: the key counter's lock is stuck" >&2; exit 1; fi
     sleep 0.01
   done
+  # Released however this exits: a fake killed mid-create must not leave the
+  # lock behind for every later create in this world to spin on.
+  trap 'rmdir "$FAKE_BOARD/.next-key.lock" 2>/dev/null' EXIT
   n=$(cat "$FAKE_BOARD/next-key" 2>/dev/null)
   case "$n" in ''|*[!0-9]*) n=9 ;; esac
   echo $((n + 1)) > "$FAKE_BOARD/next-key"
   rmdir "$FAKE_BOARD/.next-key.lock"
+  # Dropped once released, or it would remove the NEXT holder's lock at exit.
+  trap - EXIT
   local title="" prev="" a
   for a in "$@"; do
     case "$a" in --title=*) title=${a#--title=} ;; esac
