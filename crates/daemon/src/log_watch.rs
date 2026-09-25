@@ -31,11 +31,31 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 /// sampling cadence, not something this type needs to invent a clock for.
 pub struct LogWatcher {
     changed: Arc<Mutex<HashSet<PathBuf>>>,
-    /// Kept alive for as long as the `LogWatcher` is: a `notify::Watcher` stops
-    /// watching the moment it is dropped, so this field exists to be held, not
-    /// read. `None` only when the platform backend itself could not be built,
-    /// which is not a per-root failure and has nothing left to retry.
-    _watcher: Option<RecommendedWatcher>,
+    /// Where the registering thread leaves the watcher once it exists, and
+    /// what this `LogWatcher` takes back when it is dropped. See `Slot`.
+    slot: Arc<Mutex<Slot>>,
+}
+
+/// The watcher's life, shared between a `LogWatcher` and the thread that
+/// registers for it.
+///
+/// Kept alive for as long as the `LogWatcher` is: a `notify::Watcher` stops
+/// watching the moment it is dropped. `Watching` holds `None` only when the platform
+/// backend itself could not be built, which is not a per-root failure and has
+/// nothing left to retry.
+enum Slot {
+    Registering,
+    Watching { _watcher: Option<RecommendedWatcher> },
+    /// The `LogWatcher` went away first. A registration that finishes after
+    /// this drops its watcher on the spot rather than keeping one nobody reads.
+    Closed,
+}
+
+impl Drop for LogWatcher {
+    fn drop(&mut self) {
+        let old = std::mem::replace(&mut *self.slot.lock().unwrap_or_else(|e| e.into_inner()), Slot::Closed);
+        drop(old);
+    }
 }
 
 /// The three directories the agents write their sessions under.
@@ -70,45 +90,71 @@ impl LogWatcher {
     /// covers both — the platform backends watch the whole subtree, including
     /// directories created after `watch` was called, so there is no separate
     /// path to re-register when codex rolls over to a new day.
+    ///
+    /// **Returns at once; the watch is registered on a thread of its own.**
+    /// `Watcher::watch` on macOS is `FSEventStreamStart`, a round trip to
+    /// `fseventsd`, and with `fseventsd` backed up (an Xcode build, an
+    /// XProtect scan) it has been sampled blocking for MINUTES inside
+    /// `register_with_server`. This runs from `watch::Watcher::new`, on the
+    /// daemon's startup path, so registering inline held the whole daemon --
+    /// and every `rpc_over_socket` harness start, 1530 s for one run of that
+    /// file -- behind `fseventsd`. Nothing reads this watcher as a promise:
+    /// its one caller uses `drain` as a gate with a backstop on its own clock
+    /// (`watch.rs`, `LOG_JOIN_BACKSTOP_MS`), so a watch that is not live yet
+    /// costs a join that waits for the backstop, never one that is missed.
+    ///
+    /// And to cut even that short: once registration finishes, every root is
+    /// reported as changed, once. Whatever was written while the registration
+    /// stalled produced no event, and this is what tells the caller to look.
     pub fn start(roots: Vec<PathBuf>) -> LogWatcher {
+        Self::start_registering(roots, watch_roots)
+    }
+
+    /// `start`, with the registration passed in, so a test can stand in one
+    /// that stalls.
+    fn start_registering<R>(roots: Vec<PathBuf>, register: R) -> LogWatcher
+    where
+        R: FnOnce(&[PathBuf], Arc<Mutex<HashSet<PathBuf>>>) -> Option<RecommendedWatcher> + Send + 'static,
+    {
         let changed: Arc<Mutex<HashSet<PathBuf>>> = Arc::new(Mutex::new(HashSet::new()));
-        let sink = changed.clone();
-
-        // Every path in every event is kept, with no filtering by
-        // `EventKind`. The three backends (FSEvents, inotify, ReadDirectoryChangesW)
-        // do not agree on which kind an append surfaces as, and the cost of
-        // being wrong in the permissive direction is a redundant entry in a
-        // `HashSet` — the cost of being wrong the other way is a session log
-        // that grows and nobody notices.
-        let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            let Ok(event) = res else { return };
-            let mut set = sink.lock().unwrap_or_else(|e| e.into_inner());
-            set.extend(event.paths);
+        let slot = Arc::new(Mutex::new(Slot::Registering));
+        let (sink, landing) = (changed.clone(), slot.clone());
+        let spawned = std::thread::Builder::new().name("log-watch-register".into()).spawn(move || {
+            // A panic in `notify` is a registration that failed, the same as
+            // `None`: left to unwind, it would leave this slot `Registering`
+            // for good with nothing to say why.
+            let watcher = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| register(&roots, sink.clone())))
+                .unwrap_or_else(|_| {
+                    tracing::warn!("registering the log watch panicked; falling back to no watching");
+                    None
+                });
+            let mut slot = landing.lock().unwrap_or_else(|e| e.into_inner());
+            if matches!(*slot, Slot::Closed) {
+                return;
+            }
+            *slot = Slot::Watching { _watcher: watcher };
+            drop(slot);
+            sink.lock().unwrap_or_else(|e| e.into_inner()).extend(roots.into_iter().filter(|r| r.exists()));
         });
-
-        let mut watcher = match watcher {
-            Ok(w) => w,
-            Err(error) => {
-                // Not a per-root problem — the backend itself failed to
-                // start, which no amount of retrying a root fixes. Logged and
-                // left inert rather than panicking the daemon over a feature
-                // that trades work for none, never none for none.
-                tracing::warn!(?error, "could not start a log watcher; falling back to no watching");
-                return LogWatcher { changed, _watcher: None };
-            }
-        };
-
-        for root in roots {
-            if !root.exists() {
-                tracing::debug!(root = %root.display(), "log root does not exist, skipping");
-                continue;
-            }
-            if let Err(error) = watcher.watch(&root, RecursiveMode::Recursive) {
-                tracing::warn!(root = %root.display(), ?error, "could not watch log root");
-            }
+        if let Err(error) = spawned {
+            tracing::warn!(?error, "could not start the thread that registers the log watch; falling back to no watching");
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Slot::Watching { _watcher: None };
         }
+        LogWatcher { changed, slot }
+    }
 
-        LogWatcher { changed, _watcher: Some(watcher) }
+    /// Whether registration has finished, successfully or not. For tests,
+    /// which cannot write a file and expect an event until it has.
+    #[cfg(test)]
+    fn wait_until_registered(&self, deadline: std::time::Duration) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < deadline {
+            if !matches!(*self.slot.lock().unwrap_or_else(|e| e.into_inner()), Slot::Registering) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
     }
 
     /// The paths that changed since the last call to `drain`.
@@ -122,10 +168,128 @@ impl LogWatcher {
     }
 }
 
+/// Build the watcher and register every root that exists, recursively --
+/// the blocking half of `LogWatcher::start`, run on its own thread.
+///
+/// A root that does not exist is not an error and not even logged above
+/// debug: see `LogWatcher::start`. Every path in every event is kept, with no
+/// filtering by `EventKind`. The three backends (FSEvents, inotify,
+/// ReadDirectoryChangesW) do not agree on which kind an append surfaces as,
+/// and the cost of being wrong in the permissive direction is a redundant
+/// entry in a `HashSet` — the cost of being wrong the other way is a session
+/// log that grows and nobody notices.
+fn watch_roots(roots: &[PathBuf], sink: Arc<Mutex<HashSet<PathBuf>>>) -> Option<RecommendedWatcher> {
+    let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let Ok(event) = res else { return };
+        let mut set = sink.lock().unwrap_or_else(|e| e.into_inner());
+        set.extend(event.paths);
+    });
+    let mut watcher = match watcher {
+        Ok(w) => w,
+        Err(error) => {
+            // Not a per-root problem — the backend itself failed to start,
+            // which no amount of retrying a root fixes. Logged and left inert
+            // rather than panicking the daemon over a feature that trades
+            // work for none, never none for none.
+            tracing::warn!(?error, "could not start a log watcher; falling back to no watching");
+            return None;
+        }
+    };
+    for root in roots {
+        if !root.exists() {
+            tracing::debug!(root = %root.display(), "log root does not exist, skipping");
+            continue;
+        }
+        if let Err(error) = watcher.watch(root, RecursiveMode::Recursive) {
+            tracing::warn!(root = %root.display(), ?error, "could not watch log root");
+        }
+    }
+    Some(watcher)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    /// `LogWatcher::start`, then wait for its registration to finish and
+    /// drain the one report of every root that comes with it. A test that
+    /// writes a file and expects the event can only do so once the watch is
+    /// live, which `start` no longer waits for (see its doc).
+    fn registered(roots: Vec<PathBuf>) -> LogWatcher {
+        let watcher = LogWatcher::start(roots);
+        assert!(watcher.wait_until_registered(Duration::from_secs(60)), "the log watch never registered");
+        watcher.drain();
+        watcher
+    }
+
+    /// The daemon's startup path is not held behind a registration that
+    /// stalls -- `FSEventStreamStart` has been sampled blocking for minutes
+    /// when `fseventsd` is backed up. The stand-in registration here blocks
+    /// until the test lets it go.
+    #[test]
+    fn a_stalled_registration_does_not_hold_up_start() {
+        let root = scratch("stalled");
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let begun = Instant::now();
+        let watcher = LogWatcher::start_registering(vec![root.clone()], move |_, _| {
+            entered_tx.send(()).unwrap();
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+            None
+        });
+        let took = begun.elapsed();
+        entered_rx.recv_timeout(Duration::from_secs(10)).expect("the registration ran");
+        assert!(!watcher.wait_until_registered(Duration::from_millis(100)), "still registering");
+        release_tx.send(()).unwrap();
+        assert!(took < Duration::from_secs(2), "start waited {took:?} for a registration that stalled");
+        assert!(watcher.wait_until_registered(Duration::from_secs(10)), "registration finished once released");
+    }
+
+    /// Anything written while registration stalled produced no event, so a
+    /// finished registration reports every root that exists as changed,
+    /// once: the caller's next tick looks, instead of waiting for its
+    /// backstop.
+    #[test]
+    fn a_finished_registration_reports_every_root_once() {
+        let root = scratch("reported");
+        let missing = scratch("reported-parent").join("absent");
+        let watcher = LogWatcher::start_registering(vec![root.clone(), missing], |_, _| None);
+        assert!(watcher.wait_until_registered(Duration::from_secs(10)));
+        assert_eq!(watcher.drain(), vec![root], "each root that exists, and no other");
+        assert!(watcher.drain().is_empty(), "once");
+    }
+
+    /// A registration that panics finishes like one that failed: the slot
+    /// leaves `Registering`, and the roots are still reported.
+    #[test]
+    fn a_registration_that_panics_finishes_as_no_watcher() {
+        let root = scratch("panics");
+        let watcher = LogWatcher::start_registering(vec![root.clone()], |_, _| panic!("notify's runloop thread died"));
+        assert!(watcher.wait_until_registered(Duration::from_secs(10)), "stuck registering after a panic");
+        assert_eq!(watcher.drain(), vec![root]);
+    }
+
+    /// A `LogWatcher` dropped while its registration is still running does
+    /// not have a watcher land in it afterwards: the finished registration
+    /// finds the slot closed and lets its watcher go.
+    #[test]
+    fn a_registration_that_finishes_after_the_drop_keeps_nothing() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let watcher = LogWatcher::start_registering(Vec::new(), move |_, _| {
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+            let built = notify::recommended_watcher(|_: notify::Result<notify::Event>| {}).ok();
+            done_tx.send(()).unwrap();
+            built
+        });
+        let slot = watcher.slot.clone();
+        drop(watcher);
+        release_tx.send(()).unwrap();
+        done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(matches!(*slot.lock().unwrap(), Slot::Closed), "a watcher landed in a dropped LogWatcher");
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("farcooler-log-watch-{name}-{}", std::process::id()));
@@ -153,7 +317,7 @@ mod tests {
     #[test]
     fn a_write_under_a_watched_root_surfaces_its_path() {
         let root = scratch("basic");
-        let watcher = LogWatcher::start(vec![root.clone()]);
+        let watcher = registered(vec![root.clone()]);
 
         let file = root.join("session.jsonl");
         std::fs::write(&file, "{}").unwrap();
@@ -198,7 +362,7 @@ mod tests {
     #[test]
     fn drain_is_idempotent() {
         let root = scratch("idempotent");
-        let watcher = LogWatcher::start(vec![root.clone()]);
+        let watcher = registered(vec![root.clone()]);
 
         std::fs::write(root.join("session.jsonl"), "{}").unwrap();
         let first = wait_for_drain(&watcher, Duration::from_secs(5));
@@ -225,7 +389,7 @@ mod tests {
 
         // Must not panic, and the root that DOES exist must still work —
         // one bad root must not take the good ones down with it.
-        let watcher = LogWatcher::start(vec![missing, real.clone()]);
+        let watcher = registered(vec![missing, real.clone()]);
         std::fs::write(real.join("session.jsonl"), "{}").unwrap();
 
         let found = wait_for_drain(&watcher, Duration::from_secs(5));
@@ -238,7 +402,7 @@ mod tests {
         let file = root.join("session.jsonl");
         std::fs::write(&file, "").unwrap();
 
-        let watcher = LogWatcher::start(vec![root.clone()]);
+        let watcher = registered(vec![root.clone()]);
 
         for i in 0..10 {
             use std::io::Write;
@@ -285,7 +449,7 @@ mod tests {
             return;
         }
         let started = std::time::SystemTime::now();
-        let watcher = LogWatcher::start(vec![root]);
+        let watcher = registered(vec![root]);
         std::thread::sleep(Duration::from_secs(3));
         let found = watcher.drain();
 
