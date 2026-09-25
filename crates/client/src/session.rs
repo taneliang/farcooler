@@ -865,20 +865,7 @@ impl Session {
             })
             .collect();
 
-        Ok(json!({
-            "runtime_healthy": healthy,
-            "live_panes": host.live_terminal_count,
-            // Every pane's trace added together at one width, summed by the
-            // daemon. Same encoding and the same absent-not-empty rule as a
-            // terminal's own. See the comment on `activityTrace` above.
-            "fleetTrace": fleet_trace(&list),
-            // Where that trace's newest bucket sits in time: its absolute
-            // index, a NUMBER, beside the base64 rather than in it. What lets
-            // a phone polling several runners sum their fleet traces onto one
-            // axis exactly. Absent with the trace, and from an older daemon.
-            "fleetTraceAnchor": fleet_trace_anchor(&list),
-            "workspaces": items,
-        }))
+        Ok(fleet_json(healthy, json!(host.live_terminal_count), &list, items))
     }
 
     pub async fn host(&mut self) -> Result<farcooler_protocol::v1::Host, SessionError> {
@@ -2042,6 +2029,34 @@ fn terminal_label(s: TerminalState) -> &'static str {
     }
 }
 
+/// The object `Session::fleet` returns, given what it read.
+///
+/// Its own function so the keys the apps decode by name can be checked by a
+/// test: the round trips that fill it need a live daemon, and the spelling of
+/// `fleetTraceAnchor` is a contract with `CoreModel.Fleet` that nothing on the
+/// Swift side can see break.
+fn fleet_json(
+    healthy: bool,
+    live_panes: serde_json::Value,
+    list: &farcooler_protocol::v1::TerminalList,
+    workspaces: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    json!({
+        "runtime_healthy": healthy,
+        "live_panes": live_panes,
+        // Every pane's trace added together at one width, summed by the
+        // daemon. Same encoding and the same absent-not-empty rule as a
+        // terminal's own. See the comment on `activityTrace` above.
+        "fleetTrace": fleet_trace(list),
+        // Where that trace's newest bucket sits in time: its absolute index, a
+        // NUMBER, beside the base64 rather than in it. What lets a phone
+        // polling several runners sum their fleet traces onto one axis
+        // exactly. Null with no trace, and from an older daemon.
+        "fleetTraceAnchor": fleet_trace_anchor(list),
+        "workspaces": workspaces,
+    })
+}
+
 /// The fleet's trace as `fleet` spells it: base64, or no key for none.
 fn fleet_trace(list: &farcooler_protocol::v1::TerminalList) -> Option<String> {
     (!list.fleet_trace.is_empty()).then(|| farcooler_core::base64::encode(&list.fleet_trace))
@@ -2067,6 +2082,12 @@ mod tests {
         assert_eq!(super::fleet_trace_anchor(&list), Some(5_960_000));
         assert_eq!(super::fleet_trace(&list).map(|t| t.len()), Some(88));
 
+        // Spelled exactly as `CoreModel.Fleet` decodes it, and a number. A
+        // rename here would be a phone that silently packs every runner again.
+        let sent = super::fleet_json(true, serde_json::json!(1), &list, Vec::new());
+        assert_eq!(sent["fleetTraceAnchor"], serde_json::json!(5_960_000), "{sent}");
+        assert!(sent["fleetTrace"].is_string(), "{sent}");
+
         let bare = farcooler_protocol::v1::TerminalList {
             items: Vec::new(),
             fleet_trace: Default::default(),
@@ -2074,6 +2095,8 @@ mod tests {
         };
         assert_eq!(super::fleet_trace_anchor(&bare), None, "an anchor for no trace");
         assert_eq!(super::fleet_trace(&bare), None);
+        let quiet = super::fleet_json(true, serde_json::json!(0), &bare, Vec::new());
+        assert!(quiet["fleetTraceAnchor"].is_null(), "{quiet}");
     }
 
     use super::*;
