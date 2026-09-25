@@ -1906,6 +1906,35 @@ final class DaemonClient: ObservableObject {
         _ = await run(["terminal", "seen", terminal], background: true)
     }
 
+    /// End `done` for the terminals on screen that have it — if somebody is
+    /// there to see them, by the same `Presence` the "watching" claim asks.
+    ///
+    /// The window calls this on every fleet event while it is frontmost, so
+    /// without the check a Mac left locked, asleep or idle with Far Cooler in
+    /// front marked each agent's finish as read the moment it happened, and
+    /// the row was dark by the time anybody came back to it. And it is
+    /// called again when a claim is made after none (`reportWatching`), which
+    /// is the person coming back to a pane that finished while they were
+    /// gone: no fleet event and no click would otherwise end its `done`.
+    func markSeen(onScreen terminals: [Terminal]) {
+        guard presence.isPresent else { return }
+        for terminal in terminals where terminal.agent == .done {
+            // The daemon is idempotent, but this is not free: each call is a
+            // CLI subprocess, and a fleet event arrives for every terminal on
+            // the runner. Without this, ten busy panes would mean ten
+            // redundant processes for every one that finished.
+            guard !markingSeen.contains(terminal.id) else { continue }
+            markingSeen.insert(terminal.id)
+            Task { [weak self] in
+                await self?.markSeen(terminal.short)
+                self?.markingSeen.remove(terminal.id)
+            }
+        }
+    }
+
+    /// Terminals with a `terminal seen` call in flight.
+    private var markingSeen: Set<String> = []
+
     /// The terminals this window last told the runner it was showing, and when.
     ///
     /// Full ids, not the eight-character `short` every other command here takes.
@@ -1986,6 +2015,12 @@ final class DaemonClient: ObservableObject {
         // armed it.
         let claim = presence.isPresent ? terminals : []
         let changed = claim != watching
+        // Somebody is looking again, after nobody was: what finished on these
+        // panes while they were gone is seen now.
+        if !claim.isEmpty && watching.isEmpty {
+            let claimed = Set(claim)
+            markSeen(onScreen: fleet.workspaces.flatMap(\.terminals).filter { claimed.contains($0.id) })
+        }
         watchingTask?.cancel()
         watchingTask = nil
 

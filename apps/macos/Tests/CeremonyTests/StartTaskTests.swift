@@ -112,6 +112,7 @@ struct StartTaskTests {
         }
         var sent: [[String]] { calls.filter { $0.starts(with: ["terminal", "send"]) } }
         var watchingCalls: [[String]] { calls.filter { $0.starts(with: ["terminal", "watching"]) } }
+        var seenCalls: [[String]] { calls.filter { $0.starts(with: ["terminal", "seen"]) } }
     }
 
     /// A client wired to `runner`, connected, with the runner's build read.
@@ -476,6 +477,53 @@ struct StartTaskTests {
             try? await Task.sleep(for: .milliseconds(50))
         }
         #expect(runner.watchingCalls.last == ["terminal", "watching"], "\(runner.watchingCalls)")
+    }
+
+    // MARK: - Seen
+
+    /// A runner whose one agent, `t-new`, has finished and not been seen.
+    private func aFinishedAgent() -> Runner {
+        let runner = Runner(capabilities: ["workspaces", "terminals", "watching"])
+        runner.workspaceMade = true
+        runner.terminalMade = true
+        runner.activity = "done"
+        return runner
+    }
+
+    /// `done` ends when somebody sees it, so a pane on screen with nobody at
+    /// the Mac — locked, asleep, walked away — stays `done`.
+    @Test(arguments: [false, true])
+    func aFinishedPaneIsSeenOnlyBySomebodyThere(_ present: Bool) async {
+        let runner = aFinishedAgent()
+        let client = await client(runner)
+        client.presence = present ? Self.present() : Self.present(unlocked: false)
+        let onScreen = client.fleet.workspaces.flatMap(\.terminals)
+        #expect(onScreen.map(\.agent) == [.done], "the stub's agent has finished")
+
+        client.markSeen(onScreen: onScreen)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(runner.seenCalls == (present ? [["terminal", "seen", "tnew"]] : []))
+    }
+
+    /// It finished while nobody was there; the person comes back to the pane
+    /// with a touch of the mouse — no fleet event, no click — and it is seen.
+    @Test func aFinishedPaneIsSeenWhenThePersonComesBack() async {
+        let runner = aFinishedAgent()
+        let client = await client(runner)
+        var idle: TimeInterval = Presence.idleLimit + 1
+        client.presence = Presence(
+            appActive: { true }, screenAwake: { true }, sessionUnlocked: { true },
+            secondsSinceInput: { idle })
+        client.markSeen(onScreen: client.fleet.workspaces.flatMap(\.terminals))
+        client.reportWatching(["t-new"])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(runner.seenCalls.isEmpty, "nobody there yet")
+
+        idle = 1
+        for _ in 0..<40 where runner.seenCalls.isEmpty {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(runner.seenCalls == [["terminal", "seen", "tnew"]])
     }
 
     @Test func aRunnerThatIsNotConnectedIsNeverSentAHeartbeat() async {

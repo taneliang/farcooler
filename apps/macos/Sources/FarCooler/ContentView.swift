@@ -105,9 +105,6 @@ struct ContentView: View {
     /// banner below — the opposite of when this control exists. See
     /// `EditorErrorBanner`.
     @State private var editorError: String?
-    /// Terminals with a `terminal seen` call already in flight. See
-    /// `markVisibleSeen`.
-    @State private var markingSeen: Set<String> = []
     /// What a refused or failed action said, shown by the banner over the
     /// detail pane.
     ///
@@ -1786,7 +1783,10 @@ struct ContentView: View {
     /// Gated on the app being active, which is the whole distinction the feature
     /// rests on. An agent finishing while you are in another app is precisely
     /// what the notification exists for, and a window sitting behind three
-    /// others must not quietly mark it read.
+    /// others must not quietly mark it read. And, for the marking itself, on
+    /// somebody being at the Mac at all (`Presence`): a frontmost window on a
+    /// locked or sleeping Mac, or one left for the kitchen, gets fleet events
+    /// too, and nobody sees what they bring.
     ///
     /// Only `done`. `blocked` is the agent waiting on an ANSWER, and looking at
     /// a question does not answer it — the daemon agrees, so sending anything
@@ -1827,19 +1827,9 @@ struct ContentView: View {
         for other in store.clients.values where other !== client {
             other.reportWatching([])
         }
-        guard let client else { return }
-        for terminal in visibleTerminals where terminal.agent == .done {
-            // The daemon is idempotent, but this is not free: each call is a
-            // CLI subprocess, and a fleet event arrives for every terminal on
-            // the runner. Without this, ten busy panes would mean ten
-            // redundant processes for every one that finished.
-            guard !markingSeen.contains(terminal.id) else { continue }
-            markingSeen.insert(terminal.id)
-            Task {
-                await client.markSeen(terminal.short)
-                markingSeen.remove(terminal.id)
-            }
-        }
+        // Only for somebody there, by the same `Presence` the claim above
+        // asks — see `DaemonClient.markSeen(onScreen:)`.
+        client?.markSeen(onScreen: visibleTerminals)
     }
 
     // MARK: - Tiling
