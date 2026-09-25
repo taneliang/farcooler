@@ -284,7 +284,10 @@ pub enum TaskCmd {
     /// this way" is asked months later, about a task nobody remembers the key
     /// of. Matched literally: `%` and `_` are characters, not wildcards.
     Search {
-        /// The phrase to look for, matched literally.
+        /// The phrase to look for, matched literally. May be an old key
+        /// (`-3`), which is how notes written before a board had a prefix
+        /// name a task.
+        #[arg(allow_negative_numbers = true)]
         query: String,
         /// Only entries of this kind: decision, finding, question, answer,
         /// progress, comment, status_change, created.
@@ -3035,6 +3038,19 @@ mod tests {
         // Only a key's own shape is let through: anything else that starts
         // with a dash is still read as a flag.
         assert!(crate::Cli::try_parse_from(["farcooler", "task", "show", "-x"]).is_err());
+        // A mistyped long flag is an error, not a key, with a key or without.
+        assert!(crate::Cli::try_parse_from(["farcooler", "task", "set", "--stauts", "done"]).is_err());
+        assert!(crate::Cli::try_parse_from(["farcooler", "task", "set", "-16", "--stauts", "done"]).is_err());
+        // And one standing alone, where it is the only thing that could be
+        // taken for the key.
+        assert!(crate::Cli::try_parse_from(["farcooler", "task", "show", "--nots"]).is_err());
+        // Notes from before a board had a prefix name tasks by the old key,
+        // so it is also something to search for.
+        let crate::Command::Task(TaskCmd::Search { query, .. }) = parse(&["task", "search", "-3", "--repo", "overnight"])
+        else {
+            panic!("search")
+        };
+        assert_eq!(query, "-3");
         let crate::Command::Task(TaskCmd::Show { key, fields, .. }) = parse(&["task", "show", "--fields", "title"])
         else {
             panic!("show --fields")
