@@ -80,7 +80,7 @@ struct TaskNameTests {
         // would: only a race that does not wait for it can return on time.
         let namer = TaskNamer(
             model: { _ in
-                let until = ContinuousClock.now + .seconds(3)
+                let until = ContinuousClock.now + .seconds(10)
                 while ContinuousClock.now < until { usleep(10_000) }
                 return "too-late"
             },
@@ -89,7 +89,10 @@ struct TaskNameTests {
         let name = await namer.name(for: "Please fix the flaky reconnect test")
         let took = ContinuousClock.now - started
         #expect(name == "fix-flaky-reconnect-test", "the heuristic, not the late answer")
-        #expect(took < .seconds(1), "returned at the deadline: \(took)")
+        // Well under the model's 10 s, with room for a 2-core CI runner: the
+        // model blocks a thread with usleep, which can starve the race there
+        // (1.32 s seen against a 1 s bound).
+        #expect(took < .seconds(5), "returned at the deadline: \(took)")
     }
 
     @Test func aModelThatFailsOrRamblesFallsBackToTheHeuristic() async {
