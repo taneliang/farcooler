@@ -245,13 +245,14 @@ struct ContentView: View {
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }
         .onChange(of: store.layouts) { _, _ in followLayoutFocus() }
-        .onChange(of: store.fleet) { _, _ in
+        .onChange(of: store.fleet) { old, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its
-            // workspace being hidden. Hooking each path separately meant the
-            // common one — you press Ctrl-D in the terminal you are looking at —
-            // left the selection pointing at something that no longer existed.
-            healSelection()
+            // workspace being hidden or removed. Hooking each path separately
+            // meant the common one — you press Ctrl-D in the terminal you are
+            // looking at — left the selection pointing at something that no
+            // longer existed.
+            healSelection(previous: old.workspaces)
             // An agent finishing under your nose is a fleet change and nothing
             // else — no click, no selection change — so this is the only hook
             // that can catch the case where you were already watching it.
@@ -516,10 +517,19 @@ struct ContentView: View {
                 ) { c in
                     await c.removeWorktree(ws.short, confirm: typed)
                 }
-                if case .ok = result, case .terminal(let h, let w, _) = selection,
-                    h == (ws.host ?? ""), w == ws.id
-                {
-                    selection = nil
+                // Healed as though the fleet had already dropped it, by the
+                // same rule the fleet change runs. Whichever of the two lands
+                // first, the second finds the selection already off `ws` and
+                // changes nothing, so where you end up no longer depends on
+                // which finished first. It used to set nil here only when the
+                // selection was still one of `ws`'s terminals, so if the fleet
+                // arrived first you kept wherever that had put you.
+                if case .ok = result {
+                    let without = store.fleet.workspaces.filter {
+                        !(($0.host ?? "") == (ws.host ?? "") && $0.id == ws.id)
+                    }
+                    let next = Self.healed(selection, in: without, was: [ws])
+                    if next != selection { selection = next }
                 }
                 return result
             }
@@ -2484,16 +2494,19 @@ struct ContentView: View {
         select(ordered[next])
     }
 
-    /// Move the selection off a terminal that has gone.
+    /// Move the selection off a terminal, or a worktree, that has gone.
     ///
     /// Prefers to stay where the user was looking: another terminal in the same
     /// workspace, whatever wants attention first, then anything running. Only
-    /// falls back to the workspace itself when the workspace is empty.
+    /// falls back to the workspace itself when the workspace is empty, and to a
+    /// sibling worktree on the same runner when the workspace itself is gone.
     ///
-    /// The one rule for every way a terminal can disappear, closing it here
-    /// with ⌘W included. See `healed(_:in:)`, which is the rule itself.
-    private func healSelection() {
-        let next = Self.healed(selection, in: store.fleet.workspaces)
+    /// The one rule for every way a terminal or a worktree can disappear,
+    /// closing one here with ⌘W included. See `healed(_:in:was:)`, which is the
+    /// rule itself. `previous` is the fleet before the change, which is the only
+    /// place a removed worktree's repository can still be read.
+    private func healSelection(previous: [Workspace] = []) {
+        let next = Self.healed(selection, in: store.fleet.workspaces, was: previous)
         if next != selection { selection = next }
     }
 
@@ -2501,27 +2514,39 @@ struct ContentView: View {
     /// selection when it is not.
     ///
     /// Static and free of the view so it can be tested; `healSelection` holds
-    /// only the assignment. Never leaves the workspace while the workspace is
-    /// there: a closed terminal's neighbour is in the worktree you were
-    /// working in, not wherever the fleet happens to list a running terminal
-    /// first. The phones keep the same promise their own way, clamping to the
-    /// neighbouring tab (`ShellFleet.reseat`).
+    /// only the assignment.
+    ///
+    /// - **Never leaves the workspace while the workspace is there.** A closed
+    ///   terminal's neighbor is in the worktree you were working in, not
+    ///   wherever the fleet happens to list a running terminal first. The
+    ///   phones keep the same promise their own way, clamping to the
+    ///   neighboring tab (`ShellFleet.reseat`).
+    /// - **Never leaves the runner.** When the worktree itself is gone, a
+    ///   terminal selection and a worktree selection both land on a sibling
+    ///   worktree on the same runner (see `sibling(of:host:in:was:)`), or on
+    ///   nothing. It used to take the first worktree in the merged fleet,
+    ///   which is often another runner's, and it left a selected worktree's
+    ///   id in place after the worktree was gone.
     nonisolated static func healed(
-        _ selection: Selection?, in workspaces: [Workspace]
+        _ selection: Selection?, in workspaces: [Workspace], was previous: [Workspace] = []
     ) -> Selection? {
-        guard case .terminal(let host, let workspaceID, let terminalID) = selection else {
-            return selection
+        let host: String
+        let workspaceID: String
+        let terminalID: String?
+        switch selection {
+        case nil: return nil
+        case .workspace(let h, let w): (host, workspaceID, terminalID) = (h, w, nil)
+        case .terminal(let h, let w, let t): (host, workspaceID, terminalID) = (h, w, t)
         }
         guard
             let workspace = workspaces.first(where: {
                 ($0.host ?? "") == host && $0.id == workspaceID
             })
         else {
-            // The whole workspace went. Land on whatever is left rather than
-            // on nothing.
-            return workspaces.first.map { .workspace(host: $0.host ?? "", id: $0.id) }
+            return sibling(of: workspaceID, host: host, in: workspaces, was: previous)
         }
-        guard !workspace.terminals.contains(where: { $0.id == terminalID }) else {
+        guard let terminalID, !workspace.terminals.contains(where: { $0.id == terminalID })
+        else {
             return selection
         }
 
@@ -2531,6 +2556,27 @@ struct ContentView: View {
             ?? candidates.first
         return next.map { .terminal(host: host, workspace: workspaceID, terminal: $0.id) }
             ?? .workspace(host: host, id: workspaceID)
+    }
+
+    /// The worktree to land on when `workspaceID` is gone: one on the same
+    /// runner, in the same repository if `previous` still says which that was,
+    /// and one the sidebar actually draws before a hidden one. Nil when the
+    /// runner has none left, because landing on another runner is the app
+    /// moving you somewhere you never asked to go.
+    nonisolated static func sibling(
+        of workspaceID: String, host: String, in workspaces: [Workspace],
+        was previous: [Workspace]
+    ) -> Selection? {
+        let repository = previous.first {
+            ($0.host ?? "") == host && $0.id == workspaceID
+        }?.repository
+        let sameRunner = workspaces.filter { ($0.host ?? "") == host && $0.id != workspaceID }
+        let shown = sameRunner.filter { !$0.isHidden }
+        let next =
+            shown.first(where: { repository != nil && $0.repository == repository })
+            ?? shown.first
+            ?? sameRunner.first
+        return next.map { .workspace(host: host, id: $0.id) }
     }
 
     private func selectTerminal(at index: Int) {
