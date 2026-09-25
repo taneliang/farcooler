@@ -376,6 +376,15 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// looks exactly the same, so a screen with this nil keeps the spinner and
     /// the "still starting" ladder it already had.
     var agentFailure: String?
+    /// The board task this pane was opened for, as the uuid a `TaskRow`
+    /// carries, or nil for a pane nobody dispatched.
+    ///
+    /// Sent as `taskId` by `Session::fleet` — `task_of` in
+    /// `crates/client/src/session.rs` — and absent, never the nil uuid, when
+    /// there is none. Optional for this type's rule, and absent from every
+    /// runner that does not advertise `terminal_task`; see
+    /// `TaskAgentLink.speaksOfAgents` for what a board says then.
+    var taskId: String?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
 
@@ -1059,3 +1068,15 @@ enum StateKind {
 }
 
 extension StateKind: Equatable {}
+
+/// The phone's terminal, as the board asks about it.
+///
+/// Internal like the type, and conforming to the board's public protocol so
+/// that `TaskRow.livePanes` asks this model and not a copy made for the
+/// purpose. `runsAgent` is `TaskAgentLink.runsAgent`, the Mac's rule, so the
+/// two apps agree about which panes are agents.
+extension Terminal: TaskBoardPane {
+    var boardTaskID: String? { taskId }
+    var boardState: String { state }
+    var runsAgent: Bool { TaskAgentLink.runsAgent(preset: preset, isChangesPane: isChangesPane) }
+}

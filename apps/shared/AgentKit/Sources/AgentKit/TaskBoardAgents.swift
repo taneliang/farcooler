@@ -4,14 +4,16 @@ import Foundation
 //
 // Beside `TaskBoardModel` and for its reason: every rule here decides a
 // sentence or a link somebody acts on, and a rule that lives in a view body is
-// one no suite calls. The Mac draws these; `swift test --package-path
-// apps/shared/AgentKit` is what checks them.
+// one no suite calls. The Mac and the iPhone both draw these, which is the
+// other reason they are here: one rule, so the two agree about the same card.
+// `swift test --package-path apps/shared/AgentKit` is what checks them.
 //
 // ## Where "working" comes from
 //
 // The runner records which task a terminal was opened for (`terminals.task_id`,
-// set by `farcooler task dispatch` and `terminal new --task`), and both of the
-// CLI's terminal projections carry it as `taskId`. The rule for whether such a
+// set by `farcooler task dispatch` and `terminal new --task`). Both of the
+// CLI's terminal projections carry it as `taskId` for the Mac, and so does the
+// client core's fleet (`Session::fleet`) for the phone. The rule for whether such a
 // pane is still ON the task is the CLI's own `working_on`
 // (crates/cli/src/tasks.rs): the task id matches and the pane is running,
 // starting, or unknown. This adds one clause the CLI does not need: the pane
@@ -54,6 +56,57 @@ public enum TaskAgentLink {
     public static func isWorking(_ pane: some TaskBoardPane, on taskID: String) -> Bool {
         guard let id = pane.boardTaskID, !id.isEmpty, id == taskID else { return false }
         return pane.runsAgent && liveStates.contains(pane.boardState)
+    }
+}
+
+extension TaskAgentLink {
+    /// Whether a pane running `preset` is running an agent: not a shell, and
+    /// not a changes pane.
+    ///
+    /// The Mac's `Terminal.runsAgent` and the phone's both ask this, so the two
+    /// agree about the same pane. `preset` is what the runner reports is
+    /// running — `claude`, `codex:gpt-5`, `zsh` — and a live plain shell
+    /// reports its real process name rather than the word `shell`, so every
+    /// shell's name is refused here, not only that one. A changes pane runs
+    /// `farcooler`, which is not a shell and is not an agent either: the
+    /// daemon never dispatches one for a task, and a pill that could lead to a
+    /// diff would be a rule that works by luck.
+    public static func runsAgent(preset: String, isChangesPane: Bool) -> Bool {
+        guard !isChangesPane else { return false }
+        let name = preset.split(separator: ":").first.map(String.init) ?? ""
+        guard !name.isEmpty else { return false }
+        return name != "shell" && !shells.contains(name.lowercased())
+    }
+
+    /// The names a plain shell reports itself by.
+    static let shells: Set<String> = ["sh", "zsh", "bash", "fish", "dash", "ksh", "-zsh"]
+
+    /// Whether a board may say anything about agents on one runner.
+    ///
+    /// Two gates, the Mac's `BoardAgents.on` rule. The runner has to record
+    /// which pane works which task (`terminal_task`), and it has to be
+    /// connected right now: connecting, reconnecting and unreachable all mean
+    /// the panes are the last ones read before the link went, kept so the
+    /// screen stays put, and the agents in them may have exited since. So a
+    /// runner that is not connected gets no pills, no "No Agent", and no count
+    /// — "can't say", which is different from "none".
+    public static func speaksOfAgents(connected: Bool, build: DaemonBuild?) -> Bool {
+        connected && build?.can("terminal_task") == true
+    }
+
+    /// Menu items for several panes on one card, told apart even where their
+    /// names are not: titles that collide get the pane's short id after them.
+    ///
+    /// `titles[i]` and `shorts[i]` are one pane's. The Mac's `BoardPane.titles`
+    /// makes the same choice.
+    public static func menuTitles(_ titles: [String], shorts: [String]) -> [String] {
+        let counts = Dictionary(titles.map { ($0, 1) }, uniquingKeysWith: +)
+        return titles.enumerated().map { index, title in
+            guard counts[title, default: 0] > 1, shorts.indices.contains(index) else {
+                return title
+            }
+            return "\(title) (\(shorts[index]))"
+        }
     }
 }
 

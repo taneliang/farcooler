@@ -848,15 +848,15 @@ enum StateKind {
     }
 }
 
-/// A terminal as the board reads it. The rule itself is AgentKit's
-/// `TaskAgentLink.isWorking`; what is decided here is only what "runs an
-/// agent" means for this app's model.
+/// A terminal as the board reads it. Both rules are AgentKit's —
+/// `TaskAgentLink.isWorking`, and `TaskAgentLink.runsAgent` for what "runs an
+/// agent" means — so this app and the phone agree about the same pane.
 extension Terminal: TaskBoardPane {
     var boardTaskID: String? { taskId }
     var boardState: String { state }
-    /// `hasDetectedAgent` and not a changes pane. The changes pane's process is
+    /// Not a shell and not a changes pane. The changes pane's process is
     /// `farcooler`, which `hasDetectedAgent` would take for an agent — and the
     /// daemon never dispatches one for a task, but a pill that could lead to a
     /// diff is a rule that works by luck.
-    var runsAgent: Bool { hasDetectedAgent && !isChangesPane }
+    var runsAgent: Bool { TaskAgentLink.runsAgent(preset: preset, isChangesPane: isChangesPane) }
 }

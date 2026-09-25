@@ -156,3 +156,37 @@ private func row(
     #expect(TaskBoardModel.agentsHelp(1) == "An agent is on 1 task")
     #expect(TaskBoardModel.agentsHelp(3) == "Agents are on 3 tasks")
 }
+
+/// Which panes are agents, by the rule the Mac and the phone share: a
+/// shell's name in any of the spellings a live shell reports is not one, nor
+/// is a changes pane, nor a pane with no name at all.
+@Test func anAgentIsNeitherAShellNorAChangesPane() {
+    for preset in ["claude", "codex:gpt-5", "cursor", "aider"] {
+        #expect(TaskAgentLink.runsAgent(preset: preset, isChangesPane: false), "\(preset)")
+    }
+    for preset in ["shell", "zsh", "-zsh", "fish", "bash", "sh", "dash", "ksh", "ZSH", ""] {
+        #expect(!TaskAgentLink.runsAgent(preset: preset, isChangesPane: false), "\(preset)")
+    }
+    #expect(!TaskAgentLink.runsAgent(preset: "farcooler", isChangesPane: true))
+    #expect(!TaskAgentLink.runsAgent(preset: "claude", isChangesPane: true))
+}
+
+/// A board speaks of agents only on a connected runner that records which
+/// pane works which task.
+@Test func aBoardSpeaksOfAgentsOnlyOnAConnectedRunnerThatRecordsThem() {
+    let records = DaemonBuild(
+        version: "1", matches: true, platform: "", capabilities: ["tasks", "terminal_task"])
+    let doesNot = DaemonBuild(version: "1", matches: true, platform: "", capabilities: ["tasks"])
+    #expect(TaskAgentLink.speaksOfAgents(connected: true, build: records))
+    #expect(!TaskAgentLink.speaksOfAgents(connected: false, build: records))
+    #expect(!TaskAgentLink.speaksOfAgents(connected: true, build: doesNot))
+    #expect(!TaskAgentLink.speaksOfAgents(connected: true, build: nil))
+}
+
+/// Two panes whose titles collide are told apart by their short ids; a title
+/// nothing collides with is left alone.
+@Test func menuItemsForAgentsThatShareATitleGetTheirShortIds() {
+    let titles = TaskAgentLink.menuTitles(
+        ["claude in lane", "claude in lane", "codex in lane"], shorts: ["aaa1", "bbb2", "ccc3"])
+    #expect(titles == ["claude in lane (aaa1)", "claude in lane (bbb2)", "codex in lane"])
+}

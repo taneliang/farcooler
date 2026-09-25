@@ -79,7 +79,8 @@ struct FleetDecodeTests {
               "agentSessionId": "01J8Z2",
               "agentMode": "plan",
               "availableAgentModes": ["plan", "edit"],
-              "agentFailure": "not-authenticated"
+              "agentFailure": "not-authenticated",
+              "taskId": "0198f2c0-0000-7000-8000-00000000a001"
             }
           ]
         }
@@ -198,6 +199,9 @@ struct FleetDecodeTests {
         // decodes breaks nothing and reports nothing. This list is where
         // that is meant to be caught.
         #expect(terminal.agentFailure == "not-authenticated")
+        // What takes a board card to the agent on it. Absent from a pane
+        // nobody dispatched; see `anOlderDaemonSendingOnlyTheOriginalKeysStillDecodes`.
+        #expect(terminal.taskId == "0198f2c0-0000-7000-8000-00000000a001")
     }
 
     /// The derivations the two screens actually draw, off the decoded fields.
@@ -222,6 +226,11 @@ struct FleetDecodeTests {
         // A named conversation beats the preset, and needs no ordinal.
         #expect(terminal.label == "Fix the parser")
         #expect(terminal.displayName(ordinal: 2) == "Fix the parser")
+        // The board reads the pane through these three. A changes pane is
+        // never an agent, whatever its preset says.
+        #expect(terminal.boardTaskID == "0198f2c0-0000-7000-8000-00000000a001")
+        #expect(terminal.boardState == "exited")
+        #expect(!terminal.runsAgent)
     }
 
     /// A daemon old enough to send none of the optional keys.
@@ -271,6 +280,9 @@ struct FleetDecodeTests {
         #expect(terminal.sortRank == UInt32.max)
         #expect(terminal.recentSteps.isEmpty)
         #expect(terminal.lastSaid == nil)
+        // No task, and a shell: nothing a board could take anyone to.
+        #expect(terminal.taskId == nil)
+        #expect(!terminal.runsAgent)
     }
 
     /// A daemon NEWER than this app, sending a key nothing here declares.
