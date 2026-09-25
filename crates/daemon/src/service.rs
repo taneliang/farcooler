@@ -538,7 +538,10 @@ fn exclude_locally(worktree: &Path, relative: &str) -> bool {
     if !out.status.success() {
         return false;
     }
-    let common = String::from_utf8_lossy(&out.stdout).trim_end_matches('\n').to_string();
+    // Bytes, not text: a path that isn't UTF-8 must name the directory git
+    // reads, not a lossy copy of it.
+    use std::os::unix::ffi::OsStrExt;
+    let common = std::ffi::OsStr::from_bytes(out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout));
     // Relative to the directory git ran in when it's relative at all.
     let exclude = worktree.join(common).join("info").join("exclude");
     let line = format!("/{relative}");
@@ -551,13 +554,17 @@ fn exclude_locally(worktree: &Path, relative: &str) -> bool {
         return true;
     }
     let separator = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
+    // One comment says whose these lines are, however many follow it.
+    const WHOSE: &str = "# Far Cooler's manager skill for codex";
+    let said = existing.lines().any(|l| l.trim_end() == WHOSE);
+    let comment = if said { String::new() } else { format!("{WHOSE}\n") };
     let append = || -> std::io::Result<()> {
         use std::io::Write;
         if let Some(info) = exclude.parent() {
             std::fs::create_dir_all(info)?;
         }
         let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&exclude)?;
-        file.write_all(format!("{separator}# Far Cooler's manager skill for codex\n{line}\n").as_bytes())
+        file.write_all(format!("{separator}{comment}{line}\n").as_bytes())
     };
     append().is_ok()
 }
@@ -7770,6 +7777,8 @@ mod project_skill_tests {
         assert!(text.starts_with("# mine\n*.log\n"), "the owner's lines are kept: {text}");
         let ours = format!("/{PROJECT_SKILL}");
         assert_eq!(text.lines().filter(|l| *l == ours).count(), 1, "{text}");
+        let whose = text.lines().filter(|l| l.starts_with("# Far Cooler")).count();
+        assert_eq!(whose, 1, "one comment for both of our lines: {text}");
     }
 
     /// An unedited copy of ours is not work: removing a worktree that holds
