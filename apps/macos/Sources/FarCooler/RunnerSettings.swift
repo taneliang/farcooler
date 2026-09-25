@@ -113,7 +113,7 @@ struct RunnerSettingsSheet: View {
             Text("Branches")
         } footer: {
             Text(
-                "Added to branch names New Workspace makes from what you describe. For example, "
+                "Added to the branch names Far Cooler makes for new workspaces. For example, "
                 + "\u{201c}add authentication\u{201d} becomes \u{201c}\(effectivePrefix)add-authentication\u{201d}."
             )
         }

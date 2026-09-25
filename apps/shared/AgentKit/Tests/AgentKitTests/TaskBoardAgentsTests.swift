@@ -121,7 +121,7 @@ private func row(
 
 @Test func acceptanceThatAllHoldsSaysSo() {
     let all = row(acceptance: [true, true, true, true, true]).acceptanceProgress
-    #expect(all?.sentence == "All 5 Met")
+    #expect(all?.sentence == "All 5 met")
     #expect(all?.isComplete == true)
     let one = row(acceptance: [true]).acceptanceProgress
     #expect(one?.sentence == "Met")

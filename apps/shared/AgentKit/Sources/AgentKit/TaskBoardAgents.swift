@@ -97,14 +97,16 @@ public struct TaskAcceptanceProgress: Equatable, Sendable {
     /// the one state of this line that says "ready to look at".
     public var isComplete: Bool { total > 0 && met == total }
 
-    /// `2 of 5`, or `All 5 Met` once they all are.
+    /// `2 of 5`, or `All 5 met` once they all are.
     ///
-    /// Written out rather than formatted, for `TaskRow.listed`'s reason: the
-    /// suite's assertions are English. A single line that holds reads `Met`
-    /// rather than `All 1 Met`, which is a sentence nobody would write.
+    /// Sentence case, because this is a label and not a control — the pill
+    /// beside it is the button. Written out rather than formatted, for
+    /// `TaskRow.listed`'s reason: the suite's assertions are English. A
+    /// single line that holds reads `Met` rather than `All 1 met`, which is a
+    /// sentence nobody would write.
     public var sentence: String {
         guard isComplete else { return "\(met) of \(total)" }
-        return total == 1 ? "Met" : "All \(total) Met"
+        return total == 1 ? "Met" : "All \(total) met"
     }
 }
 

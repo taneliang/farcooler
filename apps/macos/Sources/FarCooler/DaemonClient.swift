@@ -944,8 +944,17 @@ final class DaemonClient: ObservableObject {
     /// about one.
     @Published private(set) var boardGenerations: [String: Int] = [:]
 
-    /// How many times `repository`'s board has moved since this link came up.
-    func boardGeneration(for repository: String) -> Int { boardGenerations[repository] ?? 0 }
+    /// A number that changes whenever `repository`'s board may have moved.
+    ///
+    /// Its own events, plus every reconnection: a write made while the event
+    /// stream was down — a daemon restart, a network flap, a laptop asleep —
+    /// sends no event anybody hears, and the sidebar's amber count is a number
+    /// people act on. `linkGeneration` moves exactly when the link comes back,
+    /// so adding it re-reads every board once per reconnection and never
+    /// otherwise.
+    func boardGeneration(for repository: String) -> Int {
+        linkGeneration + (boardGenerations[repository] ?? 0)
+    }
 
     /// Who caused the last board move, verbatim: `user`, `manager`, or
     /// `agent:<uuid>`.

@@ -68,8 +68,20 @@ final class TaskBoardStore: ObservableObject {
         self.seenGeneration = client.boardGeneration(for: repository.id)
     }
 
-    /// How many times the runner has said this repository's board moved.
+    /// A number that moves whenever this repository's board may have moved:
+    /// its own `task` events, and every reconnection. See
+    /// `DaemonClient.boardGeneration(for:)`.
     var generation: Int { client.boardGeneration(for: repository.id) }
+
+    /// Set when a read was asked for while one was already in flight.
+    ///
+    /// The in-flight read looks at this when it lands and reads once more,
+    /// so a burst of events costs one `task list` running plus one after it,
+    /// never one per event. SwiftUI cancelling a `.task` does not stop a
+    /// `task list` already launched — `runRaw` waits on a `Process` — so
+    /// before this, five writes in a second were five processes racing, and
+    /// whichever finished last drew the board, older or not.
+    private var readAgain = false
 
     /// The first read, once, however many views ask for it.
     ///
@@ -87,9 +99,30 @@ final class TaskBoardStore: ObservableObject {
     /// editors move this state at once, and a client applying deltas would
     /// need to be right about all three. `task list` answers a board in one
     /// call, which is what makes re-reading the cheap answer.
-    func reload() async {
+    ///
+    /// One at a time per store. A call that arrives while a read is running
+    /// marks the board to be read again and returns; the running read then
+    /// reads once more when it lands. So results land in the order they were
+    /// asked for, and an older board can never be drawn over a newer one.
+    ///
+    /// Returns whether THIS call did the reading, which is what tells
+    /// `reloadIfMoved` whether it is the one that should refresh an open card.
+    @discardableResult
+    func reload() async -> Bool {
+        if reading {
+            readAgain = true
+            return false
+        }
         reading = true
         defer { reading = false }
+        repeat {
+            readAgain = false
+            await readOnce()
+        } while readAgain
+        return true
+    }
+
+    private func readOnce() async {
         let (data, _) = await client.taskBoard(repository: repository.id)
         guard let data else {
             trouble = "Far Cooler couldn’t read this board."
@@ -121,8 +154,11 @@ final class TaskBoardStore: ObservableObject {
     func reloadIfMoved() async {
         guard generation != seenGeneration else { return }
         seenGeneration = generation
-        await reload()
-        if let opened { await open(opened) }
+        // Only the call that read refreshes an open card. The ones folded into
+        // a read already running would each launch a `task show` of their own
+        // for the same card.
+        guard await reload(), let opened else { return }
+        await open(opened)
     }
 
     /// Open one card: its record, and what it is waiting on.
@@ -188,7 +224,44 @@ struct BoardPane: Identifiable, Equatable {
     /// What a menu item offering this pane says: the pane, then where it is.
     /// "claude in fix-reconnect", because two agents on one task are usually
     /// the same program, and the workspace is what tells them apart.
-    var title: String { "\(terminal.label) in \(workspace.task)" }
+    ///
+    /// Numbered the way the sidebar numbers it — "claude 2 in fix-reconnect"
+    /// — when the workspace holds two alike, because `dispatch --again` can
+    /// put the second agent in the same lane and two identical menu items
+    /// would be a coin toss. See `Workspace.ordinals()`.
+    var title: String {
+        "\(terminal.displayName(ordinal: workspace.ordinals()[terminal.id])) in \(workspace.task)"
+    }
+
+    /// Menu titles for several panes, told apart even where their names are
+    /// not: two panes the agent titled identically get their short ids.
+    static func titles(_ panes: [BoardPane]) -> [String] {
+        let plain = panes.map(\.title)
+        let counts = Dictionary(plain.map { ($0, 1) }, uniquingKeysWith: +)
+        return zip(panes, plain).map { pane, title in
+            counts[title, default: 0] > 1 ? "\(title) (\(pane.terminal.short))" : title
+        }
+    }
+
+    /// Where going to `pane` should land, looked up again in the fleet as it
+    /// is NOW rather than as it was when the card drew.
+    ///
+    /// A menu is open while the fleet moves under it, so the pane can have
+    /// exited and been reaped by the time it is chosen. Then: its workspace,
+    /// if that is still there, and nil — stay on the board and say so — if
+    /// neither is.
+    static func landing(for pane: BoardPane, in fleet: [Workspace]) -> ContentView.Selection? {
+        let host = pane.workspace.host ?? ""
+        guard
+            let workspace = fleet.first(where: {
+                ($0.host ?? "") == host && $0.id == pane.workspace.id
+            })
+        else { return nil }
+        if workspace.terminals.contains(where: { $0.id == pane.terminal.id }) {
+            return .terminal(host: host, workspace: workspace.id, terminal: pane.terminal.id)
+        }
+        return .workspace(host: host, id: workspace.id)
+    }
 }
 
 /// Every pane on a board's runner, and whether that runner says which pane
@@ -206,6 +279,22 @@ struct BoardAgents {
     var runnerRecordsTasks: Bool
 
     static let none = BoardAgents(workspaces: [], runnerRecordsTasks: false)
+
+    /// The panes a board may speak of on one runner — or none, which is
+    /// "can't say": no pills, no "No Agent", and no count in the sidebar.
+    ///
+    /// Two gates. The runner has to record which pane works which task
+    /// (`terminal_task`), and it has to be answering: a refused runner's
+    /// workspaces are the last ones read before it went quiet, kept so the
+    /// sidebar stays put, and the agents in them may have exited since.
+    /// `FleetStore.remerge` refuses a refused runner's live-pane count for
+    /// the same reason, with the same test, `state.refusal == nil`.
+    static func on(
+        _ workspaces: [Workspace], state: HostState, build: DaemonBuild?
+    ) -> BoardAgents {
+        guard state.refusal == nil, build?.can("terminal_task") == true else { return .none }
+        return BoardAgents(workspaces: workspaces, runnerRecordsTasks: true)
+    }
 
     private var panes: [BoardPane] {
         workspaces.flatMap { ws in ws.terminals.map { BoardPane(terminal: $0, workspace: ws) } }
@@ -278,7 +367,11 @@ struct TaskBoardView: View {
         // board that nothing is touching would be the shape this app spent a
         // release removing.
         .task(id: store.generation) { await store.reloadIfMoved() }
-        .task { await store.readIfNeverRead() }
+        // Keyed on the store, not run once per view: a runner removed and
+        // added back gets a new client, so the window hands this view a new
+        // store in the same place, and a `.task` with no id would never read
+        // it — the board would sit on empty columns until the next event.
+        .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
         .sheet(item: $store.opened) { row in
             TaskCard(
                 row: row, detail: store.detail, agents: agents.live(for: row),
@@ -481,7 +574,7 @@ private struct TaskCardRow: View {
     }
 }
 
-/// "2 of 5", or "All 5 Met" in the accent color once every line holds.
+/// "2 of 5", or "All 5 met" in the accent color once every line holds.
 private struct AcceptanceProgressLabel: View {
     let progress: TaskAcceptanceProgress
 
@@ -576,8 +669,9 @@ private struct GoToAgentItems: View {
             Button("Go to Agent") { onGoTo(pane) }
         } else if !live.isEmpty {
             Section("Go to Agent") {
-                ForEach(live) { pane in
-                    Button(pane.title) { onGoTo(pane) }
+                let titles = BoardPane.titles(live)
+                ForEach(Array(live.enumerated()), id: \.element.id) { index, pane in
+                    Button(titles[index]) { onGoTo(pane) }
                 }
             }
         }

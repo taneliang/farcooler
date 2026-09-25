@@ -1346,11 +1346,15 @@ struct BoardRow: View {
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        // Selected said as well as drawn: VoiceOver has no other way to know
+        // which row the window is showing.
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // Read here as well as by the board, because the counts are the
         // row's and the board is usually not on screen. Only this
-        // repository's `task` events wake it — see `boardGenerations`.
-        .task { await store.readIfNeverRead() }
+        // repository's `task` events, and reconnections, wake it — see
+        // `boardGeneration(for:)`. Keyed on the store for the reason
+        // `TaskBoardView`'s first read is: a replacement store is read.
+        .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
         .task(id: client.boardGeneration(for: store.repository.id)) { await store.reloadIfMoved() }
     }
 }

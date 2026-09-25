@@ -237,14 +237,17 @@ struct StartTaskTests {
         }
     }
 
-    /// Nothing the ⌘N path says calls the request a "task".
+    /// No refusal or failure sentence the ⌘N path composes calls the request
+    /// a "task".
     ///
     /// A task is a card on the board now, with a row of its own above every
     /// repository's workspaces, and ⌘N puts nothing there: it makes a
-    /// workspace and starts an agent. Every sentence this path can put in
-    /// front of someone is walked here, so one that drifts back to "your task"
-    /// fails rather than reintroducing the two meanings side by side.
-    @Test func noNewWorkspaceSentenceCallsTheRequestATask() {
+    /// workspace and starts an agent. What this walks is `TaskPrompt` and
+    /// `TaskFailure` — the sentences composed off the view, which are the
+    /// ones a test can call. The menu item, the palette entry, the ⌘/ row,
+    /// the panel's hints and `startTask`'s two refusals are literals in
+    /// views and are not covered here.
+    @Test func noStartFailureSentenceCallsTheRequestATask() {
         var sentences: [String] = [
             TaskPrompt.problem(String(repeating: "a", count: TaskPrompt.maxBytes + 1)) ?? "",
             TaskPrompt.problem("a\u{0}b") ?? "",

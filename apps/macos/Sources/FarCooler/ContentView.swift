@@ -773,11 +773,27 @@ struct ContentView: View {
         }
     }
 
-    /// Every pane on one runner, for the board to find the ones working a task.
+    /// Every pane on one runner, for the board to find the ones working a
+    /// task — or none while that runner is refused. See `BoardAgents.on`.
     private func boardAgents(host: String, client: DaemonClient) -> BoardAgents {
-        BoardAgents(
-            workspaces: store.fleet.workspaces.filter { ($0.host ?? "") == host },
-            runnerRecordsTasks: client.daemonBuild?.can("terminal_task") ?? false)
+        BoardAgents.on(
+            store.fleet.workspaces.filter { ($0.host ?? "") == host },
+            state: client.state, build: client.daemonBuild)
+    }
+
+    /// Go to a pane a card offered, as the fleet has it now. See
+    /// `BoardPane.landing`: its workspace when the pane has gone, and the
+    /// board with a sentence when the workspace has too.
+    private func go(to pane: BoardPane) {
+        switch BoardPane.landing(for: pane, in: store.fleet.workspaces) {
+        case .terminal(let host, let workspace, let terminal):
+            expanded.insert(workspace)
+            selection = .terminal(host: host, workspace: workspace, terminal: terminal)
+        case let landed?:
+            selection = landed
+        case nil:
+            errorBanner = "That agent has closed, and its workspace is gone."
+        }
     }
 
     /// One project's worktrees, plus its hidden section.
@@ -1535,12 +1551,21 @@ struct ContentView: View {
                     store: boardStore(for: repository, client: client, host: host),
                     client: client,
                     agents: boardAgents(host: host, client: client),
-                    onGoTo: { pane in select(pane.terminal, in: pane.workspace) }
+                    onGoTo: { pane in go(to: pane) }
                 )
                 .navigationTitle(repository.displayName)
                 .navigationSubtitle("Board")
             } else {
-                placeholder
+                // Said, rather than the generic "Select a workspace": this
+                // was a board, and the reader should know where it went.
+                ContentUnavailableView {
+                    Label("This board isn’t here", systemImage: "checklist")
+                } description: {
+                    Text(
+                        store.clients[host] == nil
+                            ? "The runner it was on isn’t in Far Cooler any more."
+                            : "Its project isn’t on this runner any more, or the runner hasn’t listed it yet.")
+                }
             }
 
         case nil:
@@ -2233,8 +2258,12 @@ struct ContentView: View {
             // to create into.
             if store.repositories.isEmpty {
                 showAddRepository = true
-            } else if case .board = selection {
-                // Already there.
+            } else if case .board(let host, let id) = selection {
+                // Already there — unless "there" has gone, which is said
+                // rather than answered with nothing.
+                if store.clients[host]?.repositories.contains(where: { $0.id == id }) != true {
+                    errorBanner = "That project’s board is gone. Choose another in the sidebar."
+                }
             } else if let target = boardTarget {
                 selection = .board(host: target.host, repository: target.repository.id)
             } else {
