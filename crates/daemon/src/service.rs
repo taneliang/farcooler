@@ -108,12 +108,14 @@ fn changes_host_command() -> String {
 }
 
 /// What Far Cooler hands a claude pane beyond its preset: both are files in
-/// this daemon's runtime directory, and both are claude's flags alone.
+/// this daemon's runtime directory. `--settings` is claude's alone;
+/// `--plugin-dir` is claude's and cursor's.
 ///
 /// - `settings` is `--settings <file>`, the hooks that make the pane report
 ///   itself (`write_claude_hook_settings`).
 /// - `plugin_dir` is `--plugin-dir <dir>`, the plugin that carries the manager
-///   skill (`write_claude_plugin`), invoked as `/farcooler:manager`.
+///   skill (`write_plugin`), invoked as `/farcooler:manager` in claude and
+///   `/manager` in cursor.
 ///
 /// One struct rather than a parameter each, because every launch path gets
 /// both from one call to `Service::prepare_launch_hooks` and hands both to
@@ -219,7 +221,17 @@ pub fn preset_command_with_hooks(
             format!("{shell} -ilc {}", shell_quote(&format!("claude{flag}{session}{settings}")))
         }
         "codex" => format!("{shell} -ilc 'codex{flag}'"),
-        "cursor" => format!("{shell} -ilc 'cursor-agent{flag}'"),
+        // `shell_quote` around the payload for claude's reason: the plugin
+        // path is quoted in turn. With no plugin directory the payload holds
+        // no quote, and this is the `'cursor-agent…'` it always was.
+        "cursor" => {
+            let plugin = extras
+                .plugin_dir
+                .as_deref()
+                .map(|p| format!(" --plugin-dir {}", shell_quote(&p.display().to_string())))
+                .unwrap_or_default();
+            format!("{shell} -ilc {}", shell_quote(&format!("cursor-agent{flag}{plugin}")))
+        }
         other if is_safe_model(other) => format!("{shell} -ilc '{other}{flag}'"),
         // An unrecognized preset that is not a plain identifier is not run at
         // all. A preset is chosen from a list; anything else is a bug or an
@@ -333,11 +345,12 @@ fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Write claude's plugin, the manager skill, into the runtime directory, and
-/// say where it went.
+/// Write the plugin that carries the manager skill into the runtime directory,
+/// and say where it went. claude and cursor are both handed it.
 ///
-/// `--plugin-dir` loads it for that session only (measured: `/farcooler:manager`
-/// answered, and the model was not offered it on its own), so like
+/// `--plugin-dir` loads it for that session only (measured in both: claude
+/// answered `/farcooler:manager`, cursor answered `/manager`, and neither
+/// model was offered it on its own), so like
 /// `claude-hooks.json` this is Far Cooler's own file in Far Cooler's own
 /// directory and nothing of the user's or the repository's is touched.
 ///
@@ -349,9 +362,9 @@ fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
 /// `None` on any failure, and the pane launches anyway, as it does without
 /// its hooks: a manager that can't be summoned is not worth a terminal that
 /// won't open.
-fn write_claude_plugin(runtime_dir: &Path) -> Option<PathBuf> {
-    use crate::skill_install::{CLAUDE_PLUGIN_DIR, Harness, render, write_atomically};
-    let dir = runtime_dir.join(CLAUDE_PLUGIN_DIR);
+fn write_plugin(runtime_dir: &Path) -> Option<PathBuf> {
+    use crate::skill_install::{Harness, PLUGIN_DIR, render, write_atomically};
+    let dir = runtime_dir.join(PLUGIN_DIR);
     let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
     for file in render(Harness::Claude, &cli) {
         let path = dir.join(file.relative);
@@ -401,23 +414,27 @@ fn install_project_hooks(worktree: &Path, socket: &Path) {
     use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
     install_project_hook_file(&worktree.join(CODEX_HOOKS), socket, merge_codex);
     install_project_hook_file(&worktree.join(CURSOR_HOOKS), socket, merge_cursor);
-    // The manager skill, on the same act: both agents' copies, which share
-    // one `SKILL.md`, so cursor's install finds codex's already there.
+    // The manager skill, on the same act, for codex: the one agent that can
+    // only read it from the worktree. cursor is handed `--plugin-dir`.
     install_project_skill(worktree, crate::skill_install::Harness::Codex);
-    install_project_skill(worktree, crate::skill_install::Harness::Cursor);
 }
 
-/// The agent whose copy of the manager skill a preset's pane reads from the
-/// worktree, or `None` for one that reads none there. claude's copy is a
-/// plugin in the runtime directory (`write_claude_plugin`). Matched on the
-/// agent exactly, like `project_hook_file_for`.
+/// Whether a preset's pane needs the manager skill written into its
+/// worktree: codex alone, which has no per-session way to load one. claude
+/// and cursor are handed the plugin in the runtime directory instead
+/// (`write_plugin`). Matched on the agent exactly, like
+/// `project_hook_file_for`.
 fn project_skill_for(preset: &str) -> Option<crate::skill_install::Harness> {
-    use crate::skill_install::Harness;
     match preset.split_once(':').map_or(preset, |(agent, _)| agent) {
-        "codex" => Some(Harness::Codex),
-        "cursor" => Some(Harness::Cursor),
+        "codex" => Some(crate::skill_install::Harness::Codex),
         _ => None,
     }
+}
+
+/// Whether a preset's program takes `--plugin-dir`: claude and cursor, both
+/// measured. Gated like the flag itself in `preset_command_with_hooks`.
+fn takes_plugin_dir(preset: &str) -> bool {
+    preset.starts_with("claude") || preset.split_once(':').map_or(preset, |(agent, _)| agent) == "cursor"
 }
 
 /// Write one agent's copy of the manager skill into a worktree, under the
@@ -2047,11 +2064,12 @@ impl Service {
     /// anybody pointed Far Cooler at. The trigger is an act — this agent, in
     /// this worktree, because somebody opened it.
     ///
-    /// **The manager skill rides on the same act.** claude's copy is a plugin
-    /// in the runtime directory, returned as `LaunchExtras::plugin_dir` beside
-    /// the settings file; codex's and cursor's are written into this worktree
-    /// by `install_project_skill`, for this pane's agent only. Nothing of it is
-    /// user-level. See `skill_install` for how each agent was measured
+    /// **The manager skill rides on the same act.** claude and cursor get a
+    /// plugin in the runtime directory, returned as `LaunchExtras::plugin_dir`
+    /// and handed over as `--plugin-dir`; codex, which has no such flag, gets a
+    /// copy written into this worktree by `install_project_skill`. Nothing of
+    /// it is user-level, and opening claude or cursor writes nothing into the
+    /// repository. See `skill_install` for how each agent was measured
     /// finding it.
     ///
     /// Never fails, in either half. A read-only mount, a `.cursor` that is a
@@ -2066,8 +2084,7 @@ impl Service {
                 merge,
             );
         }
-        // The manager skill codex and cursor read from the worktree, on the
-        // same act and for the same agent.
+        // The manager skill codex reads from the worktree, on the same act.
         if let Some(harness) = project_skill_for(preset) {
             install_project_skill(Path::new(worktree), harness);
         }
@@ -2077,9 +2094,9 @@ impl Service {
         // pane on startup rather than merely leave it quiet.
         let claude = preset.starts_with("claude");
         let settings = claude.then(|| write_claude_hook_settings(&self.root)).flatten();
-        // The manager skill, the same way and behind the same gate: a plugin in
-        // the runtime directory, handed over as `--plugin-dir`.
-        let plugin_dir = claude.then(|| write_claude_plugin(&self.root)).flatten();
+        // The manager skill: a plugin in the runtime directory, handed over as
+        // `--plugin-dir` to claude and to cursor, which both take the flag.
+        let plugin_dir = takes_plugin_dir(preset).then(|| write_plugin(&self.root)).flatten();
         LaunchExtras { settings, plugin_dir }
     }
 
@@ -3911,10 +3928,15 @@ mod preset_tests {
     /// technique is `the_settings_path_survives_both_shells_as_one_argument`'s.
     #[cfg(unix)]
     pub(super) fn claude_argv_through_both_shells(command: &str) -> String {
+        argv_through_both_shells(command, "claude")
+    }
+
+    /// The same probe for any program's launch.
+    pub(super) fn argv_through_both_shells(command: &str, program: &str) -> String {
         let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
-        // The FIRST `claude` only: it is the program, and the paths after it
-        // can hold the word (`claude-plugin`, or a temp directory's name).
-        let probe = command.replacen(&prefix, "/bin/sh -c", 1).replacen("claude", "printf ,%s", 1);
+        // The FIRST occurrence only: it is the program, and the paths after it
+        // can hold the word (a temp directory's name, say).
+        let probe = command.replacen(&prefix, "/bin/sh -c", 1).replacen(program, "printf ,%s", 1);
         assert!(probe.starts_with("/bin/sh -c"), "the prefix was found and replaced: {probe}");
         let out = std::process::Command::new("/bin/sh")
             .arg("-c")
@@ -3936,24 +3958,48 @@ mod preset_tests {
         assert_eq!(claude_argv_through_both_shells(&command), format!(",--settings,{s},--plugin-dir,{p}"));
     }
 
-    /// `--plugin-dir` is claude's. codex has no such flag and would refuse to
-    /// start, and cursor's copy of the skill comes from the worktree's
-    /// `.agents/skills` instead.
+    /// `--plugin-dir` is claude's and cursor's, measured for both. codex has no
+    /// such flag and would refuse to start; its copy of the skill comes from
+    /// the worktree's `.agents/skills` instead. `--settings` stays claude's
+    /// alone.
     #[test]
-    fn only_claude_is_handed_a_plugin_dir() {
+    fn only_claude_and_cursor_are_handed_a_plugin_dir() {
         let extras = LaunchExtras {
             settings: Some("/tmp/fc/h.json".into()),
-            plugin_dir: Some("/tmp/fc/claude-plugin".into()),
+            plugin_dir: Some("/tmp/fc/farcooler-plugin".into()),
         };
-        for preset in ["codex", "codex:gpt-5.6-sol", "cursor", "shell", "aider", CHANGES_PRESET] {
+        let sid = "018f5b2c-0000-7000-8000-00000000000e";
+        for preset in ["codex", "codex:gpt-5.6-sol", "shell", "aider", CHANGES_PRESET] {
             let with = preset_command_with_hooks(preset, None, &extras);
             assert!(!with.contains("--plugin-dir"), "{preset}: {with}");
             for resumable in [false, true] {
-                let back = terminal_mode_command(preset, "018f5b2c-0000-7000-8000-00000000000e", resumable, &extras);
+                let back = terminal_mode_command(preset, sid, resumable, &extras);
                 assert!(!back.contains("--plugin-dir"), "{preset} resumable={resumable}: {back}");
             }
         }
-        assert!(preset_command_with_hooks("claude:opus", None, &extras).contains("--plugin-dir"));
+        for preset in ["claude", "claude:opus", "cursor", "cursor:auto"] {
+            assert!(preset_command_with_hooks(preset, None, &extras).contains("--plugin-dir"), "{preset}");
+            for resumable in [false, true] {
+                let back = terminal_mode_command(preset, sid, resumable, &extras);
+                assert!(back.contains("--plugin-dir"), "{preset} resumable={resumable}: {back}");
+            }
+        }
+        for preset in ["cursor", "cursor:auto"] {
+            let with = preset_command_with_hooks(preset, None, &extras);
+            assert!(!with.contains("--settings"), "cursor has no --settings: {with}");
+        }
+    }
+
+    /// cursor's launch, through both shells: the runtime directory has a
+    /// space in it on macOS, and the plugin path must arrive as one argument.
+    /// The model flag stays where it was.
+    #[cfg(unix)]
+    #[test]
+    fn a_cursor_launch_carries_the_plugin_dir_as_one_argument() {
+        let p = "/tmp/My Runner/farcooler-plugin";
+        let extras = LaunchExtras { settings: Some("/tmp/My Runner/h.json".into()), plugin_dir: Some(p.into()) };
+        let command = preset_command_with_hooks("cursor:auto", None, &extras);
+        assert_eq!(argv_through_both_shells(&command, "cursor-agent"), format!(",--model,auto,--plugin-dir,{p}"));
     }
 
     #[test]
@@ -6782,7 +6828,7 @@ mod hook_file_tests {
     /// The call site, end to end: parse `--plugin-dir` out of the command
     /// tmux was actually handed, and read the skill back from where it
     /// points. Fails if `prepare_launch_hooks` stops writing the plugin, even
-    /// with `write_claude_plugin` itself still present and working.
+    /// with `write_plugin` itself still present and working.
     #[tokio::test]
     async fn opening_a_claude_pane_puts_the_skill_where_the_flag_points() {
         let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
@@ -7589,17 +7635,84 @@ mod project_skill_tests {
         assert!(yaml.contains("allow_implicit_invocation: false"), "{yaml}");
     }
 
-    /// cursor reads the same `SKILL.md` and never reads codex's policy, so it
-    /// gets the one file and not the other.
+    /// The directory a pane's program was handed as `--plugin-dir`, read out
+    /// of the command tmux was actually given.
+    async fn plugin_dir_of(svc: &Service, terminal: Uuid, program: &str) -> PathBuf {
+        let command = super::restart_wiring_tests::pane_start_command(svc, terminal).await;
+        // tmux prints a start command inside double quotes, with a backslash
+        // before each backslash, double quote and dollar sign in it.
+        let quoted = command.strip_prefix('"').and_then(|c| c.strip_suffix('"')).unwrap_or(&command);
+        let (mut unquoted, mut chars) = (String::new(), quoted.chars());
+        while let Some(c) = chars.next() {
+            unquoted.push(if c == '\\' { chars.next().unwrap_or(c) } else { c });
+        }
+        let shell = format!("{} -ilc", farcooler_core::shell::login_shell());
+        let from_shell = unquoted.find(&shell).map_or(unquoted.as_str(), |at| &unquoted[at..]);
+        let argv = super::preset_tests::argv_through_both_shells(from_shell, program);
+        let dir = argv
+            .split(',')
+            .skip_while(|a| *a != "--plugin-dir")
+            .nth(1)
+            .unwrap_or_else(|| panic!("launched with no --plugin-dir: {command} -> {argv}"));
+        PathBuf::from(dir)
+    }
+
+    /// The owner's ruling: cursor takes the skill from `--plugin-dir`, like
+    /// claude, so opening cursor writes nothing into the repository. Read
+    /// back from the filesystem, not from what any function returned.
     #[tokio::test]
-    async fn opening_cursor_puts_only_the_skill_there() {
+    async fn opening_cursor_writes_nothing_into_the_worktree() {
         let (_dir, svc, ws) = a_workspace().await;
+        let status = || {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&ws.worktree_path)
+                .args(["status", "--porcelain", "--untracked-files=all", "--ignored"])
+                .output()
+                .expect("git status");
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                // cursor's HOOKS file is the one write a cursor launch makes,
+                // under the hooks ruling; this test is about the skill.
+                .filter(|l| !l.contains(crate::hook_install::CURSOR_HOOKS))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        let before = status();
 
         svc.create_terminal(ws.id, "agent", "cursor").await.expect("a cursor pane");
 
-        let text = std::fs::read_to_string(skill(&ws)).expect("the skill");
-        assert!(text.contains("disable-model-invocation: true"), "{text}");
-        assert!(!policy(&ws).exists(), "codex's policy is for codex");
+        assert!(!Path::new(&ws.worktree_path).join(".agents").exists(), "no skill in the worktree");
+        assert_eq!(status(), before, "opening cursor wrote something into the worktree");
+    }
+
+    /// And the flag points at the skill: parsed out of the command tmux was
+    /// handed, and read back from where it points.
+    #[tokio::test]
+    async fn opening_a_cursor_pane_puts_the_skill_where_the_flag_points() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "cursor:auto").await.expect("a cursor pane");
+
+        let dir = plugin_dir_of(&svc, term.id, "cursor-agent").await;
+        let text = std::fs::read_to_string(dir.join("skills/manager/SKILL.md"))
+            .unwrap_or_else(|e| panic!("no skill where --plugin-dir points ({}): {e}", dir.display()));
+        assert!(text.contains("**Never execute a task yourself.**"), "{text}");
+        let manifest = std::fs::read_to_string(dir.join(".cursor-plugin/plugin.json")).expect("cursor's manifest");
+        assert!(manifest.contains("\"farcooler\""), "{manifest}");
+    }
+
+    /// A restarted cursor pane is launched again, and keeps the flag.
+    #[tokio::test]
+    async fn a_restarted_cursor_pane_keeps_the_plugin_dir() {
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "cursor").await.expect("a cursor pane");
+        std::fs::remove_dir_all(svc.root.join(crate::skill_install::PLUGIN_DIR)).expect("take it away");
+
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        let dir = plugin_dir_of(&svc, term.id, "cursor-agent").await;
+        assert!(dir.join("skills/manager/SKILL.md").exists(), "the restart wrote it again");
+        assert!(!Path::new(&ws.worktree_path).join(".agents").exists());
     }
 
     /// A restart is a launch, the same as for the hooks: a worktree cleaned
@@ -7625,7 +7738,7 @@ mod project_skill_tests {
         svc.create_terminal(ws.id, "plain", "shell").await.expect("a shell pane");
 
         assert!(!Path::new(&ws.worktree_path).join(".agents").exists());
-        assert!(svc.root.join(crate::skill_install::CLAUDE_PLUGIN_DIR).exists(), "claude's own copy");
+        assert!(svc.root.join(crate::skill_install::PLUGIN_DIR).exists(), "the plugin claude is handed");
     }
 
     /// A user's own skill survives, and so does an edited copy of ours: the

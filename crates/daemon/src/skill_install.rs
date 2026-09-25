@@ -5,24 +5,26 @@
 //! doc (claude 2.1.282, codex-cli 0.153.4, cursor-agent 2026.09.23):
 //!
 //! - **claude** loads a plugin directory named by `--plugin-dir`, for that
-//!   session only. Far Cooler writes the plugin into its own runtime directory
-//!   (`CLAUDE_PLUGIN_DIR`), the way it writes `claude-hooks.json` for
-//!   `--settings`, so no file of the user's and none in the repository is
-//!   touched. It is invoked as `/farcooler:manager`.
+//!   session only, and invokes its skill as `/farcooler:manager`.
+//! - **cursor-agent** accepts `--plugin-dir` too, and invokes the same skill
+//!   as `/manager`, with no namespace. One directory carrying both
+//!   `.claude-plugin/plugin.json` and `.cursor-plugin/plugin.json` loads in
+//!   both. Far Cooler writes it into its own runtime directory (`PLUGIN_DIR`),
+//!   the way it writes `claude-hooks.json` for `--settings`, so nothing of the
+//!   user's and nothing in the repository is touched, and it is regenerated on
+//!   every launch.
 //! - **codex** reads `.agents/skills/<name>/SKILL.md` in the directory it was
 //!   opened in, and nothing per session: `-c skills.config=[{path=…}]` from
 //!   outside a repository did not add a skill, whether `path` named the file
-//!   or its directory. It is invoked as `$farcooler-manager`, and
-//!   `agents/openai.yaml` keeps the model from reaching for it on its own.
-//! - **cursor-agent** reads the same `.agents/skills/` and is invoked as
-//!   `/farcooler-manager`. It also accepts `--plugin-dir`, measured, but the
-//!   owner's install rule for cursor is the project-local one, so that flag is
-//!   not used.
+//!   or its directory. So codex alone gets a copy in the worktree, invoked as
+//!   `$farcooler-manager`, and `agents/openai.yaml` keeps the model from
+//!   reaching for it on its own.
 //!
-//! codex and cursor share one `SKILL.md`, byte for byte. codex was measured
-//! loading a file that carries cursor's `disable-model-invocation: true`, so
-//! one file serves both, and neither harness's install can read the other's
-//! copy as an edit of its own.
+//! cursor ALSO reads `.agents/skills`, so in a worktree where codex has run a
+//! cursor pane lists codex's copy as `/farcooler-manager` beside its own
+//! `/manager`. That copy keeps `disable-model-invocation: true` so cursor's
+//! model can't reach for it either, and it is deliberately named differently
+//! from the plugin's: see `the_worktree_copy_never_shadows_the_plugin_skill`.
 //!
 //! **Ours is recorded in the file**, because a skill is a whole file rather
 //! than an entry in a shared list the way a hook is. The last line of every
@@ -66,10 +68,11 @@ pub enum Installed {
     Failed,
 }
 
-/// Where claude's plugin lives, relative to this daemon's runtime directory.
-pub const CLAUDE_PLUGIN_DIR: &str = "claude-plugin";
+/// Where the plugin claude and cursor are handed lives, relative to this
+/// daemon's runtime directory.
+pub const PLUGIN_DIR: &str = "farcooler-plugin";
 
-/// The skill codex and cursor both read, relative to a worktree's root.
+/// The skill codex reads, relative to a worktree's root. cursor sees it too.
 pub const PROJECT_SKILL: &str = ".agents/skills/farcooler-manager/SKILL.md";
 
 /// codex's invocation policy for it. cursor never reads this file.
@@ -86,15 +89,16 @@ pub const PROJECT_SKILL_FILES: &[&str] = &[PROJECT_SKILL, PROJECT_SKILL_POLICY];
 /// fill. Kept as a file so it reads as what an agent reads.
 const BODY: &str = include_str!("../assets/manager/SKILL.md");
 
-/// The frontmatter every copy carries, differing only in `name`: claude
-/// namespaces a plugin's skill itself (`/farcooler:manager`), and codex and
-/// cursor read `.agents/skills`, which is shared with whatever other skills a
-/// repository has, so that copy says whose it is in its name.
+/// The frontmatter every copy carries, differing only in `name`: the plugin's
+/// is `manager` (claude namespaces it as `/farcooler:manager`, cursor shows it
+/// as `/manager`), and codex's `.agents/skills` copy, which sits beside
+/// whatever other skills a repository has, says whose it is in its name.
 ///
 /// `disable-model-invocation: true` for claude and cursor, which both read it:
 /// measured, a model with this skill installed answered that it had no such
 /// skill available. codex ignores the key (measured: it still loads the file)
-/// and reads `agents/openai.yaml` instead.
+/// and reads `agents/openai.yaml` instead, but its copy keeps the key because
+/// cursor reads `.agents/skills` as well.
 fn frontmatter(name: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: Manage this repository's Far Cooler task board. Reads the \
@@ -145,14 +149,20 @@ const CODEX_POLICY: &str = "policy:\n  allow_implicit_invocation: false\n";
 ///
 /// The worktree copies are signed (`sign_markdown`, `sign_yaml`), because a
 /// worktree is somebody else's directory and the signature is how a later
-/// install or `remove_ours` tells our unedited file from theirs. claude's copy
-/// goes to Far Cooler's own runtime directory and is not signed: nobody else
-/// writes there, and it is rewritten whenever it differs.
+/// install or `remove_ours` tells our unedited file from theirs. The plugin
+/// claude and cursor get goes to Far Cooler's own runtime directory and is not
+/// signed: nobody else writes there, and it is rewritten whenever it differs.
 pub fn render(harness: Harness, cli: &str) -> Vec<SkillFile> {
     match harness {
-        Harness::Claude => vec![
+        // One plugin directory for both: each reads its own manifest and the
+        // same `skills/manager/SKILL.md`.
+        Harness::Claude | Harness::Cursor => vec![
             SkillFile {
                 relative: ".claude-plugin/plugin.json",
+                contents: "{\"name\":\"farcooler\"}\n".to_string(),
+            },
+            SkillFile {
+                relative: ".cursor-plugin/plugin.json",
                 contents: "{\"name\":\"farcooler\"}\n".to_string(),
             },
             SkillFile { relative: "skills/manager/SKILL.md", contents: body("manager", cli) },
@@ -161,10 +171,6 @@ pub fn render(harness: Harness, cli: &str) -> Vec<SkillFile> {
             SkillFile { relative: PROJECT_SKILL, contents: sign_markdown(&body("farcooler-manager", cli)) },
             SkillFile { relative: PROJECT_SKILL_POLICY, contents: sign_yaml(CODEX_POLICY) },
         ],
-        Harness::Cursor => vec![SkillFile {
-            relative: PROJECT_SKILL,
-            contents: sign_markdown(&body("farcooler-manager", cli)),
-        }],
     }
 }
 
@@ -430,7 +436,7 @@ mod tests {
     #[test]
     fn the_marker_hash_covers_the_body_and_not_itself() {
         let mut checked = 0;
-        for h in [Harness::Codex, Harness::Cursor] {
+        for h in [Harness::Codex] {
             for f in render(h, "farcooler") {
                 checked += 1;
                 let body_end = f.contents.trim_end_matches('\n').rfind('\n').unwrap() + 1;
@@ -440,9 +446,9 @@ mod tests {
                 assert!(marker.ends_with('\n') && marker.matches('\n').count() == 1, "{marker:?}");
             }
         }
-        // codex's two files and cursor's one. A render that wrote nothing
-        // would otherwise pass this by checking nothing.
-        assert_eq!(checked, 3);
+        // codex's two files, the only ones written into a worktree. A render
+        // that wrote nothing would otherwise pass this by checking nothing.
+        assert_eq!(checked, 2);
     }
 
     const ALL: [Harness; 3] = [Harness::Claude, Harness::Codex, Harness::Cursor];
@@ -605,23 +611,46 @@ mod tests {
     #[test]
     fn each_harness_gets_its_own_files() {
         let names = |h| render(h, "farcooler").into_iter().map(|f| f.relative).collect::<Vec<_>>();
-        assert_eq!(names(Harness::Claude), vec![".claude-plugin/plugin.json", "skills/manager/SKILL.md"]);
+        let plugin = vec![".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", "skills/manager/SKILL.md"];
+        assert_eq!(names(Harness::Claude), plugin);
         assert_eq!(names(Harness::Codex), vec![PROJECT_SKILL, PROJECT_SKILL_POLICY]);
-        assert_eq!(names(Harness::Cursor), vec![PROJECT_SKILL]);
+        // cursor takes the same plugin directory as claude, through its own
+        // manifest (measured: one directory holding both loads in both).
+        assert_eq!(render(Harness::Cursor, "farcooler"), render(Harness::Claude, "farcooler"));
 
         let claude = render(Harness::Claude, "farcooler");
-        let manifest: serde_json::Value = serde_json::from_str(&claude[0].contents).unwrap();
-        assert_eq!(manifest, serde_json::json!({"name": "farcooler"}));
-        assert!(claude[1].contents.starts_with("---\nname: manager\n"), "{}", claude[1].contents);
-        assert!(claude[1].contents.contains("\ndisable-model-invocation: true\n"));
+        for manifest in &claude[..2] {
+            let v: serde_json::Value = serde_json::from_str(&manifest.contents).unwrap();
+            assert_eq!(v, serde_json::json!({"name": "farcooler"}), "{}", manifest.relative);
+        }
+        assert!(claude[2].contents.starts_with("---\nname: manager\n"), "{}", claude[2].contents);
+        assert!(claude[2].contents.contains("\ndisable-model-invocation: true\n"));
 
         let codex = render(Harness::Codex, "farcooler");
+        assert!(codex[0].contents.starts_with("---\nname: farcooler-manager\n"));
+        // cursor also reads `.agents/skills`, so codex's copy keeps the key
+        // that stops cursor's model reaching for it on its own.
+        assert!(codex[0].contents.contains("\ndisable-model-invocation: true\n"));
         assert!(codex[1].contents.contains("allow_implicit_invocation: false"));
-        let cursor = render(Harness::Cursor, "farcooler");
-        assert!(cursor[0].contents.starts_with("---\nname: farcooler-manager\n"));
-        assert!(cursor[0].contents.contains("\ndisable-model-invocation: true\n"));
-        // One file serves both: whichever launches first writes it, and the
-        // other must not read it as an edit.
-        assert_eq!(codex[0].contents, cursor[0].contents);
+    }
+
+    /// Measured: cursor-agent handed `--plugin-dir` in a worktree that also
+    /// holds codex's `.agents/skills/farcooler-manager/` lists both skills
+    /// when their names differ, and when they're the same it lists one and
+    /// runs the WORKTREE copy. So a plugin skill named like the worktree one
+    /// would be silently replaced by whatever codex last wrote there (or the
+    /// owner edited), and cursor would lose "regenerated on every launch"
+    /// exactly where codex has run. The names are kept apart on purpose.
+    #[test]
+    fn the_worktree_copy_never_shadows_the_plugin_skill() {
+        let name = |text: &str| {
+            text.lines().find_map(|l| l.strip_prefix("name: ")).map(str::to_string).expect("a name")
+        };
+        let plugin = render(Harness::Cursor, "farcooler")
+            .into_iter()
+            .find(|f| f.relative.ends_with("SKILL.md"))
+            .unwrap();
+        let project = render(Harness::Codex, "farcooler").into_iter().find(|f| f.relative == PROJECT_SKILL).unwrap();
+        assert_ne!(name(&plugin.contents), name(&project.contents));
     }
 }
