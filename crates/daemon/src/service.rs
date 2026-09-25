@@ -746,8 +746,10 @@ async fn install_project_hooks(worktree: &Path, socket: &Path) {
     // a file written under a name nothing filters just quietly becomes the
     // user's uncommitted work.
     use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
-    install_project_hook_file(worktree, CODEX_HOOKS, socket, merge_codex).await;
-    install_project_hook_file(worktree, CURSOR_HOOKS, socket, merge_cursor).await;
+    // One time budget for both files' gits (`git::git_bytes_by`).
+    let deadline = tokio::time::Instant::now() + git::GIT_TIMEOUT;
+    install_project_hook_file(worktree, CODEX_HOOKS, socket, merge_codex, deadline).await;
+    install_project_hook_file(worktree, CURSOR_HOOKS, socket, merge_cursor, deadline).await;
     // Not the manager skill. codex's copy is written when a codex pane is
     // opened (`prepare_launch_hooks`), so a worktree only claude or cursor
     // ever runs in never holds a document none of them reads.
@@ -895,7 +897,15 @@ fn takes_plugin_dir(preset: &str) -> bool {
 ///
 /// Never fails, like `install_project_hooks`: a worktree we can't write
 /// costs this agent the skill and nothing else.
-async fn install_project_skill(worktree: &Path, harness: crate::skill_install::Harness) {
+///
+/// Every git it runs shares `deadline` with the rest of the launch's
+/// (`git::git_bytes_by`), so a git that hangs costs the launch one budget,
+/// not one per file.
+async fn install_project_skill(
+    worktree: &Path,
+    harness: crate::skill_install::Harness,
+    deadline: tokio::time::Instant,
+) {
     use crate::skill_install::{Holds, Installed, crosses_a_symlink, holds, install_file, render};
     let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
     for file in render(harness, &cli) {
@@ -914,14 +924,14 @@ async fn install_project_skill(worktree: &Path, harness: crate::skill_install::H
             tracing::info!(path = %path.display(), "leaving somebody's skill file alone");
             continue;
         }
-        if git_tracks_without_blocking(worktree, file.relative).await {
+        if git_tracks_without_blocking(worktree, file.relative, deadline).await {
             tracing::info!(
                 path = %path.display(),
                 "the repository tracks this file; leaving the manager skill out of it"
             );
             continue;
         }
-        if !exclude_locally(worktree, file.relative).await {
+        if !exclude_locally(worktree, file.relative, deadline).await {
             tracing::warn!(
                 path = %path.display(),
                 "could not tell git to ignore the manager skill; not writing it"
@@ -935,11 +945,11 @@ async fn install_project_skill(worktree: &Path, harness: crate::skill_install::H
 }
 
 /// Whether git tracks `relative` in `worktree`, for the launch paths: through
-/// `git::git_bytes`, so it holds no runtime thread while git runs, and a git
-/// that hangs (a slow filesystem, an fsmonitor hook) is killed at
-/// `git::GIT_TIMEOUT` instead of pinning a worker.
-async fn git_tracks_without_blocking(worktree: &Path, relative: &str) -> bool {
-    tracked_by(git::git_bytes(worktree, &["ls-files", "--", relative]).await)
+/// `git::git_bytes_by`, so it holds no runtime thread while git runs, and a
+/// git that hangs (a slow filesystem, an fsmonitor hook) is killed when the
+/// act's `deadline` passes instead of pinning a worker.
+async fn git_tracks_without_blocking(worktree: &Path, relative: &str, deadline: tokio::time::Instant) -> bool {
+    tracked_by(git::git_bytes_by(deadline, worktree, &["ls-files", "--", relative]).await)
 }
 
 /// What `git ls-files -- <path>` says about tracking. A path in the index is
@@ -964,8 +974,8 @@ fn tracked_by(answer: Result<git::GitBytes>) -> bool {
 /// pattern at a worktree's root, and the whole path names our file and nothing
 /// beside it, so a file of the owner's own in the same directory is still
 /// reported. An exclude line hides nothing git already tracks.
-async fn exclude_locally(worktree: &Path, relative: &str) -> bool {
-    let Ok(out) = git::git_bytes(worktree, &["rev-parse", "--git-common-dir"]).await else {
+async fn exclude_locally(worktree: &Path, relative: &str, deadline: tokio::time::Instant) -> bool {
+    let Ok(out) = git::git_bytes_by(deadline, worktree, &["rev-parse", "--git-common-dir"]).await else {
         return false;
     };
     if !out.ok {
@@ -1041,17 +1051,16 @@ async fn holds_an_unseen_skill_file(worktree: &Path) -> bool {
 /// of this: `is_dirty` reports its changes, and its committed bytes survive in
 /// the branch.
 ///
-/// Read off `status`, `git status` as git reports it
-/// (`change_set::working_tree_as_git_reports_it`), the same answer
-/// `removal_needs_confirmation` derives dirtiness from: one git process and
-/// one snapshot for both. `socket` is this runner's hook socket, which is how
-/// an entry of ours under an older CLI path is still known for ours.
-fn holds_an_unseen_hook_file(worktree: &Path, status: &crate::change_set::WorkingTree, socket: &Path) -> bool {
-    use crate::hook_install::{PROJECT_HOOK_FILES, holds_only_ours};
-    for file in &status.untracked {
+/// `hidden` is what `change_set::working_tree_and_hidden` took out of the
+/// same `git status` that `removal_needs_confirmation` reads dirtiness from:
+/// one git process and one snapshot for both. `socket` is this runner's hook
+/// socket, the mark every entry of ours carries.
+fn holds_an_unseen_hook_file(worktree: &Path, hidden: &[crate::change_set::FileChange], socket: &Path) -> bool {
+    use crate::hook_install::holds_only_ours;
+    for file in hidden {
         let relative = file.path.as_str();
         // Through a link, the file lives somewhere removal doesn't reach.
-        if !PROJECT_HOOK_FILES.contains(&relative) || crate::skill_install::crosses_a_symlink(worktree, relative) {
+        if crate::skill_install::crosses_a_symlink(worktree, relative) {
             continue;
         }
         match std::fs::read(worktree.join(relative)) {
@@ -1115,7 +1124,13 @@ fn project_hook_file_for(preset: &str) -> Option<(&'static str, MergeHooks)> {
 /// `.codex` linked to `~/.codex` would have our entries merged into the
 /// user's global hooks, outside anything Far Cooler was asked to touch. The
 /// skill installer refuses the same way (`skill_install::crosses_a_symlink`).
-async fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Path, merge: MergeHooks) {
+async fn install_project_hook_file(
+    worktree: &Path,
+    relative: &str,
+    socket: &Path,
+    merge: MergeHooks,
+    deadline: tokio::time::Instant,
+) {
     let path = &worktree.join(relative);
     if crate::skill_install::crosses_a_symlink(worktree, relative) {
         tracing::info!(
@@ -1124,9 +1139,9 @@ async fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Pat
         );
         return;
     }
-    let existing = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+    let before = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => {
             tracing::warn!(
                 error = %e,
@@ -1136,17 +1151,24 @@ async fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Pat
             return;
         }
     };
+    let Ok(existing) = std::str::from_utf8(&before) else {
+        tracing::warn!(path = %path.display(), "an existing hooks file is not text; leaving it alone");
+        return;
+    };
 
+    // `parse_hooks_file`, not a plain parse: a file that names one key twice
+    // reads to serde_json as the last copy alone, and a merge written back
+    // from that would delete the other copy.
     let starting = if existing.trim().is_empty() {
         // A file with nothing in it says nothing to preserve. This is also the
         // state a missing file arrives here as.
         "{}".to_string()
-    } else if serde_json::from_str::<serde_json::Value>(&existing).is_ok_and(|v| v.is_object()) {
-        existing
+    } else if crate::hook_install::parse_hooks_file(existing).is_some_and(|v| v.is_object()) {
+        existing.to_string()
     } else {
         tracing::warn!(
             path = %path.display(),
-            "an existing hooks file is not a JSON object; leaving it alone rather than replacing it"
+            "an existing hooks file is not a JSON object we can read safely (it may repeat a key); leaving it alone"
         );
         return;
     };
@@ -1159,21 +1181,23 @@ async fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Pat
     // second launch in a worktree must cost nothing: an identical rewrite
     // still changes the mtime, which wakes every file watcher on the runner
     // and drops the file out of git's stat cache so the next `git status`
-    // re-hashes it — all for a byte-for-byte identical document. The merge is
-    // a pure function of the socket path and the socket is `<root>/h.sock` for
-    // the life of the daemon, so "no change" is the ordinary answer here
-    // rather than a rare one, which is why installing on every launch needs no
-    // record of which worktrees have already been done.
+    // re-hashes it. The merge hands back its input byte for byte whenever it
+    // changes nothing a JSON reader would see (`hook_install::merge`), so a
+    // file in the owner's own spacing and key order, already holding ours,
+    // compares equal here too. The socket is `<root>/h.sock` for the life of
+    // the daemon, so "no change" is the ordinary answer here rather than a
+    // rare one, which is why installing on every launch needs no record of
+    // which worktrees have already been done.
     //
     // `starting`, not `existing`: the two are the same string for every file
     // that is present and is an object, which is every file this can reach
     // here with one. A missing or empty file arrives as `{}`, which no merge
-    // ever produces, so the first install always writes.
+    // hands back unchanged, so the first install always writes.
     if merged == starting {
         return;
     }
 
-    if git_tracks_without_blocking(worktree, relative).await {
+    if git_tracks_without_blocking(worktree, relative, deadline).await {
         tracing::info!(
             path = %path.display(),
             "the repository tracks this hooks file; leaving it alone, so this agent reports nothing here"
@@ -1192,12 +1216,41 @@ async fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Pat
         return;
     }
 
-    if let Err(e) = std::fs::write(path, merged) {
-        tracing::warn!(
-            error = %e,
-            path = %path.display(),
-            "could not write a hooks file; this worktree reports nothing for this agent"
-        );
+    replace_hooks_file(path, merged.as_bytes(), &before, || {});
+}
+
+/// Put `contents` at `path` if the file still holds `before` (or is still
+/// absent, for an empty `before`), and say whether it did.
+///
+/// The read above ran before a git that can take seconds, and the owner can
+/// save the file in that time. So the file is read again just before it is
+/// replaced, and a change cancels the write: our registrations come back on
+/// the next launch, their save would not. The write itself goes to a new
+/// temporary file beside it, keeps the file's mode, and is renamed into
+/// place, so a crash leaves the old file or the new one and never half of
+/// one (`codex_trust::replace`, the same write codex's config gets).
+/// `between` runs after the temporary file is written and before the read
+/// that decides, for a test to change the file in that window.
+fn replace_hooks_file(path: &Path, contents: &[u8], before: &[u8], between: impl FnOnce()) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).map_or(0o644, |m| m.permissions().mode() & 0o7777);
+    match crate::codex_trust::replace(path, contents, mode, before, between) {
+        Ok(true) => true,
+        Ok(false) => {
+            tracing::info!(
+                path = %path.display(),
+                "the hooks file changed while we worked, or can't be replaced safely; leaving it alone this time"
+            );
+            false
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %path.display(),
+                "could not write a hooks file; this worktree reports nothing for this agent"
+            );
+            false
+        }
     }
 }
 
@@ -2517,16 +2570,15 @@ impl Service {
         // `--untracked-files=all` scan, which in a worktree holding a large
         // untracked tree (a `target/`, a `node_modules/`) is the slow part of
         // this whole check.
-        let Ok(mut status) = crate::change_set::working_tree_as_git_reports_it(worktree).await else {
+        let Ok((status, hidden)) = crate::change_set::working_tree_and_hidden(worktree).await else {
             return Ok(true);
         };
         // What `git::is_dirty` subtracts: an untracked hooks file holding
         // anything besides our registrations.
-        if holds_an_unseen_hook_file(worktree, &status, &hook_ingress::HookIngress::socket_path(&self.root)) {
+        if holds_an_unseen_hook_file(worktree, &hidden, &hook_ingress::HookIngress::socket_path(&self.root)) {
             return Ok(true);
         }
         // `git::is_dirty`'s answer, from the same snapshot.
-        crate::hook_install::hide_our_untracked(&mut status);
         if status.is_dirty() {
             return Ok(true);
         }
@@ -2710,18 +2762,23 @@ impl Service {
     /// — each of those costs the live view for that agent in that worktree and
     /// nothing else. A pane that opens quiet beats a pane that will not open.
     async fn prepare_launch_hooks(&self, preset: &str, worktree: &str) -> LaunchExtras {
+        // One time budget for every git this launch runs, however many files
+        // need asking about: a git that hangs delays the pane by
+        // `GIT_TIMEOUT` at most, not by that once per file.
+        let deadline = tokio::time::Instant::now() + git::GIT_TIMEOUT;
         if let Some((relative, merge)) = project_hook_file_for(preset) {
             install_project_hook_file(
                 Path::new(worktree),
                 relative,
                 &hook_ingress::HookIngress::socket_path(&self.root),
                 merge,
+                deadline,
             )
             .await;
         }
         // The manager skill codex reads from the worktree, on the same act.
         if let Some(harness) = project_skill_for(preset) {
-            install_project_skill(Path::new(worktree), harness).await;
+            install_project_skill(Path::new(worktree), harness, deadline).await;
         }
         // claude's half, unchanged, and gated by the same `starts_with` that
         // gates minting a session id, for the same reason: `--settings` is
@@ -7876,53 +7933,155 @@ mod hook_file_tests {
     #[tokio::test]
     async fn the_tracked_check_without_blocking_answers_what_git_says() {
         let bare = tempfile::tempdir().unwrap();
-        assert!(git_tracks_without_blocking(bare.path(), crate::hook_install::CODEX_HOOKS).await, "not a repository");
+        assert!(git_tracks_without_blocking(bare.path(), crate::hook_install::CODEX_HOOKS, budget()).await, "not a repository");
         let repo = scratch("tracks");
-        assert!(!git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS).await, "unknown to git");
+        assert!(!git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS, budget()).await, "unknown to git");
         std::fs::create_dir_all(repo.join(".codex")).unwrap();
         std::fs::write(repo.join(crate::hook_install::CODEX_HOOKS), "{}").unwrap();
         let out = git::git(&repo, &["add", "--", crate::hook_install::CODEX_HOOKS]).await.unwrap();
         assert!(out.ok, "{}", out.stderr);
-        assert!(git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS).await, "in the index");
+        assert!(git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS, budget()).await, "in the index");
         let _ = std::fs::remove_dir_all(&repo);
     }
 
-    /// m7: no git at all is "can't tell", and so tracked. The program is
-    /// named, not looked up on `PATH`, so this changes nothing for any other
-    /// test running beside it.
+    /// A whole `GIT_TIMEOUT` from now: the budget one act's gits share.
+    fn budget() -> tokio::time::Instant {
+        tokio::time::Instant::now() + git::GIT_TIMEOUT
+    }
+
+    /// Put `program` where git would be for this test's thread (`git::PROGRAM`),
+    /// run `act`, and put git back.
+    async fn with_git_as<T>(program: &std::ffi::OsStr, act: impl std::future::Future<Output = T>) -> T {
+        git::PROGRAM.with(|p| *p.borrow_mut() = Some(program.to_os_string()));
+        let out = act.await;
+        git::PROGRAM.with(|p| *p.borrow_mut() = None);
+        out
+    }
+
+    /// A git that never answers, for a repository: `/bin/sh ls-files …` runs
+    /// the script `ls-files` in the working directory, which sleeps. Nothing
+    /// freshly written is executed, so nothing can fail with ETXTBSY (a new
+    /// executable exec'd while another test thread forks), and a stand-in
+    /// that didn't run shows up as an answer that came too fast.
+    fn hung_git_in(repo: &Path) -> &'static std::ffi::OsStr {
+        std::fs::write(repo.join("ls-files"), "exec sleep 30\n").unwrap();
+        std::ffi::OsStr::new("/bin/sh")
+    }
+
+    /// m7: no git at all is "can't tell", and so tracked. In a repository
+    /// that doesn't track the path, so a check that went around `git_bytes_by`
+    /// to the real git would answer "untracked" and go red.
     #[tokio::test]
     async fn a_missing_git_counts_as_tracked() {
         let repo = scratch("no-git");
         let missing = repo.join("no-such-git");
-        let answer =
-            git::run_bounded(missing.as_os_str(), git::GIT_TIMEOUT, &repo, &["ls-files", "--", "x"]).await;
-        assert!(answer.is_err(), "a program that isn't there is an error, not an answer");
-        assert!(tracked_by(answer), "and that error reads as tracked");
+        let tracked = with_git_as(
+            missing.as_os_str(),
+            git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS, budget()),
+        )
+        .await;
+        assert!(tracked, "no git to ask reads as tracked");
         let _ = std::fs::remove_dir_all(&repo);
     }
 
-    /// m7: a git that never answers is killed at the timeout, and that is
-    /// "can't tell" too. A script that `exec`s `sleep` stands in for git, so
-    /// the process the timeout kills is the sleep itself.
+    /// m7: a git that never answers is killed when the budget runs out, and
+    /// that is "can't tell" too.
     #[tokio::test]
     async fn a_git_that_never_answers_is_cut_off_and_counts_as_tracked() {
-        use std::os::unix::fs::PermissionsExt;
         let repo = scratch("hung-git");
-        let hung = repo.join("hung-git");
-        std::fs::write(&hung, "#!/bin/sh\nexec sleep 30\n").unwrap();
-        std::fs::set_permissions(&hung, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let hung = hung_git_in(&repo);
+        let wait = std::time::Duration::from_millis(300);
         let started = std::time::Instant::now();
-        let answer = git::run_bounded(
-            hung.as_os_str(),
-            std::time::Duration::from_millis(200),
-            &repo,
-            &["ls-files", "--", "x"],
-        )
-        .await;
-        assert!(started.elapsed() < std::time::Duration::from_secs(10), "cut off, not waited out");
-        assert!(answer.is_err(), "a timeout is an error, not an answer");
-        assert!(tracked_by(answer), "and that error reads as tracked");
+        let deadline = tokio::time::Instant::now() + wait;
+        let tracked =
+            with_git_as(hung, git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS, deadline)).await;
+        let took = started.elapsed();
+        assert!(took >= wait, "the stand-in never ran, so nothing was timed: {took:?}");
+        assert!(took < std::time::Duration::from_secs(3), "cut off at the budget, not waited out: {took:?}");
+        assert!(tracked, "a git cut off reads as tracked");
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// m4: a codex launch's gits share one budget. Two skill files means two
+    /// tracked checks; with a git that hangs, the second finds the budget
+    /// spent and starts nothing, so the whole install takes one budget, not
+    /// one per file. And can't-tell writes nothing.
+    #[tokio::test]
+    async fn a_launchs_gits_share_one_budget() {
+        let repo = scratch("one-budget");
+        let hung = hung_git_in(&repo);
+        let wait = std::time::Duration::from_millis(500);
+        let started = std::time::Instant::now();
+        let deadline = tokio::time::Instant::now() + wait;
+        with_git_as(hung, install_project_skill(&repo, crate::skill_install::Harness::Codex, deadline)).await;
+        let took = started.elapsed();
+        assert!(took >= wait, "the stand-in never ran, so nothing was timed: {took:?}");
+        assert!(took < wait * 9 / 5, "the files' gits shared one budget: {took:?}");
+        for relative in crate::skill_install::PROJECT_SKILL_FILES {
+            assert!(!repo.join(relative).exists(), "can't tell means don't write: {relative}");
+        }
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// m7 of the second review: the owner saves the hooks file after we read
+    /// it and before we replace it. Their save stays, and no temporary file
+    /// is left beside it. With nothing changed, the write goes through and
+    /// keeps the file's mode.
+    #[test]
+    fn a_hooks_file_saved_while_we_worked_is_not_overwritten() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hooks.json");
+        std::fs::write(&path, "{}").unwrap();
+        let wrote = replace_hooks_file(&path, b"ours", b"{}", || std::fs::write(&path, "theirs, saved just now").unwrap());
+        assert!(!wrote, "a file that changed is not replaced");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "theirs, saved just now");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no temporary file is left behind");
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(replace_hooks_file(&path, b"ours", b"theirs, saved just now", || {}), "unchanged, so written");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ours");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777, 0o640, "its mode kept");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "renamed into place, nothing beside it");
+    }
+
+    /// I1: a hooks file that names one key twice reads to serde_json as the
+    /// last copy alone. The installer must leave it exactly as it is, not
+    /// write back a merge that has lost the first copy.
+    #[tokio::test]
+    async fn a_hooks_file_with_a_key_twice_is_left_byte_for_byte() {
+        let worktree = scratch("key-twice");
+        let owners = r#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "say theirs"}]}], "Stop": []}}"#;
+        std::fs::create_dir_all(worktree.join(".codex")).unwrap();
+        std::fs::write(worktree.join(crate::hook_install::CODEX_HOOKS), owners).unwrap();
+
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
+
+        assert_eq!(std::fs::read_to_string(worktree.join(crate::hook_install::CODEX_HOOKS)).unwrap(), owners);
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    /// m1 of the second review: a file that already holds ours, in the
+    /// owner's own spacing, key order and final newline, is not rewritten
+    /// into serde's form by the next install.
+    #[tokio::test]
+    async fn a_hooks_file_already_holding_ours_in_the_owners_format_is_not_rewritten() {
+        let worktree = scratch("owners-format");
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
+        let path = worktree.join(crate::hook_install::CODEX_HOOKS);
+        let ours: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let hooks = &ours["hooks"];
+        // Events out of serde's sorted order, all on one line, with a newline.
+        let owners = format!(
+            "{{ \"hooks\": {{ \"UserPromptSubmit\": {}, \"Stop\": {}, \"SessionStart\": {} }} }}\n",
+            hooks["UserPromptSubmit"], hooks["Stop"], hooks["SessionStart"],
+        );
+        std::fs::write(&path, &owners).unwrap();
+
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), owners, "left exactly as the owner keeps it");
+        let _ = std::fs::remove_dir_all(&worktree);
     }
 
     /// Installing twice — a worktree adopted, removed and adopted again, or a
@@ -8659,6 +8818,24 @@ mod launch_hook_install_tests {
         assert!(svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "their command would be lost");
     }
 
+    /// I1 for removal: `{"hooks": <theirs>, "hooks": <ours>}` reads to
+    /// serde_json as the last copy alone, which is nothing but ours. Removal
+    /// has to ask, because the first copy is the owner's.
+    #[tokio::test]
+    async fn removal_asks_about_a_hooks_file_that_names_a_key_twice() {
+        let (_dir, svc, ws) = a_workspace().await;
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+        let ours = std::fs::read_to_string(codex_hooks(&ws)).unwrap();
+        let ours: serde_json::Value = serde_json::from_str(&ours).unwrap();
+        let twice = format!(
+            r#"{{"hooks": {{"Stop": [{{"hooks": [{{"type": "command", "command": "say theirs"}}]}}]}}, "hooks": {}}}"#,
+            ours["hooks"]
+        );
+        std::fs::write(codex_hooks(&ws), twice).unwrap();
+
+        assert!(svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "their first copy would be lost");
+    }
+
     /// m3: our entries from a CLI that has since moved still name this
     /// runner's socket, so they are ours. Removal doesn't ask about them, and
     /// the next launch replaces them with entries at the CLI's current path.
@@ -9190,7 +9367,7 @@ mod project_skill_tests {
     #[tokio::test]
     async fn a_git_that_cannot_answer_counts_as_tracked() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(git_tracks_without_blocking(dir.path(), PROJECT_SKILL).await, "exit 128 read as untracked");
+        assert!(git_tracks_without_blocking(dir.path(), PROJECT_SKILL, tokio::time::Instant::now() + git::GIT_TIMEOUT).await, "exit 128 read as untracked");
     }
 
     /// And the other side of it: a repository that doesn't know the path
@@ -9199,7 +9376,7 @@ mod project_skill_tests {
     async fn a_path_git_does_not_know_is_untracked() {
         let dir = tempfile::tempdir().unwrap();
         git_in(dir.path(), &["init", "-q"]);
-        assert!(!git_tracks_without_blocking(dir.path(), PROJECT_SKILL).await);
+        assert!(!git_tracks_without_blocking(dir.path(), PROJECT_SKILL, tokio::time::Instant::now() + git::GIT_TIMEOUT).await);
     }
 
     /// Opening codex in a checkout Far Cooler didn't make writes the skill

@@ -77,14 +77,50 @@ pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
 /// mid-scroll leaves a `git diff` running on the runner for as long as it likes,
 /// once per abandoned request.
 pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
-    run_bounded(std::ffi::OsStr::new("git"), GIT_TIMEOUT, cwd, args).await
+    run_bounded(&program(), GIT_TIMEOUT, cwd, args).await
 }
 
-/// `git_bytes`, with the program and the timeout named. So a test can put a
-/// program that isn't there, or one that never answers, where git would be,
-/// and watch what a caller does with the failure; nothing else runs anything
-/// but git through here.
-pub(crate) async fn run_bounded(
+/// `git_bytes`, sharing one `deadline` with every other git of the same act.
+///
+/// For an act that runs several gits one after another, a codex launch (the
+/// hooks file's tracked check, then two for each skill file): each git gets
+/// what is left of the budget, so a git that hangs costs the act the budget
+/// once, not `GIT_TIMEOUT` per call. With nothing left, no git is started
+/// and the answer is the same error a timeout gives.
+pub async fn git_bytes_by(deadline: tokio::time::Instant, cwd: &Path, args: &[&str]) -> Result<GitBytes> {
+    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    if left.is_zero() {
+        tracing::warn!(?args, "no time left for git in this act's budget");
+        return Err(DomainError::OperationFailed);
+    }
+    run_bounded(&program(), left, cwd, args).await
+}
+
+/// The program `git_bytes` runs.
+#[cfg(not(test))]
+fn program() -> std::ffi::OsString {
+    std::ffi::OsString::from("git")
+}
+
+/// The program `git_bytes` runs: git, unless a test on this thread put
+/// something else in its place (`PROGRAM`).
+#[cfg(test)]
+fn program() -> std::ffi::OsString {
+    PROGRAM.with(|p| p.borrow().clone()).unwrap_or_else(|| std::ffi::OsString::from("git"))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What a test puts where git would be: a program that isn't there, or
+    /// one that never answers, to watch what a caller does with the failure.
+    /// Per thread, so it changes nothing for a test running beside it; a
+    /// `#[tokio::test]` runs its future on its own thread.
+    pub(crate) static PROGRAM: std::cell::RefCell<Option<std::ffi::OsString>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// `git_bytes`, with the program and the timeout named.
+async fn run_bounded(
     program: &std::ffi::OsStr,
     timeout: Duration,
     cwd: &Path,

@@ -447,19 +447,26 @@ pub fn parse_numstat_z(bytes: &[u8]) -> Vec<FileChange> {
 /// untracked copies are subtracted; an edit to a tracked hooks file is the
 /// user's and is listed (`hook_install::hide_our_untracked`).
 pub async fn working_tree(repo: &Path) -> Result<WorkingTree> {
+    Ok(working_tree_and_hidden(repo).await?.0)
+}
+
+/// `working_tree`, and beside it the untracked hooks files of ours it took
+/// out, from one `git status`. For the removal check, which has to look
+/// inside those files (`service::holds_an_unseen_hook_file`) and wants the
+/// same dirtiness everything else reads, from the same snapshot.
+pub async fn working_tree_and_hidden(repo: &Path) -> Result<(WorkingTree, Vec<FileChange>)> {
     let mut tree = working_tree_as_git_reports_it(repo).await?;
-    crate::hook_install::hide_our_untracked(&mut tree);
-    Ok(tree)
+    let hidden = crate::hook_install::hide_our_untracked(&mut tree);
+    Ok((tree, hidden))
 }
 
 /// `git status` with nothing subtracted, Far Cooler's own hooks files
-/// included. For the removal check, which has to look inside those files
-/// (`service::holds_an_unseen_hook_file`); everything shown to a person reads
-/// `working_tree`.
+/// included. Only `working_tree_and_hidden` reads it; everything else reads
+/// what that takes out.
 ///
 /// `--untracked-files=all`, so an untracked file is always its own record and
 /// never folded into its directory's.
-pub async fn working_tree_as_git_reports_it(repo: &Path) -> Result<WorkingTree> {
+async fn working_tree_as_git_reports_it(repo: &Path) -> Result<WorkingTree> {
     let raw = git_bytes(repo, &["status", "--porcelain=v2", "--untracked-files=all", "-z"]).await?;
     if !raw.ok {
         return Err(DomainError::OperationFailed);

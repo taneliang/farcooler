@@ -17,8 +17,8 @@
 //!   and camelCase — no nested `hooks` array, and its own event names.
 //!
 //! An entry is ours only when it is exactly what we write: our shape, no key
-//! we don't write, and one command in our grammar naming this CLI or this
-//! runner's socket (`entry_is_ours`, `Us`). We merge, and we replace or
+//! we don't write, and one command in our grammar naming this runner's
+//! socket through a CLI of ours (`entry_is_ours`, `Us`). We merge, and we replace or
 //! remove only entries that are ours by that test: a command of somebody's
 //! inside one of our entries, a key of theirs on it, or a command line that
 //! goes on after ours makes the entry theirs, and it is left exactly as it is.
@@ -130,14 +130,99 @@ pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
 ///
 /// Hidden from the diff view is not the same as safe to delete: an untracked
 /// hooks file can hold the owner's own entries, merged with ours or not.
-/// `service::holds_an_unseen_hook_file` asks about those before removal.
+/// So this returns what it hid, and `service::holds_an_unseen_hook_file`
+/// looks inside those files before removal.
 ///
 /// Not the manager skill's files (`skill_install::PROJECT_SKILL_FILES`). Those
 /// are hidden by git itself, through a line in the repository's
 /// `info/exclude` (`service::exclude_locally`), which also keeps `git add -A`
 /// from committing them.
-pub fn hide_our_untracked(tree: &mut crate::change_set::WorkingTree) {
-    tree.untracked.retain(|f| !PROJECT_HOOK_FILES.contains(&f.path.as_str()));
+pub fn hide_our_untracked(tree: &mut crate::change_set::WorkingTree) -> Vec<crate::change_set::FileChange> {
+    let (hidden, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut tree.untracked)
+        .into_iter()
+        .partition(|f| PROJECT_HOOK_FILES.contains(&f.path.as_str()));
+    tree.untracked = kept;
+    hidden
+}
+
+/// A hooks file's text as JSON, or `None` for text that isn't JSON or that
+/// names one key twice in one object, at any depth.
+///
+/// serde_json keeps the last of two equal keys and says nothing. So a `Stop`
+/// block the owner pasted above ours would vanish from a merge's rewrite, and
+/// `{"hooks": <theirs>, "hooks": <ours>}` would read as nothing but ours to the
+/// removal check. Every reader here goes through this instead: the installer
+/// leaves such a file exactly as it is, the merge adds nothing to it, and
+/// removal asks about it.
+pub fn parse_hooks_file(text: &str) -> Option<Value> {
+    serde_json::from_str::<NoKeyTwice>(text).ok().map(|NoKeyTwice(v)| v)
+}
+
+/// A `Value` that failed to deserialize if any object in it has a key twice.
+struct NoKeyTwice(Value);
+
+impl<'de> serde::Deserialize<'de> for NoKeyTwice {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_any(NoKeyTwiceVisitor).map(NoKeyTwice)
+    }
+}
+
+struct NoKeyTwiceVisitor;
+
+impl<'de> serde::de::Visitor<'de> for NoKeyTwiceVisitor {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("JSON with no key twice in one object")
+    }
+
+    fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Value, E> {
+        Ok(Value::Bool(v))
+    }
+
+    fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Value, E> {
+        Ok(serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number))
+    }
+
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Value, E> {
+        Ok(Value::String(v.to_string()))
+    }
+
+    fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Value, E> {
+        Ok(Value::String(v))
+    }
+
+    fn visit_unit<E: serde::de::Error>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        let mut out = Vec::new();
+        while let Some(NoKeyTwice(v)) = seq.next_element()? {
+            out.push(v);
+        }
+        Ok(Value::Array(out))
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        let mut out = serde_json::Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if out.contains_key(&key) {
+                return Err(serde::de::Error::custom("a key appears twice in one object"));
+            }
+            let NoKeyTwice(v) = map.next_value()?;
+            out.insert(key, v);
+        }
+        Ok(Value::Object(out))
+    }
 }
 
 /// Whether a hooks file holds nothing but our registrations: a JSON object
@@ -147,12 +232,13 @@ pub fn hide_our_untracked(tree: &mut crate::change_set::WorkingTree) {
 /// asking, because nobody else put anything in it. Anything else is
 /// somebody's: their own entry, a key of their own on the file or on one of
 /// our entries, a command of theirs inside our entry or appended to ours,
-/// text that isn't a JSON object, or another daemon's registration.
+/// text that isn't a JSON object, an object with a key twice
+/// (`parse_hooks_file`), or another daemon's registration.
 ///
-/// `socket` is this runner's hook socket, which is how an entry of ours
-/// written under an older CLI path is still recognized as ours (`Us`).
+/// `socket` is this runner's hook socket, the mark every entry of ours
+/// carries (`Us`).
 pub fn holds_only_ours(text: &str, socket: &Path) -> bool {
-    let Ok(Value::Object(root)) = serde_json::from_str::<Value>(text) else { return false };
+    let Some(Value::Object(root)) = parse_hooks_file(text) else { return false };
     let Some(Value::Object(hooks)) = root.get("hooks") else { return false };
     let us = Us::here(socket);
     root.iter().all(|(k, v)| k == "hooks" || (k == "version" && v.is_number()))
@@ -173,29 +259,51 @@ fn binary_path() -> String {
 /// (`hook_ingress::HookIngress::socket_path`), fixed for as long as this
 /// runner's home is, and no other daemon reports to it. The CLI path is not
 /// stable: the app moves from `~/Downloads` to `/Applications`, a dev build
-/// comes before the release. So a command is ours when it names this CLI at
-/// its current path, or names this runner's socket through a CLI of ours at
-/// any path. Another channel's daemon (its own home, its own socket, its own
-/// CLI name) is somebody else, and the two installs sit side by side.
+/// comes before the release. So a command is ours when it names THIS runner's
+/// socket, through a CLI at any path whose name is exactly one our channels
+/// install (`is_a_far_cooler_cli`).
+///
+/// The socket is required every time. The CLI's path alone says nothing
+/// about which daemon wrote the entry: two homes can run one cargo binary,
+/// and a channel whose own CLI is missing falls back to stable's
+/// (`service::shim_binary`). Either way, a path-only match would take another
+/// daemon's entries for ours and replace them on every launch. Another
+/// channel's daemon (its own home, its own socket) is somebody else, and the
+/// two installs sit side by side.
 struct Us {
-    binary: String,
     socket: String,
 }
 
 impl Us {
     fn here(socket: &Path) -> Self {
-        Us { binary: binary_path(), socket: socket.display().to_string() }
+        Us { socket: socket.display().to_string() }
     }
 
     fn wrote(&self, command: &OurCommand) -> bool {
-        command.binary == self.binary || (command.socket == self.socket && is_a_far_cooler_cli(&command.binary))
+        command.socket == self.socket && is_a_far_cooler_cli(&command.binary)
     }
 }
 
-/// Every CLI name a channel installs or cargo builds begins with this
-/// (`farcooler_protocol::Channel::cli_binary_candidates`).
+/// Whether a binary's file name is exactly one our channels install or cargo
+/// builds (`farcooler_protocol::Channel::cli_binary_candidates`, all four
+/// channels). Exactly, not by prefix: a `farcooler-trace` the owner wrapped
+/// around our CLI is theirs, even registered in our grammar with our socket.
 fn is_a_far_cooler_cli(binary: &str) -> bool {
-    Path::new(binary).file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("farcooler"))
+    use farcooler_protocol::Channel;
+    let Some(name) = Path::new(binary).file_name().and_then(|n| n.to_str()) else { return false };
+    every_channel().into_iter().any(|c: Channel| c.cli_binary_candidates().contains(&name))
+}
+
+/// Every channel, spelled out through a `match` so a fifth one can't be added
+/// without this list learning its CLI names.
+fn every_channel() -> [farcooler_protocol::Channel; 4] {
+    use farcooler_protocol::Channel;
+    const EVERY: [Channel; 4] = [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable];
+    // Not called; it exists to stop compiling when `Channel` grows.
+    let _listed = |c: Channel| match c {
+        Channel::Local | Channel::Canary | Channel::Preview | Channel::Stable => (),
+    };
+    EVERY
 }
 
 /// A command line in the one grammar `hook_command` writes, taken apart.
@@ -274,15 +382,48 @@ fn entry_is_ours(entry: &Value, us: &Us) -> bool {
 }
 
 /// Whether somebody's entry already runs `ours`, exactly this command, as
-/// one of its commands or at the start of one (`<ours> && say done`). Then
-/// the event already reports to us, and adding our own entry beside it would
-/// run the hook twice: every prompt and every answer drawn twice in chat.
-fn entry_runs(entry: &Value, ours: &str) -> bool {
-    let runs = |c: &Value| c.as_str().and_then(parse_our_command).is_some_and(|c| c.rendered == ours);
-    entry.get("command").is_some_and(runs)
-        || entry.get("hooks").and_then(Value::as_array).is_some_and(|inner| {
-            inner.iter().any(|h| h.get("command").is_some_and(runs))
+/// the file's own agent would read it. Then the event already reports to us,
+/// and adding our own entry beside it would run the hook twice: every prompt
+/// and every answer drawn twice in chat.
+///
+/// Only in the shape that agent reads (`nested`: codex's inner `hooks` list,
+/// the hook `type: "command"`; otherwise cursor's flat `command`), and only
+/// with no key on the entry, or on the hook that runs ours, that we don't
+/// write ourselves. A key we don't know may switch the entry off or narrow
+/// it (`enabled: false`, a `matcher`, a zero `timeout`), and an entry that
+/// quietly doesn't run would cost this event its live view for good. A
+/// second copy of ours firing is the visible failure of the two, so an
+/// unknown key means we add ours.
+fn entry_runs(entry: &Value, ours: &str, nested: bool) -> bool {
+    let Some(entry) = entry.as_object() else { return false };
+    if !nested {
+        return entry.keys().all(|k| k == "command")
+            && entry.get("command").and_then(Value::as_str).is_some_and(|c| command_runs(c, ours));
+    }
+    if entry.keys().any(|k| k != "hooks") {
+        return false;
+    }
+    let Some(Value::Array(inner)) = entry.get("hooks") else { return false };
+    inner.iter().any(|hook| {
+        hook.as_object().is_some_and(|hook| {
+            hook.keys().all(|k| k == "type" || k == "command")
+                && hook.get("type").and_then(Value::as_str) == Some("command")
+                && hook.get("command").and_then(Value::as_str).is_some_and(|c| command_runs(c, ours))
         })
+    })
+}
+
+/// Whether a command line runs `ours` as its first command: `ours` itself,
+/// or `ours` and then a shell separator (`<ours> && say done`, `<ours>; …`,
+/// `<ours>` and a newline, `<ours> # note`). Not `<ours>.bak`, which the
+/// shell reads as one longer word, and not `<ours> --gating`, which is
+/// another command.
+fn command_runs(command: &str, ours: &str) -> bool {
+    let Some(rest) = command.strip_prefix(ours) else { return false };
+    let after = rest.trim_start_matches([' ', '\t']);
+    after.is_empty()
+        || after.starts_with([';', '&', '|', '\n'])
+        || (after.len() < rest.len() && after.starts_with('#'))
 }
 
 /// The full shell command line for one hook registration.
@@ -336,7 +477,7 @@ pub fn claude_settings(socket: &Path) -> Value {
 /// don't touch, and every entry under an event we do touch that is not
 /// exactly ours (`entry_is_ours`), survives unchanged.
 pub fn merge_codex(existing: &str, socket: &Path) -> String {
-    merge(existing, socket, "codex", CLAUDE_CODEX_EVENTS, |command| {
+    merge(existing, socket, "codex", CLAUDE_CODEX_EVENTS, true, |command| {
         json!({ "hooks": [ { "type": "command", "command": command } ] })
     })
 }
@@ -347,71 +488,116 @@ pub fn merge_codex(existing: &str, socket: &Path) -> String {
 /// entry shape below, and nothing else about the file (its `version` key
 /// included) is touched.
 pub fn merge_cursor(existing: &str, socket: &Path) -> String {
-    merge(existing, socket, "cursor", CURSOR_EVENTS, |command| json!({ "command": command }))
+    merge(existing, socket, "cursor", CURSOR_EVENTS, false, |command| json!({ "command": command }))
 }
 
 /// `merge_codex` and `merge_cursor`, which differ only in their events and
-/// in the shape of one entry.
+/// in the shape of one entry (`nested`: codex's).
 ///
-/// A `hooks` that isn't an object, or an event whose value isn't a list, is
-/// somebody's arrangement we can't add to without replacing it, so it is
-/// left as it is and we go without that registration.
+/// Hands back `existing` itself, byte for byte, whenever the merge changes
+/// nothing a JSON reader would see (`rewritten`), so a caller comparing
+/// strings writes only when ours has to be added or replaced.
+///
+/// Text that isn't empty and isn't a JSON object we can read safely
+/// (`parse_hooks_file`) is handed back unchanged too, and so is a `hooks`
+/// that isn't an object. An event whose value isn't a list is skipped. Each
+/// of those is somebody's arrangement we can't add to without replacing it,
+/// so we go without that registration.
 fn merge(
     existing: &str,
     socket: &Path,
     agent: &str,
     events: &[(&str, bool)],
+    nested: bool,
     entry: impl Fn(String) -> Value,
 ) -> String {
-    let mut root = parse_or_empty_object(existing);
-    let Some(hooks_obj) = hooks_object_mut(&mut root) else {
+    let before = if existing.trim().is_empty() {
+        json!({})
+    } else {
+        match parse_hooks_file(existing) {
+            Some(v) if v.is_object() => v,
+            _ => {
+                tracing::info!(agent, "a hooks file isn't a JSON object we can read safely; leaving it alone");
+                return existing.to_string();
+            }
+        }
+    };
+    let mut after = before.clone();
+    let Some(hooks_obj) = hooks_object_mut(&mut after) else {
         tracing::info!(agent, "a hooks file's `hooks` is not an object; leaving it alone");
         return existing.to_string();
     };
     let us = Us::here(socket);
     for (event, gating) in events {
         let command = hook_command(agent, event, socket, *gating);
-        merge_event(hooks_obj, event, &command, entry(command.clone()), &us);
+        merge_event(hooks_obj, event, &command, entry(command.clone()), nested, &us);
     }
-    serde_json::to_string_pretty(&root).unwrap_or_else(|_| existing.to_string())
+    rewritten(existing, &before, &after)
 }
 
 /// Strip only the entries that are exactly ours (`entry_is_ours`), leaving
 /// every other event and every other entry exactly as it was. Works on
 /// either file's shape, since `entry_is_ours` reads whichever of the two it
-/// finds.
+/// finds. Text we can't read safely is handed back unchanged.
 pub fn remove_ours(existing: &str, socket: &Path) -> String {
-    let Ok(mut root) = serde_json::from_str::<Value>(existing) else {
+    let Some(before) = parse_hooks_file(existing) else {
         return existing.to_string();
     };
+    let mut after = before.clone();
     let us = Us::here(socket);
-    if let Some(hooks_obj) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+    if let Some(hooks_obj) = after.get_mut("hooks").and_then(Value::as_object_mut) {
         for arr in hooks_obj.values_mut() {
             let Some(list) = arr.as_array() else { continue };
             let kept: Vec<Value> = list.iter().filter(|entry| !entry_is_ours(entry, &us)).cloned().collect();
             *arr = Value::Array(kept);
         }
     }
-    serde_json::to_string_pretty(&root).unwrap_or_else(|_| existing.to_string())
+    rewritten(existing, &before, &after)
 }
 
-/// `existing`, parsed as a JSON object — or an empty one, for a file that is
-/// missing, empty, or (should it somehow happen) not an object at all. A
-/// file we cannot make sense of is treated as one with nothing in it yet,
-/// never as a reason to give up and leave our hooks uninstalled.
-/// (`service::install_project_hook_file` refuses to write over a present
-/// file that isn't an object, so that case never reaches the disk.)
-fn parse_or_empty_object(existing: &str) -> Value {
-    match serde_json::from_str::<Value>(existing) {
-        Ok(v) if v.is_object() => v,
-        _ => json!({}),
+/// The text of the file that said `before` and must now say `after`:
+/// `existing` itself when the two are equal as JSON, so a file whose
+/// spacing, key order or final newline isn't serde's is never rewritten for
+/// nothing.
+///
+/// When it does change, it is written with the owner's indentation and
+/// final newline. Not their key order: without serde_json's
+/// `preserve_order` feature (off in this workspace, and turning it on
+/// changes every map in every crate) an object's keys come out sorted.
+fn rewritten(existing: &str, before: &Value, after: &Value) -> String {
+    if before == after {
+        return existing.to_string();
     }
+    let indent = indent_of(existing);
+    let mut out = Vec::new();
+    {
+        let formatter = serde_json::ser::PrettyFormatter::with_indent(indent.as_bytes());
+        let mut serializer = serde_json::Serializer::with_formatter(&mut out, formatter);
+        if serde::Serialize::serialize(after, &mut serializer).is_err() {
+            return existing.to_string();
+        }
+    }
+    let Ok(mut text) = String::from_utf8(out) else { return existing.to_string() };
+    if existing.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
+/// One level of the owner's indentation: the leading spaces or tabs of the
+/// first indented line, or serde's two spaces for a file with none.
+fn indent_of(text: &str) -> String {
+    text.lines()
+        .map(|line| &line[..line.len() - line.trim_start_matches([' ', '\t']).len()])
+        .find(|lead| !lead.is_empty())
+        .unwrap_or("  ")
+        .to_string()
 }
 
 /// `root["hooks"]` as an object, created if it is missing. `None` when it is
 /// there and is something else, which is somebody's and not ours to replace.
 fn hooks_object_mut(root: &mut Value) -> Option<&mut serde_json::Map<String, Value>> {
-    let root_obj = root.as_object_mut().expect("parse_or_empty_object guarantees an object");
+    let root_obj = root.as_object_mut().expect("merge only starts from an object");
     root_obj.entry("hooks").or_insert_with(|| json!({})).as_object_mut()
 }
 
@@ -421,11 +607,11 @@ fn hooks_object_mut(root: &mut Value) -> Option<&mut serde_json::Map<String, Val
 /// makes a second merge a no-op instead of a second copy, and what replaces
 /// an entry of ours that names an older CLI path.
 ///
-/// Unless somebody's entry already runs `command`, exactly this one: an
-/// owner who put a command of theirs inside our entry, or after ours on its
-/// command line. That entry isn't ours to take apart, and it already reports
-/// to us, so a second entry of ours would fire the hook twice (every prompt
-/// and answer drawn twice in chat). Then we add nothing.
+/// Unless somebody's entry already runs `command`, exactly this one
+/// (`entry_runs`): an owner who put a command of theirs inside our entry, or
+/// after ours on its command line. That entry isn't ours to take apart, and
+/// it already reports to us, so a second entry of ours would fire the hook
+/// twice (every prompt and answer drawn twice in chat). Then we add nothing.
 ///
 /// An event whose value isn't a list is left alone, for `merge`'s reason.
 fn merge_event(
@@ -433,6 +619,7 @@ fn merge_event(
     event: &str,
     command: &str,
     new_entry: Value,
+    nested: bool,
     us: &Us,
 ) {
     let existing_arr = match hooks_obj.get(event) {
@@ -444,7 +631,7 @@ fn merge_event(
         }
     };
     let mut kept: Vec<Value> = existing_arr.into_iter().filter(|e| !entry_is_ours(e, us)).collect();
-    if kept.iter().any(|e| entry_runs(e, command)) {
+    if kept.iter().any(|e| entry_runs(e, command, nested)) {
         tracing::info!(event, "somebody's hook entry already runs ours; leaving it as they arranged it");
     } else {
         kept.push(new_entry);
@@ -489,23 +676,22 @@ mod tests {
         assert_eq!(once, twice, "installing is idempotent");
     }
 
-    /// The real case a daemon restart produces: the socket path rotates, so
-    /// the second merge is never byte-identical to the first. An
-    /// implementation that dedups by whole-entry equality (rather than by
-    /// the `entry_is_ours` marker) would pass `merging_twice_installs_one_copy`
-    /// above — same socket both times, so the two entries ARE equal — and
-    /// still duplicate here, where they are not.
+    /// A socket is one daemon's for as long as its home is
+    /// (`<runtime dir>/h.sock`), so an entry naming another socket, even
+    /// through this very CLI, is another daemon's: two homes sharing one
+    /// cargo binary. It stays, and ours is added beside it, once.
     #[test]
-    fn merging_again_with_a_new_socket_replaces_the_stale_entry() {
+    fn merging_with_another_socket_keeps_that_daemons_entry() {
         let once = merge_codex(SOMEONE_ELSES, Path::new("/tmp/h.sock"));
         let twice = merge_codex(&once, Path::new("/tmp/other.sock"));
         let v: Value = serde_json::from_str(&twice).expect("json");
         let arr = v["hooks"]["SessionStart"].as_array().expect("SessionStart is an array");
+        assert_eq!(arr.len(), 3, "somebody's, the other daemon's, and ours: {arr:?}");
         let ours: Vec<&Value> = arr.iter().filter(|e| entry_is_ours(e, &Us::here(Path::new("/tmp/other.sock")))).collect();
-        assert_eq!(ours.len(), 1, "a re-merge with a new socket replaces, not accompanies: {arr:?}");
-        let command = ours[0]["hooks"][0]["command"].as_str().unwrap();
-        assert!(command.contains("other.sock"), "the surviving entry names the new socket: {command}");
-        assert!(!command.contains("/tmp/h.sock"), "the stale socket is gone: {command}");
+        assert_eq!(ours.len(), 1, "{arr:?}");
+        let theirs: Vec<&Value> = arr.iter().filter(|e| entry_is_ours(e, &Us::here(Path::new("/tmp/h.sock")))).collect();
+        assert_eq!(theirs.len(), 1, "the other daemon's entry is still there: {arr:?}");
+        assert_eq!(twice, merge_codex(&twice, Path::new("/tmp/other.sock")), "and a third merge changes nothing");
     }
 
     #[test]
@@ -638,17 +824,15 @@ mod tests {
     }
 
     #[test]
-    fn cursor_merging_again_with_a_new_socket_replaces_the_stale_entry() {
+    fn cursor_merging_with_another_socket_keeps_that_daemons_entry() {
         let once = merge_cursor(CURSORS_ELSES, Path::new("/tmp/h.sock"));
         let twice = merge_cursor(&once, Path::new("/tmp/other.sock"));
         let v: Value = serde_json::from_str(&twice).expect("json");
         let arr = v["hooks"]["sessionStart"].as_array().expect("sessionStart is an array");
-        assert_eq!(arr.len(), 3, "both foreign entries plus exactly one of ours: {arr:?}");
+        assert_eq!(arr.len(), 4, "both foreign entries, the other daemon's, and ours: {arr:?}");
         let ours: Vec<&Value> = arr.iter().filter(|e| entry_is_ours(e, &Us::here(Path::new("/tmp/other.sock")))).collect();
-        assert_eq!(ours.len(), 1, "a re-merge with a new socket replaces, not accompanies: {arr:?}");
-        let command = ours[0]["command"].as_str().unwrap();
-        assert!(command.contains("other.sock"), "the surviving entry names the new socket: {command}");
-        assert!(!command.contains("/tmp/h.sock"), "the stale socket is gone: {command}");
+        assert_eq!(ours.len(), 1, "{arr:?}");
+        assert_eq!(v["version"], json!(1), "cursor's `version` survives: {twice}");
     }
 
     #[test]
@@ -894,6 +1078,14 @@ mod tests {
         assert!(holds_only_ours(&at("/Applications/Far Cooler.app/Contents/MacOS/farcooler", "/tmp/h.sock"), socket));
         assert!(holds_only_ours(&at("/Users/x/Dev/overnight/target/debug/farcooler", "/tmp/h.sock"), socket));
         assert!(!holds_only_ours(&at("/usr/local/bin/other-tool", "/tmp/h.sock"), socket), "not a CLI of ours");
+        assert!(
+            !holds_only_ours(&at("/Users/x/bin/farcooler-trace", "/tmp/h.sock"), socket),
+            "the owner's wrapper around our CLI, in our grammar with our socket"
+        );
+        assert!(
+            !holds_only_ours(&at(&binary_path(), "/tmp/p.sock"), socket),
+            "this very CLI, reporting to another daemon"
+        );
         assert!(!holds_only_ours(&at("/Users/x/.local/bin/farcooler-preview", "/tmp/p.sock"), socket), "another daemon's");
     }
 
@@ -901,9 +1093,9 @@ mod tests {
     /// space, a quote, a backslash. And nothing but what we write.
     #[test]
     fn a_command_we_render_is_the_only_command_we_parse_as_ours() {
-        let us = Us { binary: "/x/it's a \\ farcooler".into(), socket: "/r/h.sock".into() };
-        for (binary, socket) in [("/x/it's a \\ farcooler", "/tmp/h.sock"), ("/y/farcooler", "/r/h.sock")] {
-            let command = render_command(binary, "cursor", "stop", socket, true);
+        let us = Us { socket: "/r/it's a \\ dir/h.sock".into() };
+        for binary in ["/x/it's a \\ dir/farcooler-canary", "/y/farcooler"] {
+            let command = render_command(binary, "cursor", "stop", &us.socket, true);
             assert!(is_our_command(&command, &us), "{command}");
             assert!(!is_our_command(&format!("{command} "), &us), "a trailing space: {command}");
             assert!(!is_our_command(&command.replace(" hook ", "  hook "), &us), "a double space: {command}");
@@ -1010,10 +1202,9 @@ mod tests {
         let ours = cursor["hooks"]["stop"][0]["command"].as_str().unwrap().to_string();
         cursor["hooks"]["stop"][0]["command"] = json!(format!("{ours}; say done"));
         let merged = merge_cursor(&cursor.to_string(), Path::new("/tmp/h.sock"));
-        assert!(
-            commands_under(&merged, "stop").iter().any(|c| c.ends_with("; say done")),
-            "and on cursor's flat entry: {merged}"
-        );
+        let stop = commands_under(&merged, "stop");
+        assert!(stop.iter().any(|c| c.ends_with("; say done")), "and on cursor's flat entry: {merged}");
+        assert_eq!(stop.len(), 1, "with ours not added beside it: {stop:?}");
     }
 
     /// m3: an entry we wrote under another path to the CLI (the app moved,
@@ -1041,5 +1232,106 @@ mod tests {
         let stop = commands_under(&merged, "Stop");
         assert_eq!(stop.len(), 2, "theirs and ours: {stop:?}");
         assert_eq!(stop[0], theirs, "theirs untouched");
+    }
+
+    /// I1: a key twice in one object, at any depth, is not JSON we trust.
+    /// serde_json would keep the last copy and drop the first without a word.
+    #[test]
+    fn a_key_twice_in_one_object_is_not_read_at_all() {
+        let socket = Path::new("/tmp/h.sock");
+        assert!(parse_hooks_file(r#"{"a": 1, "b": {"c": [1, {"d": 2}]}}"#).is_some(), "plain JSON reads");
+        assert!(parse_hooks_file(r#"{"a": 1, "a": 2}"#).is_none(), "at the top");
+        assert!(parse_hooks_file(r#"{"hooks": {"Stop": [], "Stop": []}}"#).is_none(), "one level down");
+        assert!(parse_hooks_file(r#"{"hooks": {"Stop": [{"command": "x", "command": "y"}]}}"#).is_none(), "in an entry");
+
+        let ours: Value = serde_json::from_str(&merge_codex("{}", socket)).unwrap();
+        let twice = format!(r#"{{"hooks": {{"Stop": [{{"command": "say theirs"}}]}}, "hooks": {}}}"#, ours["hooks"]);
+        assert!(!holds_only_ours(&twice, socket), "the last copy is ours, the first is theirs");
+        assert_eq!(merge_codex(&twice, socket), twice, "a merge hands it back untouched");
+        assert_eq!(remove_ours(&twice, socket), twice, "and so does removing ours");
+    }
+
+    /// m1 of the second review: a merge that changes nothing a JSON reader
+    /// would see hands back the owner's text byte for byte, spacing, key
+    /// order and final newline included. One that must change keeps their
+    /// indentation and final newline.
+    #[test]
+    fn a_merge_that_changes_nothing_keeps_the_owners_text() {
+        let socket = Path::new("/tmp/h.sock");
+        let ours: Value = serde_json::from_str(&merge_codex("{}", socket)).unwrap();
+        let h = &ours["hooks"];
+        let owners = format!(
+            "{{\n    \"hooks\": {{\n        \"UserPromptSubmit\": {},\n        \"Stop\": {},\n        \"SessionStart\": {}\n    }}\n}}\n",
+            h["UserPromptSubmit"], h["Stop"], h["SessionStart"],
+        );
+        assert_eq!(merge_codex(&owners, socket), owners, "already current, so untouched");
+
+        let theirs = "{\n    \"hooks\": {\n        \"sessionEnd\": [ { \"command\": \"say bye\" } ]\n    },\n    \"version\": 1\n}\n";
+        let merged = merge_cursor(theirs, socket);
+        assert!(merged.ends_with("}\n"), "their final newline: {merged}");
+        assert!(merged.contains("\n    \"hooks\": {\n        \""), "their four-space indent: {merged}");
+        assert!(merged.contains("say bye"), "{merged}");
+        assert_eq!(serde_json::from_str::<Value>(&merged).unwrap()["version"], json!(1), "{merged}");
+    }
+
+    /// m3 of the second review: an entry of theirs counts as already running
+    /// ours only when the agent would really run exactly ours from it.
+    /// Anything less and we add ours, since an event that silently reports
+    /// nothing is the worse failure.
+    #[test]
+    fn only_an_entry_that_really_runs_ours_stands_in_for_ours() {
+        let socket = Path::new("/tmp/h.sock");
+        let ours = hook_command("codex", "Stop", socket, false);
+        let stop_after = |entry: Value| {
+            let existing = json!({ "hooks": { "Stop": [entry] } }).to_string();
+            commands_under(&merge_codex(&existing, socket), "Stop").len()
+        };
+        let hook = |command: String| json!({ "type": "command", "command": command });
+
+        assert_eq!(stop_after(json!({ "hooks": [hook(ours.clone()), hook("say done".into())] })), 2, "runs ours");
+        assert_eq!(stop_after(json!({ "hooks": [hook(format!("{ours}\nsay done"))] })), 1, "ours, then a newline");
+        assert_eq!(stop_after(json!({ "hooks": [hook(format!("{ours} # note"))] })), 1, "ours, then a comment");
+
+        assert_eq!(stop_after(json!({ "hooks": [hook(format!("{ours}.bak"))] })), 2, "a longer word");
+        assert_eq!(
+            stop_after(json!({ "hooks": [hook(format!("{ours} --gating"))] })),
+            1,
+            "a gating copy of ours is still ours, and is replaced by the current one"
+        );
+        assert_eq!(stop_after(json!({ "hooks": [hook(format!("{ours}#x"))] })), 2, "no space before `#`: one word");
+        assert_eq!(
+            stop_after(json!({ "hooks": [{ "type": "prompt", "command": ours.clone() }] })),
+            2,
+            "not a command hook"
+        );
+        assert_eq!(
+            stop_after(json!({ "command": format!("{ours} && say done") })),
+            2,
+            "cursor's shape, which codex doesn't read"
+        );
+        assert_eq!(
+            stop_after(json!({ "enabled": false, "hooks": [hook(ours.clone())] })),
+            2,
+            "a key we don't know on the entry may switch it off"
+        );
+        assert_eq!(
+            stop_after(json!({ "hooks": [{ "type": "command", "command": ours.clone(), "timeout": 0 }] })),
+            2,
+            "or on the hook"
+        );
+        let unquoted = ours.replacen('\'', "", 2);
+        assert_eq!(stop_after(json!({ "hooks": [hook(unquoted)] })), 2, "the same CLI, quoted differently, fires twice");
+
+        let cursor = |entry: Value| {
+            let existing = json!({ "hooks": { "stop": [entry] } }).to_string();
+            commands_under(&merge_cursor(&existing, socket), "stop").len()
+        };
+        let ours = hook_command("cursor", "stop", socket, false);
+        assert_eq!(cursor(json!({ "command": format!("{ours} && say done") })), 1, "cursor's own shape runs ours");
+        assert_eq!(
+            cursor(json!({ "hooks": [hook(format!("{ours} && say done"))] })),
+            2,
+            "codex's shape, which cursor doesn't read"
+        );
     }
 }

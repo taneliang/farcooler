@@ -526,19 +526,25 @@ fn read_no_follow(path: &Path) -> Result<Option<(Vec<u8>, u32)>, &'static str> {
 /// Tells one write's temporary file from another's in the same process.
 static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// A temporary name beside `path` no other write shares: the process id, a
-/// count of writes in this process, and the time, so a file left by a crash
-/// in an earlier process with the same id doesn't block this one.
+/// A temporary name beside `path` no other write shares: the file's own
+/// name, the process id, a count of writes in this process, and the time,
+/// so a file left by a crash in an earlier process with the same id doesn't
+/// block this one.
 fn temporary_beside(path: &Path) -> Option<PathBuf> {
     let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    Some(path.parent()?.join(format!(".config.toml.farcooler-{}-{write}-{nanos}.tmp", std::process::id())))
+    let name = path.file_name()?.to_string_lossy();
+    Some(path.parent()?.join(format!(".{name}.farcooler-{}-{write}-{nanos}.tmp", std::process::id())))
 }
 
 /// Write `contents` to a new temporary file beside `path` with `mode`, then
 /// rename it over `path` if `path` still holds `before` (or is still absent
 /// when `before` is empty), and say whether it did.
-fn replace(path: &Path, contents: &[u8], mode: u32, before: &[u8], between: impl FnOnce()) -> std::io::Result<bool> {
+///
+/// Also how `service::replace_hooks_file` writes a hooks file. The read that
+/// decides refuses the same things for both (`read_no_follow`): a symbolic
+/// link, a file with more than one name, a read-only file.
+pub(crate) fn replace(path: &Path, contents: &[u8], mode: u32, before: &[u8], between: impl FnOnce()) -> std::io::Result<bool> {
     let temp = temporary_beside(path).ok_or(std::io::ErrorKind::InvalidInput)?;
     replace_through(path, &temp, contents, mode, before, between)
 }
