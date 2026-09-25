@@ -3803,9 +3803,12 @@ mod tests {
     ///
     /// The daemon has stored `terminals.task_id` and put it on the wire since
     /// `terminal_task`, and both of these dropped it, so no app could go from
-    /// a card on the board to the agent working it. The Mac reads the list
-    /// on a refresh and the event on every change after that, and a link that
-    /// only one of them carried would come and go with whichever arrived last.
+    /// a card on the board to the agent working it. The Mac reads it from
+    /// `workspace list`: a pane's task is set when it is created, and a new
+    /// pane's first event makes the Mac re-read the list. The event carries
+    /// it too so the two projections stay one shape — which
+    /// `the_two_terminal_projections_agree_on_every_field` enforces — for any
+    /// client that applies events without re-reading.
     #[test]
     fn a_dispatched_terminal_names_its_task_in_both_projections() {
         let task = uuid::Uuid::now_v7();
