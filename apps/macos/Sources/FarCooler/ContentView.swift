@@ -2157,7 +2157,19 @@ struct ContentView: View {
                 // nothing behind — that is what closing means everywhere else.
                 await act(on: workspace) { c in await c.stop(terminal: terminal.short) }
                 await act(on: workspace) { c in await c.removeTerminal(terminal.short) }
-                selectNeighbour(of: terminal)
+                // Nothing to select here. Where the selection goes when a
+                // terminal disappears is `healSelection`'s one rule, run from
+                // `.onChange(of: store.fleet)` once the removal reaches the
+                // merged fleet — and it is that one rule on purpose.
+                //
+                // This used to call `selectNeighbour(of:)`, which walked the
+                // WHOLE fleet and took the first running terminal anywhere,
+                // on any runner. It also ran before the removal had reached
+                // `store.fleet` — `FleetStore.remerge` runs in a task of its
+                // own after the client changes — so it found the closed
+                // terminal still listed, moved the selection off it, and left
+                // `healSelection` nothing to heal. ⌘W in one worktree landed
+                // you in another, often on another runner.
             }
 
         case .nextTerminal: step(by: 1)
@@ -2477,25 +2489,47 @@ struct ContentView: View {
     /// Prefers to stay where the user was looking: another terminal in the same
     /// workspace, whatever wants attention first, then anything running. Only
     /// falls back to the workspace itself when the workspace is empty.
+    ///
+    /// The one rule for every way a terminal can disappear, closing it here
+    /// with ⌘W included. See `healed(_:in:)`, which is the rule itself.
     private func healSelection() {
-        guard case .terminal(let host, let workspaceID, let terminalID) = selection else { return }
+        let next = Self.healed(selection, in: store.fleet.workspaces)
+        if next != selection { selection = next }
+    }
+
+    /// Where a selection goes when what it points at is gone, or the same
+    /// selection when it is not.
+    ///
+    /// Static and free of the view so it can be tested; `healSelection` holds
+    /// only the assignment. Never leaves the workspace while the workspace is
+    /// there: a closed terminal's neighbour is in the worktree you were
+    /// working in, not wherever the fleet happens to list a running terminal
+    /// first. The phones keep the same promise their own way, clamping to the
+    /// neighbouring tab (`ShellFleet.reseat`).
+    nonisolated static func healed(
+        _ selection: Selection?, in workspaces: [Workspace]
+    ) -> Selection? {
+        guard case .terminal(let host, let workspaceID, let terminalID) = selection else {
+            return selection
+        }
         guard
-            let workspace = store.fleet.workspaces.first(where: {
+            let workspace = workspaces.first(where: {
                 ($0.host ?? "") == host && $0.id == workspaceID
             })
         else {
             // The whole workspace went. Land on whatever is left rather than
             // on nothing.
-            selection = store.fleet.workspaces.first.map { .workspace(host: $0.host ?? "", id: $0.id) }
-            return
+            return workspaces.first.map { .workspace(host: $0.host ?? "", id: $0.id) }
         }
-        guard !workspace.terminals.contains(where: { $0.id == terminalID }) else { return }
+        guard !workspace.terminals.contains(where: { $0.id == terminalID }) else {
+            return selection
+        }
 
         let candidates = workspace.terminals
         let next = candidates.first(where: { $0.status.wantsAttention })
             ?? candidates.first(where: { StateKind.parse($0.state) == .running })
             ?? candidates.first
-        selection = next.map { .terminal(host: host, workspace: workspaceID, terminal: $0.id) }
+        return next.map { .terminal(host: host, workspace: workspaceID, terminal: $0.id) }
             ?? .workspace(host: host, id: workspaceID)
     }
 
@@ -2514,19 +2548,6 @@ struct ContentView: View {
         selection = .terminal(host: workspace.host ?? "", workspace: workspace.id, terminal: terminal.id)
     }
 
-    /// After closing one, land on the next terminal rather than on nothing.
-    private func selectNeighbour(of terminal: Terminal) {
-        let ordered = allTerminals
-        guard let index = ordered.firstIndex(where: { $0.id == terminal.id }) else { return }
-        let remaining = ordered.enumerated().filter { $0.offset != index }.map(\.element)
-        if let next = remaining.first(where: { StateKind.parse($0.state) == .running })
-            ?? remaining.first
-        {
-            select(next)
-        } else {
-            selection = currentWorkspace.map { .workspace(host: $0.host ?? "", id: $0.id) }
-        }
-    }
 }
 
 enum TerminalAction { case restart, dismissLost, stop }
