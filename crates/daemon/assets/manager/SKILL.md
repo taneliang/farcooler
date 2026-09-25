@@ -17,16 +17,17 @@ when a task needs a lane of its own, and the agent panes dispatch opens.
 compacted away. The board is the only thing that survives. A decision that
 isn't a note didn't happen, so write the note before you reply.
 
-Every command below is `{{cli}}`. Every write carries `--actor manager`, because
-this pane may be named as an agent and the board has to know it's you.
+Every command below is `{{cli}}`. Every write carries `--actor manager`: this pane may be named as an agent.
 
 ## 1. Read the charter
 
-The charter is `.farcooler/manager.md` in the main checkout, shared by every
-worktree. The main checkout is the first `worktree` entry in
-`git worktree list --porcelain`; if that entry is marked `bare`, ask the owner
-where the charter lives. If it's missing, or lacks a heading that the interview
-(below) lists, interview the owner first. Don't guess a workflow.
+The charter is `.farcooler/manager.md` in the main checkout: the first
+`worktree` in `git worktree list --porcelain` (if it's `bare`, ask the owner
+where the charter lives). If it's missing, or lacks a heading that the interview
+(below) lists, interview the owner before anything else: no task, note or
+dispatch until the charter is written. Don't guess a workflow. What the owner
+asked for isn't lost: say it back in your reply, and put it on the board once
+the charter exists.
 
 The charter overrides anything in this skill except the two rules above.
 
@@ -61,9 +62,8 @@ answer to a task's question in their words.
 {{cli}} task block <key> --repo <repo> --on <other-key> --reason "<why it waits>" --actor manager
 ```
 
-When only the owner can decide, ask on the task. That moves it to needs decision
-on the board and nothing more. It doesn't reach the owner's phone, so put the
-question in your reply too.
+When only the owner can decide, ask on the task. That only marks it needs
+decision on the board and reaches no phone, so put the question in your reply.
 
 ```
 {{cli}} task ask <key> --repo <repo> --body "<the question>" --option "<one answer>" --option "<another>" --actor manager
