@@ -91,6 +91,7 @@ pub enum TaskCmd {
     Show {
         /// A key like `fc-42`, or the last eight of a task's id. Defaults to
         /// the pane's own task.
+        #[arg(allow_negative_numbers = true)]
         key: Option<String>,
         /// Which sections to print, comma separated: title, status, intent,
         /// acceptance, constraints, labels, blocks, history.
@@ -143,6 +144,7 @@ pub enum TaskCmd {
     Set {
         /// A key like `fc-42`, or the last eight of a task's id. Defaults to
         /// the pane's own task.
+        #[arg(allow_negative_numbers = true)]
         key: Option<String>,
         /// backlog, todo, needs_decision, in_progress, in_review, done,
         /// cancelled.
@@ -191,6 +193,7 @@ pub enum TaskCmd {
     Note {
         /// A key like `fc-42`, or the last eight of a task's id. Defaults to
         /// the pane's own task.
+        #[arg(allow_negative_numbers = true)]
         key: Option<String>,
         /// decision, finding, question, answer, progress, or comment.
         #[arg(long)]
@@ -226,6 +229,7 @@ pub enum TaskCmd {
     Ask {
         /// A key like `fc-42`, or the last eight of a task's id. Defaults to
         /// the pane's own task.
+        #[arg(allow_negative_numbers = true)]
         key: Option<String>,
         /// What only the user can answer.
         #[arg(long)]
@@ -247,9 +251,10 @@ pub enum TaskCmd {
     Block {
         /// A key like `fc-42`, or the last eight of a task's id. Defaults to
         /// the pane's own task.
+        #[arg(allow_negative_numbers = true)]
         key: Option<String>,
         /// The task this one waits on.
-        #[arg(long = "on")]
+        #[arg(long = "on", allow_negative_numbers = true)]
         on: String,
         /// Why it has to wait.
         ///
@@ -310,10 +315,9 @@ pub enum TaskCmd {
     /// agent ever got going (it stopped at a trust question, say), tell it to
     /// run `farcooler task show` yourself.
     ///
-    /// A key that starts with `-` goes after `--`: `task dispatch --workspace
-    /// lane -- -1`.
     Dispatch {
         /// A key like `fc-42`.
+        #[arg(allow_negative_numbers = true)]
         key: String,
         /// The workspace to work in, by name or id, in the task's repository.
         #[arg(long, required_unless_present = "new", conflicts_with = "new")]
@@ -1380,9 +1384,9 @@ async fn tasks_with_key(
 /// refused rather than picked from — writing to the wrong board is the failure
 /// that would be found days later. That the refusal is nearly unreachable is
 /// not a reason to drop it: a key is `<prefix>-<n>` and `task_key_prefix` has
-/// a unique index, so a runner that has always worked cannot mint one key
-/// twice, but a repository that missed its prefix at registration issues `-1`,
-/// `-2` with no prefix at all — see `Store::tasks_with_key`.
+/// a unique index, so a runner cannot mint one key twice, but a task still
+/// answers to the `-1` it had before its board got a prefix, and two boards
+/// that were both prefixless each had a `-1` — see `Store::tasks_with_key`.
 ///
 /// Two questions, asked cheapest first. A key goes straight to the runner's
 /// index; only if that names nothing does this fall back to reading the boards
@@ -1722,8 +1726,9 @@ fn working_on(t: &pb::Terminal, task: &[u8]) -> bool {
         && [Running as i32, Starting as i32, Unknown as i32].contains(&t.state)
 }
 
-/// `farcooler task show <key>`, with a key that starts with `-` after `--`,
-/// where clap won't read it as a flag.
+/// `farcooler task show <key>`, with a key that starts with `-` after `--`.
+/// This CLI takes `-1` as a key without it, but a command someone copies may
+/// be run by an older one, which reads it as a flag.
 fn show_command(key: &str) -> String {
     if key.starts_with('-') {
         format!("farcooler task show -- {key}")
@@ -2979,6 +2984,62 @@ mod tests {
         let (done, warned) = run_as(&mut link, &task, existing(), "claude", false).await;
         done.expect("still the caller's call");
         assert!(warned.iter().any(|w| w.contains("fc-2 is done")), "{warned:?}");
+    }
+
+    /// A key from a board that had no prefix (`-16`) is taken as the key
+    /// wherever a key goes, before or after the flags, with no `--`: it is
+    /// what `task show` printed, and what an old note or a pane's
+    /// `FARCOOLER_TASK` still says. A real flag after it is still a flag.
+    #[test]
+    fn a_key_that_starts_with_a_dash_is_a_key_not_a_flag() {
+        use clap::Parser;
+        let parse = |args: &[&str]| {
+            crate::Cli::try_parse_from(["farcooler"].iter().chain(args))
+                .unwrap_or_else(|e| panic!("{args:?}: {e}"))
+                .command
+        };
+        let key_of = |command: crate::Command| match command {
+            crate::Command::Task(
+                TaskCmd::Show { key, .. }
+                | TaskCmd::Set { key, .. }
+                | TaskCmd::Note { key, .. }
+                | TaskCmd::Ask { key, .. }
+                | TaskCmd::Block { key, .. },
+            ) => key,
+            crate::Command::Task(TaskCmd::Dispatch { key, .. }) => Some(key),
+            _ => panic!("not a task command with a key"),
+        };
+        for args in [
+            &["task", "show", "-16", "--repo", "overnight", "--notes", "decision"][..],
+            &["task", "show", "--repo", "overnight", "-16"],
+            &["task", "set", "-16", "--repo", "overnight", "--status", "done", "--actor", "manager"],
+            &["task", "note", "-16", "--kind", "decision", "--body", "b"],
+            &["task", "note", "--kind", "decision", "--body", "b", "-16"],
+            &["task", "ask", "-16", "--body", "q", "--option", "a"],
+            &["task", "block", "-16", "--on", "-3", "--reason", "r"],
+            &["task", "dispatch", "-16", "--repo", "overnight", "--new", "n", "--branch", "b"],
+        ] {
+            assert_eq!(key_of(parse(args)).as_deref(), Some("-16"), "{args:?}");
+        }
+        let crate::Command::Task(TaskCmd::Block { on, .. }) = parse(&["task", "block", "fc-1", "--on", "-3"])
+        else {
+            panic!("block")
+        };
+        assert_eq!(on, "-3", "the task waited on is a key too");
+        let crate::Command::Terminal(crate::TerminalCmd::Create { task, .. }) =
+            parse(&["terminal", "create", "lane", "--preset", "claude", "--task", "-16"])
+        else {
+            panic!("terminal create")
+        };
+        assert_eq!(task.as_deref(), Some("-16"));
+        // Only a key's own shape is let through: anything else that starts
+        // with a dash is still read as a flag.
+        assert!(crate::Cli::try_parse_from(["farcooler", "task", "show", "-x"]).is_err());
+        let crate::Command::Task(TaskCmd::Show { key, fields, .. }) = parse(&["task", "show", "--fields", "title"])
+        else {
+            panic!("show --fields")
+        };
+        assert_eq!((key, fields.as_deref()), (None, Some("title")));
     }
 
     #[test]

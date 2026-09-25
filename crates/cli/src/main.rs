@@ -602,7 +602,7 @@ enum TerminalCmd {
         /// An agent pane exports it as FARCOOLER_TASK, now and after every
         /// restart, and starts on a short message that points it at the task.
         /// `farcooler task dispatch` does this and moves the task too.
-        #[arg(long)]
+        #[arg(long, allow_negative_numbers = true)]
         task: Option<String>,
     },
     /// Send exact bytes to a terminal.
