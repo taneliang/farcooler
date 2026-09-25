@@ -46,6 +46,30 @@ const WEDGED: Duration = Duration::from_secs(3);
 /// different assertions that happen to be spelled the same way.
 const NEVER_FINISHED: Duration = Duration::from_secs(60);
 
+/// The hook's OWN deadline, for a test that is about integrity.
+///
+/// `NEVER_FINISHED` loosens only the test's clock. The hook carries a clock of
+/// its own, `hook::HOOK_DEADLINE`, 400 ms, and when it runs out the hook prints
+/// nothing and exits 0 — by design, because the agent then asks at the
+/// keyboard. So under that deadline a test that expects a verdict on stdout is
+/// also asserting that the fake daemon, the socket and two runtimes all got
+/// scheduled inside 400 ms, and a full workspace run is entitled to make that
+/// false. It did, on 2026-09-25: exit 0, stdout empty, a red that read as a lost
+/// verdict and was the deadline doing its job.
+///
+/// Passed as the hidden `--deadline-ms`, which no installed hook carries. Under
+/// `NEVER_FINISHED`, so a hook that ignores it still ends the test rather than
+/// wedging it. What the real deadline does to a late answer is asserted on its
+/// own, below, with the real deadline.
+const SHAPE_NOT_SPEED: Duration = Duration::from_secs(30);
+
+/// Long past `hook::HOOK_DEADLINE` and well inside `SHAPE_NOT_SPEED`.
+///
+/// Measured from the daemon's accept, which is after the hook started its
+/// clock, so a hook under the real deadline has always given up by the time
+/// this answer is written, however slow the machine is.
+const LATE: Duration = Duration::from_secs(1);
+
 /// Big enough that the frame it becomes overruns a Unix socket's send buffer.
 ///
 /// `net.local.stream.sendspace` is 8192 on macOS. A `PreToolUse` carrying a
@@ -80,12 +104,16 @@ async fn run_the_hook(
     payload: Vec<u8>,
     pipe: Pipe,
 ) -> Output {
-    run_the_hook_within(WEDGED, event, gating, socket, payload, pipe).await
+    run_the_hook_within(WEDGED, None, event, gating, socket, payload, pipe).await
 }
 
 /// The same, for a test whose bound is not the thing it is asserting.
+///
+/// `deadline` is the hook's own, passed as `--deadline-ms`; `None` runs it
+/// exactly as an installed hook runs, under `hook::HOOK_DEADLINE`.
 async fn run_the_hook_within(
     bound: Duration,
+    deadline: Option<Duration>,
     event: &str,
     gating: bool,
     socket: &Path,
@@ -104,6 +132,9 @@ async fn run_the_hook_within(
         .kill_on_drop(true);
     if gating {
         command.arg("--gating");
+    }
+    if let Some(deadline) = deadline {
+        command.arg("--deadline-ms").arg(deadline.as_millis().to_string());
     }
     let mut child = command.spawn().expect("the hook binary runs");
 
@@ -257,6 +288,10 @@ async fn a_hook_told_an_agent_nobody_ships_is_invisible() {
 /// still passes about 197 times in 200, because at the size of a real verdict
 /// the bytes usually win their race with the exit. The test below is the one
 /// that guards it.
+///
+/// Under `SHAPE_NOT_SPEED` and `NEVER_FINISHED` rather than the real deadline
+/// and `WEDGED`, because this is about what arrives, not when: see
+/// `SHAPE_NOT_SPEED` for the run it went red in and why that red was false.
 #[tokio::test]
 async fn a_gating_hook_hands_the_verdict_to_the_agent_on_stdout() {
     let dir = tempfile::tempdir().expect("a directory");
@@ -275,7 +310,9 @@ async fn a_gating_hook_hands_the_verdict_to_the_agent_on_stdout() {
         tokio::io::AsyncWriteExt::write_all(&mut stream, b"\n").await.expect("newline");
     });
 
-    let out = run_the_hook(
+    let out = run_the_hook_within(
+        NEVER_FINISHED,
+        Some(SHAPE_NOT_SPEED),
         "PermissionRequest",
         true,
         &socket,
@@ -319,14 +356,19 @@ async fn a_gating_hook_hands_the_verdict_to_the_agent_on_stdout() {
 /// made unusual is the length of a string the daemon chose to send.
 ///
 /// It waits under `NEVER_FINISHED` rather than `WEDGED`, and the difference is
-/// deliberate. Every other test in this file asserts TIMELINESS — taking too
-/// long against a socket nobody reads is itself the failure, so a tight bound
-/// is the assertion. This one asserts INTEGRITY, and does not care whether the
-/// verdict takes 200 ms or four seconds to arrive whole. Bounding it tightly
-/// only lets a loaded machine redden it for a reason unrelated to what it
-/// tests — and a reader who sees that red will reasonably conclude the flush
-/// race is back. It flaked exactly that way once under a full workspace run
-/// before the bounds were split.
+/// deliberate. The tests about a socket nobody reads assert TIMELINESS —
+/// taking too long is itself the failure, so a tight bound is the assertion.
+/// This one asserts INTEGRITY, and does not care whether the verdict takes
+/// 200 ms or four seconds to arrive whole. Bounding it tightly only lets a
+/// loaded machine redden it for a reason unrelated to what it tests — and a
+/// reader who sees that red will reasonably conclude the flush race is back.
+/// It flaked exactly that way once under a full workspace run before the
+/// bounds were split.
+///
+/// Splitting the test's bound was only half of that. The hook's own 400 ms
+/// deadline still covered the half megabyte's trip across the socket, and a
+/// hook that runs out of it prints nothing — which this test reported as "the
+/// exit outran the write". So it also runs under `SHAPE_NOT_SPEED`.
 #[tokio::test]
 async fn a_big_verdict_is_not_lost_to_the_exit_that_follows_it() {
     /// Comfortably past the point where the blocking pool cannot finish the
@@ -357,6 +399,7 @@ async fn a_big_verdict_is_not_lost_to_the_exit_that_follows_it() {
     // and a JSON parse is not fast, and how fast it is proves nothing here.
     let out = run_the_hook_within(
         NEVER_FINISHED,
+        Some(SHAPE_NOT_SPEED),
         "PermissionRequest",
         true,
         &socket,
@@ -382,4 +425,64 @@ async fn a_big_verdict_is_not_lost_to_the_exit_that_follows_it() {
         "the verdict arrived truncated, which is the same race half-lost"
     );
     assert_eq!(parsed["hookSpecificOutput"]["decision"]["message"], message);
+}
+
+/// A fake daemon that reads the frame, waits `after`, and answers with a deny.
+fn a_daemon_that_denies(socket: &Path, after: Duration) {
+    let listener = tokio::net::UnixListener::bind(socket).expect("bind");
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("accept");
+        let mut reader = tokio::io::BufReader::new(&mut stream);
+        let mut line = String::new();
+        tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+        tokio::time::sleep(after).await;
+        let verdict = b"{\"decision\":{\"behavior\":\"deny\",\"message\":\"Denied late\"}}\n";
+        // The hook may be long gone; a write into its closed socket is fine.
+        let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, verdict).await;
+    });
+}
+
+/// What the agent gets when the verdict misses the real deadline: nothing.
+///
+/// This is the case the 2026-09-25 red was, made certain instead of left to
+/// the machine's load. The design means it (spec, "Permissions, which is the
+/// feature": "On timeout the hook returns nothing and the TUI asks as it
+/// always would"), and it is why a late deny is safe: claude reads no output
+/// from a `PermissionRequest` hook as no decision, and asks the person at the
+/// keyboard. It never reads it as an allow. If the hook ever printed an allow,
+/// or anything at all, on this path, a daemon's slowness would be deciding.
+#[tokio::test]
+async fn a_verdict_that_misses_the_deadline_leaves_the_agent_to_ask() {
+    let dir = tempfile::tempdir().expect("a directory");
+    let socket = dir.path().join("h.sock");
+    a_daemon_that_denies(&socket, LATE);
+    let out =
+        run_the_hook("PermissionRequest", true, &socket, a_payload_of(64), Pipe::Closed).await;
+    it_was_never_in_the_way(&out, "a gating hook whose verdict came after its deadline");
+}
+
+/// The other side of the same daemon: `--deadline-ms` is honored.
+///
+/// Without this, `SHAPE_NOT_SPEED` could be silently ignored and the two
+/// integrity tests above would be back on the 400 ms deadline without anything
+/// saying so, green on an idle machine and red on a busy one again.
+#[tokio::test]
+async fn a_wider_deadline_waits_for_the_same_late_verdict() {
+    let dir = tempfile::tempdir().expect("a directory");
+    let socket = dir.path().join("h.sock");
+    a_daemon_that_denies(&socket, LATE);
+    let out = run_the_hook_within(
+        NEVER_FINISHED,
+        Some(SHAPE_NOT_SPEED),
+        "PermissionRequest",
+        true,
+        &socket,
+        a_payload_of(64),
+        Pipe::Closed,
+    )
+    .await;
+    let printed = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(printed.trim()).unwrap_or_else(|e| panic!("stdout was {printed:?}: {e}"));
+    assert_eq!(parsed["hookSpecificOutput"]["decision"]["message"], "Denied late");
 }
