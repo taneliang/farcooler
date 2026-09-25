@@ -2621,7 +2621,7 @@ mod tests {
         terminals: Vec<pb::Terminal>,
         refuse: Option<(&'static str, &'static str)>,
         /// The argument a refusal names (`Error.what`).
-        refuse_what: &'static str,
+        refused_argument: &'static str,
         sent: Vec<pb::Request>,
     }
 
@@ -2632,7 +2632,7 @@ mod tests {
                 workspaces: vec![lane(LANE, "lane", REPO)],
                 terminals: Vec::new(),
                 refuse: None,
-                refuse_what: "",
+                refused_argument: "",
                 sent: Vec::new(),
             }
         }
@@ -2660,7 +2660,7 @@ mod tests {
                     code,
                     retryable: false,
                     message: String::new(),
-                    what: self.refuse_what.into(),
+                    what: self.refused_argument.into(),
                 });
             }
             let value = match method.as_str() {
@@ -2841,7 +2841,7 @@ mod tests {
     async fn a_preset_the_runner_refuses_leaves_the_board_as_it_was() {
         let mut link = FakeLink {
             refuse: Some(("terminal.create", "invalid-argument")),
-            refuse_what: "command_preset",
+            refused_argument: "command_preset",
             ..Default::default()
         };
         let said = run(&mut link, existing()).await.0.expect_err("refused");
