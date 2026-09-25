@@ -2576,7 +2576,6 @@ mod terminal_task_tests {
 
     #[tokio::test]
     async fn a_terminal_for_a_task_on_its_own_board_exports_the_key() {
-        let _stub = test_agent::stubbed();
         let (_dir, svc, factory, ws) = a_handler().await;
         let task = svc.store.create_task(ws.repository_id, "the work", models::Actor::User).unwrap();
 
@@ -2595,7 +2594,6 @@ mod terminal_task_tests {
     /// other of the two first launches, and the one `prefix %` takes.
     #[tokio::test]
     async fn a_terminal_split_into_the_layout_for_a_task_exports_the_key() {
-        let _stub = test_agent::stubbed();
         let (_dir, svc, factory, ws) = a_handler().await;
         let task = svc.store.create_task(ws.repository_id, "the work", models::Actor::User).unwrap();
         // A layout to join: one ordinary pane first.

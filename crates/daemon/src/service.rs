@@ -345,7 +345,7 @@ pub fn preset_command_with_hooks(
         "claude" => {
             format!(
                 "{shell} -ilc {}",
-                shell_quote(&format!("{}{flag}{session}{settings}{prompt}", claude_program()))
+                shell_quote(&format!("{}{flag}{session}{settings}{prompt}", agent_program("claude")))
             )
         }
         // `shell_quote` around the payload now, for claude's reason: the
@@ -360,7 +360,7 @@ pub fn preset_command_with_hooks(
         // load, where an unknown key is ignored).
         "codex" => format!(
             "{shell} -ilc {}",
-            shell_quote(&format!("codex{flag} {CODEX_NO_UPDATE_CHECK}{prompt}"))
+            shell_quote(&format!("{}{flag} {CODEX_NO_UPDATE_CHECK}{prompt}", agent_program("codex")))
         ),
         // `shell_quote` around the payload for claude's reason: the plugin
         // path is quoted in turn. With no plugin directory, no trust and no
@@ -375,10 +375,10 @@ pub fn preset_command_with_hooks(
             let trust = if extras.trust_workspace { " --trust" } else { "" };
             format!(
                 "{shell} -ilc {}",
-                shell_quote(&format!("cursor-agent{flag}{trust}{plugin}{prompt}"))
+                shell_quote(&format!("{}{flag}{trust}{plugin}{prompt}", agent_program("cursor-agent")))
             )
         }
-        other if is_safe_model(other) => format!("{shell} -ilc '{other}{flag}'"),
+        other if is_safe_model(other) => format!("{shell} -ilc '{}{flag}'", agent_program(other)),
         // An unrecognized preset that is not a plain identifier is not run at
         // all. A preset is chosen from a list; anything else is a bug or an
         // attempt.
@@ -386,20 +386,29 @@ pub fn preset_command_with_hooks(
     }
 }
 
-/// The program claude's launch arm runs: `claude`, always, outside tests.
+/// The program an agent launch runs: `name` itself, always, outside tests.
 ///
-/// Under test a thread may swap it for a name no binary has
-/// (`test_agent::stubbed`), so a test can open a real pane through the real
-/// launch path, read back the command tmux was handed, and never start an
-/// agent. That matters most for a pane opened for a task: its first message
-/// tells the agent to run board commands, through a CLI that can reach
-/// whichever daemon is on this machine.
-fn claude_program() -> &'static str {
+/// **Under test, a stub by default.** Every launch builder -- the three
+/// agent arms of `preset_command_with_hooks` and its `other` arm, the two
+/// resume commands in `terminal_mode_command`, and the `agent-host` shim in
+/// `set_pane_mode` -- names its program through this, so a daemon unit test
+/// that opens a real pane in a private tmux server starts
+/// `test_agent::PROGRAM` there, with `name` and everything after it as
+/// arguments that nothing reads. That matters for any launch, and most for
+/// a pane opened for a task: its first message tells the agent to run board
+/// commands through a CLI that, from a test binary, reaches whichever daemon
+/// is on this machine.
+///
+/// A test that checks the command a builder writes, rather than running it,
+/// takes `test_agent::real_names()` and sees the real program; the tmux
+/// boundary refuses to launch anything built under that guard
+/// (`test_agent::refuse_a_real_agent`).
+fn agent_program(name: &str) -> String {
     #[cfg(test)]
-    if let Some(stub) = test_agent::STUB.with(|s| s.get()) {
-        return stub;
+    if !test_agent::REAL.with(|r| r.get()) {
+        return format!("{} {name}", test_agent::PROGRAM);
     }
-    "claude"
+    name.to_string()
 }
 
 #[cfg(test)]
@@ -411,10 +420,11 @@ pub(crate) mod test_agent {
     /// as a program.
     pub(crate) const MARKER: &str = "farcooler-test-stub-agent";
 
-    /// What an agent's launch arm runs in place of the agent: a `sh` that
-    /// waits, named `MARKER`, which takes every argument the arm appends --
-    /// flags, session id, the opening prompt -- as positional parameters and
-    /// reads none of them.
+    /// What an agent's launch runs in place of the agent: a `sh` that waits,
+    /// named `MARKER`, which takes the agent's own name and every argument
+    /// after it -- flags, session id, the opening prompt -- as positional
+    /// parameters and reads none of them. The `exec` means the only process
+    /// left in the pane is `/bin/sleep`.
     ///
     /// **It waits, rather than failing at once.** The first stub was a name
     /// no binary has, so the login shell printed "unknown command" and
@@ -430,16 +440,24 @@ pub(crate) mod test_agent {
     /// `shell_quote` and every login shell's own parse the same way.
     pub(crate) const PROGRAM: &str = "/bin/sh -c exec\\ /bin/sleep\\ 600 farcooler-test-stub-agent";
 
+    /// The program words the refusal below looks for: the three agent CLIs
+    /// and the shim. A word in this list reaching tmux without `MARKER`
+    /// before it is a real agent about to start.
+    const AGENTS: [&str; 4] = ["claude", "codex", "cursor-agent", "agent-host"];
+
     thread_local! {
-        pub(crate) static STUB: Cell<Option<&'static str>> = const { Cell::new(None) };
+        pub(crate) static REAL: Cell<bool> = const { Cell::new(false) };
     }
 
-    /// Stub claude on this thread until the guard drops. A thread-local, so
-    /// tests on other threads keep building the real command. `#[tokio::test]`
-    /// runs its future on the test's own thread, so every command built while
-    /// it awaits a `Service` call is built here.
-    pub(crate) fn stubbed() -> Guard {
-        STUB.with(|s| s.set(Some(PROGRAM)));
+    /// Build real program names on this thread until the guard drops -- for
+    /// a test that checks the string a builder writes and launches nothing.
+    /// Anything built under it that reaches tmux panics instead of starting.
+    ///
+    /// A thread-local, so it cannot leak into a test on another thread; a
+    /// builder that runs on some other thread than the test's gets the stub,
+    /// which is the safe direction.
+    pub(crate) fn real_names() -> Guard {
+        REAL.with(|r| r.set(true));
         Guard
     }
 
@@ -447,7 +465,40 @@ pub(crate) mod test_agent {
 
     impl Drop for Guard {
         fn drop(&mut self) {
-            STUB.with(|s| s.set(None));
+            REAL.with(|r| r.set(false));
+        }
+    }
+
+    /// `command` with the stub taken back out, so a test that reads a
+    /// stubbed launch's argv through a shell (swapping the agent for a
+    /// `printf`) runs the `printf` and not the stub's `sleep`. Removes both
+    /// renderings the builders write: bare, and inside `shell_quote`.
+    pub(crate) fn unstubbed(command: &str) -> String {
+        let quoted = super::shell_quote(PROGRAM);
+        let inner = &quoted[1..quoted.len() - 1];
+        command.replace(&format!("{inner} "), "").replace(&format!("{PROGRAM} "), "")
+    }
+
+    /// The tmux boundary's check, run on every command a test is about to
+    /// hand tmux: panics rather than start a real agent. Two ways in, both
+    /// refused -- a command built under `real_names()`, and an agent's
+    /// program word with no stub in front of it, which is what a new launch
+    /// path that forgot `agent_program` would write.
+    pub(crate) fn refuse_a_real_agent(command: &str) {
+        assert!(
+            !REAL.with(|r| r.get()),
+            "a test built this command with test_agent::real_names() and then launched it; \
+             real names are for checking a builder's string, never for a pane: {command}"
+        );
+        let words: Vec<&str> =
+            command.split(|c: char| c.is_whitespace() || c == '\'' || c == '"').filter(|w| !w.is_empty()).collect();
+        for (i, word) in words.iter().enumerate() {
+            assert!(
+                !AGENTS.contains(word) || words[..i].contains(&MARKER),
+                "a daemon unit test was about to start a real `{word}` in a tmux pane. Every launch \
+                 names its program through `agent_program`, which stubs it under test; this one did \
+                 not: {command}"
+            );
         }
     }
 }
@@ -1108,7 +1159,7 @@ fn terminal_mode_command(
             format!(
                 "{} -ilc {}",
                 shell(),
-                shell_quote(&format!("claude --resume {session_id}{settings}"))
+                shell_quote(&format!("{} --resume {session_id}{settings}", agent_program("claude")))
             )
         } else {
             // Nothing to continue: start claude clean rather than fail into
@@ -1123,7 +1174,7 @@ fn terminal_mode_command(
         }
     } else if preset.starts_with("codex") {
         if resumable {
-            format!("{} -ilc 'codex resume {session_id} {CODEX_NO_UPDATE_CHECK}'", shell())
+            format!("{} -ilc '{} resume {session_id} {CODEX_NO_UPDATE_CHECK}'", shell(), agent_program("codex"))
         } else {
             // Same reasoning as claude's clean-start branch above: a codex
             // session with no completed turn wrote no rollout, and `codex
@@ -2713,6 +2764,8 @@ impl Service {
             prompt.as_deref(),
             task_key.as_deref(),
         );
+        #[cfg(test)]
+        test_agent::refuse_a_real_agent(&command);
         let created = self
             .tmux
             .create_terminal_window(workspace_id, term.id, title, &ws.worktree_path, &command)
@@ -3051,6 +3104,8 @@ impl Service {
             prompt.as_deref(),
             task_key.as_deref(),
         );
+        #[cfg(test)]
+        test_agent::refuse_a_real_agent(&command);
         let created = self
             .tmux
             .split_pane(&pane.pane_id, axis, term.id, &ws.worktree_path, &command, before)
@@ -3198,6 +3253,8 @@ impl Service {
         // which is what a genuinely lost terminal is: there is no rectangle
         // left to put the program back into.
         let existing = self.inventory.refresh().await.claimants(id).into_iter().next().cloned();
+        #[cfg(test)]
+        test_agent::refuse_a_real_agent(&command);
         match existing {
             Some(pane) => self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?,
             None => {
@@ -3532,7 +3589,7 @@ impl Service {
                     .unwrap_or_default();
                 format!(
                     "{} agent-host --terminal {id} --socket {} --worktree {}{session}{preset}",
-                    shell_quote(&binary),
+                    agent_program(&shell_quote(&binary)),
                     shell_quote(&socket),
                     shell_quote(&ws.worktree_path),
                 )
@@ -3604,6 +3661,8 @@ impl Service {
             command,
         );
 
+        #[cfg(test)]
+        test_agent::refuse_a_real_agent(&command);
         self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
         let updated = self.record_pane_mode(&term, pane_mode, session_id)?;
         // The shim died with the pane the line above respawned. Nothing told
@@ -4085,6 +4144,8 @@ mod tests {
 
     #[test]
     fn presets_run_through_an_interactive_login_shell() {
+        // Real names: this checks the exact string the builder writes, and launches nothing.
+        let _real = crate::service::test_agent::real_names();
         // Startup files, version managers, direnv and aliases must behave like a
         // hand-launched terminal.
         // Quoted now, because a preset may carry a model.
@@ -4418,12 +4479,80 @@ mod tests {
     }
 }
 
+/// The stub every daemon unit test launches in place of an agent
+/// (`agent_program`, `test_agent`), and the check that refuses a real one.
+#[cfg(test)]
+mod test_agent_tests {
+    use super::*;
+
+    /// Every command a launch path can build for an agent, under test with
+    /// no guard: the three agent arms and the `other` arm of the launch
+    /// builder, and both resume commands. The shim's command is built inline
+    /// in `set_pane_mode`; `switching_a_claude_pane_into_agent_mode_runs_the_shim`
+    /// sends it through the refusal below on its way to tmux.
+    fn every_agent_launch() -> Vec<(&'static str, String)> {
+        let sid = Uuid::now_v7().to_string();
+        let extras = LaunchExtras::NONE;
+        vec![
+            ("claude", preset_command_with_hooks("claude", Some(&sid), &extras)),
+            ("claude:opus", preset_command_with_hooks("claude:opus", None, &extras)),
+            ("codex", preset_command_with_hooks("codex", None, &extras)),
+            ("cursor", preset_command_with_hooks("cursor", None, &extras)),
+            ("opencode", preset_command_with_hooks("opencode", None, &extras)),
+            ("claude --resume", terminal_mode_command("claude", &sid, true, &extras)),
+            ("codex resume", terminal_mode_command("codex", &sid, true, &extras)),
+        ]
+    }
+
+    #[test]
+    fn every_agent_launch_runs_the_stub_under_test() {
+        for (what, command) in every_agent_launch() {
+            assert!(command.contains(test_agent::MARKER), "{what} must launch the stub: {command}");
+            test_agent::refuse_a_real_agent(&command);
+        }
+    }
+
+    /// The same launches with `real_names()` held: the builders write the
+    /// real program, and every one of them is refused at the tmux boundary.
+    #[test]
+    fn a_launch_built_with_real_names_is_refused() {
+        let _real = test_agent::real_names();
+        for (what, command) in every_agent_launch() {
+            assert!(!command.contains(test_agent::MARKER), "{what} is the real program under real_names: {command}");
+            let refused = std::panic::catch_unwind(|| test_agent::refuse_a_real_agent(&command));
+            assert!(refused.is_err(), "{what} would have started for real: {command}");
+        }
+    }
+
+    /// The content check alone, with no guard held: a program word that was
+    /// written without `agent_program` in front of it -- what a new launch
+    /// path that forgot it would produce -- is refused, and words that only
+    /// mention an agent after the stub are not.
+    #[test]
+    fn an_agent_word_with_no_stub_in_front_is_refused() {
+        let shell = farcooler_core::shell::login_shell();
+        for command in [
+            format!("{shell} -ilc 'claude --resume x'"),
+            format!("env A=b {shell} -ilc 'codex resume x'"),
+            format!("{shell} -ilc 'cursor-agent --trust'"),
+            "'/Applications/Far Cooler.app/Contents/MacOS/farcooler' agent-host --terminal x".to_string(),
+        ] {
+            let refused = std::panic::catch_unwind(|| test_agent::refuse_a_real_agent(&command));
+            assert!(refused.is_err(), "not refused: {command}");
+        }
+        test_agent::refuse_a_real_agent(&format!("{shell} -il"));
+        test_agent::refuse_a_real_agent(&format!("{shell} -ilc '{} claude --prompt \"ask claude\"'", test_agent::PROGRAM));
+    }
+}
+
 #[cfg(test)]
 mod preset_tests {
     use super::*;
 
     #[test]
     fn a_bare_preset_runs_the_agent() {
+        // Real names: this checks the exact string the builder writes, and launches nothing.
+        let _real = crate::service::test_agent::real_names();
         assert!(preset_command_with_hooks("claude", None, &LaunchExtras::NONE).contains("'claude'"));
         // codex carries its update-check flag on every launch; see the
         // `"codex"` arm.
@@ -4443,6 +4572,8 @@ mod preset_tests {
 
     #[test]
     fn a_model_that_is_not_an_identifier_is_dropped_not_escaped() {
+        // Real names: this checks the exact string the builder writes, and launches nothing.
+        let _real = crate::service::test_agent::real_names();
         // This string reaches a `-ilc` argument. Dropping it loses nothing real
         // and leaves no argument about quoting.
         let out = preset_command_with_hooks("claude:opus'; rm -rf /; '", None, &LaunchExtras::NONE);
@@ -4459,6 +4590,8 @@ mod preset_tests {
 
     #[test]
     fn a_custom_agent_name_still_works() {
+        // Real names: this checks the exact string the builder writes, and launches nothing.
+        let _real = crate::service::test_agent::real_names();
         // Presets are not a closed set: someone's own wrapper should run.
         assert!(preset_command_with_hooks("aider", None, &LaunchExtras::NONE).contains("'aider'"));
         assert!(preset_command_with_hooks("aider:sonnet", None, &LaunchExtras::NONE).contains("aider --model sonnet"));
@@ -4501,6 +4634,8 @@ mod preset_tests {
 
     #[test]
     fn a_pane_with_no_hook_settings_is_the_command_it_always_was() {
+        // Real names: this checks the exact string the builder writes, and launches nothing.
+        let _real = crate::service::test_agent::real_names();
         // The task brief wrote this as an equality against a two-argument
         // `preset_command`. That function is gone — it had no production
         // caller and was a trap — and comparing this function against itself
@@ -4551,6 +4686,8 @@ mod preset_tests {
     #[cfg(unix)]
     #[test]
     fn the_settings_path_survives_both_shells_as_one_argument() {
+        // Real names: runs the builder's command through a shell with the agent swapped for printf; nothing reaches tmux.
+        let _real = crate::service::test_agent::real_names();
         let path = "/tmp/My Runner/hooks.json";
         let command = preset_command_with_hooks("claude", None, &LaunchExtras::settings_only(Path::new(path)));
 
@@ -4588,7 +4725,9 @@ mod preset_tests {
         let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
         // The FIRST occurrence only: it is the program, and the paths after it
         // can hold the word (a temp directory's name, say).
-        let probe = command.replacen(&prefix, "/bin/sh -c", 1).replacen(program, "printf ,%s", 1);
+        let probe = crate::service::test_agent::unstubbed(command)
+            .replacen(&prefix, "/bin/sh -c", 1)
+            .replacen(program, "printf ,%s", 1);
         assert!(probe.starts_with("/bin/sh -c"), "the prefix was found and replaced: {probe}");
         let out = std::process::Command::new("/bin/sh")
             .arg("-c")
@@ -5716,7 +5855,6 @@ mod pane_actor_tests {
     /// the work had been done.
     #[tokio::test]
     async fn a_pane_opened_for_no_task_claims_none() {
-        let _stub = super::test_agent::stubbed();
         let (_dir, svc, ws) = a_workspace().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
@@ -5745,7 +5883,6 @@ mod pane_actor_tests {
     /// this is the relaunch's wiring, read off the pane tmux was handed.
     #[tokio::test]
     async fn a_pane_opened_for_a_task_names_it_across_a_restart() {
-        let _stub = super::test_agent::stubbed();
         let (_dir, svc, ws) = a_workspace().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
@@ -5765,9 +5902,9 @@ mod pane_actor_tests {
     /// The opening prompt is the first launch's alone. A restart that replayed
     /// it would start the work over on top of the work.
     ///
-    /// **No agent is started.** claude's program is stubbed on this thread
-    /// (`test_agent::stubbed`), so the pane runs
-    /// `<login shell> -ilc '/bin/sh -c exec\ /bin/sleep\ 600 farcooler-test-stub-agent … <prompt>'`:
+    /// **No agent is started.** Under test every agent's program is stubbed
+    /// (`agent_program`), so the pane runs
+    /// `<login shell> -ilc '/bin/sh -c exec\ /bin/sleep\ 600 farcooler-test-stub-agent claude … <prompt>'`:
     /// a `sh` that sleeps, holding the prompt as a positional parameter it
     /// never reads. That is airtight in a way a trust screen is not: the message
     /// tells an agent to run board commands through a CLI that, from a test
@@ -5775,7 +5912,6 @@ mod pane_actor_tests {
     /// The stub is checked in the pane itself, not assumed.
     #[tokio::test]
     async fn only_the_first_launch_is_told_what_to_do() {
-        let _stub = super::test_agent::stubbed();
         let (_dir, svc, ws) = a_workspace().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
@@ -5828,7 +5964,6 @@ mod pane_actor_tests {
     /// longer than any login shell here takes to start and fail.
     #[tokio::test]
     async fn a_stubbed_agents_pane_stays_alive() {
-        let _stub = super::test_agent::stubbed();
         let (_dir, svc, ws) = a_workspace().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
         assert!(pane_start_command(&svc, term.id).await.contains(super::test_agent::MARKER), "the stub");
@@ -5845,7 +5980,6 @@ mod pane_actor_tests {
     /// chat. It keeps the key, just as a restart does.
     #[tokio::test]
     async fn a_pane_opened_for_a_task_names_it_after_switching_modes() {
-        let _stub = super::test_agent::stubbed();
         let (_dir, svc, ws) = a_workspace().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
@@ -7839,6 +7973,8 @@ mod hook_file_tests {
     #[cfg(unix)]
     #[test]
     fn the_resumed_settings_path_survives_both_shells_too() {
+        // Real names: runs the builder's command through a shell with the agent swapped for printf; nothing reaches tmux.
+        let _real = crate::service::test_agent::real_names();
         let path = "/tmp/My Runner/hooks.json";
         let sid = "018f5b2c-0000-7000-8000-00000000000d";
         let command = terminal_mode_command("claude", sid, true, &LaunchExtras::settings_only(Path::new(path)));
@@ -8893,7 +9029,7 @@ mod launch_prompt_tests {
     /// agent would have seen.
     fn argv_through(command: &str, program: &str, outer: &str, inner: &str) -> String {
         let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
-        let probe = command
+        let probe = crate::service::test_agent::unstubbed(command)
             .replacen(&prefix, &format!("{inner} -c"), 1)
             .replacen(program, "printf ,%s", 1);
         assert!(probe.contains(&format!("{inner} -c")), "the prefix was found: {probe}");
@@ -9077,6 +9213,8 @@ mod launch_prompt_tests {
 
     #[test]
     fn no_prompt_leaves_every_launch_as_it_was() {
+        // Real names: this checks the exact string the builder writes, and launches nothing.
+        let _real = crate::service::test_agent::real_names();
         // Byte for byte, the command every pane had before prompts existed,
         // bar codex's update flag (its own test below).
         let shell = farcooler_core::shell::login_shell();
@@ -9221,7 +9359,7 @@ mod launch_prompt_tests {
         assert!(inline.len() > 16_384, "the inline form is past the ceiling: {}", inline.len());
         let refused = svc
             .tmux
-            .create_terminal_window(ws.id, Uuid::now_v7(), "inline", &ws.worktree_path, &inline.replacen("claude", &printf, 1))
+            .create_terminal_window(ws.id, Uuid::now_v7(), "inline", &ws.worktree_path, &super::test_agent::unstubbed(&inline).replacen("claude", &printf, 1))
             .await;
         assert!(refused.is_err(), "tmux took a command past its ceiling");
 
@@ -9229,7 +9367,7 @@ mod launch_prompt_tests {
         let command =
             launch_command_with_prompt(&svc.root, id, "claude", None, LaunchExtras::NONE, Some(&prompt), None);
         svc.tmux
-            .create_terminal_window(ws.id, id, "file", &ws.worktree_path, &command.replacen("claude", &printf, 1))
+            .create_terminal_window(ws.id, id, "file", &ws.worktree_path, &super::test_agent::unstubbed(&command).replacen("claude", &printf, 1))
             .await
             .expect("tmux takes the file form");
 
