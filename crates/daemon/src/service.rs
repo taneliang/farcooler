@@ -406,9 +406,29 @@ fn claude_program() -> &'static str {
 pub(crate) mod test_agent {
     use std::cell::Cell;
 
-    /// A name that is not a program anywhere. A shell handed it prints
-    /// "unknown command" and runs nothing.
-    pub(crate) const NOT_A_PROGRAM: &str = "farcooler-test-stub-not-an-agent";
+    /// The name the stub runs under, so a test can find it in a pane's
+    /// start command. It is only ever `$0` of the `sh` below, never looked up
+    /// as a program.
+    pub(crate) const MARKER: &str = "farcooler-test-stub-agent";
+
+    /// What an agent's launch arm runs in place of the agent: a `sh` that
+    /// waits, named `MARKER`, which takes every argument the arm appends --
+    /// flags, session id, the opening prompt -- as positional parameters and
+    /// reads none of them.
+    ///
+    /// **It waits, rather than failing at once.** The first stub was a name
+    /// no binary has, so the login shell printed "unknown command" and
+    /// exited, and `remain-on-exit` kept a dead pane. A test that then acted
+    /// on the pane -- `set_pane_mode` needs one that `proves_life` -- raced
+    /// the shell's exit: on a fast CI runner the shell won, and
+    /// `a_pane_opened_for_a_task_names_it_after_switching_modes` failed with
+    /// `NotFound`. Ten minutes bounds the stub if a tmux server were ever left
+    /// behind; `ScratchDir` kills the server, and the stub with it, when the
+    /// test ends.
+    ///
+    /// Written with `\ ` rather than quotes so it survives the arms'
+    /// `shell_quote` and every login shell's own parse the same way.
+    pub(crate) const PROGRAM: &str = "/bin/sh -c exec\\ /bin/sleep\\ 600 farcooler-test-stub-agent";
 
     thread_local! {
         pub(crate) static STUB: Cell<Option<&'static str>> = const { Cell::new(None) };
@@ -419,11 +439,7 @@ pub(crate) mod test_agent {
     /// runs its future on the test's own thread, so every command built while
     /// it awaits a `Service` call is built here.
     pub(crate) fn stubbed() -> Guard {
-        assert!(
-            farcooler_core::programs::find(NOT_A_PROGRAM).is_none(),
-            "{NOT_A_PROGRAM} exists on this machine; the stub would run it"
-        );
-        STUB.with(|s| s.set(Some(NOT_A_PROGRAM)));
+        STUB.with(|s| s.set(Some(PROGRAM)));
         Guard
     }
 
@@ -5705,7 +5721,7 @@ mod pane_actor_tests {
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
         let command = pane_start_command(&svc, term.id).await;
-        assert!(command.contains(super::test_agent::NOT_A_PROGRAM), "the stub, not claude: {command}");
+        assert!(command.contains(super::test_agent::MARKER), "the stub, not claude: {command}");
         assert!(
             !command.contains(farcooler_core::pane_env::TASK),
             "no task on the record, so none in the pane: {command}"
@@ -5750,10 +5766,10 @@ mod pane_actor_tests {
     /// it would start the work over on top of the work.
     ///
     /// **No agent is started.** claude's program is stubbed on this thread
-    /// (`test_agent::stubbed`) with a name that is not a program, so the pane
-    /// runs `<login shell> -ilc 'farcooler-test-stub-not-an-agent … <prompt>'`,
-    /// the shell reports an unknown command, and nothing ever reads the
-    /// message. That is airtight in a way a trust screen is not: the message
+    /// (`test_agent::stubbed`), so the pane runs
+    /// `<login shell> -ilc '/bin/sh -c exec\ /bin/sleep\ 600 farcooler-test-stub-agent … <prompt>'`:
+    /// a `sh` that sleeps, holding the prompt as a positional parameter it
+    /// never reads. That is airtight in a way a trust screen is not: the message
     /// tells an agent to run board commands through a CLI that, from a test
     /// binary, is whatever `farcooler` is on PATH, and so the live daemon.
     /// The stub is checked in the pane itself, not assumed.
@@ -5769,7 +5785,7 @@ mod pane_actor_tests {
         assert_eq!(svc.store.get_terminal(term.id).unwrap().task_id, Some(task), "on the record");
 
         let first = pane_start_command(&svc, term.id).await;
-        assert!(first.contains(super::test_agent::NOT_A_PROGRAM), "the stub, not claude: {first}");
+        assert!(first.contains(super::test_agent::MARKER), "the stub, not claude: {first}");
         assert!(!first.contains("'claude "), "no real agent was started: {first}");
         // Quoted twice on its way into the pane, so an apostrophe reads back
         // escaped; the words between them do not.
@@ -5778,7 +5794,7 @@ mod pane_actor_tests {
 
         svc.restart_terminal(term.id).await.expect("restart");
         let again = pane_start_command(&svc, term.id).await;
-        assert!(again.contains(super::test_agent::NOT_A_PROGRAM), "still the stub: {again}");
+        assert!(again.contains(super::test_agent::MARKER), "still the stub: {again}");
         assert!(!again.contains("re working"), "a restart says nothing: {again}");
         assert!(again.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)), "{again}");
     }
@@ -5804,6 +5820,27 @@ mod pane_actor_tests {
         svc.create_terminal_with_prompt(ws.id, "s", "shell", None, None).await.expect("a shell");
     }
 
+    /// The stub outlives the test that opened it. A stub that exits at once
+    /// leaves a dead pane behind (`remain-on-exit`), and every test that acts
+    /// on the pane afterwards -- `set_pane_mode` wants one that
+    /// `proves_life` -- then races the stub's exit. On a fast CI runner the
+    /// exit won and the test below failed with `NotFound`. Three seconds is
+    /// longer than any login shell here takes to start and fail.
+    #[tokio::test]
+    async fn a_stubbed_agents_pane_stays_alive() {
+        let _stub = super::test_agent::stubbed();
+        let (_dir, svc, ws) = a_workspace().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+        assert!(pane_start_command(&svc, term.id).await.contains(super::test_agent::MARKER), "the stub");
+
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let snapshot = svc.inventory.refresh().await;
+        assert!(
+            snapshot.claimants(term.id).into_iter().any(|p| p.proves_life()),
+            "the stub's pane died; a test acting on it afterwards would race its exit"
+        );
+    }
+
     /// The fourth launch path: a pane switched back to a terminal from a
     /// chat. It keeps the key, just as a restart does.
     #[tokio::test]
@@ -5818,7 +5855,7 @@ mod pane_actor_tests {
 
         svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
         let command = pane_start_command(&svc, term.id).await;
-        assert!(command.contains(super::test_agent::NOT_A_PROGRAM), "the stub: {command}");
+        assert!(command.contains(super::test_agent::MARKER), "the stub: {command}");
         assert!(
             command.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)),
             "a pane switched back to a terminal still names its task: {command}"

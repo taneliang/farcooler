@@ -2584,7 +2584,7 @@ mod terminal_task_tests {
         assert_eq!(made.task_id.as_deref(), Some(task.id.as_bytes().as_slice()), "the terminal says which task");
 
         let panes = panes(&svc).await;
-        assert!(panes.iter().all(|p| p.contains(test_agent::NOT_A_PROGRAM)), "the stub: {panes:?}");
+        assert!(panes.iter().all(|p| p.contains(test_agent::MARKER)), "the stub: {panes:?}");
         assert!(
             panes.iter().any(|c| c.contains(&format!("FARCOOLER_TASK={}", task.key))),
             "the pane names its task: {panes:?}"
@@ -2609,7 +2609,7 @@ mod terminal_task_tests {
         assert_eq!(window(&panes[0]), window(&panes[1]), "a split, in the same window: {panes:?}");
         assert!(
             panes.iter().any(|c| c.contains(&format!("FARCOOLER_TASK={}", task.key))
-                && c.contains(test_agent::NOT_A_PROGRAM)),
+                && c.contains(test_agent::MARKER)),
             "the split pane names its task, and runs the stub: {panes:?}"
         );
     }
