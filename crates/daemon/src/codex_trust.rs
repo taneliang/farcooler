@@ -33,12 +33,24 @@
 //! writes nothing. See `skip_reason`. Otherwise a test or a live check on a
 //! scratch repository would leave its entry in the owner's real config.
 //!
+//! One scratch recipe still passes that gate: a daemon started with only
+//! `HOME` overridden (`HOME=/tmp/x farcoolerd`, no `FARCOOLER_HOME`). Its
+//! home is `/tmp/x/Library/Application Support/…`, which is exactly its
+//! channel's default under that `HOME`, so it writes. That is safe only while
+//! `CODEX_HOME` is unset: codex's home is then `/tmp/x/.codex`, as scratch as
+//! the rest. With `CODEX_HOME` exported, such a daemon would write the real
+//! config. So a scratch daemon sets `FARCOOLER_HOME` (or
+//! `FARCOOLER_NO_CODEX_TRUST=1`), as the documented recipe and
+//! `scripts/demo-host.sh` do.
+//!
 //! The config is the owner's file, so the write is as small and as careful as
 //! it can be:
 //!
 //! - **An entry already there is final**, in any spelling of the same
 //!   directory and whatever it says. An owner who answered "No" has
-//!   `trust_level = "untrusted"`, and that stays. See `same_directory`.
+//!   `trust_level = "untrusted"`, and that stays. Only keys ending in the
+//!   repository's own name are ever resolved to find out; see
+//!   `same_directory`.
 //! - **A config that won't parse is left alone** and logged, and codex asks.
 //!   So is one `toml_edit` wouldn't give back byte for byte (CRLF line
 //!   endings, a byte-order mark), one that is read-only, a symbolic link, or
@@ -47,7 +59,9 @@
 //!   Before renaming, the new file is checked to be the old one with one run
 //!   of bytes inserted.
 //! - **A unique temporary file and a rename**, with the file's own mode.
-//! - **One writer per daemon at a time** (`WRITING`). Between processes there
+//! - **One writer per daemon at a time** (`WRITING`, taken with `try_lock`:
+//!   a launch that finds another write running skips its own rather than
+//!   wait behind it). Between processes there
 //!   is no lock: codex takes none we could share. The file is read again just
 //!   before the rename, and a change seen there cancels the write. A change
 //!   landing in the microseconds between that read and the rename would still
@@ -292,6 +306,10 @@ fn repository_of(common: &Path) -> Option<PathBuf> {
 /// One trust write at a time in this process: two launches in two
 /// repositories at once would otherwise both read the same file and the
 /// second rename would drop the first one's entry.
+///
+/// Taken with `try_lock`, never waited on. A write still running (one stuck
+/// in the kernel on a path that won't answer, say) then costs a later launch
+/// nothing: that launch skips its write, and codex asks, as it always did.
 static WRITING: Mutex<()> = Mutex::new(());
 
 /// Add `[projects."<repository>"] trust_level = "trusted"` to
@@ -301,7 +319,24 @@ static WRITING: Mutex<()> = Mutex::new(());
 /// `repository` is written exactly as given; `main_checkout` is what gives it
 /// the form codex reads. `user_home` expands a `~` in an existing key.
 pub fn trust_repository(codex_home: &Path, repository: &Path, user_home: Option<&Path>) -> Trusted {
-    let _one_at_a_time = WRITING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    trust_repository_holding(&WRITING, codex_home, repository, user_home)
+}
+
+/// `trust_repository` under `lock` rather than `WRITING`, so a test can hold
+/// one without racing every other test that writes.
+fn trust_repository_holding(
+    lock: &Mutex<()>,
+    codex_home: &Path,
+    repository: &Path,
+    user_home: Option<&Path>,
+) -> Trusted {
+    let _one_at_a_time = match lock.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Trusted::LeftAlone("another trust write is still running");
+        }
+    };
     trust_repository_between(codex_home, repository, user_home, || {})
 }
 
@@ -345,7 +380,14 @@ fn trust_repository_between(
     let Some(projects) = projects.as_table_like_mut() else {
         return Trusted::LeftAlone("its `projects` is not a table");
     };
-    if projects.iter().any(|(existing, _)| same_directory(existing, repository, user_home)) {
+    // Asked at most once, and only if some key needs it.
+    let case = std::cell::OnceCell::new();
+    let mut ignores = || *case.get_or_init(|| ignores_case(repository));
+    let mut resolve = |path: &Path| path.canonicalize().ok();
+    if projects
+        .iter()
+        .any(|(existing, _)| same_directory(existing, repository, user_home, &mut resolve, &mut ignores))
+    {
         return Trusted::AlreadyDecided;
     }
     if inline {
@@ -374,11 +416,31 @@ fn trust_repository_between(
 /// Whether `key`, an existing `projects` key, names `repository`, however it
 /// is spelled.
 ///
-/// A trailing `/` is dropped, a leading `~` is expanded, and the result is
-/// resolved when it exists, so `/tmp/x`, `/private/tmp/x/`, `~/x` and a path
-/// through a linked parent all match. On a volume that ignores case, a key
-/// differing only in case matches too.
-fn same_directory(key: &str, repository: &Path, user_home: Option<&Path>) -> bool {
+/// A trailing `/` is dropped and a leading `~` is expanded, with no system
+/// call. A key spelled exactly as `repository` matches there. Otherwise only
+/// a key whose last component is the repository's own name, ignoring case,
+/// is looked at any further; every other key is never resolved, so an
+/// unrelated project on a mount that doesn't answer, or in a folder macOS
+/// guards (`~/Documents`), is never touched. A key of the same name is
+/// resolved with `resolve` (`canonicalize`), which catches `/tmp` for
+/// `/private/tmp`, a linked parent, `..`, and, on APFS, another case, since
+/// the resolved path comes back in the case on disk.
+///
+/// A key of the same name that can't be resolved (gone, or in a folder we
+/// may not read) is compared as text, ignoring case when `ignores_case` says
+/// the repository's volume does. That is the one case the case check
+/// decides; a key that resolves never needs it.
+///
+/// What this gives up: a key naming the repository through a link whose own
+/// name differs from the repository's. It reads as another directory, and
+/// the entry is added beside it.
+fn same_directory(
+    key: &str,
+    repository: &Path,
+    user_home: Option<&Path>,
+    resolve: &mut dyn FnMut(&Path) -> Option<PathBuf>,
+    ignores_case: &mut dyn FnMut() -> bool,
+) -> bool {
     let trimmed = match key.trim_end_matches('/') {
         "" if key.starts_with('/') => "/",
         trimmed => trimmed,
@@ -388,16 +450,20 @@ fn same_directory(key: &str, repository: &Path, user_home: Option<&Path>) -> boo
         (Some(rest), Some(home)) if rest.starts_with('/') => home.join(rest.trim_start_matches('/')),
         _ => PathBuf::from(trimmed),
     };
-    let resolved = expanded.canonicalize().ok();
-    if expanded == repository || resolved.as_deref() == Some(repository) {
+    if expanded == repository {
         return true;
     }
-    if !ignores_case(repository) {
+    let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_lowercase());
+    if name(repository).is_none() || name(&expanded) != name(repository) {
         return false;
     }
-    let folded = |p: &Path| p.to_string_lossy().to_lowercase();
-    let repository = folded(repository);
-    folded(expanded.as_path()) == repository || resolved.is_some_and(|r| folded(r.as_path()) == repository)
+    match resolve(&expanded) {
+        Some(resolved) => resolved == repository,
+        None => {
+            ignores_case()
+                && expanded.to_string_lossy().to_lowercase() == repository.to_string_lossy().to_lowercase()
+        }
+    }
 }
 
 /// Whether the volume `path` is on ignores case: the same path with every
@@ -545,7 +611,7 @@ mod tests {
     }
 
     fn trust(home: &Path, repository: &str) -> Trusted {
-        trust_repository(home, Path::new(repository), None)
+        trust_repository_between(home, Path::new(repository), None, || {})
     }
 
     fn mode_of(path: &Path) -> u32 {
@@ -638,14 +704,14 @@ mod tests {
         } else {
             // A volume that keeps case: another case is another directory.
             let home = home_with(Some(&format!("[projects.\"{case}\"]\ntrust_level = \"untrusted\"\n")));
-            assert_eq!(trust_repository(home.path(), &repository, Some(&user_home)), Trusted::Wrote);
+            assert_eq!(trust_repository_between(home.path(), &repository, Some(&user_home), || {}), Trusted::Wrote);
         }
         for level in ["untrusted", "trusted"] {
             for spelling in &spellings {
                 let config = format!("[projects.\"{spelling}\"]\ntrust_level = \"{level}\"\n");
                 let home = home_with(Some(&config));
                 assert_eq!(
-                    trust_repository(home.path(), &repository, Some(&user_home)),
+                    trust_repository_between(home.path(), &repository, Some(&user_home), || {}),
                     Trusted::AlreadyDecided,
                     "{config}"
                 );
@@ -654,7 +720,7 @@ mod tests {
         }
         // And a different directory is not the same one.
         let home = home_with(Some(&format!("[projects.\"{real}-other\"]\ntrust_level = \"untrusted\"\n")));
-        assert_eq!(trust_repository(home.path(), &repository, Some(&user_home)), Trusted::Wrote);
+        assert_eq!(trust_repository_between(home.path(), &repository, Some(&user_home), || {}), Trusted::Wrote);
     }
 
     /// A config that won't parse is the owner's to fix. Nothing is written,
@@ -756,6 +822,96 @@ mod tests {
         let home = parent.path().join(".codex");
         assert!(matches!(trust(&home, "/r/repo"), Trusted::LeftAlone(_)));
         assert!(!home.exists());
+    }
+
+    /// A config shaped like a real one: codex's own project tables first,
+    /// then the owner's other tables, two comments, LF, a final newline.
+    /// Synthetic throughout. The entry lands right after the last project
+    /// table, as one run of bytes, and nothing else moves.
+    #[test]
+    fn an_owner_shaped_config_takes_the_entry_after_its_projects() {
+        let mut projects = String::from("# settings, by hand\nmodel = \"gpt-5.6\"\n");
+        for i in 0..30 {
+            projects.push_str(&format!("\n[projects.\"/Users/someone/code/p{i}\"]\ntrust_level = \"trusted\"\n"));
+        }
+        let mut rest = String::new();
+        for i in 0..30 {
+            if i == 15 {
+                rest.push_str("\n# the tools I use");
+            }
+            let table = if i < 15 { format!("mcp_servers.s{i}") } else { format!("profiles.p{i}") };
+            rest.push_str(&format!("\n[{table}]\ncommand = \"run-{i}\"\n"));
+        }
+        let config = format!("{projects}{rest}");
+        let home = home_with(Some(&config));
+        assert_eq!(trust(home.path(), "/r/repo"), Trusted::Wrote);
+        assert_eq!(read(&home), format!("{projects}\n[projects.\"/r/repo\"]\ntrust_level = \"trusted\"\n{rest}"));
+    }
+
+    /// Only a key ending in the repository's own name is ever looked up.
+    /// Every other key, on a mount that might not answer or in a folder
+    /// macOS guards, is decided without a single call.
+    #[test]
+    fn only_a_key_of_the_same_name_is_ever_resolved() {
+        let repository = Path::new("/Users/someone/Dev/repo");
+        let user_home = Some(Path::new("/Users/someone"));
+        let asked = std::cell::RefCell::new(Vec::<PathBuf>::new());
+        let case_asked = std::cell::Cell::new(0);
+        let mut resolve = |p: &Path| -> Option<PathBuf> {
+            asked.borrow_mut().push(p.to_path_buf());
+            None
+        };
+        let mut ignores = || {
+            case_asked.set(case_asked.get() + 1);
+            true
+        };
+        for key in [
+            "/Volumes/nas/share/other",
+            "/net/unreachable/project",
+            "~/Documents/notes",
+            "/Users/someone/Dev/repo-2",
+            "/Users/someone/Dev",
+            "/",
+        ] {
+            assert!(!same_directory(key, repository, user_home, &mut resolve, &mut ignores), "{key}");
+        }
+        assert_eq!(*asked.borrow(), Vec::<PathBuf>::new(), "an unrelated key was resolved");
+        assert_eq!(case_asked.get(), 0, "the volume was asked about for an unrelated key");
+        // The exact spelling, and `~` for it, need no lookup either.
+        assert!(same_directory("/Users/someone/Dev/repo/", repository, user_home, &mut resolve, &mut ignores));
+        assert!(same_directory("~/Dev/repo", repository, user_home, &mut resolve, &mut ignores));
+        assert_eq!(*asked.borrow(), Vec::<PathBuf>::new());
+        // A key of the same name is looked up.
+        assert!(!same_directory("/elsewhere/Repo", repository, user_home, &mut resolve, &mut ignores));
+        assert_eq!(*asked.borrow(), vec![PathBuf::from("/elsewhere/Repo")]);
+    }
+
+    /// A key of the repository's name that can't be resolved is compared as
+    /// text, ignoring case only where the volume does.
+    #[test]
+    fn an_unresolvable_key_matches_by_case_only_where_case_is_ignored() {
+        let repository = Path::new("/Users/someone/Dev/Repo");
+        let mut unresolvable = |_: &Path| -> Option<PathBuf> { None };
+        let key = "/users/someone/dev/REPO";
+        assert!(same_directory(key, repository, None, &mut unresolvable, &mut || true));
+        assert!(!same_directory(key, repository, None, &mut unresolvable, &mut || false));
+        assert!(!same_directory("/users/someone/other/repo", repository, None, &mut unresolvable, &mut || true));
+    }
+
+    /// A trust write still running (stuck, say) is not waited on: this
+    /// launch skips its own, and the file is untouched.
+    #[test]
+    fn a_write_already_running_is_not_waited_for() {
+        let home = home_with(Some(OWNERS));
+        let lock = Mutex::new(());
+        let held = lock.lock().unwrap();
+        assert_eq!(
+            trust_repository_holding(&lock, home.path(), Path::new("/r/repo"), None),
+            Trusted::LeftAlone("another trust write is still running")
+        );
+        assert_eq!(read(&home), OWNERS);
+        drop(held);
+        assert_eq!(trust_repository_holding(&lock, home.path(), Path::new("/r/repo"), None), Trusted::Wrote);
     }
 
     /// Somebody saves the config between our read and our rename: their
