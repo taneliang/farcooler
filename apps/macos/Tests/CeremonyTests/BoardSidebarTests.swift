@@ -347,7 +347,9 @@ struct BoardSidebarTests {
         let newClient = client(after)
         holder.client = newClient
         holder.store = TaskBoardStore(client: newClient, repository: Self.repository(Self.repoA))
-        for _ in 0..<100 where after.count(Self.repoA) == 0 {
+        // Until the read has LANDED, not just started: the stub counts a
+        // read when it is asked, and answers a beat later.
+        for _ in 0..<100 where !holder.store.hasRead {
             host.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(10))
         }
