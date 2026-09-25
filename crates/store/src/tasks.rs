@@ -96,6 +96,11 @@ fn is_unique_violation(err: &rusqlite::Error) -> bool {
 /// `repo` is the row's id as stored, not a `Uuid`: the migration passes each
 /// row's id through untouched rather than parsing it, so a row it cannot
 /// parse is still given a prefix instead of stopping the store from opening.
+///
+/// Only a repository that has none yet is written: the `UPDATE` is guarded on
+/// `task_key_prefix = ''`, so a claim that loses a race to another (two
+/// first tasks created at once, say) returns the prefix the winner stored
+/// rather than re-deriving one from a name that may have changed since.
 pub(crate) fn claim_task_key_prefix(conn: &Connection, repo: &[u8], name: &str) -> rusqlite::Result<String> {
     let base = derive_prefix(name);
 
@@ -104,11 +109,20 @@ pub(crate) fn claim_task_key_prefix(conn: &Connection, repo: &[u8], name: &str) 
     loop {
         let outcome = conn.execute(
             "UPDATE repositories SET task_key_prefix = ?1, resource_version = resource_version + 1
-             WHERE id = ?2",
+             WHERE id = ?2 AND task_key_prefix = ''",
             params![candidate, repo],
         );
         match outcome {
-            Ok(_) => return Ok(candidate),
+            Ok(1) => return Ok(candidate),
+            // Somebody else set it first (or the row is gone, which the
+            // read below reports as the `NotFound` it is).
+            Ok(_) => {
+                return conn.query_row(
+                    "SELECT task_key_prefix FROM repositories WHERE id = ?1",
+                    params![repo],
+                    |r| r.get(0),
+                );
+            }
             Err(e) if is_unique_violation(&e) => {
                 attempt += 1;
                 candidate = format!("{base}{attempt}");
@@ -1093,6 +1107,21 @@ mod tests {
             after.split('-').next(),
             "the prefix is the repository's, once, forever"
         );
+    }
+
+    /// A second claim on a repository that already has a prefix changes
+    /// nothing, even after a rename: it is how a claim that lost a race
+    /// learns the winner's prefix instead of overwriting it.
+    #[test]
+    fn a_prefix_already_held_is_never_claimed_again() {
+        let store = Store::open_in_memory().expect("store");
+        let repo = store.register_repository_for_test("Far Cooler");
+        let version = store.get_repository(repo).unwrap().resource_version;
+        store.rename_repository_for_test(repo, "Something Else");
+        assert_eq!(store.assign_task_key_prefix(repo).unwrap(), "fc", "the stored prefix, not a new one");
+        let after = store.get_repository(repo).unwrap();
+        assert_eq!(after.task_key_prefix, "fc");
+        assert_eq!(after.resource_version, version + 1, "only the rename wrote the row");
     }
 
     #[test]
@@ -2526,7 +2555,8 @@ mod prefixless_boards {
 
     /// A database file exactly as a schema-11 runner left it: `Far Cooler`
     /// registered with the board and holding `fc`; `overnight` and `Far Cry`
-    /// registered before it, prefixless, each with a `-1`; and on
+    /// registered before it, prefixless, each with a `-1`; `Ovation`, also
+    /// prefixless, registered after `overnight` and deriving the same `ov`; and on
     /// `overnight`, a second task blocked on the first, a note naming `-1`
     /// in its text, and a terminal opened for `-1`.
     fn schema_11_database(path: &std::path::Path) {
@@ -2545,6 +2575,7 @@ mod prefixless_boards {
         repo(10, "overnight", "");
         repo(11, "Far Cooler", "fc");
         repo(12, "Far Cry", "");
+        repo(13, "Ovation", "");
         let task = |n: u128, repo: u128, key: &str| {
             conn.execute(
                 "INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
@@ -2586,9 +2617,10 @@ mod prefixless_boards {
     }
 
     /// Every board gets a prefix, by registration's own rule: `overnight`
-    /// derives `ov`; `Far Cry` derives `fc`, which `Far Cooler` already
-    /// holds, so it gets `fc2` the way a second registration would. A
-    /// board that already had one keeps it.
+    /// derives `ov`, and `Ovation`, registered after it, `ov2`: in
+    /// registration order, so the older board wins. `Far Cry` derives `fc`,
+    /// which `Far Cooler` already holds, so it gets `fc2` the way a second
+    /// registration would. A board that already had one keeps it.
     #[test]
     fn a_board_registered_before_prefixes_gets_one_by_the_registration_rule() {
         let (dir, store) = opened();
@@ -2596,7 +2628,36 @@ mod prefixless_boards {
         assert_eq!(prefix(10), "ov");
         assert_eq!(prefix(11), "fc", "an assigned prefix is never recomputed");
         assert_eq!(prefix(12), "fc2", "a contested prefix resolves like registration's");
-        assert!(dir.join("db.sqlite3.bak-v11").exists(), "the schema-11 file is backed up first");
+        assert_eq!(prefix(13), "ov2", "the older of two prefixless boards wins the prefix");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The backup is the schema-11 file as it was BEFORE the migration: a
+    /// backup named `.bak-v11` but taken after would hold the renamed keys
+    /// and be no way back at all.
+    #[test]
+    fn the_backup_is_the_board_before_the_migration() {
+        let (dir, _store) = opened();
+        let backup = Connection::open_with_flags(
+            dir.join("db.sqlite3.bak-v11"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .expect("the backup is there");
+        let version: String = backup
+            .query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, "11");
+        let key: String = backup
+            .query_row("SELECT key FROM tasks WHERE id = ?1", params![uuid_blob(id(20))], |r| r.get(0))
+            .unwrap();
+        assert_eq!(key, "-1", "the backup holds the key as it was");
+        let former: i64 = backup
+            .query_row("SELECT count(*) FROM pragma_table_info('tasks') WHERE name = 'former_key'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(former, 0, "and no trace of migration 12");
+        drop(backup);
         std::fs::remove_dir_all(&dir).ok();
     }
 

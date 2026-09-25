@@ -557,8 +557,11 @@ fn migration_0011_terminal_task(tx: &Transaction) -> rusqlite::Result<()> {
 /// kept `''` for good and minted `-1`, `-2`: keys a command line reads as
 /// flags. This gives each such repository the prefix registration would have,
 /// by the same `claim_task_key_prefix` (derivation and collision rule
-/// both), in registration order, so an older repository wins a contested
-/// prefix the way it would have had the board existed when it arrived.
+/// both), in registration order. Among repositories that had no prefix, the
+/// older one wins a contested prefix (`overnight` gets `ov`, `Ovation`
+/// registered after it `ov2`); a prefix a repository already holds is never
+/// taken back, so a prefixless `Far Cry` beside `Far Cooler`'s `fc` gets
+/// `fc2` however much older it is.
 ///
 /// Its tasks are renamed `-3` to `ov-3`, and the old key is kept in
 /// `former_key`, which `Store::tasks_with_key` also answers to. Renaming is
