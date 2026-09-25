@@ -272,10 +272,33 @@ enum TaskFailure {
             .first
     }
 
-    /// A task started on a runner too old to take it at launch, whose agent
-    /// was never ready to have it typed in. It's on the clipboard by then.
-    static func undelivered(name: String) -> String {
-        "Couldn’t give the task to the agent in “\(WorktreeName.display(name))”. It’s on the clipboard, so you can paste it in when the agent is ready."
+    /// Why a task that was to be typed in never was.
+    enum Undelivered {
+        /// The agent asked something first: a trust screen, a resume dialog.
+        case askedFirst
+        /// Not ready within the minute.
+        case neverReady
+        /// Its terminal went away.
+        case gone
+        /// The runner didn't take the keystrokes.
+        case notTyped
+    }
+
+    /// A task that was to be typed into its agent and wasn't. It's on the
+    /// clipboard by then, and each sentence says what to do with it for its
+    /// own cause: answer first, wait, or start one.
+    static func undelivered(name: String, _ cause: Undelivered) -> String {
+        let task = "“\(WorktreeName.display(name))”"
+        switch cause {
+        case .askedFirst:
+            return "The agent in \(task) asked a question first, so your task is on the clipboard. Paste it in once you’ve answered."
+        case .neverReady:
+            return "The agent in \(task) wasn’t ready for your task after a minute. It’s on the clipboard, so you can paste it in when the agent is ready."
+        case .gone:
+            return "The agent in \(task) closed before it got your task. It’s on the clipboard, so you can start another and paste it in."
+        case .notTyped:
+            return "Couldn’t type your task into the agent in \(task). It’s on the clipboard, so you can paste it in yourself."
+        }
     }
 
     static func sentence(for message: String?) -> String {

@@ -34,6 +34,8 @@ struct StartTaskTests {
         var workspaceCreateFails: String?
         var terminalCreateFails: String?
         var branchListFails = false
+        /// The runner refuses `terminal send`.
+        var sendFails = false
         var listFails = false
 
         init(capabilities: [String]) { self.capabilities = capabilities }
@@ -58,6 +60,8 @@ struct StartTaskTests {
                     return entry
                 }
                 return (json(["branches": list]), nil)
+            case ["terminal", "send"]:
+                return sendFails ? (nil, "error: the pane is gone") : (Data(), nil)
             case ["workspace", "list"]:
                 if listFails { return (nil, "error: could not reach the daemon") }
                 return (fleet(), nil)
@@ -179,13 +183,22 @@ struct StartTaskTests {
         #expect(runner.sent.first == ["terminal", "send", "tnew", Self.description])
     }
 
-    /// The typing path meets an agent that asks something first — a trust
-    /// screen — and gives up. The task goes on the clipboard and the window
-    /// is told, rather than the task simply not being there.
-    @Test func aTaskThatCannotBeTypedIsPutOnTheClipboardAndSaid() async {
+    /// Every way the typing path gives up keeps the task: it goes on the
+    /// clipboard, and the window is told in a sentence for that cause —
+    /// rather than the task simply not being there.
+    @Test(arguments: ["asked a question", "never ready", "closed", "send refused"])
+    func aTaskThatCannotBeTypedIsPutOnTheClipboardAndSaid(_ cause: String) async {
         let runner = Runner(capabilities: ["workspaces", "terminals"])
-        runner.activity = "blocked"
+        switch cause {
+        case "asked a question": runner.activity = "blocked"
+        case "never ready": runner.activity = "working"
+        case "send refused":
+            runner.activity = "idle"
+            runner.sendFails = true
+        default: runner.activity = "working"
+        }
         let client = await client(runner)
+        client.typingPasses = 2
         var clipboard: [String] = []
         client.copyToClipboard = { clipboard.append($0) }
         var said: [String] = []
@@ -193,13 +206,32 @@ struct StartTaskTests {
             project: "repo", description: Self.description, name: "fix-flaky-reconnect",
             agent: "claude", undelivered: { said.append($0) })
         #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        // Gone before the first look.
+        if cause == "closed" { runner.terminalMade = false }
 
         for _ in 0..<50 where said.isEmpty { try? await Task.sleep(for: .milliseconds(100)) }
-        #expect(clipboard == [Self.description])
-        #expect(said.count == 1)
-        #expect(said.first?.contains("clipboard") == true && said.first?.contains("fix flaky reconnect") == true,
-                "\(said)")
-        #expect(runner.sent.isEmpty, "nothing typed into the question")
+        #expect(clipboard == [Self.description], "\(cause)")
+        let expected: TaskFailure.Undelivered =
+            switch cause {
+            case "asked a question": .askedFirst
+            case "never ready": .neverReady
+            case "closed": .gone
+            default: .notTyped
+            }
+        #expect(said == [TaskFailure.undelivered(name: "fix-flaky-reconnect", expected)], "\(cause)")
+        if cause != "send refused" { #expect(runner.sent.isEmpty, "nothing typed") }
+    }
+
+    /// Each cause says what to do next, in this app's words, naming the task.
+    @Test func eachGiveUpSaysWhatToDoNext() {
+        let say = { TaskFailure.undelivered(name: "fix-it", $0) }
+        #expect(say(.askedFirst).contains("once you’ve answered"))
+        #expect(say(.neverReady).contains("after a minute"))
+        #expect(say(.gone).contains("closed before it got your task"))
+        #expect(say(.notTyped).hasPrefix("Couldn’t type your task"))
+        for cause: TaskFailure.Undelivered in [.askedFirst, .neverReady, .gone, .notTyped] {
+            #expect(say(cause).contains("“fix it”") && say(cause).contains("clipboard"))
+        }
     }
 
     @Test func anAgentThatTakesNoPromptArgumentIsTypedInstead() async {

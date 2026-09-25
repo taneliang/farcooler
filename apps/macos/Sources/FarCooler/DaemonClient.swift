@@ -1588,15 +1588,21 @@ final class DaemonClient: ObservableObject {
     ///
     /// **Giving up is said, and the text is kept.** An agent that asks
     /// something first, isn't idle within the minute, or goes away is never
-    /// typed into; the description goes on the clipboard and `undelivered`
-    /// gets a sentence saying so. It used to stop without a word, after the
-    /// panel had already let go of the draft — the task simply wasn't there.
+    /// typed into, and a send the runner refuses doesn't arrive: each time the
+    /// description goes on the clipboard and `undelivered` gets a sentence
+    /// for that cause (`TaskFailure.Undelivered`). It used to stop without a
+    /// word, after the panel had already let go of the draft — the task
+    /// simply wasn't there.
+    ///
+    /// A client released while this waits says nothing: its runner was
+    /// removed, and nothing shows it any more to say it over.
     private func typeWhenIdle(
         workspace: String, terminal: String, text: String, name: String,
         undelivered: (@MainActor (String) -> Void)?
     ) {
+        let passes = typingPasses
         Task { [weak self] in
-            for _ in 0..<120 {
+            for _ in 0..<passes {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, !Task.isCancelled else { return }
                 await self.refresh()
@@ -1604,32 +1610,49 @@ final class DaemonClient: ObservableObject {
                     .first(where: { $0.id == workspace })?
                     .terminals.first(where: { $0.id == terminal })
                 guard let current else {
-                    self.keepUndelivered(text, name: name, undelivered)
+                    self.keepUndelivered(text, name: name, .gone, undelivered)
                     return
                 }
                 if current.agent == .idle {
-                    await self.send(terminal: current.short, text: text)
+                    if !(await self.type(text, into: current.short)) {
+                        self.keepUndelivered(text, name: name, .notTyped, undelivered)
+                    }
                     return
                 }
                 // It asked something before we got a word in — a trust prompt,
                 // or a resume dialog. Stop rather than typing a task
                 // description into a yes/no question.
                 if current.agent == .blocked {
-                    self.keepUndelivered(text, name: name, undelivered)
+                    self.keepUndelivered(text, name: name, .askedFirst, undelivered)
                     return
                 }
             }
             guard let self, !Task.isCancelled else { return }
-            self.keepUndelivered(text, name: name, undelivered)
+            self.keepUndelivered(text, name: name, .neverReady, undelivered)
         }
+    }
+
+    /// How many half-second looks `typeWhenIdle` takes before giving up: a
+    /// minute. A test takes fewer.
+    var typingPasses = 120
+
+    /// `send`, saying whether the runner took both the text and the Return.
+    /// Through `runRaw`, so a refusal is this path's to report rather than a
+    /// `lastError` left for the next unrelated action's banner.
+    private func type(_ text: String, into terminal: String) async -> Bool {
+        let (typed, _) = await runRaw(["terminal", "send", terminal, text], background: true)
+        guard typed != nil else { return false }
+        let (entered, _) = await runRaw(["terminal", "send-hex", terminal, "0d"], background: true)
+        return entered != nil
     }
 
     /// The task was never typed: onto the clipboard, and said.
     private func keepUndelivered(
-        _ text: String, name: String, _ undelivered: (@MainActor (String) -> Void)?
+        _ text: String, name: String, _ cause: TaskFailure.Undelivered,
+        _ undelivered: (@MainActor (String) -> Void)?
     ) {
         copyToClipboard(text)
-        undelivered?(TaskFailure.undelivered(name: name))
+        undelivered?(TaskFailure.undelivered(name: name, cause))
     }
 
     /// Where a task that couldn't be typed goes. The general pasteboard; a
