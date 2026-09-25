@@ -531,8 +531,8 @@ struct StartTaskTests {
     // MARK: - Seen
 
     /// A runner whose one agent, `t-new`, has finished and not been seen.
-    private func aFinishedAgent() -> Runner {
-        let runner = Runner(capabilities: ["workspaces", "terminals", "watching"])
+    private func aFinishedAgent(watching: Bool = true) -> Runner {
+        let runner = Runner(capabilities: ["workspaces", "terminals"] + (watching ? ["watching"] : []))
         runner.workspaceMade = true
         runner.terminalMade = true
         runner.activity = "done"
@@ -556,8 +556,10 @@ struct StartTaskTests {
 
     /// It finished while nobody was there; the person comes back to the pane
     /// with a touch of the mouse — no fleet event, no click — and it is seen.
-    @Test func aFinishedPaneIsSeenWhenThePersonComesBack() async {
-        let runner = aFinishedAgent()
+    /// On a runner without `watching` too: `done` isn't the claim's.
+    @Test(arguments: [true, false])
+    func aFinishedPaneIsSeenWhenThePersonComesBack(_ watching: Bool) async {
+        let runner = aFinishedAgent(watching: watching)
         let client = await client(runner)
         var idle: TimeInterval = Presence.idleLimit + 1
         client.presence = Presence(

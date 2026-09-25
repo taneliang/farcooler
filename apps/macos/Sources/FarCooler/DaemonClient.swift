@@ -1979,6 +1979,10 @@ final class DaemonClient: ObservableObject {
     /// Terminals with a `terminal seen` call in flight.
     private var markingSeen: Set<String> = []
 
+    /// Whether the last `reportWatching` had somebody present with panes on
+    /// screen. Its turning true is the person coming back.
+    private var wasLooking = false
+
     /// The terminals this window last told the runner it was showing, and when.
     ///
     /// Full ids, not the eight-character `short` every other command here takes.
@@ -2039,14 +2043,6 @@ final class DaemonClient: ObservableObject {
     /// `changes inbox` read this app already makes on the same clock while an
     /// agent works.
     func reportWatching(_ terminals: [String]) {
-        // `"watching"` is `farcooler_protocol::capability::WATCHING`. A runner
-        // that predates it withholds nothing and notifies exactly as it always
-        // did — but this renews itself every few seconds for as long as a pane
-        // is on screen, so without the check it would spawn a `farcooler`
-        // invocation on that clock forever to be refused the same way each
-        // time. `daemonBuild` is nil until the first status read lands, which
-        // reads as "not yet" and is retried by the next claim.
-        guard daemonBuild?.can("watching") ?? false else { return }
         // Never an ssh attempt for a heartbeat to a runner that is not up: the
         // runner ages every claim out on its own (`WATCHED_TTL_MS`), so
         // nothing is owed to one that went away.
@@ -2057,14 +2053,21 @@ final class DaemonClient: ObservableObject {
         // person never gets. Asked here as well as by the caller because the
         // renewal below fires on its own clock, long after the call that
         // armed it.
-        let claim = presence.isPresent ? terminals : []
-        let changed = claim != watching
+        let present = presence.isPresent
+        let claim = present ? terminals : []
+
         // Somebody is looking again, after nobody was: what finished on these
-        // panes while they were gone is seen now.
-        if !claim.isEmpty && watching.isEmpty {
+        // panes while they were gone is seen now. Before the capability check
+        // below, because ending `done` has nothing to do with the claim — a
+        // runner without `watching` has `done` all the same, and nothing else
+        // would end it for a person who comes back with a touch of the mouse.
+        let looking = !claim.isEmpty
+        if looking && !wasLooking {
             let claimed = Set(claim)
             markSeen(onScreen: fleet.workspaces.flatMap(\.terminals).filter { claimed.contains($0.id) })
         }
+        wasLooking = looking
+
         watchingTask?.cancel()
         watchingTask = nil
 
@@ -2072,7 +2075,9 @@ final class DaemonClient: ObservableObject {
         // nobody is present too, sending nothing then. That is what brings a
         // claim back within one tick of the person returning: a lapse for
         // idleness ends with a key or the mouse, which is no fleet event and no
-        // selection change, and nothing else would ask again.
+        // selection change, and nothing else would ask again. On a runner
+        // without `watching` too, for the `done` above; it spawns nothing
+        // there, only asks `Presence` again.
         if !terminals.isEmpty {
             watchingTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(Self.watchingFloor))
@@ -2080,6 +2085,15 @@ final class DaemonClient: ObservableObject {
                 self?.reportWatching(terminals)
             }
         }
+
+        // `"watching"` is `farcooler_protocol::capability::WATCHING`. A runner
+        // that predates it withholds nothing and notifies exactly as it always
+        // did, and is sent nothing: otherwise the renewal above would spawn a
+        // `farcooler` invocation on its clock forever, to be refused the same
+        // way each time. `daemonBuild` is nil until the first status read
+        // lands, which reads as "not yet" and is retried by the next tick.
+        guard daemonBuild?.can("watching") ?? false else { return }
+        let changed = claim != watching
 
         // Nothing claimed and nothing to take back: say nothing. This is every
         // runner not in the detail pane, on every fleet event, and every tick
