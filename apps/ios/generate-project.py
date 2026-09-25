@@ -541,6 +541,10 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
 ]
 
 UI_TEST_SOURCES = [
+    # Not a test: the one way the suite drives a key row's Hide Keyboard key.
+    # Waits for the key to be tappable and fails, rather than skipping, when
+    # the keyboard will not go. See its own note.
+    "HideKeyboard.swift",
     "ChangesPullRequestTests.swift",
     # A runner saved before `Runner.reach` existed still loads. Needs no runner
     # and no daemon: it seeds the old shape through the argument domain and
