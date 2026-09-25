@@ -128,6 +128,9 @@ struct BoardSidebarTests {
         var inFlight = 0
         var mostAtOnce = 0
         var delay: Duration = .milliseconds(20)
+        /// The repositories `repo list` answers with, or nil to answer with
+        /// nothing it can decode.
+        var listed: [String]?
         func count(_ repository: String) -> Int { calls.filter { $0 == repository }.count }
     }
 
@@ -152,6 +155,12 @@ struct BoardSidebarTests {
                     #"{"id":"t\#(i)","key":"-\#(i)","title":"T","status":"todo"}"#
                 }
                 return (Data(#"{"tasks":[\#(tasks.joined(separator: ","))]}"#.utf8), nil)
+            }
+            if words.starts(with: ["repo", "list"]), let listed = reads.listed {
+                let rows = listed.map { id in
+                    #"{"id":"\#(id)","short":"\#(id.suffix(8))","displayName":"\#(id)","remote":"","repositoryRootId":""}"#
+                }
+                return (Data(#"{"repositories":[\#(rows.joined(separator: ","))]}"#.utf8), nil)
             }
             if words.starts(with: ["workspace", "list"]) {
                 return (Data(#"{"runtime_healthy":true,"live_panes":0,"workspaces":[]}"#.utf8), nil)
@@ -404,5 +413,53 @@ struct BoardSidebarTests {
         ])
         #expect(named == ["Fix it in same (c3)", "Fix it in same (d4)"])
         #expect(Set(named).count == 2)
+    }
+
+    // MARK: - Which board stores the window keeps
+
+    /// A store whose runner has gone — removed, or back as a new client — is
+    /// let go, and its open card with it; one whose runner is still the one
+    /// the window holds is kept.
+    @Test func aStoreIsLetGoWithItsRunner() {
+        let reads = Reads()
+        let old = client(reads), current = client(reads)
+        let stale = TaskBoardStore(client: old, repository: Self.repository(Self.repoA))
+        let live = TaskBoardStore(client: current, repository: Self.repository(Self.repoA))
+        stale.opened = Self.row()
+        live.opened = Self.row()
+
+        let held = ContentView.heldBoardStores(
+            ["old/a": stale, "/a": live], clients: ["": current])
+        #expect(Array(held.keys) == ["/a"])
+        #expect(stale.opened == nil, "a let-go store kept its card open")
+        #expect(live.opened != nil, "a kept store's card was closed")
+    }
+
+    /// A project a connected runner has listed without is let go. Before the
+    /// runner has listed anything — connecting, or reconnecting — it is kept:
+    /// "gone" can't be told from "not answering" then.
+    @Test func aStoreIsLetGoOnlyOnceItsRunnerHasListedWithoutIt() async {
+        let reads = Reads()
+        let client = client(reads)
+        let a = TaskBoardStore(client: client, repository: Self.repository(Self.repoA))
+        let b = TaskBoardStore(client: client, repository: Self.repository(Self.repoB))
+        let stores = ["/a": a, "/b": b]
+
+        // Not connected, nothing listed: both kept.
+        #expect(ContentView.heldBoardStores(stores, clients: ["": client]).count == 2)
+
+        // Connected, and a list that didn't decode: still can't say.
+        await client.refresh()
+        #expect(client.state == .connected)
+        await client.refreshRepositories()
+        #expect(!client.repositoriesListed)
+        #expect(ContentView.heldBoardStores(stores, clients: ["": client]).count == 2)
+
+        // Connected and listed with only A: B goes.
+        reads.listed = [Self.repoA]
+        await client.refreshRepositories()
+        #expect(client.repositoriesListed)
+        #expect(Array(ContentView.heldBoardStores(stores, clients: ["": client]).keys) == ["/a"])
+        client.stopEvents()
     }
 }

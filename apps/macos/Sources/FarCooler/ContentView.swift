@@ -248,6 +248,10 @@ struct ContentView: View {
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }
         .onChange(of: store.layouts) { _, _ in followLayoutFocus() }
+        // Every client change reaches `store.fleet` — `FleetStore` remerges
+        // on each one — so this hears a runner leaving, coming back as a new
+        // client, and listing its projects without one.
+        .onReceive(store.$fleet) { _ in pruneBoardStores() }
         .onChange(of: store.fleet) { old, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its
@@ -1427,6 +1431,27 @@ struct ContentView: View {
         // SwiftUI is reading that state right now. See `changesStore`.
         DispatchQueue.main.async { boardStores[key] = made }
         return made
+    }
+
+    /// The board stores still worth holding, given the runners there are now.
+    /// See `TaskBoardStore.isHeld(by:)`.
+    ///
+    /// Before this, `boardStores` only ever grew: every repository a runner
+    /// had ever listed, and every client a runner had ever had, stayed held
+    /// for the life of the window. A dropped store's open card is closed on
+    /// the way out, so a view still holding it for a moment has nothing to
+    /// put back on screen.
+    static func heldBoardStores(
+        _ stores: [String: TaskBoardStore], clients: [String: DaemonClient]
+    ) -> [String: TaskBoardStore] {
+        let held = stores.filter { $0.value.isHeld(by: clients) }
+        for (key, dropped) in stores where held[key] == nil { dropped.opened = nil }
+        return held
+    }
+
+    private func pruneBoardStores() {
+        let held = Self.heldBoardStores(boardStores, clients: store.clients)
+        if held.count != boardStores.count { boardStores = held }
     }
 
     /// Whose board ⇧⌘B selects.

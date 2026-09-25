@@ -68,6 +68,22 @@ final class TaskBoardStore: ObservableObject {
         self.seenGeneration = client.boardGeneration(for: repository.id)
     }
 
+    /// Whether the window should go on holding this store, given the runners
+    /// it has now.
+    ///
+    /// No, once its client is not one of them — the runner was removed, or
+    /// left and came back as a new client — because a store held over talks
+    /// to a connection nobody is answering, and holds that client alive.
+    /// No, once its runner is connected, has listed its projects, and this
+    /// one isn't among them. Yes otherwise, and in particular while the
+    /// runner is reconnecting: "the project is gone" can't be told from "the
+    /// runner isn't answering" then, which is `missingBoardSentence`'s rule.
+    func isHeld(by clients: [String: DaemonClient]) -> Bool {
+        guard clients.values.contains(where: { $0 === client }) else { return false }
+        guard client.state == .connected, client.repositoriesListed else { return true }
+        return client.repositories.contains { $0.id == repository.id }
+    }
+
     /// A number that moves whenever this repository's board may have moved:
     /// its own `task` events, and every reconnection. See
     /// `DaemonClient.boardGeneration(for:)`.
@@ -376,6 +392,13 @@ struct TaskBoardView: View {
         // store in the same place, and a `.task` with no id would never read
         // it — the board would sit on empty columns until the next event.
         .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
+        // A card is open only while its board is on screen. A board that goes
+        // away under an open card — its project removed, its runner gone, or
+        // a command that selected something else — would otherwise leave the
+        // card set on a store the sidebar row still holds: re-read with a
+        // `task show` on every event nobody sees, and back on screen the next
+        // time the board is.
+        .onDisappear { store.opened = nil }
         .sheet(item: $store.opened) { row in
             TaskCard(
                 row: row, detail: store.detail, agents: agents.live(for: row),
