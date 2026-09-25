@@ -1920,10 +1920,18 @@ fn dispatched_output(key: &str, done: &Dispatched, json: bool) -> String {
         return format!("{moved}\n  it won't report back by itself: check the board or `workspace list --json`");
     }
     format!(
-        "{moved}\n  Dispatched, but the pane couldn't be confirmed yet: check `farcooler terminal screen \
+        "{moved}\n  dispatched, but the pane couldn't be confirmed yet: check `farcooler terminal screen \
          {short}` (it last read {state})",
         short = done.terminal_short,
         state = pane_state_word(done.pane_state),
+    )
+}
+
+/// `task.get` for `task`, with its whole record.
+fn task_get_request(task: Uuid) -> pb::Request {
+    with(
+        req_for("task.get", task),
+        request::Payload::TaskGet(pb::TaskGetRequest { task_id: id_bytes(task), note_kind: 0 }),
     )
 }
 
@@ -2022,35 +2030,40 @@ async fn dispatch<L: DispatchLink>(
         ));
     }
 
-    // One read, for a warning: whether something the task waits on is still
-    // on it. A warning and not a refusal, like the two above, because
-    // starting early can be the right call (the block may be a formality, or
-    // settled and never cleared); the manager is told so it can decide.
-    // A read that fails is said too, and doesn't stop the dispatch.
-    let id = uuid_of(&task.id);
-    let read = link
-        .call(with(
-            req_for("task.get", id),
-            request::Payload::TaskGet(pb::TaskGetRequest { task_id: id_bytes(id), note_kind: 0 }),
-        ))
-        .await;
-    match read.map(|r| r.value) {
-        Ok(Some(result::Value::TaskDetail(detail))) if !detail.blocks.is_empty() => {
-            let on: Vec<String> = detail
-                .blocks
-                .iter()
-                .map(|b| match b.reason.as_str() {
-                    "" => short_bytes(&b.blocked_by),
-                    why => format!("{} ({why})", short_bytes(&b.blocked_by)),
-                })
-                .collect();
-            warn(format!(
-                "warning: {} still waits on {}. dispatching it anyway starts it before that's done",
-                task.key,
-                on.join(", ")
-            ));
+    // A warning, not a refusal, like the two above: starting early can be
+    // the right call (the block may be a formality), and the manager is told
+    // so it can decide. One read for the task's blocks, then one per blocker,
+    // because a block isn't cleared when its blocker finishes: only a
+    // blocker that isn't done or cancelled is still in the way. A blocker
+    // that can't be read is taken as still open. A read that fails is said
+    // too, and doesn't stop the dispatch.
+    match link.call(task_get_request(uuid_of(&task.id))).await.map(|r| r.value) {
+        Ok(Some(result::Value::TaskDetail(detail))) => {
+            let mut open = Vec::new();
+            for b in &detail.blocks {
+                let blocker = link.call(task_get_request(uuid_of(&b.blocked_by))).await.map(|r| r.value);
+                let name = match blocker {
+                    Ok(Some(result::Value::TaskDetail(pb::TaskDetail { task: Some(t), .. }))) => {
+                        if let Some(TaskStatus::Done | TaskStatus::Cancelled) = status_of(t.status) {
+                            continue;
+                        }
+                        t.key
+                    }
+                    _ => short_bytes(&b.blocked_by),
+                };
+                open.push(match b.reason.as_str() {
+                    "" => name,
+                    why => format!("{name} ({why})"),
+                });
+            }
+            if !open.is_empty() {
+                warn(format!(
+                    "warning: {} still waits on {}. dispatching it anyway starts it before that's done",
+                    task.key,
+                    open.join(", ")
+                ));
+            }
         }
-        Ok(Some(result::Value::TaskDetail(_))) => {}
         Ok(_) => warn(format!(
             "warning: couldn't read what {} waits on: the runner answered with something this Far \
              Cooler cannot read. dispatching it anyway",
@@ -2853,6 +2866,8 @@ mod tests {
         refused_argument: &'static str,
         /// What the task waits on, as `task.get` answers.
         blocks: Vec<pb::TaskBlock>,
+        /// The tasks it waits on, as `task.get` of each answers.
+        blockers: Vec<pb::Task>,
         /// The new pane's state in `terminal.create`'s answer.
         opened: pb::TerminalState,
         /// Its state in each `terminal.list` after that, in order; the last
@@ -2872,6 +2887,7 @@ mod tests {
                 refuse: None,
                 refused_argument: "",
                 blocks: Vec::new(),
+                blockers: Vec::new(),
                 opened: pb::TerminalState::Running,
                 pane_reads: Vec::new(),
                 paused: Vec::new(),
@@ -2932,11 +2948,26 @@ mod tests {
                 "workspace.create" => result::Value::Workspace(lane(MADE, "fix-it", REPO)),
                 "terminal.create" => result::Value::Terminal(pane(self.opened)),
                 "task.update" | "task.set_status" => result::Value::Task(fc_2()),
-                "task.get" => result::Value::TaskDetail(pb::TaskDetail {
-                    task: Some(fc_2()),
-                    notes: Vec::new(),
-                    blocks: self.blocks.clone(),
-                }),
+                "task.get" => {
+                    let asked = self.sent.last().and_then(|r| r.target_resource_id.clone()).unwrap_or_default();
+                    match self.blockers.iter().find(|b| b.id == asked) {
+                        Some(blocker) => result::Value::TaskDetail(pb::TaskDetail {
+                            task: Some(blocker.clone()),
+                            ..Default::default()
+                        }),
+                        None if asked == id_bytes(TASK) => result::Value::TaskDetail(pb::TaskDetail {
+                            task: Some(fc_2()),
+                            notes: Vec::new(),
+                            blocks: self.blocks.clone(),
+                        }),
+                        None => return Err(ClientError::Daemon {
+                            code: pb::ErrorCode::NotFound as i32,
+                            retryable: false,
+                            message: String::new(),
+                            what: String::new(),
+                        }),
+                    }
+                }
                 other => panic!("dispatch sent {other}, which this fake doesn't expect"),
             };
             Ok(pb::Result { value: Some(value) })
@@ -3338,39 +3369,71 @@ mod tests {
         assert_eq!(code, None);
     }
 
-    /// A task that still waits on something is warned about, from one read
-    /// of its blocks, and dispatched anyway: the manager's call.
+    /// A task that still waits on an unfinished task is warned about, and
+    /// dispatched anyway: the manager's call. A block whose blocker is done
+    /// or cancelled isn't in the way (blocks aren't cleared when a blocker
+    /// finishes), so it's silent. A blocker that can't be read is taken as
+    /// still open, and named by short id.
     #[tokio::test]
-    async fn dispatching_a_blocked_task_warns_and_still_dispatches() {
-        let blocker = Uuid::from_u128(0x6f);
+    async fn dispatching_a_blocked_task_warns_only_about_unfinished_blockers() {
+        let blocker = |n: u128, key: &str, status: TaskStatus| pb::Task {
+            id: id_bytes(Uuid::from_u128(n)),
+            key: key.into(),
+            status: pb_status(status),
+            ..fc_2()
+        };
+        let block = |n: u128, reason: &str| pb::TaskBlock {
+            task_id: id_bytes(TASK),
+            blocked_by: id_bytes(Uuid::from_u128(n)),
+            reason: reason.into(),
+        };
+        let finished = vec![blocker(0x61, "fc-5", TaskStatus::Done), blocker(0x62, "fc-6", TaskStatus::Cancelled)];
+
+        // Open, unreadable, done, cancelled: the first two warn.
         let mut link = FakeLink {
-            blocks: vec![pb::TaskBlock {
-                task_id: id_bytes(TASK),
-                blocked_by: id_bytes(blocker),
-                reason: "needs the schema".into(),
-            }],
+            blocks: vec![block(0x60, "needs the schema"), block(0x6f, ""), block(0x61, "x"), block(0x62, "")],
+            blockers: [vec![blocker(0x60, "fc-3", TaskStatus::InProgress)], finished.clone()].concat(),
             ..Default::default()
         };
         let (done, warned) = run(&mut link, existing()).await;
         done.expect("a block is a warning, not a refusal");
-        let short = short_bytes(&id_bytes(blocker));
+        let unreadable = short_bytes(&id_bytes(Uuid::from_u128(0x6f)));
         assert_eq!(
             warned,
             [format!(
-                "warning: fc-2 still waits on {short} (needs the schema). dispatching it anyway starts it \
-                 before that's done"
+                "warning: fc-2 still waits on fc-3 (needs the schema), {unreadable}. dispatching it anyway \
+                 starts it before that's done"
             )]
         );
-        assert_eq!(link.methods().iter().filter(|m| **m == "task.get").count(), 1, "one read");
-        let Some(request::Payload::TaskGet(g)) = &link.sent("task.get").payload else { panic!("get") };
-        assert_eq!(g.task_id, id_bytes(TASK), "its own blocks");
+        let asked: Vec<Uuid> = link
+            .sent
+            .iter()
+            .filter(|r| r.method == "task.get")
+            .map(|r| match &r.payload {
+                Some(request::Payload::TaskGet(g)) => uuid_of(&g.task_id),
+                _ => panic!("get"),
+            })
+            .collect();
+        let each = [0x60, 0x6f, 0x61, 0x62].map(Uuid::from_u128);
+        assert_eq!(asked, [&[TASK][..], &each].concat(), "its own blocks, then each blocker once");
         assert!(link.writes().contains(&"task.set_status"), "{:?}", link.methods());
 
-        // Unblocked: nothing said.
+        // Every blocker finished: nothing said.
+        let mut link = FakeLink {
+            blocks: vec![block(0x61, "x"), block(0x62, "")],
+            blockers: finished,
+            ..Default::default()
+        };
+        let (done, warned) = run(&mut link, existing()).await;
+        done.expect("dispatched");
+        assert!(warned.is_empty(), "{warned:?}");
+
+        // Unblocked: nothing said, and no blocker read.
         let mut link = FakeLink::default();
         assert!(run(&mut link, existing()).await.1.is_empty());
+        assert_eq!(link.methods().iter().filter(|m| **m == "task.get").count(), 1);
 
-        // A read that fails is said, and still dispatches.
+        // A read of its own blocks that fails is said, and still dispatches.
         let mut link = FakeLink { refuse: Some(("task.get", "resource-conflict")), ..Default::default() };
         let (done, warned) = run(&mut link, existing()).await;
         done.expect("still dispatched");
@@ -3427,7 +3490,7 @@ mod tests {
         assert!(said.starts_with(&format!("fc-2 is in progress in lane, terminal {short}\n")), "{said}");
         assert!(
             said.contains(&format!(
-                "Dispatched, but the pane couldn't be confirmed yet: check `farcooler terminal screen {short}` \
+                "dispatched, but the pane couldn't be confirmed yet: check `farcooler terminal screen {short}` \
                  (it last read starting)"
             )),
             "{said}"
