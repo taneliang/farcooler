@@ -64,11 +64,35 @@ show_task() {
   echo "no task $key"
 }
 
+# The key `task show` was asked about: the first word after `show` that is not
+# a flag or a flag's value. `--json` and `--runner` are global in the real CLI
+# and may come anywhere, so `task show --json fc-1` names fc-1.
+shown_key() {
+  shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo|--fields|--runner|--host) shift 2 ;;
+      -*) shift ;;
+      *) echo "$1"; return ;;
+    esac
+  done
+}
+
 # `task create`: the next key from the world's counter, starting at fc-9.
+# Under a `mkdir` lock -- atomic, and macOS has no `flock` -- so two creates at
+# once can't read the same number, or catch the file mid-write and read
+# nothing.
 create_task() {
-  local n
-  n=$(cat "$FAKE_BOARD/next-key" 2>/dev/null || echo 9)
+  local n tries=0
+  until mkdir "$FAKE_BOARD/.next-key.lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    if [ $tries -gt 500 ]; then echo "fake farcooler: the key counter's lock is stuck" >&2; exit 1; fi
+    sleep 0.01
+  done
+  n=$(cat "$FAKE_BOARD/next-key" 2>/dev/null)
+  case "$n" in ''|*[!0-9]*) n=9 ;; esac
   echo $((n + 1)) > "$FAKE_BOARD/next-key"
+  rmdir "$FAKE_BOARD/.next-key.lock"
   local title="" prev="" a
   for a in "$@"; do
     case "$a" in --title=*) title=${a#--title=} ;; esac
@@ -81,7 +105,7 @@ create_task() {
 
 case "${1:-} ${2:-}" in
   "task list")      show_file "$FAKE_BOARD/list.txt" "no tasks" ;;
-  "task show")      show_task "${3:-}" ;;
+  "task show")      show_task "$(shown_key "$@")" ;;
   "task search")    show_file "$FAKE_BOARD/search.txt" "no notes match" ;;
   "task create")    create_task "$@" ;;
   "task set")       echo "${3:-fc-?}  updated" ;;
