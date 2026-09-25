@@ -81,9 +81,8 @@ again. Your own pane counts. `--preset` picks claude, codex or cursor.
 {{cli}} task dispatch <key> --repo <repo> --workspace <name> --preset codex --actor manager
 ```
 
-A busy lane, or a task that still waits on something, is warned about, not
-refused: tell the owner. If a dispatch says its pane couldn't be confirmed, or
-seems not to have taken, read `task show <key>` and `workspace list --json` before
+A busy lane is warned about, not refused: tell the owner. If a dispatch seems
+not to have taken, read `task show <key>` and `workspace list --json` before
 dispatching again, and pass `--again` only if the owner asked for a second
 agent. A dispatched agent doesn't report back to you or the owner. Say so.
 
