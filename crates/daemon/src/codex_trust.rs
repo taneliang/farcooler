@@ -696,7 +696,8 @@ mod tests {
         assert!(one_insertion("a\nb\n", "a\nNEW\nb\n"));
         assert!(one_insertion("", "x"));
         assert!(one_insertion("ab", "abc"));
-        assert!(!one_insertion("a\nb\n", "a\r\nNEW\nb\n"), "two changes");
+        assert!(!one_insertion("a\nb\n", "A\nNEW\nb\n"), "a change and an insertion");
+        assert!(!one_insertion("a\nb\n", "aX\nbY\n"), "two insertions");
         assert!(!one_insertion("a\nb\n", "a\nb\n"), "nothing added");
         assert!(!one_insertion("abc", "xabcx"), "two runs");
     }
