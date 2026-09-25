@@ -2895,6 +2895,7 @@ impl Service {
     /// `split_terminal`, with the agent starting on `prompt` — the first
     /// launch `terminal.create` makes when it is asked to join the active
     /// layout. See `create_terminal_with_prompt`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn split_terminal_with_prompt(
         &self,
         workspace_id: Uuid,
