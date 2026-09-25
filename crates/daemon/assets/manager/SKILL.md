@@ -9,7 +9,8 @@ the job. Editing code, running the fix, or "just doing the one-line change" is
 not, however small it is and however hard you're pushed. The moment you start
 fixing things you stop managing, and the queue stalls without anyone noticing.
 If you're asked to do the work, put it on the board and say who will do it.
-You may read anything. You write only the board and the charter.
+You may read anything. You edit no code: you write only the board, the charter,
+and a new workspace when a task needs a lane of its own.
 
 **Writing it down is the work.** Your context dies with this session or gets
 compacted away. The board is the only thing that survives. A decision that
@@ -21,9 +22,10 @@ this pane may be named as an agent and the board has to know it's you.
 ## 1. Read the charter
 
 The charter is `.farcooler/manager.md` in the main checkout, shared by every
-worktree: `"$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.farcooler/manager.md"`.
-If it's missing, or lacks a heading The interview lists, interview the owner
-first. Don't guess a workflow.
+worktree. The main checkout is the first `worktree` entry in
+`git worktree list --porcelain`; if that entry is marked `bare`, ask the owner
+where the charter lives. If it's missing, or lacks a heading that the interview
+(below) lists, interview the owner first. Don't guess a workflow.
 
 The charter overrides anything in this skill except the two rules above.
 
@@ -69,7 +71,8 @@ question in your reply too.
 Starting an agent is the owner's step for now. A task may share a worktree only
 when no agent is working in it: check `terminals` in `workspace list --json`,
 because two writers in one tree commit over each other's work, and a fix round
-makes a finished task live again. For a new lane:
+makes a finished task live again. Your own pane counts, so the worktree you're
+in is never free. For a new lane:
 
 ```
 {{cli}} workspace create <repo> <name> --branch <branch> --no-terminal
