@@ -241,6 +241,10 @@ struct ContentView: View {
                 lastTerminal = "\(host)/\(workspace)/\(terminal)"
             }
         }
+        // Tells the menu bar the main window is key, and whether an overlay
+        // is open over it. See `MainWindowFocus`.
+        .focusedSceneValue(
+            \.mainWindow, MainWindowFocus(overlayOpen: showQuickCreate || showPalette))
         .onCommand { command in run(command) }
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in selectTerminal(at: index) }

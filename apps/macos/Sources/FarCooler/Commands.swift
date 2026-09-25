@@ -53,6 +53,9 @@ enum AppCommand: String {
 /// where people already look, and is findable through Help's menu search
 /// without knowing it exists.
 struct FarCoolerCommands: Commands {
+    /// Nil unless the main window is key. See `MainWindowFocus`.
+    @FocusedValue(\.mainWindow) private var mainWindow
+
     var body: some Commands {
         // About Far Cooler, saying which build this is.
         //
@@ -99,8 +102,13 @@ struct FarCoolerCommands: Commands {
             // No Restart. A terminal is its process: restarting one is closing
             // it and opening another, which is ⌘W then ⌘T. A separate verb for
             // the same two steps is a concept to learn for nothing.
+            //
+            // Only while the main window is key. With Settings key, ⌘W
+            // stopped and removed the selected terminal behind it; disabled
+            // here, the chord goes on to File ▸ Close and closes Settings.
             Button("Close Terminal") { AppCommand.closeTerminal.post() }
                 .keyboardShortcut("w", modifiers: .command)
+                .disabled(!MainWindowFocus.closesTerminal(mainWindow))
             Divider()
             // The keyboard half of the title bar's editor control, which until
             // now was the one thing in this app you could only reach with a
@@ -155,6 +163,7 @@ struct FarCoolerCommands: Commands {
             // already use.
             Button("Zoom Pane  ⌃B z") { TileCommand.zoom.post() }
                 .keyboardShortcut(.return, modifiers: [.command, .shift])
+                .disabled(!MainWindowFocus.zoomsPane(mainWindow))
             Button("Next Arrangement  ⌃B space") { TileCommand.cycle.post() }
                 .keyboardShortcut(.space, modifiers: [.command, .shift])
             // Double-clicking a divider evens out the two panes it separates.

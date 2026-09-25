@@ -37,29 +37,45 @@ struct ShortcutSheetTests {
         return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }()
 
-    /// Chords the system's standard menus hold on every Mac: SwiftUI's Edit
-    /// menu (Undo, Redo, Cut, Copy, Paste, Select All, Find), the app menu
-    /// (Settings, Hide, Hide Others, Quit), File ▸ Close and the Window menu
-    /// (Minimize, Enter Full Screen). A menu item of this app's on one of them
-    /// is the same chord in two menus, and the one a keypress reaches depends
-    /// on menu order and on which of them is enabled at the time.
+    /// Chords the system's standard menus hold on every Mac:
+    ///
+    /// - Edit: Undo, Redo, Cut, Copy, Paste, Select All, and Find's own
+    ///   submenu (Find, Find Next and Previous, Use Selection for Find, Jump
+    ///   to Selection, Find and Replace), and Emoji & Symbols.
+    /// - The app menu: Settings, Hide, Hide Others, Quit.
+    /// - File ▸ Close.
+    /// - View: Show Sidebar, Show All Tabs, Enter Full Screen.
+    /// - Window: Minimize.
+    ///
+    /// A menu item of this app's on one of them is the same chord in two
+    /// menus, and the one a keypress reaches depends on menu order and on
+    /// which of them is enabled at the time.
     static let systemChords: Set<String> = [
-        "⌘Z", "⇧⌘Z", "⌘X", "⌘C", "⌘V", "⌘A", "⌘F",
+        "⌘Z", "⇧⌘Z", "⌘X", "⌘C", "⌘V", "⌘A",
+        "⌘F", "⌘G", "⇧⌘G", "⌘E", "⌘J", "⌥⌘F", "⌃⌘Space",
         "⌘,", "⌘H", "⌥⌘H", "⌘Q",
-        "⌘W", "⌘M", "⌃⌘F",
+        "⌘W",
+        "⌃⌘S", "⇧⌘\\", "⌃⌘F",
+        "⌘M",
     ]
 
-    /// The system chords this app takes on purpose, and why each is safe.
-    ///
-    /// Each one is a real second binding, and a new entry needs the same
-    /// argument written next to it:
+    /// The system chords this app takes on purpose, what each does in which
+    /// window, and why that is acceptable. A new entry needs the same.
     ///
     /// - ⌘W is Close Terminal, the tabbed-app convention the sheet opens
-    ///   with. It is in the File menu's `.newItem` group, which comes before
-    ///   the system's Close (the `.saveItem` group), so ⌘W always closes the
-    ///   terminal and never the window.
-    /// - ⌘F is Find Workspace or Agent. None of this app's text fields offers
-    ///   find in their own text, so Edit ▸ Find has nothing to find in them.
+    ///   with, and it is ahead of File ▸ Close in the File menu. It is
+    ///   ENABLED only while the main window is key (`MainWindowFocus`): there
+    ///   ⌘W closes the selected terminal, and never the window. In any other
+    ///   window (Settings, About) Close Terminal is disabled, the chord goes
+    ///   on to File ▸ Close, and that window closes. Before that gate, ⌘W in
+    ///   Settings stopped and removed the terminal behind it.
+    /// - ⌘F is Find Workspace or Agent, in the View menu, which comes after
+    ///   Edit. So ⌘F reaches Find Workspace whenever Edit ▸ Find is disabled,
+    ///   which is whenever the focused view offers no find: a terminal, the
+    ///   sidebar, a diff. A text view that does offer find (the adapter
+    ///   editor, a SwiftUI `TextEditor`, is one) takes ⌘F while it has focus
+    ///   and finds in its own text, which is what someone typing in an editor
+    ///   means by it. Not verified per field; that is the menu rule, stated.
     static let takenOnPurpose: Set<String> = ["⌘W", "⌘F"]
 
     /// One `.keyboardShortcut(key, modifiers: …)`, as the sheet would spell it.
