@@ -515,6 +515,36 @@ pub fn block(
 mod tests {
     use super::*;
 
+    /// A key from before the board had a prefix still names its task through
+    /// the daemon's own handler, not just in the store: a pane launched
+    /// before the upgrade still sends `FARCOOLER_TASK=-1`, and `task.get_by_key`
+    /// is the route its CLI resolves that on. The runner opens a real
+    /// schema-11 file, so migration 12 has renamed the task `ov-1` by then.
+    #[tokio::test]
+    async fn an_old_key_resolves_through_get_by_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repository, task) = (Uuid::now_v7(), Uuid::now_v7());
+        farcooler_store::testing::write_prefixless_board_at_schema_11(
+            &dir.path().join("farcooler.db"),
+            repository,
+            task,
+        );
+        let svc = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+        let ask = |key: &str, repository_id: Vec<u8>| pb::TaskGetByKeyRequest {
+            repository_id: repository_id.into(),
+            key: key.to_string(),
+        };
+
+        for repository_id in [repository.as_bytes().to_vec(), Vec::new()] {
+            let found = get_by_key(&svc, &ask("-1", repository_id)).unwrap().items;
+            assert_eq!(found.len(), 1, "{found:?}");
+            assert_eq!(found[0].id.as_ref(), task.as_bytes(), "the task the old key named");
+            assert_eq!(found[0].key, "ov-1", "and it comes back under its new key");
+        }
+        let found = get_by_key(&svc, &ask("ov-1", Vec::new())).unwrap().items;
+        assert_eq!(found.len(), 1, "the new key too");
+    }
+
     #[test]
     fn an_unnamed_actor_is_the_person_at_the_client() {
         assert_eq!(actor_from_wire("").unwrap(), Actor::User);

@@ -600,7 +600,7 @@ fn migration_0012_every_board_has_a_prefix(tx: &Transaction) -> rusqlite::Result
 /// Every migration below `version`, applied in one transaction, with the
 /// watermark set to it: a database exactly as a build that stopped at
 /// `version` left it, for a test to seed and then migrate forward.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn migrate_only_to(conn: &mut Connection, version: u32) {
     let tx = conn.transaction().unwrap();
     for m in &MIGRATIONS[..version as usize] {

@@ -122,3 +122,6 @@ farcooler-vt = { path = "../vt" }
 # dev-dependency cycle — `farcooler-client` depends on this crate — which cargo
 # permits precisely for this: a test that needs the real caller.
 farcooler-client.workspace = true
+# A database at an older schema, which only the store can write, so a test can
+# drive a migrated board through the daemon's own handlers.
+farcooler-store = { workspace = true, features = ["testing"] }

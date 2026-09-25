@@ -18,6 +18,8 @@ pub mod review;
 pub mod models;
 mod store;
 mod tasks;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use models::{
     AcceptanceItem, Actor, IdempotencyRecord, NoteHit, NoteKind, Repository, RepositoryRoot, Task,

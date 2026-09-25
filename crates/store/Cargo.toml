@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Fixtures other crates' tests need that only this crate can build, such as a
+# database file at an older schema. Enabled from dev-dependencies only, so no
+# shipped binary carries it.
+testing = []
+
 [dependencies]
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
