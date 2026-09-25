@@ -418,17 +418,26 @@ pub async fn rollback_worktree(
     Ok(true)
 }
 
-/// Uncommitted or untracked changes present, as git reports them.
+/// Uncommitted or untracked changes present.
 ///
-/// Nothing is subtracted here. The files Far Cooler writes into a worktree —
-/// codex's and cursor's hooks files and codex's copy of the manager skill —
-/// are each named in the repository's `info/exclude` when Far Cooler creates
-/// them (`service::exclude_locally`), so git itself leaves them out, and a
-/// workspace created a second ago still needs no typed confirmation to remove.
-/// Git's ignore rules skip every tracked file, so a change to a committed
-/// `.codex/hooks.json` is reported like a change to anything else.
+/// The files Far Cooler itself wrote into the worktree are subtracted first.
+/// `install_project_hooks` puts `.codex/hooks.json` and `.cursor/hooks.json`
+/// into every worktree this runner makes, and `Service::prepare_launch_hooks`
+/// puts one of the two into any worktree a codex or cursor pane is opened in —
+/// including the checkout the user works in every day, which Far Cooler did not
+/// make. This answer is what `removal_needs_confirmation` reads, so without the
+/// exclusion a workspace created a second ago and never touched by anyone would
+/// demand the user type its name back to remove it, on the strength of files
+/// Far Cooler wrote and the user has never seen.
+///
+/// Git's own pathspec, rather than a filter over these lines: `--porcelain`
+/// collapses a wholly-untracked directory into one entry (`?? .codex/`), so
+/// there is no line here to compare against a file path in the first place.
 pub async fn is_dirty(worktree: &Path) -> Result<bool> {
-    let r = git(worktree, &["status", "--porcelain"]).await?;
+    let mut args = vec!["status".to_string(), "--porcelain".to_string(), "--".to_string()];
+    args.extend(crate::hook_install::project_hook_exclusions());
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    let r = git(worktree, &borrowed).await?;
     if !r.ok {
         return Err(DomainError::OperationFailed);
     }

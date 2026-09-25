@@ -91,29 +91,37 @@ const CURSOR_EVENTS: &[(&str, bool)] = &[
 /// `service::Service::prepare_launch_hooks` when a codex or cursor pane is
 /// opened in one it did not make.
 ///
-/// One list, read by the installer that writes them and by
-/// `service::holds_unseen_work`, the removal check. Far Cooler wrote these
-/// files, so Far Cooler must not then report them to the user as work — a
-/// fresh worktree that opens with two files in its diff view, and a
+/// One list, read by three things that must agree: the installer that writes
+/// them, `git::is_dirty`, and `change_set::working_tree`. Far Cooler wrote
+/// these files, so Far Cooler must not then report them to the user as work —
+/// a fresh worktree that opens with two files in its diff view, and a
 /// just-created workspace that demands a typed confirmation to remove, are the
-/// same bug read through two different signals. Each file the installer
-/// creates is named in the repository's `info/exclude`, so git leaves it out
-/// of both, and an agent's `git add -A` doesn't commit it.
+/// same bug read through two different signals. A second hand-kept copy of
+/// these two strings is what would let the installer and the filters drift.
 pub const CODEX_HOOKS: &str = ".codex/hooks.json";
 pub const CURSOR_HOOKS: &str = ".cursor/hooks.json";
 pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
 
-/// Whether a hooks file holds nothing but our registrations: a JSON object
-/// with no key but `hooks`, every value under which is a list of entries this
-/// binary wrote. That is the only kind of hooks file removing a worktree can
-/// lose without asking, because it is the only kind nobody else put anything
-/// in. Anything else — a user's own entry, a key of their own, text that
-/// isn't JSON, an entry from this binary at another path — is theirs.
-pub fn holds_only_ours(text: &str) -> bool {
-    let Ok(Value::Object(root)) = serde_json::from_str::<Value>(text) else { return false };
-    let Some(Value::Object(hooks)) = root.get("hooks") else { return false };
-    root.len() == 1
-        && hooks.values().all(|list| list.as_array().is_some_and(|l| l.iter().all(entry_is_ours)))
+/// `PROJECT_HOOK_FILES` as git pathspecs that subtract them from an answer.
+///
+/// Not the manager skill's files (`skill_install::PROJECT_SKILL_FILES`). Those
+/// are hidden by git itself, through a line in the repository's
+/// `info/exclude` (`service::exclude_locally`), which also keeps `git add -A`
+/// from committing them. A pathspec here would hide them by path, whoever
+/// wrote the bytes, and so would hide an owner's edit, and any change to a
+/// tracked copy, from the diff view and from the removal check.
+///
+/// A pathspec rather than a filter over `git status` output, because git's own
+/// matching is the only thing that gets this right. `git status --porcelain`
+/// collapses a wholly-untracked directory to one entry — `?? .codex/`, never
+/// `?? .codex/hooks.json` — so a filter comparing whole lines against these
+/// paths would match nothing at all and silently do nothing. It is also
+/// conservative in the direction that matters: with a file of the user's own
+/// beside ours, git reports the directory again and their file is not hidden.
+///
+/// The caller puts `--` in front of these.
+pub fn project_hook_exclusions() -> Vec<String> {
+    PROJECT_HOOK_FILES.iter().map(|p| format!(":(exclude){p}")).collect()
 }
 
 /// The path this binary was launched as, resolved the same way the shim's
@@ -283,21 +291,6 @@ mod tests {
         ]
       }
     }"#;
-
-    /// A file holding our registrations and nothing else is ours to lose
-    /// without asking; anything anybody else put in it makes it theirs.
-    #[test]
-    fn only_a_file_of_our_entries_alone_is_ours() {
-        let socket = Path::new("/tmp/h.sock");
-        assert!(holds_only_ours(&merge_codex("{}", socket)));
-        assert!(holds_only_ours(&merge_cursor("", socket)));
-        assert!(!holds_only_ours(&merge_codex(SOMEONE_ELSES, socket)), "somebody's entry");
-        let mut extra: Value = serde_json::from_str(&merge_cursor("{}", socket)).unwrap();
-        extra["version"] = json!(1);
-        assert!(!holds_only_ours(&extra.to_string()), "a key of their own");
-        assert!(!holds_only_ours("{ not json"), "text we can't read");
-        assert!(!holds_only_ours("[]"), "not an object");
-    }
 
     /// The bug this pins is a support incident, not a test failure: replacing
     /// this file silently disables somebody else's tooling, and they find out

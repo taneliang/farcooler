@@ -86,7 +86,7 @@ pub const PROJECT_SKILL_POLICY: &str = ".agents/skills/farcooler-manager/agents/
 /// Every file Far Cooler writes into a worktree for the skill.
 ///
 /// Each is added to the repository's `info/exclude` before it is written
-/// (`service::exclude_locally`), and `service::holds_unseen_work`
+/// (`service::exclude_locally`), and `service::holds_an_unseen_skill_file`
 /// reads this list so that removing a worktree still asks when one of them
 /// holds something that isn't an unedited copy of ours.
 pub const PROJECT_SKILL_FILES: &[&str] = &[PROJECT_SKILL, PROJECT_SKILL_POLICY];
