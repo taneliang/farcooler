@@ -62,6 +62,12 @@ enum Shortcut {
             [
                 Item(keys: "⌃H ⌃L", action: "Move to the pane left / right"),
                 Item(keys: "⌃K ⌃J", action: "Move to the pane above / below"),
+                // The Layout menu's key equivalents for ⌃B z and ⌃B space,
+                // listed here as well as below because the sheet promises
+                // every shortcut in the menu bar. `ShortcutSheetTests` holds
+                // it to that.
+                Item(keys: "⇧⌘Z", action: "Zoom the focused pane; again to come back"),
+                Item(keys: "⇧⌘Space", action: "Next arrangement"),
             ]
         ),
         (
