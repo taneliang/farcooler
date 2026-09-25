@@ -901,14 +901,27 @@ fn takes_plugin_dir(preset: &str) -> bool {
 /// Every git it runs shares `deadline` with the rest of the launch's
 /// (`git::git_bytes_by`), so a git that hangs costs the launch one budget,
 /// not one per file.
+///
+/// **The policy file goes first** (`PROJECT_SKILL_POLICY`, which sets
+/// `allow_implicit_invocation: false`). The budget can run out between two
+/// files, with slow gits that do answer as much as with one that hangs, and
+/// every git after that point reads as "can't tell", so nothing later is
+/// written. Policy first, a partial install is a policy with no skill, which
+/// does nothing. Skill first, it would be a skill codex may pull in on its
+/// own, which the skill's design rules out.
 async fn install_project_skill(
     worktree: &Path,
     harness: crate::skill_install::Harness,
     deadline: tokio::time::Instant,
 ) {
-    use crate::skill_install::{Holds, Installed, crosses_a_symlink, holds, install_file, render};
+    use crate::skill_install::{
+        Holds, Installed, PROJECT_SKILL_POLICY, crosses_a_symlink, holds, install_file, render,
+    };
     let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
-    for file in render(harness, &cli) {
+    let mut files = render(harness, &cli);
+    // `false` sorts first, and the sort is stable, so the rest keep their order.
+    files.sort_by_key(|f| f.relative != PROJECT_SKILL_POLICY);
+    for file in files {
         let path = worktree.join(file.relative);
         if crosses_a_symlink(worktree, file.relative) {
             tracing::info!(
@@ -924,10 +937,17 @@ async fn install_project_skill(
             tracing::info!(path = %path.display(), "leaving somebody's skill file alone");
             continue;
         }
+        if tokio::time::Instant::now() >= deadline {
+            tracing::info!(
+                path = %path.display(),
+                "no time left for git on this launch; leaving the manager skill out of it"
+            );
+            break;
+        }
         if git_tracks_without_blocking(worktree, file.relative, deadline).await {
             tracing::info!(
                 path = %path.display(),
-                "the repository tracks this file; leaving the manager skill out of it"
+                "the repository tracks this file, or git couldn't say in time; leaving the manager skill out of it"
             );
             continue;
         }
@@ -1222,13 +1242,24 @@ async fn install_project_hook_file(
 /// Put `contents` at `path` if the file still holds `before` (or is still
 /// absent, for an empty `before`), and say whether it did.
 ///
-/// The read above ran before a git that can take seconds, and the owner can
+/// The first read ran before a git that can take seconds, and the owner can
 /// save the file in that time. So the file is read again just before it is
-/// replaced, and a change cancels the write: our registrations come back on
-/// the next launch, their save would not. The write itself goes to a new
-/// temporary file beside it, keeps the file's mode, and is renamed into
-/// place, so a crash leaves the old file or the new one and never half of
-/// one (`codex_trust::replace`, the same write codex's config gets).
+/// replaced, and a change seen there cancels the write: our registrations
+/// come back on the next launch, their save would not. The write itself goes
+/// to a new temporary file beside it, keeps the file's mode, and is renamed
+/// into place, so a crash leaves the old file or the new one and never half
+/// of one (`codex_trust::replace`, the same write codex's config gets).
+///
+/// **What this does not cover.** A save landing between that second read
+/// and the rename, a window of microseconds, is still overwritten. So is a
+/// second daemon (stable and canary, say) writing the same file at the same
+/// instant. There is no lock to share: codex and cursor take none. And the
+/// same read refuses a hooks file with more than one name (a rename would
+/// split them) or one the owner made read-only, so such a file never gets
+/// our registrations, and that agent reports nothing in that worktree. A
+/// file this creates is `0644`, and a replaced file keeps its mode but not
+/// its extended attributes.
+///
 /// `between` runs after the temporary file is written and before the read
 /// that decides, for a test to change the file in that window.
 fn replace_hooks_file(path: &Path, contents: &[u8], before: &[u8], between: impl FnOnce()) -> bool {
@@ -8021,6 +8052,90 @@ mod hook_file_tests {
             assert!(!repo.join(relative).exists(), "can't tell means don't write: {relative}");
         }
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// m4-r: the budget runs out between the two codex skill files, with
+    /// gits that answer, only slowly. Whatever is written, the skill must
+    /// never be there without the policy that turns off implicit invocation.
+    #[tokio::test]
+    async fn a_budget_that_runs_out_midway_never_leaves_the_skill_without_its_policy() {
+        use crate::skill_install::{PROJECT_SKILL, PROJECT_SKILL_POLICY};
+        let repo = scratch("policy-first");
+        // A slow git that does answer, as scripts `/bin/sh` runs from the
+        // working directory: `ls-files` takes 0.4 s and finds nothing, and
+        // `rev-parse --git-common-dir` answers at once. 0.7 s is enough for
+        // one file's two gits and not for a second `ls-files`.
+        std::fs::write(repo.join("ls-files"), "sleep 0.4\n").unwrap();
+        std::fs::write(repo.join("rev-parse"), "echo .git\n").unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(700);
+        with_git_as(
+            std::ffi::OsStr::new("/bin/sh"),
+            install_project_skill(&repo, crate::skill_install::Harness::Codex, deadline),
+        )
+        .await;
+        let policy = repo.join(PROJECT_SKILL_POLICY).exists();
+        let skill = repo.join(PROJECT_SKILL).exists();
+        assert!(
+            policy && !skill,
+            "the budget covered one file, and that file was the policy: policy {policy}, skill {skill}"
+        );
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// t1: making a worktree installs two hooks files, and their gits share
+    /// one budget. A deadline per file would double the wait on a git that
+    /// hangs. Takes one `GIT_TIMEOUT`, which is the budget under test.
+    #[tokio::test]
+    async fn a_new_worktrees_hooks_files_share_one_git_budget() {
+        use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS};
+        let worktree = scratch("hooks-one-budget");
+        let hung = hung_git_in(&worktree);
+        let started = std::time::Instant::now();
+        with_git_as(hung, install_project_hooks(&worktree, Path::new("/tmp/h.sock"))).await;
+        let took = started.elapsed();
+        assert!(took >= git::GIT_TIMEOUT, "the stand-in never ran, so nothing was timed: {took:?}");
+        assert!(took < git::GIT_TIMEOUT * 9 / 5, "both files' gits shared one budget: {took:?}");
+        assert!(!worktree.join(CODEX_HOOKS).exists(), "can't tell writes nothing");
+        assert!(!worktree.join(CURSOR_HOOKS).exists(), "can't tell writes nothing");
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+
+    /// t1: a codex launch asks git about its hooks file and then about each
+    /// skill file, and all of them share one budget. Through
+    /// `prepare_launch_hooks` itself, where the budget is made. Takes one
+    /// `GIT_TIMEOUT`.
+    #[tokio::test]
+    async fn a_codex_launchs_gits_share_one_budget() {
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let worktree = Path::new(&ws.worktree_path);
+        let hung = hung_git_in(worktree);
+        let started = std::time::Instant::now();
+        with_git_as(hung, svc.prepare_launch_hooks("codex", &ws.worktree_path)).await;
+        let took = started.elapsed();
+        assert!(took >= git::GIT_TIMEOUT, "the stand-in never ran, so nothing was timed: {took:?}");
+        assert!(took < git::GIT_TIMEOUT * 9 / 5, "the hooks file and skill gits shared one budget: {took:?}");
+        assert!(!worktree.join(crate::hook_install::CODEX_HOOKS).exists(), "can't tell writes nothing");
+        assert!(!worktree.join(crate::skill_install::PROJECT_SKILL).exists(), "can't tell writes nothing");
+    }
+
+    /// t2: the installer writes through `replace_hooks_file`, whose read
+    /// just before the rename refuses a file with two names. A plain write
+    /// would go through the link and change the other name's file too.
+    #[tokio::test]
+    async fn the_installer_never_writes_through_a_second_name() {
+        let worktree = scratch("two-names");
+        let elsewhere = tempfile::tempdir().unwrap();
+        let other = elsewhere.path().join("hooks.json");
+        std::fs::write(&other, "{}\n").unwrap();
+        std::fs::create_dir_all(worktree.join(".codex")).unwrap();
+        let ours = worktree.join(crate::hook_install::CODEX_HOOKS);
+        std::fs::hard_link(&other, &ours).unwrap();
+
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
+
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "{}\n", "the other name's file is unchanged");
+        assert_eq!(std::fs::read_to_string(&ours).unwrap(), "{}\n", "and so is this one");
+        let _ = std::fs::remove_dir_all(&worktree);
     }
 
     /// m7 of the second review: the owner saves the hooks file after we read
