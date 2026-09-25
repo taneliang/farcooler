@@ -558,6 +558,39 @@ mod tests {
         }
     }
 
+    /// No installed hook widens its own deadline.
+    ///
+    /// `farcooler hook --deadline-ms` exists for the CLI's own tests, and a
+    /// hook that carried it would keep an agent waiting up to a minute on a
+    /// daemon that has wedged. Every hook an agent runs must get the CLI's
+    /// 400 ms `HOOK_DEADLINE`, so nothing written here may name the flag:
+    /// `hook_command` in both gate states (no table sets `gating` today, and
+    /// Task 11 will), and every command in all three agents' files.
+    #[test]
+    fn no_installed_hook_carries_a_deadline_of_its_own() {
+        let socket = Path::new("/tmp/h.sock");
+        let mut commands = vec![
+            hook_command("claude", "PermissionRequest", socket, true),
+            hook_command("claude", "Stop", socket, false),
+        ];
+        let settings = claude_settings(socket);
+        let codex: Value = serde_json::from_str(&merge_codex("{}", socket)).expect("json");
+        let cursor: Value = serde_json::from_str(&merge_cursor("{}", socket)).expect("json");
+        for (event, _) in CLAUDE_CODEX_EVENTS.iter().chain(CLAUDE_ONLY_EVENTS) {
+            commands.push(settings["hooks"][event][0]["hooks"][0]["command"].to_string());
+        }
+        for (event, _) in CLAUDE_CODEX_EVENTS {
+            commands.push(codex["hooks"][event][0]["hooks"][0]["command"].to_string());
+        }
+        for (event, _) in CURSOR_EVENTS {
+            commands.push(cursor["hooks"][event][0]["command"].to_string());
+        }
+        for command in &commands {
+            assert!(command.contains(" hook --agent "), "not a hook command: {command}");
+            assert!(!command.contains("--deadline"), "an installed hook set its own deadline: {command}");
+        }
+    }
+
     /// The shape `claude_settings` hands Task 10 for `--settings <file>`.
     /// Covers `CLAUDE_CODEX_EVENTS` union `CLAUDE_ONLY_EVENTS` — including
     /// `MessageDisplay`, fix round 2.
