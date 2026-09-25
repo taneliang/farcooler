@@ -206,6 +206,13 @@ enum Command {
         /// Wait for a decision and print it. Only for permission gates.
         #[arg(long, default_value_t = false)]
         gating: bool,
+        /// How long the whole errand may take, in milliseconds. Hidden, and
+        /// never written by the installer: every hook an agent runs gets
+        /// `hook::HOOK_DEADLINE`. It exists for this binary's own tests, so a
+        /// test about whether a verdict survives the trip to stdout is not
+        /// also, silently, a test of how busy the machine running it is.
+        #[arg(long, hide = true)]
+        deadline_ms: Option<u64>,
     },
     /// Hold a pane open for a surface the client draws. Started by the daemon.
     ///
@@ -916,11 +923,13 @@ async fn run() -> Fallible {
         Command::AgentHost { terminal, socket, worktree, session, preset } => {
             agent_host::run(terminal, socket, worktree, session, preset).await
         }
-        Command::Hook { agent, event, socket, gating } => {
+        Command::Hook { agent, event, socket, gating, deadline_ms } => {
             // An unknown agent name is not an error a hook may report: it
             // exits 0 like every other failure here.
             if let Ok(agent) = agent.parse() {
-                hook::run(agent, event, socket, gating).await;
+                let deadline = deadline_ms
+                    .map_or(hook::HOOK_DEADLINE, std::time::Duration::from_millis);
+                hook::run(agent, event, socket, gating, deadline).await;
             }
             Ok(())
         }

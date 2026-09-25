@@ -40,14 +40,24 @@ use tokio::net::UnixStream;
 /// mid-answer wedges the agent for a minute, which is the one thing this file
 /// exists to prevent. So the bound stays short until there is a signal to widen
 /// it on.
-const HOOK_DEADLINE: Duration = Duration::from_millis(400);
+///
+/// Missing it loses a decision to the safe side, not the wrong one. The hook
+/// prints nothing, and an agent that reads nothing from a `PermissionRequest`
+/// hook asks at the keyboard exactly as it would with no hook installed
+/// (spec, "Permissions, which is the feature": "On timeout the hook returns
+/// nothing and the TUI asks as it always would"). A deny that arrives late
+/// becomes a question, never a yes.
+pub const HOOK_DEADLINE: Duration = Duration::from_millis(400);
 
-pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool) {
+/// `deadline` is `HOOK_DEADLINE` for every hook an agent runs. It is a
+/// parameter only so the binary's own tests can take the machine's speed out
+/// of a test that is about something else; see `--deadline-ms` in `main.rs`.
+pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool, deadline: Duration) {
     // One bound over everything, rather than one per way of getting stuck. A
     // list of blocking calls each with its own guard is only right while
     // somebody keeps adding to the list; a bound around the lot is a property,
     // and it is the property this file exists for.
-    let out = tokio::time::timeout(HOOK_DEADLINE, errand(agent, event, socket, gating))
+    let out = tokio::time::timeout(deadline, errand(agent, event, socket, gating, deadline))
         .await
         .unwrap_or_default();
     if !out.is_empty() {
@@ -98,12 +108,18 @@ pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool) {
 /// payload; codex and cursor are unmeasured, and a parent that writes and then
 /// holds the pipe open would otherwise leave this process alive forever, before
 /// it had reached a single one of the guards below.
-async fn errand(agent: Agent, event: String, socket: PathBuf, gating: bool) -> String {
+async fn errand(
+    agent: Agent,
+    event: String,
+    socket: PathBuf,
+    gating: bool,
+    deadline: Duration,
+) -> String {
     let mut payload = Vec::new();
     if tokio::io::AsyncReadExt::read_to_end(&mut tokio::io::stdin(), &mut payload).await.is_err() {
         return String::new();
     }
-    run_with_input(agent, event, socket, gating, payload).await
+    run_with_input(agent, event, socket, gating, payload, deadline).await
 }
 
 /// The whole of the hook, minus stdin and stdout, so it can be tested.
@@ -113,6 +129,7 @@ async fn run_with_input(
     socket: PathBuf,
     gating: bool,
     payload: Vec<u8>,
+    deadline: Duration,
 ) -> String {
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&payload) else {
         return String::new();
@@ -124,8 +141,8 @@ async fn run_with_input(
     // The same bound again, over the conversation alone, so this function holds
     // the property on its own terms and a test can say so. `run`'s bound starts
     // first and so still dominates: the process is over inside one
-    // `HOOK_DEADLINE`, whichever route it took to get there.
-    tokio::time::timeout(HOOK_DEADLINE, converse(&socket, &encoded, gating))
+    // deadline, whichever route it took to get there.
+    tokio::time::timeout(deadline, converse(&socket, &encoded, gating))
         .await
         .unwrap_or_default()
 }
@@ -196,6 +213,17 @@ fn claude_shaped_output(decision: &Decision) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The deadline for a test about what the hook PRINTS rather than when.
+    ///
+    /// Under `HOOK_DEADLINE` these tests assert, without saying so, that a
+    /// fake daemon in the same runtime answers inside 400 ms, and a loaded
+    /// machine is entitled to make that false. Their binary-level twin in
+    /// `tests/a_hook_is_never_in_the_way.rs` went red exactly that way in a
+    /// full workspace run on 2026-09-25: the hook deferred as designed, and the
+    /// test called the empty answer a lost verdict. The tests here that are
+    /// about the bound keep the real one.
+    const SHAPE_NOT_SPEED: Duration = Duration::from_secs(30);
+
     /// The guard the whole design rests on.
     ///
     /// If this ever goes red, a broken Far Cooler can wedge somebody's agent,
@@ -211,6 +239,7 @@ mod tests {
             socket,
             false,
             b"{\"session_id\":\"abc\"}".to_vec(),
+            HOOK_DEADLINE,
         )
         .await;
 
@@ -244,6 +273,7 @@ mod tests {
             socket,
             true,
             b"{\"session_id\":\"abc\",\"tool_name\":\"Write\"}".to_vec(),
+            SHAPE_NOT_SPEED,
         )
         .await;
 
@@ -287,6 +317,7 @@ mod tests {
             socket,
             true,
             b"{\"session_id\":\"abc\",\"tool_name\":\"Write\"}".to_vec(),
+            SHAPE_NOT_SPEED,
         )
         .await;
 
@@ -329,6 +360,7 @@ mod tests {
                 socket,
                 true,
                 b"{}".to_vec(),
+                HOOK_DEADLINE,
             ),
         )
         .await
