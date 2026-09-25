@@ -211,6 +211,7 @@ enum Command {
         /// `hook::HOOK_DEADLINE`. It exists for this binary's own tests, so a
         /// test about whether a verdict survives the trip to stdout is not
         /// also, silently, a test of how busy the machine running it is.
+        /// Capped at `hook::LONGEST_DEADLINE_MS`.
         #[arg(long, hide = true)]
         deadline_ms: Option<u64>,
     },
@@ -927,8 +928,13 @@ async fn run() -> Fallible {
             // An unknown agent name is not an error a hook may report: it
             // exits 0 like every other failure here.
             if let Ok(agent) = agent.parse() {
-                let deadline = deadline_ms
-                    .map_or(hook::HOOK_DEADLINE, std::time::Duration::from_millis);
+                // Clamped rather than refused: refusing is clap exiting 2 with
+                // words on stderr, which a hook never does. The cap is the
+                // spec's own longest wait ("on the order of a minute"), so no
+                // value, however absurd, removes the deadline.
+                let deadline = deadline_ms.map_or(hook::HOOK_DEADLINE, |ms| {
+                    std::time::Duration::from_millis(ms.min(hook::LONGEST_DEADLINE_MS))
+                });
                 hook::run(agent, event, socket, gating, deadline).await;
             }
             Ok(())

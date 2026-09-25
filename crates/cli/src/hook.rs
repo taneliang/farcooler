@@ -49,6 +49,11 @@ use tokio::net::UnixStream;
 /// becomes a question, never a yes.
 pub const HOOK_DEADLINE: Duration = Duration::from_millis(400);
 
+/// The most `--deadline-ms` may ask for: the spec's longest wait, "on the
+/// order of a minute". Without a cap, a value near `u64::MAX` would overflow
+/// tokio's deadline into its far-future sleep, which is no deadline at all.
+pub const LONGEST_DEADLINE_MS: u64 = 60_000;
+
 /// `deadline` is `HOOK_DEADLINE` for every hook an agent runs. It is a
 /// parameter only so the binary's own tests can take the machine's speed out
 /// of a test that is about something else; see `--deadline-ms` in `main.rs`.
