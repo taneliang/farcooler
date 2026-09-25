@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 
 // MARK: - Wire types
@@ -352,6 +353,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// absent means "do not offer" rather than "yes" — offering a switch that
     /// comes back as a different agent is worse than not offering one.
     var chatCapable: Bool?
+    /// The board task this pane was opened for, as a task's uuid.
+    ///
+    /// Set by `farcooler task dispatch` and `terminal new --task`, and nil for
+    /// every pane opened any other way. Absent from a runner without
+    /// `terminal_task` and from a CLI older than the field, which is why a
+    /// board on such a runner offers no link rather than guessing one — see
+    /// `TaskRow.agentPresence` in AgentKit.
+    var taskId: String?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
 
@@ -837,4 +846,17 @@ enum StateKind {
         default: return .unknown
         }
     }
+}
+
+/// A terminal as the board reads it. The rule itself is AgentKit's
+/// `TaskAgentLink.isWorking`; what is decided here is only what "runs an
+/// agent" means for this app's model.
+extension Terminal: TaskBoardPane {
+    var boardTaskID: String? { taskId }
+    var boardState: String { state }
+    /// `hasDetectedAgent` and not a changes pane. The changes pane's process is
+    /// `farcooler`, which `hasDetectedAgent` would take for an agent — and the
+    /// daemon never dispatches one for a task, but a pill that could lead to a
+    /// diff is a rule that works by luck.
+    var runsAgent: Bool { hasDetectedAgent && !isChangesPane }
 }

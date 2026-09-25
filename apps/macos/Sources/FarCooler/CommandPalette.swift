@@ -89,7 +89,7 @@ struct CommandPalette: View {
         switch current {
         case .workspace(_, let id): return id
         case .terminal(_, let workspace, _): return workspace
-        case nil: return nil
+        case .board, nil: return nil
         }
     }
 

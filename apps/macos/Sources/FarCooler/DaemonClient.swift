@@ -926,15 +926,26 @@ final class DaemonClient: ObservableObject {
     // note --supersedes` and is not composed from this app yet.
     // -----------------------------------------------------------------------
 
-    /// Bumped every time a runner says a board moved.
+    /// Bumped, per repository, every time a runner says that repository's
+    /// board moved. Keyed by the repository's uuid, the id `repo list` and the
+    /// `task` event both spell.
     ///
     /// A counter rather than the event, for the same reason `linkGeneration`
     /// is one: what a board needs to know is "something changed since the read
     /// you are showing", and a value that settles back to its old self would
     /// be missed by a view comparing it. It is also what keeps the re-read out
     /// of this object — one `DaemonClient` serves a window full of surfaces
-    /// and only the open board wants a board.
-    @Published private(set) var boardGeneration = 0
+    /// and only a board wants a board.
+    ///
+    /// Per repository since every repository's sidebar row holds its board
+    /// open. One counter for the whole runner made every board on it re-read
+    /// on any write, and each read is a CLI process: a runner with six
+    /// repositories and one busy agent was launching six a minute to learn
+    /// about one.
+    @Published private(set) var boardGenerations: [String: Int] = [:]
+
+    /// How many times `repository`'s board has moved since this link came up.
+    func boardGeneration(for repository: String) -> Int { boardGenerations[repository] ?? 0 }
 
     /// Who caused the last board move, verbatim: `user`, `manager`, or
     /// `agent:<uuid>`.
@@ -959,9 +970,11 @@ final class DaemonClient: ObservableObject {
     /// the two. The second is simply not built.
     @Published private(set) var lastBoardActor: String?
 
-    private func boardMoved(_ event: TaskEvent) {
+    /// Internal rather than private so the suite can hand it the event the
+    /// stream would have; nothing else here calls it.
+    func boardMoved(_ event: TaskEvent) {
         lastBoardActor = event.actor
-        boardGeneration += 1
+        boardGenerations[event.repository, default: 0] += 1
     }
 
     /// A repository's board, as `task list --json` prints it.

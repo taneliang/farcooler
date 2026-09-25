@@ -57,14 +57,28 @@ final class TaskBoardStore: ObservableObject {
     /// `boardStore(for:client:)` in `ContentView`, which is the same identity
     /// check `changesStore(for:client:)` makes for the same reason.
     let client: DaemonClient
-    /// The `boardGeneration` this store has already acted on, so an event that
-    /// arrives while a read is in flight is not read twice.
+    /// The generation of THIS repository's board this store has already acted
+    /// on, so an event that arrives while a read is in flight is not read
+    /// twice — and an event about another repository is not read at all.
     private var seenGeneration = 0
 
     init(client: DaemonClient, repository: Repository) {
         self.client = client
         self.repository = repository
-        self.seenGeneration = client.boardGeneration
+        self.seenGeneration = client.boardGeneration(for: repository.id)
+    }
+
+    /// How many times the runner has said this repository's board moved.
+    var generation: Int { client.boardGeneration(for: repository.id) }
+
+    /// The first read, once, however many views ask for it.
+    ///
+    /// The sidebar row and the board in the main area hold the same store and
+    /// both appear at once when the row is selected; without the `reading`
+    /// check each would launch its own `task list` for the same board.
+    func readIfNeverRead() async {
+        guard !hasRead, !reading else { return }
+        await reload()
     }
 
     /// Re-read the whole board.
@@ -105,8 +119,8 @@ final class TaskBoardStore: ObservableObject {
     /// that dropped `user` would go blind to the second — which is the one it
     /// could not have predicted.
     func reloadIfMoved() async {
-        guard client.boardGeneration != seenGeneration else { return }
-        seenGeneration = client.boardGeneration
+        guard generation != seenGeneration else { return }
+        seenGeneration = generation
         await reload()
         if let opened { await open(opened) }
     }
@@ -160,11 +174,76 @@ extension TaskRow {
     }
 }
 
-/// The board itself.
-struct TaskBoardSheet: View {
+/// One pane that is working a task, with the workspace it is in.
+///
+/// Carried together because going to it needs both: `Selection.terminal`
+/// names the workspace and the host as well as the terminal, and a pane found
+/// on its own would have to be looked up again to learn where it lives.
+struct BoardPane: Identifiable, Equatable {
+    let terminal: Terminal
+    let workspace: Workspace
+
+    var id: String { terminal.id }
+
+    /// What a menu item offering this pane says: the pane, then where it is.
+    /// "claude in fix-reconnect", because two agents on one task are usually
+    /// the same program, and the workspace is what tells them apart.
+    var title: String { "\(terminal.label) in \(workspace.task)" }
+}
+
+/// Every pane on a board's runner, and whether that runner says which pane
+/// works which task.
+///
+/// A value handed to the board by the window, which is what holds the fleet.
+/// The rule for which of these is working a card is AgentKit's
+/// (`TaskAgentLink.isWorking`); this only pairs each pane with its workspace
+/// so that the answer is somewhere you can go.
+struct BoardAgents {
+    /// The runner's workspaces, as the sidebar has them.
+    var workspaces: [Workspace]
+    /// Whether the runner advertises `terminal_task`. Without it no pane
+    /// carries a task, and the board makes no claim either way.
+    var runnerRecordsTasks: Bool
+
+    static let none = BoardAgents(workspaces: [], runnerRecordsTasks: false)
+
+    private var panes: [BoardPane] {
+        workspaces.flatMap { ws in ws.terminals.map { BoardPane(terminal: $0, workspace: ws) } }
+    }
+
+    /// The panes working `row`, in sidebar order. Empty on a runner that
+    /// doesn't record tasks, whatever its panes say.
+    func live(for row: TaskRow) -> [BoardPane] {
+        guard runnerRecordsTasks else { return [] }
+        let working = Set(row.livePanes(in: workspaces.flatMap(\.terminals)).map(\.id))
+        return panes.filter { working.contains($0.id) }
+    }
+
+    func presence(for row: TaskRow) -> TaskAgentPresence {
+        row.agentPresence(livePanes: live(for: row).count, runnerRecordsTasks: runnerRecordsTasks)
+    }
+
+    /// How many of `board`'s tasks have an agent on them — the sidebar row's
+    /// quiet count.
+    func tasksWithAgents(on board: TaskBoardModel) -> Int {
+        guard runnerRecordsTasks else { return 0 }
+        return board.tasksWithLiveAgents(in: workspaces.flatMap(\.terminals))
+    }
+}
+
+/// The board itself, in the main area of the window.
+///
+/// Not a sheet any more. A sheet sat over the agents it was orchestrating, so
+/// going to one closed the board and coming back meant opening it again; here
+/// it is a place in the sidebar like any workspace, and ⌘[ or a click on its
+/// row brings it back.
+struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore
     @ObservedObject var client: DaemonClient
-    let onClose: () -> Void
+    let agents: BoardAgents
+    /// Go to a pane working a task. The window's, because only the window can
+    /// change what is selected.
+    let onGoTo: (BoardPane) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -193,15 +272,21 @@ struct TaskBoardSheet: View {
                 columns
             }
         }
-        .frame(minWidth: 900, minHeight: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(WorkspaceStyle.canvas)
-        // The board only moves when a runner says it did. Polling a board that
-        // nothing is touching would be the shape this app spent a release
-        // removing.
-        .task(id: client.boardGeneration) { await store.reloadIfMoved() }
-        .task { if !store.hasRead { await store.reload() } }
+        // The board only moves when a runner says THIS board did. Polling a
+        // board that nothing is touching would be the shape this app spent a
+        // release removing.
+        .task(id: store.generation) { await store.reloadIfMoved() }
+        .task { await store.readIfNeverRead() }
         .sheet(item: $store.opened) { row in
-            TaskCard(row: row, detail: store.detail, onClose: { store.opened = nil })
+            TaskCard(
+                row: row, detail: store.detail, agents: agents.live(for: row),
+                onGoTo: { pane in
+                    store.opened = nil
+                    onGoTo(pane)
+                },
+                onClose: { store.opened = nil })
         }
     }
 
@@ -234,7 +319,6 @@ struct TaskBoardSheet: View {
                     .foregroundStyle(.secondary)
             }
             Button("Refresh") { Task { await store.reload() } }
-            Button("Done", action: onClose).keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -245,7 +329,7 @@ struct TaskBoardSheet: View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 12) {
                 ForEach(store.board.columns) { column in
-                    TaskColumnView(column: column, store: store)
+                    TaskColumnView(column: column, store: store, agents: agents, onGoTo: onGoTo)
                 }
                 if !store.board.unreadable.isEmpty {
                     UnreadableColumnView(rows: store.board.unreadable)
@@ -260,6 +344,8 @@ struct TaskBoardSheet: View {
 private struct TaskColumnView: View {
     let column: TaskBoardColumn
     @ObservedObject var store: TaskBoardStore
+    let agents: BoardAgents
+    let onGoTo: (BoardPane) -> Void
 
     /// The only state waiting on the person looking at the board, so it is the
     /// only one drawn in the accent color. Everything competing for
@@ -279,7 +365,10 @@ private struct TaskColumnView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(column.rows) { row in
-                        TaskCardRow(row: row, prominent: leads, store: store)
+                        TaskCardRow(
+                            row: row, prominent: leads, store: store,
+                            live: agents.live(for: row), presence: agents.presence(for: row),
+                            onGoTo: onGoTo)
                     }
                 }
             }
@@ -297,6 +386,11 @@ private struct TaskCardRow: View {
     let row: TaskRow
     let prominent: Bool
     @ObservedObject var store: TaskBoardStore
+    /// The panes working this task, and what the card says about them. Both
+    /// decided by AgentKit's rule; see `BoardAgents`.
+    let live: [BoardPane]
+    let presence: TaskAgentPresence
+    let onGoTo: (BoardPane) -> Void
 
     private var stale: Bool { row.staleness == .stale }
 
@@ -338,6 +432,17 @@ private struct TaskCardRow: View {
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.orange)
             }
+            // How far along it is, and who is on it: the two things a card
+            // says about the work rather than about the task.
+            if row.acceptanceProgress != nil || presence.title != nil {
+                HStack(alignment: .center, spacing: 6) {
+                    if let progress = row.acceptanceProgress {
+                        AcceptanceProgressLabel(progress: progress)
+                    }
+                    Spacer(minLength: 0)
+                    AgentPill(live: live, presence: presence, onGoTo: onGoTo)
+                }
+            }
             if !row.labels.isEmpty {
                 Text(row.labels.joined(separator: " · "))
                     .font(.system(size: WorkspaceStyle.PaneText.minimum))
@@ -359,6 +464,10 @@ private struct TaskCardRow: View {
         .contentShape(Rectangle())
         .onTapGesture { Task { await store.open(row) } }
         .contextMenu {
+            // Going somewhere writes nothing, so it is not a `BoardAction`:
+            // that list is for writes, and `rewritesTheRecord` walks it.
+            GoToAgentItems(live: live, onGoTo: onGoTo)
+            if !live.isEmpty { Divider() }
             // Built from the model's list rather than written out here, which
             // is what makes `nothingTheBoardOffersRewritesTheRecord` a guard
             // over what actually ships. A new write goes in `TaskBoardModel`,
@@ -366,6 +475,105 @@ private struct TaskCardRow: View {
             Section("Move To") {
                 ForEach(TaskBoardModel.moves(for: row)) { move in
                     Button(move.action.title) { Task { await store.move(row, to: move.status) } }
+                }
+            }
+        }
+    }
+}
+
+/// "2 of 5", or "All 5 Met" in the accent color once every line holds.
+private struct AcceptanceProgressLabel: View {
+    let progress: TaskAcceptanceProgress
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: progress.isComplete ? "checkmark.circle.fill" : "checkmark.circle")
+            Text(progress.sentence).monospacedDigit()
+        }
+        .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: progress.isComplete ? .medium : .regular))
+        .foregroundStyle(progress.isComplete ? Color.accentColor : Color.secondary)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Acceptance: \(progress.sentence)")
+    }
+}
+
+/// The way from a card to the agent working it.
+///
+/// A pill for one pane, the same pill as a menu for several, and a quiet
+/// "No Agent" for a task in progress with nobody on it. The status mark is the
+/// pane's own, drawn by `StatusGlyph` like the sidebar row it leads to — so an
+/// agent waiting on a question is amber here too, and the card says which
+/// agent needs you before you open anything.
+private struct AgentPill: View {
+    let live: [BoardPane]
+    let presence: TaskAgentPresence
+    let onGoTo: (BoardPane) -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        switch presence {
+        case .unsaid:
+            EmptyView()
+        case .noAgent:
+            Text(presence.title ?? "")
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                .foregroundStyle(.tertiary)
+        case .agents:
+            if live.count == 1, let pane = live.first {
+                Button { onGoTo(pane) } label: { label(for: [pane]) }
+                    .buttonStyle(.plain)
+                    .help("Go to \(pane.title)")
+            } else {
+                Menu {
+                    GoToAgentItems(live: live, onGoTo: onGoTo)
+                } label: {
+                    label(for: live)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Go to one of the agents on this task")
+            }
+        }
+    }
+
+    private func label(for panes: [BoardPane]) -> some View {
+        HStack(spacing: 4) {
+            if let status = Status.mostUrgent(in: panes.map(\.terminal.status)) ?? panes.first?.terminal.status {
+                StatusGlyph(status: status, inAppDiameter: 6)
+            }
+            Text(presence.title ?? "")
+                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
+            Image(systemName: panes.count == 1 ? "arrow.right" : "chevron.down")
+                .font(.system(size: 7.5, weight: .bold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2.5)
+        .background(
+            Capsule().fill(Color.primary.opacity(hovering ? 0.12 : 0.07)))
+        .contentShape(Capsule())
+        .onHover { hovering = $0 }
+        .animation(Motion.snap, value: hovering)
+    }
+}
+
+/// "Go to Agent", or one "Go to …" per pane when several are on the task.
+///
+/// Shared by the card's context menu and the pill's menu so the two can't
+/// come to list different panes.
+private struct GoToAgentItems: View {
+    let live: [BoardPane]
+    let onGoTo: (BoardPane) -> Void
+
+    var body: some View {
+        if live.count == 1, let pane = live.first {
+            Button("Go to Agent") { onGoTo(pane) }
+        } else if !live.isEmpty {
+            Section("Go to Agent") {
+                ForEach(live) { pane in
+                    Button(pane.title) { onGoTo(pane) }
                 }
             }
         }
@@ -422,6 +630,11 @@ private struct UnreadableColumnView: View {
 private struct TaskCard: View {
     let row: TaskRow
     let detail: TaskDetailModel
+    /// The panes working this task. Going to one closes the card first — the
+    /// card is a sheet, and a sheet left up would sit over the pane you went
+    /// to.
+    let agents: [BoardPane]
+    let onGoTo: (BoardPane) -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -435,6 +648,15 @@ private struct TaskCard: View {
                 Text(row.status.title)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                     .foregroundStyle(.secondary)
+                if agents.count == 1, let pane = agents.first {
+                    Button("Go to Agent") { onGoTo(pane) }
+                        .help("Go to \(pane.title)")
+                } else if !agents.isEmpty {
+                    Menu("Go to Agent") {
+                        GoToAgentItems(live: agents, onGoTo: onGoTo)
+                    }
+                    .fixedSize()
+                }
                 Button("Done", action: onClose).keyboardShortcut(.defaultAction)
             }
             .padding(14)

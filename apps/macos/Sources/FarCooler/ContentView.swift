@@ -61,7 +61,6 @@ struct ContentView: View {
     /// runners can hand back rows that collide on id alone. Same lifetime rule
     /// as `changesStores` — see `boardStore(for:client:)`.
     @State private var boardStores: [String: TaskBoardStore] = [:]
-    @State private var showBoard = false
     @State private var showAddRepository = false
     @State private var showAdd = false
     @State private var showShortcuts = false
@@ -129,6 +128,9 @@ struct ContentView: View {
     enum Selection: Hashable {
         case workspace(host: String, id: String)
         case terminal(host: String, workspace: String, terminal: String)
+        /// A repository's board, by the repository's uuid. The row above its
+        /// workspaces in the sidebar, and where ⇧⌘B goes.
+        case board(host: String, repository: String)
     }
 
     /// What confirming a pane-mode switch would do, and to which pane.
@@ -319,28 +321,6 @@ struct ContentView: View {
             // clearing a notification nobody read is worse than not sending one
             // — but being on screen is, which is more than the pane you clicked.
             markVisibleSeen()
-        }
-        .sheet(isPresented: $showBoard) {
-            // Resolved inside the sheet rather than captured when it opened,
-            // so a board opened before a runner finished listing its
-            // repositories still finds one when it does.
-            if let target = boardTarget {
-                TaskBoardSheet(
-                    store: boardStore(
-                        for: target.repository, client: target.client, host: target.host),
-                    client: target.client,
-                    onClose: { showBoard = false })
-            } else {
-                // Never a guess between several. A picker belongs here
-                // eventually; a wrong board does not.
-                VStack(spacing: 10) {
-                    Text("Pick a project first.").font(.headline)
-                    Text("Select a worktree in the sidebar, and ⇧⌘B opens its board.")
-                        .foregroundStyle(.secondary)
-                    Button("Done") { showBoard = false }.keyboardShortcut(.defaultAction)
-                }
-                .padding(30)
-            }
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
         .sheet(isPresented: $showAbout) { AboutSheet() }
@@ -770,6 +750,36 @@ struct ContentView: View {
         Task { await act(on: anchor) { client in await client.reorderWorkspaces(order) } }
     }
 
+    /// A repository's board row, above its workspaces — or nothing, for a
+    /// group that is not a repository or a runner that has no board.
+    ///
+    /// Gated on `tasks`, the capability a board needs: on an older runner the
+    /// row would be a dead link under every repository. Shown whenever the
+    /// runner has it, even for an empty board, because the row is also how
+    /// anybody finds out there is a board at all.
+    @ViewBuilder
+    private func boardRow(_ group: ProjectGroup) -> some View {
+        if !group.project.isEmpty, group.project != "Ungrouped",
+            let repo = repository(host: group.host, project: group.project),
+            let client = store.clients[group.host],
+            client.daemonBuild?.can("tasks") == true
+        {
+            BoardRow(
+                store: boardStore(for: repo, client: client, host: group.host),
+                client: client,
+                agents: boardAgents(host: group.host, client: client),
+                isSelected: selection == .board(host: group.host, repository: repo.id),
+                onSelect: { selection = .board(host: group.host, repository: repo.id) })
+        }
+    }
+
+    /// Every pane on one runner, for the board to find the ones working a task.
+    private func boardAgents(host: String, client: DaemonClient) -> BoardAgents {
+        BoardAgents(
+            workspaces: store.fleet.workspaces.filter { ($0.host ?? "") == host },
+            runnerRecordsTasks: client.daemonBuild?.can("terminal_task") ?? false)
+    }
+
     /// One project's worktrees, plus its hidden section.
     ///
     /// Lifted out of `sidebar` when projects became collapsible: the rows had to
@@ -872,6 +882,7 @@ struct ContentView: View {
                             // Everything under the header, which is everything a
                             // collapsed project hides.
                             if !preferences.isProjectCollapsed(key) {
+                                boardRow(group)
                                 projectRows(group, key: key, usable: usable)
                             }
                         }
@@ -1388,7 +1399,7 @@ struct ContentView: View {
         return made
     }
 
-    /// Whose board ⇧⌘B opens.
+    /// Whose board ⇧⌘B selects.
     ///
     /// The repository of whatever the sidebar is showing, and the only
     /// repository there is when nothing is selected. Never a guess between
@@ -1516,6 +1527,22 @@ struct ContentView: View {
                 placeholder
             }
 
+        case .board(let host, let repositoryID):
+            if let client = store.clients[host],
+                let repository = client.repositories.first(where: { $0.id == repositoryID })
+            {
+                TaskBoardView(
+                    store: boardStore(for: repository, client: client, host: host),
+                    client: client,
+                    agents: boardAgents(host: host, client: client),
+                    onGoTo: { pane in select(pane.terminal, in: pane.workspace) }
+                )
+                .navigationTitle(repository.displayName)
+                .navigationSubtitle("Board")
+            } else {
+                placeholder
+            }
+
         case nil:
             placeholder
         }
@@ -1589,7 +1616,7 @@ struct ContentView: View {
 
     /// A repository to default the project picker to, when nothing was
     /// chosen yet — the empty state's "New Workspace" button, the sidebar's
-    /// own `+`, and the palette's "New Task" all reach this with no project
+    /// own `+`, and the palette's "New Workspace" all reach this with no project
     /// and therefore no host in hand at all, which is the one case where a
     /// default runner is legitimate rather than the picker again in
     /// disguise. This Mac's own repositories come first: it is the runner
@@ -1766,7 +1793,8 @@ struct ContentView: View {
             else { return [] }
             return ws.terminals.filter { group.terminals.contains($0.id) }
 
-        case nil:
+        // A board shows cards, not panes: nothing on it has been seen.
+        case .board, nil:
             return []
         }
     }
@@ -2201,12 +2229,18 @@ struct ContentView: View {
         case .addRepository: showAddRepository = true
         case .showBoard:
             // Only reachable with a project registered; a board needs a
-            // repository to be scoped to, the same way New Task needs one to
-            // create into.
+            // repository to be scoped to, the same way New Workspace needs one
+            // to create into.
             if store.repositories.isEmpty {
                 showAddRepository = true
+            } else if case .board = selection {
+                // Already there.
+            } else if let target = boardTarget {
+                selection = .board(host: target.host, repository: target.repository.id)
             } else {
-                showBoard = true
+                // Never a guess between several. The rows are in the sidebar
+                // for exactly this case.
+                errorBanner = "Select a workspace first, or choose a project’s Board in the sidebar."
             }
         case .openInEditor: openInPreferredEditor()
         case .reload: Task { for client in store.clients.values { await client.refresh() } }
@@ -2465,7 +2499,7 @@ struct ContentView: View {
         switch selection {
         case .workspace(let host, let id): return workspace(host: host, id: id)
         case .terminal(let host, let id, _): return workspace(host: host, id: id)
-        case nil: return nil
+        case .board, nil: return nil
         }
     }
 
@@ -2485,7 +2519,9 @@ struct ContentView: View {
         switch selection {
         case .workspace(let host, let id): return workspace(host: host, id: id)
         case .terminal(let host, let id, _): return workspace(host: host, id: id)
-        case nil: return nil
+        // A board is a repository's, not a workspace's: a keystroke that acts
+        // on "the current workspace" has nothing to act on here.
+        case .board, nil: return nil
         }
     }
 
@@ -2539,6 +2575,9 @@ struct ContentView: View {
         let terminalID: String?
         switch selection {
         case nil: return nil
+        // A board has nothing to heal: it is a repository's, and a runner
+        // that loses the repository draws the placeholder until you choose.
+        case .board: return selection
         case .workspace(let h, let w): (host, workspaceID, terminalID) = (h, w, nil)
         case .terminal(let h, let w, let t): (host, workspaceID, terminalID) = (h, w, t)
         }
@@ -2594,6 +2633,13 @@ struct ContentView: View {
             let workspace = store.fleet.workspaces
                 .first(where: { $0.terminals.contains(where: { $0.id == terminal.id }) })
         else { return }
+        select(terminal, in: workspace)
+    }
+
+    /// The same, when the workspace is already known — a board's pill found
+    /// the pane on its own runner, and a second search of the whole fleet
+    /// would be one that could land on another.
+    private func select(_ terminal: Terminal, in workspace: Workspace) {
         expanded.insert(workspace.id)
         selection = .terminal(host: workspace.host ?? "", workspace: workspace.id, terminal: terminal.id)
     }

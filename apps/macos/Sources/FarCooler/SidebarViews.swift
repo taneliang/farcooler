@@ -1262,3 +1262,95 @@ struct HiddenWorktrees: View {
         }
     }
 }
+
+/// A repository's board, as the first row under its header.
+///
+/// Above the workspaces because the board is about all of them: a task sits on
+/// one repository's board whichever worktree an agent takes it into. Drawn
+/// like a workspace row — one line, the same band, the same selection pill —
+/// because it is a place you go, not a section label.
+///
+/// Two counts, and neither at zero. The amber one is the Needs Decision
+/// column: amber means one thing across these apps, something is waiting on
+/// you, and a question on the board is exactly that. The quiet one is how many
+/// tasks have an agent on them right now, which answers "is this board
+/// moving" without asking for anything.
+struct BoardRow: View {
+    @ObservedObject var store: TaskBoardStore
+    /// Observed for its board generations: the row holds its board open, so it
+    /// is what re-reads when the runner says this repository's board moved.
+    @ObservedObject var client: DaemonClient
+    let agents: BoardAgents
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    @State private var hovering = false
+    @Environment(\.colorScheme) private var scheme
+    /// See `WorkspaceStyle.navigatorSelection(active:)`.
+    @Environment(\.controlActiveState) private var controlActiveState
+    private var windowActive: Bool { controlActiveState == .key }
+
+    private var decisions: Int { store.board.waitingOnYou }
+    private var working: Int { agents.tasksWithAgents(on: store.board) }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 0) {
+            Image(systemName: "checklist")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
+
+            Text("Board")
+                .font(WorkspaceStyle.sidebarPrimary)
+                .lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            HStack(spacing: 8) {
+                if let help = TaskBoardModel.agentsHelp(working) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 8.5, weight: .medium))
+                        Text("\(working)")
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(.tertiary)
+                    .help(help)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(help)
+                }
+                if let help = TaskBoardModel.decisionsHelp(decisions) {
+                    Text("\(decisions)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(GlancePalette.amber(scheme))
+                        .help(help)
+                        .accessibilityLabel(help)
+                }
+            }
+            .padding(.leading, SidebarGrid.cellGap)
+        }
+        .padding(.vertical, SidebarGrid.rowVerticalPadding)
+        .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    isSelected
+                        ? WorkspaceStyle.navigatorSelection(active: windowActive)
+                        : (hovering ? Color.primary.opacity(0.045) : .clear))
+        )
+        .padding(.horizontal, SidebarGrid.highlightInset)
+        .animation(Motion.snap, value: hovering)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        // Read here as well as by the board, because the counts are the
+        // row's and the board is usually not on screen. Only this
+        // repository's `task` events wake it — see `boardGenerations`.
+        .task { await store.readIfNeverRead() }
+        .task(id: client.boardGeneration(for: store.repository.id)) { await store.reloadIfMoved() }
+    }
+}
