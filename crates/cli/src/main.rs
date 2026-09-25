@@ -799,9 +799,15 @@ pub(crate) type Fallible = Result<(), Box<dyn std::error::Error>>;
 /// client switches on to choose its own sentence — the Mac's ⌘N panel does.
 /// Only under `--json`, which is the machine-reading mode: a person reading
 /// the terminal has the sentence already.
+///
+/// A refusal the board commands reworded (`tasks::Refused`) carries the same
+/// word, so rewording a sentence for a person doesn't take it from a script.
 fn error_code_line(error: &(dyn std::error::Error + 'static), json: bool) -> Option<String> {
     if !json {
         return None;
+    }
+    if let Some(refused) = error.downcast_ref::<tasks::Refused>() {
+        return refused.word().map(|word| format!("code: {word}"));
     }
     match error.downcast_ref::<farcooler_transport::ClientError>()? {
         farcooler_transport::ClientError::Daemon { code, .. } => {

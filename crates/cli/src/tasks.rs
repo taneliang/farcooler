@@ -1527,6 +1527,47 @@ fn said_about(what: &str) -> Option<&'static str> {
 /// rest — which is exactly the old behavior for a word this CLI is too old
 /// to have heard of.
 fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
+    Box::new(refusal(err, invalid))
+}
+
+/// A refusal from the runner, said in this CLI's words, that still carries
+/// the runner's stable code.
+///
+/// The sentence is for a person; the code is for a script. `main`'s
+/// `error_code_line` prints `code: <word>` under `--json` for a bare
+/// `ClientError`, and a refusal reworded into a `String` used to lose it on
+/// the way: `task dispatch --json` couldn't tell `capability-unsupported`
+/// from a conflict. This keeps the two together however often the sentence
+/// is reworded (see `reworded`). `code` is `None` when there's no runner
+/// code to keep: a transport failure, or a refusal of this CLI's own.
+#[derive(Debug)]
+pub(crate) struct Refused {
+    said: String,
+    code: Option<i32>,
+}
+
+impl Refused {
+    /// The runner's stable word for this refusal, if it sent one.
+    pub(crate) fn word(&self) -> Option<&'static str> {
+        self.code.map(farcooler_core::error::word_for)
+    }
+
+    /// The same refusal, and the same code, said differently.
+    fn reworded(self, f: impl FnOnce(String) -> String) -> Refused {
+        Refused { said: f(self.said), code: self.code }
+    }
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.said)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// `refused`, unboxed, for a caller that rewords it before it's returned.
+fn refusal(err: ClientError, invalid: &str) -> Refused {
     let (code, what) = match err {
         ClientError::Daemon { code, what, .. } => (code, what),
         // `Codec` is transparent over `CodecError`, which is transparent over
@@ -1536,13 +1577,12 @@ fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
         // pipe, a closed socket and a garbled frame are one fact, so they get
         // one sentence.
         ClientError::VersionMismatch { .. } => {
-            return "this Far Cooler and the runner's speak different protocols. update both"
-                .into();
+            return uncoded("this Far Cooler and the runner's speak different protocols. update both");
         }
         ClientError::EmptyResult | ClientError::WrongResult { .. } => {
-            return "the runner answered with something this Far Cooler cannot read".into();
+            return uncoded("the runner answered with something this Far Cooler cannot read");
         }
-        _ => return "the runner stopped answering".into(),
+        _ => return uncoded("the runner stopped answering"),
     };
     let word = farcooler_core::error::word_for(code);
     let said: String = match word {
@@ -1561,7 +1601,11 @@ fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
         // client-facing vocabulary, and it is what a bug report needs.
         other => format!("the runner refused that ({other})"),
     };
-    said.into()
+    Refused { said, code: Some(code) }
+}
+
+fn uncoded(said: &str) -> Refused {
+    Refused { said: said.to_string(), code: None }
 }
 
 // ---------------------------------------------------------------------------
@@ -1756,21 +1800,50 @@ fn finish_command(task: &pb::Task, rest: &str) -> String {
 /// A refusal of `terminal.create`, in this command's words rather than the
 /// board's: the board's `refused` would call a missing workspace "that task"
 /// and a runner without `terminal_task` "older than the board".
-fn pane_refused(e: ClientError) -> String {
+fn pane_refused(e: ClientError) -> Refused {
     let (code, what) = match &e {
         ClientError::Daemon { code, what, .. } => (*code, what.clone()),
-        _ => return refused(e, "that pane could not be opened").to_string(),
+        _ => return refusal(e, "that pane could not be opened"),
     };
-    match farcooler_core::error::word_for(code) {
+    let said = match farcooler_core::error::word_for(code) {
         "capability-unsupported" => {
-            "this runner's Far Cooler can't open a pane for a task yet. update it and try again".into()
+            "this runner's Far Cooler can't open a pane for a task yet. update it and try again"
         }
-        "not-found" => "that workspace isn't on this runner any more".into(),
+        "not-found" => "that workspace isn't on this runner any more",
         "invalid-argument" if what == "command_preset" => {
-            "this runner opens a pane for a task only with claude, codex or cursor".into()
+            "this runner opens a pane for a task only with claude, codex or cursor"
         }
-        _ => refused(e, "that pane could not be opened").to_string(),
+        _ => return refusal(e, "that pane could not be opened"),
+    };
+    Refused { said: said.to_string(), code: Some(code) }
+}
+
+/// A refusal of the workspace `--new` asked for, in this command's words.
+///
+/// `branch-exists` is the common one: `--new` run a second time, after the
+/// first made the branch, or a branch name somebody already pushed (fork-only
+/// refuses a name a remote carries rather than checking it out). The way on
+/// depends on whether this repository has a workspace on that branch
+/// already, so it's named when there is one.
+fn new_lane_refused(e: ClientError, branch: &str, on_it: Option<&str>) -> Refused {
+    let code = match &e {
+        ClientError::Daemon { code, .. } => *code,
+        _ => return refusal(e, "that workspace could not be made"),
+    };
+    if farcooler_core::error::word_for(code) != "branch-exists" {
+        return refusal(e, "that workspace could not be made");
     }
+    let said = match on_it {
+        Some(name) => format!(
+            "the branch {branch} already exists, in the workspace {name}. dispatch into it with \
+             --workspace {name}, or pick another --branch"
+        ),
+        None => format!(
+            "the branch {branch} already exists, here or on a remote, and --new only starts a new \
+             one. pick another --branch"
+        ),
+    };
+    Refused { said, code: Some(code) }
 }
 
 /// `task dispatch`, in order: everything that can refuse, then the lane,
@@ -1883,7 +1956,15 @@ async fn dispatch<L: DispatchLink>(
                     String::new(),
                     fork_only,
                 ))
-                .await?;
+                .await
+                .map_err(|e| {
+                    let on_it = workspaces
+                        .items
+                        .iter()
+                        .find(|w| w.repository_id.as_ref() == task.repository_id.as_ref() && w.branch == *branch)
+                        .map(|w| w.task_name.as_str());
+                    new_lane_refused(e, branch, on_it)
+                })?;
             let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
@@ -1899,16 +1980,17 @@ async fn dispatch<L: DispatchLink>(
         },
         Err(e) => {
             let why = pane_refused(e);
-            return Err(match made {
-                Some(branch) => format!(
-                    "{why}. the workspace {workspace_name} (branch {branch}) was made for {key} and \
-                     is still there: dispatch into it with --workspace {workspace_name}, or remove it \
-                     with `farcooler workspace remove-worktree {workspace_name}`, which keeps the branch",
-                    key = task.key,
-                ),
+            return Err(Box::new(match made {
+                Some(branch) => why.reworded(|why| {
+                    format!(
+                        "{why}. the workspace {workspace_name} (branch {branch}) was made for {key} and \
+                         is still there: dispatch into it with --workspace {workspace_name}, or remove it \
+                         with `farcooler workspace remove-worktree {workspace_name}`, which keeps the branch",
+                        key = task.key,
+                    )
+                }),
                 None => why,
-            }
-            .into());
+            }));
         }
     };
     let (terminal, terminal_short) = (uuid_of(&opened.id), short_bytes(&opened.id));
@@ -1917,22 +1999,22 @@ async fn dispatch<L: DispatchLink>(
     let pane = format!("terminal {terminal_short} is working {} in {workspace_name}", task.key);
     let actor = d.actor.to_string();
     if let Err(e) = link.call(update).await {
-        return Err(format!(
-            "{pane}, but the board didn't move: {}. move it with `{}`",
-            refused(e, "that task could not be put on the lane"),
-            finish_command(task, &format!("--workspace {workspace} --status in_progress --actor {actor}")),
-        )
-        .into());
+        return Err(Box::new(refusal(e, "that task could not be put on the lane").reworded(|why| {
+            format!(
+                "{pane}, but the board didn't move: {why}. move it with `{}`",
+                finish_command(task, &format!("--workspace {workspace} --status in_progress --actor {actor}")),
+            )
+        })));
     }
     if let Err(e) = link.call(status).await {
-        return Err(format!(
-            "{pane}, and {key} is on that lane, but it's still {}: {}. move it with `{}`",
-            status_word(task.status),
-            refused(e, "that is not a status this runner knows"),
-            finish_command(task, &format!("--status in_progress --actor {actor}")),
-            key = task.key,
-        )
-        .into());
+        return Err(Box::new(refusal(e, "that is not a status this runner knows").reworded(|why| {
+            format!(
+                "{pane}, and {key} is on that lane, but it's still {}: {why}. move it with `{}`",
+                status_word(task.status),
+                finish_command(task, &format!("--status in_progress --actor {actor}")),
+                key = task.key,
+            )
+        })));
     }
     Ok(Dispatched { workspace, workspace_name, terminal, terminal_short })
 }
@@ -2668,6 +2750,8 @@ mod tests {
                     pb::ErrorCode::CapabilityUnsupported,
                     pb::ErrorCode::ResourceConflict,
                     pb::ErrorCode::InvalidArgument,
+                    pb::ErrorCode::NotFound,
+                    pb::ErrorCode::BranchExists,
                 ]
                 .into_iter()
                 .find(|c| farcooler_core::error::word_for(*c as i32) == word)
@@ -2736,6 +2820,20 @@ mod tests {
 
     fn existing() -> Lane {
         Lane::Existing("lane".into())
+    }
+
+    fn new_lane() -> Lane {
+        Lane::New { name: "fix-it".into(), branch: "fix/it".into(), base: "HEAD".into() }
+    }
+
+    /// A refused dispatch as `main` prints it under `--json`: the sentence,
+    /// and the `code:` line after it, read through `main`'s own
+    /// `error_code_line`.
+    async fn refused_with_code(link: &mut FakeLink, lane: Lane) -> (String, Option<String>) {
+        let task = fc_2();
+        let asked = Dispatch { task: &task, lane, preset: "claude", actor: Actor::Manager, again: false };
+        let e = dispatch(link, asked, &mut |_| {}).await.expect_err("refused");
+        (e.to_string(), crate::error_code_line(e.as_ref(), true))
     }
 
     /// The pane is asked for with the task's key, and the capability without
@@ -3005,6 +3103,68 @@ mod tests {
         let mut link = FakeLink { refuse: Some(("task.set_status", "resource-conflict")), ..Default::default() };
         let said = run_as(&mut link, &task, existing(), "claude", false).await.0.expect_err("half");
         assert!(said.contains("--actor manager -- -1`"), "{said}");
+    }
+
+    /// m6: a workspace removed between the lookup and the pane is said as
+    /// that, not as a missing task.
+    #[tokio::test]
+    async fn a_pane_refused_as_not_found_says_the_workspace_is_gone() {
+        let mut link = FakeLink { refuse: Some(("terminal.create", "not-found")), ..Default::default() };
+        let said = run(&mut link, existing()).await.0.expect_err("refused");
+        assert_eq!(said, "that workspace isn't on this runner any more");
+        assert!(!link.methods().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
+    }
+
+    /// m3: a branch that already exists is said in this CLI's words, with
+    /// the way on: the workspace that has it, when this repository has one.
+    #[tokio::test]
+    async fn a_new_lane_on_a_branch_that_exists_says_so_readably() {
+        let mut link = FakeLink { refuse: Some(("workspace.create", "branch-exists")), ..Default::default() };
+        let said = run(&mut link, new_lane()).await.0.expect_err("refused");
+        assert_eq!(
+            said,
+            "the branch fix/it already exists, here or on a remote, and --new only starts a new one. \
+             pick another --branch"
+        );
+        assert_eq!(link.writes(), ["workspace.create"], "nothing after the refusal");
+
+        let mut on_it = lane(Uuid::from_u128(0x4d), "first-try", REPO);
+        on_it.branch = "fix/it".into();
+        let mut theirs = lane(Uuid::from_u128(0x5e), "theirs", OTHER_REPO);
+        theirs.branch = "fix/it".into();
+        let mut link = FakeLink {
+            workspaces: vec![theirs, lane(LANE, "lane", REPO), on_it],
+            refuse: Some(("workspace.create", "branch-exists")),
+            ..Default::default()
+        };
+        let said = run(&mut link, new_lane()).await.0.expect_err("refused");
+        assert!(said.contains("in the workspace first-try. dispatch into it with --workspace first-try"), "{said}");
+    }
+
+    /// m5: under `--json` a refused dispatch still ends in the runner's
+    /// stable word, however the sentence above it was reworded.
+    #[tokio::test]
+    async fn a_refused_dispatch_keeps_the_runners_code_under_json() {
+        let cases = [
+            ("workspace.create", "branch-exists", new_lane()),
+            ("terminal.create", "capability-unsupported", existing()),
+            // Reworded to name the workspace `--new` made.
+            ("terminal.create", "capability-unsupported", new_lane()),
+            ("terminal.create", "not-found", existing()),
+            ("task.update", "resource-conflict", existing()),
+            ("task.set_status", "resource-conflict", existing()),
+            ("workspace.list", "not-found", existing()),
+        ];
+        for (method, word, lane) in cases {
+            let mut link = FakeLink { refuse: Some((method, word)), ..Default::default() };
+            let (said, code) = refused_with_code(&mut link, lane).await;
+            assert_eq!(code.as_deref(), Some(format!("code: {word}").as_str()), "{method}: {said}");
+            assert!(!said.contains("code:"), "the sentence is for a person: {said}");
+        }
+        // A refusal of this CLI's own has no runner code to keep.
+        let mut link = FakeLink { capabilities: Vec::new(), ..Default::default() };
+        let (_, code) = refused_with_code(&mut link, existing()).await;
+        assert_eq!(code, None);
     }
 
     /// M5: dispatching a task from a state nobody dispatches from is said.
