@@ -1689,20 +1689,36 @@ pub(crate) fn workspace_create_request(
     req
 }
 
+/// The `workspace.create` a parsed `workspace create` sends: every flag the
+/// command line carries, as the request says it. Its own function so a test
+/// can go from the argv a client sends to the request the daemon gets.
+fn workspace_create_from_args(
+    repository: uuid::Uuid,
+    name: String,
+    branch: String,
+    base: String,
+    terminal: String,
+    no_terminal: bool,
+    fork_only: bool,
+) -> farcooler_protocol::v1::Request {
+    let terminal = if no_terminal { String::new() } else { terminal };
+    workspace_create_request(repository, name, branch, base, terminal, fork_only)
+}
+
 async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
     match cmd {
         WorkspaceCmd::Create { repo, name, branch, base, terminal, no_terminal, fork_only } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
-            let terminal = if no_terminal { String::new() } else { terminal };
             let r = link
-                .call(workspace_create_request(
+                .call(workspace_create_from_args(
                     uuid_of(&target.id),
                     name,
                     branch,
                     base,
                     terminal,
+                    no_terminal,
                     fork_only,
                 ))
                 .await?;
@@ -3424,6 +3440,34 @@ mod tests {
 
         let none = terminal_create_request(ws, "w".into(), "claude".into(), false, None, Some("".into()));
         assert!(none.required_capabilities.is_empty(), "an empty key is no key");
+    }
+
+    /// The Mac's ⌘N create, word for word (`DaemonClient.startTask`), reaches
+    /// the daemon fork-only and naming the capability. A renamed or dropped
+    /// flag would fail every ⌘N task on a new runner with a clap error and no
+    /// `code:` line, while each half of the chain tested on its own stayed
+    /// green.
+    #[test]
+    fn the_macs_fork_only_create_parses_and_is_sent_fork_only() {
+        let argv = [
+            "farcooler", "--json", "workspace", "create", "repo", "fix-it", "--branch", "el/fix-it",
+            "--no-terminal", "--fork-only",
+        ];
+        let cli = Cli::try_parse_from(argv).expect("the Mac's argv parses");
+        let Command::Workspace(WorkspaceCmd::Create {
+            repo, name, branch, base, terminal, no_terminal, fork_only,
+        }) = cli.command
+        else {
+            panic!("workspace create")
+        };
+        assert_eq!(repo, "repo");
+        let req = workspace_create_from_args(
+            uuid::Uuid::now_v7(), name, branch, base, terminal, no_terminal, fork_only);
+        assert_eq!(req.required_capabilities, [farcooler_protocol::capability::WORKSPACE_FORK_ONLY]);
+        let Some(request::Payload::WorkspaceCreate(p)) = req.payload else { panic!("payload") };
+        assert!(p.fork_only);
+        assert_eq!((p.task_name.as_str(), p.branch.as_str()), ("fix-it", "el/fix-it"));
+        assert!(p.terminal_preset.is_empty(), "--no-terminal");
     }
 
     #[test]
