@@ -523,13 +523,19 @@ fn with_pane_env(terminal: Uuid, preset: &str, task_key: Option<&str>, command: 
 /// `cli` is `shim_binary`'s path, `shell_quote`d, as the manager skill gets
 /// it: a bare `farcooler` on `PATH` can be another channel's CLI talking to
 /// another daemon.
+///
+/// A key from a repository that missed its prefix (`-1`) would read as a
+/// flag in a command, so the commands leave it out and let the pane's
+/// `FARCOOLER_TASK` name the task, which it does for every key this is
+/// given.
 fn opening_prompt(cli: &str, key: &str) -> String {
+    let arg = if key.starts_with('-') { String::new() } else { format!(" {key}") };
     format!(
         "You're working {key} on this repository's Far Cooler board. Read the task first: \
-         {cli} task show {key}. If the main checkout has a .farcooler/manager.md, it's the \
+         {cli} task show{arg}. If the main checkout has a .farcooler/manager.md, it's the \
          owner's charter; follow it. Work to the task's acceptance items. Record each decision \
-         as you make it with {cli} task note {key} --kind decision --body \"<what, and why>\". \
-         If only the owner can decide something, ask with {cli} task ask {key} --body \
+         as you make it with {cli} task note{arg} --kind decision --body \"<what, and why>\". \
+         If only the owner can decide something, ask with {cli} task ask{arg} --body \
          \"<the question>\" and stop. When you're done, move the task the way the charter says."
     )
 }
@@ -8906,6 +8912,23 @@ mod launch_prompt_tests {
                 }
             }
         }
+    }
+
+    /// A prefixless key (`-1`) would parse as a flag, so the commands in the
+    /// opening prompt leave it out and rely on the pane's `FARCOOLER_TASK`.
+    #[test]
+    fn a_prefixless_key_is_not_written_where_it_would_read_as_a_flag() {
+        let opening = opening_prompt("farcooler", "-1");
+        assert!(opening.contains("You're working -1"), "{opening}");
+        assert!(!opening.contains("task show -1"), "{opening}");
+        assert!(opening.contains("farcooler task show."), "{opening}");
+        assert!(opening.contains("farcooler task note --kind decision"), "{opening}");
+        assert!(opening.contains("farcooler task ask --body"), "{opening}");
+        // And the export it relies on is there for such a key.
+        let command = with_pane_env(Uuid::now_v7(), "claude", Some("-1"), "claude".into());
+        assert!(command.contains(" FARCOOLER_TASK=-1 "), "{command}");
+        // An ordinary key is still written out.
+        assert!(opening_prompt("farcooler", "fc-1").contains("farcooler task show fc-1."));
     }
 
     /// A key that is not a plain identifier never reaches the `env` line,
