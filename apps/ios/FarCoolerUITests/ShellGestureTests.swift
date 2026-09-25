@@ -1190,7 +1190,9 @@ final class ShellGestureTests: XCTestCase {
         let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
         XCTAssertEqual(try state(app)["overview"], 1, "the harness did not open on the grid")
 
-        for runner in ["this-mac", "eu-runner-1", "gpu-box-2"] {
+        // By runner id, not label: `harness` is labeled this-mac, `runner-eu`
+        // eu-runner-1 and `runner-gpu` gpu-box-2. See `ShellHarness.elsewhere`.
+        for runner in ["harness", "runner-eu", "runner-gpu"] {
             let header = app.descendants(matching: .any)
                 .matching(identifier: "shell-section-\(runner)").firstMatch
             XCTAssertTrue(
@@ -1220,9 +1222,9 @@ final class ShellGestureTests: XCTestCase {
     func testTheMostRecentlySeenRunnerComesFirst() throws {
         let app = launch(["-shell-servers", "-shell-overview", "-shell-4"])
         let recent = app.descendants(matching: .any)
-            .matching(identifier: "shell-section-eu-runner-1").firstMatch
+            .matching(identifier: "shell-section-runner-eu").firstMatch
         let older = app.descendants(matching: .any)
-            .matching(identifier: "shell-section-gpu-box-2").firstMatch
+            .matching(identifier: "shell-section-runner-gpu").firstMatch
         XCTAssertTrue(recent.waitForExistence(timeout: 10))
         XCTAssertTrue(older.waitForExistence(timeout: 10))
         XCTAssertLessThan(

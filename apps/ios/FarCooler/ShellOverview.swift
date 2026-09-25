@@ -940,8 +940,14 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// under it — which is right in a `List` of rows and wrong here, because
     /// the thing it would cover is the amber outline that says which workspace
     /// you are in.
+    ///
+    /// `runner` is the runner's id, and it is what the accessibility
+    /// identifiers are keyed by. They used to be keyed by `name`, and two
+    /// runners can share a label — two daemons on one box, or two boxes
+    /// somebody named the same — which gave two headings one identifier, and
+    /// a UI test asking for one of them whichever the query found first.
     private func header(
-        _ name: String, detail: String?, isEmpty: Bool = false,
+        _ name: String, runner: String, detail: String?, isEmpty: Bool = false,
         actions: [ShellHeaderAction] = []
     ) -> some View {
         HStack(alignment: .center, spacing: PaneMetrics.step) {
@@ -971,11 +977,11 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("shell-section-\(name)")
+            .accessibilityIdentifier("shell-section-\(runner)")
 
             Spacer(minLength: 0)
 
-            if !actions.isEmpty { headerMenu(name, actions) }
+            if !actions.isEmpty { headerMenu(name, runner: runner, actions) }
         }
         // The whole width the grid was given, which is now the width the cards
         // span: the grid is padded to its margins and its columns fill what is
@@ -1009,7 +1015,9 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// 44 points square, which is the target floor and also what keeps every
     /// heading one height whether or not its runner says anything under its
     /// name.
-    private func headerMenu(_ name: String, _ actions: [ShellHeaderAction]) -> some View {
+    private func headerMenu(
+        _ name: String, runner: String, _ actions: [ShellHeaderAction]
+    ) -> some View {
         Menu {
             ForEach(actions) { action in
                 Button(role: action.role, action: action.perform) {
@@ -1025,7 +1033,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
         .opacity(chrome ? 1 : 0)
         .disabled(!chrome)
         .accessibilityLabel("\(name) Actions")
-        .accessibilityIdentifier("shell-section-menu-\(name)")
+        .accessibilityIdentifier("shell-section-menu-\(runner)")
     }
 
     /// The way back from hiding, which is the whole reason this is a section
@@ -1162,7 +1170,8 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                             liveCards(section, width: cardWidth)
                         } header: {
                             header(
-                                section.runner.name, detail: section.runner.detail,
+                                section.runner.name, runner: section.runner.id,
+                                detail: section.runner.detail,
                                 isEmpty: section.cards.isEmpty,
                                 actions: runnerSections.liveActions(section.runner))
                         }
@@ -1202,7 +1211,8 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                             // the heading offers instead is the way to make
                             // this runner live.
                             header(
-                                group.name, detail: Self.lastSeen(group.lastSeen),
+                                group.name, runner: group.id,
+                                detail: Self.lastSeen(group.lastSeen),
                                 isEmpty: group.order(matching: search).isEmpty,
                                 actions: runnerSections.cachedActions(group))
                         }

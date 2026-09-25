@@ -297,9 +297,15 @@ struct ShellHarness: View {
     /// One of them is HIDDEN, which must not be drawn at all: the way back
     /// from hiding is on the runner the worktree is on, and this is not that
     /// runner.
+    ///
+    /// `-shell-twin-labels` gives the second runner the first one's label.
+    /// Two runners can share one — two daemons on a box, or two boxes named
+    /// alike — and the ids are what tell them apart, which is what a heading's
+    /// accessibility identifier has to be keyed by for a test to find each.
     static var elsewhere: [ShellServerGroup] {
         guard CommandLine.arguments.contains("-shell-servers") else { return [] }
         let now = Date()
+        let twinLabels = CommandLine.arguments.contains("-shell-twin-labels")
         return [
             RunnerDirectory(
                 runner: "runner-gpu", label: "gpu-box-2",
@@ -311,7 +317,7 @@ struct ShellHarness: View {
                 ]
             ).group(),
             RunnerDirectory(
-                runner: "runner-eu", label: "eu-runner-1",
+                runner: "runner-eu", label: twinLabels ? "gpu-box-2" : "eu-runner-1",
                 seenAt: now.addingTimeInterval(-9 * 60),
                 workspaces: [directory("spike/watch-sync", mark: "unreadDiff")]
             ).group(),

@@ -48,13 +48,15 @@ final class ShellRunnerHeadingTests: XCTestCase {
         let app = launch(["-shell-servers"])
         XCTAssertEqual(try state(app)["overview"], 1, "the harness did not open on the grid")
 
-        for runner in ["this-mac", "eu-runner-1", "gpu-box-2"] {
+        // By runner id, not label: `harness` is labeled this-mac, `runner-eu`
+        // eu-runner-1 and `runner-gpu` gpu-box-2. See `ShellHarness.elsewhere`.
+        for runner in ["harness", "runner-eu", "runner-gpu"] {
             XCTAssertTrue(
                 app.buttons["shell-section-menu-\(runner)"].waitForExistence(timeout: 10),
                 "\(runner)'s heading has no menu: \(app.debugDescription)")
         }
 
-        app.buttons["shell-section-menu-this-mac"].tap()
+        app.buttons["shell-section-menu-harness"].tap()
         XCTAssertTrue(
             app.buttons["Edit Runner…"].waitForExistence(timeout: 5),
             "the connected runner's menu does not offer Edit Runner…")
@@ -66,10 +68,39 @@ final class ShellRunnerHeadingTests: XCTestCase {
         // either — on iOS 26 an open menu makes that button unhittable.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.13)).tap()
 
-        app.buttons["shell-section-menu-eu-runner-1"].tap()
+        app.buttons["shell-section-menu-runner-eu"].tap()
         XCTAssertTrue(
             app.buttons["Switch to This Runner"].waitForExistence(timeout: 5),
             "a runner this app is not connected to offers no way to switch to it")
+    }
+
+    /// **Two runners with one label are two headings, each findable.**
+    ///
+    /// The identifiers were keyed by label, so two runners that share one gave
+    /// two headings the same identifier and a query found whichever it met
+    /// first. `-shell-twin-labels` labels `runner-eu` gpu-box-2, the same as
+    /// `runner-gpu`, and the assertion is that each id names exactly one
+    /// heading and the two are not the same place on screen.
+    func testTwoRunnersWithOneLabelHaveTwoHeadings() throws {
+        let app = launch(["-shell-servers", "-shell-twin-labels"])
+        XCTAssertEqual(try state(app)["overview"], 1, "the harness did not open on the grid")
+
+        var frames: [CGRect] = []
+        for runner in ["runner-gpu", "runner-eu"] {
+            let headings = app.descendants(matching: .any)
+                .matching(identifier: "shell-section-\(runner)")
+            XCTAssertTrue(
+                headings.firstMatch.waitForExistence(timeout: 10),
+                "no heading for \(runner): \(app.debugDescription)")
+            XCTAssertEqual(headings.count, 1, "\(runner)'s id names \(headings.count) headings")
+            XCTAssertEqual(
+                app.buttons.matching(identifier: "shell-section-menu-\(runner)").count, 1,
+                "\(runner)'s menu id is not unique")
+            frames.append(headings.firstMatch.frame)
+        }
+        XCTAssertNotEqual(
+            frames[0].minY, frames[1].minY,
+            "both ids found the same heading, at \(frames[0].minY)")
     }
 
     /// **A press-and-drag moves a card on iOS 27, and moves nothing on 26.**
