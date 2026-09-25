@@ -63,6 +63,15 @@ const NEVER_FINISHED: Duration = Duration::from_secs(60);
 /// own, below, with the real deadline.
 const SHAPE_NOT_SPEED: Duration = Duration::from_secs(30);
 
+/// What a hook that really waited out `hook::HOOK_DEADLINE` (400 ms) must
+/// have taken at least.
+///
+/// Below the deadline rather than at it, so the floor proves "it waited for
+/// the verdict" without also asserting the timer's precision. A hook that
+/// gave up at once, on a connect that failed or a frame it never sent, exits
+/// in a few milliseconds and falls far short of this.
+const WAITED_OUT_THE_DEADLINE: Duration = Duration::from_millis(300);
+
 /// Long past `hook::HOOK_DEADLINE` and well inside `SHAPE_NOT_SPEED`.
 ///
 /// Measured from the daemon's accept, which is after the hook started its
@@ -120,6 +129,23 @@ async fn run_the_hook_within(
     payload: Vec<u8>,
     pipe: Pipe,
 ) -> Output {
+    run_the_hook_timed(bound, deadline, event, gating, socket, payload, pipe).await.0
+}
+
+/// The same again, also returning how long the process ran.
+///
+/// Measured from just after the spawn to the exit. The hook starts its own
+/// clock later than that, once it is running, so a hook that waited out its
+/// deadline always shows at least the whole deadline here.
+async fn run_the_hook_timed(
+    bound: Duration,
+    deadline: Option<Duration>,
+    event: &str,
+    gating: bool,
+    socket: &Path,
+    payload: Vec<u8>,
+    pipe: Pipe,
+) -> (Output, Duration) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_farcooler"));
     command
         .args(["hook", "--agent", "claude", "--event", event, "--socket"])
@@ -158,13 +184,10 @@ async fn run_the_hook_within(
              forked it is stopped mid-turn, and nothing it can do will free it."
         );
     };
-    assert!(
-        started.elapsed() < bound,
-        "the hook took {:?}, which is the agent sitting still for no reason",
-        started.elapsed()
-    );
+    let took = started.elapsed();
+    assert!(took < bound, "the hook took {took:?}, which is the agent sitting still for no reason");
     drop(holding);
-    finished.expect("the hook exited")
+    (finished.expect("the hook exited"), took)
 }
 
 /// Exit 0, nothing on stdout, nothing on stderr. The whole of the promise.
@@ -456,9 +479,24 @@ async fn a_verdict_that_misses_the_deadline_leaves_the_agent_to_ask() {
     let dir = tempfile::tempdir().expect("a directory");
     let socket = dir.path().join("h.sock");
     a_daemon_that_denies(&socket, LATE);
-    let out =
-        run_the_hook("PermissionRequest", true, &socket, a_payload_of(64), Pipe::Closed).await;
+    let (out, took) = run_the_hook_timed(
+        WEDGED,
+        None,
+        "PermissionRequest",
+        true,
+        &socket,
+        a_payload_of(64),
+        Pipe::Closed,
+    )
+    .await;
     it_was_never_in_the_way(&out, "a gating hook whose verdict came after its deadline");
+    // Nothing on stdout is also what a hook that never reached the daemon
+    // prints. This is what says it got there and waited.
+    assert!(
+        took >= WAITED_OUT_THE_DEADLINE,
+        "the hook gave up after {took:?}, before its deadline could have fired: \
+         something other than the deadline ended it"
+    );
 }
 
 /// The other side of the same daemon: `--deadline-ms` is honored.
@@ -481,6 +519,12 @@ async fn a_wider_deadline_waits_for_the_same_late_verdict() {
         Pipe::Closed,
     )
     .await;
+    assert_eq!(out.status.code(), Some(0), "a hook exits 0 even when it has something to say");
+    assert!(
+        out.stderr.is_empty(),
+        "and still says nothing to the terminal: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let printed = String::from_utf8_lossy(&out.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(printed.trim()).unwrap_or_else(|e| panic!("stdout was {printed:?}: {e}"));
