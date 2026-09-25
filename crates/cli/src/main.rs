@@ -122,9 +122,9 @@ enum Command {
     /// understanding was reached, and nothing here edits an entry already
     /// written. A pane Far Cooler launched to run an agent carries its own
     /// name in `FARCOOLER_ACTOR`, so an agent writing to the board files as
-    /// itself without ever typing `--actor`. Its key in `FARCOOLER_TASK` is
-    /// the other half and is still unset: nothing on this runner knows which
-    /// task a pane was opened for, so a key is typed. See `tasks::TASK_ENV`.
+    /// itself without ever typing `--actor`. A pane opened for a task (`task
+    /// dispatch`) also carries its key in `FARCOOLER_TASK`, so a command there
+    /// that names no task means that one. See `tasks::TASK_ENV`.
     #[command(subcommand)]
     Task(tasks::TaskCmd),
     /// Search a workspace's worktree files, for an agent chat's @-mention.
