@@ -2040,8 +2040,9 @@ mod tests {
         words
     }
 
-    /// Every `farcooler …` line inside a fenced block of the skill, with each
-    /// `<placeholder>` replaced by a word clap will take.
+    /// Every `farcooler …` line inside a fenced block of the skill, and every
+    /// inline `` `farcooler …` `` span outside one, with each `<placeholder>`
+    /// replaced by a word clap will take.
     fn commands_the_skill_names() -> Vec<String> {
         use farcooler_daemon::skill_install::{Harness, render};
         let skill = render(Harness::Claude, "farcooler")
@@ -2057,7 +2058,20 @@ mod tests {
                 continue;
             }
             let line = line.trim();
-            if fenced && line.starts_with("farcooler ") {
+            let spans: Vec<&str> = if fenced {
+                vec![line]
+            } else {
+                // A span may open on prose ("Read farcooler task show <key>,
+                // then do the task."): the command is from the CLI's name to
+                // the first comma.
+                line.split('`')
+                    .skip(1)
+                    .step_by(2)
+                    .filter_map(|span| span.find("farcooler ").map(|at| &span[at..]))
+                    .map(|span| span.split(',').next().unwrap_or(span))
+                    .collect()
+            };
+            for line in spans.into_iter().filter(|l| l.starts_with("farcooler ")) {
                 let mut filled = String::new();
                 let mut rest = line;
                 while let Some(open) = rest.find('<') {
@@ -2067,7 +2081,7 @@ mod tests {
                     rest = &rest[close + 1..];
                 }
                 filled.push_str(rest);
-                found.push(filled);
+                found.push(filled.trim_end_matches(['.', ',']).to_string());
             }
         }
         found
@@ -2090,6 +2104,27 @@ mod tests {
             if let Err(e) = crate::Cli::try_parse_from(shell_words(line)) {
                 panic!("the manager skill names a command the CLI refuses:\n  {line}\n{e}");
             }
+            // clap takes these as plain strings and they are refused only when
+            // run, so the literal values the skill writes are checked here too.
+            let words = shell_words(line);
+            for pair in words.windows(2) {
+                let (flag, value) = (pair[0].as_str(), pair[1].as_str());
+                if value == "x" {
+                    continue;
+                }
+                let checked = match flag {
+                    "--status" => status_named(value).map(drop),
+                    "--kind" => writable_kind(value).map(drop),
+                    "--fields" => asked_fields(Some(value)).map(drop),
+                    "--stale-for" => parse_gap(value).map(drop),
+                    _ => Ok(()),
+                };
+                if let Err(e) = checked {
+                    panic!("the manager skill writes a value the CLI refuses:\n  {line}\n{e}");
+                }
+            }
         }
+        // The inline command the owner is told to hand an agent is read too.
+        assert!(commands.iter().any(|c| c == "farcooler task show x"), "{commands:?}");
     }
 }
