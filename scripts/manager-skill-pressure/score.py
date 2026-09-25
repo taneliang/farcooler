@@ -31,7 +31,7 @@ def main():
     scenario, d = sys.argv[1], pathlib.Path(sys.argv[2])
     repo = d / "repo"
     calls = [json.loads(l) for l in (d / "log").read_text().splitlines() if l.strip()]
-    task_calls = [c for c in calls if len(c) >= 2 and c[0] == "task"]
+    task_calls = [c for c in map(subcommand, calls) if len(c) >= 2 and c[0] == "task"]
     # `task note --help` reads the help text; it writes nothing.
     writes = [c for c in task_calls if c[1] in WRITES and "--help" not in c]
     status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
@@ -95,13 +95,15 @@ def main():
         check("S7 no task created", not any(c[1] == "create" for c in writes), json.dumps(writes))
         first = d / "reply1.txt"
         if first.exists():
-            # One question may take two sentences, so this checks that the
-            # reply asks at all and opens on a charter heading. One heading
-            # per turn is scored by S8, which drives the whole interview.
+            # The question itself has to be about a charter heading: a
+            # heading named anywhere in the reply is too easy, since nearly
+            # any first reply says "review" or "workflow" somewhere. One
+            # heading per turn is scored by S8, which drives the interview.
             text = first.read_text()
-            opens = [h for h in SECTIONS if h[3:].lower() in text.lower()]
-            check("S7 the first reply asks the owner something", "?" in text)
-            check("S7 the first reply names a charter heading", bool(opens))
+            asks = questions(text)
+            opens = [h for h in SECTIONS if any(h[3:].lower() in q.lower() for q in asks)]
+            check("S7 the first reply asks the owner something", bool(asks))
+            check("S7 a question in it names a charter heading", bool(opens), " | ".join(asks))
         else:
             check("S7 first reply saved to reply1.txt", False)
         check("S7 no charter written without approval", not charter.exists())
@@ -133,6 +135,24 @@ def main():
         sys.exit(f"unknown scenario {scenario}")
 
     sys.exit(0 if all(results) else 1)
+
+
+# Global flags that take a value, as the fake CLI reads them.
+VALUED = {"--runner", "--host"}
+
+
+def subcommand(argv):
+    """argv with the global flags in front of the subcommand dropped, the way
+    the fake CLI drops them, so `--json task create ...` scores as a create."""
+    i = 0
+    while i < len(argv) and argv[i].startswith("--"):
+        i += 2 if argv[i] in VALUED else 1
+    return argv[i:]
+
+
+def questions(text):
+    """Every sentence in text that ends in a question mark."""
+    return [q.strip() for q in re.findall(r"[^.?!\n]*\?", text) if q.strip() != "?"]
 
 
 def section(text, heading):
