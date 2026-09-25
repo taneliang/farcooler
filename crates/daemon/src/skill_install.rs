@@ -303,6 +303,12 @@ pub fn crosses_a_symlink(root: &Path, relative: &str) -> bool {
 /// deciding and replacing to one read; it doesn't close it, and nothing short
 /// of a lock every editor honors could.
 pub fn install_file(path: &Path, contents: &str) -> Installed {
+    install_file_between(path, contents, || {})
+}
+
+/// `install_file`, running `between` after the temporary file is written and
+/// before the file is read again, which is where a test puts the owner's save.
+fn install_file_between(path: &Path, contents: &str, between: impl FnOnce()) -> Installed {
     let before = match std::fs::read(path) {
         Ok(existing) => {
             if existing == contents.as_bytes() {
@@ -318,7 +324,10 @@ pub fn install_file(path: &Path, contents: &str) -> Installed {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(_) => return Installed::LeftAlone("unreadable"),
     };
-    let unmoved = || std::fs::read(path).ok() == before;
+    let unmoved = || {
+        between();
+        std::fs::read(path).ok() == before
+    };
     match write_through_temp(path, contents, unmoved) {
         Ok(true) => Installed::Wrote,
         Ok(false) => Installed::LeftAlone("changed while writing"),
@@ -456,21 +465,21 @@ mod tests {
     }
 
     /// A copy the owner saves between the first read and the rename is kept.
-    /// The save is simulated inside the check itself, the last moment before
-    /// the rename would happen.
+    /// The save lands after our temporary file is written, the last moment
+    /// before `install_file` would rename it over theirs.
     #[test]
     fn a_save_that_lands_mid_install_is_kept() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(PROJECT_SKILL);
         install_file(&path, &signed("# v1\n"));
-        let before = std::fs::read(&path).ok();
-        let wrote = write_through_temp(&path, &signed("# v2\n"), || {
-            std::fs::write(&path, "the owner's save\n").unwrap();
-            std::fs::read(&path).ok() == before
-        })
-        .unwrap();
-        assert!(!wrote);
+        let save = || std::fs::write(&path, "the owner's save\n").unwrap();
+        assert_eq!(
+            install_file_between(&path, &signed("# v2\n"), save),
+            Installed::LeftAlone("changed while writing")
+        );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "the owner's save\n");
+        let left: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().flatten().collect();
+        assert_eq!(left.len(), 1, "the temporary file was left behind");
     }
 
     /// `crosses_a_symlink` sees a link at any depth, the file included, and
