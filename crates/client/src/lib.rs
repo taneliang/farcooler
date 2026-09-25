@@ -14,3 +14,4 @@ pub mod changes_json;
 pub mod ffi;
 pub mod session;
 pub mod ssh;
+pub mod tasks_json;

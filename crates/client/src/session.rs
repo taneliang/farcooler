@@ -695,12 +695,7 @@ impl Session {
     /// `false` for the rest is the honest reading, and it is what lets a new
     /// app talk to an old runner without a special case at every call site.
     pub fn can(&self, capability: &str) -> bool {
-        let advertised = self.capabilities();
-        if advertised.is_empty() {
-            return capability == farcooler_protocol::capability::WORKSPACES
-                || capability == farcooler_protocol::capability::TERMINALS;
-        }
-        advertised.iter().any(|c| c == capability)
+        advertises(self.capabilities(), capability)
     }
 
     // ---- reads ----
@@ -859,6 +854,13 @@ impl Session {
                             // never draw, so a chat whose agent refused to
                             // start would spin on the phone forever.
                             "agentFailure": t.agent_failure.clone(),
+                            // The board task this pane was opened for, which
+                            // is what lets a phone's board go from a card to
+                            // the agent working it. The CLI's two terminal
+                            // projections carry the same key for the Mac; see
+                            // `task_of` for why a missing or malformed id is
+                            // absent rather than the nil uuid.
+                            "taskId": task_of(t),
                         }))
                         .collect::<Vec<_>>(),
                 })
@@ -1638,6 +1640,43 @@ impl Session {
         }
     }
 
+    /// One repository's board, in the shape `farcooler task list --json`
+    /// prints — see `tasks_json`, which both of them call.
+    ///
+    /// Read-only, and the whole board rather than a status: the phone draws
+    /// every column and counts the one waiting on the person.
+    ///
+    /// Refused here, without a round trip, on a runner that does not
+    /// advertise `tasks`. The daemon would refuse it too, with the same code;
+    /// asking first only spends a request to be told what the handshake
+    /// already said.
+    pub async fn tasks(&mut self, repository: Uuid) -> Result<serde_json::Value, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.list")?;
+        let payload = request::Payload::TaskList(farcooler_protocol::v1::TaskListRequest {
+            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+            status: 0,
+            stale_after_millis: None,
+        });
+        match self.value("task.list", Some(repository), Some(payload)).await? {
+            result::Value::TaskList(l) => Ok(crate::tasks_json::list_json(&l.items, now_millis())),
+            other => Err(wrong("task_list", &other)),
+        }
+    }
+
+    /// One task with its whole record, in the shape `farcooler task show
+    /// --json` prints. Gated like `tasks`.
+    pub async fn task(&mut self, task: Uuid) -> Result<serde_json::Value, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.get")?;
+        let payload = request::Payload::TaskGet(farcooler_protocol::v1::TaskGetRequest {
+            task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
+            note_kind: 0,
+        });
+        match self.value("task.get", Some(task), Some(payload)).await? {
+            result::Value::TaskDetail(d) => Ok(crate::tasks_json::detail_json(&d, now_millis())),
+            other => Err(wrong("task_detail", &other)),
+        }
+    }
+
     /// What the daemon is, and what it can do.
     ///
     /// Named apart from the `daemon_version` accessor above, which answers from
@@ -1815,6 +1854,53 @@ impl Session {
         let outcome = self.client.call(request).await?;
         outcome.value.ok_or_else(|| SessionError::Protocol(format!("{method} returned nothing")))
     }
+}
+
+/// Whether a runner that advertised `advertised` can do `capability`.
+///
+/// Empty means a daemon too old to answer the question at all — every one of
+/// those predates capabilities, so it has exactly the feature set that existed
+/// then. Reporting `true` for the two floor capabilities and `false` for the
+/// rest is the honest reading, and it is what lets a new app talk to an old
+/// runner without a special case at every call site.
+fn advertises(advertised: &[String], capability: &str) -> bool {
+    if advertised.is_empty() {
+        return capability == farcooler_protocol::capability::WORKSPACES
+            || capability == farcooler_protocol::capability::TERMINALS;
+    }
+    advertised.iter().any(|c| c == capability)
+}
+
+/// Refuse `method` on a runner that cannot serve it, as the runner itself
+/// would: `CAPABILITY_UNSUPPORTED`, the code an app words as "this runner is
+/// too old for that" rather than as a failure it should retry.
+fn require(advertised: &[String], capability: &str, method: &str) -> Result<(), SessionError> {
+    if advertises(advertised, capability) {
+        return Ok(());
+    }
+    Err(SessionError::Refused {
+        code: farcooler_protocol::v1::ErrorCode::CapabilityUnsupported as i32,
+        retryable: false,
+        message: format!("this runner does not serve {method}"),
+    })
+}
+
+/// The board task a terminal was opened for, as a uuid string, or nothing.
+///
+/// Nothing for a pane nobody dispatched, for a runner too old to record one
+/// (`capability::TERMINAL_TASK`), and for bytes that are not a uuid at all —
+/// never the nil uuid, which `uuid_of` would hand back and which a client
+/// would then match against nothing and draw as a link to nowhere. The same
+/// rule as the CLI's `task_of`, which projects the same field for the Mac.
+fn task_of(t: &Terminal) -> Option<String> {
+    t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 fn wrong(expected: &'static str, got: &result::Value) -> SessionError {
@@ -2071,6 +2157,48 @@ fn fleet_trace_anchor(list: &farcooler_protocol::v1::TerminalList) -> Option<i64
 
 #[cfg(test)]
 mod tests {
+    /// A runner that does not advertise `tasks` is refused a board read here,
+    /// with the code the runner itself would have used, and one that does is
+    /// let through. An empty list is an old runner, which has no board.
+    #[test]
+    fn a_board_read_is_refused_by_name_on_a_runner_without_a_board() {
+        use farcooler_protocol::capability::TASKS;
+        let old: Vec<String> = Vec::new();
+        let without = vec!["workspaces".to_string(), "terminals".to_string()];
+        let with = vec!["workspaces".to_string(), TASKS.to_string()];
+        for advertised in [&old, &without] {
+            match super::require(advertised, TASKS, "task.list") {
+                Err(super::SessionError::Refused { code, retryable, .. }) => {
+                    assert_eq!(
+                        code,
+                        farcooler_protocol::v1::ErrorCode::CapabilityUnsupported as i32
+                    );
+                    assert!(!retryable, "asking again will not grow the runner a board");
+                }
+                other => panic!("{advertised:?} was not refused: {other:?}"),
+            }
+        }
+        assert!(super::require(&with, TASKS, "task.list").is_ok());
+    }
+
+    /// A pane's task is a uuid string or nothing: never the nil uuid, which
+    /// would match no card and be drawn as a link to nowhere.
+    #[test]
+    fn a_pane_names_its_task_or_nothing() {
+        let task = uuid::Uuid::now_v7();
+        let mut t = farcooler_protocol::v1::Terminal {
+            task_id: Some(bytes::Bytes::copy_from_slice(task.as_bytes())),
+            ..Default::default()
+        };
+        assert_eq!(super::task_of(&t), Some(task.to_string()));
+        t.task_id = None;
+        assert_eq!(super::task_of(&t), None);
+        t.task_id = Some(bytes::Bytes::new());
+        assert_eq!(super::task_of(&t), None, "empty bytes are not the nil uuid");
+        t.task_id = Some(bytes::Bytes::from_static(b"short"));
+        assert_eq!(super::task_of(&t), None);
+    }
+
     /// The fleet trace's anchor reaches the app as its own number, and never
     /// without the trace it anchors.
     #[test]

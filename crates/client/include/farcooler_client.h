@@ -106,6 +106,17 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   terminal.restart       {terminal}
  *   terminal.dismiss_lost  {terminal}
  *   terminal.resize        {terminal, columns, rows}
+ *   task.list              {repository}           -> {"tasks": [...]}, one
+ *                                                    repository's board
+ *   task.get               {task}                 -> {"task", "notes", "blocks"}
+ *
+ * The two board reads answer in `farcooler task list --json` and `task show
+ * --json`'s shapes, snake_case keys and all, because the Mac reads the same
+ * board through the CLI and one decoder reads both. Both fail with the
+ * runner's CAPABILITY_UNSUPPORTED code, without a round trip, on a runner that
+ * does not advertise `tasks`. A terminal in `fleet` names the task it was
+ * opened for as `taskId`, absent when none — and always absent from a runner
+ * that does not advertise `terminal_task`.
  *
  * The two `confirm` arguments are a name a PERSON typed, and neither is
  * optional in the way an empty string is optional. They differ in when the
@@ -222,10 +233,13 @@ const char *farcooler_client_poll(void *handle);
  *   {"event": "fleet"}
  *   {"event": "change_set", "workspace": "<uuid>"}
  *   {"event": "stack", "repository": "<uuid>"}
+ *   {"event": "task", "repository": "<uuid>", "actor": "user"}
  *   {"event": "resync"}
  *
- * All four mean the same thing to a client that re-reads everything: ask again
- * now. No notice carries a delta, which is what makes losing one survivable —
+ * All five mean the same thing to a client that re-reads everything: ask again
+ * now. `task` names the one board that moved, so a client holding several
+ * calls `task.list` for that repository alone; `actor` is who moved it —
+ * `user`, `manager` or `agent:<uuid>`. `resync` means every board as well. No notice carries a delta, which is what makes losing one survivable —
  * so this queue is allowed to coalesce and, at its ceiling, to collapse to a
  * single `resync`. It never blocks the runner, and it never leaves a client
  * believing it is up to date when it is not.

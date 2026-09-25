@@ -91,7 +91,26 @@ async fn start_with_a_scratch_home() -> (Daemon, PathBuf) {
     (daemon, authorized_keys)
 }
 
+/// A daemon whose `claude` is a stand-in that sleeps, and whose `HOME` and
+/// `PATH` cannot reach the real one.
+///
+/// For the one test that opens an agent pane for a task: the daemon refuses a
+/// task on a shell (`takes_a_task`), so the pane has to be an agent, and a
+/// test must not start the developer's real Claude Code on a prompt. The
+/// daemon looks for a program on its own `PATH`, then the login shell's, then
+/// fixed prefixes that include `$HOME/.local/bin` — so the stand-in goes
+/// there, `HOME` is the scratch directory, and `PATH` is only the system's
+/// and Homebrew's, where the real one is not installed. The stand-in sleeps
+/// rather than exiting so the pane is still live when the fleet is read.
+async fn start_with_a_stand_in_agent() -> Daemon {
+    spawn_with(true, true).await
+}
+
 async fn spawn(scratch_home: bool) -> Daemon {
+    spawn_with(scratch_home, false).await
+}
+
+async fn spawn_with(scratch_home: bool, stand_in_agent: bool) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("farcoolerd.sock");
 
@@ -102,6 +121,15 @@ async fn spawn(scratch_home: bool) -> Daemon {
         .stderr(std::process::Stdio::null());
     if scratch_home {
         command.env("HOME", dir.path());
+    }
+    if stand_in_agent {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.path().join(".local").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let claude = bin.join("claude");
+        std::fs::write(&claude, "#!/bin/sh\nexec sleep 60\n").unwrap();
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+        command.env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
     }
     let process = command.spawn().expect("spawn farcoolerd");
 
@@ -917,6 +945,136 @@ async fn a_scope_word_nobody_has_is_refused_rather_than_guessed_at() {
     assert!(session.enrolled_clients().await.is_ok());
     let written = std::fs::read_to_string(&authorized_keys).unwrap();
     assert!(!written.contains("--client phone-7"), "a refused scope enrolled something");
+}
+
+/// A board read through the client is the board the Mac reads through the
+/// CLI, and a pane opened for a task says which task in the fleet.
+///
+/// Against the real daemon because both halves of the phone's board are
+/// shapes someone else decodes: `TaskBoardModel.decode` reads `task.list`, and
+/// `TaskRow.livePanes` matches `taskId` against a row's `id`. A stub would
+/// agree with whatever this file believed.
+#[tokio::test]
+async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
+    use farcooler_protocol::v1::request::Payload;
+
+    let daemon = start_with_a_stand_in_agent().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    assert!(session.can(farcooler_protocol::capability::TASKS), "this daemon keeps a board");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = farcooler_client::session::uuid_of(&repositories[0].id);
+
+    // An empty board is an empty list, not an error: the phone reads every
+    // repository and draws a row only for the ones with something on them.
+    let empty = session.tasks(repository).await.expect("an empty board");
+    assert_eq!(empty["tasks"], serde_json::json!([]));
+
+    let mut raw = raw_client(&daemon.socket).await;
+    let mut create = farcooler_transport::request("task.create");
+    create.target_resource_id = Some(bytes::Bytes::copy_from_slice(repository.as_bytes()));
+    create.payload = Some(Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+        title: "A board on the phone".into(),
+        intent: "so the phone can see it".into(),
+        acceptance: vec![
+            farcooler_protocol::v1::TaskAcceptanceItem { text: "one".into(), ..Default::default() },
+            farcooler_protocol::v1::TaskAcceptanceItem { text: "two".into(), ..Default::default() },
+        ],
+        actor: "user".into(),
+        ..Default::default()
+    }));
+    let created = raw.call(create).await.expect("task.create");
+    let Some(farcooler_protocol::v1::result::Value::Task(task)) = created.value else {
+        panic!("task.create answered with something else");
+    };
+    let task_id = farcooler_client::session::uuid_of(&task.id);
+
+    let board = session.tasks(repository).await.expect("task.list");
+    let rows = board["tasks"].as_array().expect("tasks");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], task_id.to_string());
+    assert_eq!(rows[0]["key"], task.key);
+    assert_eq!(rows[0]["title"], "A board on the phone");
+    assert_eq!(rows[0]["acceptance"].as_array().map(Vec::len), Some(2));
+    assert!(rows[0]["status"].is_string());
+
+    let detail = session.task(task_id).await.expect("task.get");
+    assert_eq!(detail["task"]["id"], task_id.to_string());
+    assert!(detail["notes"].is_array());
+    assert!(detail["blocks"].is_array());
+
+    // A workspace with two panes: one opened for the task, one not.
+    let workspace = session
+        .create_workspace(repository, "board lane", "feat/board", "HEAD", "", false)
+        .await
+        .expect("create_workspace");
+    let workspace_id = farcooler_client::session::uuid_of(&workspace.id);
+    let mut open = farcooler_transport::request("terminal.create");
+    open.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace_id.as_bytes()));
+    open.required_capabilities =
+        vec![farcooler_protocol::capability::TERMINAL_TASK.to_string()];
+    open.payload = Some(Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
+        title: "on the task".into(),
+        command_preset: "claude".into(),
+        task_key: Some(task.key.clone()),
+        ..Default::default()
+    }));
+    let opened = raw.call(open).await.expect("terminal.create for a task");
+    let Some(farcooler_protocol::v1::result::Value::Terminal(on_task)) = opened.value else {
+        panic!("terminal.create answered with something else");
+    };
+    let plain = session
+        .create_terminal(workspace_id, "not on it", "shell", false)
+        .await
+        .expect("a pane nobody dispatched");
+
+    let fleet = session.fleet().await.expect("fleet");
+    let terminals: Vec<&serde_json::Value> = fleet["workspaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|w| w["terminals"].as_array().unwrap())
+        .collect();
+    let find = |id: &[u8]| {
+        let id = farcooler_client::session::uuid_of(id).to_string();
+        *terminals.iter().find(|t| t["id"] == id.as_str()).expect("the pane is in the fleet")
+    };
+    assert_eq!(find(&on_task.id)["taskId"], task_id.to_string());
+    assert!(find(&plain.id)["taskId"].is_null(), "a pane nobody dispatched names no task");
+}
+
+/// A raw protocol client on the daemon's socket, for the writes the phone's
+/// session does not make.
+async fn raw_client(
+    socket: &std::path::Path,
+) -> farcooler_transport::Client<
+    Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+    Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
+> {
+    let stream = tokio::net::UnixStream::connect(socket).await.unwrap();
+    let (read, write) = stream.into_split();
+    farcooler_transport::Client::over(
+        Box::new(read) as Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+        Box::new(write) as Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
+        "test",
+        "0.0.0",
+    )
+    .await
+    .unwrap()
 }
 
 /// Add a root and register a repository, over a throwaway session.

@@ -308,19 +308,18 @@ pub mod capability {
     /// which is an empty board with no explanation rather than a surface it
     /// knew not to offer.
     ///
-    /// Absent means the runner keeps no tasks. **What a client then does with
-    /// that is not yet decided anywhere: nothing reads this constant.** The
-    /// capability is published so that a client CAN hide the board rather than
-    /// offer one that cannot work, and none does — the Mac board is reachable
-    /// on any runner and finds out by asking.
+    /// Absent means the runner keeps no tasks, and a client offers no board
+    /// for it. The Mac's sidebar draws its Board row only where the runner
+    /// advertises this; the phone draws its overview's Board rows on the same
+    /// terms; and `crates/client`'s `task.list` and `task.get` refuse without a
+    /// round trip on a runner that does not, with the code the daemon itself
+    /// would answer.
     ///
-    /// So what a person actually meets on an older runner is the refusal, not
-    /// a hidden surface: the daemon routes every `task.*` method through this
-    /// capability and answers `CAPABILITY_UNSUPPORTED`, which the CLI turns
-    /// into its own sentence and the Mac board reports as a board it could not
-    /// read. That is a worse experience than not offering the board, which is
-    /// exactly why this is published — but publishing it and reading it are
-    /// two jobs, and only the first is done.
+    /// The daemon still routes every `task.*` method through this capability
+    /// and answers `CAPABILITY_UNSUPPORTED`, which is what a person meets by
+    /// any path that does not ask first: the CLI turns it into its own
+    /// sentence, and the Mac's ⇧⌘B, which is not gated, reports a board it
+    /// could not read.
     pub const TASKS: &str = "tasks";
     /// `TerminalCreate.prompt`: an agent terminal that starts on a message,
     /// passed as the agent's launch argument.

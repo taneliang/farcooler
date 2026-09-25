@@ -1832,6 +1832,27 @@ async fn dispatch(
 
         "pr.refresh" => Ok(session.pr_refresh(id("repository")?).await?),
 
+        // ---- the board ----
+        //
+        // Read-only, and deliberately so for now: a phone shows a repository's
+        // board and goes from a card to the agent on it. Moving a card and
+        // answering a question are writes with their own rules — a note can
+        // never be edited, a status change is a note — and they get arms when
+        // a phone has a screen that makes them.
+        //
+        // Both answer in the CLI's shapes (`tasks_json`), because AgentKit has
+        // ONE decoder for a board and the Mac feeds it the CLI's output. Both
+        // are refused without a round trip on a runner that does not advertise
+        // `tasks`; see `Session::tasks`.
+        //
+        // Board news is already on the event queue as `{"event": "task",
+        // "repository": ...}`, which is what tells an app to call `task.list`
+        // again for that one repository.
+
+        "task.list" => Ok(session.tasks(id("repository")?).await?),
+
+        "task.get" => Ok(session.task(id("task")?).await?),
+
         // ---- the runner itself ----
 
         "daemon.version" => Ok(session.daemon_capabilities().await?),
@@ -2883,6 +2904,19 @@ mod identity_tests {
         }
         assert_eq!(queue.pending.len(), 1);
         assert_eq!(queue.pending[0], r#"{"event":"fleet"}"#);
+    }
+
+    /// A board notice is the line a phone reads to re-read ONE board: the
+    /// word `task` and the repository, as a uuid string it can hand straight
+    /// back to `task.list`.
+    #[test]
+    fn a_board_notice_names_the_repository_to_read_again() {
+        use crate::session::FleetEvent;
+        let repository = uuid::Uuid::now_v7();
+        let line = super::event_line(&FleetEvent::Task { repository, actor: "manager".into() });
+        let parsed: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(parsed["event"], "task");
+        assert_eq!(parsed["repository"], repository.to_string());
     }
 
     /// News about different things is not collapsed together.

@@ -33,6 +33,21 @@ const WORKSPACES: [&str; 5] = [
     "workspace.remove_worktree",
 ];
 
+/// The board's reads. A phone's board with no arm behind it would be a row
+/// that opens onto "couldn't read this board" on every runner there is, with
+/// the daemon serving the method the whole time.
+const BOARD: [&str; 2] = ["task.list", "task.get"];
+
+#[test]
+fn every_board_read_the_phone_makes_can_be_called() {
+    for method in BOARD {
+        assert!(
+            FFI.contains(&format!("\"{method}\" =>")),
+            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
+        );
+    }
+}
+
 #[test]
 fn every_enrollment_method_the_daemon_serves_can_be_called() {
     for method in ENROLLMENT {
@@ -59,7 +74,7 @@ fn every_workspace_method_the_daemon_serves_can_be_called() {
 #[test]
 fn the_header_tells_an_app_developer_these_exist() {
     const HEADER: &str = include_str!("../include/farcooler_client.h");
-    for method in ENROLLMENT.iter().chain(WORKSPACES.iter()).copied() {
+    for method in ENROLLMENT.iter().chain(WORKSPACES.iter()).chain(BOARD.iter()).copied() {
         assert!(
             HEADER.contains(method),
             "{method} is routed but undocumented: nobody will find it"

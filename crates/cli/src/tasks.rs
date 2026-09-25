@@ -27,6 +27,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Subcommand;
+use farcooler_client::tasks_json;
 use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_store::models::{Actor, NoteKind, TaskStatus};
 use farcooler_transport::ClientError;
@@ -892,59 +893,22 @@ fn wants(fields: &[&str], section: &str) -> bool {
 /// human-formatted table that shifts when a title grows is a parser that breaks
 /// on a Tuesday.
 fn render_list_json(tasks: &[pb::Task]) -> String {
-    let now = now_millis();
-    let rows: Vec<serde_json::Value> = tasks.iter().map(|t| task_json(t, now)).collect();
-    serde_json::json!({ "tasks": rows }).to_string()
+    tasks_json::list_json(tasks, now_millis()).to_string()
 }
 
 fn render_show_json(detail: &pb::TaskDetail) -> String {
-    let now = now_millis();
-    serde_json::json!({
-        "task": detail.task.as_ref().map(|t| task_json(t, now)),
-        "notes": detail.notes.iter().map(note_json).collect::<Vec<_>>(),
-        "blocks": detail.blocks.iter().map(block_json).collect::<Vec<_>>(),
-    })
-    .to_string()
+    tasks_json::detail_json(detail, now_millis()).to_string()
 }
 
+/// One row, in the shape the phones read through `task.list` as well. The
+/// builders live in `farcooler_client::tasks_json` so the two cannot drift:
+/// AgentKit decodes both with one decoder.
 fn task_json(task: &pb::Task, now: i64) -> serde_json::Value {
-    serde_json::json!({
-        "id": uuid_of(&task.id).to_string(),
-        "short": short_bytes(&task.id),
-        "repository_id": uuid_of(&task.repository_id).to_string(),
-        "resource_version": task.resource_version,
-        "key": task.key,
-        "title": task.title,
-        "status": status_word(task.status),
-        "status_since": task.status_since,
-        "stale_for_seconds": stale_for_seconds(task.status_since, now),
-        "intent": task.intent,
-        "acceptance": task.acceptance.iter().map(|a| serde_json::json!({
-            "id": uuid_of(&a.id).to_string(),
-            "text": a.text,
-            "met": a.met,
-        })).collect::<Vec<_>>(),
-        "constraints": task.constraints,
-        "labels": task.labels,
-        "workspace_id": task.workspace_id.as_ref().map(|b| uuid_of(b).to_string()),
-    })
+    tasks_json::task_json(task, now)
 }
 
 fn note_json(note: &pb::TaskNote) -> serde_json::Value {
-    serde_json::json!({
-        "id": uuid_of(&note.id).to_string(),
-        "short": short_bytes(&note.id),
-        "task_id": uuid_of(&note.task_id).to_string(),
-        "kind": kind_word(note.kind),
-        "actor": note.actor,
-        "at": note.at,
-        "body": note.body,
-        // Parsed rather than passed through as a string, so a reader does not
-        // have to decode JSON a second time to reach a decision's rejected
-        // alternatives.
-        "extra": parsed_extra(&note.extra_json),
-        "supersedes": note.supersedes.as_ref().map(|b| uuid_of(b).to_string()),
-    })
+    tasks_json::note_json(note)
 }
 
 /// A reason as it appears after a blocker's id, or nothing at all.
@@ -959,16 +923,11 @@ fn said(reason: &str) -> String {
 }
 
 fn block_json(block: &pb::TaskBlock) -> serde_json::Value {
-    serde_json::json!({
-        "task_id": uuid_of(&block.task_id).to_string(),
-        "blocked_by": uuid_of(&block.blocked_by).to_string(),
-        "short": short_bytes(&block.blocked_by),
-        "reason": block.reason,
-    })
+    tasks_json::block_json(block)
 }
 
 fn parsed_extra(raw: &str) -> serde_json::Value {
-    serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({}))
+    tasks_json::parsed_extra(raw)
 }
 
 /// A note's structure, as lines under its body.
@@ -1033,8 +992,11 @@ fn status_of(raw: i32) -> Option<TaskStatus> {
     }
 }
 
+/// The client's word, which is the one the phones read too. That it is ALSO
+/// the store's `TaskStatus::as_str` is what
+/// `every_status_and_kind_survives_the_round_trip` checks.
 fn status_word(raw: i32) -> &'static str {
-    status_of(raw).map(TaskStatus::as_str).unwrap_or("unknown")
+    tasks_json::status_word(raw)
 }
 
 fn pb_note_kind(kind: NoteKind) -> i32 {
@@ -1065,7 +1027,7 @@ fn note_kind_of(raw: i32) -> Option<NoteKind> {
 }
 
 fn kind_word(raw: i32) -> &'static str {
-    note_kind_of(raw).map(NoteKind::as_str).unwrap_or("unknown")
+    tasks_json::note_kind_word(raw)
 }
 
 /// A status a person typed.
@@ -2215,7 +2177,7 @@ fn now_millis() -> i64 {
 /// How long a task has sat where it is. Never negative: a runner whose clock is
 /// a little ahead of this one has not moved a task in the future.
 fn stale_for_seconds(status_since: i64, now: i64) -> i64 {
-    now.saturating_sub(status_since).max(0) / 1000
+    tasks_json::stale_for_seconds(status_since, now)
 }
 
 /// A length of time written the way a person types it: `45s`, `10m`, `2h`, `3d`.
