@@ -316,9 +316,12 @@ pub enum TaskCmd {
     /// another is warned about too. A task whose own agent is still running
     /// is refused, unless `--again` says a second one is meant.
     ///
-    /// A pane the runner can't yet see running after a few seconds is still
+    /// A pane the runner can't see running within 3 seconds is still
     /// dispatched, and never stopped: it's said, and `--json` has
-    /// `pane_confirmed: false`.
+    /// `pane_confirmed: false`. `pane_state` is one of a stable list:
+    /// `running`; `starting` or `unknown` (not confirmed yet, and may still
+    /// come up); `exited`, `error` or `lost` (a finding: the agent isn't
+    /// running); `unspecified` (a runner too new or too old to say).
     ///
     /// The agent is told to read the task once, on its first launch. A
     /// restart doesn't tell it again, so if a pane is restarted before its
@@ -1865,20 +1868,30 @@ fn new_lane_refused(e: ClientError, branch: &str, on_it: Option<&str>) -> Refuse
 /// `terminal.create` answers after tmux has been read twice, fresh, for the
 /// pane's tags (once to confirm the window, once for the reply). A pane that
 /// wasn't in either read is usually just slow to come up, so it's looked for
-/// again a few times over `RECHECKS`, and never for longer than
-/// `RECHECK_BUDGET`. It's never torn down: an agent that is in fact working
+/// again a few times over `RECHECKS`, while it's still `pending`. A pane
+/// that is running, or that has exited, failed or been lost, is a finding,
+/// and looking again won't change it.
+///
+/// Everything, waits and looks together, ends by `RECHECK_BUDGET`: each look
+/// is cut off at what's left of it, so a runner that stops answering can't
+/// hold the command. It's never torn down: an agent that is in fact working
 /// would lose its work to tidy the board. A look that fails, or that
 /// doesn't list the pane, leaves the last state read standing.
 async fn recheck_pane<L: DispatchLink>(link: &mut L, workspace: Uuid, terminal: Uuid, first: i32) -> i32 {
-    let running = pb::TerminalState::Running as i32;
-    let started = std::time::Instant::now();
+    // Tokio's clock, not the system's, so a test with the clock paused
+    // measures the budget exactly.
+    let started = tokio::time::Instant::now();
+    let left = || RECHECK_BUDGET.saturating_sub(started.elapsed());
     let mut last = first;
     for wait in RECHECKS {
-        if last == running || started.elapsed() + wait > RECHECK_BUDGET {
+        if !pending(last) || wait >= left() {
             break;
         }
         link.pause(wait).await;
-        let Ok(r) = link.call(req_for("terminal.list", workspace)).await else { continue };
+        let Ok(look) = tokio::time::timeout(left(), link.call(req_for("terminal.list", workspace))).await else {
+            break;
+        };
+        let Ok(r) = look else { continue };
         let Some(result::Value::TerminalList(l)) = r.value else { continue };
         if let Some(t) = l.items.iter().find(|t| t.id.as_ref() == terminal.as_bytes()) {
             last = t.state;
@@ -1887,21 +1900,38 @@ async fn recheck_pane<L: DispatchLink>(link: &mut L, workspace: Uuid, terminal: 
     last
 }
 
-/// A terminal state as one lower-case word, for a sentence or `--json`.
-fn pane_state_word(state: i32) -> String {
+/// Whether a pane in `state` may still turn out to be running: starting,
+/// or unknown because the runner couldn't read its panes. Anything else is
+/// already the answer.
+fn pending(state: i32) -> bool {
+    use pb::TerminalState::{Starting, Unknown, Unspecified};
+    matches!(pb::TerminalState::try_from(state), Ok(Starting | Unknown | Unspecified) | Err(_))
+}
+
+/// `pane_state` under `task dispatch --json`: a stable word per terminal
+/// state, its own list rather than `terminal_label`'s, which is written for
+/// a person and may change. Listed in `TaskCmd::Dispatch`'s help.
+fn pane_state_word(state: i32) -> &'static str {
     match pb::TerminalState::try_from(state) {
-        Ok(pb::TerminalState::Unspecified) | Err(_) => "unspecified".into(),
-        Ok(s) => crate::terminal_label(s).to_ascii_lowercase(),
+        Ok(pb::TerminalState::Starting) => "starting",
+        Ok(pb::TerminalState::Running) => "running",
+        Ok(pb::TerminalState::Exited) => "exited",
+        Ok(pb::TerminalState::Error) => "error",
+        Ok(pb::TerminalState::Lost) => "lost",
+        Ok(pb::TerminalState::Unknown) => "unknown",
+        Ok(pb::TerminalState::Unspecified) | Err(_) => "unspecified",
     }
 }
 
 /// What `task dispatch` prints once it has dispatched: one JSON object
 /// under `--json`, lines for a person otherwise.
 ///
-/// A pane the runner hadn't seen live by the end of `recheck_pane` is
-/// still a dispatch, and the board has moved; it's said plainly, with where
-/// to look, and `--json` carries `pane_confirmed: false` beside the state
-/// last read, so a script can tell the two apart without reading prose.
+/// A pane the runner hadn't seen running by the end of `recheck_pane` is
+/// still a dispatch, and the board has moved. What's said depends on what
+/// was seen: one still starting (or unreadable) couldn't be confirmed
+/// *yet*; one that exited, failed or was lost is a finding, said as that.
+/// Either way it says where to look, and `--json` carries `pane_confirmed`
+/// beside `pane_state`, so a script can tell them apart without prose.
 fn dispatched_output(key: &str, done: &Dispatched, json: bool) -> String {
     if json {
         return serde_json::json!({
@@ -1916,15 +1946,23 @@ fn dispatched_output(key: &str, done: &Dispatched, json: bool) -> String {
         .to_string();
     }
     let moved = format!("{key} is in progress in {}, terminal {}", done.workspace_name, done.terminal_short);
+    let silent = "  it won't report back by itself: check the board or `workspace list --json`";
     if done.confirmed() {
-        return format!("{moved}\n  it won't report back by itself: check the board or `workspace list --json`");
+        return format!("{moved}\n{silent}");
     }
-    format!(
-        "{moved}\n  dispatched, but the pane couldn't be confirmed yet: check `farcooler terminal screen \
-         {short}` (it last read {state})",
-        short = done.terminal_short,
-        state = pane_state_word(done.pane_state),
-    )
+    let screen = format!("`farcooler terminal screen {}`", done.terminal_short);
+    let seen = match pb::TerminalState::try_from(done.pane_state) {
+        Ok(pb::TerminalState::Exited) => format!("dispatched, but the agent's pane exited: check {screen} for why"),
+        Ok(pb::TerminalState::Error) => format!("dispatched, but the agent's pane failed: check {screen} for why"),
+        Ok(pb::TerminalState::Lost) => {
+            "dispatched, but the runner can't find the agent's pane: check `farcooler workspace list`".to_string()
+        }
+        _ => format!(
+            "dispatched, but the pane couldn't be confirmed yet: check {screen} (it last read {})",
+            pane_state_word(done.pane_state)
+        ),
+    };
+    format!("{moved}\n  {seen}\n{silent}")
 }
 
 /// `task.get` for `task`, with its whole record.
@@ -2875,6 +2913,9 @@ mod tests {
         pane_reads: Vec<pb::TerminalState>,
         /// Every wait `dispatch` asked for.
         paused: Vec<Duration>,
+        /// When set, a wait is really waited (on tokio's clock) and each
+        /// look for the new pane takes this long.
+        look_takes: Duration,
         sent: Vec<pb::Request>,
     }
 
@@ -2891,6 +2932,7 @@ mod tests {
                 opened: pb::TerminalState::Running,
                 pane_reads: Vec::new(),
                 paused: Vec::new(),
+                look_takes: Duration::ZERO,
                 sent: Vec::new(),
             }
         }
@@ -2902,6 +2944,9 @@ mod tests {
         }
         async fn pause(&mut self, wait: Duration) {
             self.paused.push(wait);
+            if !self.look_takes.is_zero() {
+                tokio::time::sleep(wait).await;
+            }
         }
         async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError> {
             let method = req.method.clone();
@@ -2936,6 +2981,7 @@ mod tests {
                 "terminal.list" => {
                     let mut items = self.terminals.clone();
                     if self.sent.iter().any(|r| r.method == "terminal.create") {
+                        tokio::time::sleep(self.look_takes).await;
                         let state = match self.pane_reads.len() {
                             0 => self.opened,
                             1 => self.pane_reads[0],
@@ -3474,7 +3520,7 @@ mod tests {
 
     /// M8: a pane never seen live is still a dispatch (the board moves, and
     /// nothing is torn down), said plainly, and marked under `--json`. The
-    /// looks stay inside their budget.
+    /// looks stop after `RECHECKS`.
     #[tokio::test]
     async fn a_pane_never_seen_is_still_dispatched_and_said_to_be_unconfirmed() {
         let mut link = FakeLink { opened: pb::TerminalState::Starting, ..Default::default() };
@@ -3483,17 +3529,16 @@ mod tests {
         assert_eq!(done.pane_state, pb::TerminalState::Starting as i32);
         assert_eq!(link.writes(), ["terminal.create", "task.update", "task.set_status"], "moved, nothing removed");
         assert_eq!(link.paused, RECHECKS, "every look, then it stops");
-        assert!(link.paused.iter().sum::<Duration>() <= RECHECK_BUDGET);
 
         let short = short_bytes(&id_bytes(PANE));
         let said = dispatched_output("fc-2", &done, false);
-        assert!(said.starts_with(&format!("fc-2 is in progress in lane, terminal {short}\n")), "{said}");
-        assert!(
-            said.contains(&format!(
-                "dispatched, but the pane couldn't be confirmed yet: check `farcooler terminal screen {short}` \
-                 (it last read starting)"
-            )),
-            "{said}"
+        assert_eq!(
+            said,
+            format!(
+                "fc-2 is in progress in lane, terminal {short}\n  dispatched, but the pane couldn't be confirmed \
+                 yet: check `farcooler terminal screen {short}` (it last read starting)\n  it won't report back \
+                 by itself: check the board or `workspace list --json`"
+            )
         );
         let json: serde_json::Value = serde_json::from_str(&dispatched_output("fc-2", &done, true)).unwrap();
         assert_eq!((&json["pane_confirmed"], &json["pane_state"]), (&false.into(), &"starting".into()));
@@ -3504,6 +3549,70 @@ mod tests {
         let done = run(&mut link, existing()).await.0.expect("dispatched");
         assert!(!done.confirmed());
         assert_eq!(pane_state_word(done.pane_state), "unknown");
+    }
+
+    /// I1: the recheck ends by its budget, waits and looks together, even
+    /// when every look is slow (a stalled tmux over ssh). On tokio's paused
+    /// clock: 0.25 s wait, a 1.3 s look, a 0.5 s wait, and the second look is
+    /// cut off at 3 s instead of running to 3.35 s.
+    #[tokio::test(start_paused = true)]
+    async fn the_recheck_ends_by_its_budget_even_when_looks_are_slow() {
+        let mut link = FakeLink {
+            opened: pb::TerminalState::Starting,
+            look_takes: Duration::from_millis(1_300),
+            ..Default::default()
+        };
+        let started = tokio::time::Instant::now();
+        let done = run(&mut link, existing()).await.0.expect("still a dispatch");
+        let took = started.elapsed();
+        assert!(took <= RECHECK_BUDGET, "{took:?}");
+        assert!(!done.confirmed());
+        assert_eq!(link.paused, RECHECKS[..2], "{:?}", link.paused);
+    }
+
+    /// I2: a pane that exited, failed or was lost is a finding: not looked
+    /// for again, and said as what it is rather than as "not yet".
+    #[tokio::test]
+    async fn a_pane_that_is_already_dead_is_said_as_a_finding_without_waiting() {
+        let short = short_bytes(&id_bytes(PANE));
+        for (state, sentence) in [
+            (pb::TerminalState::Exited, format!("dispatched, but the agent's pane exited: check `farcooler terminal screen {short}` for why")),
+            (pb::TerminalState::Error, format!("dispatched, but the agent's pane failed: check `farcooler terminal screen {short}` for why")),
+            (pb::TerminalState::Lost, "dispatched, but the runner can't find the agent's pane: check `farcooler workspace list`".to_string()),
+        ] {
+            let mut link = FakeLink { opened: state, ..Default::default() };
+            let done = run(&mut link, existing()).await.0.expect("still a dispatch");
+            assert!(link.paused.is_empty(), "{state:?}: {:?}", link.paused);
+            assert!(link.writes().contains(&"task.set_status"), "{state:?}: the board moves");
+            let said = dispatched_output("fc-2", &done, false);
+            assert!(said.contains(&format!("\n  {sentence}\n")), "{state:?}: {said}");
+            assert!(!said.contains("yet"), "{state:?}: {said}");
+            assert!(said.ends_with("it won't report back by itself: check the board or `workspace list --json`"));
+        }
+        // Starting, then exited on the first look: it stops there.
+        let mut link = FakeLink {
+            opened: pb::TerminalState::Starting,
+            pane_reads: vec![pb::TerminalState::Exited],
+            ..Default::default()
+        };
+        let done = run(&mut link, existing()).await.0.expect("still a dispatch");
+        assert_eq!(link.paused.len(), 1, "{:?}", link.paused);
+        assert_eq!(pane_state_word(done.pane_state), "exited");
+    }
+
+    /// m-a: `pane_state`'s words are a stable list of their own, pinned here,
+    /// not a display label lowercased.
+    #[test]
+    fn pane_state_words_are_a_stable_list() {
+        use pb::TerminalState as S;
+        let words: Vec<&str> = [S::Unspecified, S::Starting, S::Running, S::Exited, S::Error, S::Lost, S::Unknown]
+            .into_iter()
+            .map(|s| pane_state_word(s as i32))
+            .collect();
+        assert_eq!(words, ["unspecified", "starting", "running", "exited", "error", "lost", "unknown"]);
+        assert_eq!(pane_state_word(99), "unspecified", "a state this build hasn't heard of");
+        assert!([S::Starting, S::Unknown, S::Unspecified].iter().all(|s| pending(*s as i32)));
+        assert!(![S::Running, S::Exited, S::Error, S::Lost].iter().any(|s| pending(*s as i32)));
     }
 
     /// M5: dispatching a task from a state nobody dispatches from is said.
