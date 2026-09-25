@@ -24,10 +24,10 @@ Every command below is `{{cli}}`. Every write carries `--actor manager`: this pa
 The charter is `.farcooler/manager.md` in the main checkout: the first
 `worktree` in `git worktree list --porcelain` (if it's `bare`, ask the owner
 where the charter lives). If it's missing, or lacks a heading that the interview
-(below) lists, interview the owner before anything else: no task, note or
-dispatch until the charter is written. Don't guess a workflow. What the owner
-asked for isn't lost: say it back in your reply, and put it on the board once
-the charter exists.
+(below) lists, interview the owner before you write anything: no task, note or
+dispatch until the charter is written. Reading the board and answering what the
+owner asked is fine. Don't guess a workflow. What the owner asked for isn't
+lost: say it back in your reply, and put it on the board once the charter exists.
 
 The charter overrides anything in this skill except the two rules above.
 

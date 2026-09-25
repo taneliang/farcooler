@@ -756,13 +756,18 @@ mod tests {
 
     /// With no charter, nothing goes on the board first. A pressure run (S7)
     /// had the manager create all three tasks "so it isn't lost" and only
-    /// then start the interview. The owner's request survives in the reply.
+    /// then start the interview. The owner's request survives in the reply,
+    /// and reading the board is still allowed.
     #[test]
     fn nothing_goes_on_the_board_before_the_charter() {
         for h in ALL {
             let body = skill_body(h).split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(body.contains("no task, note or dispatch until the charter is written"), "{h:?}");
             assert!(body.contains("say it back in your reply"), "{h:?}");
+            // Only writes wait. An S9 run read "before anything else" as "don't
+            // read the board either" and wouldn't answer "What's on the board?".
+            assert!(body.contains("interview the owner before you write anything"), "{h:?}");
+            assert!(body.contains("Reading the board and answering what the owner asked is fine"), "{h:?}");
         }
     }
 
