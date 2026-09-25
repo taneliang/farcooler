@@ -405,15 +405,12 @@ type MergeHooks = fn(&str, &Path) -> String;
 /// a file rather than a directory, a hooks file we cannot parse — each of
 /// those loses the live view for that agent in that worktree and nothing else.
 fn install_project_hooks(worktree: &Path, socket: &Path) {
-    // Both paths come off `PROJECT_HOOK_FILES`, which `git::is_dirty` and
-    // `change_set::working_tree` also read to subtract these files from what
-    // they report. Spelling them out here as well is what would let the
-    // installer and those two filters drift apart, and the drift is invisible:
-    // a file written under a name nothing filters just quietly becomes the
-    // user's uncommitted work.
+    // Both paths come off `PROJECT_HOOK_FILES`, which `holds_unseen_work`
+    // also reads to find an edit git has been told to ignore. Spelling them
+    // out here as well is what would let the two drift apart.
     use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
-    install_project_hook_file(&worktree.join(CODEX_HOOKS), socket, merge_codex);
-    install_project_hook_file(&worktree.join(CURSOR_HOOKS), socket, merge_cursor);
+    install_project_hook_file(worktree, CODEX_HOOKS, socket, merge_codex);
+    install_project_hook_file(worktree, CURSOR_HOOKS, socket, merge_cursor);
     // Not the manager skill. codex's copy is written when a codex pane is
     // opened (`prepare_launch_hooks`), so a worktree only claude or cursor
     // ever runs in never holds a document none of them reads.
@@ -557,26 +554,38 @@ fn exclude_locally(worktree: &Path, relative: &str) -> bool {
             std::fs::create_dir_all(info)?;
         }
         let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&exclude)?;
-        file.write_all(format!("{separator}# Far Cooler's manager skill for codex\n{line}\n").as_bytes())
+        file.write_all(format!("{separator}# Written by Far Cooler, for this machine only\n{line}\n").as_bytes())
     };
     append().is_ok()
 }
 
-/// Whether a worktree holds a manager-skill file that removing it would lose
-/// and that `git::is_dirty` can't see: one at our path that isn't an unedited
-/// copy of ours, and that git doesn't track.
+/// Whether a worktree holds a file at one of our paths that removing it would
+/// lose and that `git::is_dirty` can't see: one that isn't what we wrote, and
+/// that git doesn't track.
+///
+/// "What we wrote" is an unedited copy of the manager skill
+/// (`skill_install::holds`), or a hooks file holding nothing but our
+/// registrations (`hook_install::holds_only_ours`).
 ///
 /// `exclude_locally` tells git to ignore our paths in every worktree of the
-/// repository, so an owner who edited our copy, or who put a file of their own
-/// at that path, has work git reports nowhere. A tracked file needs none of
-/// this: `is_dirty` reports its changes like any other file's, and its
+/// repository, so an owner who edited one of our files, or who put a file of
+/// their own at that path, has work git reports nowhere. A tracked file needs
+/// none of this: `is_dirty` reports its changes like any other file's, and its
 /// committed bytes survive in the branch. A git we can't ask means we ask the
 /// owner instead.
-async fn holds_an_unseen_skill_file(worktree: &Path) -> bool {
+async fn holds_unseen_work(worktree: &Path) -> bool {
+    use crate::hook_install::{PROJECT_HOOK_FILES, holds_only_ours};
     use crate::skill_install::{Holds, PROJECT_SKILL_FILES, crosses_a_symlink, holds};
-    for relative in PROJECT_SKILL_FILES {
+    let hook = |relative: &str| match std::fs::read(worktree.join(relative)) {
+        Ok(bytes) => !holds_only_ours(&String::from_utf8_lossy(&bytes)),
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    };
+    let skill = |relative: &str| holds(&worktree.join(relative)) == Holds::Somebodys;
+    let paths = PROJECT_HOOK_FILES.iter().map(|r| (*r, hook(r)));
+    let paths = paths.chain(PROJECT_SKILL_FILES.iter().map(|r| (*r, skill(r))));
+    for (relative, somebodys) in paths.collect::<Vec<_>>() {
         // Through a link, the file lives somewhere removal doesn't reach.
-        if crosses_a_symlink(worktree, relative) || holds(&worktree.join(relative)) != Holds::Somebodys {
+        if !somebodys || crosses_a_symlink(worktree, relative) {
             continue;
         }
         let tracked = git::git(worktree, &["ls-files", "--", relative]).await;
@@ -627,10 +636,18 @@ fn project_hook_file_for(preset: &str) -> Option<(&'static str, MergeHooks)> {
 /// So a file that is present and is not a JSON object is left exactly as it
 /// is. Losing the live view is recoverable; replacing a file we do not own is
 /// a support incident somebody finds out about days later.
-fn install_project_hook_file(path: &Path, socket: &Path, merge: MergeHooks) {
-    let existing = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+///
+/// A file this creates is first named in the repository's `info/exclude`
+/// (`exclude_locally`), so git leaves it out of `git status` and an agent's
+/// `git add -A` doesn't commit a document naming this runner's paths. When
+/// that line can't be written, neither is the file. A file that was already
+/// there is somebody's, tracked or not, and gets no line: what they commit is
+/// theirs to decide, and a change to it shows up like any other.
+fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Path, merge: MergeHooks) {
+    let path = &worktree.join(relative);
+    let (existing, creating) = match std::fs::read_to_string(path) {
+        Ok(text) => (text, false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), true),
         Err(e) => {
             tracing::warn!(
                 error = %e,
@@ -674,6 +691,14 @@ fn install_project_hook_file(path: &Path, socket: &Path, merge: MergeHooks) {
     // here with one. A missing or empty file arrives as `{}`, which no merge
     // ever produces, so the first install always writes.
     if merged == starting {
+        return;
+    }
+
+    if creating && !exclude_locally(worktree, relative) {
+        tracing::warn!(
+            path = %path.display(),
+            "could not tell git to ignore a hooks file; this worktree reports nothing for this agent"
+        );
         return;
     }
 
@@ -1982,9 +2007,9 @@ impl Service {
 
     /// Whether removing this worktree should demand its name typed out.
     ///
-    /// Only when there is uncommitted or untracked work in it, counting a
-    /// manager-skill file git is told to ignore that isn't an unedited copy of
-    /// ours (`holds_an_unseen_skill_file`). Everything
+    /// Only when there is uncommitted or untracked work in it, counting a file
+    /// at one of our paths that git is told to ignore and that isn't what we
+    /// wrote (`holds_unseen_work`). Everything
     /// committed survives in the branch, which removal never touches, so a
     /// clean worktree is recoverable by re-adding it.
     ///
@@ -2007,8 +2032,8 @@ impl Service {
         if git::is_dirty(worktree).await.unwrap_or(true) {
             return Ok(true);
         }
-        // What git is told to ignore: an edited copy of the manager skill.
-        Ok(holds_an_unseen_skill_file(worktree).await)
+        // What git is told to ignore: an edit to one of our files.
+        Ok(holds_unseen_work(worktree).await)
     }
 
     /// Remove a workspace's worktree.
@@ -2189,7 +2214,8 @@ impl Service {
     fn prepare_launch_hooks(&self, preset: &str, worktree: &str) -> LaunchExtras {
         if let Some((relative, merge)) = project_hook_file_for(preset) {
             install_project_hook_file(
-                &Path::new(worktree).join(relative),
+                Path::new(worktree),
+                relative,
                 &hook_ingress::HookIngress::socket_path(&self.root),
                 merge,
             );
@@ -6733,6 +6759,9 @@ mod hook_wiring_tests {
 mod hook_file_tests {
     use super::*;
 
+    /// A git repository to install into: every worktree Far Cooler writes
+    /// into is one, and a hooks file is only created once `info/exclude`
+    /// names it.
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "farcooler-hooks-{}-{}-{name}",
@@ -6740,6 +6769,8 @@ mod hook_file_tests {
             Uuid::now_v7()
         ));
         std::fs::create_dir_all(&dir).expect("scratch dir");
+        let init = std::process::Command::new("git").arg("-C").arg(&dir).args(["init", "-q"]).status();
+        assert!(init.is_ok_and(|s| s.success()), "git init");
         dir
     }
 
@@ -7057,10 +7088,9 @@ mod hook_file_tests {
     }
 
     /// A file of the user's OWN inside `.codex/` must not be swallowed by the
-    /// exclusion. Git's pathspec is what makes this true — it re-reports the
-    /// directory once anything in it is not excluded — and the alternative
-    /// this rules out is an exclusion written as `.codex/` or a glob, which
-    /// would hide their file along with ours.
+    /// exclusion. The `info/exclude` line names our file and nothing beside
+    /// it; the alternative this rules out is a line written as `.codex/` or a
+    /// glob, which would hide their file along with ours.
     #[tokio::test]
     async fn a_users_own_file_beside_ours_is_still_their_work() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
@@ -7076,6 +7106,110 @@ mod hook_file_tests {
             svc.removal_needs_confirmation(ws.id).await.expect("dirt check"),
             "a file of their own next to ours is still uncommitted work"
         );
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// An agent's `git add -A` in a worktree Far Cooler made commits neither
+    /// hooks file: both name this runner's binary and socket, and nobody
+    /// reviewing the branch asked for them. Read back from what a real git
+    /// stages in a real linked worktree.
+    #[tokio::test]
+    async fn git_add_all_in_a_new_worktree_stages_no_hooks_file() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .await
+            .expect("a workspace");
+        let worktree = Path::new(&ws.worktree_path);
+        assert!(worktree.join(".codex/hooks.json").exists() && worktree.join(".cursor/hooks.json").exists());
+        std::fs::write(worktree.join("theirs.txt"), "real work").unwrap();
+
+        git_in(worktree, &["add", "-A"]);
+
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(worktree)
+            .args(["diff", "--cached", "--name-only"])
+            .output()
+            .expect("git diff");
+        let staged = String::from_utf8_lossy(&out.stdout);
+        assert!(staged.contains("theirs.txt"), "git add -A ran: {staged}");
+        assert!(!staged.contains("hooks.json"), "a hooks file was staged: {staged}");
+        let exclude = std::fs::read_to_string(dir.path().join("repo/.git/info/exclude")).expect("info/exclude");
+        for relative in crate::hook_install::PROJECT_HOOK_FILES {
+            assert!(exclude.lines().any(|l| l == format!("/{relative}")), "{exclude}");
+        }
+    }
+
+    /// A hooks file the repository tracks is the user's, and a change to it
+    /// is dirty and in the diff view like a change to any other file.
+    #[tokio::test]
+    async fn a_tracked_hooks_file_the_user_changed_is_dirty() {
+        let (_dir, _svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let worktree = Path::new(&ws.worktree_path);
+        let path = worktree.join(".codex/hooks.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{\"hooks\": {}}\n").unwrap();
+        git_in(worktree, &["add", ".codex/hooks.json"]);
+        git_in(worktree, &["commit", "-q", "-m", "our team's hooks"]);
+        assert!(!git::is_dirty(worktree).await.expect("dirt check"), "committed and unchanged");
+
+        std::fs::write(&path, "{\"hooks\": {\"Stop\": []}}\n").unwrap();
+
+        assert!(git::is_dirty(worktree).await.expect("dirt check"), "a changed tracked file is work");
+        let tree = crate::change_set::working_tree(worktree).await.expect("the diff view");
+        assert!(format!("{tree:?}").contains(".codex/hooks.json"), "and the diff view shows it: {tree:?}");
+    }
+
+    /// The user added an entry of their own to a hooks file Far Cooler
+    /// created. Git ignores the file, so nothing reports the edit, and
+    /// removing the worktree would lose it: it must ask.
+    #[tokio::test]
+    async fn an_edited_hooks_file_asks_before_the_worktree_is_removed() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc
+            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .await
+            .expect("a workspace");
+        let path = Path::new(&ws.worktree_path).join(".codex/hooks.json");
+        let mut doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        doc["hooks"]["Stop"] = serde_json::json!([{ "hooks": [{ "type": "command", "command": "say done" }] }]);
+        std::fs::write(&path, doc.to_string()).unwrap();
+
+        assert!(
+            !git::is_dirty(Path::new(&ws.worktree_path)).await.expect("dirt check"),
+            "git ignores it, which is the case this test is about"
+        );
+        assert!(svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "their entry would be lost");
+    }
+
+    /// A hooks file the user already had, untracked, is theirs: we merge our
+    /// entries into it but tell git nothing, so it stays in `git status`
+    /// where they can see it and decide what to commit.
+    #[tokio::test]
+    async fn a_hooks_file_that_was_already_there_gets_no_exclude_line() {
+        let (dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let worktree = Path::new(&ws.worktree_path);
+        let path = worktree.join(".codex/hooks.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{}\n").unwrap();
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+
+        assert!(std::fs::read_to_string(&path).unwrap().contains("--agent codex"), "ours was merged in");
+        let exclude = std::fs::read_to_string(dir.path().join("repo/.git/info/exclude")).unwrap_or_default();
+        assert!(!exclude.contains(".codex/hooks.json"), "{exclude}");
+        assert!(git::is_dirty(worktree).await.expect("dirt check"), "their untracked file is still reported");
     }
 
     /// A resumed claude pane reports itself too.
