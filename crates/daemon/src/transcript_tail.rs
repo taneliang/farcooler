@@ -251,8 +251,25 @@ impl TranscriptTail {
         // ended by the time this returns (`alive` went false during a long
         // stall), the send fails and the watcher is dropped right here,
         // which is exactly what should happen to it.
-        if let Some(watcher) = register(&path, &parent, tx) {
-            let _ = watcher_tx.send(watcher);
+        //
+        // A panic inside `register` is a registration that failed, not a
+        // tail that failed: the loop is already running and delivers on the
+        // poll alone. `notify`'s FSEvents backend has `unwrap`s and an
+        // `expect` on this path. Let a panic unwind out of here instead, and
+        // `hook_ingress` reads it as "nothing started", frees the terminal's
+        // slot and lets the next hook start a SECOND tail beside this one,
+        // which then delivers every line twice.
+        let registered =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| register(&path, &parent, tx)));
+        match registered {
+            Ok(Some(watcher)) => {
+                let _ = watcher_tx.send(watcher);
+            }
+            Ok(None) => {}
+            Err(_) => tracing::warn!(
+                path = %parent.display(),
+                "registering a transcript watch panicked; this tail polls alone"
+            ),
         }
         true
     }
@@ -729,6 +746,86 @@ mod tests {
             std::thread::sleep(Duration::from_millis(25));
         }
         assert!(dropped.load(Ordering::Relaxed), "a stopped tail must let its watcher go");
+    }
+
+    /// A registration that panics is a registration that failed: `follow`
+    /// still reports the tail started, and it delivers on the poll alone.
+    /// Were the panic to unwind out of `follow`, `hook_ingress` would free the
+    /// terminal's slot with this tail's loop still running, and the next hook
+    /// would start a second tail on the same file -- every line twice.
+    #[test]
+    fn a_registration_that_panics_still_leaves_a_tail_that_delivers() {
+        use std::time::{Duration, Instant};
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, "").expect("seed");
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = { let seen = seen.clone(); move |t: String| seen.lock().unwrap().push(t) };
+        let alive = Arc::new(AtomicBool::new(true));
+
+        let started = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            TranscriptTail::new().follow_registering(path.clone(), 0, sink, alive.clone(), |_, _, _| -> Option<()> {
+                panic!("notify's runloop thread died")
+            })
+        }));
+        assert!(matches!(started, Ok(true)), "a panicking registration must not unwind out of follow");
+
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).expect("open");
+        writeln!(f, "{{\"type\":\"message\",\"role\":\"assistant\",\"text\":\"hello\"}}").expect("append");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while seen.lock().unwrap().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        alive.store(false, Ordering::Relaxed);
+        assert_eq!(seen.lock().unwrap().as_slice(), ["hello"], "the poll still delivers");
+    }
+
+    /// A registration that only returns after the tail was stopped: its
+    /// watcher is let go, not parked somewhere that outlives the tail.
+    #[test]
+    fn a_watcher_registered_after_the_tail_stopped_is_dropped() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        struct Probe(Arc<AtomicBool>);
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        let dropped = Arc::new(AtomicBool::new(false));
+        let alive = Arc::new(AtomicBool::new(true));
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let probe = Probe(dropped.clone());
+        let starter = std::thread::spawn({
+            let alive = alive.clone();
+            move || {
+                TranscriptTail::new().follow_registering(path, 0, |_| {}, alive, move |_, _, _| {
+                    entered_tx.send(()).unwrap();
+                    let _ = release_rx.recv_timeout(Duration::from_secs(30));
+                    Some(probe)
+                })
+            }
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).expect("registration was reached");
+
+        // Stopped, and past a poll, so the loop has certainly exited.
+        alive.store(false, Ordering::Relaxed);
+        std::thread::sleep(WAIT_POLL_FALLBACK * 2 + Duration::from_millis(200));
+        release_tx.send(()).unwrap();
+        assert!(starter.join().unwrap());
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !dropped.load(Ordering::Relaxed) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(dropped.load(Ordering::Relaxed), "a watcher that arrived after the tail stopped was kept");
     }
 
     // -- assistant_text: the decode `follow` runs every line through --

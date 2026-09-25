@@ -544,6 +544,10 @@ impl HookIngress {
 
         let this = self.clone();
         let loop_alive = alive.clone();
+        // Kept back so a start that fails below can also stop whatever it
+        // did get running: a slot freed while a loop still holds `alive` true
+        // is a tail nothing can stop, and the next payload starts another.
+        let stop = alive.clone();
         tokio::spawn(async move {
             let started = tokio::task::spawn_blocking(move || {
                 TranscriptTail::new().follow(
@@ -575,6 +579,7 @@ impl HookIngress {
                         %error,
                         "the task starting a transcript tail did not finish; the next payload for this terminal will retry"
                     );
+                    stop.store(false, Ordering::Relaxed);
                     this.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
                 }
             }
