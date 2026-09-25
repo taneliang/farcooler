@@ -9,13 +9,15 @@ import SwiftUI
 /// a line break, and a prompt to an agent is a message.
 ///
 /// So this is an `NSTextView`: Return sends, Shift-Return breaks the line, Esc
-/// closes, and the field grows with the text up to a limit.
+/// closes, and the field grows with the text up to a limit. Option-Return sends
+/// too, and tells `onSubmit` so: the ⌘N panel reads it as "and keep me open".
 struct Composer: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String = ""
     var minHeight: CGFloat = 24
     var maxHeight: CGFloat = 220
-    let onSubmit: () -> Void
+    /// Called on Return. `true` when Option was held.
+    let onSubmit: (_ keepOpen: Bool) -> Void
     let onCancel: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -80,14 +82,14 @@ struct Composer: NSViewRepresentable {
 
 /// An `NSTextView` that sends on Return.
 final class SubmittingTextView: NSTextView {
-    var onSubmit: (() -> Void)?
+    var onSubmit: ((_ keepOpen: Bool) -> Void)?
     var onCancel: (() -> Void)?
     var placeholder: String = "" { didSet { needsDisplay = true } }
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         if isReturn && !event.modifierFlags.contains(.shift) {
-            onSubmit?()
+            onSubmit?(event.modifierFlags.contains(.option))
             return
         }
         if event.keyCode == 53 {  // Esc

@@ -13,9 +13,11 @@ import SwiftUI
 /// one you were last in, and the agent is a preference. So there is one field,
 /// and what you type in it becomes the agent's first message.
 ///
-/// It stays open after submitting, because the stated need is several tasks in
-/// quick succession and a panel that closes on every one turns a burst into a
-/// sequence of separate decisions.
+/// It closes on ⏎, and ⌥⏎ starts the task and keeps it open. It used to stay
+/// open after every submit, for bursts of several tasks in quick succession
+/// (242ec102); in use, the one-task case is the common one, and a panel left
+/// on top of the task you just started is in the way of looking at it. The
+/// burst is still one key away.
 struct QuickCreate: View {
     /// Every runner's repositories, tagged the same way `FleetStore.repositories`
     /// tags them. Carried together rather than flattened to a bare `[Repository]`
@@ -24,7 +26,8 @@ struct QuickCreate: View {
     let projects: [(host: String, repository: Repository)]
     @Binding var project: String
     /// Description, host, project, preset. Returns once queued, not
-    /// finished.
+    /// finished. The panel closes itself afterwards unless ⌥⏎ asked it not
+    /// to, through `onClose` — the same way Esc closes it.
     ///
     /// `host` comes from `chosen` below, the same picker selection that
     /// resolved `project` — not re-derived by the caller from `project`
@@ -121,7 +124,7 @@ struct QuickCreate: View {
                 Composer(
                     text: $text,
                     placeholder: "What do you want done?",
-                    onSubmit: submit,
+                    onSubmit: { keepOpen in submit(keepOpen: keepOpen) },
                     onCancel: onClose
                 )
                 .frame(height: composerHeight)
@@ -203,7 +206,7 @@ struct QuickCreate: View {
             }
             .labelsHidden().fixedSize().controlSize(.small)
 
-            Text(canSubmit ? "↩ start" : "⇧↩ newline")
+            Text(canSubmit ? "↩ start  ⌥↩ start, keep open" : "⇧↩ newline")
                 .foregroundStyle(.tertiary)
         }
         .font(.system(size: 11))
@@ -211,7 +214,9 @@ struct QuickCreate: View {
         .padding(.vertical, 7)
     }
 
-    private func submit() {
+    /// Start the task, then close unless `keepOpen`. Not private so a test
+    /// can press ⏎ without a window.
+    func submit(keepOpen: Bool) {
         let description = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // The same gate the footer shows, not a weaker one. ⏎ is the only way
         // in here, and a name the daemon refuses would clear the draft on its
@@ -224,6 +229,7 @@ struct QuickCreate: View {
         justCreated = WorktreeName.display(name)
         // Cleared only on success, which is also what clears the draft.
         text = ""
+        if !keepOpen { onClose() }
     }
 }
 
