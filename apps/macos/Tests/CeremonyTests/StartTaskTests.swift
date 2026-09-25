@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import Foundation
 import Testing
 
@@ -114,8 +115,10 @@ struct StartTaskTests {
     }
 
     /// A client wired to `runner`, connected, with the runner's build read.
-    private func client(_ runner: Runner) async -> DaemonClient {
-        let client = DaemonClient(target: "")
+    private func client(_ runner: Runner, notifications: NotificationCenter = NotificationCenter())
+        async -> DaemonClient
+    {
+        let client = DaemonClient(target: "", notifications: notifications)
         client.commandRunnerForTesting = { args in runner.answer(args) }
         // Never this Mac's own pasteboard: a typing path left running by a
         // test gives up after a minute, and would put a task on it.
@@ -452,6 +455,27 @@ struct StartTaskTests {
             try? await Task.sleep(for: .milliseconds(100))
         }
         #expect(runner.watchingCalls.contains { $0.contains("t1") }, "\(runner.watchingCalls)")
+    }
+
+    /// The claim goes the moment the person does — the app resigning, or
+    /// `ScreenState` saying the display slept, the screen locked or the
+    /// session switched away — rather than aging out on the runner while an
+    /// agent finishes unannounced.
+    @Test(arguments: [NSApplication.didResignActiveNotification, ScreenState.personLeft])
+    func leavingGivesTheClaimBackAtOnce(_ leaving: Notification.Name) async {
+        let runner = Runner(capabilities: ["workspaces", "terminals", "watching"])
+        let center = NotificationCenter()
+        let client = await client(runner, notifications: center)
+        client.presence = Self.present()
+        client.reportWatching(["t1"])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(runner.watchingCalls == [["terminal", "watching", "t1"]])
+
+        center.post(name: leaving, object: nil)
+        for _ in 0..<20 where runner.watchingCalls.count < 2 {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(runner.watchingCalls.last == ["terminal", "watching"], "\(runner.watchingCalls)")
     }
 
     @Test func aRunnerThatIsNotConnectedIsNeverSentAHeartbeat() async {

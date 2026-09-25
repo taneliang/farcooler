@@ -67,26 +67,37 @@ struct Presence {
 @MainActor
 final class ScreenState {
     static let shared = ScreenState()
-    static let personLeft = Notification.Name("FarCoolerPersonLeft")
+    nonisolated static let personLeft = Notification.Name("FarCoolerPersonLeft")
 
     private(set) var displayAsleep = false
     /// Assumed unlocked at launch: the app was just opened by somebody.
     private(set) var locked = false
     private(set) var sessionActive = true
     private var tokens: [NSObjectProtocol] = []
+    /// Where `personLeft` is posted.
+    private let announce: NotificationCenter
 
-    private init() {
-        let workspace = NSWorkspace.shared.notificationCenter
+    /// The three centers are this Mac's own, except in a test, which hands in
+    /// centers of its own to post on — no display has to sleep and no session
+    /// has to lock for one to run.
+    init(
+        workspace: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        distributed: NotificationCenter = DistributedNotificationCenter.default(),
+        announce: NotificationCenter = .default
+    ) {
+        self.announce = announce
         observe(workspace, NSWorkspace.screensDidSleepNotification) { $0.displayAsleep = true }
         observe(workspace, NSWorkspace.screensDidWakeNotification) { $0.displayAsleep = false }
         observe(workspace, NSWorkspace.sessionDidResignActiveNotification) { $0.sessionActive = false }
         observe(workspace, NSWorkspace.sessionDidBecomeActiveNotification) { $0.sessionActive = true }
         // Not public API names, but the ones every Mac app that cares uses:
         // the loginwindow posts them on the distributed center.
-        let distributed = DistributedNotificationCenter.default()
-        observe(distributed, Notification.Name("com.apple.screenIsLocked")) { $0.locked = true }
-        observe(distributed, Notification.Name("com.apple.screenIsUnlocked")) { $0.locked = false }
+        observe(distributed, Self.screenIsLocked) { $0.locked = true }
+        observe(distributed, Self.screenIsUnlocked) { $0.locked = false }
     }
+
+    nonisolated static let screenIsLocked = Notification.Name("com.apple.screenIsLocked")
+    nonisolated static let screenIsUnlocked = Notification.Name("com.apple.screenIsUnlocked")
 
     private func observe(
         _ center: NotificationCenter, _ name: Notification.Name,
@@ -98,7 +109,7 @@ final class ScreenState {
                     guard let self else { return }
                     apply(self)
                     if self.displayAsleep || self.locked || !self.sessionActive {
-                        NotificationCenter.default.post(name: Self.personLeft, object: nil)
+                        self.announce.post(name: Self.personLeft, object: nil)
                     }
                 }
             })

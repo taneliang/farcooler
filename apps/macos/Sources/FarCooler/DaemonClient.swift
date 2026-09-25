@@ -79,9 +79,11 @@ final class DaemonClient: ObservableObject {
     /// holding several at once possible at all.
     let target: String
 
-    init(target: String = "") {
+    /// `notifications` is where the app resigning and `ScreenState.personLeft`
+    /// are heard: the default center, except in a test, which posts on its own.
+    init(target: String = "", notifications: NotificationCenter = .default) {
         self.target = target.trimmingCharacters(in: .whitespaces)
-        watchResignations()
+        watchResignations(on: notifications)
     }
 
     /// Who is at this Mac, for `reportWatching`. A test holds any part of it
@@ -2038,10 +2040,10 @@ final class DaemonClient: ObservableObject {
     ///
     /// And the moment the person goes: display sleep, the lock screen or a
     /// switch to another user (`ScreenState.personLeft`), for the same reason.
-    private func watchResignations() {
-        resignObserver = NotificationCenter.default
+    private func watchResignations(on notifications: NotificationCenter) {
+        resignObserver = notifications
             .publisher(for: NSApplication.didResignActiveNotification)
-            .merge(with: NotificationCenter.default.publisher(for: ScreenState.personLeft))
+            .merge(with: notifications.publisher(for: ScreenState.personLeft))
             .sink { [weak self] _ in
                 Task { @MainActor in self?.reportWatching([]) }
             }
