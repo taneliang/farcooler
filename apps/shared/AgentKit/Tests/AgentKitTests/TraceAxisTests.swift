@@ -304,4 +304,133 @@ struct TraceAxisTests {
         #expect(card.span == nil)
         #expect(card.rows.first?.trace == nil)
     }
+
+    // MARK: - The anchor: where a trace is, not only what shape it has
+
+    /// **The phase.** A five-minute trace whose newest bucket is the third of
+    /// its half hour, placed by its anchor rather than packed from the end.
+    ///
+    /// Anchor 6002 is absolute five-minute bucket 6002, so the thirteen are
+    /// 5990 through 6002. Half hours are six of those: 5988–5993 is half hour
+    /// 998, 5994–5999 is 999, 6000–6005 is 1000. So sources 0…3 land in 998,
+    /// 4…9 in 999 and 10…12 in 1000 — the newest THREE in the newest column,
+    /// where packing from the end puts six. Powers of two, so every grouping
+    /// has its own sum.
+    @Test func anAnchoredTraceIsPlacedByItsPhase() throws {
+        let code: [UInt16] = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
+        let fine = try #require(
+            ActivityTrace(ActivityTraceTests.encoded(code: code, width: 0)))
+
+        let placed = fine.placed(on: .sixHours, anchor: 6002, newest: 1000)
+        #expect(placed.span == .sixHours)
+        // 1024 + 2048 + 4096, sources 10…12.
+        #expect(placed.code(12) == 7168)
+        // 16 + 32 + 64 + 128 + 256 + 512, sources 4…9.
+        #expect(placed.code(11) == 1008)
+        // 1 + 2 + 4 + 8, sources 0…3.
+        #expect(placed.code(10) == 15)
+        for column in 0...9 { #expect(placed.code(column) == 0) }
+
+        // And that is NOT what packing from the end draws — the one-column
+        // error the anchor exists to remove, pinned so the two cannot quietly
+        // become the same function.
+        #expect(fine.rebucketed(to: .sixHours).code(12) == 8064)
+    }
+
+    /// Where the phase happens to be the last bucket of its half hour, placing
+    /// and packing agree exactly. That is `rebucketed(to:)`'s own claim — "exact
+    /// when the phase is `per - 1`" — checked from the other side.
+    @Test func anAnchorAtTheEndOfItsColumnDrawsWhatPackingDid() throws {
+        let code: [UInt16] = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
+        let fine = try #require(
+            ActivityTrace(ActivityTraceTests.encoded(code: code, width: 0)))
+        // 6005 is the sixth five-minute bucket of half hour 1000.
+        #expect(fine.placed(on: .sixHours, anchor: 6005, newest: 1000) == fine.rebucketed(to: .sixHours))
+    }
+
+    /// **The skew, made visible.** Two rows from two runners' last notices, end
+    /// to end from the push's JSON: a five-minute row anchored at 6002 (half
+    /// hour 1000) and a thirty-minute row anchored at 998, two half hours
+    /// earlier.
+    ///
+    /// The newer row sets the card's newest column, 1000. The older row ends two
+    /// columns before it: its thirteen buckets are half hours 986…998, so they
+    /// fill columns 0…10, its two oldest fall off the left of the window, and
+    /// columns 11 and 12 are EMPTY — the runner said nothing about them. Packing
+    /// from the end drew both rows ending in column 12, as if they had been
+    /// encoded together.
+    ///
+    /// **This is the test that fails if the card ignores the anchor.**
+    @Test func twoAnchoredRowsShareOneAbsoluteGrid() throws {
+        let short = ActivityTraceTests.encoded(
+            code: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096], width: 0)
+        let long = ActivityTraceTests.encoded(
+            code: [UInt16](repeating: 5, count: 13), width: 1)
+        let json = """
+            {"terminal":"a","label":"a","machine":"m","status":"working","detail":"",
+             "blocked":0,"review":0,"working":2,"more":0,
+             "rows":[{"terminal":"a","label":"quick","status":"working","detail":"",
+                      "trace":"\(short.base64EncodedString())","traceAnchor":6002},
+                     {"terminal":"b","label":"old","status":"working","detail":"",
+                      "trace":"\(long.base64EncodedString())","traceAnchor":998}]}
+            """
+        let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
+        let card = try #require(AgentCardLayout(state: state))
+        #expect(card.span == .sixHours)
+        #expect(card.rows.first?.row.traceAnchor == 6002, "the anchor did not survive the decode")
+
+        let quick = try #require(card.rows.first?.trace)
+        #expect(quick.code(12) == 7168)
+        #expect(quick.code(11) == 1008)
+        #expect(quick.code(10) == 15)
+        #expect(quick.code(9) == 0)
+
+        let old = try #require(card.rows.last?.trace)
+        for column in 0...10 { #expect(old.code(column) == 5, "column \(column)") }
+        #expect(old.code(11) == 0, "the older runner said nothing about this half hour")
+        #expect(old.code(12) == 0, "the older runner said nothing about this half hour")
+    }
+
+    /// A row from a runner too old to send an anchor, beside one that sent it.
+    ///
+    /// The anchored row is placed; the other is packed from its newest end into
+    /// the card's newest column, exactly as every row was before anchors — the
+    /// old drawing, not an invented placement. (`twoRowsAtDifferentWindowsAreDrawnOnOne`
+    /// above is the card where NO row has one, and it is unchanged.)
+    @Test func aRowWithNoAnchorIsPackedAsBefore() throws {
+        let short = ActivityTraceTests.encoded(
+            code: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096], width: 0)
+        let long = ActivityTraceTests.encoded(
+            code: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096], width: 1)
+        let json = """
+            {"terminal":"a","label":"a","machine":"m","status":"working","detail":"",
+             "blocked":0,"review":0,"working":2,"more":0,
+             "rows":[{"terminal":"a","label":"quick","status":"working","detail":"",
+                      "trace":"\(short.base64EncodedString())","traceAnchor":6002},
+                     {"terminal":"b","label":"old","status":"working","detail":"",
+                      "trace":"\(long.base64EncodedString())"}]}
+            """
+        let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
+        let card = try #require(AgentCardLayout(state: state))
+
+        #expect(card.rows.first?.trace?.code(12) == 7168, "the anchored row was not placed")
+        let old = try #require(card.rows.last?.trace)
+        #expect(old.code(12) == 4096, "an unanchored row keeps its newest bucket in the newest column")
+        #expect(old.code(0) == 1)
+    }
+
+    /// The anchor round-trips through the encoder ActivityKit persists a card
+    /// with, and a malformed one is no anchor rather than a thrown decode —
+    /// which would keep the whole activity out of `Activity.activities`.
+    @Test func theAnchorSurvivesPersistenceAndAMalformedOneIsDropped() throws {
+        let row = AgentCardRow(terminal: "t", trace: Data([0x10]), traceAnchor: 5_960_000)
+        let back = try JSONDecoder().decode(
+            AgentCardRow.self, from: JSONEncoder().encode(row))
+        #expect(back.traceAnchor == 5_960_000)
+
+        let odd = #"{"terminal":"t","traceAnchor":"5960000"}"#
+        let lenient = try JSONDecoder().decode(AgentCardRow.self, from: Data(odd.utf8))
+        #expect(lenient.traceAnchor == nil)
+        #expect(lenient.terminal == "t")
+    }
 }

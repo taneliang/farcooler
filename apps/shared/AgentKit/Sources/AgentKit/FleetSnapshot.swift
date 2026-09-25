@@ -984,12 +984,13 @@ public struct ActivityTrace: Sendable, Equatable {
     /// is the property `farcooler_core::trace`'s header spends itself on.
     ///
     /// A residual of under one column against the twenty-four-fold mismatch it
-    /// replaces is worth taking, and it is a residual rather than a fix: closing
-    /// it needs one number per trace on the wire and is written up in
-    /// `.claude/agent/needs-planning/`. **Do not close it by guessing `t` from
-    /// the device clock** — a card is drawn long after the push that filled it,
-    /// so that trades a bounded one-directional error for an unbounded one and
-    /// makes the drawing move on its own.
+    /// replaces is worth taking. The number that closes it is now on the wire
+    /// for a runner new enough to send it — the anchor, the absolute index of
+    /// the newest bucket — and `placed(on:anchor:newest:)` is this sum done
+    /// with it. This is the fallback for a trace without one. **Do not close the
+    /// residual by guessing `t` from the device clock** — a card is drawn long
+    /// after the push that filled it, so that trades a bounded one-directional
+    /// error for an unbounded one and makes the drawing move on its own.
     ///
     /// Returns `self` unchanged for a target that is not coarser, which is the
     /// case `AgentCardLayout` hits on every row already at the axis.
@@ -1021,6 +1022,82 @@ public struct ActivityTrace: Sendable, Equatable {
         }
 
         return Self.encoded(code: code, output: output, commits: commits, span: axis)
+    }
+
+    /// This trace on an absolute grid of `axis` buckets, with its newest bucket
+    /// placed by the runner's own word rather than by assumption.
+    ///
+    /// `anchor` is the absolute index of this trace's newest bucket in its OWN
+    /// width — `farcooler_core::trace::Trace::anchor`, `now.div_euclid(width)`
+    /// — so bucket `i` of the thirteen, oldest first, is absolute fine bucket
+    /// `anchor - 12 + i`. The widths are whole multiples, so that bucket lies
+    /// wholly inside coarse bucket `floor((anchor - 12 + i) / per)`, and
+    /// `newest` says which coarse bucket is the card's column 12. Every bucket
+    /// therefore has exactly one column, found by arithmetic on two integers:
+    /// no phase is assumed, no clock is read, and the same inputs always draw
+    /// the same picture.
+    ///
+    /// What `rebucketed(to:)` could not do, both halves of it:
+    ///
+    ///   - **The phase.** A five-minute trace whose newest bucket is the third
+    ///     of its half hour puts its newest THREE buckets in the newest column,
+    ///     not six; packing from the newest end would have put six there and
+    ///     drawn everything before them one column too new.
+    ///   - **The skew.** A trace whose newest bucket is older than `newest` —
+    ///     a runner that last spoke a while before another — lands that many
+    ///     columns to the left, with the columns after it EMPTY. That is the
+    ///     truth about what the card was told. It is not a claim the agent was
+    ///     idle then; nothing on the card can say that, and this does not.
+    ///
+    /// A bucket that lands left of column 0 is older than the card's window and
+    /// is dropped, like any history the window does not reach. One that would
+    /// land right of column 12 cannot occur when `newest` is the newest column
+    /// any row reaches, which is how `AgentCardLayout` chooses it — and is
+    /// dropped rather than drawn in the wrong place if a caller passes less.
+    ///
+    /// Returns `self` unchanged for an axis finer than this trace, or one that
+    /// is not a whole multiple of it: neither can be placed without splitting a
+    /// bucket, which is `rebucketed`'s refusal too.
+    public func placed(on axis: Span, anchor: Int, newest: Int) -> ActivityTrace {
+        guard axis.bucketSeconds >= span.bucketSeconds,
+            axis.bucketSeconds % span.bucketSeconds == 0
+        else { return self }
+        let per = axis.bucketSeconds / span.bucketSeconds
+
+        // Wider accumulators than the fields, for `rebucketed`'s reason.
+        var code = [UInt32](repeating: 0, count: Self.buckets)
+        var output = [UInt32](repeating: 0, count: Self.buckets)
+        var commits = [UInt32](repeating: 0, count: Self.buckets)
+        for bucket in 0..<Self.buckets {
+            let absolute = anchor - (Self.buckets - 1) + bucket
+            let column = (Self.buckets - 1) - (newest - Self.floorDiv(absolute, per))
+            guard (0..<Self.buckets).contains(column) else { continue }
+            code[column] += UInt32(self.code(bucket))
+            output[column] += UInt32(self.output(bucket))
+            commits[column] += UInt32(self.commits(bucket))
+        }
+        return Self.encoded(code: code, output: output, commits: commits, span: axis)
+    }
+
+    /// Which `axis` bucket, by absolute index, holds the bucket `anchor` indexes
+    /// at `span`. What `AgentCardLayout` compares rows' newest buckets by.
+    ///
+    /// Nil for an axis finer than `span` or not a whole multiple of it, where
+    /// one fine index is not inside one coarse bucket.
+    public static func column(of anchor: Int, at span: Span, on axis: Span) -> Int? {
+        guard axis.bucketSeconds >= span.bucketSeconds,
+            axis.bucketSeconds % span.bucketSeconds == 0
+        else { return nil }
+        return floorDiv(anchor, axis.bucketSeconds / span.bucketSeconds)
+    }
+
+    /// Division rounding toward negative infinity, which is what an absolute
+    /// grid needs and Swift's `/` is not: `/` rounds toward zero, so a
+    /// negative index would land in the bucket to its right. No runner's clock
+    /// reads before 1970, and the arithmetic should not depend on that.
+    private static func floorDiv(_ value: Int, _ divisor: Int) -> Int {
+        let quotient = value / divisor
+        return (value % divisor != 0 && (value < 0) != (divisor < 0)) ? quotient - 1 : quotient
     }
 
     /// The wire's bytes, for a caller that has to put a trace back on one.

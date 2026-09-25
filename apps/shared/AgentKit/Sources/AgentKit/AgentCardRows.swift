@@ -89,6 +89,20 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
     /// refuses to build from nil so the surface draws nothing rather than a
     /// flat line at zero.
     public var trace: Data?
+    /// Where `trace`'s newest bucket sits in time: its absolute index, the Unix
+    /// second it began divided by the trace's own bucket width. The relay's
+    /// `traceAnchor`, which it carries beside the blob without decoding either;
+    /// see `farcooler_core::trace::Trace::anchor`.
+    ///
+    /// **What lets the card put every row on one grid.** The bytes are a shape
+    /// and say how much, never when. With this, `AgentCardLayout` places each
+    /// bucket in the column it actually belongs to — see
+    /// `ActivityTrace.placed(on:anchor:newest:)`.
+    ///
+    /// Nil from a runner or a relay older than the field, and for a row with no
+    /// trace. The row is then packed from its newest end, which is the drawing
+    /// every card had before this existed.
+    public var traceAnchor: Int?
 
     public var id: String { terminal }
 
@@ -103,7 +117,8 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         commits: Int? = nil,
         startedAt: Date? = nil,
         updatedAt: Date? = nil,
-        trace: Data? = nil
+        trace: Data? = nil,
+        traceAnchor: Int? = nil
     ) {
         self.terminal = terminal
         self.label = label
@@ -116,11 +131,12 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         self.startedAt = startedAt
         self.updatedAt = updatedAt
         self.trace = trace
+        self.traceAnchor = traceAnchor
     }
 
     private enum CodingKeys: String, CodingKey {
         case terminal, label, machine, status, detail
-        case insertions, deletions, commits, startedAt, updatedAt, trace
+        case insertions, deletions, commits, startedAt, updatedAt, trace, traceAnchor
     }
 
     public init(from decoder: Decoder) throws {
@@ -150,6 +166,9 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         // throwing.
         trace = ((try? container.decodeIfPresent(String.self, forKey: .trace)) ?? nil)
             .flatMap { Data(base64Encoded: $0) }
+        // An integer or nothing. Anything else is a row packed from its newest
+        // end, which is the old drawing and not a wrong one — never a throw.
+        traceAnchor = number(.traceAnchor)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -165,6 +184,7 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
         try container.encodeIfPresent(AgentCardClock.number(startedAt), forKey: .startedAt)
         try container.encodeIfPresent(AgentCardClock.number(updatedAt), forKey: .updatedAt)
         try container.encodeIfPresent(trace?.base64EncodedString(), forKey: .trace)
+        try container.encodeIfPresent(traceAnchor, forKey: .traceAnchor)
     }
 
     /// How long ago this row last said anything.
@@ -240,8 +260,9 @@ public struct AgentCardLayout: Sendable, Equatable {
         /// The thirteen buckets this row DRAWS, on the axis the card chose.
         ///
         /// **Not `row.trace`, and the raw bytes are deliberately not vended
-        /// here.** Every drawn row is re-bucketed onto one window by
-        /// `AgentCardLayout.init` — see `axis(of:)` — and a surface that reached
+        /// here.** Every drawn row is re-bucketed onto one window, and placed on
+        /// one grid where the runner anchored it, by `AgentCardLayout.init` —
+        /// see `axis(of:)` and `newest(of:on:)` — and a surface that reached
         /// past this for `AgentCardRow.trace` would put the card straight back
         /// to thirteen columns meaning something different on every line. The
         /// bytes are still on `row` for anything that wants the wire; nothing
@@ -307,6 +328,12 @@ public struct AgentCardLayout: Sendable, Equatable {
         let read = drawn.map { ActivityTrace($0.trace) }
         let axis = Self.axis(of: read)
         span = axis
+        // And the column the card's newest column IS, in absolute time, from
+        // the rows that say where they are. Nil when none does — every row then
+        // packs from its newest end, which is the card before anchors existed.
+        let newest = axis.flatMap { axis in
+            Self.newest(of: zip(read, drawn).map { ($0, $1.traceAnchor) }, on: axis)
+        }
 
         rows = zip(drawn, read).map { row, trace in
             Row(
@@ -316,11 +343,7 @@ public struct AgentCardLayout: Sendable, Equatable {
                 detail: row.detail,
                 diff: Self.diff(insertions: row.insertions, deletions: row.deletions),
                 footnote: Self.footnote(row, at: now),
-                // Summed onto the shared axis. A row already there is returned
-                // unchanged; a finer one loses resolution and nothing else. See
-                // `ActivityTrace.rebucketed(to:)`, which also states the one
-                // thing the wire does not carry.
-                trace: axis.flatMap { trace?.rebucketed(to: $0) })
+                trace: axis.flatMap { Self.drawn(trace, anchor: row.traceAnchor, on: $0, newest: newest) })
         }
 
         // Two separate populations, added once. `more` is the fleet minus the
@@ -378,6 +401,46 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// an absent row narrow an axis it is not on.
     static func axis(of traces: [ActivityTrace?]) -> ActivityTrace.Span? {
         traces.compactMap { $0?.span }.max { $0.bucketSeconds < $1.bucketSeconds }
+    }
+
+    /// The absolute index, in `axis` buckets, of the card's newest column: the
+    /// newest bucket any ANCHORED row reaches.
+    ///
+    /// **The newest row sets it, so every other row is placed against the
+    /// freshest word the card has.** A row whose runner last spoke longer ago
+    /// ends earlier on the grid, and the columns after its last bucket are
+    /// empty — which is the cross-runner skew made VISIBLE. It is not the skew
+    /// closed: rows are the last notice from each of several runners, up to
+    /// `ROW_QUIET_AFTER_MS` apart, and an empty trailing column says "this
+    /// runner has said nothing since", not "this agent did nothing". The card
+    /// has no clock of its own to tell those apart and must not borrow the
+    /// phone's; see `ActivityTrace.rebucketed(to:)` on why.
+    ///
+    /// Nil when no row with a trace carries an anchor.
+    static func newest(
+        of rows: [(trace: ActivityTrace?, anchor: Int?)], on axis: ActivityTrace.Span
+    ) -> Int? {
+        rows.compactMap { row -> Int? in
+            guard let trace = row.trace, let anchor = row.anchor else { return nil }
+            return ActivityTrace.column(of: anchor, at: trace.span, on: axis)
+        }.max()
+    }
+
+    /// One row's trace as the card draws it.
+    ///
+    /// Placed exactly when both the row and the card know where they are in
+    /// time. Otherwise — a runner too old to send an anchor, or a card where no
+    /// row has one — packed from its newest end onto the axis, which puts its
+    /// newest bucket in the card's newest column: the drawing every card had
+    /// before, right to within one column and blind to skew.
+    static func drawn(
+        _ trace: ActivityTrace?, anchor: Int?, on axis: ActivityTrace.Span, newest: Int?
+    ) -> ActivityTrace? {
+        guard let trace else { return nil }
+        if let anchor, let newest {
+            return trace.placed(on: axis, anchor: anchor, newest: newest)
+        }
+        return trace.rebucketed(to: axis)
     }
 
     /// What to call this agent.

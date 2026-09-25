@@ -230,10 +230,11 @@ private struct GlanceCardRow: View {
         // under one set of x positions. `AgentCardLayout` now picks the coarsest
         // window its rows carry and sums the finer ones onto it, so `row.trace`
         // is the drawn trace and the raw bytes are not reachable from here on
-        // purpose. See `ActivityTrace.rebucketed(to:)` for the sum, and for the
-        // one thing the wire does not carry: the second a trace's newest bucket
-        // starts at, without which the placement is right to within one column
-        // and no better.
+        // purpose. Where the runner sent the trace's anchor — the absolute
+        // index of its newest bucket — every bucket is placed on one grid
+        // exactly (`ActivityTrace.placed(on:anchor:newest:)`); where it did
+        // not, the row is packed from its newest end
+        // (`ActivityTrace.rebucketed(to:)`), right to within one column.
         if let read = row.trace {
             GlanceTraceView(read, size: .cardRow)
         } else {
