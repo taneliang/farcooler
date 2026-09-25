@@ -919,7 +919,18 @@ async fn a_workspace(
     client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
     dir: &std::path::Path,
 ) -> farcooler_protocol::v1::Workspace {
-    let repo_path = dir.join("demo");
+    a_workspace_named(client, dir, "demo", "tiling").await
+}
+
+/// `a_workspace`, in a repository called `repository` on a branch named for
+/// `task`: two of them on one daemon need two names.
+async fn a_workspace_named(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    dir: &std::path::Path,
+    repository: &str,
+    task: &str,
+) -> farcooler_protocol::v1::Workspace {
+    let repo_path = dir.join(repository);
     std::fs::create_dir(&repo_path).unwrap();
     for args in [
         vec!["init", "-q", "."],
@@ -957,8 +968,8 @@ async fn a_workspace(
     create.target_resource_id = Some(repository.id.clone());
     create.payload = Some(request::Payload::WorkspaceCreate(
         farcooler_protocol::v1::WorkspaceCreate {
-            task_name: "tiling".into(),
-            branch: "feat/tiling".into(),
+            task_name: task.into(),
+            branch: format!("feat/{task}"),
             base_revision: "HEAD".into(),
             terminal_preset: String::new(),
             adopt_existing: false,
@@ -1022,6 +1033,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
             command_preset: "shell".into(),
             join_active_group: false,
             prompt: None,
+            task_key: None,
         },
     ));
     let result = client.call(create).await.expect("terminal.create");
@@ -1119,6 +1131,7 @@ async fn a_terminal(
             command_preset: "shell".into(),
             join_active_group: false,
             prompt: None,
+            task_key: None,
         },
     ));
     let result = client.call(create).await.expect("terminal.create");
@@ -1904,10 +1917,114 @@ async fn a_terminal_that_starts_on_a_prompt_names_its_capability_and_is_served()
             command_preset: "shell".into(),
             join_active_group: false,
             prompt: Some("start here".into()),
+            task_key: None,
         },
     ));
     let result = client.call(create).await.expect("a daemon with launch_prompt serves it");
     assert!(matches!(result.value, Some(result::Value::Terminal(_))));
+}
+
+/// `terminal.create` for a task, named by key, with the capability that
+/// field needs. `fcprobe` is an agent preset by name (a plain identifier that
+/// isn't `shell` or `changes`) whose program this runner doesn't have, so the
+/// pane exports the key and nothing real is started.
+fn a_terminal_for(workspace: &bytes::Bytes, key: &str) -> farcooler_protocol::v1::Request {
+    let mut create = request("terminal.create");
+    create.target_resource_id = Some(workspace.clone());
+    create.required_capabilities = vec![farcooler_protocol::capability::TERMINAL_TASK.into()];
+    create.payload = Some(request::Payload::TerminalCreate(
+        farcooler_protocol::v1::TerminalCreate {
+            title: "worker".into(),
+            command_preset: "fcprobe".into(),
+            join_active_group: false,
+            prompt: None,
+            task_key: Some(key.into()),
+        },
+    ));
+    create
+}
+
+/// What tmux was told to run in every pane on this harness's server.
+fn start_commands(h: &Harness) -> Vec<String> {
+    let out = std::process::Command::new("tmux")
+        .args(["-L", &h.tmux_socket, "list-panes", "-a", "-F", "#{pane_start_command}"])
+        .output()
+        .expect("tmux");
+    String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
+}
+
+#[tokio::test]
+async fn a_terminal_for_a_task_on_its_own_board_exports_the_key() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let task = create_task(&mut client, workspace.repository_id.clone(), "the work").await;
+
+    client.call(a_terminal_for(&workspace.id, &task.key)).await.expect("opened for its task");
+
+    let commands = start_commands(&h);
+    assert!(
+        commands.iter().any(|c| c.contains(&format!("FARCOOLER_TASK={}", task.key))),
+        "the pane names its task: {commands:?}"
+    );
+}
+
+/// A key that exists, but on another repository's board, is refused and names
+/// the argument. Resolved across every board, it would open a pane here
+/// working another repository's ticket.
+#[tokio::test]
+async fn a_terminal_for_a_task_on_another_board_is_refused() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let here_dir = tempfile::tempdir().unwrap();
+    let there_dir = tempfile::tempdir().unwrap();
+    let here = a_workspace(&mut client, here_dir.path()).await;
+    let there = a_workspace_named(&mut client, there_dir.path(), "yonder", "elsewhere").await;
+    let elsewhere = create_task(&mut client, there.repository_id.clone(), "not here").await;
+    let before = terminals(&mut client).await.len();
+
+    match client.call(a_terminal_for(&here.id, &elsewhere.key)).await {
+        Err(ClientError::Daemon { code, what, .. }) => {
+            assert_eq!(code, ErrorCode::InvalidArgument as i32);
+            assert_eq!(what, "task_key");
+        }
+        other => panic!("a task on another board must be refused: {other:?}"),
+    }
+    assert_eq!(terminals(&mut client).await.len(), before, "and nothing was opened");
+}
+
+#[tokio::test]
+async fn an_unknown_key_is_refused_and_no_pane_is_opened() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+    let before = terminals(&mut client).await.len();
+
+    match client.call(a_terminal_for(&workspace.id, "de-404")).await {
+        Err(ClientError::Daemon { code, what, .. }) => {
+            assert_eq!(code, ErrorCode::InvalidArgument as i32);
+            assert_eq!(what, "task_key");
+        }
+        other => panic!("an unknown key must be refused: {other:?}"),
+    }
+    assert_eq!(terminals(&mut client).await.len(), before, "no pane, no record");
+    assert!(start_commands(&h).iter().all(|c| !c.contains("fcprobe")), "no pane");
+}
+
+/// Empty is proto3's "unset", and what every older client sends.
+#[tokio::test]
+async fn an_empty_task_key_is_an_ordinary_terminal() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+
+    client.call(a_terminal_for(&workspace.id, "")).await.expect("an ordinary terminal");
+    let commands = start_commands(&h);
+    assert!(commands.iter().any(|c| c.contains("fcprobe")), "{commands:?}");
+    assert!(commands.iter().all(|c| !c.contains("FARCOOLER_TASK")), "{commands:?}");
 }
 
 #[tokio::test]

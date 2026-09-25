@@ -333,6 +333,7 @@ async fn a_pane(runner: &Runner) -> uuid::Uuid {
             command_preset: "shell".into(),
             join_active_group: false,
             prompt: None,
+            task_key: None,
         },
     ));
     let result = client.call(terminal).await.expect("terminal.create");

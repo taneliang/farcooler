@@ -1419,6 +1419,20 @@ message TerminalCreate {
   // drops an unknown field and would open the agent with an empty composer
   // while the client believed the task had been sent.
   optional string prompt = 4;
+  // The board task this terminal is opened to work, by its key (`fc-12`).
+  //
+  // Resolved on the workspace's own repository's board, and refused as
+  // `task_key` when it isn't there. The terminal records the task, an agent
+  // pane exports it as FARCOOLER_TASK on this launch and every relaunch, and
+  // its first message becomes a fixed opening prompt that points it at the
+  // task (with `prompt`, if set, after it). What `farcooler task dispatch`
+  // sends. Unset or empty is an ordinary launch.
+  //
+  // Gated by the `terminal_task` capability, named in
+  // `Request.required_capabilities` by a client that fills it in: an older
+  // daemon drops the field and would open a pane that knows no task, while
+  // the client moved the task into progress.
+  optional string task_key = 5;
 }
 
 message TerminalResize {

@@ -1300,6 +1300,12 @@ impl Rpc {
                 let Some(request::Payload::TerminalCreate(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                // Before anything is made, so a key that isn't on this
+                // workspace's board opens no pane and writes no record.
+                let task = match p.task_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+                    Some(key) => Some(svc.task_on_workspace_board(workspace, key)?),
+                    None => None,
+                };
                 // Joining the active layout is a SPLIT of the focused pane,
                 // not a new window.
                 //
@@ -1328,7 +1334,7 @@ impl Rpc {
                                 &p.title,
                                 &p.command_preset,
                                 p.prompt.as_deref(),
-                                None,
+                                task,
                             )
                             .await?;
                         return self.terminal_result(term.id).await;
@@ -1340,7 +1346,7 @@ impl Rpc {
                         &p.title,
                         &p.command_preset,
                         p.prompt.as_deref(),
-                        None,
+                        task,
                     )
                     .await?;
                 // A new terminal is a new tmux window, which IS a new layout —

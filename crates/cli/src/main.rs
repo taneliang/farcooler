@@ -596,6 +596,14 @@ enum TerminalCmd {
         /// once past it. Only this launch: a restart does not send it again.
         #[arg(long, allow_hyphen_values = true)]
         prompt: Option<String>,
+        /// The board task this pane is opened to work, by key (`fc-12`), on
+        /// the workspace's own repository's board.
+        ///
+        /// An agent pane exports it as FARCOOLER_TASK, now and after every
+        /// restart, and starts on a short message that points it at the task.
+        /// `farcooler task dispatch` does this and moves the task too.
+        #[arg(long)]
+        task: Option<String>,
     },
     /// Send exact bytes to a terminal.
     Send { terminal: String, data: String },
@@ -2192,18 +2200,21 @@ fn layout_json(
 // Terminals: records through the daemon, bytes through tmux
 // ---------------------------------------------------------------------------
 
-/// `terminal.create`, with the prompt's capability named when there is one:
-/// a daemon too old to know the field then refuses the request, rather than
-/// dropping the prompt and opening the agent on an empty composer. See
-/// `capability::LAUNCH_PROMPT`.
-fn terminal_create_request(
+/// `terminal.create`, with each optional field's capability named when it is
+/// sent: a daemon too old to know the field then refuses the request, rather
+/// than dropping it in silence (opening the agent on an empty composer, or a
+/// pane that knows no task). See `capability::LAUNCH_PROMPT` and
+/// `capability::TERMINAL_TASK`.
+pub(crate) fn terminal_create_request(
     workspace: uuid::Uuid,
     title: String,
     preset: String,
     tile: bool,
     prompt: Option<String>,
+    task: Option<String>,
 ) -> farcooler_protocol::v1::Request {
     let prompt = prompt.filter(|p| !p.trim().is_empty());
+    let task = task.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
     let mut req = with(
         req_for("terminal.create", workspace),
         request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
@@ -2211,10 +2222,14 @@ fn terminal_create_request(
             command_preset: preset,
             join_active_group: tile,
             prompt: prompt.clone(),
+            task_key: task.clone(),
         }),
     );
     if prompt.is_some() {
-        req.required_capabilities = vec![farcooler_protocol::capability::LAUNCH_PROMPT.to_string()];
+        req.required_capabilities.push(farcooler_protocol::capability::LAUNCH_PROMPT.to_string());
+    }
+    if task.is_some() {
+        req.required_capabilities.push(farcooler_protocol::capability::TERMINAL_TASK.to_string());
     }
     req
 }
@@ -2222,12 +2237,12 @@ fn terminal_create_request(
 async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible {
     match cmd {
         // Record changes. These write durable intent, so they go to the daemon.
-        TerminalCmd::Create { workspace, preset, title, tile, prompt } => {
+        TerminalCmd::Create { workspace, preset, title, tile, prompt, task } => {
             let mut link = connect_to(runner).await?;
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
             let title = title.unwrap_or_else(|| preset.clone());
-            let req = terminal_create_request(uuid_of(&ws.id), title, preset, tile, prompt);
+            let req = terminal_create_request(uuid_of(&ws.id), title, preset, tile, prompt, task);
             let r = link.call(req).await?;
             let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
                 return Err("the daemon returned the wrong resource".into());
@@ -3310,16 +3325,38 @@ mod tests {
     fn a_terminal_created_with_a_prompt_names_the_capability_it_needs() {
         let ws = uuid::Uuid::now_v7();
         let with_prompt =
-            terminal_create_request(ws, "claude".into(), "claude".into(), false, Some("fix it".into()));
+            terminal_create_request(ws, "claude".into(), "claude".into(), false, Some("fix it".into()), None);
         assert_eq!(with_prompt.required_capabilities, [farcooler_protocol::capability::LAUNCH_PROMPT]);
         let Some(request::Payload::TerminalCreate(p)) = with_prompt.payload else { panic!("payload") };
         assert_eq!(p.prompt.as_deref(), Some("fix it"));
 
         // Without one, an older daemon is asked nothing it cannot do.
         for prompt in [None, Some("  ".to_string())] {
-            let plain = terminal_create_request(ws, "c".into(), "claude".into(), false, prompt);
+            let plain = terminal_create_request(ws, "c".into(), "claude".into(), false, prompt, None);
             assert!(plain.required_capabilities.is_empty());
         }
+    }
+
+    /// A task key is a field an older daemon would drop, opening a pane that
+    /// knows no task while `task dispatch` moves the task into progress.
+    #[test]
+    fn a_terminal_created_for_a_task_names_the_capability_it_needs() {
+        let ws = uuid::Uuid::now_v7();
+        let for_task =
+            terminal_create_request(ws, "w".into(), "claude".into(), false, None, Some(" fc-3 ".into()));
+        assert_eq!(for_task.required_capabilities, [farcooler_protocol::capability::TERMINAL_TASK]);
+        let Some(request::Payload::TerminalCreate(p)) = for_task.payload else { panic!("payload") };
+        assert_eq!(p.task_key.as_deref(), Some("fc-3"));
+
+        let both = terminal_create_request(
+            ws, "w".into(), "claude".into(), false, Some("go".into()), Some("fc-3".into()));
+        assert_eq!(
+            both.required_capabilities,
+            [farcooler_protocol::capability::LAUNCH_PROMPT, farcooler_protocol::capability::TERMINAL_TASK]
+        );
+
+        let none = terminal_create_request(ws, "w".into(), "claude".into(), false, None, Some("".into()));
+        assert!(none.required_capabilities.is_empty(), "an empty key is no key");
     }
 
     #[test]

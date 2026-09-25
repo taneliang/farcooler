@@ -332,6 +332,14 @@ pub mod capability {
     /// and a client that reads it absent types the message in itself, as it
     /// always did.
     pub const LAUNCH_PROMPT: &str = "launch_prompt";
+    /// `TerminalCreate.task_key`: a terminal opened for a board task, which
+    /// exports `FARCOOLER_TASK` and starts its agent on the task.
+    ///
+    /// A field, so its own capability, for `LAUNCH_PROMPT`'s reason: an older
+    /// daemon drops it without a word, and `farcooler task dispatch` would
+    /// then move a task into progress beside a pane that was never told
+    /// about it. A client that sends one names this in the request.
+    pub const TERMINAL_TASK: &str = "terminal_task";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -341,7 +349,7 @@ pub mod capability {
         &[
             WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKSPACE_ORDER, TASKS,
-            LAUNCH_PROMPT,
+            LAUNCH_PROMPT, TERMINAL_TASK,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such

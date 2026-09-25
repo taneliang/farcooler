@@ -2712,6 +2712,21 @@ impl Service {
         Ok((key, Some(first)))
     }
 
+    /// The task `key` names on `workspace`'s own board, for `terminal.create`.
+    ///
+    /// On that board only. Resolved across every board, a key that happens to
+    /// exist elsewhere would open a pane in this repository working another
+    /// one's ticket. Exactly one match, or a refusal naming `task_key`: no
+    /// match is a typo or another board, and two is the prefixless-key case
+    /// `tasks_with_key` returns a list for, which is refused, never picked.
+    pub fn task_on_workspace_board(&self, workspace: Uuid, key: &str) -> Result<Uuid> {
+        let ws = self.store.get_workspace(workspace)?;
+        match self.store.tasks_with_key(Some(ws.repository_id), key.trim())?.as_slice() {
+            [task] => Ok(task.id),
+            _ => Err(DomainError::InvalidArgument { what: "task_key" }),
+        }
+    }
+
     /// The key a relaunch of `term` exports: the one its first launch did.
     fn pane_task_key(&self, term: &models::Terminal) -> Option<String> {
         let key = self.store.get_task(term.task_id?).ok()?.key;

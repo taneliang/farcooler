@@ -238,6 +238,7 @@ async fn a_terminal(
         command_preset: "shell".into(),
         join_active_group: false,
         prompt: None,
+        task_key: None,
     }));
     let result = client.call(create).await.expect("terminal.create");
     let Some(result::Value::Terminal(terminal)) = result.value else { panic!("wrong result") };
