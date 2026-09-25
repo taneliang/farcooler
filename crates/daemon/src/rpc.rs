@@ -1149,8 +1149,14 @@ impl Rpc {
                 let ws = if p.adopt_existing {
                     svc.adopt_branch(repository, &p.branch).await?
                 } else {
-                    svc.create_workspace(repository, &p.task_name, &p.branch, &p.base_revision)
-                        .await?
+                    svc.create_workspace_with(
+                        repository,
+                        &p.task_name,
+                        &p.branch,
+                        &p.base_revision,
+                        p.fork_only,
+                    )
+                    .await?
                 };
                 // A worktree with nothing running in it is a directory.
                 //

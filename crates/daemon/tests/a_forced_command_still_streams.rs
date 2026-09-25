@@ -320,6 +320,7 @@ async fn a_pane(runner: &Runner) -> uuid::Uuid {
             base_revision: "HEAD".into(),
             terminal_preset: String::new(),
             adopt_existing: false,
+            fork_only: false,
         },
     ));
     let result = client.call(create).await.expect("workspace.create");

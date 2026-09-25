@@ -260,14 +260,35 @@ pub async fn create_worktree(
     base_revision: &str,
     destination: &Path,
 ) -> Result<CreatedWorktree> {
+    create_worktree_with(repo, branch, base_revision, destination, false).await
+}
+
+/// `create_worktree`, or with `fork_only` a NEW branch or nothing: a name any
+/// remote already carries is refused as `BranchExists`, whatever the base,
+/// rather than checked out.
+///
+/// For a client that made the name up — the Mac's ⌘N task — where a checkout
+/// would start the task on somebody's commits. Asked here, under the caller's
+/// repository lock, because a client's own look at the branch list is a
+/// moment older than the create: a `git fetch` in between brings the name in.
+pub async fn create_worktree_with(
+    repo: &Path,
+    branch: &str,
+    base_revision: &str,
+    destination: &Path,
+    fork_only: bool,
+) -> Result<CreatedWorktree> {
     if branch_exists(repo, branch).await? {
         return Err(DomainError::BranchExists);
     }
     if destination.exists() {
         return Err(DomainError::WorktreeExists);
     }
+    if fork_only &&!remotes_with_branch(repo, branch).await?.is_empty() {
+        return Err(DomainError::BranchExists);
+    }
 
-    let tracking = if base_revision == "HEAD" {
+    let tracking = if base_revision == "HEAD" && !fork_only {
         match remotes_with_branch(repo, branch).await?.as_slice() {
             [only] => Some(format!("{only}/{branch}")),
             // None, or too many to choose between. Both fall back to the base
@@ -661,6 +682,32 @@ mod tests {
             head_of(&d, "feat-branch@{upstream}"),
             head_of(&d, "refs/remotes/origin/feat-branch"),
         );
+
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Fork only: a name a remote already carries is refused, not checked
+    /// out, and nothing is made — at `HEAD`, where the plain create would
+    /// check it out, and at a named base too.
+    #[tokio::test]
+    async fn fork_only_refuses_a_name_a_remote_carries_and_makes_nothing() {
+        let d = scratch("forkonly");
+        init_repo(&d);
+        add_remote_branch(&d, "origin", "feat-branch", "forkonly");
+        for base in ["HEAD", "main"] {
+            let dest = sibling("forkonly");
+            let err = create_worktree_with(&d, "feat-branch", base, &dest, true).await.unwrap_err();
+            assert!(matches!(err, DomainError::BranchExists), "{base}: {err:?}");
+            assert!(!dest.exists(), "{base}: no worktree");
+            assert!(!branch_exists(&d, "feat-branch").await.unwrap(), "{base}: no local branch");
+        }
+
+        // A name nobody has is made as ever, and is a fork.
+        let dest = sibling("forkonly");
+        let created = create_worktree_with(&d, "fresh", "HEAD", &dest, true).await.unwrap();
+        assert!(created.forked);
+        assert_eq!(created.commit, head_of(&d, "refs/heads/main"));
 
         let _ = std::fs::remove_dir_all(&dest);
         let _ = std::fs::remove_dir_all(&d);

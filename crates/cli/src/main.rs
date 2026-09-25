@@ -515,6 +515,15 @@ enum WorkspaceCmd {
         /// shell sitting beside its agent.
         #[arg(long, conflicts_with = "terminal")]
         no_terminal: bool,
+        /// Only ever a new branch: refuse, rather than check out, a name a
+        /// local branch or any remote already has.
+        ///
+        /// Without it, a name that exists only on one remote is checked out
+        /// from there when `--base` is `HEAD`. For a caller that made the
+        /// name up for new work, which would otherwise start on somebody
+        /// else's commits. Needs a runner new enough to have it.
+        #[arg(long)]
+        fork_only: bool,
     },
     /// Show the fleet with freshly derived state.
     List,
@@ -1647,26 +1656,54 @@ async fn repo(runner: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
     Ok(())
 }
 
+/// `workspace.create` for a new branch, naming `workspace_fork_only` when
+/// `fork_only` is set: a daemon too old to know the field then refuses the
+/// request rather than dropping it and checking out a branch a remote already
+/// has. See `capability::WORKSPACE_FORK_ONLY`.
+pub(crate) fn workspace_create_request(
+    repository: uuid::Uuid,
+    name: String,
+    branch: String,
+    base: String,
+    terminal_preset: String,
+    fork_only: bool,
+) -> farcooler_protocol::v1::Request {
+    let mut req = with(
+        req_for("workspace.create", repository),
+        request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
+            // The field kept its wire name and changed meaning: this is the
+            // worktree's name now. Renaming it would have broken every
+            // shipped client to say the same thing in different words.
+            task_name: name,
+            branch,
+            base_revision: base,
+            terminal_preset,
+            adopt_existing: false,
+            fork_only,
+        }),
+    );
+    if fork_only {
+        req.required_capabilities
+            .push(farcooler_protocol::capability::WORKSPACE_FORK_ONLY.to_string());
+    }
+    req
+}
+
 async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
     match cmd {
-        WorkspaceCmd::Create { repo, name, branch, base, terminal, no_terminal } => {
+        WorkspaceCmd::Create { repo, name, branch, base, terminal, no_terminal, fork_only } => {
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
+            let terminal = if no_terminal { String::new() } else { terminal };
             let r = link
-                .call(with(
-                    req_for("workspace.create", uuid_of(&target.id)),
-                    request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
-                        // The field kept its wire name and changed meaning:
-                        // this is the worktree's name now. Renaming it would
-                        // have broken every shipped client to say the same
-                        // thing in different words.
-                        task_name: name,
-                        branch,
-                        base_revision: base,
-                        terminal_preset: if no_terminal { String::new() } else { terminal },
-                        adopt_existing: false,
-                    }),
+                .call(workspace_create_request(
+                    uuid_of(&target.id),
+                    name,
+                    branch,
+                    base,
+                    terminal,
+                    fork_only,
                 ))
                 .await?;
             let result::Value::Workspace(ws) = expect_value(r.value, "workspace")? else {
@@ -1845,6 +1882,7 @@ async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Falli
                         base_revision: String::new(),
                         terminal_preset: String::new(),
                         adopt_existing: true,
+                        fork_only: false,
                     }),
                 ))
                 .await?;
@@ -3328,6 +3366,26 @@ mod tests {
         assert_eq!(error_code_line(refused.as_ref(), false), None, "a person has the sentence");
         let other: Box<dyn std::error::Error> = "no such workspace".into();
         assert_eq!(error_code_line(other.as_ref(), true), None);
+    }
+
+    /// `fork_only` is a field an older daemon would drop, checking out a
+    /// branch a remote has as if nothing had been asked.
+    #[test]
+    fn a_fork_only_create_names_the_capability_it_needs() {
+        let repo = uuid::Uuid::now_v7();
+        let create = |fork_only| {
+            workspace_create_request(
+                repo, "fix-it".into(), "fix-it".into(), "HEAD".into(), String::new(), fork_only)
+        };
+        let forking = create(true);
+        assert_eq!(forking.required_capabilities, [farcooler_protocol::capability::WORKSPACE_FORK_ONLY]);
+        let Some(request::Payload::WorkspaceCreate(p)) = forking.payload else { panic!("payload") };
+        assert!(p.fork_only && !p.adopt_existing);
+
+        let plain = create(false);
+        assert!(plain.required_capabilities.is_empty(), "an older daemon is asked nothing new");
+        let Some(request::Payload::WorkspaceCreate(p)) = plain.payload else { panic!("payload") };
+        assert!(!p.fork_only);
     }
 
     #[test]

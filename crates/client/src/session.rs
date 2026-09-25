@@ -953,6 +953,7 @@ impl Session {
             base_revision: base.into(),
             terminal_preset: terminal_preset.into(),
             adopt_existing: adopt,
+            fork_only: false,
         });
         match self.value("workspace.create", Some(repository), Some(payload)).await? {
             result::Value::Workspace(w) => Ok(w),

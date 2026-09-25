@@ -1873,6 +1873,7 @@ async fn dispatch<L: DispatchLink>(
                         base_revision: base.clone(),
                         terminal_preset: String::new(),
                         adopt_existing: false,
+                        fork_only: false,
                     }),
                 ))
                 .await?;

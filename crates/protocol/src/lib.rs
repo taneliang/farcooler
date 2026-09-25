@@ -340,6 +340,15 @@ pub mod capability {
     /// then move a task into progress beside a pane that was never told
     /// about it. A client that sends one names this in the request.
     pub const TERMINAL_TASK: &str = "terminal_task";
+    /// `WorkspaceCreate.fork_only`: a create that makes a new branch or
+    /// refuses, never checking out one a remote already has.
+    ///
+    /// A field, so its own capability, for `LAUNCH_PROMPT`'s reason: an older
+    /// daemon drops it without a word and checks a remote-only name out,
+    /// which starts a new task on somebody else's commits. A client that
+    /// sets it names this in the request, and a client that reads it absent
+    /// keeps its own check against the branch list.
+    pub const WORKSPACE_FORK_ONLY: &str = "workspace_fork_only";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -349,7 +358,7 @@ pub mod capability {
         &[
             WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKSPACE_ORDER, TASKS,
-            LAUNCH_PROMPT, TERMINAL_TASK,
+            LAUNCH_PROMPT, TERMINAL_TASK, WORKSPACE_FORK_ONLY,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such

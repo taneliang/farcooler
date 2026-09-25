@@ -148,6 +148,7 @@ async fn a_repository_with_a_branch(
             base_revision: "HEAD".into(),
             terminal_preset: String::new(),
             adopt_existing: false,
+            fork_only: false,
         },
     ));
     client.call(create).await.expect("workspace.create");

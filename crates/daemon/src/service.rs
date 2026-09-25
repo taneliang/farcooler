@@ -2212,6 +2212,21 @@ impl Service {
         branch: &str,
         base_revision: &str,
     ) -> Result<models::Workspace> {
+        self.create_workspace_with(repository_id, name, branch, base_revision, false).await
+    }
+
+    /// `create_workspace`, and with `fork_only` never on a branch that already
+    /// exists anywhere: a name a remote carries is refused as `BranchExists`
+    /// instead of checked out (`git::create_worktree_with`). What
+    /// `WorkspaceCreate.fork_only` asks for.
+    pub async fn create_workspace_with(
+        &self,
+        repository_id: Uuid,
+        name: &str,
+        branch: &str,
+        base_revision: &str,
+        fork_only: bool,
+    ) -> Result<models::Workspace> {
         validate::worktree_name(name)?;
         validate::branch_name(branch)?;
 
@@ -2230,7 +2245,8 @@ impl Service {
         // from the base. Rolling back compares this against the worktree's
         // HEAD, so a second `resolve_revision` here would refuse to remove the
         // very worktree it had just made.
-        let created = git::create_worktree(&repo_path, branch, base_revision, &dest).await?;
+        let created =
+            git::create_worktree_with(&repo_path, branch, base_revision, &dest, fork_only).await?;
         let base_commit = created.commit;
         // Claim it before anyone can adopt it. Another install sharing this
         // host sees the same worktree in `git worktree list` and would

@@ -219,6 +219,7 @@ async fn a_workspace(
         base_revision: "HEAD".into(),
         terminal_preset: String::new(),
         adopt_existing: false,
+        fork_only: false,
     }));
     let result = client.call(create).await.expect("workspace.create");
     let Some(result::Value::Workspace(workspace)) = result.value else { panic!("wrong result") };

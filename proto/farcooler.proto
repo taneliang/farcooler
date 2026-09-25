@@ -1395,6 +1395,22 @@ message WorkspaceCreate {
   // another machine, handed over by a colleague, or produced by a cloud agent.
   // A branch that exists only on a remote gets a local tracking branch.
   bool adopt_existing = 5;
+  // Only ever a NEW branch, cut from the base: refused with `BRANCH_EXISTS`
+  // when a local branch or any remote already carries the name.
+  //
+  // Without it, a name that exists only on one remote is checked out from
+  // there when the base is `HEAD` — right for `workspace create feat` typed
+  // by someone who knows the branch, and wrong for a client that made the
+  // name up for a new task: the task would start on somebody's commits
+  // with no word said. A client can check the branch list first, but a
+  // `git fetch` between that read and this create brings the name in
+  // anyway; only the daemon, holding the repository lock, can close that
+  // window. Ignored with `adopt_existing`, which is the opposite request.
+  //
+  // Gated by the `workspace_fork_only` capability, and a client that sets it
+  // names that capability in `Request.required_capabilities`: an older
+  // daemon drops an unknown field and would check the branch out anyway.
+  bool fork_only = 6;
 }
 
 message Branch {

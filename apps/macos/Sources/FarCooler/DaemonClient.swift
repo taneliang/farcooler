@@ -1400,7 +1400,10 @@ final class DaemonClient: ObservableObject {
     /// **A new task never lands on an existing branch**: a name whose
     /// directory, local branch or remote branch already exists gets `-2`,
     /// `-3` … first. The daemon checks a remote-only branch OUT rather than
-    /// forking it, which would start the task on somebody's old commits.
+    /// forking it, which would start the task on somebody's old commits — so
+    /// on a runner that has it, the create is also `--fork-only`, and a name
+    /// that arrived since the list was read is refused rather than checked
+    /// out.
     func startTask(project: String, description: String, name: String, agent: String) async
         -> TaskStart
     {
@@ -1425,21 +1428,33 @@ final class DaemonClient: ObservableObject {
         }
         let branch = Branch.slug(from: name, prefix: prefix)
 
+        // Asked, if the first status read has not landed yet: both the create
+        // and the terminal below are decided on what this runner can do.
+        if daemonBuild == nil { await readDaemonBuild() }
+
         // `--no-terminal`, because this creates its own agent terminal a few
         // lines below. Without it a task would come up with an unused shell
         // sitting beside the agent that is doing the work. `--json`, so what
         // comes back names THIS workspace — two tasks started close together
         // would otherwise each guess the other's from a before-and-after diff.
-        let (made, makeFailure) = await runRaw([
-            "--json", "workspace", "create", project, name, "--branch", branch, "--no-terminal",
-        ])
+        //
+        // `--fork-only` where the runner has it: the branch list above is a
+        // moment old, and a `git fetch` since — an agent in a sibling worktree
+        // does them — can bring in a remote branch of this very name, which a
+        // plain create would check out. The runner refuses that instead
+        // (`branch-exists`), holding its repository lock. An older runner has
+        // only the list's word for it. `"workspace_fork_only"` is
+        // `farcooler_protocol::capability::WORKSPACE_FORK_ONLY`.
+        let forkOnly = daemonBuild?.can("workspace_fork_only") ?? false
+        let (made, makeFailure) = await runRaw(
+            ["--json", "workspace", "create", project, name, "--branch", branch, "--no-terminal"]
+                + (forkOnly ? ["--fork-only"] : []))
         guard let workspace = made.flatMap(Created.decode) else {
             return .failed(TaskFailure.sentence(for: makeFailure), workspace: nil)
         }
 
-        // Asked, if the first status read has not landed yet: deciding on a
-        // nil build would type the task — the path gates break.
-        if daemonBuild == nil { await readDaemonBuild() }
+        // Deciding on a nil build would type the task — the path gates break —
+        // so the build was asked for above if it had not landed yet.
         // `"launch_prompt"` is `farcooler_protocol::capability::LAUNCH_PROMPT`.
         let asArgument =
             (daemonBuild?.can("launch_prompt") ?? false) && Agents.takesPrompt(preset: agent)

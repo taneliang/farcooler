@@ -228,6 +228,7 @@ async fn create_workspace(
             base_revision: "HEAD".into(),
             terminal_preset: preset.into(),
             adopt_existing: false,
+            fork_only: false,
         },
     ));
     let result = client.call(create).await.expect("workspace.create");
@@ -729,6 +730,7 @@ async fn a_root_with_workspaces_under_it_is_refused_with_an_actionable_reason() 
             base_revision: "HEAD".into(),
             terminal_preset: String::new(),
             adopt_existing: false,
+            fork_only: false,
         },
     ));
     client.call(create).await.expect("workspace.create");
@@ -973,6 +975,7 @@ async fn a_workspace_named(
             base_revision: "HEAD".into(),
             terminal_preset: String::new(),
             adopt_existing: false,
+            fork_only: false,
         },
     ));
     let result = client.call(create).await.expect("workspace.create");
@@ -1922,6 +1925,57 @@ async fn a_terminal_that_starts_on_a_prompt_names_its_capability_and_is_served()
     ));
     let result = client.call(create).await.expect("a daemon with launch_prompt serves it");
     assert!(matches!(result.value, Some(result::Value::Terminal(_))));
+}
+
+/// `WorkspaceCreate.fork_only` reaches the daemon and holds: a name only a
+/// remote carries, which a plain create at `HEAD` checks out, is refused with
+/// `BRANCH_EXISTS` and nothing is made. With the capability it needs named,
+/// which this daemon serves rather than refuses.
+#[tokio::test]
+async fn a_fork_only_create_refuses_a_branch_a_remote_already_has() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (dir, repository) = registered_repository(&mut client).await;
+    let repo = dir.path().join("demo");
+
+    let upstream = tempfile::tempdir().unwrap();
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let status = std::process::Command::new("git").args(args).current_dir(dir).status().unwrap();
+        assert!(status.success(), "git {args:?} in {}", dir.display());
+    };
+    for args in [
+        &["init", "-q", "."][..],
+        &["config", "user.email", "t@example.com"],
+        &["config", "user.name", "t"],
+        &["config", "commit.gpgsign", "false"],
+        &["checkout", "-q", "-b", "theirs"],
+        &["commit", "-q", "--allow-empty", "-m", "their work"],
+    ] {
+        git(upstream.path(), args);
+    }
+    git(&repo, &["remote", "add", "origin", upstream.path().to_str().unwrap()]);
+    git(&repo, &["fetch", "-q", "origin"]);
+
+    let before = workspaces(&mut client).await.len();
+    let mut create = request("workspace.create");
+    create.target_resource_id = Some(repository);
+    create.required_capabilities =
+        vec![farcooler_protocol::capability::WORKSPACE_FORK_ONLY.into()];
+    create.payload = Some(request::Payload::WorkspaceCreate(
+        farcooler_protocol::v1::WorkspaceCreate {
+            task_name: "theirs".into(),
+            branch: "theirs".into(),
+            base_revision: "HEAD".into(),
+            terminal_preset: String::new(),
+            adopt_existing: false,
+            fork_only: true,
+        },
+    ));
+    match client.call(create).await {
+        Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::BranchExists as i32),
+        other => panic!("expected BRANCH_EXISTS, got {other:?}"),
+    }
+    assert_eq!(workspaces(&mut client).await.len(), before, "nothing was made");
 }
 
 /// `terminal.create` for a task, named by key, with the capability that

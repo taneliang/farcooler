@@ -209,6 +209,20 @@ struct StartTaskTests {
             ])
     }
 
+    /// A runner that can refuse a branch a remote already has is asked to,
+    /// which closes the window between reading the branch list and the create.
+    /// One that can't is asked nothing it would refuse.
+    @Test func theCreateIsForkOnlyWhereTheRunnerCanDoIt() async {
+        for (capabilities, forkOnly) in [
+            (Self.prompting + ["workspace_fork_only"], true), (Self.prompting, false),
+        ] {
+            let runner = Runner(capabilities: capabilities)
+            let client = await client(runner)
+            _ = await start(client)
+            #expect(runner.made("workspace")?.contains("--fork-only") == forkOnly, "\(capabilities)")
+        }
+    }
+
     @Test func aNameAWorktreeOrABranchAlreadyHasGetsANumber() async {
         for setUp in [
             { (r: Runner) in r.existing = ["fix-flaky-reconnect"] },
