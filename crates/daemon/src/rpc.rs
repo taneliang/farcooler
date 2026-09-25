@@ -1321,18 +1321,26 @@ impl Rpc {
                     });
                     if let Some(anchor) = anchor {
                         let term = svc
-                            .split_terminal(
+                            .split_terminal_with_prompt(
                                 workspace,
                                 anchor,
                                 farcooler_protocol::v1::SplitSide::Right,
                                 &p.title,
                                 &p.command_preset,
+                                p.prompt.as_deref(),
                             )
                             .await?;
                         return self.terminal_result(term.id).await;
                     }
                 }
-                let term = svc.create_terminal(workspace, &p.title, &p.command_preset).await?;
+                let term = svc
+                    .create_terminal_with_prompt(
+                        workspace,
+                        &p.title,
+                        &p.command_preset,
+                        p.prompt.as_deref(),
+                    )
+                    .await?;
                 // A new terminal is a new tmux window, which IS a new layout —
                 // so the workspace's set of layouts just changed and every
                 // watcher has to be told.

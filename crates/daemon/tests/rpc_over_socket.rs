@@ -1021,6 +1021,7 @@ async fn zoom_follows_focus_so_four_agents_can_be_read_one_at_a_time() {
             title: "one".into(),
             command_preset: "shell".into(),
             join_active_group: false,
+            prompt: None,
         },
     ));
     let result = client.call(create).await.expect("terminal.create");
@@ -1117,6 +1118,7 @@ async fn a_terminal(
             title: title.into(),
             command_preset: "shell".into(),
             join_active_group: false,
+            prompt: None,
         },
     ));
     let result = client.call(create).await.expect("terminal.create");
@@ -1880,6 +1882,32 @@ async fn a_capability_this_machine_has_is_not_refused() {
     let mut req = request("workspace.list");
     req.required_capabilities = vec![farcooler_protocol::capability::WORKSPACES.into()];
     assert!(client.call(req).await.is_ok());
+}
+
+#[tokio::test]
+async fn a_terminal_that_starts_on_a_prompt_names_its_capability_and_is_served() {
+    // `TerminalCreate.prompt` is a field, so a client that sends one names
+    // `launch_prompt` — and this daemon, which has it, must serve the request
+    // rather than refuse it. A shell preset takes no prompt, so this starts
+    // nothing that would act on one.
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = a_workspace(&mut client, dir.path()).await;
+
+    let mut create = request("terminal.create");
+    create.target_resource_id = Some(workspace.id.clone());
+    create.required_capabilities = vec![farcooler_protocol::capability::LAUNCH_PROMPT.into()];
+    create.payload = Some(request::Payload::TerminalCreate(
+        farcooler_protocol::v1::TerminalCreate {
+            title: "one".into(),
+            command_preset: "shell".into(),
+            join_active_group: false,
+            prompt: Some("start here".into()),
+        },
+    ));
+    let result = client.call(create).await.expect("a daemon with launch_prompt serves it");
+    assert!(matches!(result.value, Some(result::Value::Terminal(_))));
 }
 
 #[tokio::test]

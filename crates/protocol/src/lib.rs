@@ -322,6 +322,16 @@ pub mod capability {
     /// exactly why this is published — but publishing it and reading it are
     /// two jobs, and only the first is done.
     pub const TASKS: &str = "tasks";
+    /// `TerminalCreate.prompt`: an agent terminal that starts on a message,
+    /// passed as the agent's launch argument.
+    ///
+    /// A FIELD rather than a method, which is exactly the case
+    /// `Request.required_capabilities` exists for: an older daemon drops the
+    /// field as unknown and opens the agent with an empty composer, with no
+    /// error anywhere. A client that sends a prompt names this in the request,
+    /// and a client that reads it absent types the message in itself, as it
+    /// always did.
+    pub const LAUNCH_PROMPT: &str = "launch_prompt";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -331,6 +341,7 @@ pub mod capability {
         &[
             WORKSPACES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKSPACE_ORDER, TASKS,
+            LAUNCH_PROMPT,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such

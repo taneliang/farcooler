@@ -71,15 +71,35 @@ pub fn shim_binary(daemon_exe: Option<&std::path::Path>) -> String {
 /// Wrap a value so a shell treats it as exactly one word.
 ///
 /// Single quotes, because inside them a shell interprets nothing at all — no
-/// variable expansion, no globbing, no command substitution. The only character
-/// that needs handling is a single quote itself, which is closed, escaped and
-/// reopened.
+/// variable expansion, no globbing, no command substitution. A single quote
+/// itself is closed, escaped and reopened; so is a backslash, for fish (below).
 ///
 /// This exists for paths that Far Cooler did not choose: a worktree under
 /// `~/My Projects` splits into two arguments unquoted, which takes agent mode
 /// down entirely for anyone whose directories have spaces in them.
+///
+/// **A backslash is taken out of the quotes too**, and that is for fish. A
+/// pane's command is parsed by the user's login shell (tmux's `default-shell`
+/// is pinned to it, and the payload goes to `<login shell> -ilc`), and fish
+/// is the one shell here whose single quotes are not inert: inside them `\\`
+/// is one backslash and `\'` is a quote. So `'a\\b'` reads as `a\b` to fish
+/// and `a\\b` to sh, and a backslash before a closing quote ends nothing in
+/// sh but escapes the quote in fish. Written OUTSIDE the quotes as `\\`, a
+/// backslash is one backslash to every shell there is, which is what makes
+/// this one function right under both. It mattered little while the only
+/// things quoted were paths; a prompt somebody typed can hold anything.
 pub fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        match c {
+            '\'' => out.push_str(r"'\''"),
+            '\\' => out.push_str(r"'\\'"),
+            c => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
 }
 
 /// The preset whose pane is this worktree's diff.
@@ -121,21 +141,101 @@ fn changes_host_command() -> String {
 /// both from one call to `Service::prepare_launch_hooks` and hands both to
 /// the same builders; a second parameter threaded beside the first is a
 /// second thing each of the four launch paths could forget.
+///
+/// Two more that are not files:
+///
+/// - `trust_workspace` is cursor's `--trust`, set by `prepare_launch_hooks`
+///   for a worktree this runner made itself (`Service::made_this_worktree`).
+///   cursor trusts per directory, and every new worktree is a new directory,
+///   so without it every task started on a worktree Far Cooler had just made
+///   sat on "Trust this workspace?" until someone answered it. It is on every
+///   launch in such a worktree, restarts included: a restarted pane that
+///   asked again would be the same gate one click later.
+/// - `prompt` is the agent's first message, as its launch argument. **Set by
+///   `create_terminal_with_prompt` and nowhere else**, which is how "first
+///   launch only" is kept: every other launch path builds its extras from
+///   `prepare_launch_hooks`, which never sets it, so a restart, a split or a
+///   pane coming back from chat cannot send the task a second time.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchExtras {
     pub settings: Option<PathBuf>,
     pub plugin_dir: Option<PathBuf>,
+    pub trust_workspace: bool,
+    pub prompt: Option<LaunchPrompt>,
+}
+
+/// An agent's first message, and how it reaches the agent's argv.
+///
+/// Two forms because tmux has a ceiling. The whole `new-window` command,
+/// every argument of it, travels from the tmux client to the server as one
+/// message, and a message is capped: measured on tmux 3.7c, a 16 300-byte
+/// command is accepted and a 17 000-byte one is refused with "command too
+/// long". A prompt is quoted twice on its way in, and a pasted stack trace is
+/// easily past that. So a long one goes into a file instead, and the command
+/// carries the file's name (`MAX_INLINE_LAUNCH_BYTES`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchPrompt {
+    /// The text itself, `shell_quote`d into the command.
+    Inline(String),
+    /// A file in the runtime directory holding the text. The launch reads it
+    /// with `"$(cat …)"` and removes it; see `prompt_argument`.
+    File(PathBuf),
 }
 
 impl LaunchExtras {
     /// An ordinary launch: nothing handed over.
-    pub const NONE: LaunchExtras = LaunchExtras { settings: None, plugin_dir: None };
+    pub const NONE: LaunchExtras =
+        LaunchExtras { settings: None, plugin_dir: None, trust_workspace: false, prompt: None };
 
     #[cfg(test)]
     fn settings_only(path: &Path) -> Self {
-        Self { settings: Some(path.to_path_buf()), plugin_dir: None }
+        Self { settings: Some(path.to_path_buf()), ..Self::NONE }
     }
 }
+
+/// The largest launch command that carries its prompt inline. Past this the
+/// prompt goes through a file (`LaunchPrompt::File`).
+///
+/// Half of tmux's measured ceiling (see `LaunchPrompt`), because the command
+/// is not all tmux is sent: the window's title, the worktree path and the
+/// format string share the same message.
+pub const MAX_INLINE_LAUNCH_BYTES: usize = 8 * 1024;
+
+/// The prompt as the last word of an agent's `-ilc` payload, or nothing.
+///
+/// Inline, it is one `shell_quote`d word. From a file it is
+/// `"$(cat <file> && rm -f <file>)"`: one word in every shell this runs
+/// under (POSIX shells and fish 3.4 or later both keep a double-quoted
+/// command substitution whole, newlines included), and the file is gone once
+/// the agent has it, so a runtime directory does not collect every long
+/// prompt anyone ever sent. Both forms trim nothing but the trailing newlines
+/// command substitution always drops.
+///
+/// A prompt that starts with `-` gets a space in front, in both forms. All
+/// three CLIs parse their arguments with a library that reads a leading dash
+/// as a flag, so "--help me with this" would print help, and "-p fix it"
+/// would run claude in print mode, rather than start the task. A leading space
+/// is nothing to the agent reading the message.
+fn prompt_argument(prompt: Option<&LaunchPrompt>) -> String {
+    match prompt {
+        None => String::new(),
+        Some(LaunchPrompt::Inline(text)) => format!(" {}", shell_quote(&dash_guarded(text))),
+        Some(LaunchPrompt::File(path)) => {
+            let path = shell_quote(&path.display().to_string());
+            format!(" \"$(cat {path} && rm -f {path})\"")
+        }
+    }
+}
+
+/// `text`, with a space in front when it would otherwise read as a flag.
+fn dash_guarded(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.starts_with('-') { format!(" {text}").into() } else { text.into() }
+}
+
+/// codex's startup update check, off. See the `"codex"` arm of
+/// `preset_command_with_hooks`; a resumed codex gets it too, because the
+/// offer is made on every start.
+const CODEX_NO_UPDATE_CHECK: &str = "-c check_for_update_on_startup=false";
 
 /// `--settings <file>` and `--plugin-dir <dir>`, each present only when there
 /// is a file to name, each path `shell_quote`d. Both of claude's arms (a fresh
@@ -200,6 +300,10 @@ pub fn preset_command_with_hooks(
     // — a space, in the default install, for every user.
     let settings = claude_extra_flags(extras);
 
+    // The first message, for the three agents that take one as an argument.
+    // Empty on every launch but a terminal's first (see `LaunchExtras`).
+    let prompt = prompt_argument(extras.prompt.as_ref());
+
     match agent {
         "shell" => format!("{shell} -il"),
         // Before the shell branches below, and deliberately not through one: a
@@ -218,19 +322,40 @@ pub fn preset_command_with_hooks(
         // `shell_quote` produces exactly the `'claude…'` this arm has always
         // produced, byte for byte.
         "claude" => {
-            format!("{shell} -ilc {}", shell_quote(&format!("claude{flag}{session}{settings}")))
+            format!(
+                "{shell} -ilc {}",
+                shell_quote(&format!("claude{flag}{session}{settings}{prompt}"))
+            )
         }
-        "codex" => format!("{shell} -ilc 'codex{flag}'"),
+        // `shell_quote` around the payload now, for claude's reason: the
+        // prompt is quoted in turn. With no prompt the payload holds no quote.
+        //
+        // `check_for_update_on_startup=false` because codex's update offer is
+        // a numbered menu that waits for Enter, and in a pane nobody is
+        // watching yet that is a task that never starts. Per launch rather
+        // than in `~/.codex/config.toml`, which is the person's own file.
+        // The key was checked against the installed codex: it is a field of
+        // codex's config (a wrong type there fails `codex doctor`'s config
+        // load, where an unknown key is ignored).
+        "codex" => format!(
+            "{shell} -ilc {}",
+            shell_quote(&format!("codex{flag} {CODEX_NO_UPDATE_CHECK}{prompt}"))
+        ),
         // `shell_quote` around the payload for claude's reason: the plugin
-        // path is quoted in turn. With no plugin directory the payload holds
-        // no quote, and this is the `'cursor-agent…'` it always was.
+        // path is quoted in turn. With no plugin directory, no trust and no
+        // prompt the payload holds no quote, and this is the
+        // `'cursor-agent…'` it always was.
         "cursor" => {
             let plugin = extras
                 .plugin_dir
                 .as_deref()
                 .map(|p| format!(" --plugin-dir {}", shell_quote(&p.display().to_string())))
                 .unwrap_or_default();
-            format!("{shell} -ilc {}", shell_quote(&format!("cursor-agent{flag}{plugin}")))
+            let trust = if extras.trust_workspace { " --trust" } else { "" };
+            format!(
+                "{shell} -ilc {}",
+                shell_quote(&format!("cursor-agent{flag}{trust}{plugin}{prompt}"))
+            )
         }
         other if is_safe_model(other) => format!("{shell} -ilc '{other}{flag}'"),
         // An unrecognized preset that is not a plain identifier is not run at
@@ -429,6 +554,78 @@ fn project_skill_for(preset: &str) -> Option<crate::skill_install::Harness> {
         "codex" => Some(crate::skill_install::Harness::Codex),
         _ => None,
     }
+}
+
+/// Whether a preset runs cursor, with or without a model.
+fn is_cursor(preset: &str) -> bool {
+    preset.split_once(':').map_or(preset, |(agent, _)| agent) == "cursor"
+}
+
+/// The largest prompt `terminal.create` accepts: 256 KiB, a quarter of the
+/// control envelope's ceiling, and far more than anyone types.
+pub const MAX_LAUNCH_PROMPT_BYTES: usize = 256 * 1024;
+
+/// A prompt that can become a process argument. A NUL cannot: argv strings
+/// are NUL-terminated, so the text after it would be cut off without a word.
+fn validate_launch_prompt(prompt: &str) -> Result<()> {
+    if prompt.len() > MAX_LAUNCH_PROMPT_BYTES {
+        return Err(DomainError::InvalidArgument { what: "prompt is too long" });
+    }
+    if prompt.contains('\0') {
+        return Err(DomainError::InvalidArgument { what: "prompt contains a NUL byte" });
+    }
+    Ok(())
+}
+
+/// The whole first-launch command for a terminal: `preset_command_with_hooks`
+/// with `prompt` inline, or through a file when inline would be too long for
+/// tmux (`MAX_INLINE_LAUNCH_BYTES`).
+///
+/// Measured on the finished command, pane actor and all, because that is the
+/// string tmux is sent. The file is `prompt-<terminal id>` in the runtime
+/// directory, created 0600 — a prompt is somebody's words, and the runtime
+/// directory is shared by nothing but this user's own daemon. A file that
+/// cannot be written costs the prompt, not the pane: the agent opens with an
+/// empty composer, which is what happened to every prompt before this existed.
+fn launch_command_with_prompt(
+    runtime_dir: &Path,
+    terminal: Uuid,
+    preset: &str,
+    session_id: Option<&str>,
+    mut extras: LaunchExtras,
+    prompt: Option<&str>,
+) -> String {
+    let build = |extras: &LaunchExtras| {
+        with_pane_actor(terminal, preset, preset_command_with_hooks(preset, session_id, extras))
+    };
+    extras.prompt = prompt.map(|p| LaunchPrompt::Inline(p.to_string()));
+    let command = build(&extras);
+    let Some(text) = prompt else { return command };
+    if command.len() <= MAX_INLINE_LAUNCH_BYTES {
+        return command;
+    }
+    let path = runtime_dir.join(format!("prompt-{terminal}"));
+    extras.prompt = match write_private_file(&path, &dash_guarded(text)) {
+        Ok(()) => Some(LaunchPrompt::File(path)),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not write a long prompt to a file; the agent starts without it");
+            None
+        }
+    };
+    build(&extras)
+}
+
+/// Write `text` to `path`, readable by this user only.
+fn write_private_file(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(text.as_bytes())
 }
 
 /// Whether a preset's program takes `--plugin-dir`: claude and cursor, both
@@ -776,7 +973,7 @@ fn terminal_mode_command(
         }
     } else if preset.starts_with("codex") {
         if resumable {
-            format!("{} -ilc 'codex resume {session_id}'", shell())
+            format!("{} -ilc 'codex resume {session_id} {CODEX_NO_UPDATE_CHECK}'", shell())
         } else {
             // Same reasoning as claude's clean-start branch above: a codex
             // session with no completed turn wrote no rollout, and `codex
@@ -2214,7 +2411,29 @@ impl Service {
         // The manager skill: a plugin in the runtime directory, handed over as
         // `--plugin-dir` to claude and to cursor, which both take the flag.
         let plugin_dir = takes_plugin_dir(preset).then(|| write_plugin(&self.root)).flatten();
-        LaunchExtras { settings, plugin_dir }
+        // cursor's `--trust`, for a worktree this runner made. See
+        // `LaunchExtras::trust_workspace`.
+        let trust_workspace = is_cursor(preset) && self.made_this_worktree(Path::new(worktree));
+        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None }
+    }
+
+    /// Whether `worktree` is one this runner made: a directory under its own
+    /// `worktrees/`, which is where `worktree_dest` puts every worktree
+    /// `workspace create` and `workspace adopt` make, and nothing else does.
+    ///
+    /// The line cursor's `--trust` is drawn on. Trusting a directory is a
+    /// decision about its contents; a worktree Far Cooler checked out of a
+    /// repository the person registered holds that repository's own commits,
+    /// and the person asked for the trust screen to be gone there. A main
+    /// checkout, or a worktree somebody made by hand somewhere else, is left
+    /// to cursor to ask about, as it always has been.
+    ///
+    /// Canonical on both sides, for the `/var` and `/private/var` reason
+    /// `canonical_or_raw` gives.
+    fn made_this_worktree(&self, worktree: &Path) -> bool {
+        let ours = canonical_or_raw(&self.root.join("worktrees").display().to_string());
+        let path = canonical_or_raw(&worktree.display().to_string());
+        path != ours && path.starts_with(&ours)
     }
 
     /// Create a terminal: a tagged tmux window running the preset.
@@ -2224,8 +2443,35 @@ impl Service {
         title: &str,
         command_preset: &str,
     ) -> Result<models::Terminal> {
+        self.create_terminal_with_prompt(workspace_id, title, command_preset, None).await
+    }
+
+    /// Create a terminal whose agent starts on `prompt`: claude, codex and
+    /// cursor get it as their launch argument, which is what their own
+    /// `--help` calls the initial prompt. Any other preset ignores it.
+    ///
+    /// An argument rather than typing, which is what the Mac's ⌘N panel did
+    /// before this: it waited for the agent to look idle and typed the task
+    /// in. Any screen the agent put up first — cursor's trust gate, codex's
+    /// update offer — read as blocked, the app gave up, and the task was never
+    /// sent. An argument is held by the agent through any screen it shows and
+    /// submitted once past it.
+    ///
+    /// On this launch only. `prompt` goes into this call's `LaunchExtras` and
+    /// no other path sets one, so a restart never starts the task again.
+    pub async fn create_terminal_with_prompt(
+        &self,
+        workspace_id: Uuid,
+        title: &str,
+        command_preset: &str,
+        prompt: Option<&str>,
+    ) -> Result<models::Terminal> {
         validate::display_name(title)?;
         validate::command_preset(command_preset)?;
+        let prompt = prompt.filter(|p| !p.trim().is_empty());
+        if let Some(p) = prompt {
+            validate_launch_prompt(p)?;
+        }
 
         let ws = self.store.get_workspace(workspace_id)?;
 
@@ -2275,10 +2521,13 @@ impl Service {
 
         // 2. Create and tag the window.
         let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
-        let command = with_pane_actor(
+        let command = launch_command_with_prompt(
+            &self.root,
             term.id,
             command_preset,
-            preset_command_with_hooks(command_preset, declared.as_deref(), &extras),
+            declared.as_deref(),
+            extras,
+            prompt,
         );
         let created = self
             .tmux
@@ -2469,8 +2718,28 @@ impl Service {
         title: &str,
         command_preset: &str,
     ) -> Result<models::Terminal> {
+        self.split_terminal_with_prompt(workspace_id, target, side, title, command_preset, None)
+            .await
+    }
+
+    /// `split_terminal`, with the agent starting on `prompt` — the first
+    /// launch `terminal.create` makes when it is asked to join the active
+    /// layout. See `create_terminal_with_prompt`.
+    pub async fn split_terminal_with_prompt(
+        &self,
+        workspace_id: Uuid,
+        target: Uuid,
+        side: farcooler_protocol::v1::SplitSide,
+        title: &str,
+        command_preset: &str,
+        prompt: Option<&str>,
+    ) -> Result<models::Terminal> {
         validate::display_name(title)?;
         validate::command_preset(command_preset)?;
+        let prompt = prompt.filter(|p| !p.trim().is_empty());
+        if let Some(p) = prompt {
+            validate_launch_prompt(p)?;
+        }
 
         let ws = self.store.get_workspace(workspace_id)?;
         let pane = self.pane_of(target).await?;
@@ -2515,14 +2784,13 @@ impl Service {
         // until this line was found: splitting is how most panes on a runner
         // are made, so most claude panes reported nothing at all.
         let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path);
-        let command = with_pane_actor(
+        let command = launch_command_with_prompt(
+            &self.root,
             term.id,
             command_preset,
-            preset_command_with_hooks(
-                command_preset,
-                term.agent_session_id.as_deref(),
-                &extras,
-            ),
+            term.agent_session_id.as_deref(),
+            extras,
+            prompt,
         );
         let created = self
             .tmux
@@ -3895,7 +4163,12 @@ mod preset_tests {
     #[test]
     fn a_bare_preset_runs_the_agent() {
         assert!(preset_command_with_hooks("claude", None, &LaunchExtras::NONE).contains("'claude'"));
-        assert!(preset_command_with_hooks("codex", None, &LaunchExtras::NONE).contains("'codex'"));
+        // codex carries its update-check flag on every launch; see the
+        // `"codex"` arm.
+        assert!(
+            preset_command_with_hooks("codex", None, &LaunchExtras::NONE)
+                .contains("'codex -c check_for_update_on_startup=false'")
+        );
         assert!(preset_command_with_hooks("cursor", None, &LaunchExtras::NONE).contains("'cursor-agent'"));
         assert!(preset_command_with_hooks("shell", None, &LaunchExtras::NONE).ends_with("-il"));
     }
@@ -4070,7 +4343,7 @@ mod preset_tests {
     #[test]
     fn a_claude_launch_carries_the_plugin_dir_as_one_argument() {
         let (s, p) = ("/tmp/My Runner/hooks.json", "/tmp/My Runner/claude-plugin");
-        let extras = LaunchExtras { settings: Some(s.into()), plugin_dir: Some(p.into()) };
+        let extras = LaunchExtras { settings: Some(s.into()), plugin_dir: Some(p.into()), ..LaunchExtras::NONE };
         let command = preset_command_with_hooks("claude", None, &extras);
         assert_eq!(claude_argv_through_both_shells(&command), format!(",--settings,{s},--plugin-dir,{p}"));
     }
@@ -4084,6 +4357,7 @@ mod preset_tests {
         let extras = LaunchExtras {
             settings: Some("/tmp/fc/h.json".into()),
             plugin_dir: Some("/tmp/fc/farcooler-plugin".into()),
+            ..LaunchExtras::NONE
         };
         let sid = "018f5b2c-0000-7000-8000-00000000000e";
         for preset in ["codex", "codex:gpt-5.6-sol", "shell", "aider", CHANGES_PRESET] {
@@ -4114,7 +4388,7 @@ mod preset_tests {
     #[test]
     fn a_cursor_launch_carries_the_plugin_dir_as_one_argument() {
         let p = "/tmp/My Runner/farcooler-plugin";
-        let extras = LaunchExtras { settings: Some("/tmp/My Runner/h.json".into()), plugin_dir: Some(p.into()) };
+        let extras = LaunchExtras { settings: Some("/tmp/My Runner/h.json".into()), plugin_dir: Some(p.into()), ..LaunchExtras::NONE };
         let command = preset_command_with_hooks("cursor:auto", None, &extras);
         assert_eq!(argv_through_both_shells(&command, "cursor-agent"), format!(",--model,auto,--plugin-dir,{p}"));
     }
@@ -7169,7 +7443,7 @@ mod hook_file_tests {
     fn a_resumed_claude_keeps_the_plugin_dir() {
         let (s, p) = ("/tmp/My Runner/hooks.json", "/tmp/My Runner/claude-plugin");
         let sid = "018f5b2c-0000-7000-8000-00000000000f";
-        let extras = LaunchExtras { settings: Some(s.into()), plugin_dir: Some(p.into()) };
+        let extras = LaunchExtras { settings: Some(s.into()), plugin_dir: Some(p.into()), ..LaunchExtras::NONE };
         let command = terminal_mode_command("claude", sid, true, &extras);
         assert_eq!(
             super::preset_tests::claude_argv_through_both_shells(&command),
@@ -7643,6 +7917,7 @@ mod launch_hook_install_tests {
                 prepared = true;
             }
             let builds_a_launch = line.contains("preset_command_with_hooks(")
+                || line.contains("launch_command_with_prompt(")
                 || line.contains("respawn_command(");
             if builds_a_launch && let Some(name) = inside {
                 assert!(
@@ -7658,9 +7933,61 @@ mod launch_hook_install_tests {
         // And the guard is still looking at the four it was written for: a
         // rename that put a launch path out of its sight would otherwise leave
         // it passing over an empty walk.
-        for expected in ["create_terminal", "split_terminal", "restart_terminal", "set_pane_mode"] {
+        // `create_terminal` and `split_terminal` are delegates now; the
+        // launches they make are built in their `_with_prompt` halves.
+        for expected in [
+            "create_terminal_with_prompt",
+            "split_terminal_with_prompt",
+            "restart_terminal",
+            "set_pane_mode",
+        ] {
             assert!(covered.contains(&expected), "{expected} was not walked at all: {covered:?}");
         }
+    }
+
+    /// The first message goes to the first launch and to no other.
+    ///
+    /// Structural, because the other half of it cannot be run here: a test
+    /// that restarted a real agent pane would start a real agent. What keeps
+    /// a restart from sending the task again is that only two methods ever
+    /// build a launch with a prompt — the two first launches — and every
+    /// other path gets its extras from `prepare_launch_hooks`, which sets
+    /// none. This reads the production code and says so.
+    #[test]
+    fn only_a_first_launch_is_built_with_a_prompt() {
+        let production = production_half();
+        let mut inside: Option<String> = None;
+        let mut builders: Vec<String> = Vec::new();
+        let mut setters: Vec<String> = Vec::new();
+        for line in production.lines() {
+            let trimmed = line.trim_start();
+            let indent = line.len() - trimmed.len();
+            if indent <= 4 {
+                let rest = trimmed.strip_prefix("pub(crate) ").unwrap_or(trimmed);
+                let rest = rest.strip_prefix("pub ").unwrap_or(rest);
+                let rest = rest.strip_prefix("async ").unwrap_or(rest);
+                if let Some(rest) = rest.strip_prefix("fn ") {
+                    inside = rest.split(['(', '<']).next().map(str::to_string);
+                }
+            }
+            let Some(name) = inside.clone() else { continue };
+            if line.contains("launch_command_with_prompt(") && !line.contains("fn launch_command_with_prompt") {
+                builders.push(name.clone());
+            }
+            if line.contains("LaunchPrompt::Inline(") || line.contains("LaunchPrompt::File(") {
+                setters.push(name);
+            }
+        }
+        builders.sort();
+        builders.dedup();
+        setters.sort();
+        setters.dedup();
+        assert_eq!(builders, ["create_terminal_with_prompt", "split_terminal_with_prompt"]);
+        // Constructed in the one function that decides inline or file, and
+        // read in the one that renders it — nowhere else.
+        assert_eq!(setters, ["launch_command_with_prompt", "prompt_argument"]);
+        // And the extras every launch path starts from carry none.
+        assert!(production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None }"));
     }
 }
 
@@ -8098,5 +8425,260 @@ mod project_skill_tests {
         assert_eq!(std::fs::read_to_string(skill(&ws)).unwrap(), committed, "a tracked file is left alone");
         // The untracked policy beside it is still ours to write.
         assert!(policy(&ws).exists());
+    }
+}
+
+/// The agent's first message as its launch argument: how it is quoted, when it
+/// goes through a file, and which launches carry it.
+#[cfg(test)]
+mod launch_prompt_tests {
+    use super::*;
+
+    /// Everything a person might type that a shell would like to interpret:
+    /// both quotes, a variable, a command substitution in both spellings,
+    /// backslashes (one before a quote, two together), a newline, a `!`, and
+    /// text outside ASCII.
+    const AWKWARD: &str = "Fix it's \"flaky\" $HOME test: run `whoami` and $(id)\\\nthen \\' and \\\\ — naïve 日本語 ✓ !$";
+
+    /// Every shell on this machine that a pane's command could be parsed by.
+    /// fish is here on purpose: it is the login shell of the person this was
+    /// built for, and its single quotes are not inert (see `shell_quote`).
+    fn shells() -> Vec<String> {
+        let mut found: Vec<String> = ["/bin/sh", "/bin/bash", "/bin/zsh"]
+            .iter()
+            .filter(|p| Path::new(p).exists())
+            .map(|p| p.to_string())
+            .collect();
+        match farcooler_core::programs::find("fish") {
+            Some(fish) => found.push(fish.display().to_string()),
+            None => eprintln!("fish is not installed here; the fish half of this test did not run"),
+        }
+        found
+    }
+
+    /// Run `command` the way a pane does — an outer shell handed the whole
+    /// string, the login shell handed the `-ilc` payload — with `outer` and
+    /// `inner` standing in for them and `program` swapped for a `printf`
+    /// that joins its arguments with commas. What comes back is the argv the
+    /// agent would have seen.
+    fn argv_through(command: &str, program: &str, outer: &str, inner: &str) -> String {
+        let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
+        let probe = command
+            .replacen(&prefix, &format!("{inner} -c"), 1)
+            .replacen(program, "printf ,%s", 1);
+        assert!(probe.contains(&format!("{inner} -c")), "the prefix was found: {probe}");
+        let out = std::process::Command::new(outer)
+            .arg("-c")
+            .arg(&probe)
+            .output()
+            .expect("run the probe");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn inline(text: &str) -> LaunchExtras {
+        LaunchExtras { prompt: Some(LaunchPrompt::Inline(text.to_string())), ..LaunchExtras::NONE }
+    }
+
+    #[test]
+    fn a_prompt_reaches_each_agent_as_one_exact_argument_under_every_shell() {
+        let cases = [
+            ("claude", "claude", String::new()),
+            ("codex", "codex", ",-c,check_for_update_on_startup=false".to_string()),
+            ("cursor", "cursor-agent", String::new()),
+        ];
+        let shells = shells();
+        for (preset, program, flags) in &cases {
+            let command = preset_command_with_hooks(preset, None, &inline(AWKWARD));
+            for outer in &shells {
+                for inner in &shells {
+                    assert_eq!(
+                        argv_through(&command, program, outer, inner),
+                        format!("{flags},{AWKWARD}"),
+                        "{preset} under {outer} then {inner}: {command}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_prompt_that_starts_with_a_dash_is_not_read_as_a_flag() {
+        let command = preset_command_with_hooks("claude", None, &inline("--help me with this"));
+        assert_eq!(argv_through(&command, "claude", "/bin/sh", "/bin/sh"), ", --help me with this");
+    }
+
+    #[test]
+    fn a_preset_that_takes_no_prompt_is_launched_without_one() {
+        for preset in ["shell", "aider", CHANGES_PRESET] {
+            assert_eq!(
+                preset_command_with_hooks(preset, None, &inline("hello")),
+                preset_command_with_hooks(preset, None, &LaunchExtras::NONE),
+                "{preset}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_prompt_leaves_every_launch_as_it_was() {
+        // Byte for byte, the command every pane had before prompts existed,
+        // bar codex's update flag (its own test below).
+        let shell = farcooler_core::shell::login_shell();
+        assert_eq!(preset_command_with_hooks("claude:opus", None, &LaunchExtras::NONE), format!("{shell} -ilc 'claude --model opus'"));
+        assert_eq!(preset_command_with_hooks("cursor", None, &LaunchExtras::NONE), format!("{shell} -ilc 'cursor-agent'"));
+    }
+
+    #[test]
+    fn codex_is_told_not_to_offer_an_update_on_every_start() {
+        let launch = preset_command_with_hooks("codex:gpt-5.6-sol", None, &LaunchExtras::NONE);
+        assert_eq!(
+            argv_through(&launch, "codex", "/bin/sh", "/bin/sh"),
+            ",--model,gpt-5.6-sol,-c,check_for_update_on_startup=false"
+        );
+        let sid = Uuid::now_v7().to_string();
+        let resume = terminal_mode_command("codex", &sid, true, &LaunchExtras::NONE);
+        assert_eq!(
+            argv_through(&resume, "codex", "/bin/sh", "/bin/sh"),
+            format!(",resume,{sid},-c,check_for_update_on_startup=false")
+        );
+    }
+
+    #[test]
+    fn cursor_is_trusted_only_when_the_launch_says_so() {
+        let trusted = LaunchExtras { trust_workspace: true, ..LaunchExtras::NONE };
+        let command = preset_command_with_hooks("cursor", None, &trusted);
+        assert_eq!(argv_through(&command, "cursor-agent", "/bin/sh", "/bin/sh"), ",--trust");
+        // `printf ,%s` with no arguments at all still prints its comma.
+        let command = preset_command_with_hooks("cursor", None, &LaunchExtras::NONE);
+        assert_eq!(argv_through(&command, "cursor-agent", "/bin/sh", "/bin/sh"), ",");
+        // And it is cursor's flag alone: claude and codex have no `--trust`,
+        // and an unknown flag would end the pane at startup.
+        for preset in ["claude", "codex"] {
+            assert!(!preset_command_with_hooks(preset, None, &trusted).contains("--trust"), "{preset}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cursor_trust_is_decided_by_who_made_the_worktree() {
+        let (_dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        // The fixture's workspace is the repository's own checkout, which
+        // Far Cooler did not make.
+        assert!(!svc.prepare_launch_hooks("cursor", &ws.worktree_path).trust_workspace);
+
+        let ours = svc.root.join("worktrees").join("repo").join("fix-it");
+        std::fs::create_dir_all(&ours).unwrap();
+        let ours = ours.display().to_string();
+        assert!(svc.prepare_launch_hooks("cursor", &ours).trust_workspace);
+        assert!(svc.prepare_launch_hooks("cursor:auto", &ours).trust_workspace);
+        assert!(!svc.prepare_launch_hooks("claude", &ours).trust_workspace);
+        // The directory that holds them is not itself a worktree.
+        let holder = svc.root.join("worktrees").display().to_string();
+        assert!(!svc.made_this_worktree(Path::new(&holder)));
+        // Nor is a sibling whose name merely starts the same way.
+        let sibling = svc.root.join("worktrees-else").join("x");
+        std::fs::create_dir_all(&sibling).unwrap();
+        assert!(!svc.made_this_worktree(&sibling));
+    }
+
+    #[test]
+    fn a_short_prompt_stays_in_the_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        let command =
+            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(AWKWARD));
+        assert!(command.len() <= MAX_INLINE_LAUNCH_BYTES);
+        assert!(!dir.path().join(format!("prompt-{id}")).exists(), "no file for a prompt that fits");
+    }
+
+    /// Long enough that inline it is past tmux's ceiling even before quoting:
+    /// the awkward text, repeated. Every quote in it grows fourfold per layer.
+    fn long_prompt() -> String {
+        let mut text = String::new();
+        while text.len() < 20_000 {
+            text.push_str(AWKWARD);
+            text.push('\n');
+        }
+        text.trim_end().to_string()
+    }
+
+    #[test]
+    fn a_long_prompt_goes_through_a_private_file_that_the_launch_reads_and_removes() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::now_v7();
+        let prompt = long_prompt();
+        let command =
+            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&prompt));
+        assert!(command.len() <= MAX_INLINE_LAUNCH_BYTES, "{} bytes", command.len());
+
+        let file = dir.path().join(format!("prompt-{id}"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), prompt);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "a prompt is somebody's words");
+        }
+
+        // Past the pane actor's `env`, which the probe does not need.
+        let bare = command.split_once(" /").map(|(_, rest)| format!("/{rest}")).unwrap();
+        for shell in shells() {
+            std::fs::write(&file, &prompt).unwrap();
+            assert_eq!(argv_through(&bare, "claude", "/bin/sh", &shell), format!(",{prompt}"), "{shell}");
+            assert!(!file.exists(), "{shell} read the file and removed it");
+        }
+    }
+
+    /// The fallback exists because tmux refuses the inline form, and this
+    /// asks tmux — the fixture's private server, running the real login
+    /// shell as its `default-shell` — rather than trusting a number: the
+    /// inline command is refused, and the file form is accepted and delivers
+    /// the whole prompt as one argument.
+    #[tokio::test]
+    async fn tmux_refuses_a_long_prompt_inline_and_takes_it_through_the_file() {
+        let (dir, svc, ws) = super::restart_wiring_tests::a_workspace().await;
+        let prompt = long_prompt();
+        let out = dir.path().join("argv");
+        // Unquoted inside the payload, so a path with nothing to quote.
+        assert!(!out.display().to_string().contains([' ', '\'', '\\']), "{}", out.display());
+        let printf = format!("printf ,%s >{}", out.display());
+
+        let inline = with_pane_actor(
+            Uuid::now_v7(),
+            "claude",
+            preset_command_with_hooks("claude", None, &inline(&prompt)),
+        );
+        assert!(inline.len() > 16_384, "the inline form is past the ceiling: {}", inline.len());
+        let refused = svc
+            .tmux
+            .create_terminal_window(ws.id, Uuid::now_v7(), "inline", &ws.worktree_path, &inline.replacen("claude", &printf, 1))
+            .await;
+        assert!(refused.is_err(), "tmux took a command past its ceiling");
+
+        let id = Uuid::now_v7();
+        let command =
+            launch_command_with_prompt(&svc.root, id, "claude", None, LaunchExtras::NONE, Some(&prompt));
+        svc.tmux
+            .create_terminal_window(ws.id, id, "file", &ws.worktree_path, &command.replacen("claude", &printf, 1))
+            .await
+            .expect("tmux takes the file form");
+
+        // An interactive login shell reads the person's own startup files
+        // first, which can take a while.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let expected = format!(",{prompt}");
+        loop {
+            if std::fs::read_to_string(&out).is_ok_and(|s| s == expected) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "the prompt never arrived whole");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(!svc.root.join(format!("prompt-{id}")).exists(), "the launch removed its file");
+    }
+
+    #[test]
+    fn a_prompt_that_cannot_be_an_argument_is_refused() {
+        assert!(validate_launch_prompt("fine").is_ok());
+        assert!(validate_launch_prompt("a\0b").is_err());
+        assert!(validate_launch_prompt(&"x".repeat(MAX_LAUNCH_PROMPT_BYTES + 1)).is_err());
     }
 }

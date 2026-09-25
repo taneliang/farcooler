@@ -332,6 +332,7 @@ async fn a_pane(runner: &Runner) -> uuid::Uuid {
             title: "watched".into(),
             command_preset: "shell".into(),
             join_active_group: false,
+            prompt: None,
         },
     ));
     let result = client.call(terminal).await.expect("terminal.create");

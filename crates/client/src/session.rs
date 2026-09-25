@@ -980,6 +980,7 @@ impl Session {
             title: title.into(),
             command_preset: preset.into(),
             join_active_group,
+            prompt: None,
         });
         match self.value("terminal.create", Some(workspace), Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),

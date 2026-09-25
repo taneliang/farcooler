@@ -1408,6 +1408,17 @@ message TerminalCreate {
   // a group without being asked twice, and it does nothing when there is no
   // group to add to.
   bool join_active_group = 3;
+  // The agent's first message, handed to it as its launch argument.
+  //
+  // claude, codex and cursor each take an initial prompt as a positional
+  // argument; any other preset ignores this. On this launch only: a restart
+  // never sends it again. Unset or empty is an ordinary launch.
+  //
+  // Gated by the `launch_prompt` capability, and a client that fills it in
+  // names that capability in `Request.required_capabilities`: an older daemon
+  // drops an unknown field and would open the agent with an empty composer
+  // while the client believed the task had been sent.
+  optional string prompt = 4;
 }
 
 message TerminalResize {

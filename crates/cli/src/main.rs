@@ -588,6 +588,14 @@ enum TerminalCmd {
         /// pass from a key binding.
         #[arg(long)]
         tile: bool,
+        /// The agent's first message, handed to it as its launch argument.
+        ///
+        /// For claude, codex and cursor, which each take an initial prompt;
+        /// any other preset ignores it. The agent holds it through any screen
+        /// it shows first — a trust question, an update offer — and sends it
+        /// once past it. Only this launch: a restart does not send it again.
+        #[arg(long, allow_hyphen_values = true)]
+        prompt: Option<String>,
     },
     /// Send exact bytes to a terminal.
     Send { terminal: String, data: String },
@@ -2146,24 +2154,43 @@ fn layout_json(
 // Terminals: records through the daemon, bytes through tmux
 // ---------------------------------------------------------------------------
 
+/// `terminal.create`, with the prompt's capability named when there is one:
+/// a daemon too old to know the field then refuses the request, rather than
+/// dropping the prompt and opening the agent on an empty composer. See
+/// `capability::LAUNCH_PROMPT`.
+fn terminal_create_request(
+    workspace: uuid::Uuid,
+    title: String,
+    preset: String,
+    tile: bool,
+    prompt: Option<String>,
+) -> farcooler_protocol::v1::Request {
+    let prompt = prompt.filter(|p| !p.trim().is_empty());
+    let mut req = with(
+        req_for("terminal.create", workspace),
+        request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
+            title,
+            command_preset: preset,
+            join_active_group: tile,
+            prompt: prompt.clone(),
+        }),
+    );
+    if prompt.is_some() {
+        req.required_capabilities = vec![farcooler_protocol::capability::LAUNCH_PROMPT.to_string()];
+    }
+    req
+}
+
 async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible {
     match cmd {
         // Record changes. These write durable intent, so they go to the daemon.
-        TerminalCmd::Create { workspace, preset, title, tile } => {
+        TerminalCmd::Create { workspace, preset, title, tile, prompt } => {
             let mut link = connect_to(runner).await?;
             let all = list_workspaces(&mut link).await?;
             let ws = resolve(&all, &workspace, |w| &w.id, "workspace")?;
             let title = title.unwrap_or_else(|| preset.clone());
-            let r = link
-                .call(with(
-                    req_for("terminal.create", uuid_of(&ws.id)),
-                    request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
-                        title,
-                        command_preset: preset,
-                        join_active_group: tile,
-                    }),
-                ))
-                .await?;
+            let req = terminal_create_request(uuid_of(&ws.id), title, preset, tile, prompt);
+            let r = link.call(req).await?;
             let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
@@ -3219,6 +3246,32 @@ fn resolve<'a, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_terminal_created_with_a_prompt_names_the_capability_it_needs() {
+        let ws = uuid::Uuid::now_v7();
+        let with_prompt =
+            terminal_create_request(ws, "claude".into(), "claude".into(), false, Some("fix it".into()));
+        assert_eq!(with_prompt.required_capabilities, [farcooler_protocol::capability::LAUNCH_PROMPT]);
+        let Some(request::Payload::TerminalCreate(p)) = with_prompt.payload else { panic!("payload") };
+        assert_eq!(p.prompt.as_deref(), Some("fix it"));
+
+        // Without one, an older daemon is asked nothing it cannot do.
+        for prompt in [None, Some("  ".to_string())] {
+            let plain = terminal_create_request(ws, "c".into(), "claude".into(), false, prompt);
+            assert!(plain.required_capabilities.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_prompt_that_starts_with_a_dash_is_a_prompt_and_not_a_flag() {
+        let cli = Cli::try_parse_from([
+            "farcooler", "terminal", "create", "ws", "--preset", "claude", "--prompt", "--help me",
+        ])
+        .expect("parses");
+        let Command::Terminal(TerminalCmd::Create { prompt, .. }) = cli.command else { panic!("create") };
+        assert_eq!(prompt.as_deref(), Some("--help me"));
+    }
 
     /// Every resource with a reader on the other end gets a line.
     ///
