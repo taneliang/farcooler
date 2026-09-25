@@ -2301,9 +2301,13 @@ struct ContentView: View {
 
     /// Start a task and go to it as soon as it exists.
     ///
-    /// Deliberately does not wait for the agent to boot before selecting. The
-    /// point is to be looking at the thing you asked for while it starts, not
-    /// to stare at the old screen for ten seconds first.
+    /// Selects the workspace and its agent's terminal the moment
+    /// `DaemonClient.startTask` has made them, which is before the agent has
+    /// booted: the description travels as the agent's launch argument, so
+    /// nothing is left to wait for. The point is to be looking at the thing
+    /// you asked for while it starts. (This comment said so from the start,
+    /// while `startTask` in fact waited up to a minute for the agent to look
+    /// idle before returning. It is true now.)
     ///
     /// `host` is handed in rather than re-derived from `project` here — see
     /// `QuickCreate.chosen`, which resolves both together from the same

@@ -84,6 +84,11 @@ final class DaemonClient: ObservableObject {
         watchResignations()
     }
 
+    /// Answers every CLI call in place of the CLI, when set. For tests only:
+    /// it is what lets a suite drive `startTask` against a runner whose agent
+    /// never becomes idle, without a runner.
+    var commandRunnerForTesting: (@MainActor ([String]) async -> (data: Data?, message: String?))?
+
     /// Cancels the retry loop rather than leaving it to run against a client
     /// nobody holds anymore.
     ///
@@ -1353,6 +1358,21 @@ final class DaemonClient: ObservableObject {
         return workspace.id
     }
 
+    /// Start a task: a worktree, an agent in it, and the description as the
+    /// agent's first message. Returns the workspace as soon as its terminal
+    /// exists, so the window can go there while the agent is still starting.
+    ///
+    /// **The description is the agent's launch argument** on a runner that has
+    /// `launch_prompt`. claude, codex and cursor each hold an initial prompt
+    /// through whatever they show first — cursor's "Trust this workspace?",
+    /// codex's update offer — and send it once past it. Typing it in, which is
+    /// what this did before, had to wait for the agent to look idle; a gate
+    /// read as blocked, this gave up, and the person accepted the gate to find
+    /// an empty prompt box.
+    ///
+    /// A runner too old for that still gets it typed, as before, but in a
+    /// detached task after this returns — see `typeWhenIdle`. Nothing waits on
+    /// that any more, so the window does not either.
     func startTask(project: String, description: String, agent: String) async -> String? {
         // This runner's own prefix, read from the fleet it last refreshed — the
         // same value the composer previewed, so the branch that gets made is the
@@ -1378,41 +1398,69 @@ final class DaemonClient: ObservableObject {
             return nil
         }
 
-        _ = await run([
-            "terminal", "create", workspace.short, "--preset", agent, "--title", agent,
-        ])
+        // `"launch_prompt"` is `farcooler_protocol::capability::LAUNCH_PROMPT`.
+        // Read at the moment of asking: `daemonBuild` is nil until the first
+        // status read lands, which reads as "not yet" and types instead.
+        let asArgument = daemonBuild?.can("launch_prompt") ?? false
+        _ = await run(
+            Self.taskTerminalArguments(
+                workspace: workspace.short, agent: agent,
+                prompt: asArgument ? description : nil))
         await refresh()
 
-        guard let terminal = fleet.workspaces
-            .first(where: { $0.id == workspace.id })?
-            .terminals.first(where: { $0.preset == agent || $0.title == agent })
-        else { return workspace.id }
+        if !asArgument,
+            let terminal = fleet.workspaces
+                .first(where: { $0.id == workspace.id })?
+                .terminals.first(where: { $0.preset == agent || $0.title == agent })
+        {
+            let (workspaceID, terminalID) = (workspace.id, terminal.id)
+            Task { [weak self] in
+                await self?.typeWhenIdle(
+                    workspace: workspaceID, terminal: terminalID, text: description)
+            }
+        }
+        return workspace.id
+    }
 
-        // Up to a minute: a cold agent on a slow machine is not a failure.
+    /// The `terminal create` that starts a task's agent, with the description
+    /// as its launch argument when there is one to give.
+    ///
+    /// `--prompt=` in one word rather than `--prompt` and a second word: a
+    /// description can start with a dash, and the joined form can never be
+    /// read as a flag of its own.
+    static func taskTerminalArguments(workspace: String, agent: String, prompt: String?)
+        -> [String]
+    {
+        var args = ["terminal", "create", workspace, "--preset", agent, "--title", agent]
+        if let prompt { args.append("--prompt=\(prompt)") }
+        return args
+    }
+
+    /// Type a task into its agent once the agent looks ready: the way a task
+    /// reaches a runner too old to take it as a launch argument.
+    ///
+    /// Unchanged from when it was the whole of `startTask`, except that it no
+    /// longer holds the window up. Up to a minute: a cold agent on a slow
+    /// machine is not a failure. `[weak self]` at the call site and the
+    /// optional chain here are what end it for a runner that was removed.
+    private func typeWhenIdle(workspace: String, terminal: String, text: String) async {
         for _ in 0..<120 {
             try? await Task.sleep(for: .milliseconds(500))
-            // `try?` swallows `Task.sleep`'s `CancellationError`, so a
-            // cancelled `startTask` — the runner it targets was just
-            // removed — would otherwise fall straight through into another
-            // `refresh()` and, once the agent went idle, `send()` the task
-            // description into a runner nothing holds a client for anymore.
-            // Checked explicitly rather than relying on the sleep to throw.
-            guard !Task.isCancelled else { return workspace.id }
+            guard !Task.isCancelled else { return }
             await refresh()
             let current = fleet.workspaces
-                .first(where: { $0.id == workspace.id })?
-                .terminals.first(where: { $0.id == terminal.id })
-            guard let current else { return workspace.id }
+                .first(where: { $0.id == workspace })?
+                .terminals.first(where: { $0.id == terminal })
+            guard let current else { return }
             if current.agent == .idle {
-                await send(terminal: current.short, text: description)
-                return workspace.id
+                await send(terminal: current.short, text: text)
+                return
             }
             // It asked something before we got a word in — a trust prompt, or a
             // resume dialog. Stop rather than typing a task description into a
             // yes/no question.
-            if current.agent == .blocked { return workspace.id }
+            if current.agent == .blocked { return }
         }
-        return workspace.id
     }
 
     /// Type text into a terminal and press return.
@@ -2169,6 +2217,8 @@ final class DaemonClient: ObservableObject {
         // terminal surface, which is wasted work several times a second.
         if !background { busy = true }
         defer { if !background { busy = false } }
+
+        if let stub = commandRunnerForTesting { return await stub(args) }
 
         guard let bin = binary else {
             let message =
