@@ -928,13 +928,7 @@ async fn run() -> Fallible {
             // An unknown agent name is not an error a hook may report: it
             // exits 0 like every other failure here.
             if let Ok(agent) = agent.parse() {
-                // Clamped rather than refused: refusing is clap exiting 2 with
-                // words on stderr, which a hook never does. The cap is the
-                // spec's own longest wait ("on the order of a minute"), so no
-                // value, however absurd, removes the deadline.
-                let deadline = deadline_ms.map_or(hook::HOOK_DEADLINE, |ms| {
-                    std::time::Duration::from_millis(ms.min(hook::LONGEST_DEADLINE_MS))
-                });
+                let deadline = deadline_ms.map_or(hook::HOOK_DEADLINE, hook::deadline_from_ms);
                 hook::run(agent, event, socket, gating, deadline).await;
             }
             Ok(())

@@ -54,6 +54,16 @@ pub const HOOK_DEADLINE: Duration = Duration::from_millis(400);
 /// tokio's deadline into its far-future sleep, which is no deadline at all.
 pub const LONGEST_DEADLINE_MS: u64 = 60_000;
 
+/// `--deadline-ms`, as the deadline it asks for, capped at
+/// `LONGEST_DEADLINE_MS`.
+///
+/// Clamped rather than refused: refusing is clap exiting 2 with words on
+/// stderr, which a hook never does. So no value, however absurd, removes the
+/// deadline.
+pub fn deadline_from_ms(ms: u64) -> Duration {
+    Duration::from_millis(ms.min(LONGEST_DEADLINE_MS))
+}
+
 /// `deadline` is `HOOK_DEADLINE` for every hook an agent runs. It is a
 /// parameter only so the binary's own tests can take the machine's speed out
 /// of a test that is about something else; see `--deadline-ms` in `main.rs`.
@@ -228,6 +238,18 @@ mod tests {
     /// test called the empty answer a lost verdict. The tests here that are
     /// about the bound keep the real one.
     const SHAPE_NOT_SPEED: Duration = Duration::from_secs(30);
+
+    /// A deadline asked for is a deadline given, up to a minute and no more.
+    #[test]
+    fn a_deadline_is_capped_at_a_minute() {
+        assert_eq!(deadline_from_ms(250), Duration::from_millis(250), "under the cap: as asked");
+        assert_eq!(deadline_from_ms(1_000_000), Duration::from_secs(60), "over it: the cap");
+        assert_eq!(
+            deadline_from_ms(u64::MAX),
+            Duration::from_secs(60),
+            "the value that used to overflow into no deadline at all"
+        );
+    }
 
     /// The guard the whole design rests on.
     ///
