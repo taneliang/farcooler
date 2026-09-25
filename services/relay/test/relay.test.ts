@@ -3259,6 +3259,11 @@ describe('/v1/notify and Live Activities', () => {
         expect(await stored()).toBe(null)
       }
 
+      // A runner five minutes fast is inside the slack, and kept.
+      const fast = Math.floor((seconds + 300) / 300)
+      await send(fast)
+      expect(await stored()).toBe(fast)
+
       // Healthy runners at every width are kept: this five-minute bucket, this
       // half hour, this two-hour bucket.
       for (const width of [300, 1800, 7200]) {
