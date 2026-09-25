@@ -1936,6 +1936,47 @@ async fn dispatch<L: DispatchLink>(
         ));
     }
 
+    // One read, for a warning: whether something the task waits on is still
+    // on it. A warning and not a refusal, like the two above, because
+    // starting early can be the right call (the block may be a formality, or
+    // settled and never cleared); the manager is told so it can decide.
+    // A read that fails is said too, and doesn't stop the dispatch.
+    let id = uuid_of(&task.id);
+    let read = link
+        .call(with(
+            req_for("task.get", id),
+            request::Payload::TaskGet(pb::TaskGetRequest { task_id: id_bytes(id), note_kind: 0 }),
+        ))
+        .await;
+    match read.map(|r| r.value) {
+        Ok(Some(result::Value::TaskDetail(detail))) if !detail.blocks.is_empty() => {
+            let on: Vec<String> = detail
+                .blocks
+                .iter()
+                .map(|b| match b.reason.as_str() {
+                    "" => short_bytes(&b.blocked_by),
+                    why => format!("{} ({why})", short_bytes(&b.blocked_by)),
+                })
+                .collect();
+            warn(format!(
+                "warning: {} still waits on {}. dispatching it anyway starts it before that's done",
+                task.key,
+                on.join(", ")
+            ));
+        }
+        Ok(Some(result::Value::TaskDetail(_))) => {}
+        Ok(_) => warn(format!(
+            "warning: couldn't read what {} waits on: the runner answered with something this Far \
+             Cooler cannot read. dispatching it anyway",
+            task.key
+        )),
+        Err(e) => warn(format!(
+            "warning: couldn't read what {} waits on: {}. dispatching it anyway",
+            task.key,
+            refused(e, "that task could not be read")
+        )),
+    }
+
     let (workspace, workspace_name, made) = match (existing, &d.lane) {
         (Some((id, name)), _) => (id, name, None),
         (None, Lane::New { name, branch, base }) => {
@@ -2720,6 +2761,8 @@ mod tests {
         refuse: Option<(&'static str, &'static str)>,
         /// The argument a refusal names (`Error.what`).
         refused_argument: &'static str,
+        /// What the task waits on, as `task.get` answers.
+        blocks: Vec<pb::TaskBlock>,
         sent: Vec<pb::Request>,
     }
 
@@ -2731,6 +2774,7 @@ mod tests {
                 terminals: Vec::new(),
                 refuse: None,
                 refused_argument: "",
+                blocks: Vec::new(),
                 sent: Vec::new(),
             }
         }
@@ -2772,6 +2816,11 @@ mod tests {
                 "workspace.create" => result::Value::Workspace(lane(MADE, "fix-it", REPO)),
                 "terminal.create" => result::Value::Terminal(pb::Terminal { id: id_bytes(PANE), ..Default::default() }),
                 "task.update" | "task.set_status" => result::Value::Task(fc_2()),
+                "task.get" => result::Value::TaskDetail(pb::TaskDetail {
+                    task: Some(fc_2()),
+                    notes: Vec::new(),
+                    blocks: self.blocks.clone(),
+                }),
                 other => panic!("dispatch sent {other}, which this fake doesn't expect"),
             };
             Ok(pb::Result { value: Some(value) })
@@ -2783,7 +2832,7 @@ mod tests {
             self.sent.iter().map(|r| r.method.as_str()).collect()
         }
         fn writes(&self) -> Vec<&str> {
-            self.methods().into_iter().filter(|m| !m.ends_with(".list")).collect()
+            self.methods().into_iter().filter(|m| !m.ends_with(".list") && *m != "task.get").collect()
         }
         fn sent(&self, method: &str) -> &pb::Request {
             self.sent.iter().find(|r| r.method == method).unwrap_or_else(|| panic!("{method} was not sent"))
@@ -2918,7 +2967,7 @@ mod tests {
         let mut link = FakeLink { refuse: Some(("terminal.create", "invalid-argument")), ..Default::default() };
         let (done, _) = run(&mut link, existing()).await;
         assert!(done.is_err(), "a pane that didn't open is a failed dispatch");
-        assert!(!link.methods().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
+        assert!(!link.writes().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
     }
 
     /// The other failure: the pane is working and the board didn't move.
@@ -2980,7 +3029,7 @@ mod tests {
         };
         let said = run(&mut link, existing()).await.0.expect_err("refused");
         assert!(said.contains("only with claude, codex or cursor"), "{said}");
-        assert!(!link.methods().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
+        assert!(!link.writes().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
     }
 
     /// I2: a runner that can't open a pane for a task is found out before
@@ -3013,7 +3062,7 @@ mod tests {
         assert!(said.contains("the workspace fix-it (branch fix/it) was made for fc-2"), "{said}");
         assert!(said.contains("--workspace fix-it"), "{said}");
         assert!(said.contains("farcooler workspace remove-worktree fix-it"), "{said}");
-        assert!(!link.methods().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
+        assert!(!link.writes().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
     }
 
     /// I3: a task whose agent is still running isn't dispatched a second
@@ -3112,7 +3161,7 @@ mod tests {
         let mut link = FakeLink { refuse: Some(("terminal.create", "not-found")), ..Default::default() };
         let said = run(&mut link, existing()).await.0.expect_err("refused");
         assert_eq!(said, "that workspace isn't on this runner any more");
-        assert!(!link.methods().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
+        assert!(!link.writes().iter().any(|m| m.starts_with("task.")), "{:?}", link.methods());
     }
 
     /// m3: a branch that already exists is said in this CLI's words, with
@@ -3165,6 +3214,45 @@ mod tests {
         let mut link = FakeLink { capabilities: Vec::new(), ..Default::default() };
         let (_, code) = refused_with_code(&mut link, existing()).await;
         assert_eq!(code, None);
+    }
+
+    /// A task that still waits on something is warned about, from one read
+    /// of its blocks, and dispatched anyway: the manager's call.
+    #[tokio::test]
+    async fn dispatching_a_blocked_task_warns_and_still_dispatches() {
+        let blocker = Uuid::from_u128(0x6f);
+        let mut link = FakeLink {
+            blocks: vec![pb::TaskBlock {
+                task_id: id_bytes(TASK),
+                blocked_by: id_bytes(blocker),
+                reason: "needs the schema".into(),
+            }],
+            ..Default::default()
+        };
+        let (done, warned) = run(&mut link, existing()).await;
+        done.expect("a block is a warning, not a refusal");
+        let short = short_bytes(&id_bytes(blocker));
+        assert_eq!(
+            warned,
+            [format!(
+                "warning: fc-2 still waits on {short} (needs the schema). dispatching it anyway starts it \
+                 before that's done"
+            )]
+        );
+        assert_eq!(link.methods().iter().filter(|m| **m == "task.get").count(), 1, "one read");
+        let Some(request::Payload::TaskGet(g)) = &link.sent("task.get").payload else { panic!("get") };
+        assert_eq!(g.task_id, id_bytes(TASK), "its own blocks");
+        assert!(link.writes().contains(&"task.set_status"), "{:?}", link.methods());
+
+        // Unblocked: nothing said.
+        let mut link = FakeLink::default();
+        assert!(run(&mut link, existing()).await.1.is_empty());
+
+        // A read that fails is said, and still dispatches.
+        let mut link = FakeLink { refuse: Some(("task.get", "resource-conflict")), ..Default::default() };
+        let (done, warned) = run(&mut link, existing()).await;
+        done.expect("still dispatched");
+        assert!(warned.iter().any(|w| w.starts_with("warning: couldn't read what fc-2 waits on")), "{warned:?}");
     }
 
     /// M5: dispatching a task from a state nobody dispatches from is said.
