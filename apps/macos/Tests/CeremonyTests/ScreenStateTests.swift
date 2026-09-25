@@ -77,17 +77,29 @@ struct ScreenStateTests {
         #expect(watched.left == 1)
     }
 
-    /// What `Presence.live` reads is this state, so a lock read here is a
-    /// person absent there.
-    @Test func aLockedScreenIsNobodyPresent() {
+    /// `Presence.live` reads its display and session from `ScreenState`:
+    /// each way a person leaves, posted, turns the live closure that should
+    /// see it false, and coming back turns it true again. The app-active and
+    /// idle closures are this Mac's own and aren't asked here.
+    @Test func theLivePresenceReadsTheScreenState() {
         let centers = Centers()
         let watched = Watched(centers)
-        let presence = Presence(
-            appActive: { true }, screenAwake: { !watched.state.displayAsleep },
-            sessionUnlocked: { !watched.state.locked && watched.state.sessionActive },
-            secondsSinceInput: { 1 })
-        #expect(presence.isPresent)
+        let live = Presence.live(watched.state)
+        #expect(live.screenAwake() && live.sessionUnlocked())
+
+        centers.workspace.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        #expect(!live.screenAwake())
+        centers.workspace.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        #expect(live.screenAwake())
+
         centers.distributed.post(name: ScreenState.screenIsLocked, object: nil)
-        #expect(!presence.isPresent)
+        #expect(!live.sessionUnlocked(), "locked")
+        centers.distributed.post(name: ScreenState.screenIsUnlocked, object: nil)
+        #expect(live.sessionUnlocked())
+
+        centers.workspace.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        #expect(!live.sessionUnlocked(), "switched away")
+        centers.workspace.post(name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        #expect(live.sessionUnlocked())
     }
 }

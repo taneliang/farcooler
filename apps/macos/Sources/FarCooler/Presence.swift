@@ -45,11 +45,15 @@ struct Presence {
     }
 
     /// This Mac, as it is.
-    static var live: Presence {
+    static var live: Presence { live(ScreenState.shared) }
+
+    /// This Mac, with its display and session read from `screen` — this
+    /// Mac's own in `live`, one a test posts to in a test.
+    static func live(_ screen: ScreenState) -> Presence {
         Presence(
             appActive: { NSApp.isActive },
-            screenAwake: { !ScreenState.shared.displayAsleep },
-            sessionUnlocked: { !ScreenState.shared.locked && ScreenState.shared.sessionActive },
+            screenAwake: { !screen.displayAsleep },
+            sessionUnlocked: { !screen.locked && screen.sessionActive },
             secondsSinceInput: {
                 // `kCGAnyInputEventType`: the most recent key, click, scroll
                 // or mouse movement of any kind, in this login session.
