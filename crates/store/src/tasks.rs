@@ -11,8 +11,9 @@
 //! the reasoning, and the reasoning is the part you want in three weeks.
 //!
 //! The other half of this module is the key people and agents actually use:
-//! `fc-42`. A repository's task key prefix is computed once, at registration,
-//! from its name -- and then stored, never recomputed. See `derive_prefix` and
+//! `fc-42`. A repository's task key prefix is computed once, at registration
+//! (or, for one registered before the board, by migration 12), from its
+//! name -- and then stored, never recomputed. See `derive_prefix` and
 //! `Store::assign_task_key_prefix` for why: a prefix that answered to the
 //! CURRENT name would change under a rename, and every key ever written into
 //! a note, spoken aloud, or handed to an agent in its opening prompt would
@@ -73,12 +74,48 @@ pub fn derive_prefix(repository_name: &str) -> String {
 
 /// True for any SQLite constraint failure (rusqlite's primary result code
 /// does not distinguish UNIQUE from CHECK, NOT NULL, or a foreign key).
-/// `assign_task_key_prefix` is the only caller, and the one constraint its
+/// `claim_task_key_prefix` is the only caller, and the one constraint its
 /// UPDATE can ever hit is `repositories_one_task_prefix`, so here this
 /// specifically means "another repository already holds this prefix" --
 /// retry with a different candidate rather than propagate.
 fn is_unique_violation(err: &rusqlite::Error) -> bool {
     matches!(err, rusqlite::Error::SqliteFailure(e, _) if e.code == ErrorCode::ConstraintViolation)
+}
+
+/// The derivation and collision rule `Store::assign_task_key_prefix`
+/// documents, on any connection -- the store's own at registration, or the
+/// transaction `migration_0012_every_board_has_a_prefix` runs in, which is
+/// why this takes a `&Connection` and a name rather than a `Store` and a
+/// lookup. One function, so a repository that got its prefix late gets it
+/// by exactly the rule one registered today does.
+///
+/// Inside a transaction the retry still works: a constraint failure aborts
+/// only the one `UPDATE` (SQLite's default `ABORT` resolution), not the
+/// transaction around it.
+///
+/// `repo` is the row's id as stored, not a `Uuid`: the migration passes each
+/// row's id through untouched rather than parsing it, so a row it cannot
+/// parse is still given a prefix instead of stopping the store from opening.
+pub(crate) fn claim_task_key_prefix(conn: &Connection, repo: &[u8], name: &str) -> rusqlite::Result<String> {
+    let base = derive_prefix(name);
+
+    let mut candidate = base.clone();
+    let mut attempt = 1u32;
+    loop {
+        let outcome = conn.execute(
+            "UPDATE repositories SET task_key_prefix = ?1, resource_version = resource_version + 1
+             WHERE id = ?2",
+            params![candidate, repo],
+        );
+        match outcome {
+            Ok(_) => return Ok(candidate),
+            Err(e) if is_unique_violation(&e) => {
+                attempt += 1;
+                candidate = format!("{base}{attempt}");
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 impl Store {
@@ -100,28 +137,12 @@ impl Store {
     /// unlike this crate's versioned mutations, this one is not a client
     /// request replaying a version it read; it is called exactly once, from
     /// inside repository registration, against a row nothing else has had a
-    /// chance to see yet.
+    /// chance to see yet. A repository registered before the board existed
+    /// got its prefix from `migration_0012_every_board_has_a_prefix` instead,
+    /// by the same `claim_task_key_prefix`.
     pub fn assign_task_key_prefix(&self, repo: Uuid) -> Result<String> {
         let name = self.get_repository(repo)?.display_name;
-        let base = derive_prefix(&name);
-
-        let mut candidate = base.clone();
-        let mut attempt = 1u32;
-        loop {
-            let outcome = self.conn().execute(
-                "UPDATE repositories SET task_key_prefix = ?1, resource_version = resource_version + 1
-                 WHERE id = ?2",
-                params![candidate, uuid_blob(repo)],
-            );
-            match outcome {
-                Ok(_) => return Ok(candidate),
-                Err(e) if is_unique_violation(&e) => {
-                    attempt += 1;
-                    candidate = format!("{base}{attempt}");
-                }
-                Err(e) => return Err(map_err(e)),
-            }
-        }
+        claim_task_key_prefix(&self.conn(), &uuid_blob(repo), &name).map_err(map_err)
     }
 
     /// The next key this repository has not used yet: `<prefix>-<n>`.
@@ -321,16 +342,23 @@ impl Store {
     /// `repository: None` asks every board, which is not the same question as
     /// asking one.
     ///
+    /// A key a task USED to answer to is still its key here: `former_key`,
+    /// which `migration_0012_every_board_has_a_prefix` wrote when it gave a
+    /// prefixless board its prefix and renamed `-3` to `ov-3`. The old key
+    /// is in notes nobody may rewrite, in an agent pane's `FARCOOLER_TASK`
+    /// from before the upgrade, and in people's heads, so it keeps
+    /// resolving rather than any of those being chased down. A former key
+    /// always starts with `-` and a current one never does, so the two can
+    /// never name two different tasks on one board.
+    ///
     /// A list rather than an `Option`, and the reason is narrower than it
     /// looks. A runner that has always worked cannot mint the same key twice:
     /// `task_key_prefix` carries a unique index (see `migrate.rs`) and every
-    /// key is `<prefix>-<n>`. One that has NOT can -- the prefix is assigned
-    /// once, at registration, and `register_repository` says out loud what a
-    /// repository that missed it emits: `-1`, `-2`, with no prefix, forever.
-    /// Two of those on one runner and `-1` names two tasks. So the shape here
-    /// lets a caller REFUSE an ambiguous key rather than pick from it, because
-    /// picking is how a write lands on the wrong board and nobody notices for
-    /// days.
+    /// key is `<prefix>-<n>`. Former keys can collide, though: two boards that
+    /// were both prefixless each had a `-1`, and asked without a board, `-1`
+    /// still names two tasks. So the shape here lets a caller REFUSE an
+    /// ambiguous key rather than pick from it, because picking is how a write
+    /// lands on the wrong board and nobody notices for days.
     ///
     /// `COLLATE NOCASE`, because `FC-42` is the same ticket as `fc-42` to
     /// everyone but a database, and the one caller there is already lowercased
@@ -343,7 +371,7 @@ impl Store {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {TASK_COLUMNS} FROM tasks
-                  WHERE key = ?1 COLLATE NOCASE
+                  WHERE (key = ?1 COLLATE NOCASE OR former_key = ?1 COLLATE NOCASE)
                     AND (?2 IS NULL OR repository_id = ?2)
                   ORDER BY created_at, rowid"
             ))
@@ -2476,5 +2504,129 @@ mod tests {
 
         let ours_stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
         assert!(ours_stale.is_empty(), "another repository's stale task must not appear in ours");
+    }
+}
+
+/// A board from before the board had prefixes, opened by this build.
+#[cfg(test)]
+mod prefixless_boards {
+    use super::*;
+
+    fn id(n: u128) -> Uuid {
+        Uuid::from_u128(0x0000_7e57_0000_0000_0000_0000_0000_0000 | n)
+    }
+
+    /// A database file exactly as a schema-11 runner left it: `Far Cooler`
+    /// registered with the board and holding `fc`; `overnight` and `Far Cry`
+    /// registered before it, prefixless, each with a `-1`; and on
+    /// `overnight`, a second task blocked on the first, a note naming `-1`
+    /// in its text, and a terminal opened for `-1`.
+    fn schema_11_database(path: &std::path::Path) {
+        let mut conn = Connection::open(path).unwrap();
+        conn.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);").unwrap();
+        crate::migrate::migrate_only_to(&mut conn, 11);
+        let (root, host) = (uuid_blob(id(1)), uuid_blob(id(2)));
+        let repo = |n: u128, name: &str, prefix: &str| {
+            conn.execute(
+                "INSERT INTO repositories VALUES (?1, ?2, ?3, ?4, '/r/.git', '', 1, ?5)",
+                params![uuid_blob(id(n)), host, root, name, prefix],
+            )
+            .unwrap();
+        };
+        conn.execute("INSERT INTO repository_roots VALUES (?1, ?2, '/r', 0, 1)", params![root, host]).unwrap();
+        repo(10, "overnight", "");
+        repo(11, "Far Cooler", "fc");
+        repo(12, "Far Cry", "");
+        let task = |n: u128, repo: u128, key: &str| {
+            conn.execute(
+                "INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
+                 VALUES (?1, ?2, ?3, ?3, 'backlog', 0, 0, 1)",
+                params![uuid_blob(id(n)), uuid_blob(id(repo)), key],
+            )
+            .unwrap();
+        };
+        task(20, 10, "-1");
+        task(21, 10, "-2");
+        task(22, 11, "fc-1");
+        task(23, 12, "-1");
+        conn.execute_batch(&format!(
+            "INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
+                 VALUES (x'{n}', x'{t21}', 'decision', 'user', 0, 'waits on -1, see there', '{{}}');
+             INSERT INTO task_blocks (task_id, blocked_by, reason) VALUES (x'{t21}', x'{t20}', 'first');
+             INSERT INTO workspaces (id, repository_id, branch, worktree_path, hidden, creation_failed, resource_version)
+                 VALUES (x'{w}', x'{r10}', 'main', '/r', 0, 0, 1);
+             INSERT INTO terminals (id, workspace_id, title, command_preset, intent, runtime_confirmed,
+                 lease_generation, epoch, \"columns\", \"rows\", resource_version, task_id)
+                 VALUES (x'{term}', x'{w}', 'agent', 'claude', 1, 0, 0, 0, 80, 24, 1, x'{t20}');",
+            n = id(30).simple(),
+            t20 = id(20).simple(),
+            t21 = id(21).simple(),
+            r10 = id(10).simple(),
+            w = id(40).simple(),
+            term = id(41).simple(),
+        ))
+        .unwrap();
+    }
+
+    fn opened() -> (std::path::PathBuf, Store) {
+        let dir = std::env::temp_dir().join(format!("farcooler-prefixless-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("db.sqlite3");
+        schema_11_database(&path);
+        let store = Store::open(&path).expect("a schema-11 board opens");
+        (dir, store)
+    }
+
+    /// Every board gets a prefix, by registration's own rule: `overnight`
+    /// derives `ov`; `Far Cry` derives `fc`, which `Far Cooler` already
+    /// holds, so it gets `fc2` the way a second registration would. A
+    /// board that already had one keeps it.
+    #[test]
+    fn a_board_registered_before_prefixes_gets_one_by_the_registration_rule() {
+        let (dir, store) = opened();
+        let prefix = |n| store.get_repository(id(n)).unwrap().task_key_prefix;
+        assert_eq!(prefix(10), "ov");
+        assert_eq!(prefix(11), "fc", "an assigned prefix is never recomputed");
+        assert_eq!(prefix(12), "fc2", "a contested prefix resolves like registration's");
+        assert!(dir.join("db.sqlite3.bak-v11").exists(), "the schema-11 file is backed up first");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Its tasks are renamed, nothing that points at them moves, and the next
+    /// key carries on from the renamed ones.
+    #[test]
+    fn its_tasks_take_the_prefix_and_keep_their_history() {
+        let (dir, store) = opened();
+        assert_eq!(store.get_task(id(20)).unwrap().key, "ov-1");
+        assert_eq!(store.get_task(id(21)).unwrap().key, "ov-2");
+        assert_eq!(store.get_task(id(22)).unwrap().key, "fc-1", "a prefixed board's keys are untouched");
+        assert_eq!(store.get_task(id(23)).unwrap().key, "fc2-1");
+
+        let notes = store.notes_for(id(21), None).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].body, "waits on -1, see there", "no note is rewritten");
+        let blocks = store.blocks_for(id(21)).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].blocked_by, id(20));
+        assert_eq!(store.get_terminal(id(41)).unwrap().task_id, Some(id(20)));
+
+        assert_eq!(store.next_task_key(id(10)).unwrap(), "ov-3");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The old key still names its task: the note above says `-1`, and a pane
+    /// launched before the upgrade still exports it. On one board it is that
+    /// board's task; asked of every board it is the two it always was, which
+    /// a caller refuses rather than picks from.
+    #[test]
+    fn the_old_key_still_resolves() {
+        let (dir, store) = opened();
+        let found = store.tasks_with_key(Some(id(10)), "-1").unwrap();
+        assert_eq!(found.iter().map(|t| t.id).collect::<Vec<_>>(), vec![id(20)]);
+        assert_eq!(found[0].key, "ov-1", "and comes back under its new key");
+        assert_eq!(store.tasks_with_key(Some(id(10)), "ov-1").unwrap().len(), 1);
+        assert_eq!(store.tasks_with_key(None, "-1").unwrap().len(), 2, "still two boards' -1");
+        assert!(store.tasks_with_key(Some(id(11)), "-1").unwrap().is_empty(), "never had one");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

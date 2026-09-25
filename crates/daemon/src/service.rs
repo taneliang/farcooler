@@ -2087,9 +2087,10 @@ impl Service {
         )?;
 
         // Unlike the reconcile call below, this is NOT best-effort: a
-        // repository with no task key prefix cannot ever get one later (see
+        // repository with no task key prefix does not get one later (see
         // `Store::assign_task_key_prefix` — this is the only call site, and
-        // it exists for exactly this moment), so every board this
+        // it exists for exactly this moment; migration 12 gave one only to
+        // the repositories registered before the board), so every board this
         // repository will ever have depends on this succeeding here. `?`
         // propagates a failure as the registration's own failure, rather
         // than logging and returning a repository that would silently emit

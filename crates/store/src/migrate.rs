@@ -23,6 +23,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0009_workspace_order,
     migration_0010_the_board,
     migration_0011_terminal_task,
+    migration_0012_every_board_has_a_prefix,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -545,6 +546,69 @@ fn migration_0011_terminal_task(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         "ALTER TABLE terminals ADD COLUMN task_id BLOB REFERENCES tasks(id) ON DELETE SET NULL;",
     )
+}
+
+/// A repository registered before the board existed gets its task key
+/// prefix now, and its tasks the keys that go with it.
+///
+/// `migration_0010_the_board` added `task_key_prefix` with a `''` default and
+/// no backfill, and the only thing that ever assigns one is repository
+/// registration. Every repository registered before migration 10 therefore
+/// kept `''` for good and minted `-1`, `-2`: keys a command line reads as
+/// flags. This gives each such repository the prefix registration would have,
+/// by the same `claim_task_key_prefix` (derivation and collision rule
+/// both), in registration order, so an older repository wins a contested
+/// prefix the way it would have had the board existed when it arrived.
+///
+/// Its tasks are renamed `-3` to `ov-3`, and the old key is kept in
+/// `former_key`, which `Store::tasks_with_key` also answers to. Renaming is
+/// what stops the board printing a key that reads as a flag; keeping the
+/// old one is what makes the rename safe without touching anything else.
+/// Nothing that refers to a task by id changes (`task_blocks`,
+/// `terminals.task_id`, a note's `task_id`), and nothing that refers to one
+/// by its old key has to: a note's body mentioning `-3` cannot be rewritten
+/// anyway (`task_notes` is append-only, and this migration would abort on
+/// its trigger if it tried), and an agent pane launched before the upgrade
+/// carries `FARCOOLER_TASK=-3` in its environment until it restarts.
+fn migration_0012_every_board_has_a_prefix(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE tasks ADD COLUMN former_key TEXT;")?;
+
+    let prefixless: Vec<(Vec<u8>, String)> = {
+        let mut stmt = tx.prepare(
+            "SELECT id, display_name FROM repositories WHERE task_key_prefix = '' ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    for (repo, name) in prefixless {
+        let prefix = crate::tasks::claim_task_key_prefix(tx, &repo, &name)?;
+        // A prefixless board's keys are `'' || '-' || n`, so every one of them
+        // starts with `-`, and after this none does.
+        tx.execute(
+            "UPDATE tasks SET former_key = key, key = ?1 || key,
+                              resource_version = resource_version + 1
+              WHERE repository_id = ?2 AND key LIKE '-%'",
+            rusqlite::params![prefix, repo],
+        )?;
+    }
+    Ok(())
+}
+
+/// Every migration below `version`, applied in one transaction, with the
+/// watermark set to it: a database exactly as a build that stopped at
+/// `version` left it, for a test to seed and then migrate forward.
+#[cfg(test)]
+pub(crate) fn migrate_only_to(conn: &mut Connection, version: u32) {
+    let tx = conn.transaction().unwrap();
+    for m in &MIGRATIONS[..version as usize] {
+        m(&tx).unwrap();
+    }
+    tx.execute(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', ?1)",
+        [version.to_string()],
+    )
+    .unwrap();
+    tx.commit().unwrap();
 }
 
 #[cfg(test)]
