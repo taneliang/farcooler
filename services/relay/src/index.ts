@@ -1648,17 +1648,15 @@ function trace(value: unknown): string | null {
 ///
 /// **Ten minutes.** An anchor is `now.div_euclid(width)` on the RUNNER's
 /// clock, so it is also a claim about what time it is there, and the card puts
-/// every row on the grid the newest anchor sets. A clock a day fast would push
-/// every other row off the left of the card; a clock a day slow would push its
-/// own row off. Ten minutes is far more than an NTP-disciplined clock drifts
-/// plus a notice's time in flight, so a healthy runner is never refused — and
-/// it is two five-minute columns, so the worst a runner inside it can do is
-/// draw its row two columns early or late on a `1h` card, and less than one on
-/// the wider ones. Outside it the anchor is dropped and the row is packed from
-/// its newest end, which is the drawing before anchors existed.
+/// every row on the grid the newest anchor sets. Ten minutes is far more than
+/// an NTP-disciplined clock drifts plus a notice's time in flight, so a healthy
+/// runner is never refused, and it is two five-minute columns.
 ///
-/// The card applies the same number against the relay's own `updatedAt`, from
-/// the other side — see `AgentKit.ActivityTrace.anchorSlack`.
+/// **This worker's bound is only tight at five minutes** — see `traceAnchor`.
+/// The per-width guard is the card's: `AgentKit.ActivityTrace.trusted`
+/// applies the same number against the relay's own `updatedAt`, at the width
+/// it can read, and refuses a thirty-minute or two-hour anchor that claims a
+/// time past it.
 export const TRACE_ANCHOR_SLACK_S = 10 * 60
 
 /// A trace anchor the daemon actually sent, and could have sent at `now`, or
@@ -1667,15 +1665,23 @@ export const TRACE_ANCHOR_SLACK_S = 10 * 60
 /// A whole number and nothing else. `Number.isSafeInteger` keeps a float or a
 /// string out of a column the card reads as an integer.
 ///
-/// **Bounded by this worker's clock without decoding the blob.** The index is
-/// in units of the trace's own width, which is in byte 0 of the base64 and
-/// stays there unread — so the bound is the one that holds at EVERY width: no
-/// fresher than the newest five-minute bucket and no staler than the oldest
-/// two-hour one, each widened by `TRACE_ANCHOR_SLACK_S`. That refuses a clock
-/// days off and an absurd number like 2^52 outright; the tighter per-width
-/// check is the card's, which can read the width. It also caps the column at
-/// seven digits until 2065, which is what the payload arithmetic on
-/// `ROWS_SHOWN` prices.
+/// **Bounded by this worker's clock without decoding the blob, and loosely.**
+/// The index is in units of the trace's own width, which is in byte 0 of the
+/// base64 and stays there unread — so the only bound that holds at EVERY
+/// width is: no fresher than the newest five-minute bucket and no staler than
+/// the oldest two-hour one, each widened by `TRACE_ANCHOR_SLACK_S`.
+///
+/// What that buys, and what it does not:
+///
+/// - A **five-minute** anchor more than the slack ahead of this worker is
+///   refused. That is the only width where the upper edge is tight.
+/// - A **thirty-minute** anchor is accepted up to about six times now, and a
+///   **two-hour** one up to about twenty-four — a runner a day fast on either
+///   width is stored. The card's `ActivityTrace.trusted`, which reads the width,
+///   is what refuses those; it is the real per-width time guard.
+/// - Every anchor's magnitude is capped: nothing negative, nothing absurd like
+///   2^52, and nothing past seven digits until 2065, which is what the payload
+///   arithmetic on `ROWS_SHOWN` prices.
 ///
 /// Applied on arrival only. A stored anchor rides with its stored trace and
 /// legitimately ages; it is not re-checked against a later `now`.

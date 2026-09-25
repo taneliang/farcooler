@@ -3599,6 +3599,13 @@ describe('/v1/notify and Live Activities', () => {
       // The cut drops whole rows and never truncates one. Half a question on a
       // lock screen is worse than a row that was not drawn.
       for (const row of state.rows) expect(row.detail).toBe(SAID)
+      // And every row carries the anchor it was sent, at the seven digits the
+      // payload arithmetic prices. A bound that refused it would leave these
+      // rows 22 bytes short of what this test claims to measure.
+      for (const row of state.rows) {
+        expect(typeof row.traceAnchor).toBe('number')
+        expect(String(row.traceAnchor)).toHaveLength(7)
+      }
     })
 
     it('drops rows rather than starting a card APNs would refuse', async () => {
