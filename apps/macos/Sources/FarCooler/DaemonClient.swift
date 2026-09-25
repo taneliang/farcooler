@@ -1512,8 +1512,14 @@ final class DaemonClient: ObservableObject {
 
     /// An agent's terminal that is running or on its way: not a shell, not a
     /// changes pane, and not one that has ended.
+    ///
+    /// "Not a shell" is `Terminal.hasDetectedAgent`, the app's one answer to
+    /// it, and not a match on the word `shell`: a live shell pane's `preset`
+    /// is the process tmux sees running (`zsh`, `bash`), and reading that as
+    /// an agent would take a shell somebody opened to look around for the
+    /// task's agent — go to it, start nothing, and lose the task.
     static func isLiveAgent(_ terminal: Terminal) -> Bool {
-        !["shell", "changes"].contains(terminal.preset)
+        terminal.hasDetectedAgent && !terminal.isChangesPane && terminal.preset != "changes"
             && [.running, .starting].contains(StateKind.parse(terminal.state))
     }
 

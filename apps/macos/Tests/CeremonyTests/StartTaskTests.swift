@@ -23,6 +23,9 @@ struct StartTaskTests {
         var workspaceMade = false
         var terminalMade = false
         var activity: String?
+        /// What the made terminal's `preset` reads as: what it was launched
+        /// as, or once tmux resolves it, what is running (`zsh` for a shell).
+        var terminalPreset = "claude"
         /// Worktree directories already on the runner, beside the main checkout.
         var existing: [String] = []
         /// Branches git already has, as `workspace branches` lists them.
@@ -84,7 +87,7 @@ struct StartTaskTests {
             var terminals: [[String: Any]] = []
             if terminalMade {
                 var terminal: [String: Any] = [
-                    "id": "t-new", "short": "tnew", "title": "claude", "preset": "claude",
+                    "id": "t-new", "short": "tnew", "title": "claude", "preset": terminalPreset,
                     "state": "running", "epoch": 0,
                 ]
                 if let activity { terminal["activity"] = activity }
@@ -401,6 +404,25 @@ struct StartTaskTests {
         #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
         #expect(runner.made("terminal") == nil, "no second agent")
         #expect(runner.made("workspace") == nil, "and no second worktree")
+    }
+
+    /// A shell opened in the leftover worktree to look around is not the
+    /// task's agent. A live shell pane's `preset` is the process tmux sees —
+    /// `zsh`, not `shell` — and taking that for an agent selected the shell,
+    /// started nothing, and lost the task without a word.
+    @Test(arguments: ["zsh", "bash", "fish", "shell"])
+    func aRetryWhereOnlyAShellRunsStartsTheAgent(_ shell: String) async {
+        let runner = Runner(capabilities: Self.prompting)
+        let client = await client(runner)
+        runner.workspaceMade = true
+        runner.terminalMade = true
+        runner.terminalPreset = shell
+        let outcome = await client.startTask(
+            project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+            agent: "claude", reusing: "w-new")
+        #expect(outcome == .started(workspace: "w-new", terminal: "t-new", name: "fix-flaky-reconnect"))
+        #expect(runner.made("terminal")?.contains("--prompt=\(Self.description)") == true, "\(shell)")
+        #expect(runner.made("workspace") == nil, "in the worktree it made")
     }
 
     /// Removed since: a start from scratch, not an agent sent nowhere.
