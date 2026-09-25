@@ -440,24 +440,27 @@ pub fn parse_numstat_z(bytes: &[u8]) -> Vec<FileChange> {
 /// also what `untracked_lines` and `worktree_digest` call, and neither of them
 /// wants a diff run underneath it.
 /// The files Far Cooler wrote into the worktree itself are subtracted here,
-/// for `git::is_dirty`'s reason and by the same pathspec: a worktree this
-/// runner has just made must not open with two files in its diff view that
-/// nobody put there. This is the one place to do it — `untracked_lines` and
-/// `worktree_digest` both call this function, so the digest does not move when
-/// the installer runs either. Only copies git doesn't track are subtracted;
-/// an edit to a tracked hooks file is the user's and is listed
-/// (`hook_install::project_hook_exclusions`).
+/// for `git::is_dirty`'s reason: a worktree this runner has just made must
+/// not open with two files in its diff view that nobody put there. This is the
+/// one place to do it: `untracked_lines` and `worktree_digest` both call this
+/// function, so the digest does not move when the installer runs either. Only
+/// untracked copies are subtracted; an edit to a tracked hooks file is the
+/// user's and is listed (`hook_install::hide_our_untracked`).
 pub async fn working_tree(repo: &Path) -> Result<WorkingTree> {
-    let mut args = vec![
-        "status".to_string(),
-        "--porcelain=v2".to_string(),
-        "--untracked-files=all".to_string(),
-        "-z".to_string(),
-        "--".to_string(),
-    ];
-    args.extend(crate::hook_install::project_hook_exclusions(repo).await);
-    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    let raw = git_bytes(repo, &borrowed).await?;
+    let mut tree = working_tree_as_git_reports_it(repo).await?;
+    crate::hook_install::hide_our_untracked(&mut tree);
+    Ok(tree)
+}
+
+/// `git status` with nothing subtracted, Far Cooler's own hooks files
+/// included. For the removal check, which has to look inside those files
+/// (`service::holds_an_unseen_hook_file`); everything shown to a person reads
+/// `working_tree`.
+///
+/// `--untracked-files=all`, so an untracked file is always its own record and
+/// never folded into its directory's.
+pub async fn working_tree_as_git_reports_it(repo: &Path) -> Result<WorkingTree> {
+    let raw = git_bytes(repo, &["status", "--porcelain=v2", "--untracked-files=all", "-z"]).await?;
     if !raw.ok {
         return Err(DomainError::OperationFailed);
     }

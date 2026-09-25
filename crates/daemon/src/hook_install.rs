@@ -102,54 +102,54 @@ pub const CODEX_HOOKS: &str = ".codex/hooks.json";
 pub const CURSOR_HOOKS: &str = ".cursor/hooks.json";
 pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
 
-/// The `PROJECT_HOOK_FILES` that git does not track in `worktree`, as git
-/// pathspecs that subtract them from an answer.
+/// Take Far Cooler's own untracked hooks files out of a `git status` answer.
 ///
-/// Only the untracked ones. A hooks file the repository commits is the team's
-/// (the installer never writes one; see `service::install_project_hook_file`),
-/// so any change to it is somebody's work: it has to show in the diff view,
-/// and it has to make `removal_needs_confirmation` ask before `git worktree
-/// remove --force` throws it away. Subtracting it by path hid exactly that.
+/// Only the untracked ones, the `?` records. A hooks file the repository
+/// tracks is never one Far Cooler wrote (the installer refuses to; see
+/// `service::install_project_hook_file`), so any change to it is somebody's
+/// work: an edit, a staged deletion, a `git rm --cached`. It has to show in the
+/// diff view, and it has to make `removal_needs_confirmation` ask before
+/// `git worktree remove --force` throws it away. Subtracting these paths by
+/// pathspec hid all of that.
 ///
-/// Per worktree, because tracking is: one branch can commit `.codex/hooks.json`
-/// while its sibling doesn't. That is also why this is a pathspec and not a
-/// line in `info/exclude`, which every checkout of the repository shares, and
-/// which once hid an owner's own untracked hooks file in their main checkout
-/// from their commits.
+/// Read from the same `git status` as the rest of the answer, so there is no
+/// second git process and no second snapshot to disagree with the first. That
+/// status must be `--untracked-files=all`: in git's default mode a wholly
+/// untracked directory is one record (`? .codex/`), never
+/// `? .codex/hooks.json`, and a filter on the file's path would match nothing
+/// at all. With a file of the user's own beside ours, their file is its own
+/// record and is not hidden.
 ///
-/// A git that can't answer (it won't run, times out, or refuses the directory)
-/// gets no exclusion for either file. When we can't tell, a file shows as the
-/// user's change rather than being hidden, the same direction
-/// `service::git_tracks` takes.
+/// Per worktree by construction, since tracking is: one branch can commit
+/// `.codex/hooks.json` while its sibling doesn't. That is also why this is not
+/// a line in `info/exclude`, which every checkout of the repository shares,
+/// and which once hid an owner's own untracked hooks file in their main
+/// checkout from their commits (31947322, reverted by 605f1815).
+///
+/// Hidden from the diff view is not the same as safe to delete: an untracked
+/// hooks file can hold the owner's own entries, merged with ours or not.
+/// `service::holds_an_unseen_hook_file` asks about those before removal.
 ///
 /// Not the manager skill's files (`skill_install::PROJECT_SKILL_FILES`). Those
 /// are hidden by git itself, through a line in the repository's
 /// `info/exclude` (`service::exclude_locally`), which also keeps `git add -A`
 /// from committing them.
-///
-/// A pathspec rather than a filter over `git status` output, because git's own
-/// matching is the only thing that gets this right. `git status --porcelain`
-/// collapses a wholly-untracked directory to one entry (`?? .codex/`, never
-/// `?? .codex/hooks.json`), so a filter comparing whole lines against these
-/// paths would match nothing at all and silently do nothing. It is also
-/// conservative in the direction that matters: with a file of the user's own
-/// beside ours, git reports the directory again and their file is not hidden.
-///
-/// One `git ls-files` for both files, since `is_dirty` and `working_tree` are
-/// asked often. The caller puts `--` in front of these.
-pub async fn project_hook_exclusions(worktree: &Path) -> Vec<String> {
-    let mut args = vec!["ls-files", "-z", "--"];
-    args.extend(PROJECT_HOOK_FILES);
-    let tracked = match crate::git::git_bytes(worktree, &args).await {
-        Ok(out) if out.ok => out.stdout,
-        _ => return Vec::new(),
-    };
-    let tracked: Vec<&[u8]> = tracked.split(|b| *b == 0).collect();
-    PROJECT_HOOK_FILES
-        .iter()
-        .filter(|p| !tracked.contains(&p.as_bytes()))
-        .map(|p| format!(":(exclude){p}"))
-        .collect()
+pub fn hide_our_untracked(tree: &mut crate::change_set::WorkingTree) {
+    tree.untracked.retain(|f| !PROJECT_HOOK_FILES.contains(&f.path.as_str()));
+}
+
+/// Whether a hooks file holds nothing but our registrations: a JSON object
+/// whose keys are `hooks` (and cursor's `version`), every value under `hooks`
+/// a list of entries this binary wrote. That is the only kind of hooks file
+/// removing a worktree can lose without asking, because nobody else put
+/// anything in it. Anything else is somebody's: their own entry, a key of
+/// their own, text that isn't a JSON object, or an entry from this binary at
+/// another path.
+pub fn holds_only_ours(text: &str) -> bool {
+    let Ok(Value::Object(root)) = serde_json::from_str::<Value>(text) else { return false };
+    let Some(Value::Object(hooks)) = root.get("hooks") else { return false };
+    root.keys().all(|k| k == "hooks" || k == "version")
+        && hooks.values().all(|list| list.as_array().is_some_and(|l| l.iter().all(entry_is_ours)))
 }
 
 /// The path this binary was launched as, resolved the same way the shim's
@@ -659,12 +659,20 @@ mod tests {
         );
     }
 
-    /// "Can't tell" is tracked: a directory git won't answer for gets no
-    /// exclusion, so a hooks file there shows as the user's change instead of
-    /// being hidden.
-    #[tokio::test]
-    async fn a_git_that_cannot_answer_excludes_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(project_hook_exclusions(dir.path()).await, Vec::<String>::new());
+    /// What removal may lose without asking: a file holding our entries and
+    /// nothing else, in either agent's shape.
+    #[test]
+    fn only_a_file_of_nothing_but_ours_is_ours() {
+        let socket = Path::new("/tmp/h.sock");
+        assert!(holds_only_ours(&merge_codex("{}", socket)));
+        assert!(holds_only_ours(&merge_cursor("", socket)));
+        assert!(holds_only_ours(&merge_cursor(r#"{"version":1}"#, socket)), "cursor's own version key");
+        assert!(!holds_only_ours(&merge_codex(SOMEONE_ELSES, socket)), "somebody's entry beside ours");
+        let mut extra: Value = serde_json::from_str(&merge_codex("{}", socket)).unwrap();
+        extra["theirs"] = json!(true);
+        assert!(!holds_only_ours(&extra.to_string()), "a key of their own");
+        assert!(!holds_only_ours(SOMEONE_ELSES), "nothing of ours at all");
+        assert!(!holds_only_ours("{ not json"), "text we can't read");
+        assert!(!holds_only_ours("[]"), "not an object");
     }
 }

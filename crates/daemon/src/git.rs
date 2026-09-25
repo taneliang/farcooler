@@ -436,26 +436,18 @@ pub async fn rollback_worktree(
 /// puts one of the two into any worktree a codex or cursor pane is opened in —
 /// including the checkout the user works in every day, which Far Cooler did not
 /// make. This answer is what `removal_needs_confirmation` reads, so without the
-/// exclusion a workspace created a second ago and never touched by anyone would
-/// demand the user type its name back to remove it, on the strength of files
-/// Far Cooler wrote and the user has never seen.
+/// subtraction a workspace created a second ago and never touched by anyone
+/// would demand the user type its name back to remove it, on the strength of
+/// files Far Cooler wrote and the user has never seen.
 ///
-/// Only an UNTRACKED copy is subtracted (`project_hook_exclusions`). A hooks
-/// file the repository commits is never one Far Cooler wrote, so an edit to it
-/// is the user's work and counts here like any other.
+/// Only an UNTRACKED copy is subtracted (`hook_install::hide_our_untracked`).
+/// A hooks file the repository commits is never one Far Cooler wrote, so a
+/// change to it is the user's work and counts here like any other.
 ///
-/// Git's own pathspec, rather than a filter over these lines: `--porcelain`
-/// collapses a wholly-untracked directory into one entry (`?? .codex/`), so
-/// there is no line here to compare against a file path in the first place.
+/// The same answer the diff view gets (`change_set::working_tree`), so the two
+/// can't disagree about what is the user's.
 pub async fn is_dirty(worktree: &Path) -> Result<bool> {
-    let mut args = vec!["status".to_string(), "--porcelain".to_string(), "--".to_string()];
-    args.extend(crate::hook_install::project_hook_exclusions(worktree).await);
-    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    let r = git(worktree, &borrowed).await?;
-    if !r.ok {
-        return Err(DomainError::OperationFailed);
-    }
-    Ok(!r.stdout.trim().is_empty())
+    Ok(crate::change_set::working_tree(worktree).await?.is_dirty())
 }
 
 /// A short human summary of the remote, for display only.
@@ -794,6 +786,33 @@ mod tests {
         let unstaged: Vec<&str> = tree.unstaged.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(unstaged, [".codex/hooks.json"], "the diff view lists the edit");
         assert!(tree.untracked.is_empty(), "the untracked copy is still ours to hide: {:?}", tree.untracked);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A tracked hooks file taken out of the index with `git rm --cached` and
+    /// then edited is the user's work twice over: a staged deletion and an
+    /// untracked copy. Only `?` records are ever hidden, so the staged
+    /// deletion still shows, and so does the change.
+    #[tokio::test]
+    async fn a_hooks_file_taken_out_of_the_index_is_still_the_users_change() {
+        let d = scratch("rm-cached-hooks");
+        init_repo(&d);
+        std::fs::create_dir_all(d.join(".codex")).unwrap();
+        std::fs::write(d.join(".codex/hooks.json"), "{\"hooks\":{}}\n").unwrap();
+        for args in [
+            vec!["add", "--", ".codex/hooks.json"],
+            vec!["commit", "-qm", "codex hooks"],
+            vec!["rm", "-q", "--cached", "--", ".codex/hooks.json"],
+        ] {
+            let status = SyncCommand::new("git").current_dir(&d).args(&args).status().unwrap();
+            assert!(status.success(), "git {args:?}");
+        }
+        std::fs::write(d.join(".codex/hooks.json"), "{\"hooks\":{\"Stop\":[]}}\n").unwrap();
+
+        assert!(is_dirty(&d).await.unwrap(), "a staged deletion is uncommitted work");
+        let tree = crate::change_set::working_tree(&d).await.unwrap();
+        let staged: Vec<&str> = tree.staged.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(staged, [".codex/hooks.json"], "the diff view lists the deletion");
         let _ = std::fs::remove_dir_all(&d);
     }
 

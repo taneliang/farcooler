@@ -738,16 +738,16 @@ type MergeHooks = fn(&str, &Path) -> String;
 /// and it is not worth a workspace for: a read-only mount, a `.cursor` that is
 /// a file rather than a directory, a hooks file we cannot parse — each of
 /// those loses the live view for that agent in that worktree and nothing else.
-fn install_project_hooks(worktree: &Path, socket: &Path) {
+async fn install_project_hooks(worktree: &Path, socket: &Path) {
     // Both paths come off `PROJECT_HOOK_FILES`, which `git::is_dirty` and
-    // `change_set::working_tree` also read to subtract these files from what
-    // they report. Spelling them out here as well is what would let the
+    // `change_set::working_tree` also read to subtract untracked copies of
+    // these files from what they report. Spelling them out here as well is what would let the
     // installer and those two filters drift apart, and the drift is invisible:
     // a file written under a name nothing filters just quietly becomes the
     // user's uncommitted work.
     use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
-    install_project_hook_file(worktree, CODEX_HOOKS, socket, merge_codex);
-    install_project_hook_file(worktree, CURSOR_HOOKS, socket, merge_cursor);
+    install_project_hook_file(worktree, CODEX_HOOKS, socket, merge_codex).await;
+    install_project_hook_file(worktree, CURSOR_HOOKS, socket, merge_cursor).await;
     // Not the manager skill. codex's copy is written when a codex pane is
     // opened (`prepare_launch_hooks`), so a worktree only claude or cursor
     // ever runs in never holds a document none of them reads.
@@ -951,6 +951,19 @@ fn git_tracks(worktree: &Path, relative: &str) -> bool {
         .map_or(true, |status| status.code() != Some(1))
 }
 
+/// `git_tracks`, for the async launch paths: through `git::git`, so it holds
+/// no runtime thread while git runs, and a git that hangs (a slow filesystem,
+/// an fsmonitor hook) is killed at `git::GIT_TIMEOUT` instead of pinning a
+/// worker. The same answers: a path in the index is tracked, and anything but
+/// a clean "not in the index" (git missing, a directory that isn't a
+/// repository or that `safe.directory` refuses, a timeout) counts as tracked.
+async fn git_tracks_without_blocking(worktree: &Path, relative: &str) -> bool {
+    match git::git(worktree, &["ls-files", "--", relative]).await {
+        Ok(out) if out.ok => !out.stdout.trim().is_empty(),
+        _ => true,
+    }
+}
+
 /// Add `/relative` to the repository's `info/exclude`, unless a line already
 /// says exactly that, and say whether the line is there now.
 ///
@@ -1031,6 +1044,38 @@ async fn holds_an_unseen_skill_file(worktree: &Path) -> bool {
     false
 }
 
+/// Whether a worktree holds an untracked hooks file that removing it would
+/// lose and that `git::is_dirty` can't see: one holding anything besides our
+/// registrations (`hook_install::holds_only_ours`).
+///
+/// `is_dirty` subtracts every untracked `.codex/hooks.json` and
+/// `.cursor/hooks.json` so our own writes aren't reported as the user's work.
+/// But an untracked hooks file can be the owner's: their own file in a
+/// worktree the reconciler adopted, with our entries merged in when they
+/// opened codex there, or entries they added to ours. `git worktree remove
+/// --force` deletes it either way, so removal asks. A tracked copy needs none
+/// of this: `is_dirty` reports its changes, and its committed bytes survive in
+/// the branch. A git we can't ask means we ask the owner instead.
+async fn holds_an_unseen_hook_file(worktree: &Path) -> bool {
+    use crate::hook_install::{PROJECT_HOOK_FILES, holds_only_ours};
+    let Ok(status) = crate::change_set::working_tree_as_git_reports_it(worktree).await else {
+        return true;
+    };
+    for file in &status.untracked {
+        let relative = file.path.as_str();
+        // Through a link, the file lives somewhere removal doesn't reach.
+        if !PROJECT_HOOK_FILES.contains(&relative) || crate::skill_install::crosses_a_symlink(worktree, relative) {
+            continue;
+        }
+        match std::fs::read(worktree.join(relative)) {
+            Ok(bytes) if holds_only_ours(&String::from_utf8_lossy(&bytes)) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return true,
+        }
+    }
+    false
+}
+
 /// The one project-local hooks file this preset's agent reads, or `None` for
 /// an agent that reads none.
 ///
@@ -1075,11 +1120,23 @@ fn project_hook_file_for(preset: &str) -> Option<(&'static str, MergeHooks)> {
 /// and our registrations name this runner's CLI path: written into a tracked
 /// file they become a change in `git status`, and the next `git commit -a`
 /// commits them. So a tracked file is never written, and that agent reports
-/// nothing in that repository. `git_tracks` counts "can't tell" as tracked.
-/// It runs only when there is something to write, so the ordinary launch,
-/// where the file already says this, spawns nothing.
-fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Path, merge: MergeHooks) {
+/// nothing in that repository. `git_tracks_without_blocking` counts "can't
+/// tell" as tracked. It runs only when there is something to write, so the
+/// ordinary launch, where the file already says this, spawns nothing.
+///
+/// And a symbolic link on the way to the file is somebody's arrangement: a
+/// `.codex` linked to `~/.codex` would have our entries merged into the
+/// user's global hooks, outside anything Far Cooler was asked to touch. The
+/// skill installer refuses the same way (`skill_install::crosses_a_symlink`).
+async fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Path, merge: MergeHooks) {
     let path = &worktree.join(relative);
+    if crate::skill_install::crosses_a_symlink(worktree, relative) {
+        tracing::info!(
+            path = %path.display(),
+            "a symbolic link is on the way to this hooks file; leaving it alone, so this agent reports nothing here"
+        );
+        return;
+    }
     let existing = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -1129,7 +1186,7 @@ fn install_project_hook_file(worktree: &Path, relative: &str, socket: &Path, mer
         return;
     }
 
-    if git_tracks(worktree, relative) {
+    if git_tracks_without_blocking(worktree, relative).await {
         tracing::info!(
             path = %path.display(),
             "the repository tracks this hooks file; leaving it alone, so this agent reports nothing here"
@@ -2122,7 +2179,7 @@ impl Service {
                 // After the row, not before it: the failure arm below removes
                 // the worktree again, and there is no reason to have written
                 // into a directory that is about to go.
-                install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root));
+                install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root)).await;
                 Ok(ws)
             }
             Err(e) => {
@@ -2199,7 +2256,7 @@ impl Service {
                 // branch picked up from somewhere else runs the same agents in
                 // the same panes, and a pane that reports nothing is exactly
                 // as broken here as it is in `create_workspace`.
-                install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root));
+                install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root)).await;
                 Ok(workspace)
             }
             Err(e) => {
@@ -2474,6 +2531,11 @@ impl Service {
         if git::is_dirty(worktree).await.unwrap_or(true) {
             return Ok(true);
         }
+        // What `is_dirty` subtracts: an untracked hooks file holding anything
+        // besides our registrations.
+        if holds_an_unseen_hook_file(worktree).await {
+            return Ok(true);
+        }
         // What git is told to ignore: an edited copy of the manager skill.
         Ok(holds_an_unseen_skill_file(worktree).await)
     }
@@ -2660,7 +2722,8 @@ impl Service {
                 relative,
                 &hook_ingress::HookIngress::socket_path(&self.root),
                 merge,
-            );
+            )
+            .await;
         }
         // The manager skill codex reads from the worktree, on the same act.
         if let Some(harness) = project_skill_for(preset) {
@@ -7679,10 +7742,10 @@ mod hook_file_tests {
         dir
     }
 
-    #[test]
-    fn a_new_worktree_gets_the_two_files_codex_and_cursor_read() {
+    #[tokio::test]
+    async fn a_new_worktree_gets_the_two_files_codex_and_cursor_read() {
         let worktree = scratch("fresh");
-        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
 
         let codex = std::fs::read_to_string(worktree.join(".codex/hooks.json"))
             .expect("codex hooks.json is written at the path codex reads");
@@ -7713,15 +7776,15 @@ mod hook_file_tests {
     /// treats text it cannot read as an empty document — so passing it
     /// through would hand back our three hooks alone and we would write that
     /// over theirs.
-    #[test]
-    fn a_hooks_file_we_cannot_parse_is_left_exactly_as_it_was() {
+    #[tokio::test]
+    async fn a_hooks_file_we_cannot_parse_is_left_exactly_as_it_was() {
         let worktree = scratch("unparseable");
         let path = worktree.join(".codex/hooks.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let theirs = "{ \"hooks\": { \"SessionStart\": [ oops this is not json";
         std::fs::write(&path, theirs).unwrap();
 
-        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
 
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
@@ -7738,22 +7801,22 @@ mod hook_file_tests {
     /// Valid JSON that is not an object — an array, a bare string — reaches
     /// `parse_or_empty_object` as the same "nothing here yet" a garbled file
     /// does, so it needs the same guard.
-    #[test]
-    fn a_hooks_file_that_is_json_but_not_an_object_is_left_alone_too() {
+    #[tokio::test]
+    async fn a_hooks_file_that_is_json_but_not_an_object_is_left_alone_too() {
         let worktree = scratch("not-an-object");
         let path = worktree.join(".cursor/hooks.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "[1, 2, 3]").unwrap();
 
-        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "[1, 2, 3]");
 
         let _ = std::fs::remove_dir_all(&worktree);
     }
 
-    #[test]
-    fn an_existing_hooks_file_keeps_the_entries_it_already_had() {
+    #[tokio::test]
+    async fn an_existing_hooks_file_keeps_the_entries_it_already_had() {
         let worktree = scratch("theirs");
         let path = worktree.join(".codex/hooks.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -7763,7 +7826,7 @@ mod hook_file_tests {
         )
         .unwrap();
 
-        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
 
         let after = std::fs::read_to_string(&path).unwrap();
         assert!(after.contains("herdr-agent-state.sh"), "their hook survives: {after}");
@@ -7776,12 +7839,12 @@ mod hook_file_tests {
     /// that fails to be created. `.cursor` as a FILE is the real shape of
     /// this: `create_dir_all` refuses, and the alternative — propagating
     /// that — would mean somebody's stray file stops them making a worktree.
-    #[test]
-    fn a_worktree_we_cannot_write_into_costs_the_live_view_and_nothing_else() {
+    #[tokio::test]
+    async fn a_worktree_we_cannot_write_into_costs_the_live_view_and_nothing_else() {
         let worktree = scratch("blocked");
         std::fs::write(worktree.join(".cursor"), "a file, not a directory").unwrap();
 
-        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
 
         assert_eq!(
             std::fs::read_to_string(worktree.join(".cursor")).unwrap(),
@@ -7796,16 +7859,50 @@ mod hook_file_tests {
         let _ = std::fs::remove_dir_all(&worktree);
     }
 
+    /// A `.codex` that links somewhere else is somebody's arrangement, and
+    /// writing through it would put our entries in a file outside the
+    /// worktree, such as the user's global `~/.codex/hooks.json`.
+    #[tokio::test]
+    async fn a_hooks_path_through_a_symbolic_link_is_not_written() {
+        let worktree = scratch("linked");
+        let elsewhere = scratch("elsewhere");
+        std::os::unix::fs::symlink(&elsewhere, worktree.join(".codex")).unwrap();
+
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
+
+        assert!(!elsewhere.join("hooks.json").exists(), "written through the link");
+        assert!(worktree.join(".cursor/hooks.json").exists(), "cursor, with no link in the way, is installed");
+
+        let _ = std::fs::remove_dir_all(&worktree);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    /// The launch paths' tracked check answers like `git_tracks`, "can't
+    /// tell" included.
+    #[tokio::test]
+    async fn the_tracked_check_without_blocking_answers_like_git_tracks() {
+        let bare = tempfile::tempdir().unwrap();
+        assert!(git_tracks_without_blocking(bare.path(), crate::hook_install::CODEX_HOOKS).await, "not a repository");
+        let repo = scratch("tracks");
+        assert!(!git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS).await, "unknown to git");
+        std::fs::create_dir_all(repo.join(".codex")).unwrap();
+        std::fs::write(repo.join(crate::hook_install::CODEX_HOOKS), "{}").unwrap();
+        let out = git::git(&repo, &["add", "--", crate::hook_install::CODEX_HOOKS]).await.unwrap();
+        assert!(out.ok, "{}", out.stderr);
+        assert!(git_tracks_without_blocking(&repo, crate::hook_install::CODEX_HOOKS).await, "in the index");
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
     /// Installing twice — a worktree adopted, removed and adopted again, or a
     /// daemon restarted — must not accumulate copies. The property is
     /// `hook_install`'s, but it only holds through this caller if the caller
     /// feeds the existing file back in rather than starting from empty.
-    #[test]
-    fn installing_twice_leaves_one_copy() {
+    #[tokio::test]
+    async fn installing_twice_leaves_one_copy() {
         let worktree = scratch("twice");
-        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
         let once = std::fs::read_to_string(worktree.join(".codex/hooks.json")).unwrap();
-        install_project_hooks(&worktree, Path::new("/tmp/h.sock"));
+        install_project_hooks(&worktree, Path::new("/tmp/h.sock")).await;
         let twice = std::fs::read_to_string(worktree.join(".codex/hooks.json")).unwrap();
         assert_eq!(once, twice, "installing is idempotent through the caller too");
 
@@ -7993,10 +8090,10 @@ mod hook_file_tests {
     }
 
     /// A file of the user's OWN inside `.codex/` must not be swallowed by the
-    /// exclusion. Git's pathspec is what makes this true — it re-reports the
-    /// directory once anything in it is not excluded — and the alternative
-    /// this rules out is an exclusion written as `.codex/` or a glob, which
-    /// would hide their file along with ours.
+    /// subtraction. `--untracked-files=all` is what makes this true: their
+    /// file is its own record, and only our exact paths are dropped. The
+    /// alternative this rules out is a subtraction written as `.codex/` or a
+    /// glob, which would hide their file along with ours.
     #[tokio::test]
     async fn a_users_own_file_beside_ours_is_still_their_work() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
@@ -8412,34 +8509,116 @@ mod launch_hook_install_tests {
         assert_eq!(term.command_preset, "codex");
     }
 
-    /// A hooks file the repository COMMITS is the team's, not a place for
-    /// ours. Writing our registrations into it would put this runner's CLI
-    /// path into the next commit of anyone who runs `git commit -a`. So a
-    /// codex or cursor launch leaves a tracked copy byte for byte as it was,
-    /// and that agent is quiet in this repository.
-    #[tokio::test]
-    async fn a_tracked_hooks_file_is_left_exactly_as_the_repository_has_it() {
-        let (_dir, svc, ws) = a_workspace().await;
-        let worktree = Path::new(&ws.worktree_path);
-        let codex = r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"./scripts/team-hook.sh"}]}]}}"#;
-        let cursor = r#"{"version":1,"hooks":{"stop":[{"command":"./scripts/team-hook.sh"}]}}"#;
-        for (path, text) in [(codex_hooks(&ws), codex), (cursor_hooks(&ws), cursor)] {
+    /// A team's own hooks files, in each agent's shape, with nothing of ours.
+    const TEAM_CODEX: &str = r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"./scripts/team-hook.sh"}]}]}}"#;
+    const TEAM_CURSOR: &str = r#"{"version":1,"hooks":{"stop":[{"command":"./scripts/team-hook.sh"}]}}"#;
+
+    /// Commit `TEAM_CODEX` and `TEAM_CURSOR` at the two hooks paths in `dir`.
+    async fn commit_team_hooks(dir: &Path) {
+        use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS};
+        for (relative, text) in [(CODEX_HOOKS, TEAM_CODEX), (CURSOR_HOOKS, TEAM_CURSOR)] {
+            let path = dir.join(relative);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, text).unwrap();
         }
         let who = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
-        let add = [&who[..], &["add", "--", crate::hook_install::CODEX_HOOKS, crate::hook_install::CURSOR_HOOKS]].concat();
+        let add = [&who[..], &["add", "--", CODEX_HOOKS, CURSOR_HOOKS]].concat();
         let commit = [&who[..], &["commit", "-qm", "the team's hooks"]].concat();
         for args in [add, commit] {
-            let out = git::git(worktree, &args).await.expect("git runs");
+            let out = git::git(dir, &args).await.expect("git runs");
             assert!(out.ok, "git {args:?}: {}", out.stderr);
         }
+    }
 
-        svc.create_terminal(ws.id, "one", "codex:gpt-5.6-sol").await.expect("a codex pane");
-        svc.create_terminal(ws.id, "two", "cursor").await.expect("a cursor pane");
+    /// A hooks file the repository COMMITS is the team's, not a place for
+    /// ours. Writing our registrations into it would put this runner's CLI
+    /// path into the next commit of anyone who runs `git commit -a`. So no
+    /// codex or cursor launch, by any of the doors a launch comes through,
+    /// changes a byte of a tracked copy, and that agent is quiet in this
+    /// repository.
+    #[tokio::test]
+    async fn a_tracked_hooks_file_is_left_exactly_as_the_repository_has_it() {
+        let (_dir, svc, ws) = a_workspace().await;
+        commit_team_hooks(Path::new(&ws.worktree_path)).await;
 
-        assert_eq!(std::fs::read_to_string(codex_hooks(&ws)).unwrap(), codex, "codex's tracked file");
-        assert_eq!(std::fs::read_to_string(cursor_hooks(&ws)).unwrap(), cursor, "cursor's tracked file");
+        let codex = svc.create_terminal(ws.id, "one", "codex:gpt-5.6-sol").await.expect("a codex pane");
+        let cursor = svc.create_terminal(ws.id, "two", "cursor").await.expect("a cursor pane");
+        svc.restart_terminal(codex.id).await.expect("restart");
+        svc.split_terminal(ws.id, cursor.id, farcooler_protocol::v1::SplitSide::Right, "three", "cursor")
+            .await
+            .expect("split");
+        svc.split_terminal(ws.id, cursor.id, farcooler_protocol::v1::SplitSide::Right, "four", "codex")
+            .await
+            .expect("split");
+
+        assert_eq!(std::fs::read_to_string(codex_hooks(&ws)).unwrap(), TEAM_CODEX, "codex's tracked file");
+        assert_eq!(std::fs::read_to_string(cursor_hooks(&ws)).unwrap(), TEAM_CURSOR, "cursor's tracked file");
+    }
+
+    /// The other installer: a worktree Far Cooler makes from a branch that
+    /// commits both hooks files gets neither rewritten.
+    #[tokio::test]
+    async fn a_new_workspace_on_a_branch_that_tracks_them_leaves_them_alone() {
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        commit_team_hooks(&dir.path().join("repo")).await;
+
+        let ws = svc
+            .create_workspace(repo, "rate limiting", "feat/rate-limiting", "HEAD")
+            .await
+            .expect("a workspace");
+
+        assert_eq!(std::fs::read_to_string(codex_hooks(&ws)).unwrap(), TEAM_CODEX, "codex's tracked file");
+        assert_eq!(std::fs::read_to_string(cursor_hooks(&ws)).unwrap(), TEAM_CURSOR, "cursor's tracked file");
+        assert!(!svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "and nothing is dirty");
+    }
+
+    /// The data-loss fix, read where it matters: an edit to a tracked hooks
+    /// file makes removal ask before `git worktree remove --force`.
+    #[tokio::test]
+    async fn removal_asks_before_losing_an_edit_to_a_tracked_hooks_file() {
+        let (_dir, svc, ws) = a_workspace().await;
+        commit_team_hooks(Path::new(&ws.worktree_path)).await;
+        assert!(!svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "committed and unchanged");
+
+        std::fs::write(cursor_hooks(&ws), r#"{"version":1,"hooks":{}}"#).unwrap();
+
+        assert!(svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "the edit is the user's work");
+    }
+
+    /// Our own untracked file is ours to lose; an entry somebody added to it
+    /// is not. The diff view still hides the file, so removal has to look
+    /// inside it.
+    #[tokio::test]
+    async fn removal_asks_when_our_untracked_hooks_file_holds_an_entry_of_somebodys() {
+        let (_dir, svc, ws) = a_workspace().await;
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+        assert!(
+            !svc.removal_needs_confirmation(ws.id).await.expect("dirt check"),
+            "a hooks file holding only our entries is not the user's work"
+        );
+
+        let mut doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(codex_hooks(&ws)).unwrap()).unwrap();
+        doc["hooks"]["Stop"] = serde_json::json!([{ "hooks": [{ "type": "command", "command": "say done" }] }]);
+        std::fs::write(codex_hooks(&ws), doc.to_string()).unwrap();
+
+        assert!(svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "their entry would be lost");
+    }
+
+    /// The review's scenario: the owner's own untracked hooks file in a
+    /// checkout the reconciler adopted, with our entries merged in when they
+    /// opened codex there. Removing the worktree would delete their file.
+    #[tokio::test]
+    async fn removal_asks_for_the_owners_own_untracked_hooks_file_after_ours_were_merged_in() {
+        let (_dir, svc, ws) = a_workspace().await;
+        std::fs::create_dir_all(codex_hooks(&ws).parent().unwrap()).unwrap();
+        std::fs::write(codex_hooks(&ws), TEAM_CODEX).unwrap();
+
+        svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
+        let merged = std::fs::read_to_string(codex_hooks(&ws)).unwrap();
+        assert!(merged.contains("team-hook.sh") && merged.contains("--agent codex"), "{merged}");
+
+        assert!(svc.removal_needs_confirmation(ws.id).await.expect("dirt check"), "their file would be lost");
     }
 
     /// "First launch" is not tracked, and this is what lets it not be.
