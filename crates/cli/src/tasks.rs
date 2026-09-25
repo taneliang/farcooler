@@ -66,8 +66,10 @@ const SECTIONS: [&str; 8] =
 pub enum TaskCmd {
     /// The board: one row per task.
     ///
-    /// The cheap read. Rows only — no intent, no acceptance, no history — so
-    /// that surveying the whole board costs one call whatever is on it.
+    /// The cheap read. The table is rows only — no intent, no acceptance, no
+    /// history — so that surveying the whole board costs one call whatever is
+    /// on it. `--json` also carries each row's intent and acceptance; history
+    /// and blocks are `task show`'s.
     List {
         /// Which repository's board. Defaults to the pane's own, then to the
         /// only one there is.

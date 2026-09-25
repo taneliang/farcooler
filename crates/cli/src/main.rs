@@ -2956,6 +2956,16 @@ fn turn_started_at(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
     t.turn_started_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
+/// The board task a terminal was opened for, as the uuid a board row carries.
+///
+/// `None` for a terminal nobody dispatched, for a runner too old to record one
+/// (`capability::TERMINAL_TASK`), and for bytes that are not a uuid at all —
+/// never the nil uuid, which `uuid_of` would hand back and which a client
+/// would then match against nothing and draw as a link to nowhere.
+fn task_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
+    t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
+}
+
 /// One terminal, projected for a client — the shape `WorkspaceCmd::List` and
 /// `terminal_event_json` both need and must agree on.
 ///
@@ -2974,6 +2984,10 @@ fn workspace_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_j
         "short": short_bytes(&t.id),
         "title": t.title,
         "preset": label(t),
+        // Which board task this pane was opened for, so a board card can go to
+        // the agent working it. The daemon has recorded it since
+        // `terminal_task`; this is the hop that used to drop it.
+        "taskId": task_of(t),
         "state": terminal_label(t.state()),
         "activity": activity_label(t.activity),
         "activitySince": activity_since(t),
@@ -3191,6 +3205,10 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         "workspace": uuid_of(&t.workspace_id).to_string(),
         "title": t.title,
         "preset": label(t),
+        // Which board task this pane was opened for, so a board card can go to
+        // the agent working it. The daemon has recorded it since
+        // `terminal_task`; this is the hop that used to drop it.
+        "taskId": task_of(t),
         "state": terminal_label(t.state()),
         "activity": activity_label(t.activity),
         "activitySince": activity_since(t),
@@ -3775,8 +3793,41 @@ mod tests {
             "planTotal",
             "turnFailed",
             "agentFailure",
+            "taskId",
         ] {
             assert!(event.contains(field), "{field} is in neither projection");
+        }
+    }
+
+    /// The board task a pane was opened for crosses both projections.
+    ///
+    /// The daemon has stored `terminals.task_id` and put it on the wire since
+    /// `terminal_task`, and both of these dropped it, so no app could go from
+    /// a card on the board to the agent working it. The Mac reads the list
+    /// on a refresh and the event on every change after that, and a link that
+    /// only one of them carried would come and go with whichever arrived last.
+    #[test]
+    fn a_dispatched_terminal_names_its_task_in_both_projections() {
+        let task = uuid::Uuid::now_v7();
+        let t = farcooler_protocol::v1::Terminal {
+            task_id: Some(bytes::Bytes::copy_from_slice(task.as_bytes())),
+            ..Default::default()
+        };
+        assert_eq!(workspace_list_terminal_json(&t)["taskId"], task.to_string());
+        assert_eq!(terminal_event_json(&t)["taskId"], task.to_string());
+    }
+
+    /// And a pane nobody dispatched names none, rather than the nil uuid.
+    ///
+    /// `uuid_of` answers malformed bytes with `Uuid::nil()`, and a client
+    /// handed `00000000-…` would hold a task id that matches no task, which
+    /// reads as a link rather than as its absence.
+    #[test]
+    fn a_terminal_with_no_task_or_a_malformed_one_names_none() {
+        for task_id in [None, Some(bytes::Bytes::new()), Some(bytes::Bytes::from_static(b"nope"))] {
+            let t = farcooler_protocol::v1::Terminal { task_id, ..Default::default() };
+            assert_eq!(workspace_list_terminal_json(&t)["taskId"], serde_json::json!(null));
+            assert_eq!(terminal_event_json(&t)["taskId"], serde_json::json!(null));
         }
     }
 
