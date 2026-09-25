@@ -1561,10 +1561,19 @@ private struct TerminalKeyRow: View {
 
     var body: some View {
         HStack(spacing: 5) {
+            // Every key named, like Hide Keyboard below: a symbol's name is
+            // what VoiceOver says otherwise, and "arrow right to line" is not
+            // what Tab is called.
             key { onKey(UInt32(FARCOOLER_VT_KEY_ESCAPE)) } label: { glyph("escape") }
+                .accessibilityLabel("Escape")
             key { onKey(UInt32(FARCOOLER_VT_KEY_TAB)) } label: { glyph("arrow.right.to.line") }
+                .accessibilityLabel("Tab")
             key(filled: ctrlArmed, action: onToggleCtrl) { glyph("control") }
+                .accessibilityLabel("Control")
+                .accessibilityAddTraits(ctrlArmed ? .isSelected : [])
             key(filled: altArmed, action: onToggleAlt) { glyph("option") }
+                .accessibilityLabel("Option")
+                .accessibilityAddTraits(altArmed ? .isSelected : [])
             // Held, each arrow becomes the jump it is the small version of.
             // A phone has no room for eight more keys and no modifier to hide
             // them behind, and holding a direction to go further in it is the
@@ -1573,9 +1582,13 @@ private struct TerminalKeyRow: View {
             // chevron: ⌃ beside a chevron-up meant two keys with the same
             // glyph sitting four apart in the same row.
             arrow("arrow.left", tap: FARCOOLER_VT_KEY_LEFT, hold: FARCOOLER_VT_KEY_HOME)
+                .accessibilityLabel("Left Arrow")
             arrow("arrow.down", tap: FARCOOLER_VT_KEY_DOWN, hold: FARCOOLER_VT_KEY_PAGE_DOWN)
+                .accessibilityLabel("Down Arrow")
             arrow("arrow.up", tap: FARCOOLER_VT_KEY_UP, hold: FARCOOLER_VT_KEY_PAGE_UP)
+                .accessibilityLabel("Up Arrow")
             arrow("arrow.right", tap: FARCOOLER_VT_KEY_RIGHT, hold: FARCOOLER_VT_KEY_END)
+                .accessibilityLabel("Right Arrow")
             // Putting the keyboard away, which this row is otherwise the only
             // thing standing in the way of: it lives above the keyboard, so it
             // goes when the keyboard does, and without a way to dismiss from
