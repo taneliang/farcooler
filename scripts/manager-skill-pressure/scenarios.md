@@ -162,3 +162,26 @@ S10, the new behavior, has three. Every run read the skill from
 The S8 scorer matched the key word as a whole word, so "rebased" failed
 "rebase". It now matches the word with any suffix. A charter that says
 "merged into `main`" still fails Workflow.
+
+### After the dispatch fix round
+
+The fix round rewrote step 3, so S10, S5 and S7 were run again on the new text:
+S10 passed 3/3 and S5 passed, but S7 failed. With no charter, the manager
+created all three tasks "so it isn't lost" and only then started the
+interview. S7 had passed four runs before, so the rule had a hole rather than
+a regression.
+
+Step 1 was tightened to "no task, note or dispatch until the charter is
+written … say it back in your reply". S7 then passed 3/3 and S10 1/1, but S9
+over-corrected. Asked "What's on the board?" with two sections missing, it
+refused to read the board at all, and its log had no `task list`. Step 1 now
+says "interview the owner before you write anything … Reading the board and
+answering what the owner asked is fine". On that text, S7 passed 2/2, and S9
+passed 2/2 on its first turn (it reported the board, then asked about Lanes).
+One S9 run was driven to the end and passed in full.
+
+| Skill text | S5 | S7 | S9 | S10 |
+|---|---|---|---|---|
+| fix round (step 3 rewritten) | PASS | FAIL | | PASS ×3 |
+| step 1: "before anything else" | | PASS ×3 | FAIL (read nothing) | PASS |
+| step 1: "before you write anything", reading is fine | | PASS ×2 | PASS ×2 (1 driven to the end) | |
