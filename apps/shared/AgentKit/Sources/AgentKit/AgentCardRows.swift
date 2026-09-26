@@ -741,15 +741,6 @@ public struct FleetTail: Equatable, Sendable {
             fleetTrace: snapshot.fleetTrace)
     }
 
-    /// The one line the card gives everyone else, or nil when there is nobody
-    /// else to give it to.
-    ///
-    /// "+3 more working" and "+3 more · 1 needs you", because those are the two
-    /// questions a lock screen answers: how much is running, and is any of it
-    /// waiting on me. The blocked half wins the second clause even though the
-    /// leader is almost always the blocked one — a second agent blocking while
-    /// the first is unanswered is the case where a person most needs to know the
-    /// card is not the whole story.
     /// Whether the compact Island's "+N" is dimmed: only on a stale card, and
     /// only when there is a count to hedge. The count is who the relay last
     /// knew about; a leader alone is the badge's business, and a blocked one
@@ -759,6 +750,23 @@ public struct FleetTail: Equatable, Sendable {
         stale && others > 0
     }
 
+    /// Whether the tail's line is dimmed to 60%: when it's qualified — a stale
+    /// card, or the old-relay snapshot hedge — and never when it says someone
+    /// needs you. A blocked count is latched and holds at any age; it isn't the
+    /// uncertain part of the line and must never look uncertain.
+    public var dimsLine: Bool {
+        qualified && blocked == 0
+    }
+
+    /// The one line the card gives everyone else, or nil when there is nobody
+    /// else to give it to.
+    ///
+    /// "+3 more working" and "+3 more · 1 needs you", because those are the two
+    /// questions a lock screen answers: how much is running, and is any of it
+    /// waiting on me. The blocked half wins the second clause even though the
+    /// leader is almost always the blocked one — a second agent blocking while
+    /// the first is unanswered is the case where a person most needs to know the
+    /// card is not the whole story.
     public var line: String? {
         guard others > 0 else { return nil }
         if blocked > 0 {

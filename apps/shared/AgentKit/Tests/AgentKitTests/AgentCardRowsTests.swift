@@ -501,3 +501,51 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
     #expect(hedged.qualified)
     #expect(!hedged.dimsCompactCount(stale: false))
 }
+
+/// **A "needs you" line is never dimmed.** The tail's line dims when it's
+/// qualified — a stale card, or the old-relay snapshot hedge — and only when
+/// nobody in it is blocked: a blocked count is latched and holds at any age,
+/// so it must never look uncertain.
+///
+/// Mutation: `dimsLine` returning `qualified`. Red on both blocked cases.
+@Test func aNeedsYouLineIsNeverDimmed() throws {
+    // Stale, from a relay that counts: 2 blocked (one is the leader), 3 working.
+    let blocked = try decode(
+        """
+        {"status":"blocked","detail":"","blocked":2,"review":0,"working":3,"more":0}
+        """)
+    let staleBlocked = FleetTail.current(for: blocked, snapshot: nil, now: cardNow, stale: true)
+    #expect(staleBlocked.line == "+4 more · 1 needs you")
+    #expect(!staleBlocked.dimsLine, "stale, with someone blocked: full strength")
+
+    let working = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":4,"more":0}
+        """)
+    let staleWorking = FleetTail.current(for: working, snapshot: nil, now: cardNow, stale: true)
+    #expect(staleWorking.dimsLine, "stale, nobody blocked: dimmed")
+
+    // Hedged, not stale: an old relay's card over an incomplete snapshot.
+    let old = AgentCardState(terminal: "lead", status: "working", detail: "")
+    func agent(_ id: String, _ status: String) -> FleetSnapshot.Agent {
+        FleetSnapshot.Agent(
+            id: id, label: id, machine: "studio", status: status, glyph: "", headline: "",
+            line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: nil,
+            observedAt: cardNow)
+    }
+    let withBlocked = FleetSnapshot(
+        agents: [agent("a", "blocked"), agent("b", "working")], capturedAt: cardNow,
+        complete: false)
+    let hedgedBlocked = FleetTail.current(
+        for: old, snapshot: withBlocked, now: cardNow, stale: false)
+    #expect(hedgedBlocked.qualified)
+    #expect(hedgedBlocked.line == "+2 more · 1 needs you")
+    #expect(!hedgedBlocked.dimsLine, "hedged, with someone blocked: full strength")
+
+    let withoutBlocked = FleetSnapshot(
+        agents: [agent("b", "working")], capturedAt: cardNow, complete: false)
+    let hedgedWorking = FleetTail.current(
+        for: old, snapshot: withoutBlocked, now: cardNow, stale: false)
+    #expect(hedgedWorking.qualified)
+    #expect(hedgedWorking.dimsLine, "hedged, nobody blocked: dimmed")
+}

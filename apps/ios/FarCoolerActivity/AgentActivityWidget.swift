@@ -191,7 +191,7 @@ struct AgentActivityWidget: Widget {
                             Text(rest)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .opacity(tail.qualified ? 0.6 : 1)
+                                .opacity(tail.dimsLine ? 0.6 : 1)
                                 .padding(.top, 2)
                         }
                         // The same controls the lock screen card draws, from
@@ -578,7 +578,7 @@ private struct LockScreenCard: View {
                     Text(rest)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .opacity(tail.qualified ? 0.6 : 1)
+                        .opacity(tail.dimsLine ? 0.6 : 1)
                         .lineLimit(1)
                 }
             }
