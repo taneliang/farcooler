@@ -94,6 +94,61 @@ struct FleetPublicationTests {
         #expect(publication.merged(at: now).agents.map(\.id) == ["t1"])
     }
 
+    // MARK: - A runner that isn't answering
+
+    /// **The reason `answering` exists.** A runner that has lost its link keeps
+    /// its rows, so the fleet on the lock screen stays put, but none of its
+    /// agents may be counted as working: the fleet they came from was read
+    /// before the link went. Its neighbor, still answering, is untouched.
+    ///
+    /// Mutation: `merged(at:)` returning `contribution.snapshot.agents` without
+    /// the `lost` branch. Red: `t2` reads nil and `.working(2)`.
+    @Test func aLostRunnersAgentsStayButAreNotCountedAsWorking() {
+        var publication = FleetPublication()
+        publication.record(runner: "a", snapshot: snapshot([agent("t1", machine: "laptop")]))
+        publication.record(runner: "b", snapshot: snapshot([agent("t2", machine: "gpu-box")]))
+
+        publication.keeping(runners: ["a", "b"], answering: ["a"])
+
+        let merged = publication.merged(at: now)
+        #expect(merged.agents.map(\.id) == ["t1", "t2"])
+        #expect(merged.agents.map(\.runnerAnswering) == [nil, false])
+        #expect(merged.glance(at: now) == .working(1))
+    }
+
+    /// Answering again is not enough to vouch for the old rows. A link is up a
+    /// whole SSH round trip before the first poll over it lands, and until
+    /// then these are the rows read before it went. The poll is what clears it.
+    ///
+    /// Mutation: `keeping(runners:answering:)` clearing `lost` for a runner in
+    /// `answering`. Red on the second expectation.
+    @Test func aRunnerBackOnlyVouchesForWhatItsNextPollSays() {
+        var publication = FleetPublication()
+        publication.record(runner: "a", snapshot: snapshot([agent("t1", machine: "l")]))
+        publication.keeping(runners: ["a"], answering: [])
+        #expect(publication.merged(at: now).agents.first?.runnerAnswering == false)
+
+        publication.keeping(runners: ["a"], answering: ["a"])
+        #expect(publication.merged(at: now).agents.first?.runnerAnswering == false)
+
+        publication.record(runner: "a", snapshot: snapshot([agent("t1", machine: "l")]))
+        #expect(publication.merged(at: now).agents.first?.runnerAnswering == nil)
+    }
+
+    /// Losing a runner with rows is news for the surfaces; a launch where
+    /// nothing has answered yet still is not. See
+    /// `aMembershipSettledBeforeAnybodyPolledSaysNothing`.
+    @Test func losingARunnerIsWorthTellingButALaunchIsNot() {
+        var launch = FleetPublication()
+        let launchTold = launch.keeping(runners: ["a"], answering: [])
+        #expect(!launchTold)
+
+        var publication = FleetPublication()
+        publication.record(runner: "a", snapshot: snapshot([agent("t1", machine: "l")]))
+        let told = publication.keeping(runners: ["a"], answering: [])
+        #expect(told)
+    }
+
     // MARK: - The launch that used to clobber the file
 
     /// **The regression this answers.** `FleetStore.publish` settles the

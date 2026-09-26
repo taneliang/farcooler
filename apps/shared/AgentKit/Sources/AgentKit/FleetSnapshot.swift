@@ -172,13 +172,37 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         /// down.
         public var trace: Data?
 
+        /// Whether this agent's runner was answering when the snapshot was
+        /// assembled. `false` is "the phone had lost its link to that runner";
+        /// nil is "not told", and reads as answering.
+        ///
+        /// **The second field nothing on the wire supplies**, for
+        /// `observedAt`'s reason: it is a fact about this client's knowledge,
+        /// not about the agent. The daemon can't say it's unreachable.
+        ///
+        /// It exists because `observedAt` alone lets a lost runner's agents
+        /// read as current for up to `staleAfter`. A runner that stays down
+        /// spends that hour reconnecting, and every surface outside the app
+        /// went on counting its agents as working, on the lock screen and the
+        /// wrist, while the app itself knew it had heard nothing. So while a
+        /// runner isn't answering, `confidence(in:at:)` stops vouching for its
+        /// working agents at once: "can't say", which is the treatment an
+        /// hour's silence already gets, and not "gone". Blocked and done hold,
+        /// as they do at any age. The Mac counts live panes by the same rule
+        /// (`FleetStore.reading`).
+        ///
+        /// Stamped by `FleetPublication.merged(at:)` and nothing else, so it's
+        /// never written for a runner that answered. A push folded in by
+        /// `merging(_:at:)` carries nil: that agent was just heard about.
+        public var runnerAnswering: Bool?
+
         public init(
             id: String, label: String, machine: String, status: String,
             glyph: String, headline: String, line: String, feed: [String],
             rank: UInt32, turnFailed: Bool, activityChangedAt: Date?,
             observedAt: Date? = nil,
             planDone: UInt32? = nil, planTotal: UInt32? = nil,
-            trace: Data? = nil
+            trace: Data? = nil, runnerAnswering: Bool? = nil
         ) {
             self.id = id
             self.label = label
@@ -195,6 +219,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
             self.planDone = planDone
             self.planTotal = planTotal
             self.trace = trace
+            self.runnerAnswering = runnerAnswering
         }
 
         /// Whether this status stays true as the snapshot ages.
@@ -456,8 +481,13 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// longer vouch for, and `stated(_:_:)` prefixes the row. A phone out of
     /// range still takes every one of them to "last seen" on the hour, which is
     /// the case the rule was written for.
+    ///
+    /// **Or once its runner stops answering**, whichever comes first. See
+    /// `Agent.runnerAnswering`.
     public func confidence(in agent: Agent, at now: Date) -> Confidence {
-        Self.confidence(status: agent.status, heard: age(of: agent, at: now))
+        Self.confidence(
+            status: agent.status, heard: age(of: agent, at: now),
+            answering: agent.runnerAnswering != false)
     }
 
     /// Whether this status stays true as what we know about it ages.
@@ -482,8 +512,15 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// against it, `glance(at:)` stops counting a working agent against it, and
     /// a second copy that drifted would put a dashed ring and an asserted status
     /// on the same screen.
-    public static func confidence(status: String, heard age: TimeInterval) -> Confidence {
+    ///
+    /// `answering` is whether the runner is answering right now, where the
+    /// caller knows; the card's rows don't, and leave it true. A runner that
+    /// isn't answering can't vouch for a claim about the present at any age.
+    public static func confidence(
+        status: String, heard age: TimeInterval, answering: Bool = true
+    ) -> Confidence {
         if isLatched(status) { return .known }
+        guard answering else { return .lastSeen }
         return age >= staleAfter ? .lastSeen : .known
     }
 
@@ -514,8 +551,10 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// of whose agents were folded in by pushes at different times — but it is
     /// worth knowing before reading a timeline of one entry as a bug.
     public func stalenessMoments(after now: Date) -> [Date] {
+        // An agent whose runner isn't answering has no moment ahead: it's
+        // already past vouching for, and nothing but a poll brings it back.
         let moments = agents
-            .filter { !$0.isLatched }
+            .filter { !$0.isLatched && $0.runnerAnswering != false }
             .map { lastHeard(of: $0).addingTimeInterval(Self.staleAfter) }
             .filter { $0 > now }
         return Array(Set(moments)).sorted()
@@ -735,6 +774,9 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         // it describes started, and this is the moment we heard it.
         if incoming.activityChangedAt == nil { incoming.activityChangedAt = now }
         incoming.observedAt = now
+        // And heard from, whatever the app last knew of its runner's link: the
+        // news came through the relay, which that link has nothing to do with.
+        incoming.runnerAnswering = nil
 
         var merged = agents
         if let index = merged.firstIndex(where: { $0.id == incoming.id }) {

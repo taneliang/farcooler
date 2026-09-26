@@ -258,7 +258,14 @@ final class FleetStore: ObservableObject {
         // event. A runner nobody is polling with its agents on a lock screen,
         // forever, is the bug merging creates if this is missing; see
         // `FleetPublication.keeping(runners:)`.
-        FleetSnapshotWriter.keep(runners: Set(mine.map { $0.0.id.uuidString }))
+        //
+        // And which of them are answering, by the Mac's rule: `.connected`,
+        // and nothing weaker. A runner that stays down spends most of its
+        // outage reconnecting, and its last fleet must not go on reading as
+        // working on the lock screen while it does.
+        FleetSnapshotWriter.keep(
+            runners: Set(mine.map { $0.0.id.uuidString }),
+            answering: Set(mine.filter { $0.1.phase == .connected }.map { $0.0.id.uuidString }))
 
         entries = mine.flatMap { host, connection -> [FleetEntry] in
             let counts = connection.inbox

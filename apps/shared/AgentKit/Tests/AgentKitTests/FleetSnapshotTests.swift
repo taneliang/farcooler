@@ -707,4 +707,80 @@ struct FleetSnapshotTests {
         #expect(FleetSnapshot.Glance.review(3).count == 3)
         #expect(FleetSnapshot.Glance.working(4).count == 4)
     }
+
+    // MARK: - A runner that isn't answering
+
+    /// A working agent on a runner the phone has lost is "can't say" at once,
+    /// not after an hour. The hour is for a phone that has stopped looking;
+    /// here the phone looked and could not reach it.
+    ///
+    /// Mutation: `confidence(in:at:)` passing `answering: true`. Red: the
+    /// working agent reads `.known`.
+    @Test func aLostRunnersWorkingAgentIsNotVouchedFor() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var working = agent("t1", status: "working", observedAt: now)
+        working.runnerAnswering = false
+        let snapshot = FleetSnapshot(agents: [working], capturedAt: now, complete: true)
+
+        #expect(snapshot.confidence(in: working, at: now) == .lastSeen)
+        #expect(snapshot.glance(at: now) == nil)
+        #expect(snapshot.stalenessMoments(after: now).isEmpty)
+    }
+
+    /// Blocked and done hold, exactly as they do at any age: an agent that
+    /// stopped for you is still stopped for you, whether or not the link held.
+    @Test func aLostRunnersLatchedAgentsHold() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var blocked = agent("t1", status: "blocked", observedAt: now)
+        blocked.runnerAnswering = false
+        var done = agent("t2", status: "done", observedAt: now)
+        done.runnerAnswering = false
+        let snapshot = FleetSnapshot(agents: [blocked, done], capturedAt: now, complete: true)
+
+        #expect(snapshot.confidence(in: blocked, at: now) == .known)
+        #expect(snapshot.confidence(in: done, at: now) == .known)
+        #expect(snapshot.glance(at: now) == .blocked(1))
+    }
+
+    /// Nil is "not told" and reads as answering, which is every snapshot
+    /// written before the field and every push folded in since.
+    @Test func anAgentNobodySaidAnythingAboutIsAnswering() throws {
+        let json = """
+        {"agents":[{"id":"t1","label":"claude","machine":"orchard",
+        "status":"working","glyph":"●","headline":"claude 4m","line":"x",
+        "feed":[],"rank":0,"turnFailed":false,"observedAt":1000000}],
+        "capturedAt":1000000,"complete":true}
+        """
+        let snapshot = try JSONDecoder().decode(FleetSnapshot.self, from: Data(json.utf8))
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        #expect(snapshot.agents.first?.runnerAnswering == nil)
+        #expect(snapshot.glance(at: now) == .working(1))
+    }
+
+    /// The flag survives the trip to disk and to the watch.
+    @Test func aLostRunnerRoundTripsThroughJson() throws {
+        var working = agent("t1", status: "working")
+        working.runnerAnswering = false
+        let snapshot = FleetSnapshot(
+            agents: [working], capturedAt: Date(timeIntervalSince1970: 1_000_000), complete: true)
+        let data = try JSONEncoder().encode(snapshot)
+        let back = try JSONDecoder().decode(FleetSnapshot.self, from: data)
+        #expect(back.agents.first?.runnerAnswering == false)
+    }
+
+    /// A push about an agent is news about it, through the relay, whatever the
+    /// app last knew of its runner's link.
+    ///
+    /// Mutation: `merging(_:at:)` without `incoming.runnerAnswering = nil`.
+    /// Red: the pushed agent keeps `false`.
+    @Test func aPushedAgentIsHeardFromWhateverItsRunnersLink() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var lost = agent("t1", status: "working", observedAt: now)
+        lost.runnerAnswering = false
+        let snapshot = FleetSnapshot(agents: [lost], capturedAt: now, complete: true)
+
+        let merged = snapshot.merging(lost, at: now)
+        #expect(merged.agents.first?.runnerAnswering == nil)
+        #expect(merged.glance(at: now) == .working(1))
+    }
 }

@@ -39,8 +39,12 @@ enum FleetSnapshotWriter {
     /// claiming to be working, forever. That is why the merge is step 7 of the
     /// port and not step 1: it needs something that knows which runners are
     /// live, and until the store existed nothing did.
+    ///
+    /// `answering` is which of them are `.connected` right now. A runner that
+    /// drops out of it keeps its agents on these surfaces, but as "can't say"
+    /// rather than working: see `FleetPublication.keeping(runners:answering:)`.
     @MainActor
-    static func keep(runners: Set<String>) {
+    static func keep(runners: Set<String>, answering: Set<String>) {
         // **Only when the membership actually moved**, and that guard is
         // load-bearing rather than thrifty. `FleetStore.publish` runs on every
         // change any connection publishes — several times a second while an
@@ -49,8 +53,12 @@ enum FleetSnapshotWriter {
         // watch. Called unguarded it wedged the main thread badly enough to
         // time a UI test out. Adding or removing a runner is not a per-poll
         // event and must not be priced like one.
-        guard runners != kept else { return }
+        //
+        // A runner's link going or coming back is not a per-poll event either,
+        // so it is priced the same way.
+        guard runners != kept || answering != keptAnswering else { return }
         kept = runners
+        keptAnswering = answering
         // Written here rather than left to the next poll. A retirement is
         // followed by nothing at all on the retired runner's part, and a store
         // that has just dropped its last connection has no next poll from
@@ -71,7 +79,7 @@ enum FleetSnapshotWriter {
         // offline launch and every foreground somebody backs straight out of.
         // `keeping` is what answers this, in AgentKit where the answer is
         // tested; see `FleetPublication.keeping(runners:)`.
-        guard publication.keeping(runners: runners) else { return }
+        guard publication.keeping(runners: runners, answering: answering) else { return }
         publish(at: Date())
     }
 
@@ -79,6 +87,10 @@ enum FleetSnapshotWriter {
     /// said, which is what makes the first call always a write.
     @MainActor
     private static var kept: Set<String>?
+
+    /// The runners `keep(runners:answering:)` last knew to be answering.
+    @MainActor
+    private static var keptAnswering: Set<String>?
 
     /// `@MainActor` because `WatchLinkHost` is, and because the one caller —
     /// `Connection.refresh` — already is. Nothing here is slow enough to be

@@ -44,6 +44,9 @@ import Foundation
 /// - **`reviewsWaiting`** sums the runners that answered and ignores the ones
 ///   that did not. Nil only when nobody answered at all, because nil means "not
 ///   told" and one modern runner reporting 3 is being told something.
+/// - **A runner that isn't answering** keeps its rows, marked
+///   `runnerAnswering == false`, so no surface counts them as working. See
+///   `keeping(runners:answering:)`.
 /// - **`fleetTrace`** is summed onto one axis by `ActivityTrace.summing`, which
 ///   is where that arithmetic and what it costs are written down — placing
 ///   each runner by its `fleetTraceAnchor` where it sent one, and where the
@@ -53,6 +56,9 @@ public struct FleetPublication {
     /// One runner's own projection, as its connection last polled it.
     private struct Contribution {
         var snapshot: FleetSnapshot
+        /// The link this was polled over has gone since, and no poll has
+        /// landed on a new one yet. See `keeping(runners:answering:)`.
+        var lost = false
     }
 
     private var byRunner: [String: Contribution] = [:]
@@ -112,6 +118,30 @@ public struct FleetPublication {
         return held || !isEmpty
     }
 
+    /// The same, and which of those runners are answering right now.
+    ///
+    /// **A runner that stops answering has its rows marked lost**, and they
+    /// stay marked until a poll records it again. Not until it answers again:
+    /// a link comes up a whole SSH round trip before the first poll over it
+    /// lands, and in that gap the rows are still the ones read before the link
+    /// went. Answering is `.connected` and nothing weaker; a runner that stays
+    /// down spends most of its outage reconnecting, which is what let the
+    /// Mac's status bar count a dead runner's panes for most of an outage.
+    ///
+    /// - Returns: what `keeping(runners:)` returns, and true as well when a
+    ///   recorded runner has just been marked lost, which changes what the
+    ///   surfaces draw.
+    @discardableResult
+    public mutating func keeping(runners: Set<String>, answering: Set<String>) -> Bool {
+        var told = keeping(runners: runners)
+        for runner in order where !answering.contains(runner) {
+            guard byRunner[runner]?.lost == false else { continue }
+            byRunner[runner]?.lost = true
+            told = true
+        }
+        return told
+    }
+
     /// Whether anything has been recorded at all.
     ///
     /// The difference between an empty fleet and the absence of one, asked of
@@ -154,7 +184,17 @@ public struct FleetPublication {
             })
 
         return FleetSnapshot(
-            agents: contributions.flatMap(\.snapshot.agents),
+            agents: contributions.flatMap { contribution in
+                // "Can't say" for every agent a lost runner last reported, and
+                // nothing written for one that answered: nil already reads as
+                // answering, and an old reader never meets the key.
+                guard contribution.lost else { return contribution.snapshot.agents }
+                return contribution.snapshot.agents.map { agent in
+                    var unheard = agent
+                    unheard.runnerAnswering = false
+                    return unheard
+                }
+            },
             capturedAt: now,
             complete: complete,
             reviewsWaiting: counted.isEmpty ? nil : counted.reduce(0, +),
