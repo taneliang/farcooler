@@ -191,6 +191,50 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
     #expect(layout.mark == GlanceMark(attention: .needsYou, core: .atAPrompt))
 }
 
+/// **A card the relay has stopped vouching for says nothing about now.**
+/// ActivityKit's `isStale`: an hour since the last push, which is what a runner
+/// that stays down looks like from the lock screen. "In flight" leaves the
+/// header and every working ring and row goes to "can't say"; the three that
+/// need you and the three to review hold, as they do at any age.
+///
+/// Mutation: the header's working clause without `&& !stale`. Red: the counts
+/// read `3 to review · 3 in flight`.
+@Test func aStaleCardStopsClaimingAnythingIsInFlight() throws {
+    let fresh = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow))
+    let stale = try #require(
+        AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: true))
+
+    #expect(stale.title == "2 need you")
+    #expect(stale.counts == "3 to review")
+    #expect(stale.mark == fresh.mark, "the header is about the blocked tier, which holds")
+    // Two blocked, three to review, three working: the working three go dashed
+    // and nothing else moves.
+    #expect(stale.rings.prefix(5) == fresh.rings.prefix(5))
+    #expect(stale.rings.suffix(3) == [.unsaid, .unsaid, .unsaid])
+    #expect(fresh.rings.suffix(3).allSatisfy { $0.link == .live })
+    // The rows: the blocked one holds, the working one (heard from twelve
+    // minutes ago, well inside the hour) is dashed only because the card is.
+    #expect(stale.rows[0].mark == fresh.rows[0].mark)
+    #expect(fresh.rows[1].mark.link == .live)
+    #expect(stale.rows[1].mark.link == .broken)
+    #expect(stale.line == fresh.line, "who has no line, and the totals, are history")
+}
+
+/// A fleet that is only working, on a stale card, falls back to the title a
+/// fleet with nothing to report already has, under a "can't say" ring.
+@Test func aStaleCardOfOnlyWorkingAgentsHasNothingToHeadline() throws {
+    let working = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":4,"more":0,
+         "rows":[{"terminal":"a","label":"a","status":"working","detail":""}]}
+        """)
+    let layout = try #require(AgentCardLayout(state: working, now: cardNow, stale: true))
+    #expect(layout.title == "Your agents")
+    #expect(layout.counts == nil)
+    #expect(layout.mark == .unsaid)
+    #expect(layout.rows[0].mark.link == .broken)
+}
+
 @Test func anEmptyTierIsDroppedRatherThanWrittenAsZero() throws {
     // "0 need you" is worse than silence on a lock screen, and a header that
     // led with it would spend the card's loudest line on nothing.

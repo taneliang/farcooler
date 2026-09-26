@@ -209,8 +209,12 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
     /// agent — the same function, not a second opinion. Blocked and done are
     /// latched at any age; working stops being vouched for after
     /// `FleetSnapshot.staleAfter`.
-    public func confidence(at now: Date) -> FleetSnapshot.Confidence {
-        FleetSnapshot.confidence(status: status, heard: age(at: now))
+    ///
+    /// `answering` false is a card the relay has stopped vouching for — see
+    /// `AgentCardLayout.init(state:now:stale:)` — and then working is "can't
+    /// say" at any age, as it is for a runner that isn't answering.
+    public func confidence(at now: Date, answering: Bool = true) -> FleetSnapshot.Confidence {
+        FleetSnapshot.confidence(status: status, heard: age(at: now), answering: answering)
     }
 }
 
@@ -316,7 +320,19 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// way it always did. `knowsFleet` is required for the same reason the
     /// header needs it — a card may not write "2 need you" from counts nothing
     /// sent.
-    public init?(state: AgentCardState, now: Date = Date()) {
+    ///
+    /// **`stale` is ActivityKit's `isStale`**: the card's stale date has passed
+    /// with no push. The relay sets that date an hour after every push, and
+    /// means it: "after an hour of silence the relay genuinely does not know
+    /// whether this is still true" (`stale-date` in `push.ts`). It's the
+    /// outage this card can see — a runner that stays down sends nothing, and
+    /// nothing else moves the card — so a stale card stops claiming anything
+    /// about now: "in flight" leaves the header, and every working ring and row
+    /// goes to "can't say", `GlanceMark.unsaid` and the dashed row. Needs-you
+    /// and to-review hold, as they do at any age. The card is not ended: the
+    /// relay's own rule is that a stale date is not a dismissal date, because
+    /// a card that vanished on a timer could take a blocked agent with it.
+    public init?(state: AgentCardState, now: Date = Date(), stale: Bool = false) {
         guard !state.rows.isEmpty, state.knowsFleet else { return nil }
 
         let drawn = state.rows.prefix(Self.rowsDrawn)
@@ -351,7 +367,8 @@ public struct AgentCardLayout: Sendable, Equatable {
             let (row, trace) = pair
             return Row(
                 row: row,
-                mark: GlanceMark(status: row.status, confidence: row.confidence(at: now)),
+                mark: GlanceMark(
+                    status: row.status, confidence: row.confidence(at: now, answering: !stale)),
                 name: Self.name(of: row),
                 detail: row.detail,
                 diff: Self.diff(insertions: row.insertions, deletions: row.deletions),
@@ -376,14 +393,14 @@ public struct AgentCardLayout: Sendable, Equatable {
             clauses.append("\(state.blocked) need\(state.blocked == 1 ? "s" : "") you")
         }
         if state.review > 0 { clauses.append("\(state.review) to review") }
-        if state.working > 0 { clauses.append("\(state.working) in flight") }
+        if state.working > 0 && !stale { clauses.append("\(state.working) in flight") }
         // A fleet with nothing in any tier still needs a title — the card is on
         // screen either way, and a blank header reads as a card that failed to
         // load. The relay's `fleetHeader` falls back to the same two words.
         title = clauses.first ?? "Your agents"
         counts = clauses.count > 1 ? clauses.dropFirst().joined(separator: " · ") : nil
-        mark = GlanceMark(status: Self.tier(state))
-        rings = Self.rings(state)
+        mark = GlanceMark(status: Self.tier(state)).said(answering: !stale)
+        rings = Self.rings(state).map { $0.said(answering: !stale) }
 
         var tail: [String] = []
         if hidden > 0 { tail.append("+\(hidden) more") }

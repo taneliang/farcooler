@@ -64,7 +64,12 @@ struct AgentActivityWidget: Widget {
             // Which of the two cards this is. See `LockScreenCard`, which is
             // where the choice is argued: rows when the relay sent any and
             // there is nothing to answer, the headline otherwise.
-            let layout = ask.isPresent ? nil : AgentCardLayout(state: context.state)
+            //
+            // `isStale` is the relay's hour of silence, which is the one outage
+            // this card can see; see `AgentCardLayout.init(state:now:stale:)`.
+            let layout =
+                ask.isPresent
+                ? nil : AgentCardLayout(state: context.state, stale: context.isStale)
             LockScreenCard(
                 state: context.state,
                 // The fleet line steps aside while there is an answer on offer.
@@ -84,7 +89,8 @@ struct AgentActivityWidget: Widget {
                     ? FleetTail.unknown
                     : FleetTail.current(for: context.state),
                 ask: ask,
-                layout: layout)
+                layout: layout,
+                stale: context.isStale)
                 // The card's own background. Left to the system's material
                 // rather than a color of ours: the lock screen wallpaper is
                 // behind it and a flat fill sits on top of the photo like a
@@ -120,7 +126,7 @@ struct AgentActivityWidget: Widget {
                 ? FleetTail.unknown : FleetTail.current(for: context.state)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    StatusBadge(status: status)
+                    StatusBadge(status: status, stale: context.isStale)
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -197,7 +203,7 @@ struct AgentActivityWidget: Widget {
                 // phone's appearance is — §01's light palette answers a
                 // different question, "what does this look like on a pale
                 // backdrop", and there is no pale backdrop here.
-                GlanceMarkView(status.mark, size: .header)
+                GlanceMarkView(status.mark(stale: context.isStale), size: .header)
                     .environment(\.colorScheme, .dark)
             } compactTrailing: {
                 // §07's compact presentation, which is about the FLEET: "Count
@@ -240,7 +246,7 @@ struct AgentActivityWidget: Widget {
                 // §07, verbatim: "MINIMAL: The ring alone at 15pt. No count, no
                 // trace — history is unreadable at this size." The lone
                 // indicator, which is the whole presentation.
-                GlanceMarkView(status.mark, size: .lone)
+                GlanceMarkView(status.mark(stale: context.isStale), size: .lone)
                     .environment(\.colorScheme, .dark)
             }
             .widgetURL(terminalURL(context.state.terminal))
@@ -736,13 +742,15 @@ private struct LockScreenCard: View {
     /// The rows card, or nil for the headline card. Built in the widget's own
     /// body so the choice and the tap target are made from one value.
     let layout: AgentCardLayout?
+    /// ActivityKit's `isStale`. See `AgentStatus.mark(stale:)`.
+    let stale: Bool
 
     var body: some View {
         if let layout {
             GlanceCardView(layout: layout)
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                LeaderRow(state: state, ask: ask, trace: tail.leaderTrace)
+                LeaderRow(state: state, ask: ask, trace: tail.leaderTrace, stale: stale)
                 if let rest = tail.line {
                     Divider()
                     Text(rest)
@@ -779,6 +787,7 @@ private struct LeaderRow: View {
     /// The leader's thirteen buckets, off the snapshot. See `FleetTail`, which
     /// is where a card gets anything the push could not carry.
     let trace: Data?
+    let stale: Bool
 
     var body: some View {
         let status = AgentStatus(state.status)
@@ -835,7 +844,7 @@ private struct LeaderRow: View {
                 if !ask.isPresent, let trace = ActivityTrace(trace) {
                     GlanceTraceView(trace, size: .cardRow)
                 }
-                StatusBadge(status: status)
+                StatusBadge(status: status, stale: stale)
             }
             // Guarded at the call site as well as inside the view. A `VStack`
             // asked to lay out a child that draws nothing is one more thing
@@ -875,10 +884,12 @@ private struct StatusBadge: View {
     /// 11pt — §07 gives the card's rows a leading column of exactly 11, which
     /// is §03's header diameter.
     var size: GlanceMarkSize = .header
+    /// ActivityKit's `isStale`. See `AgentStatus.mark(stale:)`.
+    var stale = false
 
     var body: some View {
         VStack(spacing: 4) {
-            GlanceMarkView(status.mark, size: size)
+            GlanceMarkView(status.mark(stale: stale), size: size)
             Text(status.title)
                 .glanceType(.monoFigures)
         }
@@ -903,6 +914,16 @@ extension AgentStatus {
         case .blocked: GlanceMark(attention: .needsYou, core: .atAPrompt)
         case .done: GlanceMark(attention: .quiet, core: .atAPrompt)
         }
+    }
+
+    /// The same, on a card the relay has stopped vouching for.
+    ///
+    /// ActivityKit's `isStale`: an hour since the last push, which is what a
+    /// runner that stays down looks like from here. Working is the claim about
+    /// now, so it becomes "can't say", the dashed ring with no core that
+    /// `AgentCardLayout` draws for the same card; blocked and finished hold.
+    func mark(stale: Bool) -> GlanceMark {
+        stale && self == .working ? .unsaid : mark
     }
 
     /// The color for the WORDS beside the mark. The mark colors itself.
