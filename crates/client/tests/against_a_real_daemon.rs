@@ -107,30 +107,41 @@ async fn start_with_a_scratch_home() -> (Daemon, PathBuf) {
 ///
 /// **And proven, not assumed.** The scratch `HOME` gives every login shell a
 /// config that puts a TRAP directory first on its PATH, holding a `claude`
-/// that only writes a marker. `bare_claude_resolves_to_the_trap` shows a bare
+/// that only writes a marker. `bare_claude_resolves_to` shows a bare
 /// `claude` from that shell would have hit it; the test then asserts the trap
 /// never ran and the stand-in did.
 ///
-/// The environment a real agent would read its credentials and config from
-/// is removed, so even a launch that went wrong would start with nothing to
-/// authenticate with.
+/// The absolute path and the trap are the protection, and the only one that
+/// matters. The daemon also starts without any variable an agent reads
+/// credentials or config from (`stripped_agent_environment`), so nothing in
+/// the ENVIRONMENT would sign a stray agent in — but Claude Code on macOS
+/// keeps its sign-in in the login Keychain, which no HOME swap or strip
+/// reaches, so a real `claude` started by a regression would still be signed
+/// in. That is why the launch must never search for it.
 async fn start_with_a_stand_in_agent() -> Daemon {
     spawn_with(true, true).await
 }
 
-/// Variables a real agent reads credentials or config from, removed from the
-/// stand-in daemon's environment and so from every pane's.
-const AGENT_ENVIRONMENT: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "CLAUDE_CONFIG_DIR",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "OPENAI_API_KEY",
-    "CODEX_HOME",
-    "CURSOR_API_KEY",
-    "XDG_CONFIG_HOME",
-];
+/// Variables removed from the stand-in daemon's environment, and so from every
+/// pane's: everything a real agent reads credentials, a provider or a config
+/// directory from — by prefix, so a provider this file has never heard of
+/// under a known prefix goes too — and the ones that point a login shell at a
+/// config other than the scratch HOME's (`ZDOTDIR`, `BASH_ENV`, `ENV`,
+/// `XDG_CONFIG_HOME`), which would put the user's own PATH ahead of the trap.
+fn stripped_agent_environment() -> Vec<std::ffi::OsString> {
+    const PREFIXES: &[&str] = &[
+        "ANTHROPIC_", "CLAUDE_", "OPENAI_", "CURSOR_", "CODEX_", "AWS_", "GOOGLE_", "VERTEX_",
+        "BEDROCK_",
+    ];
+    const NAMES: &[&str] = &["CLOUD_ML_REGION", "XDG_CONFIG_HOME", "ZDOTDIR", "BASH_ENV", "ENV"];
+    std::env::vars_os()
+        .map(|(name, _)| name)
+        .filter(|name| {
+            let name = name.to_string_lossy();
+            PREFIXES.iter().any(|p| name.starts_with(p)) || NAMES.contains(&name.as_ref())
+        })
+        .collect()
+}
 
 /// The stand-in, the trap, and the two markers, under a daemon's scratch dir.
 struct StandIn {
@@ -205,7 +216,7 @@ async fn spawn_with(scratch_home: bool, stand_in_agent: bool) -> Daemon {
     if stand_in_agent {
         let stand_in = StandIn::under(dir.path());
         stand_in.install(dir.path());
-        for name in AGENT_ENVIRONMENT {
+        for name in stripped_agent_environment() {
             command.env_remove(name);
         }
         command
@@ -226,17 +237,23 @@ async fn spawn_with(scratch_home: bool, stand_in_agent: bool) -> Daemon {
     Daemon { dir, socket, process }
 }
 
-/// What a bare `claude` resolves to in the login shell a pane runs, with the
-/// stand-in daemon's HOME and PATH. The control for the trap: if this is not
-/// the trap, "the trap never ran" would prove nothing.
+/// What a bare `claude` resolves to in the login shell a pane runs. The
+/// control for the trap: if this is not the trap, "the trap never ran" would
+/// prove nothing.
+///
+/// In the environment the pane gets, built the way the daemon's is — this
+/// process's, minus `stripped_agent_environment`, with the scratch HOME and
+/// the fixture's PATH — and NOT a clean one. A clean control would answer
+/// "trap" for a machine whose exported `ZDOTDIR` or `XDG_CONFIG_HOME` points
+/// the pane's shell at the user's own config, where the trap is not first.
 fn bare_claude_resolves_to(daemon: &Daemon, stand_in: &StandIn) -> String {
     let shell = farcooler_core::shell::login_shell();
     let mut probe = std::process::Command::new(&shell);
-    probe
-        .args(["-ilc", "command -v claude"])
-        .env_clear()
-        .env("HOME", daemon.dir.path())
-        .env("PATH", stand_in_path(stand_in));
+    probe.args(["-ilc", "command -v claude"]);
+    for name in stripped_agent_environment() {
+        probe.env_remove(name);
+    }
+    probe.env("HOME", daemon.dir.path()).env("PATH", stand_in_path(stand_in));
     let out = probe.output().expect("run the login shell");
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }

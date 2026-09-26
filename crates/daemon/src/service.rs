@@ -386,7 +386,8 @@ pub fn preset_command_with_hooks(
     }
 }
 
-/// The program an agent launch runs: `name` itself, always, outside tests.
+/// The program an agent launch runs: `name` itself outside tests, unless
+/// `FARCOOLER_STAND_IN_AGENT` names a stand-in (see below).
 ///
 /// **Under test, a stub by default.** Every launch builder -- the three
 /// agent arms of `preset_command_with_hooks` and its `other` arm, the two
@@ -416,8 +417,8 @@ pub fn preset_command_with_hooks(
 /// fixture controls.
 ///
 /// Inert when unset, which is every shipped install: nothing sets it, and the
-/// launch is `name` exactly as before. Set but unusable — relative, or with a
-/// character a shell would read — it fails CLOSED: the launch runs `false`,
+/// launch is `name` exactly as before. Set but unusable — empty, relative, or
+/// with a character a shell would read — it fails CLOSED: the launch runs `false`,
 /// so a typo in a fixture opens a pane that exits, never the real agent.
 fn agent_program(name: &str) -> String {
     #[cfg(test)]
@@ -433,12 +434,16 @@ fn agent_program(name: &str) -> String {
 /// The name of the variable `agent_program` reads. See there.
 pub const STAND_IN_AGENT: &str = "FARCOOLER_STAND_IN_AGENT";
 
-/// `FARCOOLER_STAND_IN_AGENT`, read once. `None` when it is unset or empty.
+/// `FARCOOLER_STAND_IN_AGENT`, read once. `None` only when it is absent.
 fn stand_in_agent() -> Option<&'static str> {
     static STAND_IN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     STAND_IN
         .get_or_init(|| {
-            let raw = std::env::var(STAND_IN_AGENT).ok();
+            // `var_os`, not `var`: a value that is present but not UTF-8 is
+            // still a value somebody set, and must fail closed rather than
+            // read as absent.
+            let raw = std::env::var_os(STAND_IN_AGENT)
+                .map(|v| v.to_str().map(str::to_string).unwrap_or_default());
             let program = stand_in_program(raw.as_deref());
             if let Some(p) = &program {
                 tracing::warn!(program = %p, "agent launches run a stand-in ({STAND_IN_AGENT})");
@@ -450,17 +455,16 @@ fn stand_in_agent() -> Option<&'static str> {
 
 /// What a `FARCOOLER_STAND_IN_AGENT` value makes every agent launch run.
 ///
-/// `None` for unset or empty: the real agent, as shipped. A plain absolute
-/// path is used as given. Anything else is `false`, never the agent: a
-/// fixture that set this meant "not the real one", and a value this cannot use
-/// must not fall back to the one thing it was set to prevent. "Plain" is
-/// letters, digits and `/._-`, so the path needs no quoting inside the
-/// single-quoted `-ilc` payloads it is written into.
+/// `None` only when the variable is ABSENT: the real agent, as shipped. A
+/// plain absolute path is used as given. Anything else — empty, whitespace,
+/// relative, or with a character a shell would read — is `false`, never the
+/// agent: a fixture that set this meant "not the real one", and a value this
+/// cannot use (a `STAND_IN` that was never assigned, say) must not fall back
+/// to the one thing it was set to prevent. "Plain" is letters, digits and
+/// `/._-`, so the path needs no quoting inside the single-quoted `-ilc`
+/// payloads it is written into.
 fn stand_in_program(raw: Option<&str>) -> Option<String> {
     let raw = raw?.trim();
-    if raw.is_empty() {
-        return None;
-    }
     let plain = raw.starts_with('/')
         && raw.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c));
     Some(if plain { raw.to_string() } else { "false".to_string() })
@@ -4762,18 +4766,23 @@ mod tests {
     }
 }
 
-/// The stub every daemon unit test launches in place of an agent
-/// (`agent_program`, `test_agent`), and the check that refuses a real one.
+/// What `FARCOOLER_STAND_IN_AGENT` makes an agent launch run.
 #[cfg(test)]
 mod stand_in_agent_tests {
     use super::stand_in_program;
 
-    /// Unset is the shipped daemon: the real agent, by name.
+    /// Absent is the shipped daemon: the real agent, by name.
     #[test]
-    fn unset_or_empty_names_no_stand_in() {
+    fn only_an_absent_variable_names_no_stand_in() {
         assert_eq!(stand_in_program(None), None);
-        assert_eq!(stand_in_program(Some("")), None);
-        assert_eq!(stand_in_program(Some("  ")), None);
+    }
+
+    /// Present but empty is a fixture whose path variable was never set. It
+    /// meant "not the real one", so it gets `false`.
+    #[test]
+    fn a_present_but_empty_value_fails_closed() {
+        assert_eq!(stand_in_program(Some("")), Some("false".to_string()));
+        assert_eq!(stand_in_program(Some("  ")), Some("false".to_string()));
     }
 
     #[test]
@@ -4794,6 +4803,8 @@ mod stand_in_agent_tests {
     }
 }
 
+/// The stub every daemon unit test launches in place of an agent
+/// (`agent_program`, `test_agent`), and the check that refuses a real one.
 #[cfg(test)]
 mod test_agent_tests {
     use super::*;

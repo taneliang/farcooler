@@ -316,13 +316,19 @@ RENDER="$DIR/fence-line/target/release/demo-fence-line"
 # bare `claude` through PATH or a login shell's search order, whose first
 # entries on macOS are `/etc/paths` — not this script's to control.
 #
-# Belt and braces, and the proof: the session's login shells put a TRAP
-# directory first on their PATH, holding a `claude` that only writes
-# `$TRAPPED`. The fixture checks that a bare `claude` from that shell WOULD hit
-# the trap, then that the dispatched pane ran the stand-in and the trap never
-# ran. And the daemon starts without the variables a real agent authenticates
-# or configures itself from, so even a launch that went wrong would have
-# nothing to sign in with.
+# The proof: the session's login shells put a TRAP directory first on their
+# PATH, holding a `claude` that only writes `$TRAPPED`. The fixture checks that
+# a bare `claude` from that shell WOULD hit the trap, then that the pane it
+# dispatched ran the stand-in and the trap never ran.
+#
+# The absolute path and the trap are the protection. The daemon also starts
+# without any variable an agent reads credentials, a provider or a config
+# directory from (`STRIP`, by prefix), and without the ones that would point a
+# login shell at the user's own config instead of the session's (`ZDOTDIR`,
+# `BASH_ENV`, `ENV`, `XDG_CONFIG_HOME`). But that is not a second barrier:
+# Claude Code on macOS keeps its sign-in in the login Keychain, which no HOME
+# swap or strip reaches, so a real `claude` a regression started would still
+# be signed in. That is why nothing here may search for it.
 #
 # PATH is only what the daemon needs (the trap, tmux, git, the system). Panes
 # inherit it through tmux.
@@ -357,9 +363,14 @@ touch '$STAND_IN_RAN'
 exec -a claude /bin/sleep 86400
 STANDIN
 chmod +x "$STAND_IN"
-env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
-    -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_OAUTH_TOKEN -u OPENAI_API_KEY -u CURSOR_API_KEY \
-    -u XDG_CONFIG_HOME \
+# `env -u NAME` for each, built from what this shell actually exports.
+STRIP=()
+for name in $(env | cut -d= -f1 \
+    | grep -E '^(ANTHROPIC|CLAUDE|OPENAI|CURSOR|CODEX|AWS|GOOGLE|VERTEX|BEDROCK)_|^(CLOUD_ML_REGION|XDG_CONFIG_HOME|ZDOTDIR|BASH_ENV|ENV)$' \
+    || true); do
+    STRIP+=(-u "$name")
+done
+env ${STRIP[@]+"${STRIP[@]}"} \
     HOME="$SESSION_HOME" CODEX_HOME="$SESSION_HOME/.codex" FARCOOLER_HOME="$FC_HOME" \
     PATH="$DAEMON_PATH" FARCOOLER_STAND_IN_AGENT="$STAND_IN" \
     nohup "$TARGET/farcoolerd" >"$DIR/daemon.log" 2>&1 &
@@ -615,9 +626,15 @@ fi
 # Only after the control holds: a bare `claude` from the session's login
 # shell resolves to the trap. If it does not, "the trap never ran" below would
 # prove nothing, and the fixture is skipped and says so.
+#
+# Asked in the environment the daemon — and so every pane — was started with,
+# not a clean one: a clean control would say "trap" on a machine whose
+# exported config variables send the pane's shell somewhere the trap is not.
 LOGIN_SHELL=$(dscl . -read "/Users/$(id -un)" UserShell 2>/dev/null | awk '{print $2}')
 LOGIN_SHELL=${LOGIN_SHELL:-/bin/zsh}
-RESOLVED=$(env -i HOME="$SESSION_HOME" PATH="$DAEMON_PATH" \
+RESOLVED=$(env ${STRIP[@]+"${STRIP[@]}"} \
+    HOME="$SESSION_HOME" CODEX_HOME="$SESSION_HOME/.codex" FARCOOLER_HOME="$FC_HOME" \
+    PATH="$DAEMON_PATH" \
     "$LOGIN_SHELL" -ilc 'command -v claude' 2>/dev/null | tail -1 || true)
 if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
     BOARD_KEY=$(fc --json task list --repo "$REPO_ID" \
@@ -641,13 +658,21 @@ if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
     done
     ON_TASK=$(fc --json workspace list \
         | jq -r 'first(.workspaces[] | select(.task=="boarding") | .terminals[] | select(.taskId != null and .state == "running") | .id) // empty')
+    DISPATCHED=0
     if [ -n "$BOARD_KEY" ] && [ -n "$BOARDING" ] && [ -z "$ON_TASK" ]; then
-        fc terminal create "$BOARDING" --preset claude --task "$BOARD_KEY" >/dev/null || true
+        fc terminal create "$BOARDING" --preset claude --task "$BOARD_KEY" >/dev/null \
+            && DISPATCHED=1
     fi
-    # The proof, every run: the pane ran the stand-in, and nothing resolved
-    # a bare `claude`. A trap that fired means some launch searched, and the
-    # fixture's agent panes are stopped rather than left running.
-    for _ in $(seq 1 20); do [ -e "$STAND_IN_RAN" ] && break; sleep 0.5; done
+    # The proof, every run that dispatched: the pane ran the stand-in, and
+    # nothing resolved a bare `claude`. A trap that fired means some launch
+    # searched, and the fixture's agent panes are stopped rather than left
+    # running.
+    if [ "$DISPATCHED" = 1 ]; then
+        for _ in $(seq 1 20); do
+            [ -e "$STAND_IN_RAN" ] || [ -e "$TRAPPED" ] && break
+            sleep 0.5
+        done
+    fi
     if [ -e "$TRAPPED" ]; then
         echo "STOPPING: a bare claude was resolved by searching ($TRAPPED)."
         for pane in $(fc --json workspace list \
@@ -656,11 +681,20 @@ if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
         done
         exit 1
     fi
-    if [ -e "$STAND_IN_RAN" ]; then
+    if [ "$DISPATCHED" = 1 ] && [ ! -e "$STAND_IN_RAN" ]; then
+        # Dispatched, and the stand-in never ran: the value failed closed to
+        # `false`, or the pane died. The real-path UI test would fail later
+        # with no clue why, so say it here.
+        echo "FAILED: the dispatched pane never ran the stand-in ($STAND_IN)."
+        echo "        See $DIR/daemon.log for how the launch went."
+        exit 1
+    elif [ "$DISPATCHED" = 1 ]; then
         echo "        and a board: task $BOARD_KEY with a stand-in agent in workspace 'boarding'"
         echo "        (the stand-in ran by absolute path; the trap for a searched claude did not)"
+    elif [ -n "$ON_TASK" ]; then
+        echo "        and a board: task $BOARD_KEY, its stand-in agent still running from an earlier run"
     else
-        echo "        and a board: task $BOARD_KEY (the stand-in pane was already running)"
+        echo "        (no board fixture: the task or its workspace could not be made; see $DIR/daemon.log)"
     fi
 else
     echo "        (no board fixture: a bare claude resolves to '${RESOLVED:-nothing}', not the trap)"
