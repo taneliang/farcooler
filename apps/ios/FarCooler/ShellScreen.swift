@@ -1026,10 +1026,34 @@ struct ShellScreen: View {
                 BoardSheetHost(
                     sheet: sheet, connection: connection,
                     onJump: { agent in
-                        boardJump = agent.id
-                        boardSheet = nil
+                        // Resolved BEFORE the board closes: a pane that has
+                        // exited, or sits in a workspace the shell does not
+                        // draw, is said on the board rather than closed onto.
+                        switch boardLanding(for: agent.id) {
+                        case .tab:
+                            boardJump = agent.id
+                            boardSheet = nil
+                            return nil
+                        case .hidden: return TaskAgentLink.cannotLand(hidden: true)
+                        case .gone: return TaskAgentLink.cannotLand(hidden: false)
+                        }
                     },
                     onDone: { boardSheet = nil })
+            } else {
+                // The runner was removed while its board was open. A sheet
+                // with no body would have no way off it.
+                NavigationStack {
+                    ContentUnavailableView {
+                        Label("Runner Removed", systemImage: "server.rack")
+                    } description: {
+                        Text("This board’s runner isn’t in Far Cooler anymore.")
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { boardSheet = nil }
+                        }
+                    }
+                }
             }
         }
         // The ceremony a card's menu starts, run from the screen rather than
@@ -1810,6 +1834,12 @@ struct ShellScreen: View {
     /// shell does not actually have that tab" to be got wrong.
     private func requestedTab(in map: ShellFleetMap) -> String? {
         guard let id = pendingTerminal ?? createdTerminal ?? boardTerminal else { return nil }
+        return tab(forTerminal: id, in: map)
+    }
+
+    /// The shell's tab for a terminal, on whichever runner it is, or nil when
+    /// the shell has no such tab.
+    private func tab(forTerminal id: String, in map: ShellFleetMap) -> String? {
         // Across every runner, because a card carries a terminal id and no
         // host: the URL is `…://terminal/<id>` and always has been, so the only
         // way to answer "which runner is that on" is to look. One connection
@@ -1911,6 +1941,7 @@ extension ShellScreen {
             boards: connection.boards,
             panes: connection.fleet.workspaces.flatMap(\.terminals),
             build: connection.daemon,
+            lastKnownBuild: connection.lastDaemon,
             connected: connection.phase == .connected)
     }
 
@@ -1921,6 +1952,19 @@ extension ShellScreen {
     /// while the menu was open, or it is in a workspace the shell does not
     /// draw — so a request nobody could honor does not stand waiting for a tab
     /// that may appear much later and pull the screen to it.
+    /// Where a board's Agent button can go. See `onJump` on the sheet.
+    fileprivate enum BoardLanding { case tab, hidden, gone }
+
+    fileprivate func boardLanding(for terminal: String) -> BoardLanding {
+        if tab(forTerminal: terminal, in: map) != nil { return .tab }
+        let known = fleet.runners.contains { runner in
+            runner.connection.fleet.workspaces.contains { workspace in
+                workspace.terminals.contains { $0.id == terminal }
+            }
+        }
+        return known ? .hidden : .gone
+    }
+
     fileprivate func landOnBoardJump() {
         guard let id = boardJump else { return }
         boardJump = nil
@@ -1937,7 +1981,7 @@ extension ShellScreen {
 private struct BoardSheetHost: View {
     let sheet: BoardSheet
     @ObservedObject var connection: Connection
-    let onJump: (BoardAgent) -> Void
+    let onJump: (BoardAgent) -> String?
     let onDone: () -> Void
 
     var body: some View {

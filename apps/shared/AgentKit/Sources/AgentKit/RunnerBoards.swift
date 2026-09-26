@@ -64,14 +64,23 @@ public enum RunnerBoards {
     /// kept through a reconnect on purpose, like the fleet: the decisions are
     /// what the runner last said, and a row that blinked out for every
     /// dropped link would be a row nobody could find twice.
+    ///
+    /// `build` is what THIS link has read, nil from the moment a link comes up
+    /// until its `host` answers. `lastKnownBuild` is the last any link read,
+    /// kept through a reconnect, and it is what keeps the rows drawn in that
+    /// gap: a row that vanished for one round trip after every Wi-Fi blink
+    /// would move every card under it up and back down. Agents are counted
+    /// only against `build` — the fresh one — so in the gap the rows stay and
+    /// say nothing about agents.
     public static func rows<P: TaskBoardPane>(
         repositories: [(id: String, name: String)],
         boards: [String: TaskBoardModel],
         panes: [P],
         build: DaemonBuild?,
+        lastKnownBuild: DaemonBuild? = nil,
         connected: Bool
     ) -> [RunnerBoardRow] {
-        guard build?.can("tasks") == true else { return [] }
+        guard (build ?? lastKnownBuild)?.can("tasks") == true else { return [] }
         let speaks = TaskAgentLink.speaksOfAgents(connected: connected, build: build)
         return repositories.compactMap { repository in
             guard let board = boards[repository.id],

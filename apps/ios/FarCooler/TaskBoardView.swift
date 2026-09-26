@@ -51,7 +51,9 @@ struct TaskBoardView: View {
     let speaksOfAgents: Bool
     /// The panes working a card, in fleet order.
     let agents: (TaskRow) -> [BoardAgent]
-    let onJump: (BoardAgent) -> Void
+    /// Go to `agent`. Nil when going — the caller closes the board and lands
+    /// — or the sentence to say instead when there is nowhere to land.
+    let onJump: (BoardAgent) -> String?
     let onRefresh: () async -> Void
     let onDone: () -> Void
 
@@ -59,6 +61,9 @@ struct TaskBoardView: View {
     /// card that is open redraws from the board as it is now when a notice
     /// re-reads it — and closes itself if the task leaves the board.
     @State private var path: [String] = []
+    /// Why the last Agent tap went nowhere, shown at the foot of the board
+    /// for a few seconds. See `jump`.
+    @State private var notice: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -81,7 +86,7 @@ struct TaskBoardView: View {
                             row: row, live: live,
                             presence: row.agentPresence(
                                 livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
-                            onJump: onJump)
+                            onJump: jump)
                     } else {
                         ContentUnavailableView {
                             Label("Not on This Board", systemImage: "checklist")
@@ -91,8 +96,31 @@ struct TaskBoardView: View {
                     }
                 }
         }
+        .overlay(alignment: .bottom) {
+            if let notice {
+                Text(notice)
+                    .font(.subheadline)
+                    .padding(.horizontal, PaneMetrics.edge)
+                    .padding(.vertical, PaneMetrics.step)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.bottom, PaneMetrics.edge)
+                    .transition(.opacity)
+                    .accessibilityIdentifier("board-notice")
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board")
+    }
+
+    /// An Agent tap: go, or say why not and stay on the board.
+    private func jump(_ agent: BoardAgent) {
+        guard let why = onJump(agent) else { return }
+        withAnimation(.easeOut(duration: 0.2)) { notice = why }
+        UIAccessibility.post(notification: .announcement, argument: why)
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if notice == why { withAnimation(.easeOut(duration: 0.2)) { notice = nil } }
+        }
     }
 
     @ViewBuilder
@@ -140,7 +168,7 @@ struct TaskBoardView: View {
                             presence: row.agentPresence(
                                 livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
                             onOpen: { path.append(row.id) },
-                            onJump: onJump)
+                            onJump: jump)
                     }
                 } header: {
                     HStack(spacing: PaneMetrics.tight) {

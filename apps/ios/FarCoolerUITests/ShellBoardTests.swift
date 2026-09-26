@@ -168,6 +168,29 @@ final class ShellBoardTests: XCTestCase {
             "the opened card's Agent did not land: \(probe(app, "shell-pane-ws-1-tab-1"))")
     }
 
+    /// **An agent whose pane has gone says so, on the board, and stays.**
+    ///
+    /// -20's menu offers a third pane the runner still names but the shell no
+    /// longer has. Choosing it must not close the board onto nothing.
+    func testAnAgentWhosePaneHasGoneSaysSoAndKeepsTheBoard() throws {
+        let app = launch()
+        XCTAssertTrue(boardRow(app).waitForExistence(timeout: 30), "no Board row")
+        boardRow(app).tap()
+
+        let menu = app.buttons["board-agent--20"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "-20 has no agents control")
+        menu.tap()
+        let gone = app.buttons["aider in chore/put-away"]
+        XCTAssertTrue(gone.waitForExistence(timeout: 5), "the menu does not list the closed pane")
+        gone.tap()
+
+        let notice = app.descendants(matching: .any)["board-notice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), "nothing said the pane had closed")
+        XCTAssertEqual(notice.label, "That agent’s pane has closed.")
+        XCTAssertTrue(app.descendants(matching: .any)["board"].exists, "the board closed anyway")
+        XCTAssertEqual(probe(app, "shell-state")["overview"], "1", "the shell moved anyway")
+    }
+
     // MARK: - The real path, against the demo runner
 
     /// **Overview → Board row → card → Agent lands on the pane the runner

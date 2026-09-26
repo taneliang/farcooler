@@ -371,9 +371,9 @@ final class Connection: ObservableObject {
         await listenForFleetNews()
         await refresh()
         await loadRepositories()
-        await loadBoards()
         await loadThemes()
         startPolling()
+        loadBoardsDetached()
     }
 
     /// Take the runner's word for it when something changes.
@@ -406,14 +406,20 @@ final class Connection: ObservableObject {
             // nothing more specific — is every board.
             let event = notice["event"] as? String
             let repository = notice["repository"] as? String
+            //
+            // The fleet first, and never behind a board: `fleetNewsArrived`
+            // only arms a refresh, and the board read after it runs on its
+            // own. A `resync` is the queue having overflowed, which is when
+            // the fleet is most behind — it must not wait out a `task.list`
+            // per repository before it is even asked for.
             Task { @MainActor in
                 guard let self else { return }
+                self.fleetNewsArrived()
                 switch event {
                 case "task": if let repository { await self.readBoard(repository) }
                 case "resync": await self.loadBoards()
                 default: break
                 }
-                self.fleetNewsArrived()
             }
         }
     }
@@ -578,9 +584,9 @@ final class Connection: ObservableObject {
         // staying invisible to the pickers until relaunch is the failure the
         // Mac's `onReconnect` seeding exists to prevent.
         await loadRepositories()
-        await loadBoards()
         await loadThemes()
         startPolling()
+        loadBoardsDetached()
     }
 
     /// What to do about an attempt that failed: wait longer, wait much longer,
@@ -655,12 +661,17 @@ final class Connection: ObservableObject {
             // fact. Testing it now beats waiting out a poll interval to find
             // out, and if it holds this is one round trip nobody notices.
             //
-            // The boards too, and after the fleet: a board's news arrived
-            // while the process was suspended, if it arrived at all, and a
-            // board is read on its news and nothing else.
+            // Not the boards, as a rule. A link that survived the suspension
+            // kept its event channel, and the client core queues the notices
+            // that arrived meanwhile — coalesced, and collapsed to a `resync`
+            // if there were too many — so each board that moved is read on
+            // its own news as the queue drains. Only a runner with no live
+            // channel had nobody to tell it; see `boardsMayHaveMissedNews`.
+            // A link that did not survive comes back through `reconnect`,
+            // which reads every board anyway.
             Task {
                 await refresh()
-                await loadBoards()
+                if await boardsMayHaveMissedNews() { loadBoardsDetached() }
             }
         case .reconnecting, .failed:
             reconnectNow()
@@ -812,6 +823,17 @@ final class Connection: ObservableObject {
         daemonLink += 1
     }
 
+    /// The last build any link to this runner reported, kept through a
+    /// reconnect.
+    ///
+    /// For LAYOUT only — whether the overview draws this runner's Board rows —
+    /// and never for a capability gate on a call: `daemon` is what those ask,
+    /// and its clear is what makes a reconnected runner prove itself again.
+    /// A Board row that vanished for the round trip after every reconnect
+    /// would move every card under it twice; the row stays, and only its
+    /// agent count goes quiet until the fresh build lands.
+    @Published private(set) var lastDaemon: DaemonBuild?
+
     /// Which link `daemon` is being read for. Bumped by `forgetDaemonBuild`,
     /// so a read that set out on the previous link and answers after the new
     /// one came up is dropped rather than installing the old build over the
@@ -826,7 +848,7 @@ final class Connection: ObservableObject {
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             link == daemonLink
         else { return }
-        daemon = DaemonBuild(
+        let build = DaemonBuild(
             version: body["daemonVersion"] as? String ?? "unknown",
             matches: body["buildsMatch"] as? Bool ?? true,
             platform: body["platform"] as? String ?? "",
@@ -843,6 +865,8 @@ final class Connection: ObservableObject {
             // "keep offering what we offer today", so a runner newer than this
             // build cannot silently strip controls off it.
             grantedScope: body["grantedScope"] as? String ?? "unspecified")
+        daemon = build
+        lastDaemon = build
         // Read from the same call, which is already made once per connection.
         //
         // Defaulted to the daemon's own default rather than to no prefix: an
@@ -953,6 +977,12 @@ final class Connection: ObservableObject {
             // and this is the poll. Without it, the one case that needs no
             // interaction at all is the one case that never clears.
             await markVisibleSeen()
+
+            // The one poll-driven board read: a runner with no event channel
+            // is never told a board moved, so its boards are read again on
+            // the poll, at most once a minute. With a channel this is never
+            // true and costs nothing.
+            if await boardsMayHaveMissedNews() { loadBoardsDetached() }
         } catch {
             // A failed poll is not a disconnection — unless the core says it
             // is. That distinction did not exist before: this swallowed every
@@ -1174,9 +1204,47 @@ final class Connection: ObservableObject {
     /// somebody writes to it, and every write is announced.
     func loadBoards() async {
         guard phase == .connected, daemon?.can("tasks") == true else { return }
-        for repository in repositories.map(\.id) {
-            await readBoard(repository)
+        lastBoardsRead = Date()
+        // A few at a time, not one after another and not all at once: a
+        // runner with thirty repositories over a relay is thirty round trips,
+        // and serially that is seconds of nothing arriving, while thirty at
+        // once is a burst on a link the fleet and the terminals share.
+        let queue = repositories.map(\.id)
+        await withTaskGroup(of: Void.self) { group in
+            var next = queue.makeIterator()
+            for _ in 0..<Self.boardReadsAtOnce {
+                guard let repository = next.next() else { break }
+                group.addTask { await self.readBoard(repository) }
+            }
+            while await group.next() != nil {
+                if let repository = next.next() {
+                    group.addTask { await self.readBoard(repository) }
+                }
+            }
         }
+    }
+
+    /// How many boards are read at once. See `loadBoards`.
+    static let boardReadsAtOnce = 4
+
+    /// `loadBoards`, not waited on: nothing a link does after coming up —
+    /// themes, the poll, the fleet — should stand behind a board.
+    func loadBoardsDetached() {
+        Task { await self.loadBoards() }
+    }
+
+    /// When every board was last read, for the one case that reads them all
+    /// without being told to. See `boardsMayHaveMissedNews`.
+    private var lastBoardsRead: Date?
+
+    /// Whether this runner's boards may have moved without a notice reaching
+    /// this app: no live event channel (the poll is all there is), and more
+    /// than a minute since they were last read. With a channel, every board
+    /// write is announced and each board is read on its own news.
+    func boardsMayHaveMissedNews() async -> Bool {
+        guard !(await core.eventsLive) else { return false }
+        guard let last = lastBoardsRead else { return true }
+        return Date().timeIntervalSince(last) > 60
     }
 
     /// Read one repository's board, or fold into the read already under way.

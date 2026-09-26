@@ -122,3 +122,20 @@ private let panes = [
     #expect(listed.map(\.status) == [.needsDecision, .inProgress, .done])
     #expect(board([]).listed.isEmpty)
 }
+
+/// A runner whose new link has not read its build yet keeps the rows the
+/// last build allowed, so nothing under them moves — and says nothing about
+/// agents until the fresh build lands.
+@Test func aReconnectedRunnerKeepsItsRowsWhileItsBuildIsReadAgain() throws {
+    let gap = RunnerBoards.rows(
+        repositories: repositories, boards: boards, panes: panes,
+        build: nil, lastKnownBuild: both, connected: true)
+    #expect(gap.map(\.repository) == ["r-busy", "r-new"])
+    #expect(try #require(gap.first).decisions == 2)
+    #expect(try #require(gap.first).agents == 0)
+
+    let landed = RunnerBoards.rows(
+        repositories: repositories, boards: boards, panes: panes,
+        build: both, lastKnownBuild: both, connected: true)
+    #expect(try #require(landed.first).agents == 2)
+}

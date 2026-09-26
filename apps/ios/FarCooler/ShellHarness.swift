@@ -118,8 +118,15 @@ struct ShellHarness: View {
                 name: "overnight", board: HarnessBoard.board, unread: false,
                 speaksOfAgents: true, agents: HarnessBoard.agents(for:),
                 onJump: { agent in
+                    // The shell's own question, as `ShellScreen` asks it:
+                    // is there a tab to land on? A harness pane whose tab the
+                    // fleet does not have is the closed pane.
+                    guard fleet.position(ofTab: agent.id) != nil else {
+                        return TaskAgentLink.cannotLand(hidden: false)
+                    }
                     boardJump = agent.id
                     boardOpen = false
+                    return nil
                 },
                 onRefresh: {}, onDone: { boardOpen = false })
         }
@@ -413,6 +420,9 @@ enum HarnessBoard {
         Pane(boardTaskID: "t-19", tab: "ws-1-tab-1", title: "claude in feat/queue-drain"),
         Pane(boardTaskID: "t-20", tab: "ws-2-tab-1", title: "claude in fix/token-refresh"),
         Pane(boardTaskID: "t-20", tab: "ws-2-tab-2", title: "codex in fix/token-refresh"),
+        // Working -20 as far as the runner said, in a tab the fleet no longer
+        // has: the pane that closed while the board was open.
+        Pane(boardTaskID: "t-20", tab: "ws-gone-tab-1", title: "aider in chore/put-away"),
         // Dispatched, and its agent has gone: back at a shell, still running.
         Pane(boardTaskID: "t-21", runsAgent: false, tab: "ws-3-tab-0", title: "shell"),
     ]
