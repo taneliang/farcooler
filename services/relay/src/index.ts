@@ -1465,8 +1465,10 @@ function tier(status: string | null): number {
 /// Whether a row still has anything to say about now.
 ///
 /// Only rows in a tier the card draws, and only ones that have spoken inside
-/// `ROW_QUIET_AFTER_MS`. Both halves matter: a quiet row is dropped from the
-/// LINES but kept in the counts, and this is the test the lines use.
+/// `ROW_QUIET_AFTER_MS`. Both halves matter. It is the test the LINES use, and
+/// the test the `working` count uses: working is a claim about now, so a quiet
+/// working row leaves "in flight" with its line. Blocked and done are latched
+/// and stay in their counts at any age, and every quiet row is still in `more`.
 function speaks(row: AgentRow, now: number): boolean {
   return tier(row.status) < 3 && now - row.updated_at < ROW_QUIET_AFTER_MS
 }
