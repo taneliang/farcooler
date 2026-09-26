@@ -139,3 +139,17 @@ private let panes = [
         build: both, lastKnownBuild: both, connected: true)
     #expect(try #require(landed.first).agents == 2)
 }
+
+/// A link whose build lands before its boards were read owes a sweep; one
+/// whose boards were read does not; and a new link owes one again. The case
+/// this exists for: the first `host` read on a reconnect failed, the sweep
+/// that followed refused every board, and a later poll installed the build.
+@Test func aBuildThatLandsLateReadsTheBoardsItsLinkNeverRead() {
+    var sweep = BoardSweep()
+    sweep.linkCameUp()
+    #expect(sweep.owedWhenBuildLands, "no board was read on this link yet")
+    sweep.swept()
+    #expect(!sweep.owedWhenBuildLands, "this link already read its boards")
+    sweep.linkCameUp()
+    #expect(sweep.owedWhenBuildLands, "a new link has read nothing")
+}

@@ -611,6 +611,20 @@ struct ShellFleet: Hashable {
         return nil
     }
 
+    /// The tab to land on for a terminal, or nil when this shell has none.
+    ///
+    /// The ONE answer to "can the shell go to that pane", for the two things
+    /// that ask it: a deep link (a tapped Live Activity) and a board card's
+    /// Agent button. `tabOfTerminal` is the fleet map's own composition of
+    /// each terminal's tab id (`ShellFleetMap.tabOfTerminal`), and a tab id is
+    /// only an answer if this fleet has the tab: a pane that exited since the
+    /// card drew is in neither, and a terminal the map knows but whose tab the
+    /// shell does not draw must not resolve to a place nobody can land.
+    func landing(forTerminal id: String, tabOfTerminal: [String: String]) -> String? {
+        guard let tab = tabOfTerminal[id], position(ofTab: tab) != nil else { return nil }
+        return tab
+    }
+
     /// Where a shell holding `tab` sits in THIS fleet.
     ///
     /// **A `ShellPosition` is a pair of INDICES, and the fleet it indexes into

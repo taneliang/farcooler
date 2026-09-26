@@ -47,9 +47,9 @@ public enum RunnerBoards {
     /// repositories.
     ///
     /// - A runner that does not advertise `tasks` has no board, and gets no
-    ///   rows. Nor does one nobody has asked yet (`build` nil): a row that
-    ///   appeared and then vanished on the first answer would move every card
-    ///   under it.
+    ///   rows. Nor does one no link has asked yet (`build` and
+    ///   `lastKnownBuild` both nil): a row that appeared and then vanished on
+    ///   the first answer would move every card under it.
     /// - A repository gets a row only once its board has been read and has
     ///   something on it, unreadable rows included. An empty board is most
     ///   repositories on most runners, and a row for each would push the
@@ -92,6 +92,30 @@ public enum RunnerBoards {
                 agents: speaks ? board.tasksWithLiveAgents(in: panes) : 0)
         }
     }
+}
+
+/// Whether a link still owes its boards a read.
+///
+/// A new link clears it; a sweep that read the repositories sets it. When the
+/// runner's build lands on a link that still owes one, the boards are read
+/// then: a sweep started before the build was known refused every board (it
+/// cannot know the runner keeps one), and without this the overview's rows
+/// would go on showing what the previous link read until some board happened
+/// to move. The first `host` read on a new link failing is exactly when that
+/// happens — a reconnect over a link still coming up.
+public struct BoardSweep: Equatable, Sendable {
+    public private(set) var sweptOnThisLink = false
+
+    public init() {}
+
+    /// A new link: its boards have not been read on it.
+    public mutating func linkCameUp() { sweptOnThisLink = false }
+
+    /// This link's boards were read.
+    public mutating func swept() { sweptOnThisLink = true }
+
+    /// Whether the build landing now should start a sweep.
+    public var owedWhenBuildLands: Bool { !sweptOnThisLink }
 }
 
 extension TaskBoardModel {

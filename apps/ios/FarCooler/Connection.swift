@@ -821,6 +821,7 @@ final class Connection: ObservableObject {
     private func forgetDaemonBuild() {
         daemon = nil
         daemonLink += 1
+        boardSweep.linkCameUp()
     }
 
     /// The last build any link to this runner reported, kept through a
@@ -867,6 +868,10 @@ final class Connection: ObservableObject {
             grantedScope: body["grantedScope"] as? String ?? "unspecified")
         daemon = build
         lastDaemon = build
+        // Boards this link never read — `loadBoards` refused them while the
+        // build was missing. Detached, so the poll that installed the build
+        // does not wait on a sweep.
+        if boardSweep.owedWhenBuildLands { loadBoardsDetached() }
         // Read from the same call, which is already made once per connection.
         //
         // Defaulted to the daemon's own default rather than to no prefix: an
@@ -1198,34 +1203,34 @@ final class Connection: ObservableObject {
 
     /// Read every repository's board, on a runner that keeps one.
     ///
-    /// On each new link, after the repositories are known; on the app coming
-    /// back to the foreground; and on `resync`. Otherwise a board is read on
-    /// its own news. Nothing here is on the poll: a board changes when
-    /// somebody writes to it, and every write is announced.
+    /// When a link comes up (after the repositories are known), when a
+    /// link's build lands on a link whose boards were not read yet (see
+    /// `boardSweep`), on `resync`, and — only for a runner with no live event
+    /// channel — on foreground and on the poll, at most once a minute (see
+    /// `boardsMayHaveMissedNews`). Otherwise a board is read on its own news.
+    ///
+    /// One board at a time, and that is not caution. The client core holds
+    /// this runner's session for the whole of each round trip, so every call
+    /// on it — a keystroke, the fleet, a board — goes over the wire one after
+    /// another whatever this side does. Starting several board reads at once
+    /// would buy no speed; it would only put several of them in the queue
+    /// ahead of the next keystroke. So the sweep is detached, so nothing waits
+    /// on it to start, and serial, so it never has more than one read ahead of
+    /// anything else.
     func loadBoards() async {
         guard phase == .connected, daemon?.can("tasks") == true else { return }
         lastBoardsRead = Date()
-        // A few at a time, not one after another and not all at once: a
-        // runner with thirty repositories over a relay is thirty round trips,
-        // and serially that is seconds of nothing arriving, while thirty at
-        // once is a burst on a link the fleet and the terminals share.
-        let queue = repositories.map(\.id)
-        await withTaskGroup(of: Void.self) { group in
-            var next = queue.makeIterator()
-            for _ in 0..<Self.boardReadsAtOnce {
-                guard let repository = next.next() else { break }
-                group.addTask { await self.readBoard(repository) }
-            }
-            while await group.next() != nil {
-                if let repository = next.next() {
-                    group.addTask { await self.readBoard(repository) }
-                }
-            }
+        if !repositories.isEmpty { boardSweep.swept() }
+        for repository in repositories.map(\.id) {
+            await readBoard(repository)
         }
     }
 
-    /// How many boards are read at once. See `loadBoards`.
-    static let boardReadsAtOnce = 4
+    /// Whether this link's boards have been swept — so a build that lands
+    /// late (the first `host` read on a new link failed, and a later poll
+    /// installed it) reads them then, rather than leaving the rows showing
+    /// what the previous link last read. See `BoardSweep`.
+    private var boardSweep = BoardSweep()
 
     /// `loadBoards`, not waited on: nothing a link does after coming up —
     /// themes, the poll, the fleet — should stand behind a board.

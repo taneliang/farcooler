@@ -94,13 +94,10 @@ extension TaskAgentLink {
         connected && build?.can("terminal_task") == true
     }
 
-    /// What a board says when its Agent button cannot go where it points:
-    /// the pane is in a workspace the shell does not show (`hidden`), or it
-    /// is not on the runner any more. Said on the board, briefly, instead of
-    /// closing it onto nothing.
-    public static func cannotLand(hidden: Bool) -> String {
-        hidden ? "That agent’s workspace is hidden." : "That agent’s pane has closed."
-    }
+    /// What a board says when its Agent button has nowhere to land: the pane
+    /// closed after the card was drawn. Said on the board, briefly, instead of
+    /// closing it onto nothing. See `ShellFleet.landing`.
+    public static let paneHasClosed = "That agent’s pane has closed."
 
     /// Menu items for several panes on one card, told apart even where their
     /// names are not: titles that collide get the pane's short id after them.

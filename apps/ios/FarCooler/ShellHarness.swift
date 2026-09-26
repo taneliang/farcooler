@@ -122,7 +122,7 @@ struct ShellHarness: View {
                     // is there a tab to land on? A harness pane whose tab the
                     // fleet does not have is the closed pane.
                     guard fleet.position(ofTab: agent.id) != nil else {
-                        return TaskAgentLink.cannotLand(hidden: false)
+                        return TaskAgentLink.paneHasClosed
                     }
                     boardJump = agent.id
                     boardOpen = false

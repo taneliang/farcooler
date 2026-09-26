@@ -111,6 +111,25 @@ struct ShellFleetMap {
     /// asks per card and the shell asks per rest.
     var entries: [String: FleetEntry] = [:]
 
+    /// Every terminal's tab id, by terminal id, across every runner in the
+    /// map — what `ShellFleet.landing` reads.
+    ///
+    /// Across every runner because a card carries a terminal id and no host:
+    /// the URL is `…://terminal/<id>` and always has been, so the only way to
+    /// answer "which runner is that on" is to look. A `changes` pane the host
+    /// happens to have open is folded into the Changes tab by `Pane.init(_:)`
+    /// and maps to that tab, which does exist.
+    var tabOfTerminal: [String: String] {
+        var out: [String: String] = [:]
+        for entry in entries.values {
+            for terminal in entry.workspace.terminals {
+                out[terminal.id] = Self.tabID(
+                    runner: entry.host.id, workspace: entry.workspace.id, pane: Pane(terminal))
+            }
+        }
+        return out
+    }
+
     /// A tab's id: the runner, the workspace it is in, then the pane it is.
     ///
     /// Composed by `ShellIdentity` rather than here, so the composition sits
@@ -1029,14 +1048,12 @@ struct ShellScreen: View {
                         // Resolved BEFORE the board closes: a pane that has
                         // exited, or sits in a workspace the shell does not
                         // draw, is said on the board rather than closed onto.
-                        switch boardLanding(for: agent.id) {
-                        case .tab:
-                            boardJump = agent.id
-                            boardSheet = nil
-                            return nil
-                        case .hidden: return TaskAgentLink.cannotLand(hidden: true)
-                        case .gone: return TaskAgentLink.cannotLand(hidden: false)
+                        guard boardCanLand(on: agent.id) else {
+                            return TaskAgentLink.paneHasClosed
                         }
+                        boardJump = agent.id
+                        boardSheet = nil
+                        return nil
                     },
                     onDone: { boardSheet = nil })
             } else {
@@ -1839,27 +1856,11 @@ struct ShellScreen: View {
 
     /// The shell's tab for a terminal, on whichever runner it is, or nil when
     /// the shell has no such tab.
+    ///
+    /// The decision is `ShellFleet.landing`, in AgentKit where `swift test`
+    /// reaches it; `ShellFleetMap.tabOfTerminal` is the composition it reads.
     private func tab(forTerminal id: String, in map: ShellFleetMap) -> String? {
-        // Across every runner, because a card carries a terminal id and no
-        // host: the URL is `…://terminal/<id>` and always has been, so the only
-        // way to answer "which runner is that on" is to look. One connection
-        // made the question invisible rather than answering it — a card about
-        // another runner simply resolved to nothing and the tap opened the app
-        // on whatever it would have opened on anyway. Now it lands.
-        for entry in map.entries.values {
-            guard
-                let terminal = entry.workspace.terminals.first(where: { $0.id == id })
-            else { continue }
-            let tab = ShellFleetMap.tabID(
-                runner: entry.host.id, workspace: entry.workspace.id, pane: Pane(terminal))
-            // Only if the shell actually has it. A `changes` pane the host
-            // happens to have open is folded into the Changes tab by
-            // `Pane.init(_:)` and is not a tab of its own, so an id naming one
-            // resolves to a tab that does exist; anything that does not is a
-            // request this shell cannot honor and must not hold open.
-            return map.fleet.position(ofTab: tab) == nil ? nil : tab
-        }
-        return nil
+        map.fleet.landing(forTerminal: id, tabOfTerminal: map.tabOfTerminal)
     }
 
     // MARK: - The one writer of `visibleTerminal`
@@ -1945,26 +1946,23 @@ extension ShellScreen {
             connected: connection.phase == .connected)
     }
 
+    /// Whether a board's Agent button has a pane to land on. See `onJump` on
+    /// the sheet, and `ShellFleet.landing` for the decision.
+    ///
+    /// No "hidden workspace" case: the shell draws hidden workspaces too (the
+    /// overview's Hidden section), so a hidden workspace's pane has a tab and
+    /// lands. The only pane with no tab is one that is gone.
+    fileprivate func boardCanLand(on terminal: String) -> Bool {
+        tab(forTerminal: terminal, in: map) != nil
+    }
+
     /// Hand the agent a card asked for to the shell, now that the board is
     /// down.
     ///
     /// Spent a second later if the shell never took it — the pane went away
-    /// while the menu was open, or it is in a workspace the shell does not
-    /// draw — so a request nobody could honor does not stand waiting for a tab
-    /// that may appear much later and pull the screen to it.
-    /// Where a board's Agent button can go. See `onJump` on the sheet.
-    fileprivate enum BoardLanding { case tab, hidden, gone }
-
-    fileprivate func boardLanding(for terminal: String) -> BoardLanding {
-        if tab(forTerminal: terminal, in: map) != nil { return .tab }
-        let known = fleet.runners.contains { runner in
-            runner.connection.fleet.workspaces.contains { workspace in
-                workspace.terminals.contains { $0.id == terminal }
-            }
-        }
-        return known ? .hidden : .gone
-    }
-
+    /// between the tap and the landing — so a request nobody could honor does
+    /// not stand waiting for a tab that may appear much later and pull the
+    /// screen to it.
     fileprivate func landOnBoardJump() {
         guard let id = boardJump else { return }
         boardJump = nil
