@@ -403,12 +403,67 @@ pub fn preset_command_with_hooks(
 /// takes `test_agent::real_names()` and sees the real program; the tmux
 /// boundary refuses to launch anything built under that guard
 /// (`test_agent::refuse_a_real_agent`).
+///
+/// **Outside tests, a stand-in only when one is named explicitly.**
+/// `FARCOOLER_STAND_IN_AGENT`, read once from the daemon's own environment,
+/// names ONE program by absolute path that every agent launch runs in place of
+/// the agent, with the agent's name and arguments after it — the same shape as
+/// the test stub. It exists for fixtures that must open a real agent PANE
+/// without ever starting a real agent: `scripts/demo-host.sh` and the client
+/// crate's real-daemon tests. Named by absolute path at the launch itself
+/// because resolving a bare `claude` goes through the pane's login shell,
+/// whose search order (`/etc/paths` first on macOS, then its own config) no
+/// fixture controls.
+///
+/// Inert when unset, which is every shipped install: nothing sets it, and the
+/// launch is `name` exactly as before. Set but unusable — relative, or with a
+/// character a shell would read — it fails CLOSED: the launch runs `false`,
+/// so a typo in a fixture opens a pane that exits, never the real agent.
 fn agent_program(name: &str) -> String {
     #[cfg(test)]
     if !test_agent::REAL.with(|r| r.get()) {
         return format!("{} {name}", test_agent::PROGRAM);
     }
-    name.to_string()
+    match stand_in_agent() {
+        None => name.to_string(),
+        Some(program) => format!("{program} {name}"),
+    }
+}
+
+/// The name of the variable `agent_program` reads. See there.
+pub const STAND_IN_AGENT: &str = "FARCOOLER_STAND_IN_AGENT";
+
+/// `FARCOOLER_STAND_IN_AGENT`, read once. `None` when it is unset or empty.
+fn stand_in_agent() -> Option<&'static str> {
+    static STAND_IN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    STAND_IN
+        .get_or_init(|| {
+            let raw = std::env::var(STAND_IN_AGENT).ok();
+            let program = stand_in_program(raw.as_deref());
+            if let Some(p) = &program {
+                tracing::warn!(program = %p, "agent launches run a stand-in ({STAND_IN_AGENT})");
+            }
+            program
+        })
+        .as_deref()
+}
+
+/// What a `FARCOOLER_STAND_IN_AGENT` value makes every agent launch run.
+///
+/// `None` for unset or empty: the real agent, as shipped. A plain absolute
+/// path is used as given. Anything else is `false`, never the agent: a
+/// fixture that set this meant "not the real one", and a value this cannot use
+/// must not fall back to the one thing it was set to prevent. "Plain" is
+/// letters, digits and `/._-`, so the path needs no quoting inside the
+/// single-quoted `-ilc` payloads it is written into.
+fn stand_in_program(raw: Option<&str>) -> Option<String> {
+    let raw = raw?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let plain = raw.starts_with('/')
+        && raw.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c));
+    Some(if plain { raw.to_string() } else { "false".to_string() })
 }
 
 #[cfg(test)]
@@ -4709,6 +4764,36 @@ mod tests {
 
 /// The stub every daemon unit test launches in place of an agent
 /// (`agent_program`, `test_agent`), and the check that refuses a real one.
+#[cfg(test)]
+mod stand_in_agent_tests {
+    use super::stand_in_program;
+
+    /// Unset is the shipped daemon: the real agent, by name.
+    #[test]
+    fn unset_or_empty_names_no_stand_in() {
+        assert_eq!(stand_in_program(None), None);
+        assert_eq!(stand_in_program(Some("")), None);
+        assert_eq!(stand_in_program(Some("  ")), None);
+    }
+
+    #[test]
+    fn a_plain_absolute_path_is_the_program() {
+        assert_eq!(
+            stand_in_program(Some("/tmp/fc-x/home/.local/bin/claude")),
+            Some("/tmp/fc-x/home/.local/bin/claude".to_string())
+        );
+    }
+
+    /// Set but unusable fails closed: `false`, never the real agent, and
+    /// never a path that would need quoting inside the `-ilc` payload.
+    #[test]
+    fn anything_else_fails_closed() {
+        for raw in ["claude", "bin/claude", "/tmp/with space/claude", "/tmp/x';claude", "/tmp/$HOME"] {
+            assert_eq!(stand_in_program(Some(raw)), Some("false".to_string()), "{raw}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod test_agent_tests {
     use super::*;

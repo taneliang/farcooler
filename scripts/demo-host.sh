@@ -308,41 +308,60 @@ RENDER="$DIR/fence-line/target/release/demo-fence-line"
 # daemon itself never pre-trusts under an explicit FARCOOLER_HOME; see
 # `codex_trust`.)
 #
-# PATH as well, and for the board fixture below: it opens a `claude` pane, and
-# the daemon finds a program on its own PATH first. The PATH this script was run
-# with is yours, and on a machine with Claude Code installed it names the real
-# one — so the daemon gets only what it needs (tmux, git, the system) and the
-# session's own `~/.local/bin`, where the one `claude` is the stand-in. Panes
-# inherit this PATH through tmux: without that last entry a dispatched pane
-# exits 127, which is safe and useless. See `STAND_IN`.
-STAND_IN="$SESSION_HOME/.local/bin/claude"
-DAEMON_PATH=$(printf '%s\n' "$(dirname "$(command -v tmux)")" "$(dirname "$(command -v git)")" \
-    /usr/bin /bin /usr/sbin /sbin "$(dirname "$STAND_IN")" | awk '!seen[$0]++' | paste -sd: -)
-mkdir -p "$(dirname "$STAND_IN")"
-# Sleeps rather than exits, so the pane stays a live agent the board can link
-# to. It reads nothing, runs nothing, and costs nothing.
+# The board fixture below opens a `claude` pane, and a test fixture must never
+# start the real Claude Code. So the claude it opens is NAMED, by absolute
+# path, at the launch itself: `FARCOOLER_STAND_IN_AGENT` makes every agent
+# launch run that one program instead (see `agent_program` in
+# crates/daemon/src/service.rs, inert unless set). Nothing below resolves a
+# bare `claude` through PATH or a login shell's search order, whose first
+# entries on macOS are `/etc/paths` — not this script's to control.
 #
-# It also has to LOOK like an agent to the runner, which reads a pane's
-# command off the first process in its tty's foreground group. The daemon
-# launches an agent as `<login shell> -c env … <login shell> -ilc 'claude …'`,
-# and a fish that was handed `-c` does no job control: a plain `exec sleep`
-# stays in the wrapper's group, the pane reads as `fish`, and no board could
-# call it an agent. So the stand-in takes a group of its own and the terminal
-# with it, as a shell with job control would have given it, and runs as
-# `claude` by argv — which is what the runner reads.
-cat > "$STAND_IN" <<'STANDIN'
-#!/bin/sh
+# Belt and braces, and the proof: the session's login shells put a TRAP
+# directory first on their PATH, holding a `claude` that only writes
+# `$TRAPPED`. The fixture checks that a bare `claude` from that shell WOULD hit
+# the trap, then that the dispatched pane ran the stand-in and the trap never
+# ran. And the daemon starts without the variables a real agent authenticates
+# or configures itself from, so even a launch that went wrong would have
+# nothing to sign in with.
+#
+# PATH is only what the daemon needs (the trap, tmux, git, the system). Panes
+# inherit it through tmux.
+STAND_IN="$DIR/stand-in/claude"
+STAND_IN_RAN="$DIR/stand-in-ran"
+TRAP_DIR="$DIR/trap-bin"
+TRAPPED="$DIR/REAL-CLAUDE-WAS-RESOLVED"
+DAEMON_PATH=$(printf '%s\n' "$TRAP_DIR" "$(dirname "$(command -v tmux)")" \
+    "$(dirname "$(command -v git)")" /usr/bin /bin /usr/sbin /sbin \
+    | awk '!seen[$0]++' | paste -sd: -)
+mkdir -p "$(dirname "$STAND_IN")" "$TRAP_DIR"
+# The stand-in an earlier version of this script left where a search could
+# find it: gone, so the only searchable `claude` is the trap.
+rm -f "$TRAPPED" "$STAND_IN_RAN" "$SESSION_HOME/.local/bin/claude"
+printf '#!/bin/sh\n# A bare `claude` resolved by searching. It should never run.\ntouch %s\nexit 97\n' \
+    "'$TRAPPED'" > "$TRAP_DIR/claude"
+chmod +x "$TRAP_DIR/claude"
+mkdir -p "$SESSION_HOME/.config/fish/conf.d"
+printf "set -gx PATH '%s' \$PATH\n" "$TRAP_DIR" > "$SESSION_HOME/.config/fish/conf.d/00-trap.fish"
+for rc in .zshenv .zprofile .bash_profile .profile; do
+    printf "export PATH='%s':\$PATH\n" "$TRAP_DIR" > "$SESSION_HOME/$rc"
+done
+# Sleeps rather than exits, so the pane stays a live agent the board can link
+# to. It reads nothing, runs nothing, and costs nothing. It runs as `claude` by
+# argv and otherwise exactly as a real dispatched agent does — a plain exec in
+# the launch's own process group, with no job control of its own — so the demo
+# shows what a real dispatch shows, including how the runner names the pane.
+cat > "$STAND_IN" <<STANDIN
+#!/bin/bash
 # The demo runner's claude: a stand-in, never the real one. See demo-host.sh.
-exec /usr/bin/perl -MPOSIX -e '
-    setpgid(0, 0);
-    $SIG{TTOU} = "IGNORE";
-    if (open(my $tty, "+<", "/dev/tty")) { tcsetpgrp(fileno($tty), getpgrp()); }
-    exec { "/bin/sleep" } "claude", "86400";
-'
+touch '$STAND_IN_RAN'
+exec -a claude /bin/sleep 86400
 STANDIN
 chmod +x "$STAND_IN"
-env HOME="$SESSION_HOME" CODEX_HOME="$SESSION_HOME/.codex" FARCOOLER_HOME="$FC_HOME" \
-    PATH="$DAEMON_PATH" \
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
+    -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_OAUTH_TOKEN -u OPENAI_API_KEY -u CURSOR_API_KEY \
+    -u XDG_CONFIG_HOME \
+    HOME="$SESSION_HOME" CODEX_HOME="$SESSION_HOME/.codex" FARCOOLER_HOME="$FC_HOME" \
+    PATH="$DAEMON_PATH" FARCOOLER_STAND_IN_AGENT="$STAND_IN" \
     nohup "$TARGET/farcoolerd" >"$DIR/daemon.log" 2>&1 &
 echo $! > "$DIR/daemon.pid"
 echo "$TARGET/farcoolerd" > "$DIR/daemon.pid.cmd"
@@ -593,12 +612,14 @@ fi
 # is what lets `ShellBoardTests.testTheRealBoardRowLandsOnTheDispatchedPane` go
 # overview → Board row → card → Agent → that pane through the app's own path.
 #
-# Only if `claude` really resolves to the stand-in for the daemon. If it does
-# not, the fixture is skipped and says so, and that test skips: a demo that
-# might start somebody's real Claude Code on a prompt is not a fixture.
+# Only after the control holds: a bare `claude` from the session's login
+# shell resolves to the trap. If it does not, "the trap never ran" below would
+# prove nothing, and the fixture is skipped and says so.
+LOGIN_SHELL=$(dscl . -read "/Users/$(id -un)" UserShell 2>/dev/null | awk '{print $2}')
+LOGIN_SHELL=${LOGIN_SHELL:-/bin/zsh}
 RESOLVED=$(env -i HOME="$SESSION_HOME" PATH="$DAEMON_PATH" \
-    sh -c 'command -v claude' 2>/dev/null || true)
-if [ "$RESOLVED" = "$STAND_IN" ]; then
+    "$LOGIN_SHELL" -ilc 'command -v claude' 2>/dev/null | tail -1 || true)
+if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
     BOARD_KEY=$(fc --json task list --repo "$REPO_ID" \
         | jq -r 'first(.tasks[] | select(.title=="Demo board task") | .key) // empty')
     if [ -z "$BOARD_KEY" ]; then
@@ -623,9 +644,26 @@ if [ "$RESOLVED" = "$STAND_IN" ]; then
     if [ -n "$BOARD_KEY" ] && [ -n "$BOARDING" ] && [ -z "$ON_TASK" ]; then
         fc terminal create "$BOARDING" --preset claude --task "$BOARD_KEY" >/dev/null || true
     fi
-    echo "        and a board: task $BOARD_KEY with a stand-in agent in workspace 'boarding'"
+    # The proof, every run: the pane ran the stand-in, and nothing resolved
+    # a bare `claude`. A trap that fired means some launch searched, and the
+    # fixture's agent panes are stopped rather than left running.
+    for _ in $(seq 1 20); do [ -e "$STAND_IN_RAN" ] && break; sleep 0.5; done
+    if [ -e "$TRAPPED" ]; then
+        echo "STOPPING: a bare claude was resolved by searching ($TRAPPED)."
+        for pane in $(fc --json workspace list \
+            | jq -r '.workspaces[] | select(.task=="boarding") | .terminals[] | select(.taskId != null) | .id'); do
+            fc terminal stop "$pane" >/dev/null 2>&1 || true
+        done
+        exit 1
+    fi
+    if [ -e "$STAND_IN_RAN" ]; then
+        echo "        and a board: task $BOARD_KEY with a stand-in agent in workspace 'boarding'"
+        echo "        (the stand-in ran by absolute path; the trap for a searched claude did not)"
+    else
+        echo "        and a board: task $BOARD_KEY (the stand-in pane was already running)"
+    fi
 else
-    echo "        (no board fixture: claude resolves to '${RESOLVED:-nothing}', not the stand-in)"
+    echo "        (no board fixture: a bare claude resolves to '${RESOLVED:-nothing}', not the trap)"
 fi
 
 echo "building the iOS app…"

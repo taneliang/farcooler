@@ -91,19 +91,99 @@ async fn start_with_a_scratch_home() -> (Daemon, PathBuf) {
     (daemon, authorized_keys)
 }
 
-/// A daemon whose `claude` is a stand-in that sleeps, and whose `HOME` and
-/// `PATH` cannot reach the real one.
+/// A daemon every agent launch of which runs a stand-in named by absolute
+/// path, never a `claude` found by searching.
 ///
 /// For the one test that opens an agent pane for a task: the daemon refuses a
-/// task on a shell (`takes_a_task`), so the pane has to be an agent, and a
-/// test must not start the developer's real Claude Code on a prompt. The
-/// daemon looks for a program on its own `PATH`, then the login shell's, then
-/// fixed prefixes that include `$HOME/.local/bin` — so the stand-in goes
-/// there, `HOME` is the scratch directory, and `PATH` is only the system's
-/// and Homebrew's, where the real one is not installed. The stand-in sleeps
-/// rather than exiting so the pane is still live when the fleet is read.
+/// task on a shell (`takes_a_task`), so the pane has to be an agent, and a test
+/// must never start the developer's real Claude Code on a prompt.
+///
+/// **Not by PATH.** A pane runs `<login shell> -ilc 'claude …'`, and that
+/// login shell's search order — `/etc/paths` ahead of anything inherited on
+/// macOS, then its own config — is not this test's to control. So the daemon
+/// is started with `FARCOOLER_STAND_IN_AGENT` naming the stand-in by absolute
+/// path (see `agent_program` in `crates/daemon/src/service.rs`), and the
+/// launch never says a bare `claude` at all.
+///
+/// **And proven, not assumed.** The scratch `HOME` gives every login shell a
+/// config that puts a TRAP directory first on its PATH, holding a `claude`
+/// that only writes a marker. `bare_claude_resolves_to_the_trap` shows a bare
+/// `claude` from that shell would have hit it; the test then asserts the trap
+/// never ran and the stand-in did.
+///
+/// The environment a real agent would read its credentials and config from
+/// is removed, so even a launch that went wrong would start with nothing to
+/// authenticate with.
 async fn start_with_a_stand_in_agent() -> Daemon {
     spawn_with(true, true).await
+}
+
+/// Variables a real agent reads credentials or config from, removed from the
+/// stand-in daemon's environment and so from every pane's.
+const AGENT_ENVIRONMENT: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "CODEX_HOME",
+    "CURSOR_API_KEY",
+    "XDG_CONFIG_HOME",
+];
+
+/// The stand-in, the trap, and the two markers, under a daemon's scratch dir.
+struct StandIn {
+    program: PathBuf,
+    ran: PathBuf,
+    trap_dir: PathBuf,
+    trapped: PathBuf,
+}
+
+impl StandIn {
+    fn under(dir: &std::path::Path) -> StandIn {
+        StandIn {
+            program: dir.join("stand-in").join("claude"),
+            ran: dir.join("stand-in-ran"),
+            trap_dir: dir.join("trap-bin"),
+            trapped: dir.join("REAL-CLAUDE-WAS-RESOLVED"),
+        }
+    }
+
+    /// Write the stand-in, the trap, and a login-shell config for every shell
+    /// this could be that puts the trap first.
+    fn install(&self, home: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let exec = |path: &std::path::Path, body: String| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        exec(&self.program, format!("#!/bin/sh\ntouch '{}'\nexec sleep 60\n", self.ran.display()));
+        exec(
+            &self.trap_dir.join("claude"),
+            format!("#!/bin/sh\ntouch '{}'\nexit 97\n", self.trapped.display()),
+        );
+        let trap = self.trap_dir.display();
+        for (path, line) in [
+            (".config/fish/conf.d/00-trap.fish", format!("set -gx PATH '{trap}' $PATH\n")),
+            (".zshenv", format!("export PATH='{trap}':$PATH\n")),
+            (".zprofile", format!("export PATH='{trap}':$PATH\n")),
+            (".bash_profile", format!("export PATH='{trap}':$PATH\n")),
+            (".profile", format!("export PATH='{trap}':$PATH\n")),
+        ] {
+            let path = home.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, line).unwrap();
+        }
+    }
+}
+
+/// The PATH the stand-in daemon runs with: the trap first, then what tmux and
+/// git need. The real agent's usual homes are left on it deliberately — the
+/// test is that nothing searches them, not that they are missing.
+fn stand_in_path(stand_in: &StandIn) -> String {
+    format!("{}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", stand_in.trap_dir.display())
 }
 
 async fn spawn(scratch_home: bool) -> Daemon {
@@ -123,13 +203,14 @@ async fn spawn_with(scratch_home: bool, stand_in_agent: bool) -> Daemon {
         command.env("HOME", dir.path());
     }
     if stand_in_agent {
-        use std::os::unix::fs::PermissionsExt;
-        let bin = dir.path().join(".local").join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let claude = bin.join("claude");
-        std::fs::write(&claude, "#!/bin/sh\nexec sleep 60\n").unwrap();
-        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
-        command.env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
+        let stand_in = StandIn::under(dir.path());
+        stand_in.install(dir.path());
+        for name in AGENT_ENVIRONMENT {
+            command.env_remove(name);
+        }
+        command
+            .env("PATH", stand_in_path(&stand_in))
+            .env("FARCOOLER_STAND_IN_AGENT", &stand_in.program);
     }
     let process = command.spawn().expect("spawn farcoolerd");
 
@@ -143,6 +224,21 @@ async fn spawn_with(scratch_home: bool, stand_in_agent: bool) -> Daemon {
     }
 
     Daemon { dir, socket, process }
+}
+
+/// What a bare `claude` resolves to in the login shell a pane runs, with the
+/// stand-in daemon's HOME and PATH. The control for the trap: if this is not
+/// the trap, "the trap never ran" would prove nothing.
+fn bare_claude_resolves_to(daemon: &Daemon, stand_in: &StandIn) -> String {
+    let shell = farcooler_core::shell::login_shell();
+    let mut probe = std::process::Command::new(&shell);
+    probe
+        .args(["-ilc", "command -v claude"])
+        .env_clear()
+        .env("HOME", daemon.dir.path())
+        .env("PATH", stand_in_path(stand_in));
+    let out = probe.output().expect("run the login shell");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
 #[tokio::test]
@@ -1055,6 +1151,27 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
     };
     assert_eq!(find(&on_task.id)["taskId"], task_id.to_string());
     assert!(find(&plain.id)["taskId"].is_null(), "a pane nobody dispatched names no task");
+
+    // What ran in the agent pane. A bare `claude` in this pane's login shell
+    // would have been the trap (the control), so the stand-in running and the
+    // trap not is the launch naming its program by absolute path.
+    let stand_in = StandIn::under(daemon.dir.path());
+    assert_eq!(
+        bare_claude_resolves_to(&daemon, &stand_in),
+        stand_in.trap_dir.join("claude").display().to_string(),
+        "the trap is not first for a bare claude, so its silence would prove nothing"
+    );
+    for _ in 0..100 {
+        if stand_in.ran.exists() || stand_in.trapped.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        !stand_in.trapped.exists(),
+        "the agent pane resolved `claude` by searching, and found the trap"
+    );
+    assert!(stand_in.ran.exists(), "the agent pane never ran the stand-in");
 }
 
 /// A raw protocol client on the daemon's socket, for the writes the phone's
