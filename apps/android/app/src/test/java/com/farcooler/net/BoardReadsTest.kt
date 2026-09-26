@@ -2,6 +2,7 @@ package com.farcooler.net
 
 import com.farcooler.model.TaskBoard
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -15,6 +16,7 @@ import org.junit.Test
  * `Connection.readBoard` follows, with the network replaced by a gate the test
  * opens by hand.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class BoardReadsTest {
     /** A read that waits for the test to let it finish, and counts itself. */
     private class Reads {
