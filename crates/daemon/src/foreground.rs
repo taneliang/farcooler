@@ -210,6 +210,9 @@ const MONTHS: [&str; 12] =
 /// misparse would cost every label its arguments while everything kept running.
 fn parse(stdout: &str) -> Foreground {
     let mut found = Foreground::default();
+    // The ttys whose current answer is a shell wrapper, which the next
+    // foreground row on that tty replaces. See `runs_a_command_string`.
+    let mut wrapped: std::collections::HashSet<String> = std::collections::HashSet::new();
     for line in stdout.lines() {
         let Some(row) = row(line) else { continue };
         // Every process, including the ones with no terminal: this is the table
@@ -219,16 +222,78 @@ fn parse(stdout: &str) -> Foreground {
         if !row.stat.contains('+') || row.tty == "??" || row.args.is_empty() {
             continue;
         }
-        // First wins. `ps` lists a foreground pipeline's members in order, and the
-        // first is the one that was typed — `rg foo | less` should read as `rg`.
-        found.panes.entry(row.tty.to_string()).or_insert_with(|| Running {
-            pid: row.pid,
-            pgid: row.pgid,
-            command: summarize(row.args),
-        });
+        // First wins, except over a shell wrapper. `ps` lists a foreground
+        // pipeline's members in order, and the first is the one that was
+        // typed — `rg foo | less` should read as `rg`.
+        //
+        // A shell that was handed `-c` is not what anybody typed; it is what
+        // started it. Every agent the daemon launches is one:
+        // `fish -c env … fish -ilc 'claude …'`, and a fish handed `-c` does no
+        // job control, so claude never gets a group of its own and shares the
+        // foreground with both fishes. Read live on 2026-09-26 from a real
+        // `task dispatch`: pids 74359, 74380 and 74390 all in group 74359,
+        // which was the tty's foreground group, and the first row, the outer
+        // fish, labeled the pane `fish`. So a wrapper holds its tty only until
+        // a later foreground row on it turns up, and the first row that is not
+        // a wrapper wins.
+        let tty = row.tty.to_string();
+        let replaces = wrapped.contains(&tty);
+        if found.panes.contains_key(&tty) && !replaces {
+            continue;
+        }
+        if runs_a_command_string(row.args) {
+            // A wrapper after a wrapper leaves the first one standing: if
+            // nothing but shells is in the foreground, the outermost is the
+            // honest answer.
+            if replaces {
+                continue;
+            }
+            wrapped.insert(tty.clone());
+        } else {
+            wrapped.remove(&tty);
+        }
+        found.panes.insert(
+            tty,
+            Running { pid: row.pid, pgid: row.pgid, command: summarize(row.args) },
+        );
     }
     found
 }
+
+/// Whether a process is a shell running a command string, `sh -c …`.
+///
+/// The flag is found in a cluster as well, since the daemon's own launch is
+/// `fish -ilc`. Only the flags before the first operand count: in
+/// `bash script.sh -c` the `-c` is the script's. A shell with no `-c` is a
+/// prompt somebody is at, and that is exactly what its pane is showing.
+fn runs_a_command_string(args: &str) -> bool {
+    let mut parts = args.split_whitespace();
+    let Some(program) = parts.next() else { return false };
+    let program = program.rsplit('/').next().unwrap_or(program);
+    // A login shell is started as `-fish`, with a dash for a name.
+    let program = program.trim_start_matches('-');
+    if !SHELLS.contains(&program) {
+        return false;
+    }
+    for arg in parts {
+        // `--` ends the options, and what follows is an operand.
+        if arg == "--" {
+            return false;
+        }
+        let Some(flags) = arg.strip_prefix('-') else { return false };
+        // `--login`, `--norc` and the like are words, not clusters.
+        if flags.starts_with('-') {
+            continue;
+        }
+        if flags.contains('c') {
+            return true;
+        }
+    }
+    false
+}
+
+/// The shells a pane is launched through, by the name `ps` shows.
+const SHELLS: &[&str] = &["sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh"];
 
 /// The columns of one `ps` row.
 struct Row<'a> {
@@ -441,15 +506,93 @@ mod tests {
         let ports = HashMap::from([(60063, vec![18299]), (22910, vec![8099])]);
         let by_group = f.ports_by_group(&ports);
 
-        // The pane is showing the wrapper, which holds nothing itself.
-        let wrapper = f.pane("ttys009").expect("a wrapper is a foreground process");
-        assert_eq!(wrapper.pid, 60061);
-        assert_eq!(ports.get(&wrapper.pid), Option::None, "the wrapper holds no socket");
-        assert_eq!(by_group.get(&wrapper.pgid), Some(&vec![18299]), "its group does");
+        // A shell wrapper is read past to what it runs (see
+        // `a_shell_handed_a_command_is_read_past_to_what_it_runs`), and the
+        // group the pane reports is still the wrapper's, which is the group
+        // the socket's process is in.
+        let pane = f.pane("ttys009").expect("a wrapped server is a foreground process");
+        assert_eq!((pane.pid, pane.pgid), (60063, 60061));
+        assert_eq!(ports.get(&pane.pgid), Option::None, "the group leader holds no socket");
+        assert_eq!(by_group.get(&pane.pgid), Some(&vec![18299]), "its group does");
 
         // A server started directly still resolves, through a group of one.
         let direct = f.pane("ttys003").expect("a server is a foreground process");
         assert_eq!(by_group.get(&direct.pgid), Some(&vec![8099]));
+    }
+
+    /// A pane `task dispatch` opened reads as its agent, not as the fish that
+    /// started it.
+    ///
+    /// The rows are verbatim from a real dispatch on this Mac (arguments cut
+    /// short, and the codex run moved from ttys011 to ttys012 so both fit in
+    /// one walk): claude shares group 74359 with both fishes, because a fish
+    /// handed `-c` does no job control, and group 74359 is the tty's
+    /// foreground group. Taking the first `+` row labeled this pane `fish`
+    /// and dated its conversation by the wrapper's pid. Codex is the same shape.
+    #[test]
+    fn a_shell_handed_a_command_is_read_past_to_what_it_runs() {
+        let f = parse(PS);
+        assert_eq!(
+            f.pane("ttys011"),
+            Some(&Running { pid: 74390, pgid: 74359, command: "claude".to_string() })
+        );
+        // The label keeps codex's first word of prompt, and it is the program
+        // that `Registry::rules_for_command` identifies an agent by.
+        let codex = f.pane("ttys012").expect("codex is in the foreground");
+        assert_eq!((codex.pid, codex.pgid), (89335, 89304));
+        assert!(codex.command.starts_with("codex"), "{}", codex.command);
+    }
+
+    /// Only a shell running a command string is a wrapper.
+    ///
+    /// A shell at its prompt is what its pane shows, and a pane with nothing
+    /// but shells in its foreground is still showing the outermost of them.
+    #[test]
+    fn a_shell_that_wraps_nothing_is_still_the_answer() {
+        // A prompt: the `S+` login shell of ttys000, unchanged.
+        assert_eq!(f_pane(PS, "ttys000"), Some(48436));
+        // Two wrappers and nothing under them yet: the first stands.
+        let only_shells = "\
+  100   100 ttys020  S+   fish -c env A=1 /opt/homebrew/bin/fish -ilc claude
+  101   100 ttys020  S+   /opt/homebrew/bin/fish -ilc claude
+";
+        assert_eq!(f_pane(only_shells, "ttys020"), Some(100));
+        // A wrapper does not displace a first row that is not one:
+        // `less` piped from `rg` is still `rg`, and so is a `sh -c` after it.
+        let pipeline = "\
+  200   200 ttys021  S+   rg pattern
+  201   200 ttys021  S+   sh -c less
+  202   200 ttys021  S+   less
+";
+        assert_eq!(f_pane(pipeline, "ttys021"), Some(200));
+    }
+
+    #[test]
+    fn a_command_string_is_told_apart_from_a_shell_at_a_prompt() {
+        for wrapper in [
+            "fish -c env FARCOOLER_ACTOR=agent:x fish -ilc claude",
+            "/opt/homebrew/bin/fish -ilc claude --session-id x",
+            "/bin/sh -c exec sleep 600",
+            "bash --norc -c python3 -m http.server",
+            "-zsh -lc make",
+        ] {
+            assert!(runs_a_command_string(wrapper), "{wrapper}");
+        }
+        for not_one in [
+            "/opt/homebrew/bin/fish -il",
+            "-fish",
+            "bash script.sh -c",
+            "bash -- -c",
+            "claude -c",
+            "/Users/e-liang/.local/bin/claude --continue",
+            "",
+        ] {
+            assert!(!runs_a_command_string(not_one), "{not_one}");
+        }
+    }
+
+    fn f_pane(ps: &str, tty: &str) -> Option<i32> {
+        parse(ps).pane(tty).map(|r| r.pid)
     }
 
     /// A socket whose process `ps` never saw belongs to no group we can name.
@@ -539,6 +682,12 @@ mod tests {
 22910 22910 ttys003  S+   /usr/bin/python3 -m http.server 8099
 60061 60061 ttys009  S+   bash -c python3 -m http.server 18299 & wait
 60063 60061 ttys009  S+   /usr/bin/python3 -m http.server 18299
+74359 74359 ttys011  SNs+ fish -c env FARCOOLER_ACTOR=agent:01a0dad0-afd0-7bd1-9d62-3d125ede9ae2 FARCOOLER_TASK=pn-1 /opt/homebrew/bin/fish -ilc 'claude --session-id 01a0dad0-afd0-7bd1-9d62-3d2f51027e9c'
+74380 74359 ttys011  SN+  /opt/homebrew/bin/fish -ilc claude --session-id 01a0dad0-afd0-7bd1-9d62-3d2f51027e9c --settings '/tmp/fc-pn/home/claude-hooks.json'
+74390 74359 ttys011  SN+  claude --session-id 01a0dad0-afd0-7bd1-9d62-3d2f51027e9c --settings /tmp/fc-pn/home/claude-hooks.json
+89304 89304 ttys012  SNs+ fish -c env FARCOOLER_ACTOR=agent:01a0dad3-16fb-75c3-baaf-ded2b9c8a9aa FARCOOLER_TASK=pn-2 /opt/homebrew/bin/fish -ilc 'codex -c check_for_update_on_startup=false'
+89325 89304 ttys012  SN+  /opt/homebrew/bin/fish -ilc codex -c check_for_update_on_startup=false 'You'\\''re working pn-2'
+89335 89304 ttys012  SN+  codex -c check_for_update_on_startup=false You're working pn-2
   742   742 ??       Ss   /usr/sbin/cfprefsd
 ";
 }
