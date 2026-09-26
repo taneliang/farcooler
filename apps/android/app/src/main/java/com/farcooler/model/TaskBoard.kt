@@ -230,12 +230,16 @@ sealed interface TaskAgentPresence {
     /** This many panes are working it. Never zero. */
     data class Agents(val count: Int) : TaskAgentPresence
 
-    /** The control's words: "Agent" for one, "N Agents", "No Agent", or null. */
+    /**
+     * The control's words: "Agent" for one, "N agents", "No agent", or null.
+     * Android's sentence case, where the iPhone and the Mac title-case the
+     * same words.
+     */
     val title: String?
         get() = when (this) {
             Unsaid -> null
-            NoAgent -> "No Agent"
-            is Agents -> if (count == 1) "Agent" else "$count Agents"
+            NoAgent -> "No agent"
+            is Agents -> if (count == 1) "Agent" else "$count agents"
         }
 }
 
@@ -250,7 +254,9 @@ object TaskAgentLink {
     /** Not a shell and not a changes pane. */
     fun runsAgent(preset: String, isChangesPane: Boolean): Boolean {
         if (isChangesPane) return false
-        val name = preset.substringBefore(':')
+        // The first non-empty piece, as Swift's `split(separator:)` gives it:
+        // `":x"` names `x` on the iPhone and must here too.
+        val name = preset.split(':').firstOrNull { it.isNotEmpty() } ?: ""
         if (name.isEmpty()) return false
         return name != "shell" && name.lowercase() !in SHELLS
     }
@@ -292,11 +298,14 @@ data class BoardRow(
     val decisions: Int,
     val agents: Int,
 ) {
-    /** What a screen reader says after the row's name: the counts in words, or null. */
+    /**
+     * What a screen reader says after the row's name: the counts in words, or
+     * null. Joined with ", " as the iPhone joins them (`RunnerBoardRow.spoken`).
+     */
     val spoken: String?
         get() {
             val parts = listOfNotNull(decisionsSentence(decisions), agentsSentence(agents))
-            return if (parts.isEmpty()) null else parts.joinToString(". ", postfix = ".")
+            return if (parts.isEmpty()) null else parts.joinToString(", ")
         }
 
     companion object {

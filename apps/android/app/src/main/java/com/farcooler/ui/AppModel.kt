@@ -310,12 +310,21 @@ class AppModel(
      * navigation at all — which is what keeps a tab tap free. See [choose].
      */
     private fun goTo(target: Route.Terminal) {
-        val base = _stack.value.dropLastWhile { it.isOverlay }
-        if (base.lastOrNull() == target) {
-            install(base)
-            return
-        }
-        install(base.dropLastWhile { it is Route.Terminal } + target)
+        install(Backstack.goTo(_stack.value, target))
+    }
+
+    /**
+     * Go to the pane a board's Agent button named, keeping the board — and the
+     * card, when it was opened from one — beneath it.
+     *
+     * Not [open]: that one closes the overlays over the ground before it
+     * pushes, which is right for a front-door row and wrong here, because the
+     * board is an overlay and Back from the pane must come out onto it. See
+     * [Backstack.goToFromBoard].
+     */
+    fun openFromBoard(ref: TerminalRef) {
+        point(ref)
+        install(Backstack.goToFromBoard(_stack.value, Route.Terminal(ref.hostId, ref.workspaceId)))
     }
 
     /**

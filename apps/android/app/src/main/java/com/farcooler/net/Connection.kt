@@ -486,6 +486,7 @@ class Connection(
      *   most once a minute, because nothing would tell this app a board moved.
      */
     private val boardReads = BoardReads(
+        scope = scope,
         canRead = { _phase.value is Phase.Connected && _daemon.value?.can("tasks") == true },
         read = { repository ->
             attempt { core.call("task.list", buildJsonObject { put("repository", repository) }) }
@@ -500,26 +501,41 @@ class Connection(
     /** Repositories whose last board read failed. */
     val unreadBoards: StateFlow<Set<String>> = boardReads.unread
 
-    private var lastBoardSweepAt = 0L
-
     /** Read every board, without making anything wait on it. */
     fun loadBoardsDetached() {
-        scope.launch {
-            lastBoardSweepAt = System.currentTimeMillis()
-            boardReads.sweep(_repositories.value.map { it.id })
-        }
+        scope.launch { boardReads.sweep(_repositories.value.map { it.id }) }
     }
 
-    /** Read one board now — its sheet opening, or pull to refresh. */
+    /**
+     * Read one board now — its screen opening, or pull to refresh — and wait
+     * until it has landed. The read runs in this connection's scope, so a
+     * screen that leaves stops waiting and never stops the read; see
+     * [BoardReads].
+     */
     suspend fun readBoard(repository: String) = boardReads.readOne(repository)
+
+    /**
+     * Whether a board notice arrived while the app was in the background and
+     * was left for later. Boards are not read in the background — the fleet
+     * poll stops there too — and one sweep on return covers every notice
+     * that was skipped.
+     */
+    private var boardNewsWhileAway = false
 
     /** A runner notice, on the core's thread. Only boards read these; see [ClientCore.onNotice]. */
     private fun noticeArrived(notice: JsonObject) {
         val event = notice["event"]?.jsonPrimitive?.contentOrNull
         val repository = notice["repository"]?.jsonPrimitive?.contentOrNull
-        when (event) {
-            "task" -> if (repository != null) scope.launch { boardReads.readOne(repository) }
-            "resync" -> loadBoardsDetached()
+        if (event != "task" && event != "resync") return
+        scope.launch {
+            if (!isForeground) {
+                boardNewsWhileAway = true
+                return@launch
+            }
+            when (event) {
+                "task" -> if (repository != null) boardReads.readOne(repository)
+                "resync" -> boardReads.sweep(_repositories.value.map { it.id })
+            }
         }
     }
 
@@ -632,7 +648,14 @@ class Connection(
             // if it holds this is one round trip nobody notices. Forced,
             // because every count on screen is a claim about a fleet nobody
             // has asked since.
-            is Phase.Connected -> scope.launch { refresh(force = true) }
+            is Phase.Connected -> scope.launch {
+                refresh(force = true)
+                // The boards whose news arrived while nobody was looking.
+                if (boardNewsWhileAway) {
+                    boardNewsWhileAway = false
+                    loadBoardsDetached()
+                }
+            }
             is Phase.Reconnecting, is Phase.Failed -> reconnectNow()
             // Already in flight, or waiting on a person. Neither is helped by
             // starting over.
@@ -939,7 +962,7 @@ class Connection(
             body["branchPrefix"]?.jsonPrimitive?.contentOrNull ?: DEFAULT_BRANCH_PREFIX
         // Boards this link never read: a sweep before the build was known
         // could not tell the runner keeps a board, and read nothing.
-        if (boardReads.ledger.owedWhenBuildLands) loadBoardsDetached()
+        scope.launch { boardReads.buildLanded(_repositories.value.map { it.id }) }
     }
 
     /**
@@ -1009,7 +1032,7 @@ class Connection(
         if (_daemon.value == null) loadDaemonBuild()
         // No event channel: nothing will say a board moved, so read them on
         // the poll, at most once a minute.
-        if (System.currentTimeMillis() - lastBoardSweepAt > BOARD_SWEEP_WITHOUT_EVENTS_MS &&
+        if (System.currentTimeMillis() - boardReads.lastSweepAt > BOARD_SWEEP_WITHOUT_EVENTS_MS &&
             !core.eventsLive()
         ) {
             loadBoardsDetached()

@@ -287,7 +287,7 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
                     connection = live,
                     repository = route.repositoryId,
                     onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.repositoryId, it)) },
-                    onJump = { model.open(it) },
+                    onJump = { model.openFromBoard(it) },
                     onBack = { model.back() },
                 )
             }
@@ -302,7 +302,7 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
                     connection = live,
                     repository = route.repositoryId,
                     taskId = route.taskId,
-                    onJump = { model.open(it) },
+                    onJump = { model.openFromBoard(it) },
                     onBack = { model.back() },
                 )
             }

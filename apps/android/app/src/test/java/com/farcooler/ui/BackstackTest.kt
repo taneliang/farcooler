@@ -483,18 +483,48 @@ class BackstackTest {
     }
 
     /**
-     * A board, a card on it, and the pane its Agent button went to survive a
-     * save and restore in order, so back from the pane lands on the card and
-     * back from the card on the board.
+     * **Jumping from a board to an agent keeps the board beneath the pane.**
+     *
+     * On the stack the app actually builds: the front door, the board row
+     * tapped (`navigate`), a card tapped (`navigate`), then the card's Agent
+     * button. Back is `dropLast(1)`, as `AppModel.back` does it. The pane must
+     * be on top with the card and the board under it, so Back comes out onto
+     * the card, then the board, then the front door. [Backstack.goTo] — the
+     * front door's own jump — closes the overlays first and fails this, which
+     * is the bug it guards: Back from the pane landed on the front door.
      */
     @Test
-    fun aBoardAndItsCardSurviveARestore() {
-        val stack = listOf(
-            Route.NeedsYou,
-            Route.Board("h", "r"),
-            Route.BoardTask("h", "r", "t"),
-            Route.Terminal("h", "w"),
-        )
-        assertEquals(stack, Backstack.decodeStack(Backstack.encodeStack(stack)))
+    fun anAgentOpenedFromABoardComesBackToTheBoard() {
+        val pane = Route.Terminal("h", "w")
+        val card = listOf<Route>(Route.NeedsYou, Route.Board("h", "r"), Route.BoardTask("h", "r", "t"))
+        val opened = Backstack.goToFromBoard(card, pane)
+        assertEquals(card + pane, opened)
+        // What is drawn: the pane is the ground, with nothing over it.
+        assertEquals(pane, opened.lastOrNull { !it.isOverlay })
+        assertTrue(opened.takeLastWhile { it.isOverlay }.isEmpty())
+        // Back, and Back again, and Back again.
+        assertEquals(card, opened.dropLast(1))
+        assertEquals(Route.Board("h", "r"), opened.dropLast(2).last())
+        assertEquals(Route.NeedsYou, opened.dropLast(3).last())
+
+        // Straight from the board, without opening a card.
+        val board = listOf<Route>(Route.NeedsYou, Route.Board("h", "r"))
+        assertEquals(board, Backstack.goToFromBoard(board, pane).dropLast(1))
+
+        // And it survives the save and restore the activity puts it through.
+        assertEquals(opened, Backstack.decodeStack(Backstack.encodeStack(opened)))
+    }
+
+    /**
+     * The front door's jump is unchanged: it closes what is over the ground
+     * and a terminal replaces a trailing terminal.
+     */
+    @Test
+    fun theFrontDoorsJumpClosesOverlaysAndReplacesATerminal() {
+        val a = Route.Terminal("h", "a")
+        val b = Route.Terminal("h", "b")
+        assertEquals(listOf(Route.NeedsYou, a), Backstack.goTo(listOf(Route.NeedsYou, Route.Settings), a))
+        assertEquals(listOf(Route.NeedsYou, b), Backstack.goTo(listOf(Route.NeedsYou, a), b))
+        assertEquals(listOf(Route.NeedsYou, a), Backstack.goTo(listOf(Route.NeedsYou, a, Route.Settings), a))
     }
 }

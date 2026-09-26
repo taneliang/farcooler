@@ -90,6 +90,21 @@ class TaskBoardTest {
         assertTrue(TaskBoard.EMPTY.listed.isEmpty())
     }
 
+    /** The whole order, not just its first two: Needs Decision, then the order work moves. */
+    @Test
+    fun theStatusOrderIsNeedsDecisionThenTheLifecycle() {
+        assertEquals(
+            listOf("needs_decision", "backlog", "todo", "in_progress", "in_review", "done", "cancelled"),
+            TaskStatus.ORDER.map { it.wire },
+        )
+        assertEquals(
+            listOf("Needs Decision", "Backlog", "To Do", "In Progress", "In Review", "Done", "Canceled"),
+            TaskStatus.ORDER.map { it.title },
+        )
+        // A decoded board's columns come out in that order too.
+        assertEquals(TaskStatus.ORDER, TaskBoard.decode(listJson).columns.map { it.status })
+    }
+
     @Test
     fun theWaitingSentenceAgreesAndIsNothingAtZero() {
         assertNull(TaskBoard.waitingSentence(0))
@@ -158,6 +173,9 @@ class TaskBoardTest {
             assertFalse(preset, TaskAgentLink.runsAgent(preset, isChangesPane = false))
         }
         assertFalse(TaskAgentLink.runsAgent("claude", isChangesPane = true))
+        // The first non-empty piece names it, as Swift's split does.
+        assertTrue(TaskAgentLink.runsAgent(":claude", isChangesPane = false))
+        assertFalse(TaskAgentLink.runsAgent(":zsh", isChangesPane = false))
         assertFalse(TaskAgentLink.isWorking(pane(preset = "farcooler", paneMode = "changes"), task))
         assertFalse(TaskAgentLink.isWorking(pane(preset = "zsh"), task))
     }
@@ -183,8 +201,8 @@ class TaskBoardTest {
         // A runner that cannot say says nothing, agents or not.
         assertEquals(TaskAgentPresence.Unsaid, row().agentPresence(2, false))
         assertEquals("Agent", TaskAgentPresence.Agents(1).title)
-        assertEquals("2 Agents", TaskAgentPresence.Agents(2).title)
-        assertEquals("No Agent", TaskAgentPresence.NoAgent.title)
+        assertEquals("2 agents", TaskAgentPresence.Agents(2).title)
+        assertEquals("No agent", TaskAgentPresence.NoAgent.title)
         assertNull(TaskAgentPresence.Unsaid.title)
     }
 
@@ -239,7 +257,7 @@ class TaskBoardTest {
         val row = RunnerBoards.rows("h", repositories, boards, panes, both, connected = true).single()
         assertEquals(2, row.decisions)
         assertEquals(2, row.agents)
-        assertEquals("2 tasks need a decision. Agents are on 2 tasks.", row.spoken)
+        assertEquals("2 tasks need a decision, Agents are on 2 tasks", row.spoken)
     }
 
     @Test
@@ -260,10 +278,25 @@ class TaskBoardTest {
         assertTrue(RunnerBoards.rows("h", repositories, boards, panes, DaemonBuild("1", true, ""), true).isEmpty())
     }
 
+    /** A board whose only rows this build cannot place still has something on it, and a row. */
+    @Test
+    fun aBoardOfOnlyUnreadableRowsStillGetsARow() {
+        val future = TaskBoard(
+            TaskStatus.ORDER.map { TaskBoardColumn(it, emptyList()) },
+            unreadable = listOf(UnreadableTaskRow("9", "-9", "x", "parked")),
+        )
+        val rows = RunnerBoards.rows(
+            "h", listOf(Repository("r-new", displayName = "newer")), mapOf("r-new" to future),
+            panes, both, connected = true,
+        )
+        assertEquals(listOf("r-new"), rows.map { it.repository })
+        assertEquals(0, rows.single().decisions)
+    }
+
     @Test
     fun aRowWithNothingToCountSaysNothing() {
         assertNull(BoardRow("h", "r", "n", 0, 0).spoken)
-        assertEquals("1 task needs a decision.", BoardRow("h", "r", "n", 1, 0).spoken)
+        assertEquals("1 task needs a decision", BoardRow("h", "r", "n", 1, 0).spoken)
     }
 
     // ---- a late build, and landing ----

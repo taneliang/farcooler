@@ -114,7 +114,7 @@ fun RunnerBoardRows(
 private fun BoardRowItem(row: BoardRow, runner: String?, onOpen: (BoardRow) -> Unit) {
     val amber = glanceColor(GlancePalette.amber)
     ListItem(
-        headlineContent = { Text("${row.name} Board", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        headlineContent = { Text("${row.name} board", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = runner?.let { { Text(it) } },
         leadingContent = {
             Icon(
@@ -157,7 +157,7 @@ private fun BoardRowItem(row: BoardRow, runner: String?, onOpen: (BoardRow) -> U
             .clickable { onOpen(row) }
             .testTag("board-row-${row.hostId}-${row.repository}")
             .semantics {
-                contentDescription = listOfNotNull("${row.name} Board", row.spoken).joinToString(". ")
+                contentDescription = listOfNotNull("${row.name} board", row.spoken).joinToString(", ")
             },
     )
 }
@@ -201,7 +201,9 @@ fun BoardScreen(
     // be showing a count from before the last reconnect.
     LaunchedEffect(repository) { connection.readBoard(repository) }
 
-    val name = repositories.firstOrNull { it.id == repository }?.displayName ?: "Board"
+    // The row's own fallback, so the board is titled what its row was.
+    val name = repositories.firstOrNull { it.id == repository }
+        ?.let { it.displayName.ifEmpty { it.short } } ?: "Board"
     val board = boards[repository]
     val speaks = TaskAgentLink.speaksOfAgents(phase is Connection.Phase.Connected, daemon)
     val jump = boardJump(connection.host.id, fleet.workspaces, onJump) { why ->
@@ -246,13 +248,13 @@ fun BoardScreen(
         ) {
             when {
                 board == null && repository in unread -> Empty(
-                    "Couldn’t Read This Board",
+                    "Couldn’t read this board",
                     "Far Cooler couldn’t read this board. Pull down to try again.",
                 )
                 board == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                board.isEmpty -> Empty("No Tasks", "Nothing is on this board yet.")
+                board.isEmpty -> Empty("No tasks", "Nothing is on this board yet.")
                 else -> LazyColumn(Modifier.fillMaxSize().testTag("board")) {
                     if (repository in unread) {
                         item(key = "unread") {
@@ -290,7 +292,7 @@ fun BoardScreen(
                     if (board.unreadable.isNotEmpty()) {
                         item(key = "unreadable") {
                             Text(
-                                "Not On This Version",
+                                "Not on this version",
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
                             )
@@ -492,7 +494,7 @@ fun TaskDetailScreen(
     ) { padding ->
         if (row == null) {
             Box(Modifier.padding(padding)) {
-                Empty("Not on This Board", "This task isn’t on the board anymore.")
+                Empty("Not on this board", "This task isn’t on the board anymore.")
             }
             return@Scaffold
         }

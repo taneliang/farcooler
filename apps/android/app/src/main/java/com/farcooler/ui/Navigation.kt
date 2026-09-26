@@ -132,8 +132,10 @@ sealed interface Route {
 
     /**
      * One repository's task board, from its Board row on the front door. Read
-     * and jump: an Agent button goes to [Terminal], which is pushed on top, so
-     * back comes out of the pane onto the board it was chosen from.
+     * and jump: an Agent button goes to [Terminal] through
+     * [AppModel.openFromBoard], which pushes it ON TOP of the board — so Back
+     * comes out of the pane onto the board it was chosen from (or the card),
+     * and only then the front door. See [Backstack.goToFromBoard].
      */
     @Serializable
     @SerialName("board")
@@ -322,6 +324,31 @@ object Backstack {
             .getOrNull() ?: return emptyMap()
         return decoded.mapValues { Focus(Pane.parse(it.value), chosen = true) }
     }
+
+    /**
+     * [AppModel.open]'s arithmetic: close what is over the ground, then put
+     * the workspace on it, a terminal replacing a trailing terminal. Arriving
+     * at the workspace already underneath only closes what is over it.
+     */
+    fun goTo(stack: List<Route>, target: Route.Terminal): List<Route> {
+        val base = stack.dropLastWhile { it.isOverlay }
+        if (base.lastOrNull() == target) return base
+        return base.dropLastWhile { it is Route.Terminal } + target
+    }
+
+    /**
+     * [AppModel.openFromBoard]'s arithmetic: the pane goes ON TOP of the board
+     * (and the card, if one is open), so Back comes out of the pane onto the
+     * card, then the board, then the front door. [goTo] would close them
+     * first, because they are overlays, and Back would skip straight to the
+     * front door.
+     *
+     * A trailing terminal is still replaced rather than stacked, for [goTo]'s
+     * reason — though from a board there is none: the pane is a ground route,
+     * so while it is showing, the board is not.
+     */
+    fun goToFromBoard(stack: List<Route>, target: Route.Terminal): List<Route> =
+        stack.dropLastWhile { it is Route.Terminal } + target
 
     /**
      * Cut the stack at the first route that no longer names anything.
