@@ -63,7 +63,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
 import com.farcooler.model.AgentActivity
+import com.farcooler.model.FleetReading
 import com.farcooler.model.GlanceMarkSize
+import com.farcooler.model.RunnerCount
+import com.farcooler.model.RunnerLink
+import com.farcooler.model.fleetReading
+import com.farcooler.model.liveSummary
 import com.farcooler.model.WorkspaceOrder
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
@@ -382,9 +387,11 @@ private fun FleetBody(
             // that comes to you by moving the list.
             val numbering = entry.workspace.ordinals()
             items(entry.workspace.terminals, key = { "${entry.host.id}/${it.id}" }) { terminal ->
+                val phase by entry.connection.phase.collectAsStateWithLifecycle()
                 TerminalRow(
                     terminal = terminal,
                     ordinal = numbering[terminal.id],
+                    answering = phase.link == RunnerLink.ANSWERING,
                     onClick = {
                         onSelect(TerminalRef(entry.host.id, entry.workspace.id, terminal.id))
                     },
@@ -440,7 +447,8 @@ private fun FleetBody(
                 //
                 // "No runners" is deliberately not colored. An app nobody has
                 // added a runner to yet is empty, not broken.
-                val down = runtimeIsDown(connections)
+                val counts = runnerCounts(connections)
+                val down = fleetReading(counts) == FleetReading.RuntimeDown
                 val tint =
                     if (down) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant
@@ -452,7 +460,7 @@ private fun FleetBody(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    liveSummary(connections),
+                    liveSummary(counts),
                     style = MaterialTheme.typography.labelSmall,
                     color = tint,
                 )
@@ -516,22 +524,18 @@ private fun FleetBody(
 }
 
 /**
- * Whether every runner this app knows about has an unreadable tmux.
+ * Each runner's link and last count, for [fleetReading] and [liveSummary].
  *
- * The same condition [liveSummary] turns into "tmux unavailable", asked
- * separately so the row can color itself without parsing its own sentence.
+ * The count and the tmux health are what each runner last reported, and only
+ * an answering runner's are believed: this footer counted every runner's, so a
+ * runner that had dropped went on adding its last "live" panes, and its last
+ * healthy tmux kept the footer calm, through the whole reconnect. The Mac's
+ * status bar had the same gap (`FleetStore.reading`).
  */
-private fun runtimeIsDown(connections: List<Connection>): Boolean =
-    connections.isNotEmpty() && connections.none { it.fleet.value.runtimeHealthy }
-
-private fun liveSummary(connections: List<Connection>): String {
-    val healthy = connections.count { it.fleet.value.runtimeHealthy }
-    val live = connections.sumOf { it.fleet.value.livePanes }
-    if (connections.isEmpty()) return "No runners"
-    if (healthy == 0) return "tmux unavailable"
-    val runners = if (connections.size == 1) "1 runner" else "${connections.size} runners"
-    return "$live live · $runners"
-}
+private fun runnerCounts(connections: List<Connection>): List<RunnerCount> =
+    connections.map {
+        RunnerCount(it.phase.value.link, it.fleet.value.livePanes, it.fleet.value.runtimeHealthy)
+    }
 
 /**
  * What one runner is doing, when that is not simply "answering".
@@ -1057,6 +1061,11 @@ internal fun TerminalRow(
     ordinal: Int?,
     onClick: () -> Unit,
     onAction: (Connection.Action) -> Unit,
+    // Whether this pane's runner is connected right now. Not, and its last
+    // fleet is on screen only so the list holds still: the mark says "can't
+    // say", the status is past tense, and no subagent is claimed running. See
+    // `GlanceMark.said`.
+    answering: Boolean = true,
 ) {
     val kind = StateKind.parse(terminal.state)
     var menu by remember { mutableStateOf(false) }
@@ -1130,7 +1139,7 @@ internal fun TerminalRow(
                                     .copy(alpha = 0.6f),
                             )
                         }
-                        ElapsedStatus(terminal)
+                        ElapsedStatus(terminal, answering)
                     }
 
                     // The reason to have opened the app: one mark, in the one
@@ -1170,6 +1179,7 @@ internal fun TerminalRow(
                             terminal,
                             now,
                             GlanceMarkSize.ROW,
+                            answering = answering,
                             // Decorative, because the words are right there.
                             // `rowStatus` is never null for an agent pane — it
                             // falls back to `activityLabel` alone — so whatever
@@ -1208,7 +1218,10 @@ internal fun TerminalRow(
             // Guarded as a group rather than left loose: an empty column would
             // still take the step of spacing above it and leave a gap under
             // every one-agent row.
-            if (terminal.recentSteps.isNotEmpty() || terminal.runningSubagents.isNotEmpty()) {
+            // Subagents only while the runner answers: "running" is a claim
+            // about now. The steps are what it said, and history holds.
+            val running = if (answering) terminal.runningSubagents else emptyList()
+            if (terminal.recentSteps.isNotEmpty() || running.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(BAND_TIGHT)) {
                     // Already redacted and cut to a row's width by the daemon,
                     // so this renders them and decides nothing about them.
@@ -1222,7 +1235,7 @@ internal fun TerminalRow(
                         )
                     }
 
-                    for (name in terminal.runningSubagents) {
+                    for (name in running) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             // An icon where the Apple apps print U+2442 in front
                             // of the name. Android has no guarantee that the
@@ -1327,9 +1340,9 @@ private fun firstLineHeight(): Dp {
  * wakeups.
  */
 @Composable
-private fun ElapsedStatus(terminal: Terminal) {
-    val now by rememberNow(ticking = terminal.hasClock)
-    val status = terminal.rowStatus(now) ?: return
+private fun ElapsedStatus(terminal: Terminal, answering: Boolean) {
+    val now by rememberNow(ticking = terminal.hasClock && answering)
+    val status = terminal.rowStatus(now, answering) ?: return
     Text(
         status,
         style = MaterialTheme.typography.labelMedium,

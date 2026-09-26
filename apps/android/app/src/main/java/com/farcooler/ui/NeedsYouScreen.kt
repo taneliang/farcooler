@@ -44,6 +44,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Runner
+import com.farcooler.model.RunnerCount
+import com.farcooler.model.RunnerLink
+import com.farcooler.model.reassurance
 import com.farcooler.model.AGENTS_PER_WORKSPACE
 import com.farcooler.model.AgentActivity
 import com.farcooler.model.NeedsYouSection
@@ -143,8 +146,14 @@ fun NeedsYouScreen(
     // Reading it off each connection's fleet would be a value nothing here
     // observes, so the sentence under "Nothing needs you" would go stale the
     // moment the last agent finished.
-    val working = visible.sumOf { entry ->
-        entry.workspace.terminals.count { it.agent == AgentActivity.WORKING }
+    //
+    // Per runner, because only an answering runner's count is believed: see
+    // `reassurance`. Summed across every runner, a runner that had dropped went
+    // on reporting its last working agents for the whole reconnect.
+    val working = visible.groupBy { it.host.id }.mapValues { (_, entries) ->
+        entries.sumOf { entry ->
+            entry.workspace.terminals.count { it.agent == AgentActivity.WORKING }
+        }
     }
 
     Scaffold(
@@ -311,10 +320,16 @@ private fun AgentRow(
     // Looked up rather than carried on the section: a reconnect replaces the
     // Connection, and a row holding the old one would act on a dead session.
     val connection = model.fleet.connection(section.hostId)
+    // Blocked and done hold whether or not the runner answers, which is every
+    // row this screen lists; the mark and the status only lose a claim about
+    // now. Read anyway, so the row says the same thing here as in the drawer.
+    val answering = connection?.phase?.collectAsStateWithLifecycle()?.value?.link ==
+        RunnerLink.ANSWERING
     Column(modifier) {
         TerminalRow(
             terminal = terminal,
             ordinal = section.ordinals[terminal.id],
+            answering = answering,
             onClick = {
                 onSelect(TerminalRef(section.hostId, section.workspace.id, terminal.id))
             },
@@ -490,11 +505,19 @@ private fun Overflow(sentence: String) {
  * it under a list would be the same news twice.
  */
 @Composable
-private fun Reassurance(connections: List<Connection>, working: Int, workspaces: Int) {
+private fun Reassurance(
+    connections: List<Connection>,
+    working: Map<String, Int>,
+    workspaces: Int,
+) {
     val phases = connections.map { connection ->
         key(connection.host.id) { connection.phase.collectAsStateWithLifecycle().value }
     }
     val silent = phases.count { it !is Connection.Phase.Connected }
+    val runners = connections.zip(phases) { connection, phase ->
+        RunnerCount(phase.link, working[connection.host.id] ?: 0)
+    }
+    val where = if (connections.size == 1) " on ${connections[0].host.displayLabel}" else ""
 
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
@@ -509,11 +532,13 @@ private fun Reassurance(connections: List<Connection>, working: Int, workspaces:
         )
         Text("Nothing needs you", style = MaterialTheme.typography.titleMedium)
         Text(
-            reassuranceDetail(working, connections, workspaces),
+            reassurance(runners, where, workspaces),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (silent > 0) {
+        // Only beside a count. With nothing answering, the line above has
+        // already said it can't say, and this would say it twice.
+        if (silent > 0 && runners.any { it.link == RunnerLink.ANSWERING }) {
             Text(
                 if (silent == 1) "One runner hasn’t answered, so this isn’t the whole fleet."
                 else "$silent runners haven’t answered, so this isn’t the whole fleet.",
@@ -524,34 +549,16 @@ private fun Reassurance(connections: List<Connection>, working: Int, workspaces:
     }
 }
 
-/**
- * What is happening, given that nothing needs you.
- *
- * Counts `working` only, which is disjoint from the two states that put a row
- * on this screen — so this is the answer to "is anything happening", asked only
- * once nothing needs you. Hidden workspaces are left out, to agree with the
- * rest of the screen.
- *
- * Named runner only when there is exactly one connected. With one, naming it is
- * what tells you which machine the app is speaking for; with several the scope
- * is the whole fleet, and picking one of their names to put in the sentence
- * would be the runner picker sneaking back in through the copy.
- */
-private fun reassuranceDetail(
-    working: Int,
-    connections: List<Connection>,
-    workspaces: Int,
-): String {
-    val where = if (connections.size == 1) " on ${connections[0].host.displayLabel}" else ""
-    if (working == 0 && workspaces == 0 && connections.isNotEmpty()) {
-        return "Nothing is running$where yet."
-    }
-    return when (working) {
-        0 -> "Nothing is running$where."
-        1 -> "One agent is working$where."
-        else -> "$working agents are working$where."
-    }
-}
+// What is happening, given that nothing needs you, is `reassurance` in
+// `model/FleetReading.kt`, where a test can read it back.
+//
+// It counts `working` only, which is disjoint from the two states that put a
+// row on this screen, so it answers "is anything happening", asked only once
+// nothing needs you. Hidden workspaces are left out, to agree with the rest of
+// the screen. It names the runner only when there is exactly one: with one,
+// naming it tells you which machine the app is speaking for; with several the
+// scope is the whole fleet, and picking one name to put in the sentence would
+// be the runner picker sneaking back in through the copy.
 
 /**
  * The door to the whole fleet, counting the thing that is actually behind it.

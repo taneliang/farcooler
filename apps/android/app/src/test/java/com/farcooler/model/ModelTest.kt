@@ -372,4 +372,30 @@ class ModelTest {
         assertFalse(terminal(paneMode = "agent").isChangesPane)
         assertFalse(terminal().isChangesPane)
     }
+
+    /**
+     * While the runner isn't answering, a working row stops counting: "Last
+     * seen working", no clock. Needs you and done hold.
+     *
+     * Mutation: `rowStatus` without the `answering` branch. Red: "Working 12m".
+     */
+    @Test
+    fun aRowOnARunnerThatIsNotAnsweringSaysWhatItLastSaw() {
+        val working = terminal(
+            activity = "working", activitySince = secondsAgo(720), turnStartedAt = secondsAgo(720),
+        )
+        assertEquals("Working 12m", working.rowStatus(now))
+        assertEquals("Last seen working", working.rowStatus(now, answering = false))
+        assertEquals("Last seen idle", terminal(activity = "idle").rowStatus(now, answering = false))
+        assertEquals(
+            "Needs you 2m",
+            terminal(activity = "blocked", activitySince = secondsAgo(120))
+                .rowStatus(now, answering = false),
+        )
+        assertEquals(
+            "Failed",
+            terminal(activity = "done", turnFailed = true).rowStatus(now, answering = false),
+        )
+        assertNull(terminal(preset = "zsh").rowStatus(now, answering = false))
+    }
 }

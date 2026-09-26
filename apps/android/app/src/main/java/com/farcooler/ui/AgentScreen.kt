@@ -67,6 +67,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.model.RunnerLink
 import com.farcooler.model.AgentActivity
 import com.farcooler.model.AgentChoice
 import com.farcooler.model.ComposerToken
@@ -140,7 +141,12 @@ fun AgentScreen(
     val transcript = stream.transcript
 
     val terminal = model.fleet.terminal(ref)
-    val isWorking = terminal?.agent == AgentActivity.WORKING
+    // And only while the runner answers. Reconnecting, the fleet is the one
+    // read before the link went, and "Working" under the transcript and a Stop
+    // button from it would be the only things on screen claiming to know.
+    val runnerPhase by connection.phase.collectAsStateWithLifecycle()
+    val isWorking =
+        runnerPhase.link == RunnerLink.ANSWERING && terminal?.agent == AgentActivity.WORKING
     val harness = terminal?.preset?.takeIf { it.isNotEmpty() }
         ?.replaceFirstChar { it.uppercase() } ?: "the agent"
 

@@ -296,6 +296,32 @@ class GlanceTest {
     private fun terminal(activity: String, since: Double? = null, failed: Boolean? = null) =
         Terminal(id = "t", activity = activity, activitySince = since, turnFailed = failed)
 
+    /**
+     * "Can't say" withdraws the claim about now and nothing else: a quiet
+     * mark goes dashed with no core, needs you and to review hold, and an
+     * answering runner changes nothing. AgentKit's `GlanceMark.said`.
+     *
+     * Mutation: `said` testing `attention == NEEDS_YOU` instead of
+     * `!= QUIET`. Red: to review is withdrawn.
+     */
+    @Test
+    fun `a runner that is not answering withdraws only the claim about now`() {
+        val now = 1_756_000_000_000L
+        val working = GlanceMark.of(terminal("working", since = now.toDouble()), now)!!
+        val idle = GlanceMark.of(terminal("idle", since = now.toDouble()), now)!!
+        val blocked = GlanceMark.of(terminal("blocked"), now)!!
+        val done = GlanceMark.of(terminal("done"), now)!!
+
+        assertEquals(GlanceMark.UNSAID, working.said(answering = false))
+        assertEquals(GlanceMark.UNSAID, idle.said(answering = false))
+        assertEquals(blocked, blocked.said(answering = false))
+        assertEquals(done, done.said(answering = false))
+        assertEquals(working, working.said(answering = true))
+        assertEquals(GlanceMark.Link.BROKEN, GlanceMark.UNSAID.link)
+        assertNull(GlanceMark.UNSAID.core)
+        assertEquals("Nothing wanted, unreachable", GlanceMark.UNSAID.phrase)
+    }
+
     @Test
     fun `blocked is the heavy ring and no core`() {
         val mark = GlanceMark.of(terminal("blocked"), now = 0L)!!

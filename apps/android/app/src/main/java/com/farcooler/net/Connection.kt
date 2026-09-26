@@ -1,5 +1,7 @@
 package com.farcooler.net
 
+import com.farcooler.model.RunnerLink
+
 import com.farcooler.core.ClientCore
 import com.farcooler.data.Identity
 import com.farcooler.data.NodeIdentity
@@ -145,6 +147,18 @@ class Connection(
          * as broken.
          */
         data class Reconnecting(val attempt: Int) : Phase
+
+        /**
+         * How far this runner's last fleet can be believed. Connected and
+         * nothing weaker is answering: a runner that stays down spends most of
+         * its outage in [Reconnecting]. See [RunnerLink].
+         */
+        val link: RunnerLink
+            get() = when (this) {
+                Connecting -> RunnerLink.CONNECTING
+                Connected -> RunnerLink.ANSWERING
+                is NeedsApproval, is Failed, is Reconnecting -> RunnerLink.AWAY
+            }
     }
 
     /**

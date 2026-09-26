@@ -364,6 +364,19 @@ data class GlanceMark(
     val withoutCore: GlanceMark get() = copy(core = null)
 
     /**
+     * This mark as it may still be drawn for a runner, answering or not.
+     *
+     * Answering is [RunnerLink.ANSWERING], connected right now, and nothing
+     * weaker: a runner that stays down spends most of its outage reconnecting,
+     * and its last fleet stays on screen so the list doesn't move. So the quiet
+     * tier, which is the claim about right now, becomes [UNSAID]; needs you and
+     * to review hold, as they do at any age. The same rule as AgentKit's
+     * `GlanceMark.said(answering:)` and the Mac's `FleetStore.reading`.
+     */
+    fun said(answering: Boolean): GlanceMark =
+        if (answering || attention != Attention.QUIET) this else UNSAID
+
+    /**
      * The tier, in words, for TalkBack.
      *
      * **Stroke weight is not exposed to a screen reader, and neither is hue.**
@@ -409,6 +422,18 @@ data class GlanceMark(
          * already says, never replacing it.
          */
         const val STALE_AFTER_MS = 60L * 60L * 1000L
+
+        /**
+         * "Can't say": a claim about the present from a runner that isn't
+         * answering. A dashed hairline with no core.
+         *
+         * Not idle and not gone. The ring is broken because the link is, and
+         * the core is withheld rather than drawn empty, because nobody is
+         * telling us what the agent is doing, which is different from being
+         * told it's at a prompt. AgentKit's `GlanceMark.unsaid`, which iOS draws
+         * for a remembered runner and a reconnecting one alike.
+         */
+        val UNSAID = GlanceMark(Attention.QUIET, null, Link.BROKEN)
 
         /**
          * The dash a broken link is drawn with: `[on, off]`, in whatever unit

@@ -472,13 +472,18 @@ data class Terminal(
      * moment, which is exactly what a unit test can pin and a Compose preview
      * cannot.
      */
-    fun rowStatus(now: Long): String? {
+    fun rowStatus(now: Long, answering: Boolean = true): String? {
         if (!agent.isAgent || agent == AgentActivity.UNKNOWN) {
             if (StateKind.parse(state) == StateKind.RUNNING) return null
             // Blank only if a daemon sent no state at all; an empty string would
             // draw an empty line with padding around it.
             return state.lowercase().ifBlank { null }
         }
+        // While the runner isn't answering, "Working 12m" is a claim about now
+        // read before the link went, with a clock still counting on it. The
+        // past tense instead, and no clock: "can't say", not "stopped". Needs
+        // you and done hold, as they do at any age. See [GlanceMark.said].
+        if (!answering && !agent.wantsAttention) return "Last seen ${activityLabel.lowercase()}"
         val elapsed = displayDuration(now) ?: return activityLabel
         return "$activityLabel $elapsed"
     }

@@ -282,6 +282,8 @@ fun AgentMarkView(
     size: GlanceMarkSize,
     modifier: Modifier = Modifier,
     decorative: Boolean = false,
+    // Whether the pane's runner is connected right now. See `GlanceMark.said`.
+    answering: Boolean = true,
 ) {
     val label = terminal.activityLabel
     val tint = agentTint(terminal)
@@ -294,7 +296,7 @@ fun AgentMarkView(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        val mark = GlanceMark.of(terminal, now)
+        val mark = GlanceMark.of(terminal, now)?.said(answering)
         if (mark != null) {
             // Decorative unconditionally: this composable has already said the
             // word above, and a mark that announced `phrase` too would make
