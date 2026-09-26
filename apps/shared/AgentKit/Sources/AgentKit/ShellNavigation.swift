@@ -474,9 +474,10 @@ struct ShellWorkspace: Identifiable, Hashable {
     ///     claimed by the rung above, so the only `.toReview` that can reach
     ///     this line is `ShellScreen.diffMark`'s.
     ///   - `allStale` is a property of the WHOLE workspace and stays one. The
-    ///     Diff tab is never broken in live data, so this rung is reached only
-    ///     by the remembered workspaces `RunnerDirectory.decayed` builds, which
-    ///     is exactly what it is for.
+    ///     Diff tab is broken only where the runner isn't answering, so this
+    ///     rung is reached by the remembered workspaces `RunnerDirectory.decayed`
+    ///     builds and by a reconnecting runner's (`said(answering:)`), which is
+    ///     exactly what it is for.
     ///
     /// Android's `ShellWorkspace.precedence` states the same split at length
     /// and for the same reason.
@@ -485,6 +486,26 @@ struct ShellWorkspace: Identifiable, Hashable {
         if tabs.contains(where: { $0.mark.attention == .toReview }) { return .unreadDiff }
         if !tabs.isEmpty && tabs.allSatisfy({ $0.mark.link == .broken }) { return .allStale }
         return .working
+    }
+}
+
+extension ShellWorkspace {
+    /// This workspace as it may be drawn while its runner is, or isn't,
+    /// answering. Every tab's mark through `GlanceMark.said(answering:)`.
+    ///
+    /// The Diff tab too, as `RunnerDirectory.decayed` has always done for a
+    /// remembered one: "nothing new to read" is a claim about now as well, and
+    /// an unread diff holds. `wantsAttention` is left alone, because blocked and
+    /// done are the latched states and hold.
+    func said(answering: Bool) -> ShellWorkspace {
+        guard !answering else { return self }
+        var workspace = self
+        workspace.tabs = tabs.map { tab in
+            var tab = tab
+            tab.mark = tab.mark.said(answering: false)
+            return tab
+        }
+        return workspace
     }
 }
 
@@ -2084,7 +2105,7 @@ extension RunnerDirectory {
         // told what it is doing, which is a different thing from being told it
         // is at a prompt.
         default:
-            return (GlanceMark(attention: .quiet, core: nil, link: .broken), false)
+            return (.unsaid, false)
         }
     }
 

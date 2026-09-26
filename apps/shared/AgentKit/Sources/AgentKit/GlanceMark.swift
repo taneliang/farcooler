@@ -218,6 +218,30 @@ public struct GlanceMark: Hashable, Sendable {
         GlanceMark(attention: attention, core: nil, link: link)
     }
 
+    /// "Can't say": a claim about the present from a runner that isn't
+    /// answering. A dashed hairline with no core.
+    ///
+    /// Not "idle" and not "gone". The ring is broken because the link is, and
+    /// the core is withheld rather than drawn empty, because nobody is telling
+    /// us what the agent is doing, which is different from being told it's at a
+    /// prompt. The remembered cards of a runner this app has no connection to
+    /// have drawn exactly this since `RunnerDirectory.decayed`.
+    public static let unsaid = GlanceMark(attention: .quiet, core: nil, link: .broken)
+
+    /// This mark as it may still be drawn for a runner, answering or not.
+    ///
+    /// Answering is `.connected` and nothing weaker: a runner that stays down
+    /// spends most of its outage reconnecting, and its last fleet is kept on
+    /// screen so the map doesn't move. So the quiet tier, which is the claim
+    /// about right now, becomes `unsaid`; needs-you and to-review hold, as they
+    /// do at any age. The Mac counts live panes by the same rule
+    /// (`FleetStore.reading`), and the snapshot surfaces by
+    /// `FleetSnapshot.Agent.runnerAnswering`.
+    public func said(answering: Bool) -> GlanceMark {
+        guard !answering, attention == .quiet else { return self }
+        return .unsaid
+    }
+
     // MARK: - Words
 
     /// The tier, in words, for VoiceOver.

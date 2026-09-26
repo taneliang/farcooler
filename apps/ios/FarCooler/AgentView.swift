@@ -180,7 +180,14 @@ struct AgentView: View {
     /// message is not lost.
     private var hasAgent: Bool { stream.phase != .starting }
 
-    private var isWorking: Bool { paneTerminal?.agent == .working }
+    /// Whether a turn is running, and only while the runner is answering.
+    ///
+    /// Reconnecting, the fleet is the
+    /// one read before the link went, and a "Working…" swept under the
+    /// transcript from it would be the one thing on screen claiming to know.
+    private var isWorking: Bool {
+        connection.phase == .connected && paneTerminal?.agent == .working
+    }
 
     #if DEBUG
     /// The canned conversation `AgentLayoutHarness` stands this pane on.

@@ -1752,6 +1752,51 @@ struct ShellNavigationTests {
         }
     }
 
+    /// **A reconnecting runner's cards read like a remembered runner's.** Its
+    /// fleet is the last one read before the link went, kept so the grid
+    /// doesn't move, and every claim about now in it becomes "can't say":
+    /// the working and idle tabs, and the quiet Diff. Blocked, done and an
+    /// unread diff hold, and so does what sorts to the top. The same
+    /// `RunnerDirectory.decayed` rule, over a live workspace.
+    ///
+    /// Mutation: `said(answering:)` returning `self` whatever `answering` is.
+    /// Red on every quiet tab.
+    @Test func aRunnerThatIsntAnsweringCantSayWhatItsAgentsAreDoing() {
+        let workspace = ShellWorkspace(
+            id: "w", name: "feat/queue",
+            tabs: [
+                Self.tab("diff", .unreadDiff), Self.tab("blocked", .needsYou),
+                Self.tab("done", .done), Self.tab("working", .working),
+                Self.tab("idle", .idle),
+                ShellTab(id: "quiet-diff", title: "Diff", mark: GlanceMark(attention: .quiet, core: nil)),
+            ])
+
+        #expect(workspace.said(answering: true) == workspace, "answering, nothing changes")
+
+        let lost = workspace.said(answering: false)
+        #expect(lost.tabs.map(\.mark) == [
+            workspace.tabs[0].mark, workspace.tabs[1].mark, workspace.tabs[2].mark,
+            .unsaid, .unsaid, .unsaid,
+        ])
+        #expect(lost.tabs.map(\.wantsAttention) == workspace.tabs.map(\.wantsAttention))
+        #expect(
+            RunnerDirectory.decayed("working").mark == .unsaid,
+            "a remembered runner and a reconnecting one say the same thing")
+    }
+
+    /// And one whose every tab was a claim about now sorts where a remembered
+    /// one does: below the workspaces that can still say they're working.
+    @Test func aReconnectingRunnersQuietWorkspaceSortsAsStale() {
+        let workspace = ShellWorkspace(
+            id: "w", name: "feat/queue",
+            tabs: [
+                ShellTab(id: "diff", title: "Diff", mark: GlanceMark(attention: .quiet, core: nil)),
+                Self.tab("working", .working),
+            ])
+        #expect(workspace.precedence == .working)
+        #expect(workspace.said(answering: false).precedence == .allStale)
+    }
+
     /// The cache becomes a group the grid can draw: the runner's label on
     /// every card, its worktrees in order, and its hidden ones left out.
     @Test func aCachedRunnerBecomesAGroupTheGridCanDraw() {

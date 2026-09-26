@@ -290,7 +290,12 @@ struct ShellFleetMap {
                 // runner a drag in that section is sent to. The runner's ID,
                 // not `server`: that is a label, and nil on a one-runner grid.
                 runner: runner.uuidString,
-                tabs: tabs),
+                tabs: tabs)
+                // "Can't say" for every claim about now while the runner isn't
+                // answering: its fleet is the one read before the link went,
+                // kept so the grid doesn't move. `.connected` and nothing
+                // weaker, the rule the board's pills and the Mac's count use.
+                .said(answering: connection.phase == .connected),
             refs
         )
     }
