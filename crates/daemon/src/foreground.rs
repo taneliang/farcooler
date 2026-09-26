@@ -774,7 +774,9 @@ mod tests {
     /// The program a command string runs, past `env` and its assignments.
     #[test]
     fn a_command_strings_program_is_past_env_and_quotes() {
-        let target_of = |args: &str| command_string(args).and_then(|w| target(&w));
+        fn target_of(args: &str) -> Option<&str> {
+            command_string(args).and_then(|w| target(&w))
+        }
         assert_eq!(
             target_of("fish -c env FARCOOLER_ACTOR=agent:x FARCOOLER_TASK=pn-1 /opt/homebrew/bin/fish -ilc 'claude'"),
             Some("fish")
