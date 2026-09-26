@@ -26,6 +26,7 @@ import com.farcooler.model.RepositoryList
 import com.farcooler.model.RepositoryRoot
 import com.farcooler.model.RepositoryRootList
 import com.farcooler.model.StackReply
+import com.farcooler.model.TaskBoard
 import com.farcooler.model.Terminal
 import com.farcooler.model.Workspace
 import com.farcooler.model.toJson
@@ -469,6 +470,63 @@ class Connection(
      */
     val core = ClientCore()
 
+    // ---- boards ----
+
+    /**
+     * This runner's task boards. See [BoardReads] for the rules; this only
+     * says when to read.
+     *
+     * - Every board, one at a time and without waiting on it, when a link
+     *   comes up and its repositories are known ([loadBoardsDetached]).
+     * - Every board when the runner's build lands on a link whose boards were
+     *   never read — the first `host` read failed and a later poll installed
+     *   it (see [loadDaemonBuild]).
+     * - One board on its `task` notice, and every board on `resync`.
+     * - On a runner with no live event channel, every board on the poll at
+     *   most once a minute, because nothing would tell this app a board moved.
+     */
+    private val boardReads = BoardReads(
+        canRead = { _phase.value is Phase.Connected && _daemon.value?.can("tasks") == true },
+        read = { repository ->
+            attempt { core.call("task.list", buildJsonObject { put("repository", repository) }) }
+                .getOrNull()
+                ?.let { runCatching { TaskBoard.decode(it) }.getOrNull() }
+        },
+    )
+
+    /** Each repository's board as last read, by repository id. */
+    val boards: StateFlow<Map<String, TaskBoard>> = boardReads.boards
+
+    /** Repositories whose last board read failed. */
+    val unreadBoards: StateFlow<Set<String>> = boardReads.unread
+
+    private var lastBoardSweepAt = 0L
+
+    /** Read every board, without making anything wait on it. */
+    fun loadBoardsDetached() {
+        scope.launch {
+            lastBoardSweepAt = System.currentTimeMillis()
+            boardReads.sweep(_repositories.value.map { it.id })
+        }
+    }
+
+    /** Read one board now — its sheet opening, or pull to refresh. */
+    suspend fun readBoard(repository: String) = boardReads.readOne(repository)
+
+    /** A runner notice, on the core's thread. Only boards read these; see [ClientCore.onNotice]. */
+    private fun noticeArrived(notice: JsonObject) {
+        val event = notice["event"]?.jsonPrimitive?.contentOrNull
+        val repository = notice["repository"]?.jsonPrimitive?.contentOrNull
+        when (event) {
+            "task" -> if (repository != null) scope.launch { boardReads.readOne(repository) }
+            "resync" -> loadBoardsDetached()
+        }
+    }
+
+    init {
+        core.onNotice = ::noticeArrived
+    }
+
     /**
      * Bumped every time a session is replaced by a new one.
      *
@@ -628,6 +686,7 @@ class Connection(
         _phase.value = Phase.Connected
         // A link nobody has told anything yet. See [WatchingClaim.reset].
         watching.reset()
+        boardReads.ledger.linkCameUp()
         // Before the first poll, because the poll renews a claim of attention
         // and [reportWatching] refuses to make one until it knows the runner
         // can hear it. This used to be read only when the settings screen
@@ -640,6 +699,7 @@ class Connection(
         loadRepositories()
         loadThemes()
         startPolling()
+        loadBoardsDetached()
     }
 
     // ---- staying connected ----
@@ -730,6 +790,7 @@ class Connection(
         // own last claim, skip the send, and go on being notified about the
         // pane in front of it.
         watching.reset()
+        boardReads.ledger.linkCameUp()
         loadDaemonBuild()
         refresh(force = true)
         // Re-read rather than trust what a previous session reported: a
@@ -739,6 +800,7 @@ class Connection(
         loadRepositories()
         loadThemes()
         startPolling()
+        loadBoardsDetached()
     }
 
     /**
@@ -875,6 +937,9 @@ class Connection(
         // differently-named branches than the Mac beside it.
         _branchPrefix.value =
             body["branchPrefix"]?.jsonPrimitive?.contentOrNull ?: DEFAULT_BRANCH_PREFIX
+        // Boards this link never read: a sweep before the build was known
+        // could not tell the runner keeps a board, and read nothing.
+        if (boardReads.ledger.owedWhenBuildLands) loadBoardsDetached()
     }
 
     /**
@@ -934,6 +999,21 @@ class Connection(
         // at all, and a failed fleet poll returns above without reaching it, so
         // a fleet nobody could read is never followed by counts describing it.
         loadInboxIfDue(force)
+
+        // Outside the `try` for the same reason: neither can throw, and
+        // neither may be taken for a dropped link.
+        //
+        // A build the first read on this link could not get, asked again on
+        // the poll — which is what lets a late build read its boards (see
+        // [loadDaemonBuild]).
+        if (_daemon.value == null) loadDaemonBuild()
+        // No event channel: nothing will say a board moved, so read them on
+        // the poll, at most once a minute.
+        if (System.currentTimeMillis() - lastBoardSweepAt > BOARD_SWEEP_WITHOUT_EVENTS_MS &&
+            !core.eventsLive()
+        ) {
+            loadBoardsDetached()
+        }
     }
 
     /**
@@ -1879,6 +1959,9 @@ class Connection(
                 "Add this device again to get one."
 
         private const val POLL_INTERVAL_MS = 3_000L
+
+        /** How often boards are swept on the poll when no notice can say one moved. */
+        private const val BOARD_SWEEP_WITHOUT_EVENTS_MS = 60_000L
 
         /**
          * One inbox read per this many fleet polls. See [loadInboxIfDue] for

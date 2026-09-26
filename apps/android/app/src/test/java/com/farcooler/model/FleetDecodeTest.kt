@@ -73,7 +73,8 @@ class FleetDecodeTest {
                   "agentSessionId": "01J8Z2",
                   "agentMode": "plan",
                   "availableAgentModes": ["plan", "edit"],
-                  "agentFailure": "not-authenticated"
+                  "agentFailure": "not-authenticated",
+                  "taskId": "0198f2c0-0000-7000-8000-00000000a001"
                 }
               ]
             }
@@ -121,6 +122,8 @@ class FleetDecodeTest {
         // decodes breaks nothing and reports nothing. This list is where
         // that is meant to be caught.
         assertEquals("not-authenticated", t.agentFailure)
+        // What takes a board card to the agent on it.
+        assertEquals("0198f2c0-0000-7000-8000-00000000a001", t.taskId)
     }
 
     @Test
@@ -169,6 +172,8 @@ class FleetDecodeTest {
         assertNull(t.turnFailed)
         assertFalse(t.runDidFail)
         assertEquals(Long.MAX_VALUE, t.sortRank)
+        // No task: nothing a board could take anyone to.
+        assertNull(t.taskId)
         // And nothing about the row it draws is a claim: absent is not zero and
         // not false-as-an-answer.
         assertEquals(emptyList<String>(), t.recentSteps)

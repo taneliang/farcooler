@@ -84,6 +84,12 @@ internal object NativeClient {
 
     external fun nativePoll(handle: Long): String?
 
+    /** The oldest runner notice, or null. `farcooler_client_next_event`. */
+    external fun nativeNextEvent(handle: Long): String?
+
+    /** Whether a dedicated event channel is up. `farcooler_client_events_live`. */
+    external fun nativeEventsLive(handle: Long): Boolean
+
     external fun nativeConnected(handle: Long): Boolean
 
     external fun nativeStreamStart(handle: Long, terminal: String): Boolean

@@ -124,6 +124,7 @@ fun NeedsYouScreen(
     onSelect: (TerminalRef) -> Unit,
     onReviewChanges: (hostId: String, workspaceId: String) -> Unit,
     onOpenWorkspaces: () -> Unit,
+    onOpenBoard: (com.farcooler.model.BoardRow) -> Unit,
     onOpenDrawer: () -> Unit,
 ) {
     val entries by model.fleet.entries.collectAsStateWithLifecycle()
@@ -252,6 +253,19 @@ fun NeedsYouScreen(
                         item(key = "changes/${section.key}") {
                             ChangesRow(section, onReviewChanges, Modifier.animateItem())
                         }
+                    }
+                }
+
+                // A Board row per repository whose board has something on it,
+                // directly above the door to the workspaces — where the Mac puts
+                // its Board row above a repository's workspaces. Here rather
+                // than in the workspace list: that list is flat across runners
+                // with no repository level, and this screen is the one every
+                // session starts on. One item per runner, because each runner's
+                // boards are flows of their own; see [RunnerBoardRows].
+                connections.forEach { connection ->
+                    item(key = "boards/${connection.host.id}") {
+                        RunnerBoardRows(connection, namesRunner = namesRunners, onOpen = onOpenBoard)
                     }
                 }
 

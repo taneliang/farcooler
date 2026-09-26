@@ -238,6 +238,7 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
                 onSelect = { model.open(it) },
                 onReviewChanges = { host, workspace -> model.openChanges(host, workspace) },
                 onOpenWorkspaces = { model.navigate(Route.Fleet) },
+                onOpenBoard = { model.navigate(Route.Board(it.hostId, it.repository)) },
                 onOpenDrawer = onOpenDrawer,
             )
         }
@@ -276,6 +277,36 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
         is Route.AddDevice -> AddDeviceScreen(model, onBack = { model.back() })
 
         is Route.Devices -> DevicesScreen(model, onBack = { model.back() })
+
+        is Route.Board -> {
+            val live = connections.firstOrNull { it.host.id == route.hostId }
+            if (live == null) {
+                model.back()
+            } else {
+                BoardScreen(
+                    connection = live,
+                    repository = route.repositoryId,
+                    onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.repositoryId, it)) },
+                    onJump = { model.open(it) },
+                    onBack = { model.back() },
+                )
+            }
+        }
+
+        is Route.BoardTask -> {
+            val live = connections.firstOrNull { it.host.id == route.hostId }
+            if (live == null) {
+                model.back()
+            } else {
+                TaskDetailScreen(
+                    connection = live,
+                    repository = route.repositoryId,
+                    taskId = route.taskId,
+                    onJump = { model.open(it) },
+                    onBack = { model.back() },
+                )
+            }
+        }
 
         // The ground's routes never reach here; `Route.isOverlay` is the one
         // place that split is decided.

@@ -156,6 +156,24 @@ class ClientCore {
             ?: throw CoreException("The client core returned something unreadable.")
     }
 
+    /**
+     * Where the runner's notices go: `{"event": "task", "repository": …}` and
+     * the rest (`farcooler_client_next_event`). Called on the core's own
+     * thread, so a receiver hops to its own dispatcher before touching state.
+     *
+     * The notices were queued by the core all along and nothing on Android
+     * read them — the fleet is polled here. The board is the first reader: a
+     * board is not in the fleet, and a `task` notice names the one repository
+     * worth reading again.
+     */
+    @Volatile
+    var onNotice: ((JsonObject) -> Unit)? = null
+
+    /** Whether a dedicated event channel to this runner is up. */
+    suspend fun eventsLive(): Boolean = withContext(dispatcher) {
+        handle != 0L && NativeClient.nativeEventsLive(handle)
+    }
+
     suspend fun isConnected(): Boolean = withContext(dispatcher) {
         handle != 0L && NativeClient.nativeConnected(handle)
     }
@@ -273,6 +291,19 @@ class ClientCore {
     private fun drain() {
         val h = handle
         if (h == 0L) return
+        // Notices first, and only when somebody is listening: with no
+        // listener they stay queued in the core, which coalesces them and
+        // collapses to a `resync` at its ceiling, so nothing is lost by
+        // leaving them.
+        val listener = onNotice
+        if (listener != null) {
+            while (true) {
+                val raw = NativeClient.nativeNextEvent(h) ?: break
+                val notice = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
+                    ?: continue
+                listener(notice)
+            }
+        }
         while (true) {
             val raw = NativeClient.nativePoll(h) ?: return
             val line = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull() ?: continue

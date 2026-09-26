@@ -475,8 +475,26 @@ class BackstackTest {
             Route.Join,
             Route.AddDevice,
             Route.Devices,
+            Route.Board("h", "r"),
+            Route.BoardTask("h", "r", "t"),
         )) {
             assertTrue("$route should be an overlay", route.isOverlay)
         }
+    }
+
+    /**
+     * A board, a card on it, and the pane its Agent button went to survive a
+     * save and restore in order, so back from the pane lands on the card and
+     * back from the card on the board.
+     */
+    @Test
+    fun aBoardAndItsCardSurviveARestore() {
+        val stack = listOf(
+            Route.NeedsYou,
+            Route.Board("h", "r"),
+            Route.BoardTask("h", "r", "t"),
+            Route.Terminal("h", "w"),
+        )
+        assertEquals(stack, Backstack.decodeStack(Backstack.encodeStack(stack)))
     }
 }

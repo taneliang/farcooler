@@ -299,6 +299,17 @@ data class Terminal(
      * state drawing the spinner and the ladder it already had.
      */
     val agentFailure: String? = null,
+    /**
+     * The board task this pane was opened for, as the uuid a [TaskRow]
+     * carries, or null for a pane nobody dispatched.
+     *
+     * Sent as `taskId` by `Session::fleet` (`task_of` in
+     * `crates/client/src/session.rs`) and absent, never the nil uuid, when
+     * there is none — and from every runner that does not advertise
+     * `terminal_task`. See [TaskAgentLink.speaksOfAgents] for what a board
+     * says then.
+     */
+    val taskId: String? = null,
 ) {
     val agent: AgentActivity get() = AgentActivity.parse(activity)
 

@@ -131,6 +131,20 @@ sealed interface Route {
     data class RunnerSettings(val hostId: String) : Route
 
     /**
+     * One repository's task board, from its Board row on the front door. Read
+     * and jump: an Agent button goes to [Terminal], which is pushed on top, so
+     * back comes out of the pane onto the board it was chosen from.
+     */
+    @Serializable
+    @SerialName("board")
+    data class Board(val hostId: String, val repositoryId: String) : Route
+
+    /** One card on that board, opened. */
+    @Serializable
+    @SerialName("board-task")
+    data class BoardTask(val hostId: String, val repositoryId: String, val taskId: String) : Route
+
+    /**
      * Whether this route is drawn OVER the workspace rather than instead of it.
      *
      * Every pushed screen is. The workspace underneath stays composed, which is
@@ -142,7 +156,8 @@ sealed interface Route {
      */
     val isOverlay: Boolean
         get() = when (this) {
-            is Settings, is RunnerSettings, is Authorize, is Join, is AddDevice, is Devices -> true
+            is Settings, is RunnerSettings, is Authorize, is Join, is AddDevice, is Devices,
+            is Board, is BoardTask -> true
             // The three GROUND routes. A terminal is one of them and not an
             // overlay, even though it is now pushed onto the front door rather
             // than replacing it: `isOverlay` also decides whether the drawer's
