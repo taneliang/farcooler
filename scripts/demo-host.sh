@@ -473,6 +473,24 @@ if [ -z "$(repo_id)" ]; then
 fi
 REPO_ID=$(repo_id)
 [ -n "$REPO_ID" ] || { echo "the demo repository did not register; see $DIR/daemon.log"; exit 1; }
+
+# Terminals whose tmux pane is gone are forgotten before anything is looked up.
+#
+# The database outlives the tmux server: a reboot, or anything that ends the
+# demo's server, leaves every terminal recorded and marked LOST, because the
+# daemon will not guess that a pane it cannot see is never coming back. The
+# lookups below take `terminals[0]` and `terminals[1]`, so they took a LOST
+# one, and the first `terminal send` into it killed the whole script with
+# `error: resource not found` — nothing said which terminal, or why. The
+# workaround was deleting `$FC_HOME` by hand.
+#
+# `dismiss-lost` refuses anything that is not lost, so this cannot take a live
+# pane with it. Every workspace that loses its panes here is given new ones
+# below, by the same code that makes them on a first run.
+for lost in $(fc --json workspace list | jq -r '.workspaces[].terminals[] | select(.state=="LOST") | .id'); do
+    fc terminal dismiss-lost "$lost" >/dev/null
+done
+
 if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .id) // empty')" ]; then
     fc workspace create "$REPO_ID" scrolling --branch demo/scrolling
 fi
@@ -599,6 +617,12 @@ if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=
 fi
 CROSSING=$(fc --json workspace list \
     | jq -r 'first(.workspaces[] | select(.task=="crossing") | .id) // empty')
+# A pane, as a new worktree comes with one, when the sweep of lost terminals
+# above took the one it had.
+if [ -n "$CROSSING" ] && [ "$(fc --json workspace list \
+    | jq -r --arg id "$CROSSING" '[.workspaces[] | select(.id==$id) | .terminals[]] | length')" = 0 ]; then
+    fc terminal create "$CROSSING" --preset shell >/dev/null
+fi
 if [ -n "$CROSSING" ]; then
     echo "        and a third workspace 'crossing', so the cross-runner grid test can run"
 else
