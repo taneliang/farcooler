@@ -392,7 +392,14 @@ data class GlanceMark(
                 Attention.TO_REVIEW -> "To review"
                 Attention.QUIET -> "Nothing wanted"
             }
-            if (link == Link.BROKEN) return "$tier, unreachable"
+            // A quiet ring that's broken is a claim about now nobody can make:
+            // a runner that isn't answering, or an hour without news.
+            // "Unreachable" was wrong for most of those, since the runner may be
+            // fine and only the news is missing. AgentKit's `phrase` says the
+            // same.
+            if (link == Link.BROKEN) {
+                return if (attention == Attention.QUIET) "Can’t say" else "$tier, unreachable"
+            }
             return when (core) {
                 Core.PRODUCING -> "$tier, producing"
                 Core.AT_A_PROMPT -> "$tier, at a prompt"

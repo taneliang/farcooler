@@ -334,10 +334,10 @@ class ModelTest {
         // The string this whole band replaced was `state.lowercase()` — the raw
         // wire word, restating the process dot immediately to its left.
         val working = terminal(activity = "working", turnStartedAt = secondsAgo(720))
-        assertEquals("Working 12m", working.rowStatus(now))
+        assertEquals("Working 12m", working.rowStatus(now, answering = true))
         // The label alone until there is an age worth printing.
-        assertEquals("Needs you", terminal(activity = "blocked").rowStatus(now))
-        assertEquals("Failed", terminal(activity = "done", turnFailed = true).rowStatus(now))
+        assertEquals("Needs you", terminal(activity = "blocked").rowStatus(now, answering = true))
+        assertEquals("Failed", terminal(activity = "done", turnFailed = true).rowStatus(now, answering = true))
     }
 
     @Test
@@ -345,11 +345,11 @@ class ModelTest {
         // Running is the ordinary case and the dot draws nothing for it either,
         // so a live shell is a row with a name on it — which is the point of
         // the silence, not a fact withheld.
-        assertNull(terminal(preset = "zsh").rowStatus(now))
-        assertEquals("exited", terminal(preset = "zsh", state = "exited").rowStatus(now))
-        assertEquals("lost", terminal(preset = "zsh", state = "lost").rowStatus(now))
+        assertNull(terminal(preset = "zsh").rowStatus(now, answering = true))
+        assertEquals("exited", terminal(preset = "zsh", state = "exited").rowStatus(now, answering = true))
+        assertEquals("lost", terminal(preset = "zsh", state = "lost").rowStatus(now, answering = true))
         // An agent this build cannot name is not an agent it can describe.
-        assertNull(terminal(preset = "claude", activity = "teleporting").rowStatus(now))
+        assertNull(terminal(preset = "claude", activity = "teleporting").rowStatus(now, answering = true))
     }
 
     @Test
@@ -384,7 +384,7 @@ class ModelTest {
         val working = terminal(
             activity = "working", activitySince = secondsAgo(720), turnStartedAt = secondsAgo(720),
         )
-        assertEquals("Working 12m", working.rowStatus(now))
+        assertEquals("Working 12m", working.rowStatus(now, answering = true))
         assertEquals("Last seen working", working.rowStatus(now, answering = false))
         assertEquals("Last seen idle", terminal(activity = "idle").rowStatus(now, answering = false))
         assertEquals(

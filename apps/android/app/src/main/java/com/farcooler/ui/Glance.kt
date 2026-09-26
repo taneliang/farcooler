@@ -283,7 +283,7 @@ fun AgentMarkView(
     modifier: Modifier = Modifier,
     decorative: Boolean = false,
     // Whether the pane's runner is connected right now. See `GlanceMark.said`.
-    answering: Boolean = true,
+    answering: Boolean,
 ) {
     val label = terminal.activityLabel
     val tint = agentTint(terminal)

@@ -472,7 +472,7 @@ data class Terminal(
      * moment, which is exactly what a unit test can pin and a Compose preview
      * cannot.
      */
-    fun rowStatus(now: Long, answering: Boolean = true): String? {
+    fun rowStatus(now: Long, answering: Boolean): String? {
         if (!agent.isAgent || agent == AgentActivity.UNKNOWN) {
             if (StateKind.parse(state) == StateKind.RUNNING) return null
             // Blank only if a daemon sent no state at all; an empty string would

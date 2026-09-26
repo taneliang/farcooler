@@ -319,7 +319,12 @@ class GlanceTest {
         assertEquals(working, working.said(answering = true))
         assertEquals(GlanceMark.Link.BROKEN, GlanceMark.UNSAID.link)
         assertNull(GlanceMark.UNSAID.core)
-        assertEquals("Nothing wanted, unreachable", GlanceMark.UNSAID.phrase)
+        // Mutation: the QUIET arm saying "$tier, unreachable". Red.
+        assertEquals("Can’t say", GlanceMark.UNSAID.phrase)
+        assertEquals(
+            "Can’t say",
+            GlanceMark(GlanceMark.Attention.QUIET, GlanceMark.Core.PRODUCING, GlanceMark.Link.BROKEN).phrase,
+        )
     }
 
     @Test

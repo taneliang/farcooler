@@ -65,7 +65,6 @@ import com.farcooler.data.Runner
 import com.farcooler.model.AgentActivity
 import com.farcooler.model.FleetReading
 import com.farcooler.model.GlanceMarkSize
-import com.farcooler.model.RunnerCount
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.fleetReading
 import com.farcooler.model.liveSummary
@@ -77,6 +76,8 @@ import com.farcooler.net.Connection
 import com.farcooler.net.FleetEntry
 import com.farcooler.net.HostKeyQuestion
 import com.farcooler.net.TerminalRef
+import com.farcooler.net.runnerCount
+import com.farcooler.net.runnerCounts
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -447,7 +448,12 @@ private fun FleetBody(
                 //
                 // "No runners" is deliberately not colored. An app nobody has
                 // added a runner to yet is empty, not broken.
-                val counts = runnerCounts(connections)
+                // Collected, not read: see `runnerCounts`.
+                val counts by remember(connections) {
+                    runnerCounts(connections.map { it.phase to it.fleet })
+                }.collectAsStateWithLifecycle(
+                    connections.map { runnerCount(it.phase.value, it.fleet.value) }
+                )
                 val down = fleetReading(counts) == FleetReading.RuntimeDown
                 val tint =
                     if (down) MaterialTheme.colorScheme.error
@@ -522,20 +528,6 @@ private fun FleetBody(
         )
     }
 }
-
-/**
- * Each runner's link and last count, for [fleetReading] and [liveSummary].
- *
- * The count and the tmux health are what each runner last reported, and only
- * an answering runner's are believed: this footer counted every runner's, so a
- * runner that had dropped went on adding its last "live" panes, and its last
- * healthy tmux kept the footer calm, through the whole reconnect. The Mac's
- * status bar had the same gap (`FleetStore.reading`).
- */
-private fun runnerCounts(connections: List<Connection>): List<RunnerCount> =
-    connections.map {
-        RunnerCount(it.phase.value.link, it.fleet.value.livePanes, it.fleet.value.runtimeHealthy)
-    }
 
 /**
  * What one runner is doing, when that is not simply "answering".
@@ -1065,7 +1057,7 @@ internal fun TerminalRow(
     // fleet is on screen only so the list holds still: the mark says "can't
     // say", the status is past tense, and no subagent is claimed running. See
     // `GlanceMark.said`.
-    answering: Boolean = true,
+    answering: Boolean,
 ) {
     val kind = StateKind.parse(terminal.state)
     var menu by remember { mutableStateOf(false) }
