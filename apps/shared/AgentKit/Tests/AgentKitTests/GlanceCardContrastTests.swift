@@ -179,7 +179,7 @@ import Testing
                     startedAt: now.addingTimeInterval(-900),
                     updatedAt: now.addingTimeInterval(-5), trace: talky),
             ])
-        return AgentCardLayout(state: state, now: now)!
+        return AgentCardLayout(state: state, now: now, stale: false)!
     }
 
     /// The size the system gives the presentation, near enough — the card is

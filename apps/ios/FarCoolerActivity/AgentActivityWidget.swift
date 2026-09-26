@@ -87,7 +87,9 @@ struct AgentActivityWidget: Widget {
                 // also the last thing this card needed a local file for.
                 tail: ask.isPresent || layout != nil
                     ? FleetTail.unknown
-                    : FleetTail.current(for: context.state),
+                    : FleetTail.current(
+                        for: context.state, snapshot: SnapshotStore.read(),
+                        stale: context.isStale),
                 ask: ask,
                 layout: layout,
                 stale: context.isStale)
@@ -123,7 +125,9 @@ struct AgentActivityWidget: Widget {
             let ask = LeaderAsk.current(for: context.state)
             let tail =
                 ask.isPresent
-                ? FleetTail.unknown : FleetTail.current(for: context.state)
+                ? FleetTail.unknown
+                : FleetTail.current(
+                    for: context.state, snapshot: SnapshotStore.read(), stale: context.isStale)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     StatusBadge(status: status, stale: context.isStale)
@@ -149,7 +153,13 @@ struct AgentActivityWidget: Widget {
                         // it does on the lock screen card and for the same
                         // reason: how long an agent has been stopped is worth
                         // less than being able to stop it being stopped.
-                        if let started = context.state.startedAt, !ask.isPresent {
+                        // And gives way on a stale card, for a working leader:
+                        // a clock still counting is a claim about now. See
+                        // `AgentCardLeader`.
+                        if let started = context.state.startedAt, !ask.isPresent,
+                            AgentCardLeader.isStated(
+                                status: context.state.status, stale: context.isStale)
+                        {
                             Text(started, style: .timer)
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.tertiary)
@@ -239,6 +249,9 @@ struct AgentActivityWidget: Widget {
                     )
                     .font(.caption2)
                     .foregroundStyle(status.tint)
+                    // The same hedge as the expanded tail's line: on a stale
+                    // card the count is who the relay last knew about.
+                    .opacity(tail.qualified ? 0.6 : 1)
                     .lineLimit(1)
                     .frame(maxWidth: 74)
                 }
@@ -297,198 +310,6 @@ enum AppScheme {
     static var current: String {
         Bundle.main.object(forInfoDictionaryKey: "FarCoolerURLScheme") as? String
             ?? "farcooler"
-    }
-}
-
-/// Everyone the HEADLINE card is not leading with, counted rather than listed.
-///
-/// **Two surfaces still want this and the lock screen card is no longer one of
-/// them.** The Dynamic Island's expanded presentation is a few lines tall and
-/// presents one agent, and a card from a relay too old to send rows has one
-/// agent to present — both of those are "lead with one and count the rest",
-/// which is what this answers. `AgentCardLayout` is the other shape, where the
-/// count is `more` off the push and there is nothing to hedge.
-///
-/// **Read from the snapshot, not from the push.** The relay stores no fleet and
-/// a daemon knows only its own runner, so neither can count this honestly; the
-/// snapshot in the App Group is the only thing on the phone that has ever seen
-/// the whole fleet. That it is a local file read on a render path is fine — it
-/// is one small JSON, and `FleetWidget` in this same extension reads it the same
-/// way on every timeline.
-///
-/// **It qualifies rather than asserts**, which is the rule every surface outside
-/// the app follows. Two separate things make it unsure and they are not the
-/// same: `complete` false means the snapshot was assembled from pushes and may
-/// not know about every agent, so the count can be LOW; a working agent past
-/// `FleetSnapshot.staleAfter` means the snapshot no longer vouches for what that
-/// agent is doing. Either one drops the line to the 60% treatment
-/// `FleetWidget` and `WatchFleetWidget` already use for "last seen", and the
-/// second one puts the words there too.
-///
-/// Nothing at all when no snapshot has ever been written. `FleetSnapshot.empty`
-/// is the absence of an observation, not an empty fleet, and a phone that has
-/// never opened the app may not claim the leader is the only agent there is.
-struct FleetTail {
-    /// How many other agents are working or waiting.
-    let others: Int
-    /// How many of those are waiting on a person.
-    let blocked: Int
-    /// Whether this is a claim or a recollection.
-    let qualified: Bool
-    /// The leader's own thirteen buckets, as the wire's bytes.
-    ///
-    /// **Off the snapshot, for the two presentations that have no row to read
-    /// one from.** The push carries a trace per ROW now — 66 bytes of base64,
-    /// see `AgentCardRow.trace` — so the rows card gets its history from the
-    /// same place it gets everything else. The Island draws the headline rather
-    /// than a row, and a card from a relay too old to send rows has no rows at
-    /// all; for both of those the App Group file is still the only thing on this
-    /// phone that has ever held a trace, and this function is already reading
-    /// it.
-    var leaderTrace: Data? = nil
-    /// The whole fleet's buckets, summed on the runner. §07's compact Island:
-    /// "Count leading, fleet trace trailing, thirteen buckets like every other."
-    var fleetTrace: Data? = nil
-
-    /// What the whole fleet has changed, when the relay counted it: `+391 −112`.
-    ///
-    /// Only ever off the PUSH. The snapshot has per-agent counts and summing
-    /// them here would be this extension inventing a total out of a file that
-    /// may be missing agents — the same objection that kept counts off the
-    /// content state until something could write them honestly. `nil` means
-    /// nobody measured, which is not zero.
-    var insertions: Int? = nil
-    var deletions: Int? = nil
-
-    /// Nothing known, which draws nothing.
-    static let unknown = FleetTail(others: 0, blocked: 0, qualified: false)
-
-    /// The tail, from the relay's roster if it sent one and from this phone's
-    /// snapshot otherwise.
-    ///
-    /// **The push wins, and the reason is not freshness alone.** The snapshot is
-    /// assembled from whatever this phone has been told — pushes it received,
-    /// polls the app made while it was open — so on the phone this feature is
-    /// actually for, one in a pocket that has not run the app today, it is
-    /// missing agents or missing entirely. That is what `complete` and
-    /// `confidence(in:at:)` have been qualifying all along, and why the tail has
-    /// been hedging a number it could not stand behind.
-    ///
-    /// The relay counted every runner's notices for this account, at the moment
-    /// it composed this push. So when it says a number, the number is not
-    /// qualified: there is nothing left for the hedge to be about.
-    ///
-    /// A relay too old to have a roster says nothing, `knowsFleet` is false, and
-    /// this falls all the way back to the snapshot and the wording it has always
-    /// used. That fallback is the compatibility story and not a nicety — an app
-    /// updated ahead of its relay is the ordinary case here.
-    static func current(
-        for state: AgentActivityAttributes.ContentState, now: Date = Date()
-    ) -> FleetTail {
-        let snapshot = SnapshotStore.read()
-        if state.knowsFleet {
-            // Everybody but the one agent this card names.
-            //
-            // Counted here rather than taken from the relay's own `more`, which
-            // is the fleet minus the ROWS it sent. That is the right number for
-            // a card that draws a line each and the wrong one for this one,
-            // which draws the headline and counts the rest: four rows sent
-            // against six agents would put "+3 more" under a card naming one of
-            // them. `AgentCardLayout.hidden` is where `more` is read, by the
-            // card that has the rows to subtract — this arithmetic stays for
-            // the presentations that do not.
-            //
-            // `review` is left out, exactly as the snapshot branch below leaves
-            // out `done`: a finished run is not "more working", and counting it
-            // would make the card claim an idle fleet is busy.
-            let headlined = AgentStatus(state.status)
-            let onTheCard = headlined == .blocked || headlined == .working ? 1 : 0
-            let others = max(0, state.blocked + state.working - onTheCard)
-            // The headline is on the card, so it is not one of the OTHERS that
-            // need somebody — which is what this half of the line says.
-            let waiting = max(0, state.blocked - (headlined == .blocked ? 1 : 0))
-            return FleetTail(
-                others: others,
-                blocked: waiting,
-                // Counted by the one thing that sees every runner. Nothing to
-                // qualify.
-                qualified: false,
-                // The traces are still the snapshot's here, because the
-                // presentations this branch serves draw the headline rather
-                // than a row and the pushed traces belong to rows. See
-                // `leaderTrace`.
-                leaderTrace: snapshot?.agents.first { $0.id == state.terminal }?.trace,
-                fleetTrace: snapshot?.fleetTrace,
-                insertions: state.insertions,
-                deletions: state.deletions)
-        }
-
-        guard let snapshot, snapshot.capturedAt.timeIntervalSince1970 > 0 else { return .unknown }
-        let leader = state.terminal
-
-        // Both traces, read before the early return below. A fleet whose only
-        // agent IS the leader has no tail and still has a history, and the two
-        // questions are not the same one — `others` counts everybody else and
-        // the trace is about time.
-        let leaderTrace = snapshot.agents.first { $0.id == leader }?.trace
-
-        // `done` agents are not "more working" — they are finished runs the
-        // snapshot has not dropped yet, and counting them would make a card
-        // claim an idle fleet is busy.
-        let rest = snapshot.agents.filter {
-            $0.id != leader && ($0.status == "working" || $0.status == "blocked")
-        }
-        guard !rest.isEmpty else {
-            return FleetTail(
-                others: 0, blocked: 0, qualified: false,
-                leaderTrace: leaderTrace, fleetTrace: snapshot.fleetTrace)
-        }
-
-        return FleetTail(
-            others: rest.count,
-            blocked: rest.filter { $0.status == "blocked" }.count,
-            // Blocked is latched, so `confidence` only ever withdraws a
-            // `working` claim — which is why the words below qualify the verb
-            // and not the number. An incomplete snapshot is the other half, and
-            // it qualifies the number instead: there may be agents in it that
-            // nothing has ever told this phone about.
-            qualified: !snapshot.complete
-                || rest.contains { snapshot.confidence(in: $0, at: now) == .lastSeen },
-            leaderTrace: leaderTrace,
-            // Carried, never summed here. The rows do not share a window width,
-            // so adding bucket 4 of a five-minute row to bucket 4 of a two-hour
-            // one would add two different spans of time — see
-            // `FleetSnapshot.fleetTrace`, which is the runner's own sum.
-            fleetTrace: snapshot.fleetTrace)
-    }
-
-    /// The one line the card gives everyone else, or nil when there is nobody
-    /// else to give it to.
-    ///
-    /// "+3 more working" and "+3 more · 1 needs you", because those are the two
-    /// questions a lock screen answers: how much is running, and is any of it
-    /// waiting on me. The blocked half wins the second clause even though the
-    /// leader is almost always the blocked one — a second agent blocking while
-    /// the first is unanswered is the case where a person most needs to know the
-    /// card is not the whole story.
-    var line: String? {
-        guard others > 0 else { return nil }
-        if blocked > 0 {
-            return "+\(others) more · \(blocked) need\(blocked == 1 ? "s" : "") you"
-        }
-        // "+6 more · +391 −112" when the relay counted the diff, which is what
-        // the design asks the tail to say. It replaces the verb rather than
-        // joining it: the line is one caption on a card capped at about 160
-        // points, and "+6 more working · +391 −112" is the width at which the
-        // half that matters gets truncated away.
-        //
-        // A minus sign, U+2212, and not a hyphen — the same character every
-        // other diff count in this product uses, so a card and a sidebar row do
-        // not disagree about a number's shape.
-        if let plus = insertions, let minus = deletions {
-            return "+\(others) more · +\(plus) −\(minus)"
-        }
-        return qualified ? "+\(others) more last seen working" : "+\(others) more working"
     }
 }
 
@@ -825,7 +646,12 @@ private struct LeaderRow: View {
                     // line: a clock counting an agent that is stopped is the
                     // least useful thing on a card whose buttons could start it
                     // again.
-                    if let started = state.startedAt, !ask.isPresent {
+                    //
+                    // And on a stale card for a working leader: see
+                    // `AgentCardLeader`.
+                    if let started = state.startedAt, !ask.isPresent,
+                        AgentCardLeader.isStated(status: state.status, stale: stale)
+                    {
                         Text(started, style: .timer)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.tertiary)
@@ -885,13 +711,18 @@ private struct StatusBadge: View {
     /// is §03's header diameter.
     var size: GlanceMarkSize = .header
     /// ActivityKit's `isStale`. See `AgentStatus.mark(stale:)`.
-    var stale = false
+    let stale: Bool
 
     var body: some View {
         VStack(spacing: 4) {
             GlanceMarkView(status.mark(stale: stale), size: size)
-            Text(status.title)
-                .glanceType(.monoFigures)
+            // No word for a leader the card can't state: "Working" beside a
+            // "can't say" ring read as a contradiction, to the eye and to
+            // VoiceOver, which now hears the ring's "Can’t say" alone.
+            if AgentCardLeader.isStated(status: status.rawValue, stale: stale) {
+                Text(status.title)
+                    .glanceType(.monoFigures)
+            }
         }
     }
 }
@@ -923,7 +754,7 @@ extension AgentStatus {
     /// now, so it becomes "can't say", the dashed ring with no core that
     /// `AgentCardLayout` draws for the same card; blocked and finished hold.
     func mark(stale: Bool) -> GlanceMark {
-        stale && self == .working ? .unsaid : mark
+        AgentCardLeader.isStated(status: rawValue, stale: stale) ? mark : .unsaid
     }
 
     /// The color for the WORDS beside the mark. The mark colors itself.

@@ -517,7 +517,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// caller knows; the card's rows don't, and leave it true. A runner that
     /// isn't answering can't vouch for a claim about the present at any age.
     public static func confidence(
-        status: String, heard age: TimeInterval, answering: Bool = true
+        status: String, heard age: TimeInterval, answering: Bool
     ) -> Confidence {
         if isLatched(status) { return .known }
         guard answering else { return .lastSeen }

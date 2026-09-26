@@ -170,7 +170,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
 // MARK: - The card
 
 @Test func theCardDrawsTwoRowsAndCountsEverybodyElse() throws {
-    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow))
+    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: false))
 
     // Two, and the wire's ceiling is a different number: `ROWS_SHOWN` is four
     // and the byte arithmetic beside it allows eight. This limit is the card's
@@ -185,7 +185,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
 }
 
 @Test func theHeaderIsTheFleetInTheOrderItIsUrgentIn() throws {
-    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow))
+    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: false))
     #expect(layout.title == "2 need you")
     #expect(layout.counts == "3 to review · 3 in flight")
     #expect(layout.mark == GlanceMark(attention: .needsYou, core: .atAPrompt))
@@ -200,7 +200,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
 /// Mutation: the header's working clause without `&& !stale`. Red: the counts
 /// read `3 to review · 3 in flight`.
 @Test func aStaleCardStopsClaimingAnythingIsInFlight() throws {
-    let fresh = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow))
+    let fresh = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: false))
     let stale = try #require(
         AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: true))
 
@@ -243,7 +243,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
         {"status":"working","detail":"","blocked":0,"review":0,"working":4,"more":0,
          "rows":[{"terminal":"a","label":"a","status":"working","detail":""}]}
         """)
-    let layout = try #require(AgentCardLayout(state: quiet, now: cardNow))
+    let layout = try #require(AgentCardLayout(state: quiet, now: cardNow, stale: false))
     #expect(layout.title == "4 in flight")
     #expect(layout.counts == nil)
     #expect(layout.mark == GlanceMark(attention: .quiet, core: .producing))
@@ -253,7 +253,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
         {"status":"blocked","detail":"","blocked":1,"review":0,"working":0,"more":0,
          "rows":[{"terminal":"a","label":"a","status":"blocked","detail":""}]}
         """)
-    #expect(try #require(AgentCardLayout(state: one, now: cardNow)).title == "1 needs you")
+    #expect(try #require(AgentCardLayout(state: one, now: cardNow, stale: false)).title == "1 needs you")
 }
 
 @Test func aFleetWithNothingInAnyTierStillHasATitle() throws {
@@ -265,7 +265,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
         {"status":"done","detail":"","blocked":0,"review":0,"working":0,"more":0,
          "rows":[{"terminal":"a","label":"a","status":"done","detail":""}]}
         """)
-    let layout = try #require(AgentCardLayout(state: idle, now: cardNow))
+    let layout = try #require(AgentCardLayout(state: idle, now: cardNow, stale: false))
     #expect(layout.title == "Your agents")
     #expect(layout.counts == nil)
     #expect(layout.line == nil, "nothing hidden and nothing measured is nothing to say")
@@ -283,7 +283,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
         """)
     #expect(old.rows.isEmpty)
     #expect(old.more == -1, "an absent count is not zero")
-    #expect(AgentCardLayout(state: old, now: cardNow) == nil)
+    #expect(AgentCardLayout(state: old, now: cardNow, stale: false) == nil)
 
     // And rows without counts, which nothing sends but which must not put a
     // header on the card claiming a fleet of minus one.
@@ -293,7 +293,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
          "rows":[{"terminal":"a","label":"a","status":"working","detail":""}]}
         """)
     #expect(!countless.knowsFleet)
-    #expect(AgentCardLayout(state: countless, now: cardNow) == nil)
+    #expect(AgentCardLayout(state: countless, now: cardNow, stale: false) == nil)
 }
 
 // MARK: - The figures on a row
@@ -341,7 +341,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
 // MARK: - What the marks say
 
 @Test func stateLivesInTheRingAndDecaysOnTheOneRuleTheProductHas() throws {
-    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow))
+    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: false))
     // Blocked is latched: an agent stopped twenty seconds ago and one stopped
     // an hour ago are both stopped, so the ring stays solid.
     #expect(layout.rows[0].mark == GlanceMark(attention: .needsYou, core: .atAPrompt))
@@ -353,18 +353,18 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
     let aged = try #require(
         AgentCardLayout(
             state: try decode(fleetPush()),
-            now: cardNow.addingTimeInterval(FleetSnapshot.staleAfter)))
+            now: cardNow.addingTimeInterval(FleetSnapshot.staleAfter), stale: false))
     #expect(aged.rows[0].mark.link == .live, "blocked holds at any age")
     #expect(aged.rows[1].mark.link == .broken, "working does not")
     // And the rule is the snapshot's own, not a second copy of it.
     #expect(
-        FleetSnapshot.confidence(status: "working", heard: FleetSnapshot.staleAfter)
+        FleetSnapshot.confidence(status: "working", heard: FleetSnapshot.staleAfter, answering: true)
             == .lastSeen)
-    #expect(FleetSnapshot.confidence(status: "blocked", heard: 86400) == .known)
+    #expect(FleetSnapshot.confidence(status: "blocked", heard: 86400, answering: true) == .known)
 }
 
 @Test func theTailDrawsARingPerAgentInTierOrder() throws {
-    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow))
+    let layout = try #require(AgentCardLayout(state: try decode(fleetPush()), now: cardNow, stale: false))
     // Two blocked, three to review, three in flight — the header's own three
     // numbers, said again as marks.
     #expect(layout.rings.count == 8)
@@ -383,7 +383,7 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
         {"status":"working","detail":"","blocked":0,"review":0,"working":40,"more":39,
          "rows":[{"terminal":"a","label":"a","status":"working","detail":""}]}
         """)
-    let layout = try #require(AgentCardLayout(state: big, now: cardNow))
+    let layout = try #require(AgentCardLayout(state: big, now: cardNow, stale: false))
     #expect(layout.rings.count == AgentCardLayout.ringsDrawn)
     #expect(AgentCardLayout.ringsDrawn == 12)
     // The count itself is never truncated — it is in the header and in the
@@ -399,10 +399,69 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
              \(totals ? "\"insertions\":391,\"deletions\":112," : "")
              "rows":[{"terminal":"a","label":"a","status":"working","detail":""}]}
             """
-        return try #require(AgentCardLayout(state: try decode(json), now: cardNow)).line
+        return try #require(AgentCardLayout(state: try decode(json), now: cardNow, stale: false)).line
     }
     #expect(try line(more: 6, totals: true) == "+6 more · +391 −112")
     #expect(try line(more: 6, totals: false) == "+6 more")
     #expect(try line(more: 0, totals: true) == "+391 −112")
     #expect(try line(more: 0, totals: false) == nil)
+}
+
+// MARK: - The headline presentations: the Island, and the old-relay card
+
+/// **A stale card's tail hedges its verb.** The expanded Island counts the
+/// relay's working agents into "+N more working"; an hour after the last push
+/// that count is who the relay last knew about, not who is working. Qualified,
+/// the line says "last seen working" and draws at 60%, as the snapshot's hedge
+/// always has.
+///
+/// Mutation: the relay branch's `qualified: stale` back to `false`. Red.
+@Test func aStaleTailSaysLastSeenWorking() throws {
+    let working = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":4,"more":0}
+        """)
+    let fresh = FleetTail.current(for: working, snapshot: nil, now: cardNow, stale: false)
+    #expect(fresh.others == 3)
+    #expect(!fresh.qualified)
+    #expect(fresh.line == "+3 more working")
+
+    let stale = FleetTail.current(for: working, snapshot: nil, now: cardNow, stale: true)
+    #expect(stale.others == 3, "the count is who the relay last knew about")
+    #expect(stale.qualified)
+    #expect(stale.line == "+3 more last seen working")
+}
+
+/// The same for a card from a relay too old to count, which falls back to the
+/// App Group snapshot: a stale card hedges even a fresh snapshot.
+///
+/// Mutation: the snapshot branch's `stale ||` dropped. Red.
+@Test func aStaleOldRelayCardHedgesItsSnapshotTail() {
+    let state = AgentCardState(terminal: "lead", status: "working", detail: "")
+    func agent(_ id: String) -> FleetSnapshot.Agent {
+        FleetSnapshot.Agent(
+            id: id, label: id, machine: "studio", status: "working", glyph: "", headline: "",
+            line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: nil,
+            observedAt: cardNow)
+    }
+    let snapshot = FleetSnapshot(
+        agents: [agent("lead"), agent("a"), agent("b")], capturedAt: cardNow, complete: true)
+
+    let fresh = FleetTail.current(for: state, snapshot: snapshot, now: cardNow, stale: false)
+    #expect(fresh.line == "+2 more working")
+    let stale = FleetTail.current(for: state, snapshot: snapshot, now: cardNow, stale: true)
+    #expect(stale.line == "+2 more last seen working")
+}
+
+/// The leader's word and clock go on a stale card only for a working leader;
+/// needs you and finished hold. An unrecognized word reads as working, as
+/// `AgentStatus` folds it.
+///
+/// Mutation: `isStated` returning `!stale`. Red: blocked loses its word.
+@Test func aStaleCardStopsStatingOnlyAWorkingLeader() {
+    #expect(AgentCardLeader.isStated(status: "working", stale: false))
+    #expect(!AgentCardLeader.isStated(status: "working", stale: true))
+    #expect(!AgentCardLeader.isStated(status: "something-newer", stale: true))
+    #expect(AgentCardLeader.isStated(status: "blocked", stale: true))
+    #expect(AgentCardLeader.isStated(status: "done", stale: true))
 }

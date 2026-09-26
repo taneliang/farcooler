@@ -19,12 +19,12 @@ import Testing
 /// spec, which is the exact mistake §03 rules out — "Stroke is a literal value
 /// per diameter, never a percentage."
 struct GlanceMarkTests {
-    /// §03: "On a phone: diameter 8pt in a ribbon, 10pt in a row, 11pt in a
-    /// header, 15pt as a lone indicator … On a wrist … 14pt in a row … 22pt as
-    /// a lone indicator … Six sizes across the two bodies, no others."
     /// "Can't say" is a claim about now withdrawn, and nothing else: the quiet
     /// tier goes dashed with no core, needs-you and to-review hold, and a
-    /// runner that's answering changes nothing. VoiceOver hears "unreachable".
+    /// runner that's answering changes nothing. VoiceOver hears "Can’t say":
+    /// the runner may be fine and only the news is missing.
+    ///
+    /// Mutation (phrase): the `.quiet` arm saying "\(tier), unreachable". Red.
     ///
     /// Mutation: `said(answering:)` testing `attention != .needsYou` instead
     /// of `== .quiet`. Red: to-review is withdrawn.
@@ -45,9 +45,17 @@ struct GlanceMarkTests {
             GlanceMark(attention: .toReview, core: nil),
         ]
         for mark in latched { #expect(mark.said(answering: false) == mark) }
-        #expect(GlanceMark.unsaid.phrase == "Nothing wanted, unreachable")
+        #expect(GlanceMark.unsaid.phrase == "Can’t say")
+        #expect(
+            GlanceMark(attention: .quiet, core: .producing, link: .broken).phrase == "Can’t say")
+        #expect(
+            GlanceMark(attention: .toReview, core: nil, link: .broken).phrase
+                == "To review, unreachable")
     }
 
+    /// §03: "On a phone: diameter 8pt in a ribbon, 10pt in a row, 11pt in a
+    /// header, 15pt as a lone indicator … On a wrist … 14pt in a row … 22pt as
+    /// a lone indicator … Six sizes across the two bodies, no others."
     @Test func thereAreSixDiametersAndNoOthers() {
         #expect(GlanceMarkSize.allCases.count == 6)
         #expect(GlanceMarkSize.allCases.map(\.diameter) == [8, 10, 11, 15, 14, 22])

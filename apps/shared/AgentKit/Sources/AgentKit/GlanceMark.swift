@@ -258,7 +258,14 @@ public struct GlanceMark: Hashable, Sendable {
             case .toReview: "To review"
             case .quiet: "Nothing wanted"
             }
-        if link == .broken { return "\(tier), unreachable" }
+        // A quiet ring that's broken is a claim about now nobody can make: a
+        // runner that isn't answering, a card the relay has gone quiet on, or
+        // an hour without news. "Unreachable" was wrong for most of those —
+        // the runner may be fine and only the news is missing — and "Nothing
+        // wanted" is a claim too. The words say what the dash says.
+        if link == .broken {
+            return attention == .quiet ? "Can’t say" : "\(tier), unreachable"
+        }
         switch core {
         case .producing: return "\(tier), producing"
         case .atAPrompt: return "\(tier), at a prompt"

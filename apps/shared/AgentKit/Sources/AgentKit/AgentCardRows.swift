@@ -213,7 +213,7 @@ public struct AgentCardRow: Codable, Hashable, Sendable, Identifiable {
     /// `answering` false is a card the relay has stopped vouching for — see
     /// `AgentCardLayout.init(state:now:stale:)` — and then working is "can't
     /// say" at any age, as it is for a runner that isn't answering.
-    public func confidence(at now: Date, answering: Bool = true) -> FleetSnapshot.Confidence {
+    public func confidence(at now: Date, answering: Bool) -> FleetSnapshot.Confidence {
         FleetSnapshot.confidence(status: status, heard: age(at: now), answering: answering)
     }
 }
@@ -332,7 +332,7 @@ public struct AgentCardLayout: Sendable, Equatable {
     /// and to-review hold, as they do at any age. The card is not ended: the
     /// relay's own rule is that a stale date is not a dismissal date, because
     /// a card that vanished on a timer could take a blocked agent with it.
-    public init?(state: AgentCardState, now: Date = Date(), stale: Bool = false) {
+    public init?(state: AgentCardState, now: Date = Date(), stale: Bool) {
         guard !state.rows.isEmpty, state.knowsFleet else { return nil }
 
         let drawn = state.rows.prefix(Self.rowsDrawn)
@@ -564,5 +564,223 @@ public struct AgentCardLayout: Sendable, Equatable {
             }
         }
         return marks
+    }
+}
+
+// MARK: - The headline presentations
+
+/// Everyone the HEADLINE card is not leading with, counted rather than listed.
+///
+/// **Two surfaces still want this and the lock screen card is no longer one of
+/// them.** The Dynamic Island's expanded presentation is a few lines tall and
+/// presents one agent, and a card from a relay too old to send rows has one
+/// agent to present — both of those are "lead with one and count the rest",
+/// which is what this answers. `AgentCardLayout` is the other shape, where the
+/// count is `more` off the push and there is nothing to hedge.
+///
+/// **Read from the snapshot, not from the push.** The relay stores no fleet and
+/// a daemon knows only its own runner, so neither can count this honestly; the
+/// snapshot in the App Group is the only thing on the phone that has ever seen
+/// the whole fleet. That it is a local file read on a render path is fine — it
+/// is one small JSON, and `FleetWidget`, in the same widget extension, reads
+/// it the same way on every timeline.
+///
+/// **It qualifies rather than asserts**, which is the rule every surface outside
+/// the app follows. Two separate things make it unsure and they are not the
+/// same: `complete` false means the snapshot was assembled from pushes and may
+/// not know about every agent, so the count can be LOW; a working agent past
+/// `FleetSnapshot.staleAfter` means the snapshot no longer vouches for what that
+/// agent is doing. Either one drops the line to the 60% treatment
+/// `FleetWidget` and `WatchFleetWidget` already use for "last seen", and the
+/// second one puts the words there too.
+///
+/// Nothing at all when no snapshot has ever been written. `FleetSnapshot.empty`
+/// is the absence of an observation, not an empty fleet, and a phone that has
+/// never opened the app may not claim the leader is the only agent there is.
+public struct FleetTail: Equatable, Sendable {
+    /// How many other agents are working or waiting.
+    public let others: Int
+    /// How many of those are waiting on a person.
+    public let blocked: Int
+    /// Whether this is a claim or a recollection.
+    public let qualified: Bool
+    /// The leader's own thirteen buckets, as the wire's bytes.
+    ///
+    /// **Off the snapshot, for the two presentations that have no row to read
+    /// one from.** The push carries a trace per ROW now — 66 bytes of base64,
+    /// see `AgentCardRow.trace` — so the rows card gets its history from the
+    /// same place it gets everything else. The Island draws the headline rather
+    /// than a row, and a card from a relay too old to send rows has no rows at
+    /// all; for both of those the App Group file is still the only thing on this
+    /// phone that has ever held a trace, and this function is already reading
+    /// it.
+    public var leaderTrace: Data? = nil
+    /// The whole fleet's buckets, summed on the runner. §07's compact Island:
+    /// "Count leading, fleet trace trailing, thirteen buckets like every other."
+    public var fleetTrace: Data? = nil
+
+    /// What the whole fleet has changed, when the relay counted it: `+391 −112`.
+    ///
+    /// Only ever off the PUSH. The snapshot has per-agent counts and summing
+    /// them here would be this extension inventing a total out of a file that
+    /// may be missing agents — the same objection that kept counts off the
+    /// content state until something could write them honestly. `nil` means
+    /// nobody measured, which is not zero.
+    public var insertions: Int? = nil
+    public var deletions: Int? = nil
+
+    /// Nothing known, which draws nothing.
+    public static let unknown = FleetTail(others: 0, blocked: 0, qualified: false)
+
+    /// The tail, from the relay's roster if it sent one and from this phone's
+    /// snapshot otherwise.
+    ///
+    /// **The push wins, and the reason is not freshness alone.** The snapshot is
+    /// assembled from whatever this phone has been told — pushes it received,
+    /// polls the app made while it was open — so on the phone this feature is
+    /// actually for, one in a pocket that has not run the app today, it is
+    /// missing agents or missing entirely. That is what `complete` and
+    /// `confidence(in:at:)` have been qualifying all along, and why the tail has
+    /// been hedging a number it could not stand behind.
+    ///
+    /// The relay counted every runner's notices for this account, at the moment
+    /// it composed this push. So when it says a number, the number is not
+    /// qualified: there is nothing left for the hedge to be about.
+    ///
+    /// A relay too old to have a roster says nothing, `knowsFleet` is false, and
+    /// this falls all the way back to the snapshot and the wording it has always
+    /// used. That fallback is the compatibility story and not a nicety — an app
+    /// updated ahead of its relay is the ordinary case here.
+    ///
+    /// **`stale` is ActivityKit's `isStale`**, the relay's hour of silence (see
+    /// `AgentCardLayout.init(state:now:stale:)`). The number can stand — it is
+    /// who the relay last knew about — but the verb can't: a stale tail is
+    /// qualified, "+3 more last seen working" at the 60% the snapshot's hedge
+    /// already draws. The rows card drops "in flight" for the same card.
+    ///
+    /// `snapshot` is the App Group file, read by the caller, so this decides and
+    /// a test can ask it.
+    public static func current(
+        for state: AgentCardState, snapshot: FleetSnapshot?, now: Date = Date(),
+        stale: Bool
+    ) -> FleetTail {
+        if state.knowsFleet {
+            // Everybody but the one agent this card names.
+            //
+            // Counted here rather than taken from the relay's own `more`, which
+            // is the fleet minus the ROWS it sent. That is the right number for
+            // a card that draws a line each and the wrong one for this one,
+            // which draws the headline and counts the rest: four rows sent
+            // against six agents would put "+3 more" under a card naming one of
+            // them. `AgentCardLayout.hidden` is where `more` is read, by the
+            // card that has the rows to subtract — this arithmetic stays for
+            // the presentations that do not.
+            //
+            // `review` is left out, exactly as the snapshot branch below leaves
+            // out `done`: a finished run is not "more working", and counting it
+            // would make the card claim an idle fleet is busy.
+            // `AgentStatus`'s folding, over the word: anything that isn't
+            // blocked or done reads as working, so it is on the card too.
+            let onTheCard = state.status == "done" ? 0 : 1
+            let others = max(0, state.blocked + state.working - onTheCard)
+            // The headline is on the card, so it is not one of the OTHERS that
+            // need somebody — which is what this half of the line says.
+            let waiting = max(0, state.blocked - (state.status == "blocked" ? 1 : 0))
+            return FleetTail(
+                others: others,
+                blocked: waiting,
+                // Counted by the one thing that sees every runner. Nothing to
+                // qualify, until the relay has gone quiet on the card.
+                qualified: stale,
+                // The traces are still the snapshot's here, because the
+                // presentations this branch serves draw the headline rather
+                // than a row and the pushed traces belong to rows. See
+                // `leaderTrace`.
+                leaderTrace: snapshot?.agents.first { $0.id == state.terminal }?.trace,
+                fleetTrace: snapshot?.fleetTrace,
+                insertions: state.insertions,
+                deletions: state.deletions)
+        }
+
+        guard let snapshot, snapshot.capturedAt.timeIntervalSince1970 > 0 else { return .unknown }
+        let leader = state.terminal
+
+        // Both traces, read before the early return below. A fleet whose only
+        // agent IS the leader has no tail and still has a history, and the two
+        // questions are not the same one — `others` counts everybody else and
+        // the trace is about time.
+        let leaderTrace = snapshot.agents.first { $0.id == leader }?.trace
+
+        // `done` agents are not "more working" — they are finished runs the
+        // snapshot has not dropped yet, and counting them would make a card
+        // claim an idle fleet is busy.
+        let rest = snapshot.agents.filter {
+            $0.id != leader && ($0.status == "working" || $0.status == "blocked")
+        }
+        guard !rest.isEmpty else {
+            return FleetTail(
+                others: 0, blocked: 0, qualified: stale,
+                leaderTrace: leaderTrace, fleetTrace: snapshot.fleetTrace)
+        }
+
+        return FleetTail(
+            others: rest.count,
+            blocked: rest.filter { $0.status == "blocked" }.count,
+            // Blocked is latched, so `confidence` only ever withdraws a
+            // `working` claim — which is why the words below qualify the verb
+            // and not the number. An incomplete snapshot is the other half, and
+            // it qualifies the number instead: there may be agents in it that
+            // nothing has ever told this phone about.
+            qualified: stale || !snapshot.complete
+                || rest.contains { snapshot.confidence(in: $0, at: now) == .lastSeen },
+            leaderTrace: leaderTrace,
+            // Carried, never summed here. The rows do not share a window width,
+            // so adding bucket 4 of a five-minute row to bucket 4 of a two-hour
+            // one would add two different spans of time — see
+            // `FleetSnapshot.fleetTrace`, which is the runner's own sum.
+            fleetTrace: snapshot.fleetTrace)
+    }
+
+    /// The one line the card gives everyone else, or nil when there is nobody
+    /// else to give it to.
+    ///
+    /// "+3 more working" and "+3 more · 1 needs you", because those are the two
+    /// questions a lock screen answers: how much is running, and is any of it
+    /// waiting on me. The blocked half wins the second clause even though the
+    /// leader is almost always the blocked one — a second agent blocking while
+    /// the first is unanswered is the case where a person most needs to know the
+    /// card is not the whole story.
+    public var line: String? {
+        guard others > 0 else { return nil }
+        if blocked > 0 {
+            return "+\(others) more · \(blocked) need\(blocked == 1 ? "s" : "") you"
+        }
+        // "+6 more · +391 −112" when the relay counted the diff, which is what
+        // the design asks the tail to say. It replaces the verb rather than
+        // joining it: the line is one caption on a card capped at about 160
+        // points, and "+6 more working · +391 −112" is the width at which the
+        // half that matters gets truncated away.
+        //
+        // A minus sign, U+2212, and not a hyphen — the same character every
+        // other diff count in this product uses, so a card and a sidebar row do
+        // not disagree about a number's shape.
+        if let plus = insertions, let minus = deletions {
+            return "+\(others) more · +\(plus) −\(minus)"
+        }
+        return qualified ? "+\(others) more last seen working" : "+\(others) more working"
+    }
+}
+
+/// Whether the headline presentations — the Dynamic Island's expanded view and
+/// the card a relay too old to send rows gets — may still state their leader's
+/// status as now: its word beside the badge, and its turn clock.
+///
+/// Not on a stale card, for a leader that's working: the relay has been quiet
+/// for an hour, and "Working" with a clock still counting is the one claim the
+/// card can't stand behind. The badge goes to "can't say" and drops its word,
+/// and the clock goes. Needs you and finished hold, as they do at any age.
+public enum AgentCardLeader {
+    public static func isStated(status: String, stale: Bool) -> Bool {
+        !stale || FleetSnapshot.isLatched(status)
     }
 }

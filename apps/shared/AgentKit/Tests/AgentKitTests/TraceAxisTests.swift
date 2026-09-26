@@ -260,7 +260,7 @@ struct TraceAxisTests {
                       "trace":"\(long.base64EncodedString())"}]}
             """
         let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
-        let card = try #require(AgentCardLayout(state: state))
+        let card = try #require(AgentCardLayout(state: state, stale: false))
 
         #expect(card.span == .sixHours, "the longer-running agent sets the axis")
         #expect(card.rows.count == 2)
@@ -300,7 +300,7 @@ struct TraceAxisTests {
              "rows":[{"terminal":"a","label":"quick","status":"working","detail":""}]}
             """
         let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
-        let card = try #require(AgentCardLayout(state: state))
+        let card = try #require(AgentCardLayout(state: state, stale: false))
         #expect(card.span == nil)
         #expect(card.rows.first?.trace == nil)
     }
@@ -375,7 +375,7 @@ struct TraceAxisTests {
                       "trace":"\(long.base64EncodedString())","traceAnchor":998,"updatedAt":1800600}]}
             """
         let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
-        let card = try #require(AgentCardLayout(state: state))
+        let card = try #require(AgentCardLayout(state: state, stale: false))
         #expect(card.span == .sixHours)
         #expect(card.rows.first?.row.traceAnchor == 6002, "the anchor did not survive the decode")
 
@@ -411,7 +411,7 @@ struct TraceAxisTests {
                       "trace":"\(long.base64EncodedString())"}]}
             """
         let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
-        let card = try #require(AgentCardLayout(state: state))
+        let card = try #require(AgentCardLayout(state: state, stale: false))
 
         #expect(card.rows.first?.trace?.code(12) == 7168, "the anchored row was not placed")
         let old = try #require(card.rows.last?.trace)
@@ -451,7 +451,7 @@ struct TraceAxisTests {
                      \(second)]}
             """
         let state = try JSONDecoder().decode(AgentCardState.self, from: Data(json.utf8))
-        return try #require(AgentCardLayout(state: state))
+        return try #require(AgentCardLayout(state: state, stale: false))
     }
 
     /// A thirty-minute row of fives, anchored at `anchor` and heard at 1,800,600.
