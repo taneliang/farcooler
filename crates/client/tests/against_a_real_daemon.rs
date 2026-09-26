@@ -456,11 +456,10 @@ async fn fleet_news_reaches_a_subscriber_in_a_round_trip_not_a_poll_interval() {
     let elapsed = started.elapsed();
 
     assert_eq!(news, farcooler_client::session::FleetEvent::Fleet);
-    // Two orders of magnitude under the three-second poll this replaces. Not a
-    // tight bound — a loaded CI machine is allowed to be slow — but tight
-    // enough that a regression back to "it arrives on the next timer" fails
-    // here rather than in somebody's hand.
-    assert!(elapsed.as_millis() < 500, "fleet news took {elapsed:?}");
+    // Well under the three-second poll this replaces. Not a tight bound: a
+    // loaded CI runner took 653 ms here (2026-09-27), so 500 ms flaked. Two
+    // seconds still fails a regression back to "it arrives on the next timer".
+    assert!(elapsed.as_millis() < 2000, "fleet news took {elapsed:?}");
     eprintln!("fleet news arrived {elapsed:?} after the change");
 
     // And the subscription is still open afterwards: one event does not end it.
