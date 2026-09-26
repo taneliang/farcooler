@@ -750,6 +750,15 @@ public struct FleetTail: Equatable, Sendable {
     /// leader is almost always the blocked one — a second agent blocking while
     /// the first is unanswered is the case where a person most needs to know the
     /// card is not the whole story.
+    /// Whether the compact Island's "+N" is dimmed: only on a stale card, and
+    /// only when there is a count to hedge. The count is who the relay last
+    /// knew about; a leader alone is the badge's business, and a blocked one
+    /// holds at any age. A card that isn't stale draws as it always did,
+    /// whatever the snapshot hedge says about the expanded line.
+    public func dimsCompactCount(stale: Bool) -> Bool {
+        stale && others > 0
+    }
+
     public var line: String? {
         guard others > 0 else { return nil }
         if blocked > 0 {

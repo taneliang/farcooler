@@ -249,9 +249,10 @@ struct AgentActivityWidget: Widget {
                     )
                     .font(.caption2)
                     .foregroundStyle(status.tint)
-                    // The same hedge as the expanded tail's line: on a stale
-                    // card the count is who the relay last knew about.
-                    .opacity(tail.qualified ? 0.6 : 1)
+                    // On a stale card with a count beside the name, the count
+                    // is who the relay last knew about. See
+                    // `FleetTail.dimsCompactCount`.
+                    .opacity(tail.dimsCompactCount(stale: context.isStale) ? 0.6 : 1)
                     .lineLimit(1)
                     .frame(maxWidth: 74)
                 }

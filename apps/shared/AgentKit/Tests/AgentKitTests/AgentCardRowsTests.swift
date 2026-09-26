@@ -465,3 +465,39 @@ private let cardNow = Date(timeIntervalSince1970: 1_755_000_000)
     #expect(AgentCardLeader.isStated(status: "blocked", stale: true))
     #expect(AgentCardLeader.isStated(status: "done", stale: true))
 }
+
+/// The compact Island's "+N" dims only on a stale card with a count beside the
+/// leader. A card that isn't stale is unchanged even when the old-relay
+/// snapshot hedges its line, and a stale leader alone (a blocked one, say)
+/// keeps full strength.
+///
+/// Mutation: `dimsCompactCount` returning `qualified`. Red: the hedged
+/// snapshot tail on a card that isn't stale dims.
+@Test func theCompactCountDimsOnlyOnAStaleCardWithACount() throws {
+    let working = try decode(
+        """
+        {"status":"working","detail":"","blocked":0,"review":0,"working":4,"more":0}
+        """)
+    let stale = FleetTail.current(for: working, snapshot: nil, now: cardNow, stale: true)
+    #expect(stale.dimsCompactCount(stale: true))
+
+    let alone = try decode(
+        """
+        {"status":"blocked","detail":"","blocked":1,"review":0,"working":0,"more":0}
+        """)
+    let lone = FleetTail.current(for: alone, snapshot: nil, now: cardNow, stale: true)
+    #expect(lone.others == 0)
+    #expect(!lone.dimsCompactCount(stale: true), "a blocked leader alone holds")
+
+    // An old relay's card, not stale, over an incomplete snapshot: the line
+    // is hedged, and the compact count is not.
+    let old = AgentCardState(terminal: "lead", status: "working", detail: "")
+    let agent = FleetSnapshot.Agent(
+        id: "a", label: "a", machine: "studio", status: "working", glyph: "", headline: "",
+        line: "", feed: [], rank: 0, turnFailed: false, activityChangedAt: nil,
+        observedAt: cardNow)
+    let partial = FleetSnapshot(agents: [agent], capturedAt: cardNow, complete: false)
+    let hedged = FleetTail.current(for: old, snapshot: partial, now: cardNow, stale: false)
+    #expect(hedged.qualified)
+    #expect(!hedged.dimsCompactCount(stale: false))
+}

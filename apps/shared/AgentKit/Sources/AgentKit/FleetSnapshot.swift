@@ -513,9 +513,11 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
     /// a second copy that drifted would put a dashed ring and an asserted status
     /// on the same screen.
     ///
-    /// `answering` is whether the runner is answering right now, where the
-    /// caller knows; the card's rows don't, and leave it true. A runner that
-    /// isn't answering can't vouch for a claim about the present at any age.
+    /// `answering` is whether anything is vouching for the present right now:
+    /// the runner's link, for a snapshot agent, and for the card's rows whether
+    /// the card is stale (`AgentCardLayout` passes `!stale`). Either way, a
+    /// claim about the present that nothing vouches for is "last seen" at any
+    /// age.
     public static func confidence(
         status: String, heard age: TimeInterval, answering: Bool
     ) -> Confidence {
