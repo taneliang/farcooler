@@ -1723,7 +1723,8 @@ function numeric(value: unknown): number | null {
 /// whose rows shuffled between two identical pushes would be a card that
 /// flickers for no reason.
 ///
-/// The counts are over EVERY row and the lines are over the first few, which is
+/// The counts are over EVERY row (working: every row that still speaks — see
+/// below) and the lines are over the first few, which is
 /// the whole point of `+N more`: a header that counted only what fits would say
 /// "2 need you" while three agents were waiting.
 function composeFleet(rows: AgentRow[], now: number): Fleet {
@@ -1752,7 +1753,15 @@ function composeFleet(rows: AgentRow[], now: number): Fleet {
     shown: all.filter(row => speaks(row, now)).slice(0, ROWS_SHOWN),
     blocked: all.filter(row => row.status === 'blocked').length,
     review: all.filter(row => row.status === 'done').length,
-    working: all.filter(row => row.status === 'working').length,
+    // Only the working rows that still speak. Working is the one tier that is
+    // a claim about now, and a row quiet for `ROW_QUIET_AFTER_MS` is one
+    // nothing has vouched for in that long: a runner that went down stops
+    // speaking without saying so. Counted over every row, a dead runner's
+    // agents stayed "in flight" for `ROW_RETENTION_MS`, a day, while any other
+    // runner kept the card moving. The same `speaks` the lines use, so a row
+    // leaves the lines and the count together. Blocked and done are latched
+    // and are counted at any age; `more` still owns up to the quiet row.
+    working: all.filter(row => row.status === 'working' && speaks(row, now)).length,
     insertions,
     deletions,
     commits,

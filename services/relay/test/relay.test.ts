@@ -3434,12 +3434,17 @@ describe('/v1/notify and Live Activities', () => {
       expect(await roster('user_2')).toEqual(['theirs-blocked', 'theirs-working'])
     })
 
-    it('drops a quiet row to the tail without dropping it from the count', async () => {
+    it('drops a quiet working row from the lines and from "in flight"', async () => {
       // `ROW_QUIET_AFTER_MS`, deliberately the same hour as `STALE_AFTER_S`: a
       // row stops spending a line exactly when the card as a whole would be
-      // marked out of date. It is still IN the fleet — still counted in the
-      // header and the totals — it has just stopped earning one of the few lines
-      // the card has.
+      // marked out of date. A WORKING row that quiet is a claim about now that
+      // nothing has vouched for in an hour, and a runner that went down stops
+      // speaking without saying so, so it leaves "in flight" too. It stays in
+      // the fleet: `more` still owns up to an agent with no line.
+      //
+      // This counted it for as long as the row was kept, twenty-four hours:
+      // while any other runner kept the card moving, a dead runner's agents
+      // stayed "in flight" on the lock screen for a day.
       const calls = watchFetch()
       await ready()
       await running('term-1')
@@ -3452,8 +3457,26 @@ describe('/v1/notify and Live Activities', () => {
       const updates = pushes(calls).filter(call => call.body.aps?.event === 'update')
       const last = updates[updates.length - 1].body.aps['content-state']
       expect(last.rows.map((each: any) => each.terminal)).toEqual(['loud'])
-      expect(last.working).toBe(2)
+      expect(last.working).toBe(1)
       expect(last.more).toBe(1)
+    })
+
+    it('keeps a quiet blocked row in the count, because blocked holds at any age', async () => {
+      // Only the claim about now decays. An agent that stopped for you two hours
+      // ago is still stopped for you, and the header must still say so.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'waiting', terminal: 'waiting', status: 'blocked' }, 'mine')
+      await env.DB.prepare(`UPDATE live_activities SET updated_at = ? WHERE terminal = 'waiting'`)
+        .bind(Date.now() - 2 * 60 * 60 * 1000)
+        .run()
+      await post('/v1/notify', { title: 'loud', terminal: 'loud', status: 'working' }, 'mine')
+
+      const updates = pushes(calls).filter(call => call.body.aps?.event === 'update')
+      const last = updates[updates.length - 1].body.aps['content-state']
+      expect(last.blocked).toBe(1)
+      expect(last.working).toBe(1)
     })
 
     it('fits a maximal card inside the size ActivityKit will accept', async () => {
