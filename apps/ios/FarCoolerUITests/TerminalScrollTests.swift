@@ -1075,6 +1075,34 @@ final class TerminalScrollTests: XCTestCase {
             XCTWaiter.wait(for: [left], timeout: 5) == .completed,
             "The bar swipe did not cross; there is nothing to come back from.")
 
+        // **The keyboard down before the swipe back, or the swipe is typing.**
+        //
+        // An arrival along the bar lands on whatever that workspace's `resume`
+        // answers, and on this runner that is a terminal — which raises the
+        // keyboard on appear, and the bar does not move for one. So the swipe
+        // back started on a key. `openOverview` says the same about its lift.
+        //
+        // This was invisible for as long as the demo's first workspace had no
+        // terminal: the test then opens on the SECOND one, crosses backward
+        // onto a workspace with nothing but a diff, and comes back forward —
+        // and no keyboard was ever up when the bar was touched. Give the first
+        // workspace a terminal and the test opens there instead, crosses
+        // forward onto a terminal, and every run failed here with "never came
+        // back". Measured at this line in such a run: one keyboard up, the
+        // key row showing, and `bar.isHittable` false.
+        //
+        // Conditional on the key row appearing, because landing on the diff
+        // raises nothing; the hittable wait below still fails if anything is
+        // left over the bar.
+        if app.buttons[Self.terminalHideKeyboard].waitForExistence(timeout: 3) {
+            hideKeyboard(app)
+        }
+        let reachable = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in bar.isHittable }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [reachable], timeout: 15), .completed,
+            "the shell's bar is not reachable — something is covering it")
+
         swipeBar(away.1, away.0)
         let returned = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in field("ws") == home }, object: nil)
