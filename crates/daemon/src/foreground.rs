@@ -434,22 +434,42 @@ const QUOTES: &[char] = &['\'', '"'];
 /// Whether a process is running `program`, and if so, the byte of its argv
 /// where its label starts.
 ///
-/// By its own name, which is the whole argv. Or, for a program an interpreter
-/// runs, by one of the next two words that is not a flag: `bash
-/// ~/.local/bin/cursor-agent` before its `exec -a`, and an npm-installed codex,
-/// which `ps` shows as `node …/node_modules/.bin/codex …` (read live here from
-/// the npx-cached `@openai/codex` 0.156.1; the native binary is node's child).
-/// Then the label starts at that word, so the pane reads `codex`, which is how
-/// `Registry::rules_for_command` knows an agent, and not `node codex`.
+/// By its own name, which is the whole argv. Or, when the process is an
+/// interpreter (see `INTERPRETERS`), by one of the next two words that is not
+/// a flag: `bash ~/.local/bin/cursor-agent` before its `exec -a`, and an
+/// npm-installed codex, which `ps` shows as `node …/node_modules/.bin/codex …`
+/// (read live here from the npx-cached `@openai/codex` 0.156.1; the native
+/// binary is node's child). Then the label starts at that word, so the pane
+/// reads `codex`, which is how `Registry::rules_for_command` knows an agent,
+/// and not `node codex`.
+///
+/// Only an interpreter's operands count. Any other process whose operand
+/// happens to end in the name is not running it: a `config.fish` job `tail -F
+/// /tmp/claude` or `rg -n claude`, or a `/usr/bin/time claude` that forked
+/// (whose child is the real claude, a grandchild the wrapper never reaches, so
+/// the pane reads as the wrapper).
 fn runs(args: &str, program: &str) -> Option<usize> {
     let mut words = args.split_whitespace();
     let first = words.next()?;
-    let operands = words.filter(|w| !w.starts_with('-')).take(2);
+    let reach = if interpreter(first) { 2 } else { 0 };
+    let operands = words.filter(|w| !w.starts_with('-')).take(reach);
     std::iter::once(first)
         .chain(operands)
         .find(|word| basename(word).trim_start_matches('-') == program)
         .map(|word| word.as_ptr() as usize - args.as_ptr() as usize)
 }
+
+/// Whether a process's first word is a program that runs a script named by an
+/// operand, by the name `ps` shows (`python3.12`, `Python`, `-bash` included).
+fn interpreter(word: &str) -> bool {
+    let name = basename(word).trim_start_matches('-');
+    let stem = name.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    INTERPRETERS.iter().chain(SHELLS).any(|known| stem.eq_ignore_ascii_case(known))
+}
+
+/// Script runners beyond the shells. A shell counts because a launcher script
+/// is one: cursor-agent's is `bash …/cursor-agent` until it execs node.
+const INTERPRETERS: &[&str] = &["node", "nodejs", "python", "ruby", "perl", "deno", "bun"];
 
 fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
@@ -701,8 +721,9 @@ mod tests {
     /// Taking the first `+` row labeled this pane `fish` and dated its
     /// conversation by the wrapper's pid. Its own children are in the same
     /// group (live: `caffeinate` on ttys000, `sourcekit-lsp` on ttys005), and
-    /// none of them may take the pane from it; its tool shells are not in the
-    /// foreground at all.
+    /// none of them may take the pane from it. Its tool shells are not in the
+    /// foreground at all (the `??` rows in `PS`, which are context, not
+    /// coverage: `parse` drops them before any of this).
     #[test]
     fn a_shell_handed_a_command_is_read_past_to_what_it_runs() {
         let f = parse(PS);
@@ -797,6 +818,20 @@ mod tests {
 99999 99000 99999 ttys034  S+   rg pattern
 ";
         assert_eq!(f_pane(pipeline, "ttys034"), Some(99999));
+        // With the leader gone (`cat f | less` after cat exits) the group
+        // still has a pane: the first top.
+        let leaderless = "\
+    5     4     3 ttys040  S+   less
+";
+        assert_eq!(f_pane(leaderless, "ttys040"), Some(5));
+        // Two tops and no leader: `ps` order decides, which after a wrap is the
+        // later member (`a | b | c`, a exited, c's pid wrapped below b's). That
+        // is main's answer, and the documented fallback.
+        let two = "\
+    2 99000 99990 ttys041  S+   c
+99995 99000 99990 ttys041  S+   b
+";
+        assert_eq!(f_pane(two, "ttys041"), Some(2));
     }
 
     /// A program an interpreter runs is named by the program, not the
@@ -805,9 +840,11 @@ mod tests {
     /// The node rows are an npm-installed codex as `ps` showed it on this host
     /// (the npx-cached `@openai/codex` 0.156.1, run from its `.bin` link with a
     /// scratch `CODEX_HOME`): node, running the link, with the native binary
-    /// as its child. The pids and argv are as read; the rows are put under a
-    /// dispatch's inner fish, and codex's own arguments swapped in for the
-    /// `app-server` it was run with.
+    /// as its child. The pids, node's ppid-to-child link and the program paths
+    /// are as read. Supplied: node's ppid and both pgids (put under the
+    /// ttys012 dispatch's inner fish; they were 40079 and 40073 there), the
+    /// stat (`SN+`; it was `SN`, run off a terminal), and codex's arguments
+    /// (`-c check_for_update_on_startup=false` for the `app-server` it ran).
     #[test]
     fn a_program_an_interpreter_runs_is_named_by_it() {
         let npm = "\
@@ -828,6 +865,36 @@ mod tests {
         // A login shell's dash is not part of its name.
         assert_eq!(runs("-fish", "fish"), Some(0));
         assert_eq!(runs("bash -c sleep 600; brew update", "claude"), Option::None);
+        assert_eq!(runs("python3.12 /x/bin/claude", "claude"), Some(11));
+    }
+
+    /// Only an interpreter's operand is the program it runs.
+    ///
+    /// Any other process with the name as an operand is doing something else
+    /// with it, and a `config.fish` job that is one sorts before the agent.
+    #[test]
+    fn an_operand_names_a_program_only_after_an_interpreter() {
+        for args in ["tail -F /tmp/claude", "rg -n --color=never claude", "/usr/bin/time claude"] {
+            assert_eq!(runs(args, "claude"), Option::None, "{args}");
+        }
+        // The job before claude starts leaves the wrapper standing, and after
+        // it starts loses to it.
+        let tail = "\
+  700   699   700 ttys038  S+   fish -c env FARCOOLER_ACTOR=agent:x /opt/homebrew/bin/fish -ilc 'claude --session-id x'
+  701   700   700 ttys038  S+   /opt/homebrew/bin/fish -ilc claude --session-id x
+  702   701   700 ttys038  S+   tail -F /tmp/claude
+";
+        assert_eq!(f_pane(tail, "ttys038"), Some(700));
+        let running = format!("{tail}  703   701   700 ttys038  S+   claude --session-id x\n");
+        assert_eq!(f_pane(&running, "ttys038"), Some(703));
+        // `time` is a prefix, so the target is claude; a `/usr/bin/time` that
+        // forks does not name the pane with its own pid.
+        let time = "\
+  800   799   800 ttys039  S+   sh -c time claude --continue
+  801   800   800 ttys039  S+   /usr/bin/time claude --continue
+  802   801   800 ttys039  S+   claude --continue
+";
+        assert_eq!(f_pane(time, "ttys039"), Some(800));
     }
 
     /// Only a shell running a command string is a wrapper.
@@ -1052,7 +1119,9 @@ mod tests {
     /// at its prompt; and a claude with its `sourcekit-lsp`. The `/bin/zsh -c`
     /// rows are claude's tool shells, arguments cut after the snapshot path.
     /// They are NOT in claude's group: each is `Ss` on no tty, a session of its
-    /// own, so a tool call never enters the foreground at all.
+    /// own, so a tool call never enters the foreground at all. They are kept as
+    /// the record of that, not as coverage: `parse` skips a row on `??` or
+    /// without `+`, so no assertion can depend on them.
     ///
     /// ttys011 is the round-1 `task dispatch` of claude, read at the trust
     /// dialog: pid, pgid, stat and argv as read, arguments cut short. That walk
