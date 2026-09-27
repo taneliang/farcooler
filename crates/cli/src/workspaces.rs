@@ -259,8 +259,8 @@ async fn workspace_via(
                 ))
                 .await
                 .map_err(|e| workspace_refused(e, "that repository isn't on this runner", "that workspace could not be made"))?;
-            let result::Value::Workspace(made) = expect_value(r.value, "workspace")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Workspace(made) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!("{}", workspaces_json::workspace_json(&made));
@@ -354,8 +354,8 @@ async fn workspace_via(
                 .map_err(|e| {
                     workspace_refused(e, "that workspace, or its repository's main checkout, isn't on this runner", "the orchestrator could not be started")
                 })?;
-            let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Terminal(t) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!(
@@ -377,8 +377,8 @@ async fn workspace_via(
 /// What a workspace command that changed one prints: the workspace under
 /// `--json`, a line otherwise.
 fn done(value: Option<result::Value>, json: bool, said: impl FnOnce(&pb::Workspace) -> String) -> Fallible {
-    let result::Value::Workspace(w) = expect_value(value, "workspace")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::Workspace(w) = expect_value(value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     if json {
         println!("{}", workspaces_json::workspace_json(&w));
@@ -405,8 +405,8 @@ pub(crate) async fn assign_worktree(link: &mut Link, worktree: &str, to: &str, j
         .call(assign_request(uuid_of(&wt.id), uuid_of(&ws.id)))
         .await
         .map_err(|e| workspace_refused(e, "that worktree or workspace isn't on this runner any more", "that worktree could not be assigned"))?;
-    let result::Value::Worktree(w) = expect_value(r.value, "worktree")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::Worktree(w) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     if json {
         println!(
@@ -444,8 +444,8 @@ pub(crate) async fn set_role(runner: Option<&str>, terminal: &str, role: Role, j
         .call(set_role_request(id, role))
         .await
         .map_err(|e| workspace_refused(e, "that terminal isn't on this runner any more", "that role could not be set"))?;
-    let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::Terminal(t) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     if json {
         println!(
@@ -511,8 +511,8 @@ pub(crate) async fn workspaces_on<L: DispatchLink>(
         .call(needs_workstreams(envelope))
         .await
         .map_err(|e| workspace_refused(e, "that repository isn't on this runner", "the workspaces could not be read"))?;
-    let result::Value::WorkspaceList(l) = expect_value(r.value, "workspace_list")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::WorkspaceList(l) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     Ok(l.items)
 }

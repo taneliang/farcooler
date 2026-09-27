@@ -101,8 +101,8 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: ChangesCmd, json: bool) -> F
                     }),
                 ))
                 .await?;
-            let result::Value::ChangeSet(cs) = expect_value(r.value, "change_set")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::ChangeSet(cs) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
 
             if json {
@@ -178,8 +178,8 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: ChangesCmd, json: bool) -> F
                     }),
                 ))
                 .await?;
-            let result::Value::FileDiff(d) = expect_value(r.value, "file_diff")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::FileDiff(d) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
 
             // The three things below this line that are not patch text —
@@ -238,9 +238,9 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: ChangesCmd, json: bool) -> F
                     }),
                 ))
                 .await?;
-            let result::Value::FileChangeList(l) = expect_value(r.value, "file_change_list")?
+            let result::Value::FileChangeList(l) = expect_value(r.value)?
             else {
-                return Err("the daemon returned the wrong resource".into());
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 let files: Vec<_> = l.items.iter().map(file_change_json).collect();
@@ -268,8 +268,8 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: ChangesCmd, json: bool) -> F
             let r = link
                 .call(with(req("changes.inbox"), request::Payload::ChangesInbox(pb::ChangesInboxRequest {})))
                 .await?;
-            let result::Value::ChangesInbox(inbox) = expect_value(r.value, "changes_inbox")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::ChangesInbox(inbox) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             // The same object the FFI's `changes.inbox` returns, out of one
             // builder, since the two stopped being different shapes. This
@@ -319,8 +319,8 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: ChangesCmd, json: bool) -> F
             let r = link
                 .call(with(req_for(method, uuid_of(&target.id)), payload))
                 .await?;
-            let result::Value::StackLinkList(l) = expect_value(r.value, "stack_link_list")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::StackLinkList(l) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             // `--json` parsed here and then did nothing: the flag was accepted,
             // this arm printed the human form regardless, and anything reading
@@ -879,6 +879,8 @@ mod tests {
     /// A link that answers the lists and refuses one method.
     struct FakeLink {
         refuse: Refusal,
+        /// A method answered with this instead: nothing, or the wrong thing.
+        odd: Option<(&'static str, Option<result::Value>)>,
     }
 
     const LANE: Uuid = Uuid::from_u128(0x11);
@@ -894,6 +896,11 @@ mod tests {
                 && method == req.method
             {
                 return Err(refuse());
+            }
+            if let Some((method, value)) = &self.odd
+                && *method == req.method
+            {
+                return Ok(pb::Result { value: value.clone() });
             }
             let value = match req.method.as_str() {
                 "worktree.list" => result::Value::WorktreeList(pb::WorktreeList {
@@ -918,7 +925,7 @@ mod tests {
     }
 
     async fn failing(cmd: ChangesCmd, refuse: Refusal) -> Box<dyn std::error::Error> {
-        let mut link = FakeLink { refuse };
+        let mut link = FakeLink { refuse, odd: None };
         changes_over(&mut link, cmd, true).await.expect_err("refused")
     }
 
@@ -973,5 +980,21 @@ mod tests {
         // This CLI's own sentence passes through untouched.
         let err = failing(ChangesCmd::Read { worktree: "nope".into() }, None).await;
         assert_eq!(err.to_string(), "no worktree matching \"nope\"");
+    }
+
+    /// An answer this build can't read says so in the runner's name, with
+    /// no machine word in it: an empty one ("the daemon returned no
+    /// change_set", as it was) and the wrong one alike.
+    #[tokio::test]
+    async fn an_answer_this_build_cannot_read_says_so_plainly() {
+        let empty = FakeLink { refuse: None, odd: Some(("changes.change_set", None)) };
+        let wrong = FakeLink {
+            refuse: None,
+            odd: Some(("changes.inbox", Some(result::Value::WorktreeList(pb::WorktreeList::default())))),
+        };
+        for (mut link, cmd) in [(empty, status()), (wrong, ChangesCmd::Inbox)] {
+            let err = changes_over(&mut link, cmd, true).await.expect_err("unreadable");
+            assert_eq!(err.to_string(), "the runner answered with something this Far Cooler cannot read");
+        }
     }
 }

@@ -380,15 +380,22 @@ pub fn with(mut r: Request, payload: request::Payload) -> Request {
     r
 }
 
+/// What this CLI says when the runner's answer is one it can't read: empty,
+/// or a different kind of thing from the one asked for.
+///
+/// One sentence for both, since to whoever typed the command they are one
+/// fact, and nothing they can do differs between them. It names the runner
+/// and no machine word: this used to be "the daemon returned no change_set"
+/// and "the daemon returned the wrong resource", which is a Rust program
+/// talking to itself.
+pub const UNREADABLE: &str = "the runner answered with something this Far Cooler cannot read";
+
 /// Unwrap a result into the variant the caller expects.
 ///
-/// A daemon that answered with the wrong variant is a protocol bug, and saying
-/// so beats a panic or a silent default.
-pub fn expect_value(
-    value: Option<result::Value>,
-    what: &str,
-) -> Result<result::Value, Box<dyn std::error::Error>> {
-    value.ok_or_else(|| format!("the daemon returned no {what}").into())
+/// A runner that answered with nothing is a protocol bug, and saying so
+/// beats a panic or a silent default.
+pub fn expect_value(value: Option<result::Value>) -> Result<result::Value, Box<dyn std::error::Error>> {
+    value.ok_or_else(|| UNREADABLE.into())
 }
 
 #[cfg(test)]

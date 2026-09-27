@@ -124,8 +124,8 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
 
     match cmd {
         ClientCmd::List => {
-            let result::Value::ClientList(list) = expect_value(r.value, "clients")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::ClientList(list) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!("{}", clients_json(&list.items));
@@ -141,8 +141,8 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
         }
 
         ClientCmd::Enroll { .. } => {
-            let result::Value::ClientEnroll(outcome) = expect_value(r.value, "enrollment")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::ClientEnroll(outcome) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!(
@@ -184,8 +184,8 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
             // What is LEFT, read back out of the file by the daemon after writing
             // it: what `authorized_keys` now says is the only claim worth making
             // about who may log in.
-            let result::Value::ClientList(list) = expect_value(r.value, "clients")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::ClientList(list) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!("{}", clients_json(&list.items));

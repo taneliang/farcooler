@@ -503,8 +503,8 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 .call(create)
                 .await
                 .map_err(|e| refused(e, "a task needs a title of at most 200 characters"))?;
-            let result::Value::Task(created) = expect_value(r.value, "task")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Task(created) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
 
             if json {
@@ -606,8 +606,8 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                     .map_err(|e| {
                         refused(e, "a task needs a title of at most 200 characters")
                     })?;
-                let result::Value::Task(revised) = expect_value(r.value, "task")? else {
-                    return Err("the daemon returned the wrong resource".into());
+                let result::Value::Task(revised) = expect_value(r.value)? else {
+                    return Err(crate::daemon_link::UNREADABLE.into());
                 };
                 task = revised;
             }
@@ -625,8 +625,8 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                     ))
                     .await
                     .map_err(|e| refused(e, "that is not a status this runner knows"))?;
-                let result::Value::Task(moved) = expect_value(r.value, "task")? else {
-                    return Err("the daemon returned the wrong resource".into());
+                let result::Value::Task(moved) = expect_value(r.value)? else {
+                    return Err(crate::daemon_link::UNREADABLE.into());
                 };
                 task = moved;
             }
@@ -673,8 +673,8 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 .call(move_request(&tasks, uuid_of(&target.id), actor))
                 .await
                 .map_err(|e| move_refused(e, &target.name))?;
-            let result::Value::TaskList(moved) = expect_value(r.value, "task_list")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::TaskList(moved) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!("{}", render_list_json(&moved.items));
@@ -753,8 +753,8 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 .map_err(|e| {
                     refused(e, "the question was written, but the task would not move")
                 })?;
-            let result::Value::Task(moved) = expect_value(r.value, "task")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Task(moved) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
 
             if json {
@@ -792,8 +792,8 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 .map_err(|e| {
                     refused(e, "those two tasks would end up waiting on each other")
                 })?;
-            let result::Value::TaskBlockList(l) = expect_value(r.value, "task_block_list")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::TaskBlockList(l) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
 
             if json {
@@ -829,9 +829,9 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 ))
                 .await
                 .map_err(|e| refused(e, "say what to search for"))?;
-            let result::Value::TaskNoteHitList(l) = expect_value(r.value, "task_note_hit_list")?
+            let result::Value::TaskNoteHitList(l) = expect_value(r.value)?
             else {
-                return Err("the daemon returned the wrong resource".into());
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
 
             // A hit names a task by id, and the whole point of this read is a
@@ -1455,8 +1455,8 @@ async fn tasks_in<L: DispatchLink>(
         .call(task_list_request(board, status, stale_after))
         .await
         .map_err(|e| refused(e, "that board could not be read"))?;
-    let result::Value::TaskList(l) = expect_value(r.value, "task_list")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::TaskList(l) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     Ok(l.items)
 }
@@ -1525,8 +1525,8 @@ async fn detail_of(
         ))
         .await
         .map_err(|e| refused(e, "that task could not be read"))?;
-    let result::Value::TaskDetail(d) = expect_value(r.value, "task_detail")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::TaskDetail(d) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     Ok(d)
 }
@@ -1558,8 +1558,8 @@ async fn append_note(
         ))
         .await
         .map_err(|e| refused(e, "an entry needs something written in it"))?;
-    let result::Value::TaskNote(note) = expect_value(r.value, "task_note")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::TaskNote(note) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     Ok(note)
 }
@@ -1609,8 +1609,8 @@ async fn tasks_with_key<L: DispatchLink>(
         }
         Err(e) => return Err(refused(e, "that board could not be read")),
     };
-    let result::Value::TaskList(l) = expect_value(r.value, "task_list")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::TaskList(l) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     Ok(l.items)
 }
@@ -1845,7 +1845,7 @@ pub(crate) fn refusal(err: ClientError, invalid: &str) -> Refused {
             return uncoded("this Far Cooler and the runner's speak different protocols. update both");
         }
         ClientError::EmptyResult | ClientError::WrongResult { .. } => {
-            return uncoded("the runner answered with something this Far Cooler cannot read");
+            return uncoded(crate::daemon_link::UNREADABLE);
         }
         _ => return uncoded("the runner stopped answering"),
     };
@@ -2400,8 +2400,8 @@ async fn dispatch<L: DispatchLink>(
     }
 
     let r = link.call(req("worktree.list")).await.map_err(|e| refused(e, "the worktrees could not be read"))?;
-    let result::Value::WorktreeList(worktrees) = expect_value(r.value, "worktrees")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::WorktreeList(worktrees) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     let existing = match &d.lane {
         Lane::Existing(needle) => Some(lane_on_board(&worktrees.items, &task.repository_id, needle)?),
@@ -2409,8 +2409,8 @@ async fn dispatch<L: DispatchLink>(
     };
 
     let r = link.call(req("terminal.list")).await.map_err(|e| refused(e, "the terminals could not be read"))?;
-    let result::Value::TerminalList(terminals) = expect_value(r.value, "terminals")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::TerminalList(terminals) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
     let name_of = |ws: &[u8]| {
         worktrees.items.iter().find(|w| w.id.as_ref() == ws).map_or_else(|| short_bytes(ws), |w| w.task_name.clone())
@@ -2551,8 +2551,8 @@ async fn dispatch<L: DispatchLink>(
                         .map(|w| w.task_name.as_str());
                     new_lane_refused(e, branch, on_it)
                 })?;
-            let result::Value::Worktree(ws) = expect_value(r.value, "worktree")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Worktree(ws) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             (uuid_of(&ws.id), ws.task_name.clone(), Some(branch.clone()))
         }
@@ -2560,9 +2560,9 @@ async fn dispatch<L: DispatchLink>(
     };
 
     let opened = match link.call(open_pane_request(worktree, d.preset, &task.key)).await {
-        Ok(r) => match expect_value(r.value, "terminal")? {
+        Ok(r) => match expect_value(r.value)? {
             result::Value::Terminal(t) => t,
-            _ => return Err("the daemon returned the wrong resource".into()),
+            _ => return Err(crate::daemon_link::UNREADABLE.into()),
         },
         Err(e) => {
             let why = pane_refused(e);

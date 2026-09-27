@@ -1260,8 +1260,8 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
                 }),
             );
             let r = link.call(req).await?;
-            let result::Value::Host(h) = expect_value(r.value, "host")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Host(h) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             // Read back from the reply rather than echoing what was sent: the
             // writer trims, so the file may not say quite what arrived.
@@ -1288,8 +1288,8 @@ async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible 
     match cmd {
         AdapterCmd::List => {
             let r = link.call(req("adapter.list")).await?;
-            let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::AdapterList(list) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 let items: Vec<_> = list
@@ -1332,8 +1332,8 @@ async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible 
             let adapter = adapter_from_json(&read_json_stdin()?);
             let preset = adapter.preset.clone();
             let r = link.call(with(req("adapter.upsert"), request::Payload::Adapter(adapter))).await?;
-            let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::AdapterList(list) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!("{}", serde_json::json!({ "adapters": list.items.len() }));
@@ -1351,8 +1351,8 @@ async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible 
             } else {
                 let preset = preset.ok_or("name an adapter, or pass --json-stdin")?;
                 let r = link.call(req("adapter.list")).await?;
-                let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
-                    return Err("the daemon returned the wrong resource".into());
+                let result::Value::AdapterList(list) = expect_value(r.value)? else {
+                    return Err(crate::daemon_link::UNREADABLE.into());
                 };
                 let found = list
                     .items
@@ -1371,9 +1371,9 @@ async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible 
             let backend = found.backend;
 
             let r = link.call(with(req("adapter.test"), request::Payload::Adapter(found))).await?;
-            let result::Value::AdapterTestResult(outcome) = expect_value(r.value, "test result")?
+            let result::Value::AdapterTestResult(outcome) = expect_value(r.value)?
             else {
-                return Err("the daemon returned the wrong resource".into());
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!(
@@ -1417,8 +1417,8 @@ async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible 
                 }),
             );
             let r = link.call(req).await?;
-            let result::Value::AdapterList(list) = expect_value(r.value, "adapters")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::AdapterList(list) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             let restored = list.items.iter().find(|a| a.preset == preset);
             match restored {
@@ -1535,8 +1535,8 @@ async fn theme(runner: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
             }),
         );
         let r = link.call(req).await?;
-        let result::Value::ThemeList(list) = expect_value(r.value, "themes")? else {
-            return Err("the daemon returned the wrong resource".into());
+        let result::Value::ThemeList(list) = expect_value(r.value)? else {
+            return Err(crate::daemon_link::UNREADABLE.into());
         };
         if json {
             println!("{}", serde_json::json!({ "themes": list.items.len() }));
@@ -1566,8 +1566,8 @@ async fn theme(runner: Option<&str>, cmd: ThemeCmd, json: bool) -> Fallible {
 
         let mut link = connect_to(runner).await?;
         let r = link.call(with(req("theme.upsert"), request::Payload::Theme(wire_theme))).await?;
-        let result::Value::ThemeList(list) = expect_value(r.value, "themes")? else {
-            return Err("the daemon returned the wrong resource".into());
+        let result::Value::ThemeList(list) = expect_value(r.value)? else {
+            return Err(crate::daemon_link::UNREADABLE.into());
         };
         if json {
             println!("{}", serde_json::json!({ "themes": list.items.len() }));
@@ -1842,8 +1842,8 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
             let workspace =
                 worktree_claim(&mut link, &repos, target, named, pane, &mut |w| eprintln!("{w}")).await?;
             let r = link.call(worktree_create_from_args(target, args, workspace)).await?;
-            let result::Value::Worktree(ws) = expect_value(r.value, "worktree")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Worktree(ws) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             // `--json` names what was made, so a client acts on THIS
             // worktree rather than guessing it from a list read before and
@@ -1939,8 +1939,8 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
             let repos = list_repositories(&mut link).await?;
             let target = resolve_repository(&repos, &repo)?;
             let r = link.call(req_for("branch.list", uuid_of(&target.id))).await?;
-            let result::Value::BranchList(list) = expect_value(r.value, "branches")? else {
-                return Err("the daemon returned the wrong list".into());
+            let result::Value::BranchList(list) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
 
             if json {
@@ -1993,8 +1993,8 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
                     }),
                 ))
                 .await?;
-            let result::Value::Worktree(ws) = expect_value(r.value, "worktree")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Worktree(ws) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             println!("adopted {}  {}", short_bytes(&ws.id), ws.branch);
             if let Some(path) = &ws.worktree_path {
@@ -2080,9 +2080,9 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
                     }),
                 ))
                 .await?;
-            let result::Value::WorktreeFileList(list) = expect_value(r.value, "worktree file list")?
+            let result::Value::WorktreeFileList(list) = expect_value(r.value)?
             else {
-                return Err("the daemon returned the wrong resource".into());
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!("{}", serde_json::json!({ "paths": list.paths }));
@@ -2272,8 +2272,8 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         with(req_for(method, worktree_id), request::Payload::LayoutUpdate(update))
     };
     let r = link.call(request).await?;
-    let result::Value::PaneGroupList(list) = expect_value(r.value, "layout")? else {
-        return Err("the daemon returned the wrong resource".into());
+    let result::Value::PaneGroupList(list) = expect_value(r.value)? else {
+        return Err(crate::daemon_link::UNREADABLE.into());
     };
 
     // Re-read: a split creates a terminal the first listing did not have.
@@ -2355,9 +2355,9 @@ async fn fetch_layout(
     worktree: Uuid,
 ) -> Result<Vec<farcooler_protocol::v1::PaneGroup>, Box<dyn std::error::Error>> {
     let r = link.call(req_for("layout.list", worktree)).await?;
-    match expect_value(r.value, "layout")? {
+    match expect_value(r.value)? {
         result::Value::PaneGroupList(l) => Ok(l.items),
-        _ => Err("the daemon returned the wrong resource".into()),
+        _ => Err(crate::daemon_link::UNREADABLE.into()),
     }
 }
 
@@ -2434,8 +2434,8 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             let title = title.unwrap_or_else(|| preset.clone());
             let req = terminal_create_request(uuid_of(&ws.id), title, preset, tile, prompt, task);
             let r = link.call(req).await?;
-            let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Terminal(t) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 println!(
@@ -2555,9 +2555,9 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                     }),
                 ))
                 .await?;
-            let result::Value::AgentEventBatch(batch) = expect_value(r.value, "agent event batch")?
+            let result::Value::AgentEventBatch(batch) = expect_value(r.value)?
             else {
-                return Err("the daemon returned the wrong resource".into());
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
                 // `AgentStream.swift`'s `Batch`/`EventFrame` decode with the
@@ -2749,8 +2749,8 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         TerminalCmd::Restart { terminal } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             let r = link.call(req_for("terminal.restart", id)).await?;
-            let result::Value::Terminal(t) = expect_value(r.value, "terminal")? else {
-                return Err("the daemon returned the wrong resource".into());
+            let result::Value::Terminal(t) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
             };
             println!("restarted {} as epoch {}", short_bytes(&t.id), t.epoch);
         }
@@ -2883,17 +2883,17 @@ async fn host_get(
     link: &mut Link,
 ) -> Result<farcooler_protocol::v1::Host, Box<dyn std::error::Error>> {
     let r = link.call(req("host.health")).await?;
-    match expect_value(r.value, "host")? {
+    match expect_value(r.value)? {
         result::Value::Host(h) => Ok(h),
-        _ => Err("the daemon returned the wrong resource".into()),
+        _ => Err(crate::daemon_link::UNREADABLE.into()),
     }
 }
 
 async fn list_roots(link: &mut Link) -> Result<Vec<RepositoryRoot>, Box<dyn std::error::Error>> {
     let r = link.call(req("repository_root.list")).await?;
-    match expect_value(r.value, "roots")? {
+    match expect_value(r.value)? {
         result::Value::RepositoryRootList(l) => Ok(l.items),
-        _ => Err("the daemon returned the wrong list".into()),
+        _ => Err(crate::daemon_link::UNREADABLE.into()),
     }
 }
 
@@ -2901,9 +2901,9 @@ pub(crate) async fn list_repositories<L: tasks::DispatchLink>(
     link: &mut L,
 ) -> Result<Vec<Repository>, Box<dyn std::error::Error>> {
     let r = link.call(req("repository.list")).await?;
-    match expect_value(r.value, "repositories")? {
+    match expect_value(r.value)? {
         result::Value::RepositoryList(l) => Ok(l.items),
-        _ => Err("the daemon returned the wrong list".into()),
+        _ => Err(crate::daemon_link::UNREADABLE.into()),
     }
 }
 
@@ -2911,9 +2911,9 @@ async fn list_themes(
     link: &mut Link,
 ) -> Result<Vec<farcooler_protocol::v1::Theme>, Box<dyn std::error::Error>> {
     let r = link.call(req("theme.list")).await?;
-    match expect_value(r.value, "themes")? {
+    match expect_value(r.value)? {
         result::Value::ThemeList(l) => Ok(l.items),
-        _ => Err("the daemon returned the wrong list".into()),
+        _ => Err(crate::daemon_link::UNREADABLE.into()),
     }
 }
 
@@ -2921,9 +2921,9 @@ pub(crate) async fn list_worktrees<L: tasks::DispatchLink>(
     link: &mut L,
 ) -> Result<Vec<Worktree>, Box<dyn std::error::Error>> {
     let r = link.call(req("worktree.list")).await?;
-    match expect_value(r.value, "worktrees")? {
+    match expect_value(r.value)? {
         result::Value::WorktreeList(l) => Ok(l.items),
-        _ => Err("the daemon returned the wrong list".into()),
+        _ => Err(crate::daemon_link::UNREADABLE.into()),
     }
 }
 
@@ -2936,9 +2936,9 @@ pub(crate) async fn list_terminals(
         None => req("terminal.list"),
     };
     let r = link.call(request).await?;
-    match expect_value(r.value, "terminals")? {
+    match expect_value(r.value)? {
         result::Value::TerminalList(l) => Ok(l.items),
-        _ => Err("the daemon returned the wrong list".into()),
+        _ => Err(crate::daemon_link::UNREADABLE.into()),
     }
 }
 
