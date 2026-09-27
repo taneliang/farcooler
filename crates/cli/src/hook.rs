@@ -285,6 +285,7 @@ mod tests {
             tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
             let verdict = HookVerdict {
                 decision: Some(Decision::Deny { message: "Denied from a test".to_string() }),
+                hold_ms: None,
             };
             tokio::io::AsyncWriteExt::write_all(
                 &mut stream,
@@ -329,7 +330,7 @@ mod tests {
             let mut reader = tokio::io::BufReader::new(&mut stream);
             let mut line = String::new();
             tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
-            let verdict = HookVerdict { decision: Some(Decision::Allow) };
+            let verdict = HookVerdict { decision: Some(Decision::Allow), hold_ms: None };
             tokio::io::AsyncWriteExt::write_all(
                 &mut stream,
                 encode_line(&verdict).expect("encode").as_bytes(),
