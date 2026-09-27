@@ -463,7 +463,10 @@ impl Store {
     /// underneath a revision in flight.
     ///
     /// A revision that changes a field dates itself in `edited_at`, which is
-    /// what moves the card's `updated_at`. One that changes nothing -- a
+    /// what moves the card's `updated_at`. Every field `TaskUpdate` carries
+    /// counts, `workspace_id` included: linking a card to a lane, or
+    /// unlinking it, is a change to the card, and the dispatch that links one
+    /// moves it at the same moment anyway. One that changes nothing -- a
     /// client writing back exactly what it read -- still bumps the version
     /// (the write happened) but leaves the date alone: "Updated 2m ago" on a
     /// card nobody changed is a small lie on every card a script touches.
@@ -486,13 +489,20 @@ impl Store {
     /// appeared. The same write, undated.
     ///
     /// Version-checked like `update_task`, so it cannot land on a task that
-    /// something else has revised in between.
+    /// something else has revised in between. And refused outright for any
+    /// version but 1, the one `create_task` hands back: `pub` because the
+    /// daemon is another crate, this would otherwise be an undated edit
+    /// available to any caller, and a card revised through it would go on
+    /// reading "Added" forever.
     pub fn fill_in_new_task(
         &self,
         task: Uuid,
         expected_version: u64,
         update: &TaskUpdate,
     ) -> Result<Task> {
+        if expected_version != 1 {
+            return Err(DomainError::InvalidArgument { what: "expected_version" });
+        }
         self.revise_task(task, expected_version, update, false)
     }
 
@@ -2066,6 +2076,14 @@ mod tests {
             store.fill_in_new_task(task.id, task.resource_version, &revision("t", "why")).unwrap();
         assert_eq!(filled.intent, "why");
         assert_eq!(filled.updated_at, filled.created_at, "a card filed with an intent read as updated");
+
+        // Only a new task: past version 1 it would be an undated edit.
+        let refused = store.fill_in_new_task(task.id, filled.resource_version, &revision("t", "later"));
+        assert!(
+            matches!(refused, Err(DomainError::InvalidArgument { what: "expected_version" })),
+            "{refused:?}"
+        );
+        assert_eq!(store.get_task(task.id).unwrap().intent, "why", "and wrote nothing");
     }
 
     /// A block names another card; it does not change this one.
