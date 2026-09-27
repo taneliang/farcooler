@@ -1507,7 +1507,8 @@ async fn install_project_hook_file(
 /// file this creates gets what any new file would, `0666` less the umask; a
 /// replaced file keeps its mode but not its extended attributes or flags. A
 /// crash between the two steps leaves `.hooks.json.farcooler-*.tmp` beside
-/// it, which the diff view doesn't list (`hook_install::hide_our_untracked`).
+/// it, which the diff view doesn't list (`hook_install::hide_our_untracked`)
+/// but which a `git add -A` can still commit.
 ///
 /// `between` runs after the temporary file is written and before the read
 /// that decides, for a test to change the file in that window.
@@ -1527,8 +1528,8 @@ fn replace_hooks_file(path: &Path, contents: &[u8], before: &[u8], between: impl
         Ok(Replaced::Refused(_)) => {
             tracing::info!(
                 path = %path.display(),
-                "the hooks file can't be replaced safely (it has another name, is read-only, or is a symbolic link); \
-                 leaving it alone, so this agent reports nothing here"
+                "the hooks file can't be replaced safely (it has another name, is read-only, is a symbolic link, \
+                 isn't a plain file, or can't be read); leaving it alone, so this agent reports nothing here"
             );
             false
         }
@@ -9930,25 +9931,39 @@ mod hook_file_tests {
     }
 
     /// m7-r of the re-review: a hooks file this creates gets what any new
-    /// file would under the owner's umask, not a fixed `0644`. The umask here
-    /// is `027`, which the fixed mode would miss; it's the process's, so it
-    /// is put back at once.
+    /// file would under the owner's umask, not a fixed `0644`.
+    ///
+    /// The umask has to be one the fixed mode would miss (`027`), and it is
+    /// the whole process's, so it is set in a child: this same test binary,
+    /// running only this test, with `UMASK_CHILD` naming the directory to
+    /// write in. Nothing else runs in that process, so no other test sees
+    /// the mask. Reading the umask here instead would prove nothing under
+    /// the usual `022`, where `0644` is also the right answer.
     #[test]
     fn a_new_hooks_file_honors_the_umask() {
         use std::os::unix::fs::PermissionsExt;
+        const UMASK_CHILD: &str = "FARCOOLER_TEST_UMASK_CHILD";
+        if let Some(dir) = std::env::var_os(UMASK_CHILD) {
+            // SAFETY: `umask` can't fail, and this process runs this test alone.
+            unsafe { libc::umask(0o027) };
+            let dir = Path::new(&dir);
+            let path = dir.join("hooks.json");
+            assert!(replace_hooks_file(&path, b"ours", b"", || {}), "a missing file is written");
+            std::fs::write(dir.join("plain"), "x").unwrap();
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("hooks.json");
-        let plain = dir.path().join("plain");
-        // SAFETY: `umask` can't fail; the old mask is restored just below.
-        let old = unsafe { libc::umask(0o027) };
-        let wrote = replace_hooks_file(&path, b"ours", b"", || {});
-        let reference = std::fs::write(&plain, "x");
-        unsafe { libc::umask(old) };
-        reference.unwrap();
-        assert!(wrote, "a missing file is written");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "service::hook_file_tests::a_new_hooks_file_honors_the_umask", "--test-threads=1"])
+            .env(UMASK_CHILD, dir.path())
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "the child's own asserts: {status:?}");
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let path = dir.path().join("hooks.json");
         assert_eq!(mode(&path), 0o640, "0666 less the umask");
-        assert_eq!(mode(&path), mode(&plain), "the same as any new file");
+        assert_eq!(mode(&path), mode(&dir.path().join("plain")), "the same as any new file");
     }
 
     /// I1: a hooks file that names one key twice reads to serde_json as the

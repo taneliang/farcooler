@@ -1435,6 +1435,23 @@ mod tests {
         assert_eq!(merge_cursor(&owners, socket), owners, "and in cursor's shape");
     }
 
+    /// `home_is_gone` says yes only to a clear "not there". A relative path
+    /// has no home to look at, and a parent we can't look at (here, a path
+    /// through a plain file: ENOTDIR) may still be somebody's.
+    #[test]
+    fn only_a_home_that_is_clearly_not_there_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("gone");
+        assert!(home_is_gone(&format!("{}/h.sock", gone.display())), "a missing directory is gone");
+        assert!(!home_is_gone(&format!("{}/h.sock", dir.path().display())), "a present one is not");
+        assert!(!home_is_gone("nowhere-at-all/h.sock"), "a relative path is never gone");
+        let file = dir.path().join("a-file");
+        std::fs::write(&file, "x").unwrap();
+        let through = file.join("home");
+        assert!(through.try_exists().is_err(), "the stat errors rather than saying no");
+        assert!(!home_is_gone(&format!("{}/h.sock", through.display())), "an error is never gone");
+    }
+
     /// m2-r of the re-review: an entry of ours naming a socket whose home is
     /// gone reports to nobody. A merge drops it and removal doesn't ask about
     /// it. While that home is there, the same entry is another daemon's, and
