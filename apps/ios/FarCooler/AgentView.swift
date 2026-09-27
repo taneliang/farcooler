@@ -236,8 +236,19 @@ struct AgentView: View {
     /// Nothing reserved by a pane that is not on screen: its bar is not docked,
     /// so there is nothing down there to clear.
     private var obstruction: CGFloat {
-        isVisible ? max(keyboard.height, barHeight) : 0
+        isDocked ? max(keyboard.height, barHeight) : 0
     }
+
+    /// Whether the composer docks: this pane is the one at rest, and the
+    /// grid is not up over it. An input accessory lives in the keyboard's
+    /// window, over everything, so a pane at rest under the open grid — B's
+    /// first pane after a runner switch — drew its composer over the cards
+    /// (ov-27). Terminals hold their keyboard for the same reason; see
+    /// `EnvironmentValues.shellOverviewShowing`.
+    private var isDocked: Bool { isVisible && !overviewShowing }
+
+    /// Whether the shell's grid is up. See `isDocked`.
+    @Environment(\.shellOverviewShowing) private var overviewShowing
 
 
     /// Whether the scroll view is parked at the end of the conversation.
@@ -364,7 +375,7 @@ struct AgentView: View {
                 // exist in the hierarchy so its controller can hold first
                 // responder and vend the bar.
                 .background(
-                    DockedBar(height: $barHeight, isActive: isVisible) { composerStack }
+                    DockedBar(height: $barHeight, isActive: isDocked) { composerStack }
                         .frame(width: 0, height: 0)
                         .accessibilityHidden(true)
                 )
@@ -3452,7 +3463,22 @@ struct AgentLayoutHarness: View {
         // this shell reads is empty for one body pass. Republishing here closes
         // it, the same way the app's first poll does.
         fleetStore.republish()
-        open = Self.agentPane.id
+        // Not under `-shell-overview`: a request with the grid up is a card
+        // tapped, and would close it. The shell rests on this pane anyway.
+        if !Self.opensOnTheGrid { open = Self.agentPane.id }
+    }
+
+    /// `-shell-overview`, as the shell harness takes it: open with the grid
+    /// up over the agent pane, which is where a runner switch leaves a pane
+    /// and the state a lift cannot reach here, because the docked composer
+    /// takes the bar's touches (see `ComposerKeyboardTests`). False outside
+    /// this harness, and outside debug builds.
+    static var opensOnTheGrid: Bool {
+        #if DEBUG
+        isRequested && CommandLine.arguments.contains("-shell-overview")
+        #else
+        false
+        #endif
     }
 
     /// The canned pane, and the fleet it lives in.

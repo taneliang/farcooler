@@ -1636,6 +1636,7 @@ struct ShellScreen: View {
         ShellRootView(
             fleet: map.fleet,
             initial: initial,
+            openingOnOverview: AgentLayoutHarness.opensOnTheGrid,
             // A tapped Live Activity card, resolved against the fleet this
             // very body pass was built from. See `requestedTab`.
             request: Binding(
