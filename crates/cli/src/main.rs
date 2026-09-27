@@ -2917,7 +2917,9 @@ async fn list_themes(
     }
 }
 
-pub(crate) async fn list_worktrees(link: &mut Link) -> Result<Vec<Worktree>, Box<dyn std::error::Error>> {
+pub(crate) async fn list_worktrees<L: tasks::DispatchLink>(
+    link: &mut L,
+) -> Result<Vec<Worktree>, Box<dyn std::error::Error>> {
     let r = link.call(req("worktree.list")).await?;
     match expect_value(r.value, "worktrees")? {
         result::Value::WorktreeList(l) => Ok(l.items),
@@ -3590,8 +3592,8 @@ pub(crate) fn resolve_repository<'a>(
 }
 
 /// A worktree by id prefix or by task name.
-pub(crate) async fn resolve_worktree_id(
-    link: &mut Link,
+pub(crate) async fn resolve_worktree_id<L: tasks::DispatchLink>(
+    link: &mut L,
     needle: &str,
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
     let worktrees = list_worktrees(link).await?;

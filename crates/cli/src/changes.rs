@@ -11,6 +11,9 @@ use farcooler_client::changes_json::{
 };
 use farcooler_protocol::v1::{self as pb, request, result};
 
+use farcooler_transport::ClientError;
+
+use crate::tasks::{DispatchLink, Refused};
 use crate::{Fallible, connect_to, expect_value, req, req_for, short_bytes, uuid_of, with};
 
 #[derive(Subcommand)]
@@ -69,10 +72,25 @@ pub enum ChangesCmd {
 
 pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
+    changes_over(&mut link, cmd, json).await
+}
 
+/// `changes`, over a link already made, with every refusal in this CLI's words.
+///
+/// One place, rather than a `map_err` at each call: every arm here makes two
+/// or three calls (the worktree list, then the one it came for), and a call
+/// site that kept its bare `?` would print the runner's log line again. That
+/// is what each of these did, all of them: "resource not found", "invalid
+/// argument: base_ref", "operation failed", "Broken pipe (os error 32)".
+async fn changes_over<L: DispatchLink>(link: &mut L, cmd: ChangesCmd, json: bool) -> Fallible {
+    let about = About::of(&cmd);
+    answer(link, cmd, json).await.map_err(|e| plainly(e, about))
+}
+
+async fn answer<L: DispatchLink>(link: &mut L, cmd: ChangesCmd, json: bool) -> Fallible {
     match cmd {
         ChangesCmd::Status { worktree, fresh } => {
-            let id = crate::resolve_worktree_id(&mut link, &worktree).await?;
+            let id = crate::resolve_worktree_id(link, &worktree).await?;
             let r = link
                 .call(with(
                     req("changes.change_set"),
@@ -138,7 +156,7 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
         }
 
         ChangesCmd::Diff { worktree, path, commit, staged, unstaged, local, context } => {
-            let id = crate::resolve_worktree_id(&mut link, &worktree).await?;
+            let id = crate::resolve_worktree_id(link, &worktree).await?;
             let selector = pb::DiffSelector {
                 kind: Some(match (&commit, staged, unstaged, local) {
                     (Some(sha), ..) => pb::diff_selector::Kind::Commit(sha.clone()),
@@ -210,7 +228,7 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
         }
 
         ChangesCmd::Files { worktree, sha } => {
-            let id = crate::resolve_worktree_id(&mut link, &worktree).await?;
+            let id = crate::resolve_worktree_id(link, &worktree).await?;
             let r = link
                 .call(with(
                     req("changes.commit_files"),
@@ -234,7 +252,7 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
             }
         }
         ChangesCmd::Read { worktree } => {
-            let id = crate::resolve_worktree_id(&mut link, &worktree).await?;
+            let id = crate::resolve_worktree_id(link, &worktree).await?;
             link.call(with(
                 req("changes.mark_read"),
                 request::Payload::ChangesMarkRead(pb::ChangesMarkRead {
@@ -285,7 +303,7 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
         }
 
         ChangesCmd::Stack { repo, branch, refresh } => {
-            let repos = crate::list_repositories(&mut link).await?;
+            let repos = crate::list_repositories(link).await?;
             let target = crate::resolve_repository(&repos, &repo)?;
             let payload = if refresh {
                 request::Payload::PrRefresh(pb::PrRefresh {
@@ -346,6 +364,122 @@ pub async fn changes(runner: Option<&str>, cmd: ChangesCmd, json: bool) -> Falli
         }
     }
     Ok(())
+}
+
+/// What a `changes` command was asking about, so that a refusal can say
+/// which thing it refused.
+///
+/// The runner's code alone can't: `not-found` from `changes status` is a
+/// worktree that has gone, and from `changes stack` it is a repository with
+/// no worktree left on disk to run git in (`review_ops::any_worktree`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum About {
+    /// One worktree's changes: `status`, `diff` and `read`.
+    Worktree,
+    /// A commit in a worktree: `files`, and `diff --commit`.
+    Commit,
+    /// Every worktree at once: `inbox`.
+    Fleet,
+    /// A repository's branches: `stack`.
+    Repository,
+}
+
+impl About {
+    fn of(cmd: &ChangesCmd) -> About {
+        match cmd {
+            ChangesCmd::Status { .. } | ChangesCmd::Read { .. } => About::Worktree,
+            ChangesCmd::Diff { commit: Some(_), .. } | ChangesCmd::Files { .. } => About::Commit,
+            ChangesCmd::Diff { .. } => About::Worktree,
+            ChangesCmd::Inbox => About::Fleet,
+            ChangesCmd::Stack { .. } => About::Repository,
+        }
+    }
+}
+
+/// A failure from `answer`, with the runner's refusals said in this CLI's
+/// words and everything else left as it was.
+///
+/// "Everything else" is this CLI's own sentences ("no worktree matching
+/// \"x\"", from `resolve`), which are already written for a person.
+fn plainly(error: Box<dyn std::error::Error>, about: About) -> Box<dyn std::error::Error> {
+    match error.downcast::<ClientError>() {
+        Ok(err) => Box::new(refusal(*err, about)),
+        Err(other) => other,
+    }
+}
+
+/// A refusal from the runner, in this CLI's words, keeping the runner's code.
+///
+/// The board's `tasks::refusal` for these commands, and for the same reasons:
+/// the runner's `message` is its log line ("resource not found", "invalid
+/// argument: base_ref", "operation failed") and is never printed; the code
+/// is kept, so `--json` still ends with `code: <word>` for a script, and the
+/// Mac's changes pane, which shows this line under its own heading, shows a
+/// sentence. The board's sentences are about tasks ("that task is not on
+/// this runner"), so these commands have their own.
+///
+/// In clap's style, after its `error: `: lowercase, no closing full stop.
+fn refusal(err: ClientError, about: About) -> Refused {
+    let (code, what) = match err {
+        ClientError::Daemon { code, what, .. } => (code, what),
+        // A closed socket or a garbled frame reads the same whatever was
+        // asked, so the board's sentences answer it, uncoded.
+        other => return crate::tasks::refusal(other, ""),
+    };
+    let word = farcooler_core::error::word_for(code);
+    let said: String = match (word, about) {
+        ("not-found", About::Worktree | About::Commit) => {
+            "that worktree is no longer on this runner".into()
+        }
+        ("not-found", About::Repository) => {
+            "none of that repository's worktrees is on this runner's disk, so its branches can't be read"
+                .into()
+        }
+        ("operation-failed", About::Worktree) => "git couldn't read this worktree's changes".into(),
+        ("operation-failed", About::Commit) => "git couldn't read that commit in this worktree".into(),
+        ("operation-failed", About::Fleet) => "the runner couldn't read what its worktrees changed".into(),
+        ("operation-failed", About::Repository) => "git couldn't read this repository's branches".into(),
+        ("base-unresolvable", _) => {
+            "couldn't work out which branch this worktree is compared against".into()
+        }
+        // This command's own words first, then the board's (which knows
+        // `worktree_id` and friends), then the runner's sentence for a word
+        // newer than this build, as the board does. Never the word itself.
+        ("invalid-argument", _) => said_about(&what)
+            .or_else(|| crate::tasks::said_about(&what))
+            .or_else(|| farcooler_core::error::sentence(&what))
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("the runner refused that ({word})")),
+        ("diff-too-large", _) => "that diff is too large to send at once".into(),
+        ("diff-unsupported", _) => "that file has no diff to show".into(),
+        ("pr-state-unavailable", _) => {
+            "couldn't read pull requests from GitHub. try again in a moment".into()
+        }
+        ("scope-denied", _) => "this client isn't allowed to do that on this runner".into(),
+        ("auth-required", _) => "this client isn't paired with the runner".into(),
+        ("capability-unsupported", _) => {
+            "this runner's Far Cooler is older than this command. update it and try again".into()
+        }
+        // The machine word rather than the runner's prose, as the board says
+        // it: a stable vocabulary, and what a bug report needs.
+        (other, _) => format!("the runner refused that ({other})"),
+    };
+    Refused::new(said, Some(code))
+}
+
+/// This command's sentence for an argument the runner named.
+///
+/// `base_ref` is `change_set::merge_base` failing: the base the runner chose
+/// (pinned, a pull request's base, or the default branch) either isn't in
+/// this worktree's checkout — a pull request's base that was never fetched —
+/// or shares no history with the branch.
+fn said_about(what: &str) -> Option<&'static str> {
+    Some(match what {
+        "base_ref" => {
+            "the branch this worktree is compared against isn't in its checkout, or shares no history with it"
+        }
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -616,5 +750,228 @@ mod tests {
         let v = inbox_json(&pb::ChangesInbox::default());
         assert_eq!(v["items"].as_array().expect("items").len(), 0);
         assert_eq!(v["elsewhere"], 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Refusals
+    // -----------------------------------------------------------------------
+
+    use uuid::Uuid;
+
+    /// What the runner logs for each of these, which is what `changes`
+    /// printed after `error: ` until it had sentences of its own.
+    const LOG_LINE: &str = "LOG LINE: resource version is stale";
+
+    fn daemon(code: pb::ErrorCode, what: &str) -> ClientError {
+        ClientError::Daemon {
+            code: code as i32,
+            retryable: false,
+            message: LOG_LINE.into(),
+            what: what.into(),
+        }
+    }
+
+    /// Every refusal a `changes` command can meet, pinned sentence by
+    /// sentence, each with the runner's code kept for `--json`.
+    ///
+    /// The producers, read off the runner: `rpc.rs` for scope, pairing and
+    /// an unknown method; `review_ops.rs` for not-found (the worktree, or a
+    /// repository with none on disk) and base-unresolvable; `change_set.rs`,
+    /// `file_diff.rs` and `stack.rs` for operation-failed and `base_ref`. The
+    /// review family's other three are defined for this surface and produced
+    /// by nothing today, so a runner that starts sending them is already
+    /// answered.
+    #[test]
+    fn each_refusal_a_changes_command_can_meet_has_its_own_line() {
+        use pb::ErrorCode as C;
+        let table: &[(About, C, &str, &str)] = &[
+            (About::Worktree, C::NotFound, "", "that worktree is no longer on this runner"),
+            (About::Commit, C::NotFound, "", "that worktree is no longer on this runner"),
+            (
+                About::Repository,
+                C::NotFound,
+                "",
+                "none of that repository's worktrees is on this runner's disk, so its branches can't be read",
+            ),
+            (About::Fleet, C::NotFound, "", "the runner refused that (not-found)"),
+            (About::Worktree, C::OperationFailed, "", "git couldn't read this worktree's changes"),
+            (About::Commit, C::OperationFailed, "", "git couldn't read that commit in this worktree"),
+            (About::Fleet, C::OperationFailed, "", "the runner couldn't read what its worktrees changed"),
+            (About::Repository, C::OperationFailed, "", "git couldn't read this repository's branches"),
+            (
+                About::Worktree,
+                C::BaseUnresolvable,
+                "",
+                "couldn't work out which branch this worktree is compared against",
+            ),
+            (
+                About::Worktree,
+                C::InvalidArgument,
+                "base_ref",
+                "the branch this worktree is compared against isn't in its checkout, or shares no history with it",
+            ),
+            (About::Commit, C::DiffTooLarge, "", "that diff is too large to send at once"),
+            (About::Worktree, C::DiffUnsupported, "", "that file has no diff to show"),
+            (
+                About::Repository,
+                C::PrStateUnavailable,
+                "",
+                "couldn't read pull requests from GitHub. try again in a moment",
+            ),
+            (About::Worktree, C::ScopeDenied, "", "this client isn't allowed to do that on this runner"),
+            (About::Fleet, C::AuthRequired, "", "this client isn't paired with the runner"),
+            (
+                About::Fleet,
+                C::CapabilityUnsupported,
+                "",
+                "this runner's Far Cooler is older than this command. update it and try again",
+            ),
+            (About::Worktree, C::ResourceConflict, "", "the runner refused that (resource-conflict)"),
+        ];
+        for &(about, code, what, expected) in table {
+            let refused = refusal(daemon(code, what), about);
+            let said = refused.to_string();
+            let word = farcooler_core::error::word(code);
+            assert_eq!(said, expected, "{about:?} {word} {what}");
+            assert_eq!(refused.word(), Some(word), "{about:?} {word} keeps its code for --json");
+            assert!(!said.contains("LOG LINE"), "{word} printed the runner's log line");
+            assert!(!said.contains('_'), "{word} put a machine word on a screen: {said}");
+            assert!(said.starts_with(char::is_lowercase), "{word}: {said}");
+            assert!(!said.ends_with('.'), "{word}: {said}");
+        }
+        // Each code its own line, within what one command can meet.
+        for about in [About::Worktree, About::Commit, About::Fleet, About::Repository] {
+            let mut seen = std::collections::HashMap::new();
+            for code in table.iter().map(|row| (row.1, row.2)) {
+                let said = refusal(daemon(code.0, code.1), about).to_string();
+                if let Some(earlier) = seen.insert(said.clone(), code.0) {
+                    assert_eq!(earlier, code.0, "{about:?}: two codes read alike: {said}");
+                }
+            }
+        }
+    }
+
+    /// An argument the runner names gets a sentence, and a word this build
+    /// has never heard of gets the stable code word, never itself.
+    #[test]
+    fn an_argument_the_runner_names_is_said_and_never_printed() {
+        let said = |what: &str| {
+            refusal(daemon(pb::ErrorCode::InvalidArgument, what), About::Worktree).to_string()
+        };
+        // The board's sentence, in this CLI's style, not the runner's.
+        assert_eq!(said("worktree_id"), "that is not a worktree on this runner");
+        assert_eq!(said("task_prefix"), "a prefix is a letter followed by up to seven letters or digits");
+        let unheard = said("columns");
+        assert_eq!(unheard, "the runner refused that (invalid-argument)");
+    }
+
+    /// Not the runner's, and not the operating system's either.
+    #[test]
+    fn a_runner_that_stops_answering_says_so() {
+        let refused = refusal(ClientError::Closed, About::Worktree);
+        assert_eq!(refused.to_string(), "the runner stopped answering");
+        assert_eq!(refused.word(), None);
+    }
+
+    /// One method, and the refusal it gets.
+    type Refusal = Option<(&'static str, fn() -> ClientError)>;
+
+    /// A link that answers the lists and refuses one method.
+    struct FakeLink {
+        refuse: Refusal,
+    }
+
+    const LANE: Uuid = Uuid::from_u128(0x11);
+    const REPO: Uuid = Uuid::from_u128(0x22);
+
+    impl DispatchLink for FakeLink {
+        fn capabilities(&self) -> Vec<String> {
+            Vec::new()
+        }
+        async fn pause(&mut self, _wait: std::time::Duration) {}
+        async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError> {
+            if let Some((method, refuse)) = self.refuse
+                && method == req.method
+            {
+                return Err(refuse());
+            }
+            let value = match req.method.as_str() {
+                "worktree.list" => result::Value::WorktreeList(pb::WorktreeList {
+                    items: vec![pb::Worktree {
+                        id: crate::id_bytes(LANE),
+                        task_name: "lane".into(),
+                        repository_id: crate::id_bytes(REPO),
+                        ..Default::default()
+                    }],
+                }),
+                "repository.list" => result::Value::RepositoryList(pb::RepositoryList {
+                    items: vec![pb::Repository {
+                        id: crate::id_bytes(REPO),
+                        display_name: "overnight".into(),
+                        ..Default::default()
+                    }],
+                }),
+                other => panic!("this fake doesn't answer {other}"),
+            };
+            Ok(pb::Result { value: Some(value) })
+        }
+    }
+
+    async fn failing(cmd: ChangesCmd, refuse: Refusal) -> Box<dyn std::error::Error> {
+        let mut link = FakeLink { refuse };
+        changes_over(&mut link, cmd, true).await.expect_err("refused")
+    }
+
+    fn status() -> ChangesCmd {
+        ChangesCmd::Status { worktree: "lane".into(), fresh: false }
+    }
+
+    /// Through the command itself, so an arm that went back to a bare `?`
+    /// would print the runner's line here and fail.
+    #[tokio::test]
+    async fn a_refused_changes_command_prints_a_sentence_and_keeps_its_code() {
+        let err = failing(
+            status(),
+            Some(("changes.change_set", || daemon(pb::ErrorCode::BaseUnresolvable, ""))),
+        )
+        .await;
+        assert_eq!(err.to_string(), "couldn't work out which branch this worktree is compared against");
+        let refused = err.downcast_ref::<Refused>().expect("a refusal, not the runner's error");
+        assert_eq!(refused.word(), Some("base-unresolvable"));
+
+        // The worktree list it reads first, before the call it came for.
+        let err = failing(status(), Some(("worktree.list", || ClientError::Closed))).await;
+        assert_eq!(err.to_string(), "the runner stopped answering");
+
+        // `stack` says a repository, not a worktree.
+        let err = failing(
+            ChangesCmd::Stack { repo: "overnight".into(), branch: "main".into(), refresh: false },
+            Some(("stack.get", || daemon(pb::ErrorCode::NotFound, ""))),
+        )
+        .await;
+        assert_eq!(
+            err.to_string(),
+            "none of that repository's worktrees is on this runner's disk, so its branches can't be read"
+        );
+
+        // `diff --commit` is about the commit.
+        let err = failing(
+            ChangesCmd::Diff {
+                worktree: "lane".into(),
+                path: "a.rs".into(),
+                commit: Some("deadbeef".into()),
+                staged: false,
+                unstaged: false,
+                local: false,
+                context: None,
+            },
+            Some(("changes.file_diff", || daemon(pb::ErrorCode::OperationFailed, ""))),
+        )
+        .await;
+        assert_eq!(err.to_string(), "git couldn't read that commit in this worktree");
+
+        // This CLI's own sentence passes through untouched.
+        let err = failing(ChangesCmd::Read { worktree: "nope".into() }, None).await;
+        assert_eq!(err.to_string(), "no worktree matching \"nope\"");
     }
 }
