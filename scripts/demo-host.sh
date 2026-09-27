@@ -488,7 +488,10 @@ REPO_ID=$(repo_id)
 # pane with it. Every workspace that loses its panes here is given new ones
 # below, by the same code that makes them on a first run.
 for lost in $(fc --json workspace list | jq -r '.workspaces[].terminals[] | select(.state=="LOST") | .id'); do
-    fc terminal dismiss-lost "$lost" >/dev/null
+    # A terminal that stopped being LOST between the list and this call is
+    # refused, and that is no reason to stop the demo.
+    fc terminal dismiss-lost "$lost" >/dev/null \
+        || echo "could not dismiss lost terminal $lost; continuing"
 done
 
 if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=="scrolling") | .id) // empty')" ]; then
@@ -612,14 +615,18 @@ fi
 # landed on, and this workspace is a NAME the grid can offer rather than a
 # place any test looks at. The 400 lines belong to `scrolling`, which is where
 # every scrollback assertion in the suite is made.
+CROSSING_EXISTED=1
 if [ -z "$(fc --json workspace list | jq -r 'first(.workspaces[] | select(.task=="crossing") | .id) // empty')" ]; then
     fc workspace create "$REPO_ID" crossing --branch demo/crossing >/dev/null
+    CROSSING_EXISTED=0
 fi
 CROSSING=$(fc --json workspace list \
     | jq -r 'first(.workspaces[] | select(.task=="crossing") | .id) // empty')
 # A pane, as a new worktree comes with one, when the sweep of lost terminals
-# above took the one it had.
-if [ -n "$CROSSING" ] && [ "$(fc --json workspace list \
+# above took the one it had. Only for a workspace that was already here: one
+# made just now gets its pane from the daemon, and not always by the next
+# listing, so topping it up would sometimes give it two.
+if [ -n "$CROSSING" ] && [ "$CROSSING_EXISTED" = 1 ] && [ "$(fc --json workspace list \
     | jq -r --arg id "$CROSSING" '[.workspaces[] | select(.id==$id) | .terminals[]] | length')" = 0 ]; then
     fc terminal create "$CROSSING" --preset shell >/dev/null
 fi

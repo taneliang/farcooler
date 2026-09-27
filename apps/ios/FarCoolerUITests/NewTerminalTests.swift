@@ -117,10 +117,13 @@ final class NewTerminalTests: XCTestCase {
     ///
     /// The column's swipe, as `ShellColumnCloseTests` drives it, then the
     /// confirmation a running shell earns (`ShellClose.mustAsk`). Only the tab
-    /// the shell LANDED on, and only when it moved off the tab it started on
-    /// to something that is not the diff: that is the one tab this test can
-    /// say it made. When it cannot say, it closes nothing and fails, because a
-    /// guess would close a fixture some other test needs.
+    /// the shell LANDED on, and only when the workspace grew by exactly one
+    /// and the shell moved off the tab it started on to something that is not
+    /// the diff. That is still an index, not the terminal's id: a create that
+    /// landed on the wrong existing pane would pass all three checks, and this
+    /// would close that pane. Left as it is because the probe publishes no id.
+    /// When these checks fail it closes nothing and fails, because a guess
+    /// would close a fixture some other test needs.
     ///
     /// Asserted, not attempted. A cleanup that fails quietly is the leak it
     /// exists to stop, reported four tests later as somebody else's failure.
@@ -225,7 +228,9 @@ final class NewTerminalTests: XCTestCase {
         let after = state(app)
         // Removed again when the test is done, pass or fail. See
         // `closeWhatThisMade` for why that is not tidiness.
-        let landed = after["tab"]
+        // Only when the workspace grew by exactly one: a landing index read
+        // from any other count may name an older pane.
+        let landed = after["tabs"] == tabsBefore + 1 ? after["tab"] : nil
         addTeardownBlock { [unowned self] in
             self.closeWhatThisMade(app, tab: landed, tabBefore: tabBefore, tabsBefore: tabsBefore)
         }
