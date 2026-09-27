@@ -1023,9 +1023,13 @@ struct BoardSidebarTests {
         #expect(checkout(Self.repoB, host: "remote") == nil, "another runner's")
         var older = first
         older.repositoryID = nil
+        var another = second
+        another.repositoryID = nil
+        another.repository = "billing-service"
         #expect(
-            ContentView.mainCheckout(host: "", repositoryID: nil, project: "overnight", in: [lane, older])?.id
-                == "first")
+            ContentView.mainCheckout(
+                host: "", repositoryID: nil, project: "overnight", in: [lane, another, older])?.id
+                == "first", "an older CLI's checkout is found by its name")
     }
 
     // MARK: - Dragging a worktree onto another workspace
@@ -1071,6 +1075,27 @@ struct BoardSidebarTests {
         #expect(meaning(lane, .workspace(Self.otherMain)) == nil, "another repository's")
         #expect(meaning(lane, .worktree("elsewhere", .above)) == nil, "another repository's")
         #expect(meaning(lane, .worktree("old", .above)) == nil, "a hidden row")
+        #expect(meaning(hidden, .worktree("bill", .above)) == nil, "a hidden row dragged")
+        #expect(meaning(lane, .worktree("lane", .above)) == nil, "onto itself")
+        let loose = Self.worktree("loose", workspace: nil, repository: Self.repoB)
+        let across = Self.fleet(workspaces: [main], worktrees: [stray, loose])
+        #expect(
+            ContentView.dropMeaning(stray, onto: .worktree("loose", .above), in: across, assigns: true) == nil,
+            "Unclaimed onto another repository's Unclaimed")
+
+        // The seam the hover and the drop share: by id, asking whether that
+        // worktree's runner assigns.
+        var asked: [String] = []
+        let seam = ContentView.dropMeaning(
+            of: "lane", onto: .workspace(Self.billing), in: fleet,
+            assigns: { asked.append($0.id); return true })
+        #expect(seam?.0.id == "lane")
+        #expect(seam?.1 == .assign(billing))
+        #expect(asked == ["lane"])
+        #expect(
+            ContentView.dropMeaning(of: "lane", onto: .workspace(Self.billing), in: fleet, assigns: { _ in false })
+                == nil)
+        #expect(ContentView.dropMeaning(of: "gone", onto: .workspace(Self.billing), in: fleet, assigns: { _ in true }) == nil)
 
         var remote = lane
         remote.host = "remote"
@@ -1103,6 +1128,45 @@ struct BoardSidebarTests {
         #expect(drag.drop(on: .workspace("billing")))
         #expect(drag.completion?.target == .workspace("billing"))
         #expect(drag.workspaceLanding == nil, "the header stayed lit after the drop")
+
+        // A header lit for a card the rule then refuses goes dark.
+        drag.begin("lane")
+        drag.hover(workspace: "billing")
+        #expect(drag.workspaceLanding == "billing")
+        drag.accepts = { _, _ in false }
+        drag.hover(workspace: "billing")
+        #expect(drag.workspaceLanding == nil, "a refused header stayed lit")
+    }
+
+    /// A worktree drag that ended without a drop — released over a row that
+    /// refused it, over nothing, or with Escape — has no end hook to clear
+    /// it. A later, unrelated drag released on a workspace header must not
+    /// move that worktree: a pane drag beginning ends it.
+    @Test func anUnrelatedDropAfterARefusedWorktreeDragAssignsNothing() {
+        let drag = WorktreeDrag.shared
+        let before = drag.accepts
+        defer {
+            drag.accepts = before
+            drag.cancel()
+        }
+        drag.accepts = { _, target in target != .worktree("stray", .above) }
+        let completed = drag.completion
+
+        drag.begin("lane")
+        drag.hover("stray", .above)  // refused, so no drop is ever performed
+        PaneDrag.shared.begin("t7")
+        drag.hover(workspace: "billing")
+        #expect(drag.workspaceLanding == nil, "a pane drag lit a header for a worktree")
+        #expect(!drag.drop(on: .workspace("billing")))
+        #expect(drag.completion == completed, "a stale worktree was dropped")
+
+        // Text dragged in from another app begins no pane drag here. The drop
+        // is read, and its payload isn't the stale worktree's id.
+        drag.begin("lane")
+        drag.hover("stray", .above)
+        #expect(!drag.drop(on: .workspace("billing"), carrying: "some text"))
+        #expect(drag.completion == completed, "a stale worktree was dropped by text from elsewhere")
+        #expect(drag.dragged == nil)
     }
 
     // MARK: - An orchestrator's pane in the detail

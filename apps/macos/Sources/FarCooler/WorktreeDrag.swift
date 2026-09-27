@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import SwiftUI
 
 /// Dragging a worktree row into a new place in the sidebar.
@@ -64,7 +65,33 @@ final class WorktreeDrag: ObservableObject {
     /// sees the fleet. Asked while hovering, so a place the drop would be
     /// refused draws no insertion line and takes no drop, rather than taking
     /// one that then does nothing. Nil lets every landing through.
+    ///
+    /// A hint for the hover, not the guard: nil until the sidebar first
+    /// appears, and answered from the fleet as it was at that moment of the
+    /// drag. `ContentView.landed` decides again from the live fleet before it
+    /// writes anything, and that is the check a drop has to pass.
     var accepts: ((_ dragged: String, _ target: Target) -> Bool)?
+
+    /// The mouse-down monitor that ends a stale drag, once installed.
+    private var staleDragMonitor: Any?
+
+    /// End any worktree drag on the next mouse-down in this app.
+    ///
+    /// SwiftUI's `onDrag` says when a drag begins and never when it ends,
+    /// and a drag released anywhere but a row that took it — over a row
+    /// that refused it, over nothing, with Escape — leaves `dragged` set. No
+    /// mouse-down can happen while a drag is in flight, so the next one
+    /// means it has ended; a new worktree drag's own mouse-down comes before
+    /// its `begin`. Mouse-down rather than mouse-up: a drop's mouse-up and
+    /// its `performDrop` aren't ordered for this, and cancelling first would
+    /// throw away a drop that was taken. Idempotent.
+    func endStaleDragsOnMouseDown() {
+        guard staleDragMonitor == nil else { return }
+        staleDragMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            MainActor.assumeIsolated { WorktreeDrag.shared.cancel() }
+            return event
+        }
+    }
 
     private var token = 0
 
@@ -119,7 +146,10 @@ final class WorktreeDrag: ObservableObject {
 
     /// Hovering over a workspace's header. Refused as `hover` is.
     func hover(workspace: String) {
-        guard allows(.workspace(workspace)) else { return }
+        guard allows(.workspace(workspace)) else {
+            leave(workspace: workspace)
+            return
+        }
         if workspaceLanding != workspace { workspaceLanding = workspace }
     }
 
@@ -134,21 +164,48 @@ final class WorktreeDrag: ObservableObject {
     /// like, and what `PaneDrag` guards against for the same reason — and
     /// for a target `accepts` refuses, since a drop the sidebar would only
     /// ignore is not a drop.
+    ///
+    /// `payload` is what the drop carried, when it has been read: a drop
+    /// completes only when that is the card this drag began with. A text
+    /// dragged in from another app, or a pane's id, over a header while a
+    /// stale worktree id is still here, is not that worktree.
     @discardableResult
-    func drop(on target: Target) -> Bool {
+    func drop(on target: Target, carrying payload: String? = nil) -> Bool {
         guard let moving = dragged, allows(target) else {
             cancel()
             return false
         }
         cancel()
+        return land(moving, on: target, carrying: payload ?? moving)
+    }
+
+    /// Publish a drop of `moving`, if it carried `moving`.
+    @discardableResult
+    private func land(_ moving: String, on target: Target, carrying payload: String) -> Bool {
+        guard payload == moving else { return false }
         token += 1
         completion = Completion(dragged: moving, target: target, token: token)
         return true
     }
 
-    @discardableResult
-    func drop(on worktree: String, _ edge: WorktreeOrder.Edge) -> Bool {
-        drop(on: .worktree(worktree, edge))
+    /// A drop target's `performDrop`: take it if the rule allows it, then
+    /// complete it once its payload is read and is the dragged worktree's id.
+    ///
+    /// Read rather than trusted, because `dragged` is only this app's memory
+    /// of the last worktree drag to begin, and every pane drag and every text
+    /// dragged in from elsewhere is `.text` too. Loading is asynchronous, so
+    /// the drag is ended here and the completion follows a moment later.
+    func receive(_ providers: [NSItemProvider], on target: Target) -> Bool {
+        guard let moving = dragged, allows(target), let provider = providers.first else {
+            cancel()
+            return false
+        }
+        cancel()
+        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+            let payload = (object as? NSString).map { $0 as String } ?? ""
+            Task { @MainActor in WorktreeDrag.shared.land(moving, on: target, carrying: payload) }
+        }
+        return true
     }
 
     func cancel() {
@@ -204,7 +261,7 @@ struct WorktreeDropTarget: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        WorktreeDrag.shared.drop(on: worktree, edge(info))
+        WorktreeDrag.shared.receive(info.itemProviders(for: [.text]), on: .worktree(worktree, edge(info)))
     }
 }
 
@@ -233,7 +290,7 @@ struct WorkspaceDropTarget: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        WorktreeDrag.shared.drop(on: .workspace(workspace))
+        WorktreeDrag.shared.receive(info.itemProviders(for: [.text]), on: .workspace(workspace))
     }
 }
 
@@ -256,8 +313,9 @@ struct WorktreeDragSource: ViewModifier {
         if enabled {
             content.onDrag {
                 MainActor.assumeIsolated { WorktreeDrag.shared.begin(worktree) }
-                // Carries the id only so the system will start a drag at all;
-                // the payload that is actually read is in `WorktreeDrag`. See
+                // Carries the id so the system will start a drag at all, and
+                // so a drop can tell this drag from any other `.text` one
+                // (`WorktreeDrag.receive`). What it means is in `WorktreeDrag`. See
                 // its docs.
                 return NSItemProvider(object: worktree as NSString)
             }

@@ -1827,6 +1827,12 @@ final class DaemonClient: ObservableObject {
         return Self.assignRefusal(message, worktree: worktree, workspace: workspace)
     }
 
+    /// The banner for a worktree that moved to `workspace` and then couldn't
+    /// be put where it was dropped: the move held, the place didn't.
+    static func movedButNotPlaced(_ worktree: Worktree, to workspace: WorkspaceSummary) -> String {
+        "Moved “\(WorktreeName.display(worktree.task))” to \(workspace.name), but couldn’t put it where you dropped it."
+    }
+
     /// Why a worktree didn't move to `workspace`, by the `code:` word on the
     /// CLI's stderr. A failure with no word never reached the daemon's
     /// answer — the runner wasn't reachable, or the CLI couldn't find one of
@@ -1863,10 +1869,16 @@ final class DaemonClient: ObservableObject {
     /// never rearranged optimistically: the runner is the one that decides, and
     /// a card that moved on screen and not on disk is the failure this whole
     /// feature exists to remove.
-    func reorderWorktrees(_ worktrees: [String]) async {
-        guard worktrees.count > 1 else { return }
-        _ = await run(["worktree", "reorder"] + worktrees)
+    ///
+    /// True once the runner has taken it, for a caller that says a failure
+    /// in its own words — the reorder after a drag moved a worktree to a
+    /// workspace.
+    @discardableResult
+    func reorderWorktrees(_ worktrees: [String]) async -> Bool {
+        guard worktrees.count > 1 else { return true }
+        let placed = await run(["worktree", "reorder"] + worktrees) != nil
         await refresh()
+        return placed
     }
 
     /// What asking the daemon to remove a worktree came back with.

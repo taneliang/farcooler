@@ -700,11 +700,11 @@ struct ContentView: View {
     /// has no meaning for never got this far, because the row asked it
     /// while hovering (`WorktreeDrag.accepts`), and is ignored here too.
     private func landed(_ done: WorktreeDrag.Completion) {
-        guard let dragged = store.fleet.worktrees.first(where: { $0.id == done.dragged }) else { return }
-        let assigns = store.client(for: dragged)?.daemonBuild?.can("workstreams") ?? false
-        switch Self.dropMeaning(dragged, onto: done.target, in: store.fleet, assigns: assigns) {
-        case nil:
-            return
+        guard
+            let (dragged, meaning) = Self.dropMeaning(
+                of: done.dragged, onto: done.target, in: store.fleet, assigns: Self.assigns(store))
+        else { return }
+        switch meaning {
         case .reorder:
             if case .worktree(let target, let edge) = done.target { reorder(done.dragged, to: target, edge) }
         case .assign(let workspace):
@@ -723,7 +723,12 @@ struct ContentView: View {
                     return
                 }
                 // Dropped between two of that workspace's rows: there, too.
-                if case .worktree(let target, let edge) = done.target { reorder(done.dragged, to: target, edge) }
+                // A failure now is said in our words: the move itself held.
+                if case .worktree(let target, let edge) = done.target {
+                    reorder(
+                        done.dragged, to: target, edge,
+                        failure: DaemonClient.movedButNotPlaced(dragged, to: workspace))
+                }
             }
         }
     }
@@ -738,7 +743,12 @@ struct ContentView: View {
     /// worktree to that workspace first. Every card in a group is on one
     /// runner and in one project, which is what makes a single call to a
     /// single client the whole of it.
-    private func reorder(_ dragged: String, to target: String, _ edge: WorktreeOrder.Edge) {
+    ///
+    /// `failure`, when given, is the banner for a reorder the runner
+    /// refuses, in place of the CLI's own words.
+    private func reorder(
+        _ dragged: String, to target: String, _ edge: WorktreeOrder.Edge, failure: String? = nil
+    ) {
         guard
             let group = sidebarEntries.first(where: { g in
                 g.kind == .repository && g.worktrees.contains { $0.id == dragged }
@@ -752,7 +762,18 @@ struct ContentView: View {
         // reorder makes every other connected client re-read the fleet.
         guard next != ids, let anchor = shown.first else { return }
         let order = next.compactMap { id in shown.first { $0.id == id }?.short }
-        Task { await act(on: anchor) { client in await client.reorderWorktrees(order) } }
+        guard let failure else {
+            Task { await act(on: anchor) { client in await client.reorderWorktrees(order) } }
+            return
+        }
+        Task {
+            if let why = store.refusal(for: anchor) {
+                errorBanner = "Cannot do that: \(why)"
+                return
+            }
+            guard let client = store.client(for: anchor) else { return }
+            if !(await client.reorderWorktrees(order)) { errorBanner = failure }
+        }
     }
 
     /// What dropping a worktree's row means.
@@ -777,7 +798,16 @@ struct ContentView: View {
     ///   has no command to send.
     /// - Never the main checkout: it is the repository's own directory, where
     ///   every workspace's orchestrator runs, not one workspace's worktree.
-    /// - Never across repositories or runners, or onto a hidden row.
+    /// - Never across repositories or runners — Unclaimed onto Unclaimed
+    ///   included, which `sameSidebarPlace` alone would call one place.
+    /// - Never a hidden row or onto one, nor a row onto itself. Neither can
+    ///   happen from the sidebar today — hidden rows are no drag source or
+    ///   target, and `WorktreeDrag.allows` refuses a row's own — so these
+    ///   hold the rule to what it says rather than guard a live path.
+    ///
+    /// Asked twice, from one place: by the rows while a card hovers
+    /// (`WorktreeDrag.accepts`) and by `landed` before anything is written,
+    /// both through `dropMeaning(of:onto:in:assigns:)`.
     static func dropMeaning(
         _ dragged: Worktree, onto target: WorktreeDrag.Target, in fleet: Fleet, assigns: Bool
     ) -> DropMeaning? {
@@ -803,6 +833,27 @@ struct ContentView: View {
             if sameSidebarPlace(dragged, onto, in: fleet) { return .reorder }
             return assign(workspace(onto.workspace))
         }
+    }
+
+    /// `dropMeaning` for a dragged worktree's id, with the worktree it is:
+    /// the one seam the hover and the drop both go through, so the two can't
+    /// come to disagree. `assigns` says whether a worktree's runner has
+    /// `workstreams`; see `assigns(_:)`. Nil for an id the fleet doesn't
+    /// have.
+    static func dropMeaning(
+        of dragged: String, onto target: WorktreeDrag.Target, in fleet: Fleet,
+        assigns: (Worktree) -> Bool
+    ) -> (Worktree, DropMeaning)? {
+        guard let moving = fleet.worktrees.first(where: { $0.id == dragged }),
+            let meaning = dropMeaning(moving, onto: target, in: fleet, assigns: assigns(moving))
+        else { return nil }
+        return (moving, meaning)
+    }
+
+    /// Whether a worktree's runner can take `worktree assign`, as `store`
+    /// knows it at the moment of asking.
+    static func assigns(_ store: FleetStore) -> (Worktree) -> Bool {
+        { store.client(for: $0)?.daemonBuild?.can("workstreams") ?? false }
     }
 
     /// Whether two worktrees are drawn under the same workspace, or both in
@@ -1043,12 +1094,9 @@ struct ContentView: View {
         .onAppear {
             let store = store
             WorktreeDrag.shared.accepts = { dragged, target in
-                guard let moving = store.fleet.worktrees.first(where: { $0.id == dragged }) else {
-                    return false
-                }
-                let assigns = store.client(for: moving)?.daemonBuild?.can("workstreams") ?? false
-                return Self.dropMeaning(moving, onto: target, in: store.fleet, assigns: assigns) != nil
+                Self.dropMeaning(of: dragged, onto: target, in: store.fleet, assigns: Self.assigns(store)) != nil
             }
+            WorktreeDrag.shared.endStaleDragsOnMouseDown()
         }
         // Declared in exactly one place. A second declaration on the
         // `NavigationSplitView`'s sidebar closure made which width the column
