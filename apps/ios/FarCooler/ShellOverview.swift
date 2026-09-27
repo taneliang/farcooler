@@ -1294,7 +1294,16 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                     // it. These are the only cards in this grid that are not a
                     // place you can go by swiping: a tap crosses runners, and
                     // `ShellScreen` is what says what that costs.
-                    ForEach(groups) { group in
+                    //
+                    // Identified as `elsewhere/<runner>`, not by the runner's
+                    // id alone. The live sections above ARE the runner's id,
+                    // and a runner moves between the two lists on every
+                    // switch with one runner at a time. Sharing an id, the
+                    // grid kept the heading it had already drawn: after
+                    // "Switch to This Runner", Runner B's live section sat
+                    // under its old "Not seen yet · No worktrees" heading,
+                    // over its own cards (ov-27).
+                    ForEach(groups, id: \.elsewhereSectionID) { group in
                         Section {
                             ForEach(group.order(matching: search), id: \.self) { index in
                                 let workspace = group.workspaces[index]
@@ -1465,4 +1474,10 @@ private struct ShellReorderContainer: ViewModifier {
             content
         }
     }
+}
+
+private extension ShellServerGroup {
+    /// This runner's cached section, as the grid identifies it. See the
+    /// `ForEach` that draws the cached sections for why it is not `id`.
+    var elsewhereSectionID: String { "elsewhere/\(id)" }
 }

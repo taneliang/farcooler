@@ -1613,16 +1613,25 @@ final class TerminalScrollTests: XCTestCase {
     /// not the shell's to keep. The shell surviving is still the whole of
     /// what `.id(host)` would break.
     ///
-    /// # Red, and not because of `.id(host)`
+    /// # The gap while Runner B connects
     ///
-    /// As of 5b4989f0 this fails, and the app is what it is reporting on. The
-    /// switch retires Runner A before Runner B has a fleet, so for that moment
-    /// no runner has one, `FleetStore.hasFleet` is false, and
-    /// `FleetView.phases` swaps the whole connected screen for its waiting
-    /// screen. When B answers, a new shell mounts: seen after the switch as
+    /// This was red from 5b4989f0 until ov-27, and not because of `.id(host)`.
+    /// The switch retires Runner A before Runner B has a fleet, so for that
+    /// moment no runner has one, `FleetStore.hasFleet` is false, and
+    /// `FleetView.phases` swapped the whole connected screen for its waiting
+    /// screen. When B answered, a new shell mounted: seen after the switch as
     /// `ws=0 tab=0 overview=0` on a shell that had been on ws=1 with the grid
-    /// open. Whether the shell should survive that gap is a product call, and
-    /// it is left red until somebody makes it.
+    /// open. The ruling was that the shell survives the gap, and
+    /// `FleetView.phases` now keeps a shell that has stood.
+    ///
+    /// A is still retired at once, by design, and the test says so: once B
+    /// has answered, A's heading must be a cached one ("last seen"), not a
+    /// live one, so its cards are the "can't say" memory every unreached
+    /// runner's are and not panes that go on looking live.
+    ///
+    /// A remount is read three ways: the probe gone, the grid closed, or the
+    /// probe's `mount` changed. The last is the one a remount cannot hide
+    /// from by standing in the same place.
     func testAChangeOfRunnerRebuildsNothing() throws {
         let app = launchTwoRunners(["-\(Self.everyRunnerAtOnce)", "<false/>"])
         _ = try openATerminalInTheShell(app)
@@ -1681,13 +1690,25 @@ final class TerminalScrollTests: XCTestCase {
             "Runner B is already connected (\(other.label)), so \"Connect every runner at once\" "
                 + "is still on and there is no switch to make")
         let wsBefore = Self.field(probe.value as? String ?? "", "ws")
+        let mountBefore = try XCTUnwrap(
+            Self.field(probe.value as? String ?? "", "mount"),
+            "the probe carries no mount= field: \(probe.value ?? "")")
+        let mine = app.descendants(matching: .any)
+            .matching(identifier: "shell-section-\(runnerIDs.a)").firstMatch
+        XCTAssertTrue(
+            mine.exists && isLive(mine),
+            "Runner A's heading is not a live one before the switch: "
+                + "\(mine.exists ? mine.label : "no heading")")
         try switchToRunner(app, id: runnerIDs.b)
 
-        // A remount is a probe that is gone or reads `overview=0`: every
-        // shell mounts with its grid closed (`ShellScreen.seed` opens on a
-        // pane), and nothing on this path closes the grid on purpose.
+        // A remount is a probe that is gone, reads `overview=0`, or names
+        // another mount: every shell mounts with its grid closed
+        // (`ShellScreen.seed` opens on a pane), and nothing on this path
+        // closes the grid on purpose.
         func remounted() -> Bool {
-            !probe.exists || Self.field(probe.value as? String ?? "", "overview") != "1"
+            let value = probe.value as? String ?? ""
+            return !probe.exists || Self.field(value, "overview") != "1"
+                || Self.field(value, "mount") != mountBefore
         }
 
         // 1. Until B has answered, or the shell has gone. Nothing is asserted
@@ -1726,6 +1747,171 @@ final class TerminalScrollTests: XCTestCase {
                 + "\(other.exists ? other.label : "nothing, because the grid it is in is gone"). "
                 + "Without B's fleet in the grid the checks above were made before the moment "
                 + "that matters")
+        // A was retired, and reads as it: a cached heading, not a live one.
+        XCTAssertTrue(
+            mine.exists && !isLive(mine),
+            "Runner A still reads as live after the switch to B "
+                + "(\(mine.exists ? mine.label : "no heading")): one runner at a time means A "
+                + "is retired, and its cards must be the cached \"can't say\" ones")
+    }
+
+    /// **A tapped card on the runner you left lands on its worktree, in the
+    /// shell you tapped it in.**
+    ///
+    /// The other half of `testAChangeOfRunnerRebuildsNothing`, and the half
+    /// its fix would have broken on its own. A cached card's tap
+    /// (`ShellScreen.select(runner:landingOn:)`) writes down which worktree it
+    /// named, and the only thing that ever read that back was `seed` — which
+    /// runs once per mount, and ran again only because the switch used to
+    /// tear the shell down. With the shell surviving, the note has to be
+    /// honored as a request instead, or the tap switches runners and lands
+    /// nowhere: the grid stays open on the runner's heading.
+    ///
+    /// "Connect every runner at once" is off for this, as for the test above:
+    /// with it on no card is ever cached.
+    func testACardOnTheRunnerYouLeftLandsOnItsWorktree() throws {
+        let app = launchTwoRunners(["-\(Self.everyRunnerAtOnce)", "<false/>"])
+        _ = try openATerminalInTheShell(app)
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        XCTAssertTrue(probe.waitForExistence(timeout: 30), "the shell never stood up")
+        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
+        // Read on the pane, before the grid is over the bar. Both demo runners
+        // serve one daemon, so B's worktree at this index has the same name
+        // and the switch below leaves the bar naming it.
+        XCTAssertTrue(bar.waitForExistence(timeout: 20), "the bar never appeared")
+        let here = Self.workspaceName(bar.label)
+
+        // Onto B from its heading, and wait for B's fleet: A's cards are only
+        // a memory once A has been retired and B has taken its place.
+        try openOverview(app)
+        let other = app.descendants(matching: .any)
+            .matching(identifier: "shell-section-\(runnerIDs.b)").firstMatch
+        XCTAssertTrue(
+            other.waitForExistence(timeout: 20), "the overview has no heading for Runner B")
+        try switchToRunner(app, id: runnerIDs.b)
+        let answered = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                other.exists && other.label.contains("Connected")
+                    && !other.label.contains("No worktrees")
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [answered], timeout: 60), .completed,
+            "Runner B never answered: its heading reads \(other.exists ? other.label : "nothing")")
+
+        // A card of A's, for a worktree other than the one the bar is on, so
+        // that landing on it is a move the bar can be seen to make.
+        let cards = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'shell-elsewhere-'"))
+        let appeared = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in cards.count > 0 }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [appeared], timeout: 20), .completed,
+            "Runner A left no cached cards behind after the switch")
+        let card = try XCTUnwrap(
+            cards.allElementsBoundByIndex.first { Self.workspaceName($0.label) != here },
+            "every cached card of A's names \(here), the worktree the bar is already on")
+        let wanted = Self.workspaceName(card.label)
+        let mountBefore = Self.field(probe.value as? String ?? "", "mount")
+        card.tap()
+
+        // Landed: the grid closed, the bar names the card's worktree, and the
+        // shell is the one the card was tapped in.
+        let landed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                Self.field(probe.value as? String ?? "", "overview") == "0"
+                    && Self.workspaceName(bar.label) == wanted
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [landed], timeout: 60), .completed,
+            "the tap on \(wanted) never landed: the bar says \(Self.workspaceName(bar.label)) "
+                + "and the probe reads \(probe.value ?? "nothing")")
+        XCTAssertEqual(
+            Self.field(probe.value as? String ?? "", "mount"), mountBefore,
+            "the card landed in a NEW shell (the probe reads \(probe.value ?? "")): the crossing "
+                + "was honored by a remount's `seed`, not by the shell it was tapped in")
+    }
+
+    /// **With every runner connected, a move onto another runner's worktree
+    /// rebuilds nothing and retires nothing.**
+    ///
+    /// The default mode's change of runner. There is no "Switch to This
+    /// Runner" with the setting on — every heading is live — but the selected
+    /// runner still changes: `ShellScreen.follow` moves it to wherever you
+    /// move, so a launch lands where you were (`ShellSelection.follows`). Two
+    /// things must not follow the selection, and each has been this app's
+    /// shape before: the tree keyed on it (`.id(host)` on `RootView`, which
+    /// rebuilt the shell on every change of runner), and the connections
+    /// narrowed to it (`FleetMembership.wanted` is the selected runner alone
+    /// only with the setting off).
+    ///
+    /// Moved by a tap on B's first card in the overview, which is a `.moved`
+    /// arrival and so a selection change. The mount is what tells a surviving
+    /// shell from a rebuilt one: a remount's `seed` lands on the selected
+    /// runner's first worktree, which is exactly where the tap lands.
+    func testAMoveOntoAnotherRunnerRebuildsNothing() throws {
+        let app = launchTwoRunners()
+        _ = try openATerminalInTheShell(app)
+        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
+        XCTAssertTrue(probe.waitForExistence(timeout: 30), "the shell never stood up")
+
+        try openOverview(app)
+        let mine = app.descendants(matching: .any)
+            .matching(identifier: "shell-section-\(runnerIDs.a)").firstMatch
+        let other = app.descendants(matching: .any)
+            .matching(identifier: "shell-section-\(runnerIDs.b)").firstMatch
+        func answering(_ heading: XCUIElement) -> Bool {
+            heading.exists && heading.label.contains("Connected")
+                && !heading.label.contains("No worktrees")
+        }
+        let both = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in answering(mine) && answering(other) }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [both], timeout: 60), .completed,
+            "both runners should be live with the setting on: A reads "
+                + "\(mine.exists ? mine.label : "nothing"), B reads "
+                + "\(other.exists ? other.label : "nothing")")
+
+        // B's first live card. Live cards are `shell-card-<runner>…`, the
+        // composite `ShellIdentity.workspace` makes.
+        let card = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "shell-card-\(runnerIDs.b)")
+        ).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "Runner B has no live card to move to")
+        let mountBefore = try XCTUnwrap(
+            Self.field(probe.value as? String ?? "", "mount"),
+            "the probe carries no mount= field: \(probe.value ?? "")")
+        let wsBefore = Self.field(probe.value as? String ?? "", "ws")
+        card.tap()
+
+        let moved = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                let value = probe.value as? String ?? ""
+                return Self.field(value, "overview") == "0" && Self.field(value, "ws") != wsBefore
+            }, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [moved], timeout: 20), .completed,
+            "the tap on B's card moved nothing: \(probe.value ?? "")")
+        // A short watch for a rebuild that trails the selection by a turn.
+        _ = XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in
+                    !probe.exists || Self.field(probe.value as? String ?? "", "mount") != mountBefore
+                }, object: nil)],
+            timeout: 5)
+        XCTAssertEqual(
+            Self.field(probe.value as? String ?? "", "mount"), mountBefore,
+            "moving onto Runner B rebuilt the shell (the probe reads \(probe.value ?? "nothing")): "
+                + "something above `ShellScreen` is keyed on the selected runner")
+
+        // And A is still live: the selection moved, the connections did not.
+        try openOverview(app)
+        XCTAssertTrue(
+            mine.waitForExistence(timeout: 20), "the overview has no heading for Runner A")
+        XCTAssertTrue(
+            answering(mine),
+            "Runner A stopped being live when the selection moved to B: its heading reads "
+                + "\(mine.label). With every runner at once the selection decides where a launch "
+                + "lands, not what is connected")
     }
 
     /// `FleetSettings.allRunnersAtOnceKey`, spelled out: this bundle cannot

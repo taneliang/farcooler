@@ -697,6 +697,13 @@ struct ShellPaneRealView: View {
     }
 }
 
+/// A tapped card on another runner: which runner, and the daemon's own id for
+/// the worktree. What `ShellScreen.crossingKey` spells as `runner/workspace`.
+private struct ShellCrossing: Equatable {
+    let runner: String
+    let workspace: String
+}
+
 /// The shell, standing on a runner.
 ///
 /// What this owns that `ShellRootView` cannot:
@@ -812,6 +819,11 @@ struct ShellScreen: View {
     /// `createdTerminal` rather than like a deep link: tapping Agent on a card
     /// is somebody choosing that tab, and the workspace should remember it.
     @State private var boardTerminal: String?
+
+    /// A worktree on another runner whose card was tapped, until the shell
+    /// has landed on it. The fourth asker `requestedTab` resolves — see
+    /// `select(runner:landingOn:)`.
+    @State private var crossing: ShellCrossing?
 
     /// Describe it, or fill in the form. Both were `WorkspaceListView`'s
     /// toolbar and are the overview's now — see `overviewActions`.
@@ -952,6 +964,11 @@ struct ShellScreen: View {
         // and every live connection writes its own directory — so this is read
         // again whenever the set of live runners moves. See `readElsewhere`.
         .onChange(of: liveRunners) { _, _ in elsewhere = readElsewhere() }
+        // A crossing the new runner cannot honor, or one somebody has since
+        // switched away from. See `settleCrossing`.
+        .onChange(of: answeredRunners) { _, _ in settleCrossing() }
+        .onChange(of: openableCount) { _, _ in settleCrossing() }
+        .onChange(of: hosts.selected?.id) { _, _ in settleCrossing() }
         .task(id: pullRequestKey) { await readPullRequest() }
         .onChange(of: scenePhase) { _, phase in
             // Coming back to the app is reading whatever it comes back to.
@@ -1540,6 +1557,14 @@ struct ShellScreen: View {
                 get: { requestedTab(in: map) },
                 set: { taken in
                     guard taken == nil else { return }
+                    // A crossing is taken only when nothing outranked it:
+                    // `requestedTab` asks the terminals first.
+                    if pendingTerminal == nil, createdTerminal == nil, boardTerminal == nil,
+                        crossing != nil
+                    {
+                        crossing = nil
+                        UserDefaults.standard.removeObject(forKey: Self.crossingKey)
+                    }
                     // Only the LINK arms `linkedTab`. Whatever rest a deep link
                     // produces is not a choice and must not be written down as
                     // one; a terminal this app was just asked to make is one,
@@ -1669,14 +1694,72 @@ struct ShellScreen: View {
     /// runner — but it IS a teardown of the other runner's connection, which is
     /// what one-runner-at-a-time means.
     ///
-    /// `UserDefaults` and not `@State` for the note, and it still has to be:
-    /// the new runner's fleet does not exist yet, so the workspace it names can
-    /// only be resolved on the far side of a connect. `seed` reads it back.
+    /// **Landed by a request, not by `seed`.** The note used to be honored only
+    /// by `seed`, and that worked for as long as the switch tore this screen
+    /// down: `FleetView` fell back to its waiting screen while no runner had a
+    /// fleet, and the shell mounted afresh when the new runner answered. It
+    /// does not any more (see `FleetView.phases`), and `seed` runs once per
+    /// mount, so the tap would switch runners and land nowhere. `crossing` is
+    /// resolved by `requestedTab` like a deep link, the moment the new runner's
+    /// fleet has the worktree.
+    ///
+    /// `UserDefaults` as well as `@State` for the note: an app killed between
+    /// the tap and the answer comes back without this screen's state, and
+    /// `seed` still reads the note back for that launch. Spent when the
+    /// request is taken, so it cannot steer a later launch.
     private func select(runner: String, landingOn workspace: String) {
         guard let picked = hosts.hosts.first(where: { $0.id.uuidString == runner })
         else { return }
         UserDefaults.standard.set("\(runner)/\(workspace)", forKey: Self.crossingKey)
+        crossing = ShellCrossing(runner: runner, workspace: workspace)
         hosts.selected = picked
+    }
+
+    /// The tab a crossing lands on, once the runner it named has the worktree.
+    ///
+    /// The worktree's `resumeTab`, the tab a tapped card opens any worktree
+    /// on. By the runner AND the daemon's id, for `seed`'s reason: two runners
+    /// can serve the same daemon, and the id alone would land on whichever
+    /// runner's copy the merge put first.
+    private func tab(forCrossing crossing: ShellCrossing, in map: ShellFleetMap) -> String? {
+        guard
+            let index = map.fleet.workspaces.indices.first(where: {
+                let entry = map.entries[map.fleet.workspaces[$0].id]
+                return entry?.workspace.id == crossing.workspace
+                    && entry?.host.id.uuidString == crossing.runner
+            })
+        else { return nil }
+        let workspace = map.fleet.workspaces[index]
+        guard workspace.tabs.indices.contains(workspace.resumeTab) else { return nil }
+        return workspace.tabs[workspace.resumeTab].id
+    }
+
+    /// Give up on a crossing that can no longer land.
+    ///
+    /// Two ways: somebody picked another runner before this one answered, or
+    /// this one answered without the worktree — it was removed while the card
+    /// was a memory. Held open, the shell would jump to a worktree of that
+    /// name long after anybody tapped anything, which is `dropUnknownTerminal`'s
+    /// reason too.
+    ///
+    /// Asked of the SELECTION and not of the live set for the first half: the
+    /// store brings the new runner up a turn after the tap, so for that turn
+    /// it is not live and a live-set test would drop every crossing at once.
+    private func settleCrossing() {
+        guard let crossing else { return }
+        let picked = hosts.selected?.id.uuidString == crossing.runner
+        let answered = fleet.runners.first(where: {
+            $0.host.id.uuidString == crossing.runner
+        })?.connection.hasFleet ?? false
+        guard !picked || (answered && tab(forCrossing: crossing, in: map) == nil) else { return }
+        self.crossing = nil
+        UserDefaults.standard.removeObject(forKey: Self.crossingKey)
+    }
+
+    /// The runners that have said what they have, as ids, for `settleCrossing`
+    /// to watch: a runner answering with nothing on it changes no count.
+    private var answeredRunners: Set<String> {
+        Set(fleet.runners.filter { $0.connection.hasFleet }.map(\.host.id.uuidString))
     }
 
     /// The selection follows where you MOVE, with every runner connected.
@@ -1854,9 +1937,16 @@ struct ShellScreen: View {
     /// shape of request from inside the app — an id that is real before the tab
     /// is — and giving it a second resolver would be a second place for "the
     /// shell does not actually have that tab" to be got wrong.
+    ///
+    /// And a crossing, last: a tapped card on a runner this phone was not
+    /// talking to. A worktree rather than a terminal, so it resolves through
+    /// `tab(forCrossing:in:)`, but it is honored the same way and at the same
+    /// moment — see `select(runner:landingOn:)`.
     private func requestedTab(in map: ShellFleetMap) -> String? {
-        guard let id = pendingTerminal ?? createdTerminal ?? boardTerminal else { return nil }
-        return tab(forTerminal: id, in: map)
+        if let id = pendingTerminal ?? createdTerminal ?? boardTerminal {
+            return tab(forTerminal: id, in: map)
+        }
+        return crossing.flatMap { tab(forCrossing: $0, in: map) }
     }
 
     /// The shell's tab for a terminal, on whichever runner it is, or nil when

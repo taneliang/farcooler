@@ -180,6 +180,17 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// on its own: the number holds still while what it names changes.
     @State var position: ShellPosition
 
+    /// Which mount of this view the probe is reporting on, and nothing else.
+    ///
+    /// A fresh one per mount and never written again, so a UI test can tell
+    /// "the same shell, moved" from "a new shell that happens to be standing
+    /// in the same place" — which, after a change of runner, a remount can be:
+    /// `ShellScreen.seed` lands on the selected runner's first worktree, and a
+    /// swipe onto that runner lands there too. Read by
+    /// `TerminalScrollTests.testAChangeOfRunnerRebuildsNothing` and its
+    /// all-runners twin.
+    @State private var mount = String(UUID().uuidString.prefix(8))
+
     /// The tab `position` is ON, by id, and the thing `onRest` announces.
     ///
     /// **The identity behind the index.** `ShellFleetMap.of` merges the
@@ -1475,7 +1486,8 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
                     // `ShellRootView.strayed` and `ShellRootView.lockedOn`.
                     + "stray=\(Int(strayed.rounded())) "
                     + "lockx=\(Int(lockedOn.width.rounded())) "
-                    + "locky=\(Int(lockedOn.height.rounded()))")
+                    + "locky=\(Int(lockedOn.height.rounded())) "
+                    + "mount=\(mount)")
     }
 }
 

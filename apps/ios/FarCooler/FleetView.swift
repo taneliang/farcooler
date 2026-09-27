@@ -52,6 +52,13 @@ struct FleetView: View {
     /// Whether to offer a way off the spinner yet. See `waitedLongEnough`.
     @State private var stalled = false
 
+    /// Whether the shell has had a worktree to open on, at least once.
+    ///
+    /// Latched, and never cleared while this view lives. See `phases`: it is
+    /// what keeps a change of runner from swapping the whole shell out for the
+    /// waiting screen and mounting a new one when the next runner answers.
+    @State private var shellStood = false
+
     @Environment(\.scenePhase) private var scenePhase
 
     /// The runner being corrected, from the row that asked.
@@ -176,10 +183,41 @@ struct FleetView: View {
     /// none, deliberately, because its own navigation is a gesture and the only
     /// navigation bar in it belongs to the overview, which declares a stack of
     /// its own.
+    ///
+    /// **Once the shell has stood, it stays.** `hasFleet` is false again
+    /// whenever every connection that had a fleet has been retired, and with
+    /// "Connect every runner at once" off that is every "Switch to This
+    /// Runner": `FleetStore.reconcile` retires the runner you were on in the
+    /// same pass that starts dialing the one you picked, so for the whole
+    /// connect no runner has a fleet. Branching on `hasFleet` alone swapped the
+    /// shell out for the waiting screen for that gap, and a new shell mounted
+    /// when the new runner answered: on the first worktree, with the grid you
+    /// switched from closed.
+    ///
+    /// The shell already knows what to draw over a fleet that empties under
+    /// it: `ShellBringUp.opening` keeps a seated shell seated, a retired
+    /// runner's panes draw nothing (`ShellScreen.connection(_:)`), its section
+    /// becomes the cached one every unreached runner gets, drawn as "can't
+    /// say" (`RunnerDirectory.decayed`), and the runner being dialed is a
+    /// status row over the grid with its retry and edit. That is also what a
+    /// runner that never answers leaves you with — the grid, its row, and a
+    /// "Switch to This Runner" on the heading of the one you left. So nothing
+    /// here waits for the new runner, and the old one is not kept alive to
+    /// cover the gap: its panes would go on looking live on a phone that has
+    /// been told to stop talking to it.
+    ///
+    /// Latched on a WORKTREE, not on `hasFleet`: a runner that answered with
+    /// no worktrees mounts a shell that has not been seated on anything (see
+    /// `ShellScreen.bringUp`), and keeping that one through a switch would
+    /// leave its bare spinner up with no way off it. Nothing is lost by
+    /// rebuilding a shell that never had a pane.
     @ViewBuilder
     private var phases: some View {
-        if fleet.hasFleet {
+        if fleet.hasFleet || shellStood {
             connected
+                .onChange(of: fleet.entries.isEmpty, initial: true) { _, empty in
+                    if !empty { shellStood = true }
+                }
         } else {
             NavigationStack { escapable { waitingForAnyone } }
         }
