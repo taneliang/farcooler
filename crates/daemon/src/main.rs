@@ -179,6 +179,11 @@ async fn run() -> Result<(), i32> {
         }
     };
 
+    // Read now rather than at the first agent launch, so a stand-in leaked
+    // into this daemon's environment is in the log from its first line. It
+    // also rides on `Host`, which is where a person will see it.
+    let _ = farcooler_daemon::service::stand_in_agent();
+
     let service = Arc::new(Service::open().await.map_err(|e| {
         eprintln!("cannot open the service: {e}");
         1

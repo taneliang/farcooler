@@ -265,6 +265,23 @@ async fn a_client_connects_and_learns_the_daemon_version() {
     assert!(!session.daemon_version().is_empty());
 }
 
+/// **A runner says when its agents run a stand-in** (ov-20 R-M3), over the
+/// real wire: the daemon started with `FARCOOLER_STAND_IN_AGENT` names the
+/// program in `Host`, and one started without it names nothing. A value leaked
+/// into a real daemon's environment was otherwise visible only in its log.
+#[tokio::test]
+async fn a_runner_says_when_its_agents_run_a_stand_in() {
+    let daemon = start_with_a_stand_in_agent().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let host = session.host().await.expect("host");
+    assert!(host.stand_in_agent.starts_with('/'), "no stand-in named: {:?}", host.stand_in_agent);
+
+    let plain = start().await;
+    let mut session = Session::connect_local(&plain.socket).await.expect("connect");
+    let host = session.host().await.expect("host");
+    assert_eq!(host.stand_in_agent, "", "a daemon with no stand-in named one");
+}
+
 #[tokio::test]
 async fn a_client_learns_what_the_runner_can_do_before_asking_it_anything() {
     // The mechanism a newer app uses to degrade against an older runner. It

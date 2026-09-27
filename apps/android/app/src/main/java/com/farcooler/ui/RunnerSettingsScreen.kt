@@ -660,6 +660,15 @@ private fun HealthSection(health: HostHealth) {
         for (reason in health.reasons) {
             DetailBox(reason)
         }
+        // Not a degradation, so not under the status: the runner is well, and
+        // no agent on it is real.
+        health.standInSentence?.let { sentence ->
+            Text(
+                sentence,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         HealthFact("Far Cooler", health.daemonVersion.ifBlank { "unknown" })
         HealthFact("Platform", health.platform.ifBlank { "unknown" })
         HealthFact("Live panes", health.livePanes.toString())

@@ -612,7 +612,13 @@ impl Rpc {
     /// see `wire::host` for why `Host` stays `Host` on the wire.
     async fn host_now(&self, svc: &Service) -> Result<farcooler_protocol::v1::Host> {
         svc.inventory.refresh().await;
-        Ok(wire::host(&self.daemon_version, svc.host_id, &svc.inventory_snapshot(), 0))
+        Ok(wire::host(
+            &self.daemon_version,
+            svc.host_id,
+            &svc.inventory_snapshot(),
+            0,
+            crate::service::stand_in_agent(),
+        ))
     }
 
     /// A config write that failed, as something a form can show.
@@ -741,6 +747,7 @@ impl Rpc {
                     svc.host_id,
                     &svc.inventory_snapshot(),
                     0,
+                    crate::service::stand_in_agent(),
                 )))
             }
 

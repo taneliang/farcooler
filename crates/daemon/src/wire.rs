@@ -67,6 +67,7 @@ pub fn host(
     host_id: Uuid,
     runtime: &farcooler_core::inventory::RuntimeSnapshot,
     replay_bytes: u64,
+    stand_in: Option<&str>,
 ) -> wire::Host {
     let healthy = runtime.inventory_healthy;
     wire::Host {
@@ -101,6 +102,9 @@ pub fn host(
         // rather than computed a second time from the install id, so the two
         // fields cannot come to disagree about which runner this is.
         runner_id: host_id.to_string(),
+        // What every agent launch runs instead of the agent, when somebody
+        // set `FARCOOLER_STAND_IN_AGENT`. See `service::stand_in_agent`.
+        stand_in_agent: stand_in.unwrap_or_default().to_string(),
     }
 }
 
@@ -806,6 +810,19 @@ mod tests {
             assert_eq!(w.display_path, None, "{scope:?} must not receive a path");
             assert!(!w.path_token.is_empty(), "but it still needs a stable handle");
         }
+    }
+
+    /// **A stand-in agent is on the wire** (ov-20 R-M3), so a client can say
+    /// so. A `FARCOOLER_STAND_IN_AGENT` leaked into a daemon's environment
+    /// makes every agent run a stand-in, and the only sign was one line in the
+    /// daemon's log. Absent, the field is empty: agents run as themselves.
+    #[test]
+    fn a_stand_in_agent_reaches_the_host() {
+        let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
+        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"));
+        assert_eq!(with.stand_in_agent, "/bin/sleep");
+        let without = host("v", Uuid::nil(), &runtime, 0, None);
+        assert_eq!(without.stand_in_agent, "");
     }
 
     #[test]

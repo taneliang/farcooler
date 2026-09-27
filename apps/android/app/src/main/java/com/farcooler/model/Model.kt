@@ -790,7 +790,24 @@ data class HostHealth(
      */
     @SerialName("reasons") val reasons: List<String> = emptyList(),
     @SerialName("livePanes") val livePanes: Int = 0,
-)
+    /**
+     * What every agent launch on this runner runs instead of the agent, from
+     * `FARCOOLER_STAND_IN_AGENT` in its daemon's environment; null when
+     * agents launch as themselves, and from a runner too old to say.
+     */
+    @SerialName("standInAgent") val standInAgent: String? = null,
+) {
+    /**
+     * The runner settings' sentence for [standInAgent], or null. A value
+     * leaked out of a test or a demo made every agent run a stand-in, and
+     * nothing but the daemon's log said so. The iPhone says the same words.
+     */
+    val standInSentence: String?
+        get() = standInAgent?.let {
+            "Agents on this runner run $it instead of the real agent. " +
+                "FARCOOLER_STAND_IN_AGENT is set where its daemon started."
+        }
+}
 
 /**
  * What one worktree has changed, and whether anybody has looked at it since.

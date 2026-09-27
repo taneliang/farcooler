@@ -474,7 +474,11 @@ fn agent_program(name: &str) -> String {
 pub const STAND_IN_AGENT: &str = "FARCOOLER_STAND_IN_AGENT";
 
 /// `FARCOOLER_STAND_IN_AGENT`, read once. `None` only when it is absent.
-fn stand_in_agent() -> Option<&'static str> {
+///
+/// Read at startup as well as at the first launch, so the warning is in the
+/// log from the moment the daemon starts, and on the wire in `Host`, so a
+/// client can show it (`wire::host`).
+pub fn stand_in_agent() -> Option<&'static str> {
     static STAND_IN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     STAND_IN
         .get_or_init(|| {

@@ -1101,6 +1101,19 @@ struct HostHealth: Decodable {
     /// know which of them matters.
     var reasons: [String]
     var livePanes: Int
+    /// What every agent launch on this runner runs instead of the agent, from
+    /// `FARCOOLER_STAND_IN_AGENT` in its daemon's environment. Nil when agents
+    /// launch as themselves, and from a runner too old to say.
+    var standInAgent: String? = nil
+
+    /// Runner settings' sentence for `standInAgent`, or nil. A value leaked
+    /// out of a test or a demo made every agent run a stand-in, and nothing
+    /// but the daemon's log said so. Android says the same words.
+    var standInSentence: String? {
+        standInAgent.map {
+            "Agents on this runner run \($0) instead of the real agent. FARCOOLER_STAND_IN_AGENT is set where its daemon started."
+        }
+    }
 }
 
 /// The states a terminal can be in, grouped by what a user should do about it.

@@ -429,6 +429,14 @@ struct RunnerSettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                // Not a degradation, so not under Status: the runner is well,
+                // and no agent on it is real.
+                if let standIn = health.standInSentence {
+                    Label(standIn, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("runner-stand-in-agent")
+                }
                 LabeledContent("Far Cooler", value: health.daemonVersion)
                 LabeledContent("Platform", value: health.platform)
                 LabeledContent("Live panes", value: "\(health.livePanes)")

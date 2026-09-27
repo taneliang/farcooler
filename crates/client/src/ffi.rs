@@ -256,6 +256,27 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
     .to_string()
 }
 
+/// `host.health`'s answer: the runner's own account of itself, as a phone's
+/// runner settings draw it.
+fn health_json(host: farcooler_protocol::v1::Host) -> Value {
+    let degraded = host.self_health == farcooler_protocol::v1::SelfHealth::Degraded as i32;
+    json!({
+        "platform": host.platform,
+        "daemonVersion": host.daemon_version,
+        "protocolVersion": host.protocol_version,
+        "healthy": !degraded,
+        // Why it is degraded, in the daemon's own words. Shown rather than
+        // summarized: the client cannot know which of these matters, and
+        // "something is wrong" is not an actionable sentence.
+        "reasons": host.self_health_reasons,
+        "livePanes": host.live_terminal_count,
+        // What every agent launch runs instead of the agent, or null when
+        // agents launch as themselves. Absent from an older runner, which
+        // reads the same way.
+        "standInAgent": Some(host.stand_in_agent).filter(|p| !p.is_empty()),
+    })
+}
+
 /// Create a client. Free with `farcooler_client_free`.
 #[unsafe(no_mangle)]
 pub extern "C" fn farcooler_client_new() -> *mut c_void {
@@ -1897,23 +1918,7 @@ async fn dispatch(
 
         "daemon.version" => Ok(session.daemon_capabilities().await?),
 
-        "host.health" => {
-            let host = session.host().await?;
-            let degraded =
-                host.self_health == farcooler_protocol::v1::SelfHealth::Degraded as i32;
-            Ok(json!({
-                "platform": host.platform,
-                "daemonVersion": host.daemon_version,
-                "protocolVersion": host.protocol_version,
-                "healthy": !degraded,
-                // Why it is degraded, in the daemon's own words. Shown rather
-                // than summarized: the client cannot know which of these
-                // matters, and "something is wrong" is not an actionable
-                // sentence.
-                "reasons": host.self_health_reasons,
-                "livePanes": host.live_terminal_count,
-            }))
-        }
+        "host.health" => Ok(health_json(session.host().await?)),
 
         "repository_root.list" => {
             let roots = session.roots().await?;
@@ -2419,6 +2424,20 @@ mod tests {
     #[test]
     fn a_resync_reaches_the_line_as_one() {
         assert_eq!(event_line(&crate::session::FleetEvent::Resync), r#"{"event":"resync"}"#);
+    }
+
+    /// **A stand-in agent reaches the phone's runner settings** (ov-20
+    /// R-M3), and none reads as null, which is also what an older runner
+    /// that never sends the field reads as.
+    #[test]
+    fn host_health_names_a_stand_in_agent() {
+        let with = health_json(farcooler_protocol::v1::Host {
+            stand_in_agent: "/bin/sleep".into(),
+            ..Default::default()
+        });
+        assert_eq!(with["standInAgent"], "/bin/sleep");
+        let without = health_json(farcooler_protocol::v1::Host::default());
+        assert!(without["standInAgent"].is_null());
     }
 
     /// The line a phone reads carries the runner's word, not just its prose.

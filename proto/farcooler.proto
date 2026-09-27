@@ -639,6 +639,14 @@ message Host {
   // in a settings file, and it is a name rather than a secret — it is already
   // visible as the tmux socket name and in worktree owner markers.
   string runner_id = 11;
+  // The program every agent launch on this runner runs instead of the real
+  // agent, from `FARCOOLER_STAND_IN_AGENT` in the daemon's environment. Empty
+  // when agents launch as themselves, which is every shipped install.
+  //
+  // On the wire because a value leaked out of a test or a demo is otherwise
+  // invisible: every agent silently runs `sleep` or `false`, and the only
+  // sign was one line in the daemon's own log. A client shows it.
+  string stand_in_agent = 12;
 }
 
 enum SelfHealth {

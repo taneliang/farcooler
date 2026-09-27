@@ -555,3 +555,29 @@ struct BranchDecodeTests {
         #expect(branch.age(at: tip.addingTimeInterval(-60)) == "now")
     }
 }
+
+/// **A runner whose agents run a stand-in says so** (ov-20 R-M3). A
+/// `FARCOOLER_STAND_IN_AGENT` leaked into a daemon's environment made every
+/// agent run `sleep` or `false`, and only the daemon's log said why. An older
+/// runner never sends the key, and reads as none.
+///
+/// Mutation: the key misspelled on `HostHealth`. Red.
+@Test func aRunnerSaysWhenItsAgentsRunAStandIn() throws {
+    let with = try JSONDecoder().decode(
+        HostHealth.self,
+        from: Data(
+            #"{"platform":"macos","daemonVersion":"1","protocolVersion":1,"healthy":true,"reasons":[],"livePanes":0,"standInAgent":"/bin/sleep"}"#
+                .utf8))
+    #expect(with.standInAgent == "/bin/sleep")
+    #expect(
+        with.standInSentence
+            == "Agents on this runner run /bin/sleep instead of the real agent. FARCOOLER_STAND_IN_AGENT is set where its daemon started."
+    )
+    let without = try JSONDecoder().decode(
+        HostHealth.self,
+        from: Data(
+            #"{"platform":"macos","daemonVersion":"1","protocolVersion":1,"healthy":true,"reasons":[],"livePanes":0}"#
+                .utf8))
+    #expect(without.standInAgent == nil)
+    #expect(without.standInSentence == nil)
+}

@@ -281,6 +281,29 @@ class FleetDecodeTest {
             health.reasons,
         )
         assertEquals(6, health.livePanes)
+        assertNull("no stand-in named, none claimed", health.standInAgent)
+        assertNull(health.standInSentence)
+    }
+
+    /**
+     * **A runner whose agents run a stand-in says so** (ov-20 R-M3). A
+     * `FARCOOLER_STAND_IN_AGENT` leaked into a daemon's environment made every
+     * agent run `sleep` or `false`, and only the daemon's log said why.
+     *
+     * Mutation: the key misspelled on [HostHealth]. Red: null.
+     */
+    @Test
+    fun aRunnerSaysWhenItsAgentsRunAStandIn() {
+        val health = json.decodeFromString(
+            HostHealth.serializer(),
+            """{"healthy": true, "standInAgent": "/bin/sleep"}""",
+        )
+        assertEquals("/bin/sleep", health.standInAgent)
+        assertEquals(
+            "Agents on this runner run /bin/sleep instead of the real agent. " +
+                "FARCOOLER_STAND_IN_AGENT is set where its daemon started.",
+            health.standInSentence,
+        )
     }
 
     /**
