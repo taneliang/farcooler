@@ -595,9 +595,10 @@ pub(crate) mod test_agent {
     /// for, so a stubbed launch followed by `; codex` is refused. Separators
     /// are found without regard to quoting, so a prompt holding one and then
     /// an agent's name (`'fix it; ask codex'`) is refused too -- the safe
-    /// direction, and no test's prompt does. That refusal's message names
-    /// the separator and the quoting rather than `agent_program`, which a
-    /// stubbed launch has already gone through.
+    /// direction, and no test's prompt does. That refusal's message leads
+    /// with the separator and the quoting, which is the likelier cause once
+    /// a stub has appeared, and names `agent_program` only for the other
+    /// reading: a chained launch that forgot it.
     ///
     /// **What it still cannot see:** a program named through a variable, an
     /// alias, `eval` or a wrapper script; and any agent not in `AGENTS`. It
@@ -641,8 +642,8 @@ pub(crate) mod test_agent {
                     "a daemon unit test's command names `{program}` after the stub, but past one of \
                      `;&|()<>$`, a backtick or a newline, so the stub does not vouch for it. This check \
                      splits on those without regard to quoting: if that separator is inside a quoted \
-                     prompt or payload, reword it; if it is not, a real `{program}` was about to start: \
-                     {command}"
+                     prompt or payload, reword it; if it is not, a real `{program}` was about to start \
+                     (a launch that did not go through `agent_program`): {command}"
                 );
                 panic!(
                     "a daemon unit test was about to start a real `{program}` in a tmux pane. Every launch \
@@ -5674,9 +5675,11 @@ mod test_agent_tests {
     }
 
     /// A stubbed launch whose quoted prompt holds a separator and then an
-    /// agent's name is refused (the check is quote-blind), but the message
-    /// must not blame `agent_program`, which that launch went through. A
-    /// command with no stub at all still gets the `agent_program` message.
+    /// agent's name is refused (the check is quote-blind), and the message
+    /// leads with the quoting rather than the unstubbed launch's message,
+    /// while still naming `agent_program` for a chained launch that forgot
+    /// it. A command with no stub at all still gets the `agent_program`
+    /// message.
     #[test]
     fn a_separator_in_a_stubbed_prompt_is_refused_for_what_it_is() {
         let refusal = |command: &str| {
@@ -5690,7 +5693,11 @@ mod test_agent_tests {
         let command = format!("{shell} -ilc {}", shell_quote(&inner));
         let message = refusal(&command);
         assert!(message.contains("without regard to quoting"), "misleading refusal: {message}");
-        assert!(!message.contains("agent_program"), "blames agent_program for a stubbed launch: {message}");
+        assert!(!message.contains("stubs it under test"), "gave a stubbed launch the unstubbed message: {message}");
+        assert!(
+            message.contains("did not go through `agent_program`"),
+            "lost the hint for a chained launch that forgot agent_program: {message}"
+        );
 
         let message = refusal(&format!("{shell} -ilc 'claude --resume x'"));
         assert!(message.contains("agent_program"), "an unstubbed launch must name agent_program: {message}");
