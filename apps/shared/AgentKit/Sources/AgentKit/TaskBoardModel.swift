@@ -196,14 +196,24 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         self.updatedAt = updatedAt
     }
 
-    /// How long this task has sat where it is, as of `now`.
+    /// When anything last moved on this card: `updatedAt` — a move, a note or
+    /// an edit — or `statusSince` from a runner too old to send it.
+    ///
+    /// A note or an edit is movement (the coordinator's ruling on ov-28): a
+    /// card three days in progress whose agent wrote ten minutes ago has not
+    /// stopped. The later of the two, so a producer whose `updated_at` lagged
+    /// a move could never make a card look older than its status says.
+    public var lastMoved: Date { max(statusSince, updatedAt ?? statusSince) }
+
+    /// How long since anything moved on this task, as of `now`. What
+    /// "Hasn’t moved in N days" counts, and what `staleness(at:)` compares.
     ///
     /// Never negative. A runner whose clock is ahead of this Mac's hands back a
-    /// `status_since` in the future, and a negative age would read as fresh by
-    /// luck rather than by decision — clamping says "just now", which is the
-    /// honest answer when the two clocks disagree about which just happened.
+    /// time in the future, and a negative age would read as fresh by luck
+    /// rather than by decision — clamping says "just now", which is the honest
+    /// answer when the two clocks disagree about which just happened.
     public func stoppedFor(at now: Date) -> TimeInterval {
-        max(0, now.timeIntervalSince(statusSince))
+        max(0, now.timeIntervalSince(lastMoved))
     }
 
     /// Whether this task has stopped moving when it should be moving.

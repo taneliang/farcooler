@@ -92,8 +92,19 @@ data class TaskRow(
      */
     val updatedAt: Long? = null,
 ) {
-    /** How long it has sat where it is. Never negative: a runner ahead of this clock. */
-    fun stoppedForMs(nowMs: Long): Long = maxOf(0L, nowMs - statusSince)
+    /**
+     * When anything last moved on the card: [updatedAt] (a move, a note or an
+     * edit), or [statusSince] from a runner too old to send it. A note or an
+     * edit is movement (ov-28). The later of the two, as AgentKit's
+     * `TaskRow.lastMoved`.
+     */
+    val lastMovedMs: Long get() = maxOf(statusSince, updatedAt ?: statusSince)
+
+    /**
+     * How long since anything moved on it: what "Hasn’t moved in N days"
+     * counts. Never negative: a runner ahead of this clock.
+     */
+    fun stoppedForMs(nowMs: Long): Long = maxOf(0L, nowMs - lastMovedMs)
 
     /**
      * Stopped moving when it should be moving: a day in In Progress or In

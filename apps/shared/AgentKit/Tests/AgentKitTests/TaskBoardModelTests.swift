@@ -81,6 +81,35 @@ func onlyActiveWorkGoesStale(status: TaskStatus) {
     #expect(dropped.staleness == .fresh, "cancelled work is not work that stopped moving")
 }
 
+/// A note or an edit is movement (ov-28): three days in progress, and a note
+/// ten minutes ago, is a card whose agent is still on it. The runner's
+/// `updated_at` carries the note; the card measures from it.
+@Test func aCardWithARecentNoteHasNotStopped() {
+    let now = Date()
+    let long = now.addingTimeInterval(-3 * 86_400)
+    let noted = TaskRow.fixture(
+        status: .inProgress, statusSince: long, createdAt: long,
+        updatedAt: now.addingTimeInterval(-600))
+    #expect(noted.staleness(at: now) == .fresh)
+    #expect(noted.stalenessNote(at: now) == nil)
+    #expect(noted.timeNote(at: now) == "Updated 10m ago")
+
+    // Two days after the note, it has stopped, counted from the note.
+    let later = now.addingTimeInterval(2 * 86_400)
+    #expect(noted.stalenessNote(at: later) == "Hasn’t moved in 2 days")
+}
+
+/// A runner too old to send `updated_at` still has its active cards measured,
+/// from the status clock, as before.
+@Test func withNoUpdatedAtStalenessFallsBackToTheStatusClock() {
+    let now = Date()
+    let long = now.addingTimeInterval(-3 * 86_400)
+    let old = TaskRow.fixture(status: .inProgress, statusSince: long)
+    #expect(old.updatedAt == nil)
+    #expect(old.lastMoved == long)
+    #expect(old.stalenessNote(at: now) == "Hasn’t moved in 3 days")
+}
+
 /// The threshold is a threshold, not a rounding.
 ///
 /// Both sides of it, because a comparison written the other way round passes

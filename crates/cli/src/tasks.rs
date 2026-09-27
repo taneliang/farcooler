@@ -79,8 +79,9 @@ pub enum TaskCmd {
         /// Only tasks sitting in this status.
         #[arg(long)]
         status: Option<String>,
-        /// Only tasks that have sat where they are for longer than this:
-        /// `45s`, `10m`, `2h`, `3d`.
+        /// Only tasks nothing has moved on for longer than this -- no move,
+        /// note or edit, the clock the boards' "Hasn’t moved" reads: `45s`,
+        /// `10m`, `2h`, `3d`.
         ///
         /// A different question rather than a filter on the same one — oldest
         /// first, and only In Progress and In Review, where an agent should be
@@ -391,11 +392,17 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             }
             let now = now_millis();
             for t in &items {
+                // The staleness view picked these by how long since anything
+                // moved on them (`updated_at`), so that is the gap it prints;
+                // a plain listing says how long each has been in its status.
+                // A runner too old to send `updated_at` sends 0, and falls
+                // back to the status clock like the boards do.
+                let since = if stale.is_some() && t.updated_at > 0 { t.updated_at } else { t.status_since };
                 println!(
                     "{:<8}  {:<14}  {:>6}  {}",
                     t.key,
                     status_word(t.status),
-                    spoken_gap(stale_for_seconds(t.status_since, now)),
+                    spoken_gap(stale_for_seconds(since, now)),
                     truncate(&t.title, 60)
                 );
             }

@@ -229,6 +229,19 @@ fn escape_like(raw: &str) -> String {
     raw.replace(LIKE_ESCAPE, "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
+/// `Task::updated_at` as SQL, for the query that filters and sorts on it
+/// (`list_tasks_stale_for`) as well as the column list that reads it. A macro
+/// so both are the same literal: the staleness view and the card must
+/// measure from one clock, and two copies of the expression are two clocks.
+macro_rules! updated_at_sql {
+    () => {
+        "max(created_at, status_since, coalesce(edited_at, 0), \
+             coalesce((SELECT max(n.at) FROM task_notes n \
+                        WHERE n.task_id = tasks.id AND n.kind != 'created'), 0))"
+    };
+}
+const UPDATED_AT: &str = updated_at_sql!();
+
 /// Every column of `tasks` that `row_to_task` reads, in its order. Named once
 /// because several queries share it and a drifting column order is a silent
 /// field swap rather than a compile error.
@@ -251,11 +264,11 @@ fn escape_like(raw: &str) -> String {
 /// creation must still have an answer. Every query using this reads `FROM
 /// tasks` unaliased, which is what `tasks.id` in the subquery names.
 /// `task_notes_by_task (task_id, at)` keeps the subquery to one task's notes.
-const TASK_COLUMNS: &str = "id, repository_id, key, title, status, status_since, \
-     intent, acceptance, constraints, labels, workspace_id, resource_version, created_at, \
-     max(created_at, status_since, coalesce(edited_at, 0), \
-         coalesce((SELECT max(n.at) FROM task_notes n \
-                    WHERE n.task_id = tasks.id AND n.kind != 'created'), 0))";
+const TASK_COLUMNS: &str = concat!(
+    "id, repository_id, key, title, status, status_since, \
+     intent, acceptance, constraints, labels, workspace_id, resource_version, created_at, ",
+    updated_at_sql!()
+);
 
 /// The same, for `row_to_task_note`.
 const NOTE_COLUMNS: &str = "id, task_id, kind, actor, at, body, extra, supersedes";
@@ -995,6 +1008,12 @@ impl Store {
     /// waits on the owner, and `done` and `cancelled` sit still forever. A
     /// staleness view that listed a month-old backlog beside the one stalled
     /// lane is a view nobody reads (ov-28).
+    ///
+    /// Measured from `updated_at`, not `status_since`: a note or an edit is
+    /// movement, so a card whose agent wrote ten minutes ago has not stopped,
+    /// however long it has been in progress. The same clock the boards use
+    /// ("Hasn’t moved in N days"), from the same expression, so this sweep
+    /// and the cards never disagree about which card stopped.
     pub fn list_tasks_stale_for(&self, repository: Uuid, threshold: Duration) -> Result<Vec<Task>> {
         let cutoff = now_millis() - threshold.as_millis() as i64;
         let conn = self.conn();
@@ -1003,8 +1022,8 @@ impl Store {
                 "SELECT {TASK_COLUMNS} FROM tasks
                   WHERE repository_id = ?1
                     AND status IN ('in_progress', 'in_review')
-                    AND status_since < ?2
-                  ORDER BY status_since, rowid"
+                    AND {UPDATED_AT} < ?2
+                  ORDER BY {UPDATED_AT}, rowid"
             ))
             .map_err(map_err)?;
         let rows = stmt
@@ -1100,23 +1119,36 @@ impl Store {
         id
     }
 
-    /// Moves a task's `status_since` into the past by `ago`, and nothing
-    /// else. The one way a staleness test gets an old-looking task without
-    /// actually waiting for one.
-    pub(crate) fn backdate_status_since_for_test(&self, task: Uuid, ago: Duration) {
+    /// A card filed `ago` in the past and sitting in `status` ever since, with
+    /// nothing on it: no note, no edit, no later move. The staleness view
+    /// measures from `updated_at`, so an old-looking card needs every clock
+    /// that feeds it to be old. Backdating `status_since` alone, which is how
+    /// these tests used to age a card, leaves a fresh `created_at` and a fresh
+    /// `status_change` note behind, and the card reads as moved just now.
+    pub(crate) fn a_card_that_sat_for_test(
+        &self,
+        repo: Uuid,
+        title: &str,
+        status: TaskStatus,
+        ago: Duration,
+    ) -> Uuid {
+        let key = self.next_task_key(repo).expect("key");
+        let id = Uuid::now_v7();
         let since = now_millis() - ago.as_millis() as i64;
         self.conn()
             .execute(
-                "UPDATE tasks SET status_since = ?1 WHERE id = ?2",
-                params![since, uuid_blob(task)],
+                "INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1)",
+                params![uuid_blob(id), uuid_blob(repo), key, title, status.as_str(), since],
             )
-            .expect("backdate status_since");
+            .expect("insert a card that sat");
+        id
     }
 
     /// A note carrying a caller-chosen `at`, not `now_millis()`'s.
     ///
-    /// There is no `backdate_note_at_for_test` UPDATE-based counterpart to
-    /// `backdate_status_since_for_test` above, and there cannot be one:
+    /// There is no UPDATE-based way to backdate a note, the way
+    /// `a_card_that_sat_for_test` above ages a task row, and there cannot be one:
     /// `task_notes_forbid_update` (`migrate.rs`) refuses EVERY `UPDATE` on
     /// `task_notes` unconditionally, with no `WHEN` clause carving out a
     /// test-only column the way `task_notes_forbid_delete` carves out a
@@ -2679,15 +2711,13 @@ mod tests {
     #[test]
     fn a_task_that_has_not_moved_can_be_found_by_how_long_it_has_sat() {
         let store = seeded();
-        let old = store.create_task(repo(), "forgotten", Actor::User).unwrap();
-        store.set_task_status(old.id, TaskStatus::InProgress, Actor::Manager).unwrap();
-        store.backdate_status_since_for_test(old.id, Duration::from_secs(3 * 86_400));
-        let fresh = store.create_task(repo(), "fresh", Actor::User).unwrap();
-        store.set_task_status(fresh.id, TaskStatus::InProgress, Actor::Manager).unwrap();
+        let old = store.a_card_that_sat_for_test(
+            repo(), "forgotten", TaskStatus::InProgress, Duration::from_secs(3 * 86_400));
+        store.a_card_that_sat_for_test(repo(), "fresh", TaskStatus::InProgress, Duration::ZERO);
 
         let stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
         assert_eq!(stale.len(), 1);
-        assert_eq!(stale[0].id, old.id);
+        assert_eq!(stale[0].id, old);
     }
 
     /// One stale task, above, proves a task can be found this way at all --
@@ -2702,17 +2732,15 @@ mod tests {
     #[test]
     fn several_stale_tasks_sort_worst_stall_first() {
         let store = seeded();
-        let less_stale = store.create_task(repo(), "less stale", Actor::User).unwrap();
-        store.set_task_status(less_stale.id, TaskStatus::InProgress, Actor::Manager).unwrap();
-        store.backdate_status_since_for_test(less_stale.id, Duration::from_secs(2 * 86_400));
-        let more_stale = store.create_task(repo(), "more stale", Actor::User).unwrap();
-        store.set_task_status(more_stale.id, TaskStatus::InReview, Actor::Manager).unwrap();
-        store.backdate_status_since_for_test(more_stale.id, Duration::from_secs(5 * 86_400));
+        let less_stale = store.a_card_that_sat_for_test(
+            repo(), "less stale", TaskStatus::InProgress, Duration::from_secs(2 * 86_400));
+        let more_stale = store.a_card_that_sat_for_test(
+            repo(), "more stale", TaskStatus::InReview, Duration::from_secs(5 * 86_400));
 
         let stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
         assert_eq!(stale.len(), 2);
-        assert_eq!(stale[0].id, more_stale.id, "the one that has sat longest sorts first");
-        assert_eq!(stale[1].id, less_stale.id);
+        assert_eq!(stale[0].id, more_stale, "the one that has sat longest sorts first");
+        assert_eq!(stale[1].id, less_stale);
     }
 
     /// Done and cancelled tasks sit still forever and are not stale, they are
@@ -2721,9 +2749,8 @@ mod tests {
     #[test]
     fn finished_tasks_are_never_stale() {
         let store = seeded();
-        let t = store.create_task(repo(), "shipped", Actor::User).unwrap();
-        store.set_task_status(t.id, TaskStatus::Done, Actor::Manager).unwrap();
-        store.backdate_status_since_for_test(t.id, Duration::from_secs(30 * 86_400));
+        store.a_card_that_sat_for_test(
+            repo(), "shipped", TaskStatus::Done, Duration::from_secs(30 * 86_400));
         assert!(store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap().is_empty());
     }
 
@@ -2735,9 +2762,8 @@ mod tests {
     #[test]
     fn cancelled_tasks_are_never_stale_either() {
         let store = seeded();
-        let t = store.create_task(repo(), "abandoned", Actor::User).unwrap();
-        store.set_task_status(t.id, TaskStatus::Cancelled, Actor::Manager).unwrap();
-        store.backdate_status_since_for_test(t.id, Duration::from_secs(30 * 86_400));
+        store.a_card_that_sat_for_test(
+            repo(), "abandoned", TaskStatus::Cancelled, Duration::from_secs(30 * 86_400));
         assert!(store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap().is_empty());
     }
 
@@ -2759,9 +2785,8 @@ mod tests {
             TaskStatus::Cancelled,
         ];
         for status in every {
-            let t = store.create_task(repo(), status.as_str(), Actor::User).unwrap();
-            store.set_task_status(t.id, status, Actor::Manager).unwrap();
-            store.backdate_status_since_for_test(t.id, Duration::from_secs(7 * 86_400));
+            store.a_card_that_sat_for_test(
+                repo(), status.as_str(), status, Duration::from_secs(7 * 86_400));
         }
         let mut listed: Vec<TaskStatus> = store
             .list_tasks_stale_for(repo(), Duration::from_secs(86_400))
@@ -2773,6 +2798,26 @@ mod tests {
         assert_eq!(listed, [TaskStatus::InProgress, TaskStatus::InReview]);
     }
 
+    /// A note is movement (the coordinator's ruling on ov-28): a card three
+    /// days in progress whose agent wrote ten minutes ago has not stopped. So
+    /// is an edit. The control is the same card before either, which is
+    /// listed -- without it, a query that listed nothing would pass.
+    #[test]
+    fn a_note_or_an_edit_is_movement() {
+        let store = seeded();
+        let day = Duration::from_secs(86_400);
+        let noted = store.a_card_that_sat_for_test(repo(), "noted", TaskStatus::InProgress, 3 * day);
+        let edited = store.a_card_that_sat_for_test(repo(), "edited", TaskStatus::InReview, 3 * day);
+        let listed = |store: &Store| -> Vec<Uuid> {
+            store.list_tasks_stale_for(repo(), day).unwrap().into_iter().map(|t| t.id).collect()
+        };
+        assert_eq!(listed(&store).len(), 2, "the control: both have sat three days");
+
+        store.add_note(noted, NoteKind::Progress, Actor::User, "still on it", json!({})).unwrap();
+        store.update_task(edited, 1, &revision("edited", "a better reason")).unwrap();
+        assert!(listed(&store).is_empty(), "a card that moved minutes ago was listed as stale");
+    }
+
     /// Staleness is scoped to one repository, for the same reason
     /// `search_does_not_leak_across_repositories` exists: the brief's own
     /// fixture never registers a second repository, so it cannot distinguish
@@ -2781,11 +2826,10 @@ mod tests {
     fn staleness_does_not_leak_across_repositories() {
         let store = seeded();
         let other = store.register_repository_for_test("Other Thing");
-        let theirs = store.create_task(other, "theirs, forgotten", Actor::User).unwrap();
         // In progress, so it WOULD be listed if the query were not scoped:
         // a backlog task here would pass this test by the status rule alone.
-        store.set_task_status(theirs.id, TaskStatus::InProgress, Actor::Manager).unwrap();
-        store.backdate_status_since_for_test(theirs.id, Duration::from_secs(3 * 86_400));
+        store.a_card_that_sat_for_test(
+            other, "theirs, forgotten", TaskStatus::InProgress, Duration::from_secs(3 * 86_400));
         assert_eq!(
             store.list_tasks_stale_for(other, Duration::from_secs(86_400)).unwrap().len(),
             1,

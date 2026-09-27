@@ -175,6 +175,29 @@ class TaskBoardTest {
         }
     }
 
+    /** A note or an edit is movement (ov-28): a recent note means the card has not stopped. */
+    @Test
+    fun aCardWithARecentNoteHasNotStopped() {
+        val day = TaskRow.DAY_MS
+        val now = 3 * day
+        val noted = row(status = TaskStatus.IN_PROGRESS, since = 0, createdAt = 0, updatedAt = now - 600_000)
+        assertFalse(noted.isStale(now))
+        assertNull(noted.stalenessNote(now))
+        assertEquals("Updated 10m ago", noted.timeNote(now))
+        // Two days after the note, it has stopped, counted from the note.
+        assertEquals("Hasn’t moved in 2 days", noted.stalenessNote(now - 600_000 + 2 * day))
+    }
+
+    /** A runner too old to send `updated_at` is measured from the status clock, as before. */
+    @Test
+    fun withNoUpdatedAtStalenessFallsBackToTheStatusClock() {
+        val day = TaskRow.DAY_MS
+        val old = row(status = TaskStatus.IN_PROGRESS, since = 0)
+        assertNull(old.updatedAt)
+        assertEquals(0L, old.lastMovedMs)
+        assertEquals("Hasn’t moved in 3 days", old.stalenessNote(3 * day))
+    }
+
     // ---- the time line ----
 
     @Test
