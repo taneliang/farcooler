@@ -331,4 +331,78 @@ class BoardReadsTest {
         assertEquals(setOf("w-main", "w-billing"), boards.boards.value.keys)
         assertFalse(boards.ledger.owedWhenBuildLands)
     }
+
+    /**
+     * **News that arrived while away is owed one sweep on return, and any
+     * sweep pays it.** A reconnect's own sweep reads every board, so the
+     * return to the foreground after it has nothing left to read. Before, only
+     * the return's Connected branch paid it, and a reconnect in between left
+     * it standing for a wasted sweep at some later, unrelated return.
+     */
+    @Test
+    fun aSweepPaysForNewsThatArrivedWhileAway() = runTest {
+        val reads = Reads()
+        val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
+
+        boards.newsWhileAway()
+        val reconnect = launch { boards.sweep(listOf(ws("r"))) }
+        runCurrent()
+        reads.answer()
+        runCurrent()
+        reconnect.join()
+        assertEquals(1, reads.started)
+
+        val back = launch { boards.cameBack(listOf(ws("r"))) }
+        runCurrent()
+        assertEquals("the reconnect's sweep already read it", 1, reads.started)
+        back.join()
+    }
+
+    /** A sweep the runner refused reads nothing, so the debt still stands. */
+    @Test
+    fun aRefusedSweepLeavesTheNewsOwed() = runTest {
+        val reads = Reads()
+        var connected = false
+        val boards = BoardReads(connection(), canRead = { connected }, read = reads::read)
+
+        boards.newsWhileAway()
+        boards.sweep(listOf(ws("r")))
+        assertEquals(0, reads.started)
+
+        connected = true
+        val back = launch { boards.cameBack(listOf(ws("r"))) }
+        runCurrent()
+        assertEquals("owed from before the refused sweep", 1, reads.started)
+        reads.answer()
+        back.join()
+    }
+
+    /**
+     * **A closed connection's reads stop with it.** A read still crossing the
+     * network when [BoardReads.close] runs lands nowhere, and a notice folded
+     * into it owes no re-read: nobody is reading this connection's boards any
+     * more, and its flows must not move after the caller let it go.
+     */
+    @Test
+    fun closingStopsTheReadsUnderWay() = runTest {
+        val reads = Reads()
+        val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
+
+        launch { boards.readOne(ws("r")) }
+        runCurrent()
+        launch { boards.readOne(ws("r")) }
+        runCurrent()
+        assertEquals(1, reads.started)
+
+        boards.close()
+        runCurrent()
+        reads.gates.forEach { it.complete(TaskBoard.EMPTY) }
+        runCurrent()
+        assertTrue("a read landed after close", boards.boards.value.isEmpty())
+        assertEquals("a folded notice re-read after close", 1, reads.started)
+
+        launch { boards.readOne(ws("r")) }
+        runCurrent()
+        assertEquals("a read started after close", 1, reads.started)
+    }
 }

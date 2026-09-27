@@ -554,22 +554,17 @@ class Connection(
     fun board(workspaceId: String): WorkspaceSummary =
         boardList().firstOrNull { it.id == workspaceId } ?: WorkspaceSummary.implicit(workspaceId)
 
-    /**
-     * Whether a board notice arrived while the app was in the background and
-     * was left for later. Boards are not read in the background — the fleet
-     * poll stops there too — and one sweep on return covers every notice
-     * that was skipped.
-     */
-    private var boardNewsWhileAway = false
-
     /** A runner notice, on the core's thread. Only boards read these; see [ClientCore.onNotice]. */
     private fun noticeArrived(notice: JsonObject) {
         val event = notice["event"]?.jsonPrimitive?.contentOrNull
         val moved = BoardNotice.of(notice)
         if (event != "task" && event != "resync") return
         scope.launch {
+            // Boards are not read in the background — the fleet poll stops
+            // there too — and one sweep on return, or a reconnect's before
+            // it, covers every notice skipped. See [BoardReads.newsWhileAway].
             if (!isForeground) {
-                boardNewsWhileAway = true
+                boardReads.newsWhileAway()
                 return@launch
             }
             when (event) {
@@ -692,11 +687,9 @@ class Connection(
             // has asked since.
             is Phase.Connected -> scope.launch {
                 refresh(force = true)
-                // The boards whose news arrived while nobody was looking.
-                if (boardNewsWhileAway) {
-                    boardNewsWhileAway = false
-                    loadBoardsDetached()
-                }
+                // The boards whose news arrived while nobody was looking,
+                // unless a reconnect meanwhile has read them all already.
+                boardReads.cameBack(boardList())
             }
             is Phase.Reconnecting, is Phase.Failed -> reconnectNow()
             // Already in flight, or waiting on a person. Neither is helped by
@@ -1993,8 +1986,15 @@ class Connection(
             worktree.terminals.any { it.id == terminalId }
         }
 
+    /**
+     * Let this connection go: nothing it started runs on — the poll, a
+     * reconnect's backoff, a board read crossing the network — so none of its
+     * flows move after the caller has dropped it.
+     */
     suspend fun close() {
         poller?.cancel()
+        reconnector?.cancel()
+        boardReads.close()
         core.close()
     }
 

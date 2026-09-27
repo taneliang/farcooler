@@ -8,6 +8,7 @@ import com.farcooler.model.WorkspaceSummary
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,7 +27,8 @@ import kotlinx.serialization.json.put
  *   coalesces the ones still queued, and this folds the ones that arrive while
  *   a read is crossing the network.
  * - **A read belongs to the connection, not to whoever asked for it.** It runs
- *   in [scope], and a caller only waits for it. A board screen that is left
+ *   in [scope], under a job [close] cancels when the connection closes, and a
+ *   caller only waits for it. A board screen that is left
  *   mid-read cancels its wait, never the read — so a notice folded into that
  *   read still gets its trailing re-read, instead of the row's counts staying
  *   where they were until some later notice.
@@ -77,6 +79,15 @@ class BoardReads(
     var lastSweepAt: Long = 0L
         private set
 
+    /**
+     * The parent of every read, a child of [scope]'s job: the app's teardown
+     * cancels it, and so does [close], which is this one connection's.
+     */
+    private val reads = SupervisorJob(scope.coroutineContext[Job])
+
+    /** Whether news arrived while away that no sweep has read yet. See [newsWhileAway]. */
+    private var owedOnReturn = false
+
     private val running = mutableMapOf<String, Job>()
     private val movedAgain = mutableSetOf<String>()
 
@@ -111,7 +122,7 @@ class BoardReads(
         // Lazy, and recorded before it starts: on an immediate dispatcher the
         // body could otherwise run to the end — `canRead` false, say — before
         // `running` knew about it, and leave a finished job standing there.
-        val job = scope.launch(start = CoroutineStart.LAZY) {
+        val job = scope.launch(reads, start = CoroutineStart.LAZY) {
             try {
                 do {
                     movedAgain -= key
@@ -141,6 +152,7 @@ class BoardReads(
     suspend fun sweep(boards: List<WorkspaceSummary>) {
         if (!canRead()) return
         lastSweepAt = clock()
+        owedOnReturn = false
         if (boards.isNotEmpty()) ledger.swept()
         for (board in withImplicit(boards)) readOne(board)
     }
@@ -161,6 +173,30 @@ class BoardReads(
      */
     suspend fun buildLanded(boards: List<WorkspaceSummary>) {
         if (ledger.owedWhenBuildLands) sweep(boards)
+    }
+
+    /**
+     * A `task` or `resync` notice arrived while the app was away, and was not
+     * read. One sweep on return pays for it — or any sweep before then, since
+     * a sweep reads every board: a reconnect's, most often. See [cameBack].
+     */
+    fun newsWhileAway() {
+        owedOnReturn = true
+    }
+
+    /** The app is back: sweep if news arrived while it was away and no sweep has read it since. */
+    suspend fun cameBack(boards: List<WorkspaceSummary>) {
+        if (owedOnReturn) sweep(boards)
+    }
+
+    /**
+     * The connection is closed: stop every read under way, and start none.
+     * A read still crossing the network lands nowhere, and a notice folded
+     * into it owes nothing, because nobody reads this connection's boards
+     * again.
+     */
+    fun close() {
+        reads.cancel()
     }
 
     companion object {

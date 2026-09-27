@@ -463,7 +463,7 @@ private fun AcceptanceLine(progress: TaskAcceptanceProgress) {
     }
 }
 
-/** A chip for one agent, a chip with a menu for several, a quiet "No Agent", or nothing. */
+/** A chip for one agent, a chip with a menu for several, a quiet "No agent", or nothing. */
 @Composable
 private fun AgentControl(
     key: String,
