@@ -105,6 +105,8 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   terminal.stop          {terminal}
  *   terminal.restart       {terminal}
  *   terminal.dismiss_lost  {terminal}
+ *   terminal.remove        {terminal}             refused while it runs:
+ *                                                    stop it first
  *   terminal.resize        {terminal, columns, rows}
  *   task.list              {repository}           -> {"tasks": [...]}, one
  *                                                    repository's board

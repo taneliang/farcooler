@@ -1127,6 +1127,12 @@ impl Session {
         self.value("terminal.dismiss_lost", Some(terminal), None).await.map(|_| ())
     }
 
+    /// Delete a terminal's record. The daemon refuses a `Running` or
+    /// `Starting` one, so closing a live pane is `stop_terminal` first.
+    pub async fn remove_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+        self.value("terminal.remove", Some(terminal), None).await.map(|_| ())
+    }
+
     /// A user has looked at this terminal, which is what ends `Done`.
     ///
     /// `Done` is idle-and-UNSEEN, so a client that can show a terminal has to be

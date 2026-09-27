@@ -38,6 +38,21 @@ const WORKSPACES: [&str; 5] = [
 /// the daemon serving the method the whole time.
 const BOARD: [&str; 2] = ["task.list", "task.get"];
 
+/// Closing a pane: a stop, then a remove, from both phones (`Connection.close`
+/// on iOS and Android). `terminal.remove` had no arm, so every close stopped
+/// the pane and left it standing, dead, with the error swallowed.
+const TERMINALS: [&str; 2] = ["terminal.stop", "terminal.remove"];
+
+#[test]
+fn every_terminal_method_a_close_makes_can_be_called() {
+    for method in TERMINALS {
+        assert!(
+            FFI.contains(&format!("\"{method}\" =>")),
+            "the daemon serves {method} and no app can reach it: `dispatch` has no arm for it"
+        );
+    }
+}
+
 #[test]
 fn every_board_read_the_phone_makes_can_be_called() {
     for method in BOARD {
@@ -74,7 +89,13 @@ fn every_workspace_method_the_daemon_serves_can_be_called() {
 #[test]
 fn the_header_tells_an_app_developer_these_exist() {
     const HEADER: &str = include_str!("../include/farcooler_client.h");
-    for method in ENROLLMENT.iter().chain(WORKSPACES.iter()).chain(BOARD.iter()).copied() {
+    for method in ENROLLMENT
+        .iter()
+        .chain(WORKSPACES.iter())
+        .chain(BOARD.iter())
+        .chain(TERMINALS.iter())
+        .copied()
+    {
         assert!(
             HEADER.contains(method),
             "{method} is routed but undocumented: nobody will find it"

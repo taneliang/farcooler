@@ -1942,6 +1942,15 @@ async fn dispatch(
             session.dismiss_lost(id("terminal")?).await?;
             Ok(json!({}))
         }
+        // The second half of closing a pane, after `terminal.stop`. Both
+        // phones have called this since they could close a terminal, and it
+        // had no arm: the stop landed, this came back "unknown method", the
+        // apps swallow a close's errors, and every close left the dead pane
+        // behind that the remove exists to take away.
+        "terminal.remove" => {
+            session.remove_terminal(id("terminal")?).await?;
+            Ok(json!({}))
+        }
         // Answers `{}` for the reason the agent calls below do: what a client
         // redraws from is the fleet it polls, or the pushed change, not an echo
         // of the row taken at the instant of the write.
