@@ -36,12 +36,46 @@ pub struct HookLine {
 /// A hook that predates holds reads one as no decision and defers to the
 /// keyboard at once, because nothing here denies unknown fields. So a newer
 /// daemon and an older hook never approve anything they should not.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+///
+/// Read-only on purpose: it does not derive `Serialize`. What is written is a
+/// `Reply`, which cannot carry a decision and a hold together.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct HookVerdict {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub decision: Option<Decision>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub hold_ms: Option<u64>,
+}
+
+/// What the daemon writes to a gating hook: one of these, and never two.
+///
+/// `HookVerdict` reads every frame, so it has room for a decision and a hold at
+/// once, and the two binaries would read such a frame differently: a hook that
+/// predates holds acts on the decision, a newer one waits out the hold. So the
+/// daemon never writes a `HookVerdict`. It writes a `Reply`, which is a
+/// decision or a hold by construction.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum Reply {
+    /// `{}`: no decision. The TUI asks at the keyboard.
+    NoDecision {},
+    Decide { decision: Decision },
+    /// Wait up to `hold_ms` more for a second line, the verdict.
+    Hold { hold_ms: u64 },
+}
+
+impl Reply {
+    pub fn hold(wait: Duration) -> Self {
+        Reply::Hold { hold_ms: u64::try_from(wait.as_millis()).unwrap_or(u64::MAX) }
+    }
+
+    /// The verdict line for how an ask ended: `None` is no decision.
+    pub fn verdict(decision: Option<Decision>) -> Self {
+        match decision {
+            Some(decision) => Reply::Decide { decision },
+            None => Reply::NoDecision {},
+        }
+    }
 }
 
 /// The longest a held hook waits for its verdict, after the first contact.
@@ -93,9 +127,11 @@ mod tests {
 
     #[test]
     fn a_hold_survives_a_round_trip() {
-        let hold = HookVerdict { decision: None, hold_ms: Some(60_000) };
-        let encoded = encode_line(&hold).expect("encodes");
-        assert_eq!(decode_line::<HookVerdict>(encoded.trim()).expect("decodes"), hold);
+        let encoded = encode_line(&Reply::hold(LONGEST_HOLD)).expect("encodes");
+        assert_eq!(
+            decode_line::<HookVerdict>(encoded.trim()).expect("decodes"),
+            HookVerdict { decision: None, hold_ms: Some(60_000) }
+        );
     }
 
     #[test]
@@ -115,12 +151,32 @@ mod tests {
     fn a_verdict_with_no_hold_writes_no_hold_key() {
         // An older hook tolerates an unknown key, but `{}` is the frame the
         // daemon has always meant by "no decision", and it stays that.
-        assert_eq!(encode_line(&HookVerdict::default()).expect("encodes"), "{}\n");
-        let deny = HookVerdict {
-            decision: Some(Decision::Deny { message: "no".to_string() }),
-            hold_ms: None,
-        };
+        assert_eq!(encode_line(&Reply::verdict(None)).expect("encodes"), "{}\n");
+        let deny = Reply::verdict(Some(Decision::Deny { message: "no".to_string() }));
         assert!(!encode_line(&deny).expect("encodes").contains("hold_ms"));
+    }
+
+    /// Every frame the daemon can write reads as exactly what it says, to a
+    /// hook of either age.
+    #[test]
+    fn a_reply_is_a_decision_or_a_hold_never_both() {
+        let deny = Decision::Deny { message: "Denied from iPhone".to_string() };
+        let cases = [
+            (Reply::verdict(None), "{}", None, None),
+            (
+                Reply::verdict(Some(deny.clone())),
+                r#"{"decision":{"behavior":"deny","message":"Denied from iPhone"}}"#,
+                Some(deny),
+                None,
+            ),
+            (Reply::hold(LONGEST_HOLD), r#"{"hold_ms":60000}"#, None, Some(60_000)),
+        ];
+        for (reply, wire, decision, hold_ms) in cases {
+            let encoded = encode_line(&reply).expect("encodes");
+            assert_eq!(encoded, format!("{wire}\n"), "{reply:?} on the wire");
+            let read = decode_line::<HookVerdict>(encoded.trim()).expect("a hook reads it");
+            assert_eq!((read.decision, read.hold_ms), (decision, hold_ms), "{reply:?} as read");
+        }
     }
 
     #[test]

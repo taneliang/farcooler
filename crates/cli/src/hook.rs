@@ -306,6 +306,7 @@ fn claude_shaped_output(decision: &Decision) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use farcooler_agent_hooks::wire::Reply;
 
     /// The deadline for a test about what the hook PRINTS rather than when.
     ///
@@ -362,10 +363,8 @@ mod tests {
             let mut reader = tokio::io::BufReader::new(&mut stream);
             let mut line = String::new();
             tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
-            let verdict = HookVerdict {
-                decision: Some(Decision::Deny { message: "Denied from a test".to_string() }),
-                hold_ms: None,
-            };
+            let verdict =
+                Reply::verdict(Some(Decision::Deny { message: "Denied from a test".to_string() }));
             tokio::io::AsyncWriteExt::write_all(
                 &mut stream,
                 encode_line(&verdict).expect("encode").as_bytes(),
@@ -409,7 +408,7 @@ mod tests {
             let mut reader = tokio::io::BufReader::new(&mut stream);
             let mut line = String::new();
             tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
-            let verdict = HookVerdict { decision: Some(Decision::Allow), hold_ms: None };
+            let verdict = Reply::verdict(Some(Decision::Allow));
             tokio::io::AsyncWriteExt::write_all(
                 &mut stream,
                 encode_line(&verdict).expect("encode").as_bytes(),
