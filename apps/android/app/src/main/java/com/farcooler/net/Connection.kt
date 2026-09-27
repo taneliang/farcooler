@@ -472,7 +472,7 @@ class Connection(
 
     /** A new link, which has read nothing yet: the fleet on screen is an earlier one's. */
     private fun linkCameUp() {
-        if (_fleetRead.value == FleetRead.THIS_LINK) _fleetRead.value = FleetRead.EARLIER_LINK
+        _fleetRead.value = _fleetRead.value.onNewLink()
     }
 
     private val _repositories = MutableStateFlow<List<Repository>>(emptyList())
@@ -1069,7 +1069,13 @@ class Connection(
             // hundredth, and left the app with no path out of Connected at
             // all. Either way the last known fleet stays on screen rather than
             // blanking the screen someone is reading.
-            if (e is com.farcooler.core.DisconnectedException) linkDropped()
+            if (e is com.farcooler.core.DisconnectedException) {
+                linkDropped()
+            } else {
+                // Not "Connecting…" for as long as every poll fails the same
+                // way: can't say, until one lands. See [FleetRead.FAILED].
+                _fleetRead.value = _fleetRead.value.failed()
+            }
             return
         }
 

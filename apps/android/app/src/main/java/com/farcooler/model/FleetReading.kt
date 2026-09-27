@@ -34,6 +34,24 @@ enum class FleetRead {
 
     /** The link that is up now. */
     THIS_LINK,
+
+    /**
+     * No link has read one, and this link's read failed without the link
+     * dropping: a reply the app could not decode, say. Away ("can't say")
+     * rather than connecting, which it would otherwise read as for as long as
+     * every poll failed the same way.
+     */
+    FAILED;
+
+    /** After a fleet read failed without the link dropping. Only a first read changes anything. */
+    fun failed(): FleetRead = if (this == NEVER) FAILED else this
+
+    /** A new link: whatever was read, it was read on an earlier one. */
+    fun onNewLink(): FleetRead = when (this) {
+        THIS_LINK -> EARLIER_LINK
+        FAILED -> NEVER
+        else -> this
+    }
 }
 
 /**
@@ -48,13 +66,15 @@ enum class FleetRead {
 fun RunnerLink.given(read: FleetRead): RunnerLink = when {
     this != RunnerLink.ANSWERING || read == FleetRead.THIS_LINK -> this
     read == FleetRead.NEVER -> RunnerLink.CONNECTING
+    // EARLIER_LINK, with the old rows, and FAILED, whose read could not be
+    // made sense of: neither vouches for now.
     else -> RunnerLink.AWAY
 }
 
 /**
  * A pane's process state, as far as its runner can vouch for it: what it
  * last said while it answers, and "can't say" — the hollow neutral dot —
- * while it doesn't. An exited grey dot or a lost red ring from a fleet read
+ * while it doesn't. An exited gray dot or a lost red ring from a fleet read
  * before the link went is a claim about now nobody made.
  */
 fun StateKind.said(answering: Boolean): StateKind = if (answering) this else StateKind.UNKNOWN

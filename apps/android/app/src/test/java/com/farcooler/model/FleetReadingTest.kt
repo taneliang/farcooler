@@ -145,7 +145,7 @@ class FleetReadingTest {
 
     /**
      * **A pane's dot says "can't say" while its runner isn't answering**
-     * (ov-22 M9). An exited grey dot, a lost red ring, or no dot for running,
+     * (ov-22 M9). An exited gray dot, a lost red ring, or no dot for running,
      * is each a claim about now from a fleet read before the link went.
      */
     @Test
@@ -155,5 +155,27 @@ class FleetReadingTest {
         assertEquals(StateKind.UNKNOWN, StateKind.LOST.said(answering = false))
         assertEquals(StateKind.LOST, StateKind.LOST.said(answering = true))
         assertEquals(StateKind.RUNNING, StateKind.RUNNING.said(answering = true))
+    }
+
+    /**
+     * **A first fleet read that fails, without the link dropping, is not
+     * "Connecting…" forever** (ov-26 review). A decode error, say: the core
+     * does not call it a disconnect, the phase stays Connected, and with no
+     * fleet on this link the runner read as connecting while every poll
+     * failed the same way. It reads as away ("can't say") until a read
+     * lands, and the poll goes on retrying. A new link starts over.
+     *
+     * Mutation: `failed` leaving NEVER alone. Red: CONNECTING.
+     */
+    @Test
+    fun `a first fleet read that fails reads as away, not connecting`() {
+        assertEquals(RunnerLink.AWAY, RunnerLink.ANSWERING.given(FleetRead.NEVER.failed()))
+        // A failed poll after a good one is not a disconnection: still answering.
+        assertEquals(FleetRead.THIS_LINK, FleetRead.THIS_LINK.failed())
+        assertEquals(FleetRead.EARLIER_LINK, FleetRead.EARLIER_LINK.failed())
+        // A new link has read nothing: connecting again, or away with old rows.
+        assertEquals(FleetRead.NEVER, FleetRead.NEVER.failed().onNewLink())
+        assertEquals(FleetRead.EARLIER_LINK, FleetRead.THIS_LINK.onNewLink())
+        assertEquals(FleetRead.EARLIER_LINK, FleetRead.EARLIER_LINK.onNewLink())
     }
 }
