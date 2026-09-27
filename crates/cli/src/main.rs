@@ -197,6 +197,11 @@ enum Command {
         /// and its argument vector never have to survive tmux's shell quoting.
         #[arg(long)]
         preset: Option<String>,
+        /// One more argument for the adapter, after its own (repeatable). A
+        /// workspace's Claude Code orchestrator is handed its recipe this
+        /// way: `--add-dir` and the memory directory, as in terminal mode.
+        #[arg(long = "adapter-arg", allow_hyphen_values = true)]
+        adapter_args: Vec<String>,
     },
     /// Report one agent lifecycle hook to the daemon. Not for humans.
     ///
@@ -988,8 +993,8 @@ async fn run() -> Fallible {
             }
             Ok(())
         }
-        Command::AgentHost { terminal, socket, worktree, session, preset } => {
-            agent_host::run(terminal, socket, worktree, session, preset).await
+        Command::AgentHost { terminal, socket, worktree, session, preset, adapter_args } => {
+            agent_host::run(terminal, socket, worktree, session, preset, adapter_args).await
         }
         Command::Hook { agent, event, socket, gating, deadline_ms } => {
             // An unknown agent name is not an error a hook may report: it

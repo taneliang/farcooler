@@ -223,6 +223,20 @@ pub fn resolve(
     registry.adapter(preset?).cloned()
 }
 
+/// `resolve`, with `extra` after the adapter's own arguments: the
+/// `--adapter-arg`s the daemon hands a workspace's Claude Code orchestrator,
+/// so its chat runs with the recipe its terminal does. Empty for every
+/// other pane.
+pub fn resolve_with(
+    registry: &farcooler_core::activity::Registry,
+    preset: Option<&str>,
+    extra: Vec<String>,
+) -> Option<farcooler_core::activity::AdapterSpec> {
+    let mut spec = resolve(registry, preset)?;
+    spec.args.extend(extra);
+    Some(spec)
+}
+
 /// Whether this preset needs `CLAUDE_CODE_EXECUTABLE` resolved for it.
 ///
 /// Claude alone. `claude_executable` probes the filesystem for Claude Code, so
@@ -312,9 +326,10 @@ pub async fn run(
     worktree: PathBuf,
     session: Option<String>,
     preset: Option<String>,
+    adapter_args: Vec<String>,
 ) -> Fallible {
     let registry = farcooler_core::config::load_registry();
-    let Some(spec) = resolve(&registry, preset.as_deref()) else {
+    let Some(spec) = resolve_with(&registry, preset.as_deref(), adapter_args) else {
         // Reached only if the daemon's check and this one disagree, which
         // means a config file changed between them. Loud, because the symptom
         // is otherwise an empty pane.
@@ -895,6 +910,29 @@ mod tests {
         // The maintained package, not the renamed one. npm reports
         // `@zed-industries/codex-acp` deprecated and it stalled at 0.16.0.
         assert!(!spec.args.iter().any(|a| a.contains("@zed-industries/")));
+    }
+
+    /// The daemon's `--adapter-arg`s parse as it writes them, a leading dash
+    /// and a space included, and follow the adapter's own arguments.
+    #[test]
+    fn an_orchestrators_recipe_follows_the_adapters_own_arguments() {
+        use clap::Parser;
+        let argv = [
+            "farcooler", "agent-host", "--terminal", "00000000-0000-0000-0000-000000000000",
+            "--socket", "/s", "--worktree", "/home", "--preset", "claude",
+            "--adapter-arg", "--add-dir", "--adapter-arg", "/src/My Repo",
+        ];
+        let crate::Command::AgentHost { adapter_args, .. } = crate::Cli::try_parse_from(argv).expect("parses").command
+        else {
+            panic!("not agent-host")
+        };
+        assert_eq!(adapter_args, ["--add-dir", "/src/My Repo"]);
+
+        let registry = farcooler_core::activity::Registry::built_in();
+        let own = resolve(&registry, Some("claude")).expect("claude has an adapter").args;
+        let spec = resolve_with(&registry, Some("claude"), adapter_args).expect("claude has an adapter");
+        assert_eq!(spec.args[..own.len()], own[..]);
+        assert_eq!(spec.args[own.len()..], ["--add-dir", "/src/My Repo"]);
     }
 
     #[test]

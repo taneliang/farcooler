@@ -3660,6 +3660,51 @@ impl Service {
         Ok(dir)
     }
 
+    /// Where a Claude Code orchestrator's chat runs, and the arguments its
+    /// adapter gets after its own (`agent-host --adapter-arg`), when `term`
+    /// is one and `hosted` is what the chat will host. `None` for every
+    /// other pane, whose chat runs in its worktree.
+    ///
+    /// **The home**, as in terminal mode, because Claude Code files a
+    /// conversation under its working directory: the orchestrator's is under
+    /// the home's, and the chat's `--resume` and its history
+    /// (`farcooler_claude::backend::transcript_for`) look there. From the
+    /// main checkout the chat would find neither. Then `--add-dir <main>`,
+    /// and `autoMemoryDirectory` as inline JSON to `--settings`, which
+    /// Claude Code takes as a file or a JSON string. Only the memory, not
+    /// the terminal's settings file: a chat reports through the shim, and no
+    /// chat is handed Far Cooler's hooks. The recipe's variables reach it
+    /// from the pane's own line (`with_pane_env`).
+    ///
+    /// **Claude Code's native backend only.** An ACP adapter configured in
+    /// its place (`[adapters.claude]`) is a different program, and these
+    /// are claude's flags. Codex already chats from the main checkout, where
+    /// its terminal runs. A Cursor chat runs in the main checkout, which is
+    /// the root its terminal's `--workspace` names; its adapter takes no
+    /// such flag.
+    fn orchestrator_chat(
+        &self,
+        term: &models::Terminal,
+        hosted: Option<&str>,
+    ) -> Result<Option<(String, Vec<String>)>> {
+        use crate::orchestrator::{Harness, extra_args, working_directory};
+        let Some((Harness::Claude, launch)) = self.orchestrator_launch(term) else { return Ok(None) };
+        let native = self
+            .registry()
+            .adapter("claude")
+            .is_some_and(|a| a.backend == farcooler_core::activity::AdapterBackend::Native);
+        if hosted != Some("claude") || !native {
+            return Ok(None);
+        }
+        self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
+        let mut args = extra_args(Harness::Claude, &launch);
+        if let Some(memory) = &launch.memory_dir {
+            args.push("--settings".into());
+            args.push(serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() }).to_string());
+        }
+        Ok(Some((working_directory(Harness::Claude, &launch).to_string_lossy().into_owned(), args)))
+    }
+
     /// `workspace`'s home, made if it's missing, or the refusal an
     /// orchestrator's launch gets when it can't be (`orchestrator_home`),
     /// with the cause in the log.
@@ -4440,11 +4485,21 @@ impl Service {
                     .as_deref()
                     .map(|h| format!(" --preset {}", shell_quote(h)))
                     .unwrap_or_default();
+                // A Claude Code orchestrator's chat runs where its terminal
+                // did, with the same recipe (`orchestrator_chat`); every
+                // other chat runs in its worktree.
+                let recipe = match self.orchestrator_chat(&term, harness.as_deref())? {
+                    Some((home, args)) => {
+                        dir = home;
+                        args.iter().map(|a| format!(" --adapter-arg {}", shell_quote(a))).collect()
+                    }
+                    None => String::new(),
+                };
                 format!(
-                    "{} agent-host --terminal {id} --socket {} --worktree {}{session}{preset}",
+                    "{} agent-host --terminal {id} --socket {} --worktree {}{session}{preset}{recipe}",
                     agent_program(&shell_quote(&binary)),
                     shell_quote(&socket),
-                    shell_quote(&ws.worktree_path),
+                    shell_quote(&dir),
                 )
             }
         };
@@ -7329,6 +7384,66 @@ mod orchestrator_launch_tests {
         assert!(command.contains(&format!("orchestrator-{}.json", main.id)), "{command}");
         assert_eq!(pane_path(&svc, term.id).await, resolved(&crate::workspace_home::home(&svc.root, main.id)));
         let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// And so does one switched into a chat, on Claude Code's native
+    /// backend: the shim runs in the home, where the conversation is filed,
+    /// and hands the adapter `--add-dir` and the memory directory. On the
+    /// built-in ACP adapter, whose program these flags aren't for, the chat
+    /// runs in the main checkout as any other does.
+    #[tokio::test]
+    async fn an_orchestrator_switched_into_a_chat_keeps_its_recipe() {
+        let (dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let repo = resolved(Path::new(&ws.worktree_path));
+        let home = crate::workspace_home::home(&svc.root, main.id);
+        let config = dir.path().join("config.toml");
+        std::fs::write(&config, "[adapters.claude]\nbackend = \"native\"\nprogram = \"claude\"\n").unwrap();
+
+        for native in [true, false] {
+            *svc.registry.write().unwrap() = Arc::new(if native {
+                farcooler_core::config::registry_from(&config)
+            } else {
+                farcooler_core::activity::Registry::built_in()
+            });
+            let term = svc.start_orchestrator(main.id, "claude", true).await.expect("started");
+            // What the chat toggle identifies as Claude Code, as
+            // `a_pane_that_looks_like_claude` draws it.
+            let pane = svc.pane_of(term.id).await.expect("a pane");
+            svc.tmux
+                .respawn_pane(&pane.pane_id, &ws.worktree_path, "printf '? for shortcuts\\n'; sleep 600")
+                .await
+                .expect("respawn");
+            for _ in 0..200 {
+                svc.inventory.refresh().await;
+                let screen = svc.screen(term.id).await.map(|(text, _, _)| text).unwrap_or_default();
+                if screen.contains("? for shortcuts") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
+
+            let command = pane_start_command(&svc, term.id).await;
+            assert!(command.contains("agent-host"), "{command}");
+            if native {
+                assert_eq!(arg_after(&command, "--worktree"), home.to_string_lossy(), "{command}");
+                assert_eq!(pane_path(&svc, term.id).await, resolved(&home));
+                assert!(
+                    command.contains(&format!("--adapter-arg '--add-dir' --adapter-arg '{}'", repo.display())),
+                    "{command}"
+                );
+                let memory = user_home().map(|h| crate::orchestrator::claude_memory_dir(&h, &repo)).unwrap();
+                assert!(command.contains("--adapter-arg '--settings' --adapter-arg '{"), "{command}");
+                // tmux prints a `"` in the start command as `\"`.
+                let settings = serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() });
+                assert!(command.replace("\\\"", "\"").contains(&format!("'{settings}'")), "{command}");
+            } else {
+                assert_eq!(arg_after(&command, "--worktree"), ws.worktree_path, "{command}");
+                assert!(!command.contains("--adapter-arg"), "{command}");
+            }
+            let _ = svc.stop_terminal(term.id).await;
+        }
     }
 }
 
