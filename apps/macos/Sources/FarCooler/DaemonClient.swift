@@ -1020,10 +1020,37 @@ final class DaemonClient: ObservableObject {
     /// minus replacing the link: the fleet (and with it the diff counts), then
     /// every board and layout. Internal rather than private so the suite can
     /// hand it the news the stream would have.
+    ///
+    /// Coalesced: a stream far enough behind to say this once can say it
+    /// several times in a row, and each pass is a `worktree list` plus a seed
+    /// of five more subprocesses — over ssh, for a remote runner. So a line
+    /// that lands while a pass is running marks one more pass owed rather
+    /// than starting its own: at most one runs and one waits, and the one
+    /// that waits covers every line that arrived meanwhile.
     func eventsMissed() async {
-        await refresh()
-        rereadMissedNews()
+        guard !missedNewsRereading else {
+            missedNewsOwed = true
+            return
+        }
+        missedNewsRereading = true
+        defer { missedNewsRereading = false }
+        repeat {
+            missedNewsOwed = false
+            // Only a link that was up before the read and is still up after
+            // it. One that came up during it took `refresh()`'s reconnection
+            // branch, which has just re-read all of this itself — a second
+            // pass would be a second seed and a second board read for the
+            // same news. One that is down now will re-read on the way back.
+            let wasConnected = state == .connected
+            await refresh()
+            if wasConnected, state == .connected { rereadMissedNews() }
+        } while missedNewsOwed
     }
+
+    /// A pass of `eventsMissed()` is running. See there.
+    private var missedNewsRereading = false
+    /// An `events_missed` line arrived during that pass, so one more is owed.
+    private var missedNewsOwed = false
 
     /// Who caused the last board move, verbatim: `user`, `manager`, or
     /// `agent:<uuid>`.

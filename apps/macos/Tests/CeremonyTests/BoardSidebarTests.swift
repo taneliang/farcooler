@@ -493,6 +493,53 @@ struct BoardSidebarTests {
         client.stopEvents()
     }
 
+    /// **A burst of `events_missed` is one pass running and one after**
+    /// (ov-49 review). Each pass is a fleet read and a seed; five lines
+    /// used to be five of each, all at once.
+    @Test func aBurstOfMissedNewsIsOnePassRunningAndOneAfter() async {
+        let client = client(Reads())
+        let runner = client.commandRunnerForTesting
+        var fleetReads = 0
+        client.commandRunnerForTesting = { args in
+            if args.starts(with: ["worktree", "list"]) {
+                fleetReads += 1
+                // A beat, so the rest of the burst lands while this is out.
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            return await runner!(args)
+        }
+        var seeded = 0
+        client.onReconnect = { seeded += 1 }
+        await client.refresh()  // the link comes up
+        fleetReads = 0
+        seeded = 0
+
+        let burst = (0..<5).map { _ in Task { await client.eventsMissed() } }
+        for pass in burst { await pass.value }
+        #expect(fleetReads == 2, "\(fleetReads) fleet reads for one burst")
+        #expect(seeded == 2, "\(seeded) seeds for one burst")
+        client.stopEvents()
+    }
+
+    /// **Missed news on a link that wasn't up is re-read once** (ov-49
+    /// review). The fleet read that brings the link up is a reconnection,
+    /// which re-reads everything itself; `eventsMissed()` re-reading after
+    /// it was a second seed and a second read of every board.
+    @Test func missedNewsOnALinkThatWasntUpIsReReadOnce() async {
+        let client = client(Reads())
+        var seeded = 0
+        client.onReconnect = { seeded += 1 }
+        let board = Self.summary(Self.main, "Main", isMain: true)
+        let before = client.boardGeneration(for: board)
+        #expect(client.state != .connected)
+
+        await client.eventsMissed()
+        #expect(client.state == .connected)
+        #expect(seeded == 1, "seeded \(seeded) times")
+        #expect(client.boardGeneration(for: board) == before + 1)
+        client.stopEvents()
+    }
+
     // MARK: - A replacement store is read
 
     @MainActor
