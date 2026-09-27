@@ -32,6 +32,7 @@
 //! | `main_workspace` | deleting Main |
 //! | `workspace_not_empty` | deleting a workspace a task, worktree or terminal still names |
 //! | `other_repository` | moving a task, or giving a worktree or terminal, to a workspace in another repository |
+//! | `main_checkout` | assigning a repository's main checkout to a workspace other than Main |
 //! | `orchestrator_taken` | a second live orchestrator for one workspace |
 //! | `workspace` | making a terminal with no workspace an orchestrator |
 
@@ -503,19 +504,34 @@ impl Store {
 
     /// Give a worktree to `workspace` whoever owned it, as an explicit claim.
     /// The one way ownership moves once claimed.
+    ///
+    /// A repository's main checkout belongs to Main: giving it to any other
+    /// workspace is refused (`main_checkout`). Giving it back to Main is not.
     pub fn assign_worktree(&self, worktree: Uuid, workspace: Uuid) -> Result<Worktree> {
         {
             let mut conn = self.conn();
             let tx = conn.transaction().map_err(map_err)?;
-            let repository: Uuid = tx
+            let (repository, is_main_checkout): (Uuid, bool) = tx
                 .query_row(
-                    "SELECT repository_id FROM worktrees WHERE id = ?1",
+                    "SELECT repository_id, is_main_checkout FROM worktrees WHERE id = ?1",
                     params![uuid_blob(worktree)],
-                    |r| get_uuid(r, 0),
+                    |r| Ok((get_uuid(r, 0)?, r.get(1)?)),
                 )
                 .map_err(map_err)?;
             if repository_of(&tx, workspace)? != repository {
                 return Err(DomainError::InvalidArgument { what: "other_repository" });
+            }
+            if is_main_checkout {
+                let to_main: bool = tx
+                    .query_row(
+                        "SELECT is_main FROM workspaces WHERE id = ?1",
+                        params![uuid_blob(workspace)],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_err)?;
+                if !to_main {
+                    return Err(DomainError::InvalidArgument { what: "main_checkout" });
+                }
             }
             give_worktree(&tx, worktree, workspace, ClaimSource::Explicit)?;
             tx.commit().map_err(map_err)?;
@@ -715,6 +731,13 @@ impl Store {
         let worktree = self.create_worktree(repository, "branch", path, false).expect("worktree");
         assert_eq!(worktree.workspace_id, None, "a new worktree starts unclaimed");
         worktree.id
+    }
+
+    /// Give `worktree` to `workspace` as an explicit claim, past every rule
+    /// `assign_worktree` holds it to: how a row reads that a runner from
+    /// before the rule wrote, such as a main checkout outside Main.
+    pub fn give_worktree_for_test(&self, worktree: Uuid, workspace: Uuid) {
+        give_worktree(&self.conn(), worktree, workspace, ClaimSource::Explicit).expect("given");
     }
 
     /// A running `claude` terminal in `worktree`, doing `workspace`'s work.
@@ -1012,6 +1035,37 @@ mod tests {
         let elsewhere = store.ensure_main_workspace(other).unwrap();
         let err = store.assign_worktree(wt.id, elsewhere.id).unwrap_err();
         assert!(refused("other_repository")(&err), "{err:?}");
+    }
+
+    /// A repository's main checkout is Main's: the runner refuses to give it
+    /// to another workspace, whoever is asking, and leaves it where it was.
+    /// One some other workspace already holds (a claim made before this
+    /// rule) can still be given back to Main.
+    #[test]
+    fn a_main_checkout_cannot_be_assigned_away_from_main() {
+        let store = Store::open_in_memory().unwrap();
+        let repo = store.register_repository_for_test("r");
+        let main = store.ensure_main_workspace(repo).unwrap();
+        let billing = store.create_workspace(repo, "Billing", "bil").unwrap();
+        let checkout = store.create_worktree(repo, "main", "/r", true).unwrap().id;
+        store.claim_worktree(checkout, main.id, ClaimSource::Explicit).unwrap().expect("claimed");
+
+        let err = store.assign_worktree(checkout, billing.id).unwrap_err();
+        assert!(refused("main_checkout")(&err), "{err:?}");
+        assert_eq!(store.get_worktree(checkout).unwrap().workspace_id, Some(main.id), "left with Main");
+        store.assign_worktree(checkout, main.id).unwrap();
+
+        let other = store.create_worktree(repo, "main", "/s", true).unwrap().id;
+        store.claim_worktree(other, billing.id, ClaimSource::Hook).unwrap().expect("claimed");
+        let ops = store.create_workspace(repo, "Ops", "ops").unwrap();
+        let err = store.assign_worktree(other, ops.id).unwrap_err();
+        assert!(refused("main_checkout")(&err), "{err:?}");
+        let back = store.assign_worktree(other, main.id).unwrap();
+        assert_eq!((back.workspace_id, back.claim_source), (Some(main.id), Some(ClaimSource::Explicit)));
+
+        // A linked worktree still goes wherever it is sent.
+        let wt = store.create_unclaimed_worktree_for_test(repo, "/r/.worktrees/x");
+        assert_eq!(store.assign_worktree(wt, billing.id).unwrap().workspace_id, Some(billing.id));
     }
 
     /// The first orchestrator whose row doesn't say it has ended.

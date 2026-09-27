@@ -1757,6 +1757,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "main_workspace" => "Main can't be deleted",
         "workspace_not_empty" => "move this workspace's tasks, worktrees and terminals first",
         "other_repository" => "that workspace is in a different repository",
+        "main_checkout" => "the repository's main checkout always belongs to Main",
         "orchestrator_taken" => "this workspace already has an orchestrator running",
         "orchestrator_home" => "this workspace's folder couldn't be made, so its orchestrator wasn't started",
         "workspace" => "this terminal doesn't belong to a workspace yet",
@@ -2124,13 +2125,26 @@ async fn other_workspaces<L: DispatchLink>(
             }
             _ => uuid_of(&task.workspace_id).to_string(),
         };
-        said.push(format!(
-            "warning: {name} is a worktree {owner_name} owns, and {key} is on {board}'s board. its agent \
-             will work {board}'s task in {owner_name}'s worktree. to give the worktree to {board}, run \
-             `farcooler worktree assign {} --to {to}`",
-            crate::remote::shell_quote(name),
-            key = task.key,
-        ));
+        // The runner gives a main checkout to Main and nobody else, so for
+        // any other board, `worktree assign` would only be refused.
+        let to_main = workspaces.iter().any(|w| w.id == task.workspace_id && w.is_main);
+        if row.is_main_checkout && !to_main {
+            said.push(format!(
+                "warning: {name} is the repository's main checkout, which {owner_name} owns, and {key} is \
+                 on {board}'s board. its agent will work {board}'s task in {owner_name}'s worktree. the main \
+                 checkout always belongs to Main, so to give {board} a worktree of its own, dispatch with \
+                 `--new` and `--branch` instead",
+                key = task.key,
+            ));
+        } else {
+            said.push(format!(
+                "warning: {name} is a worktree {owner_name} owns, and {key} is on {board}'s board. its agent \
+                 will work {board}'s task in {owner_name}'s worktree. to give the worktree to {board}, run \
+                 `farcooler worktree assign {} --to {to}`",
+                crate::remote::shell_quote(name),
+                key = task.key,
+            ));
+        }
     }
     said
 }
@@ -3864,7 +3878,8 @@ mod tests {
     fn every_runner_sentence_has_one_in_this_clis_style() {
         let runners = [
             "task_prefix", "task_prefix_taken", "name", "main_workspace", "workspace_not_empty",
-            "other_repository", "orchestrator_taken", "orchestrator_home", "workspace", "role", "task_ids",
+            "other_repository", "main_checkout", "orchestrator_taken", "orchestrator_home", "workspace",
+            "role", "task_ids",
         ];
         let ours = [
             "title", "actor", "status", "kind", "body", "acceptance", "extra_json", "supersedes",
@@ -4008,6 +4023,22 @@ mod tests {
         });
         let (_, warned) = run_as(&mut link, &on(BILLING), Lane::Existing("my lane".into()), "claude", false).await;
         assert!(warned[0].ends_with(&format!("`farcooler worktree assign 'my lane' --to {BILLING}`")), "{warned:?}");
+
+        // The main checkout can't be given to Billing, so it isn't offered;
+        // it can be given back to Main, so that still is.
+        let checkout = pb::Worktree { is_main_checkout: true, ..owned(MAIN, &[]) };
+        let mut link = FakeLink { worktrees: vec![checkout], ..Default::default() };
+        let (_, warned) = run_as(&mut link, &on(BILLING), existing(), "claude", false).await;
+        assert_eq!(
+            warned,
+            ["warning: lane is the repository's main checkout, which Main owns, and fc-2 is on Billing's \
+              board. its agent will work Billing's task in Main's worktree. the main checkout always belongs \
+              to Main, so to give Billing a worktree of its own, dispatch with `--new` and `--branch` instead"]
+        );
+        let held = pb::Worktree { is_main_checkout: true, ..owned(BILLING, &[]) };
+        let mut link = FakeLink { worktrees: vec![held], ..Default::default() };
+        let (_, warned) = run_as(&mut link, &on(MAIN), existing(), "claude", false).await;
+        assert!(warned[0].ends_with("`farcooler worktree assign lane --to fc`"), "{warned:?}");
 
         // A workspace the list doesn't know is its short id, not dropped.
         let gone = Uuid::from_u128(0xdead_beef);

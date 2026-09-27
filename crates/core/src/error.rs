@@ -268,6 +268,7 @@ pub fn sentence(what: &str) -> Option<&'static str> {
         "main_workspace" => "Main can't be deleted.",
         "workspace_not_empty" => "Move this workspace's tasks, worktrees and terminals first.",
         "other_repository" => "That workspace is in a different repository.",
+        "main_checkout" => "The repository's main checkout always belongs to Main.",
         "orchestrator_taken" => "This workspace already has an orchestrator running.",
         "orchestrator_home" => "This workspace's folder couldn't be made, so its orchestrator wasn't started.",
         "orchestrator_chat_acp" => {
@@ -614,6 +615,7 @@ mod tests {
             "main_workspace",
             "workspace_not_empty",
             "other_repository",
+            "main_checkout",
             "orchestrator_taken",
             "orchestrator_home",
             "orchestrator_chat_acp",
