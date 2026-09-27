@@ -299,6 +299,17 @@ jobs:
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
       HAS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY != '' }}
     steps:
+      # Hoisting makes the `if:`s below honest; it doesn't make a missing
+      # identity fail. Without this the signing steps skipped, the ad-hoc dmg
+      # Gatekeeper refuses was uploaded, the appcast quietly didn't move, and
+      # the job stayed green. An unsigned canary is never the intent (see the
+      # note above this job), so refuse before spending the build on one.
+      - name: Refuse to build a canary without a signing identity
+        run: |
+          if [ "$HAS_SIGN_IDENTITY" != true ]; then
+            echo "::error::MACOS_SIGN_IDENTITY is missing, so this canary would be ad-hoc signed, which Gatekeeper refuses; refusing to build it"
+            exit 1
+          fi
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
       - name: Check the runner has Xcode 27
