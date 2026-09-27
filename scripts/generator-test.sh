@@ -179,6 +179,10 @@ check "the Embed Watch Extensions phase has an id" \
   "yes" "$([ -n "$watch_ext_phase_id" ] && echo yes || echo no)"
 check "that phase is a build phase of the watch app" \
   "yes" "$(has "$watch_ext_phase_id" "$watch_target_block")"
+# The converse means nothing against an empty block, which is what a renamed
+# target comment would leave: `has` in nothing is "no", and so a pass.
+check "the phone app's target block was found" \
+  "yes" "$([ -n "$app_target_block" ] && echo yes || echo no)"
 check "it is not a build phase of the phone app" \
   "no" "$(has "$watch_ext_phase_id" "$app_target_block")"
 
