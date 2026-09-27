@@ -2081,31 +2081,41 @@ fn working_on(t: &pb::Terminal, task: &[u8]) -> bool {
 ///   pane is its worktree's. `worktree assign` is how ownership moves, so
 ///   it's named.
 ///
+/// Except for a main checkout, which the runner gives to Main and nobody
+/// else: for another board, `worktree assign` would only be refused. The
+/// way out then is a worktree of the board's own, which can only be named
+/// once the pane is open, since it starts by stopping that pane. So the
+/// board's name comes back beside the warnings, and `dispatch` says the
+/// rest (`own_worktree_steps`) with the pane's id.
+///
 /// An unclaimed worktree has neither: the runner claims it for the task's
 /// workspace when the pane opens. Names come from `workspace.list`, asked
 /// only when there's something to say; a list that can't be read leaves
-/// short ids, since the warning matters more than the names. A runner
+/// short ids, since the warning matters more than the names. Nor can it
+/// tell whether the task's board is Main, so a main checkout is then given
+/// the fact and no advice, rather than advice that may be wrong. A runner
 /// without workspaces is asked nothing.
 async fn other_workspaces<L: DispatchLink>(
     link: &mut L,
     task: &pb::Task,
     row: &pb::Worktree,
     name: &str,
-) -> Vec<String> {
+) -> (Vec<String>, Option<String>) {
     if !has_workstreams(&link.capabilities()) {
-        return Vec::new();
+        return (Vec::new(), None);
     }
-    let Some(owner) = row.workspace_id.as_ref().filter(|o| !o.is_empty()) else { return Vec::new() };
+    let Some(owner) = row.workspace_id.as_ref().filter(|o| !o.is_empty()) else { return (Vec::new(), None) };
     let mismatch = !task.workspace_id.is_empty() && *owner != task.workspace_id;
     if row.foreign_writer_workspace_ids.is_empty() && !mismatch {
-        return Vec::new();
+        return (Vec::new(), None);
     }
-    let workspaces = workspaces_on(link, Some(uuid_of(&row.repository_id))).await.unwrap_or_default();
+    let listed = workspaces_on(link, Some(uuid_of(&row.repository_id))).await.ok();
+    let workspaces = listed.as_deref().unwrap_or_default();
     let name_of = |id: &[u8]| {
         workspaces.iter().find(|w| w.id.as_ref() == id).map_or_else(|| short_bytes(id), |w| w.name.clone())
     };
     let owner_name = name_of(owner);
-    let mut said: Vec<String> = farcooler_client::workspaces_json::foreign_writers(row, &workspaces)
+    let mut said: Vec<String> = farcooler_client::workspaces_json::foreign_writers(row, workspaces)
         .into_iter()
         .map(|writer| {
             format!(
@@ -2114,6 +2124,7 @@ async fn other_workspaces<L: DispatchLink>(
             )
         })
         .collect();
+    let mut own_worktree = None;
     if mismatch {
         let board = name_of(&task.workspace_id);
         // By prefix, which is one word where a name may not be, unless some
@@ -2125,28 +2136,43 @@ async fn other_workspaces<L: DispatchLink>(
             }
             _ => uuid_of(&task.workspace_id).to_string(),
         };
-        // The runner gives a main checkout to Main and nobody else, so for
-        // any other board, `worktree assign` would only be refused.
         let to_main = workspaces.iter().any(|w| w.id == task.workspace_id && w.is_main);
-        if row.is_main_checkout && !to_main {
-            said.push(format!(
-                "warning: {name} is the repository's main checkout, which {owner_name} owns, and {key} is \
-                 on {board}'s board. its agent will work {board}'s task in {owner_name}'s worktree. the main \
-                 checkout always belongs to Main, so to give {board} a worktree of its own, dispatch with \
-                 `--new` and `--branch` instead",
-                key = task.key,
-            ));
+        let what = if row.is_main_checkout {
+            format!("the repository's main checkout, which {owner_name} owns")
         } else {
-            said.push(format!(
-                "warning: {name} is a worktree {owner_name} owns, and {key} is on {board}'s board. its agent \
-                 will work {board}'s task in {owner_name}'s worktree. to give the worktree to {board}, run \
-                 `farcooler worktree assign {} --to {to}`",
+            format!("a worktree {owner_name} owns")
+        };
+        let fact = format!(
+            "warning: {name} is {what}, and {key} is on {board}'s board. its agent will work {board}'s task \
+             in {owner_name}'s worktree",
+            key = task.key,
+        );
+        said.push(if row.is_main_checkout && listed.is_none() {
+            fact
+        } else if row.is_main_checkout && !to_main {
+            own_worktree = Some(board.clone());
+            format!("{fact}. the main checkout always belongs to Main, so it can't be given to {board}")
+        } else {
+            format!(
+                "{fact}. to give the worktree to {board}, run `farcooler worktree assign {} --to {to}`",
                 crate::remote::shell_quote(name),
-                key = task.key,
-            ));
-        }
+            )
+        });
     }
-    said
+    (said, own_worktree)
+}
+
+/// How to move `task` off a main checkout into a worktree of `board`'s own,
+/// once `pane` has opened there: stop the pane, then dispatch into a new
+/// worktree named and branched for the task. `--again` because the task
+/// has a pane on it already, which is safe once that pane is stopped.
+fn own_worktree_steps(task: &pb::Task, board: &str, pane: &str) -> String {
+    format!(
+        "warning: to give {board}'s task a worktree of its own instead, stop this pane with \
+         `farcooler terminal stop {pane}`, then run `farcooler task dispatch {key} --new {key} --branch \
+         {key} --again`. --again is safe once the pane is stopped",
+        key = task.key,
+    )
 }
 
 /// `farcooler task show <key>`, with a key that starts with `-` after `--`.
@@ -2416,12 +2442,15 @@ async fn dispatch<L: DispatchLink>(
             ));
         }
     }
+    let mut own_worktree = None;
     if let Some((id, name)) = &existing
         && let Some(row) = worktrees.items.iter().find(|w| uuid_of(&w.id) == *id)
     {
-        for w in other_workspaces(link, task, row, name).await {
+        let (said, board) = other_workspaces(link, task, row, name).await;
+        for w in said {
             warn(w);
         }
+        own_worktree = board;
     }
     if let Some(TaskStatus::Done | TaskStatus::Cancelled | TaskStatus::InReview | TaskStatus::NeedsDecision) =
         status_of(task.status)
@@ -2547,6 +2576,9 @@ async fn dispatch<L: DispatchLink>(
         }
     };
     let (terminal, terminal_short) = (uuid_of(&opened.id), short_bytes(&opened.id));
+    if let Some(board) = &own_worktree {
+        warn(own_worktree_steps(task, board, &terminal_short));
+    }
 
     let [update, status] = move_task_requests(task, worktree, d.actor);
     let pane = format!("terminal {terminal_short} is working {} in {worktree_name}", task.key);
@@ -4024,21 +4056,47 @@ mod tests {
         let (_, warned) = run_as(&mut link, &on(BILLING), Lane::Existing("my lane".into()), "claude", false).await;
         assert!(warned[0].ends_with(&format!("`farcooler worktree assign 'my lane' --to {BILLING}`")), "{warned:?}");
 
-        // The main checkout can't be given to Billing, so it isn't offered;
-        // it can be given back to Main, so that still is.
+        // The main checkout can't be given to Billing, so that isn't offered.
+        // The warning before the pane opens says so; once it has opened, the
+        // way out is named with the pane's own id, since nothing else can
+        // undo a pane that's already working.
         let checkout = pb::Worktree { is_main_checkout: true, ..owned(MAIN, &[]) };
-        let mut link = FakeLink { worktrees: vec![checkout], ..Default::default() };
-        let (_, warned) = run_as(&mut link, &on(BILLING), existing(), "claude", false).await;
+        let mut link = FakeLink { worktrees: vec![checkout.clone()], ..Default::default() };
+        let (done, warned) = run_as(&mut link, &on(BILLING), existing(), "claude", false).await;
+        let pane = done.expect("a warning, not a refusal").terminal_short;
+        assert_eq!(pane, short_bytes(&id_bytes(PANE)));
         assert_eq!(
             warned,
-            ["warning: lane is the repository's main checkout, which Main owns, and fc-2 is on Billing's \
-              board. its agent will work Billing's task in Main's worktree. the main checkout always belongs \
-              to Main, so to give Billing a worktree of its own, dispatch with `--new` and `--branch` instead"]
+            [
+                "warning: lane is the repository's main checkout, which Main owns, and fc-2 is on Billing's \
+                 board. its agent will work Billing's task in Main's worktree. the main checkout always \
+                 belongs to Main, so it can't be given to Billing"
+                    .to_string(),
+                format!(
+                    "warning: to give Billing's task a worktree of its own instead, stop this pane with \
+                     `farcooler terminal stop {pane}`, then run `farcooler task dispatch fc-2 --new fc-2 \
+                     --branch fc-2 --again`. --again is safe once the pane is stopped"
+                ),
+            ]
         );
+        // A main checkout Billing holds from before the rule can go back to
+        // Main, so that is still offered, and nothing more is said.
         let held = pb::Worktree { is_main_checkout: true, ..owned(BILLING, &[]) };
         let mut link = FakeLink { worktrees: vec![held], ..Default::default() };
         let (_, warned) = run_as(&mut link, &on(MAIN), existing(), "claude", false).await;
+        assert_eq!(warned.len(), 1, "{warned:?}");
         assert!(warned[0].ends_with("`farcooler worktree assign lane --to fc`"), "{warned:?}");
+        // With no list of workspaces, whether the board is Main can't be told,
+        // so a main checkout gets the fact and no advice at all.
+        let mut link = FakeLink {
+            worktrees: vec![checkout],
+            refuse: Some(("workspace.list", "not-found")),
+            ..Default::default()
+        };
+        let (_, warned) = run_as(&mut link, &on(BILLING), existing(), "claude", false).await;
+        assert_eq!(warned.len(), 1, "{warned:?}");
+        assert!(!warned[0].contains("farcooler "), "no command: {warned:?}");
+        assert!(warned[0].ends_with("'s worktree"), "{warned:?}");
 
         // A workspace the list doesn't know is its short id, not dropped.
         let gone = Uuid::from_u128(0xdead_beef);
