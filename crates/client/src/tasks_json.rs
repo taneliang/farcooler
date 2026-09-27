@@ -227,6 +227,20 @@ mod tests {
         assert_eq!(task_json(&old_runner, 3 * day)["stale_for_seconds"], 172_800);
     }
 
+    /// The later of the two, as the boards take it: an `updated_at` behind
+    /// the status clock -- a card moved an hour ago whose `updated_at` says
+    /// three days -- loses to it. The runner's own SQL cannot send this (its
+    /// max takes `status_since`), so it is pinned here, where a producer that
+    /// lagged would land. `a_row_carries_every_key_the_board_decodes` has the
+    /// same shape, 900 against 1_000, too close to tell apart in seconds.
+    #[test]
+    fn an_updated_at_behind_the_status_clock_loses_to_it() {
+        let day = 86_400_000;
+        let moved = pb::Task { status_since: 3 * day - 3_600_000, updated_at: day, ..Default::default() };
+        assert_eq!(last_moved(&moved), 3 * day - 3_600_000);
+        assert_eq!(task_json(&moved, 3 * day)["stale_for_seconds"], 3_600);
+    }
+
     /// A runner from before the card times sends proto3's zero for both, and
     /// a zero that reached a client as a number would draw "Added 56y ago".
     #[test]

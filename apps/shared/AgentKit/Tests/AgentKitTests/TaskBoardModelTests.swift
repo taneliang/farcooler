@@ -110,6 +110,23 @@ func onlyActiveWorkGoesStale(status: TaskStatus) {
     #expect(old.stalenessNote(at: now) == "Hasn’t moved in 3 days")
 }
 
+/// The later of the two clocks wins. A producer whose `updated_at` lags a
+/// move — a runner that derived it before the status write landed, or clocks
+/// that disagree — must not make a card look older than its status says: a
+/// card moved into review an hour ago, with an `updated_at` from three days
+/// before, has not stopped. Measured from `updatedAt` alone it reads "Hasn’t
+/// moved in 3 days"; from `statusSince` alone the note test above goes red.
+@Test func anUpdatedAtBehindTheStatusClockLosesToIt() {
+    let now = Date()
+    let moved = now.addingTimeInterval(-3600)
+    let lagging = TaskRow.fixture(
+        status: .inReview, statusSince: moved, createdAt: now.addingTimeInterval(-5 * 86_400),
+        updatedAt: now.addingTimeInterval(-3 * 86_400))
+    #expect(lagging.lastMoved == moved)
+    #expect(lagging.staleness(at: now) == .fresh)
+    #expect(lagging.stalenessNote(at: now) == nil)
+}
+
 /// The threshold is a threshold, not a rounding.
 ///
 /// Both sides of it, because a comparison written the other way round passes

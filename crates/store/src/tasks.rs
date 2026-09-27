@@ -2743,6 +2743,57 @@ mod tests {
         assert_eq!(stale[1].id, less_stale);
     }
 
+    /// The sort, apart from the filter. In the test above every clock of a
+    /// card agrees (`a_card_that_sat_for_test` files it and leaves it), so an
+    /// `ORDER BY status_since` or `ORDER BY created_at` passes it. Here each
+    /// of those orders disagrees with `updated_at`'s, and both cards are
+    /// listed under either clock, so only the ORDER BY decides:
+    ///
+    /// - `noted` was filed first and sat ten days in progress, but its agent
+    ///   wrote three days ago: rowid, `created_at` and `status_since` all put
+    ///   it first, while it moved most recently.
+    /// - `silent` was filed second and sat five days with nothing on it.
+    ///
+    /// The worst stall first is `silent`.
+    #[test]
+    fn the_stale_sweep_sorts_on_the_last_movement() {
+        let store = seeded();
+        let day = Duration::from_secs(86_400);
+        let noted = store.a_card_that_sat_for_test(repo(), "noted", TaskStatus::InProgress, 10 * day);
+        store.insert_note_with_at_for_test(
+            noted, NoteKind::Progress, "still on it", now_millis() - 3 * 86_400_000);
+        let silent = store.a_card_that_sat_for_test(repo(), "silent", TaskStatus::InProgress, 5 * day);
+
+        let stale: Vec<Uuid> =
+            store.list_tasks_stale_for(repo(), day).unwrap().into_iter().map(|t| t.id).collect();
+        assert_eq!(stale, [silent, noted], "the card that moved least recently sorts first");
+    }
+
+    /// The later of the two: a status move after a card's last note is its
+    /// last movement. `updated_at` takes `status_since` into its max, so a
+    /// card moved into review an hour ago, whose last note is three days
+    /// old, has not stopped -- on the card and in the sweep alike. Measured
+    /// from its notes and edits alone, it reads three days stale.
+    #[test]
+    fn a_move_after_the_last_note_is_the_last_movement() {
+        let store = seeded();
+        let day = Duration::from_secs(86_400);
+        let moved = store.a_card_that_sat_for_test(repo(), "moved", TaskStatus::InReview, 10 * day);
+        store.insert_note_with_at_for_test(
+            moved, NoteKind::Progress, "handed over", now_millis() - 3 * 86_400_000);
+        let an_hour_ago = now_millis() - 3_600_000;
+        store
+            .conn()
+            .execute(
+                "UPDATE tasks SET status_since = ?1 WHERE id = ?2",
+                params![an_hour_ago, uuid_blob(moved)],
+            )
+            .unwrap();
+
+        assert_eq!(store.get_task(moved).unwrap().updated_at, an_hour_ago);
+        assert!(store.list_tasks_stale_for(repo(), day).unwrap().is_empty(), "moved an hour ago");
+    }
+
     /// Done and cancelled tasks sit still forever and are not stale, they are
     /// finished. A staleness view that lists every completed task is a view
     /// nobody reads.

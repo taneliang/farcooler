@@ -198,6 +198,22 @@ class TaskBoardTest {
         assertEquals("Hasn’t moved in 3 days", old.stalenessNote(3 * day))
     }
 
+    /**
+     * The later of the two clocks wins: moved into review an hour ago, with an
+     * `updated_at` from three days before, the card has not stopped. AgentKit's
+     * `anUpdatedAtBehindTheStatusClockLosesToIt`, transcribed.
+     */
+    @Test
+    fun anUpdatedAtBehindTheStatusClockLosesToIt() {
+        val day = TaskRow.DAY_MS
+        val now = 5 * day
+        val moved = now - 3_600_000
+        val lagging = row(status = TaskStatus.IN_REVIEW, since = moved, createdAt = 0, updatedAt = now - 3 * day)
+        assertEquals(moved, lagging.lastMovedMs)
+        assertFalse(lagging.isStale(now))
+        assertNull(lagging.stalenessNote(now))
+    }
+
     // ---- the time line ----
 
     @Test
