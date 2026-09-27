@@ -318,6 +318,24 @@ struct ContentView: View {
                 }
             }
 
+            // Selecting the main checkout's row shows its own layout, never
+            // the orchestrator's window tmux calls active (see `ownLayouts`).
+            // Bring that layout forward on the runner too, so the ⌃B commands
+            // it answers itself — zoom, a preset, ⌃B o — act on the panes on
+            // screen rather than on Billing's orchestrator.
+            if case .worktree(let host, let wsID) = new,
+                let worktree = worktree(host: host, id: wsID),
+                let c = store.client(for: worktree),
+                let shown = Self.shownLayout(c.layouts[wsID], without: seatedOrchestrators),
+                !shown.isActive
+            {
+                Task {
+                    await act(on: worktree) { client in
+                        await client.selectLayout(shown.id, in: worktree)
+                    }
+                }
+            }
+
             if case .terminal(_, _, let id) = new {
                 // Stamped here rather than in the palette, so every way of
                 // arriving counts: a sidebar click, ⌘], ⌃B o, a jump from the
@@ -1490,7 +1508,11 @@ struct ContentView: View {
     /// which is a compile error with no line number worth reading.
     private func worktreeRow(_ ws: Worktree, usable: Bool) -> some View {
         let client = store.client(for: ws)
-        let tiled = Set(client?.activeGroup(ws.id)?.terminals ?? [])
+        // `ws` is the row's worktree, without the orchestrators drawn in rows
+        // of their own: whatever else the runner lists in it is one of those.
+        let listed = worktree(host: ws.host ?? "", id: ws.id)?.terminals.map(\.id) ?? []
+        let seated = Set(listed).subtracting(ws.terminals.map(\.id))
+        let tiled = Set(Self.shownLayout(client?.layouts[ws.id], without: seated)?.terminals ?? [])
         return WorktreeSection(
             worktree: ws,
             isExpanded: expanded.contains(ws.id),
@@ -1551,7 +1573,7 @@ struct ContentView: View {
     /// in a layout two tabs over is not on screen, and offering to close it
     /// from here would close something the window is not showing.
     private func changesPane(in ws: Worktree) -> Terminal? {
-        guard let group = store.client(for: ws)?.activeGroup(ws.id) else { return nil }
+        guard let group = onScreen(in: ws)?.group else { return nil }
         let inGroup = Set(group.panes.map(\.id))
         return ws.terminals.first { inGroup.contains($0.id) && $0.isChangesPane }
     }
@@ -1735,9 +1757,11 @@ struct ContentView: View {
                 let c = store.client(for: ws),
                 let group = c.group(holding: termID, in: wsID)
             {
+                let rows = Self.sidebarRows(fleet: store.fleet)
                 tiled(
                     ws, client: c, group: group,
-                    seat: Self.orchestratorRow(for: selection, in: Self.sidebarRows(fleet: store.fleet)))
+                    seat: Self.orchestratorRow(for: selection, in: rows),
+                    seated: Self.seatedOrchestrators(in: rows))
             } else if let ws = worktree(host: host, id: wsID),
                 let term = ws.terminals.first(where: { $0.id == termID })
             {
@@ -1774,12 +1798,16 @@ struct ContentView: View {
             // right answer when a worktree had no arrangement of its own; once
             // it does, showing a summary of the panes instead of the panes is a
             // click in the way.
+            //
+            // Its own layout: never an orchestrator's window, which tmux calls
+            // the main checkout's active one once it has been focused. See
+            // `ownLayouts`.
             if let ws = worktree(host: host, id: wsID),
                 let c = store.client(for: ws),
-                let group = c.activeGroup(wsID),
+                let group = Self.shownLayout(c.layouts[wsID], without: seatedOrchestrators),
                 !group.terminals.isEmpty
             {
-                tiled(ws, client: c, group: group)
+                tiled(ws, client: c, group: group, seated: seatedOrchestrators)
             } else if let ws = worktree(host: host, id: wsID) {
                 WorktreeDetail(
                     worktree: ws,
@@ -1835,9 +1863,11 @@ struct ContentView: View {
     /// fixed in one copy and not the other, so dropping a pane behaved differently
     /// depending on which sidebar row you had clicked last.
     private func tiled(
-        _ ws: Worktree, client: DaemonClient, group: PaneGroup, seat: SidebarEntry? = nil
+        _ ws: Worktree, client: DaemonClient, group: PaneGroup, seat: SidebarEntry? = nil,
+        seated: Set<String>
     ) -> some View {
-        let frame = Self.detailFrame(ws, layouts: client.layouts[ws.id], holding: group, seat: seat)
+        let frame = Self.detailFrame(
+            ws, layouts: client.layouts[ws.id], holding: group, seat: seat, seated: seated)
         return TileView(
             groups: frame.groups,
             showing: group.id,
@@ -2052,6 +2082,36 @@ struct ContentView: View {
         return (worktree, terminal)
     }
 
+    /// The terminals the sidebar draws in orchestrator rows, which the main
+    /// checkout they run in doesn't offer as its own. See `ownLayouts`.
+    private var seatedOrchestrators: Set<String> {
+        Self.seatedOrchestrators(in: Self.sidebarRows(fleet: store.fleet))
+    }
+
+    /// The layout `detail` draws for `ws` under the current selection, and
+    /// the layouts its bar offers beside it. Nil when it draws none.
+    ///
+    /// What the keyboard's layout commands act on, so ⌃B and a digit counts
+    /// the panes on screen and ⌃B n steps through the layouts in the bar —
+    /// not through the window tmux calls active, which in the main checkout
+    /// can be an orchestrator's.
+    private func onScreen(in ws: Worktree) -> (group: PaneGroup, groups: [PaneGroup])? {
+        guard let c = store.client(for: ws) else { return nil }
+        let rows = Self.sidebarRows(fleet: store.fleet)
+        let seated = Self.seatedOrchestrators(in: rows)
+        if case .terminal(let host, let id, let terminal) = selection,
+            host == (ws.host ?? ""), id == ws.id,
+            let group = c.group(holding: terminal, in: id)
+        {
+            let frame = Self.detailFrame(
+                ws, layouts: c.layouts[id], holding: group,
+                seat: Self.orchestratorRow(for: selection, in: rows), seated: seated)
+            return (group, frame.groups)
+        }
+        guard let group = Self.shownLayout(c.layouts[ws.id], without: seated) else { return nil }
+        return (group, Self.ownLayouts(c.layouts[ws.id] ?? [], without: seated))
+    }
+
     // MARK: - Attention
 
     /// Which terminals the detail pane is actually putting in front of you.
@@ -2061,24 +2121,25 @@ struct ContentView: View {
     /// screen as the one with focus — reading it took no extra click, so it
     /// cannot go on asking for one.
     ///
-    /// The branches mirror `detail` exactly, including its quirk that selecting
-    /// a pane in a non-active layout shows the ACTIVE one. Anything else would
-    /// have this marking terminals read that are not on screen, which is the one
-    /// mistake worse than the bug it fixes.
+    /// The branches mirror `detail` exactly — through `onScreen(in:)`, which
+    /// is the layout `detail` draws. Anything else would have this marking
+    /// terminals read that are not on screen, which is the one mistake worse
+    /// than the bug it fixes. It used to ask for the layout tmux calls active,
+    /// from when `detail` drew that one; since the orchestrators run in the
+    /// main checkout's session, that can be Billing's orchestrator while the
+    /// checkout's own shells are on screen.
     private var visibleTerminals: [Terminal] {
         switch selection {
         case .terminal(let host, let worktreeID, let terminalID):
             guard let ws = worktree(host: host, id: worktreeID) else { return [] }
-            if let c = store.client(for: ws), c.group(holding: terminalID, in: worktreeID) != nil,
-                let group = c.activeGroup(worktreeID)
-            {
+            if let group = onScreen(in: ws)?.group {
                 return ws.terminals.filter { group.terminals.contains($0.id) }
             }
             return ws.terminals.filter { $0.id == terminalID }
 
         case .worktree(let host, let worktreeID):
             guard let ws = worktree(host: host, id: worktreeID),
-                let group = store.client(for: ws)?.activeGroup(worktreeID),
+                let group = onScreen(in: ws)?.group,
                 !group.terminals.isEmpty
             else { return [] }
             return ws.terminals.filter { group.terminals.contains($0.id) }
@@ -2167,7 +2228,8 @@ struct ContentView: View {
     /// rectangles tmux reported, which is the only copy.
     private func tile(_ command: TileCommand) async {
         guard let worktree = tileTarget else { return }
-        let group = store.client(for: worktree)?.activeGroup(worktree.id)
+        let screen = onScreen(in: worktree)
+        let group = screen?.group
         /// The pane a keystroke acts on: the selected one, else whatever tmux says
         /// is focused.
         let here: PaneRect? = {
@@ -2191,7 +2253,9 @@ struct ContentView: View {
             await act(on: worktree) { c in await c.focusPane(next.short, in: worktree) }
 
         case .focusIndex(let n):
-            await act(on: worktree) { c in await c.focusPane(number: n, in: worktree) }
+            // Counted in the layout on screen. See `pane(numbered:in:)`.
+            guard let pane = Self.pane(numbered: n, in: group) else { return }
+            await act(on: worktree) { c in await c.focusPane(pane.short, in: worktree) }
 
         case .cycle:
             await act(on: worktree) { c in await c.cycleLayout(worktree) }
@@ -2207,7 +2271,6 @@ struct ContentView: View {
             // becomes a row of three. So this counts how the window is already
             // split, the same way `TileView.Viewport` does, and hands back the
             // even version of the shape that is on screen.
-            let group = store.client(for: worktree)?.activeGroup(worktree.id)
             let columns = Set(group?.panes.map(\.left) ?? []).count
             let rows = Set(group?.panes.map(\.top) ?? []).count
             let preset: TilePreset = columns >= rows ? .evenHorizontal : .evenVertical
@@ -2247,13 +2310,19 @@ struct ContentView: View {
             // this the selection stayed on a pane from the OLD layout, which the
             // detail view then showed on its own — so ⌃B n looked like it opened a
             // random terminal and came back.
+            //
+            // Through the layouts the bar offers. See `layout(stepping:from:in:)`.
+            guard let next = Self.layout(stepping: 1, from: group?.id, in: screen?.groups ?? [])
+            else { return }
             let groups = await act(on: worktree, default: []) { c in
-                await c.selectLayout("--next", in: worktree)
+                await c.selectLayout(next.id, in: worktree)
             }
             reveal(groups, in: worktree)
         case .previousGroup:
+            guard let previous = Self.layout(stepping: -1, from: group?.id, in: screen?.groups ?? [])
+            else { return }
             let groups = await act(on: worktree, default: []) { c in
-                await c.selectLayout("--prev", in: worktree)
+                await c.selectLayout(previous.id, in: worktree)
             }
             reveal(groups, in: worktree)
 

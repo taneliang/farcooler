@@ -1205,13 +1205,116 @@ struct BoardSidebarTests {
         let plain = ContentView.orchestratorRow(
             for: .terminal(host: "", worktree: "checkout", terminal: "shell"), in: rows)
         #expect(plain == nil)
-        let asShell = ContentView.detailFrame(checkout, layouts: [shells, own], holding: shells, seat: plain)
-        #expect(asShell.groups.map(\.id) == ["@1", "@2"])
+        let asShell = ContentView.detailFrame(
+            checkout, layouts: [shells, own], holding: shells, seat: plain,
+            seated: ContentView.seatedOrchestrators(in: rows))
+        #expect(asShell.groups.map(\.id) == ["@1"], "Billing's orchestrator offered in the checkout's bar")
         #expect(asShell.title == checkout.windowTitle)
         #expect(ContentView.orchestratorRow(for: .worktree(host: "", id: "checkout"), in: rows) == nil)
         #expect(
             ContentView.orchestratorRow(
                 for: .terminal(host: "remote", worktree: "checkout", terminal: "conductor"), in: rows) == nil)
+    }
+
+    // MARK: - The main checkout's own layouts
+
+    /// The checkout's layouts and the orchestrator's window, as tmux has them
+    /// once the orchestrator was the last thing focused: its window active.
+    private static func checkoutWithAnOrchestrator() -> (
+        checkout: Worktree, rows: [SidebarEntry], layouts: [PaneGroup]
+    ) {
+        let conductor = Self.orchestrator("conductor", workspace: Self.billing)
+        var checkout = Self.worktree(
+            "checkout", workspace: Self.main,
+            terminals: [
+                conductor, Self.terminal("s1", preset: "zsh", taskId: nil),
+                Self.terminal("s2", preset: "zsh", taskId: nil), Self.terminal("s3", preset: "zsh", taskId: nil),
+            ])
+        checkout.is_main_checkout = true
+        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
+            ],
+            worktrees: [checkout]))
+        func pane(_ id: String, left: Int = 0, focused: Bool = false) -> PaneRect {
+            PaneRect(
+                id: id, short: id, title: nil, left: left, top: 0, columns: 40, rows: 24,
+                focused: focused, zoomed: false)
+        }
+        func window(_ id: String, active: Bool, _ panes: [PaneRect]) -> PaneGroup {
+            PaneGroup(id: id, name: "", active: active, columns: 80, rows: 24, layout: id, panes: panes)
+        }
+        let layouts = [
+            window("@1", active: false, [pane("s1", focused: true), pane("s2", left: 40)]),
+            window("@2", active: true, [pane("conductor", focused: true)]),
+            window("@3", active: false, [pane("s3", focused: true)]),
+        ]
+        return (checkout, rows, layouts)
+    }
+
+    /// Selecting the main checkout's row opens on its own layout, never on
+    /// the orchestrator's window — which the runner opens in the checkout's
+    /// tmux session, and which tmux calls the active one once it was the
+    /// last focused. Its bar offers only its own layouts, whichever of its
+    /// panes is selected; the orchestrator is reached through its own row.
+    @Test func theCheckoutsRowNeverOpensOnAnOrchestratorsWindow() {
+        let (checkout, rows, layouts) = Self.checkoutWithAnOrchestrator()
+        let seated = ContentView.seatedOrchestrators(in: rows)
+        #expect(seated == ["conductor"])
+
+        #expect(ContentView.shownLayout(layouts, without: seated)?.id == "@1", "opened on the orchestrator")
+        #expect(ContentView.ownLayouts(layouts, without: seated).map(\.id) == ["@1", "@3"])
+        // Its own active layout, when it has one, is still the one shown.
+        var third = layouts
+        third[1].active = false
+        third[2].active = true
+        #expect(ContentView.shownLayout(third, without: seated)?.id == "@3")
+
+        let framed = ContentView.detailFrame(
+            checkout, layouts: layouts, holding: layouts[2], seat: nil, seated: seated)
+        #expect(framed.groups.map(\.id) == ["@1", "@3"], "the checkout's bar offers the orchestrator")
+
+        // A shell moved into the orchestrator's window is shown there, alone,
+        // rather than in a bar that doesn't list the layout on screen.
+        var shared = layouts[1]
+        shared.panes.append(layouts[2].panes[0])
+        let moved = ContentView.detailFrame(
+            checkout, layouts: [layouts[0], shared], holding: shared, seat: nil, seated: seated)
+        #expect(moved.groups.map(\.id) == ["@2"])
+
+        // Nothing drawn in an orchestrator row: every layout is the checkout's.
+        #expect(ContentView.shownLayout(layouts, without: [])?.id == "@2")
+    }
+
+    /// The number keys stay in the checkout's own panes with an orchestrator
+    /// running beside them. ⌘1… selects terminals in the order the sidebar
+    /// draws them, the orchestrator in its own row. ⌃B and a digit counts
+    /// the panes of the layout on screen, not of the orchestrator's window
+    /// tmux calls active, and ⌃B n and ⌃B p step through the checkout's own
+    /// layouts, never into the orchestrator's.
+    @Test func numberKeysStayInTheCheckoutsOwnLayouts() {
+        let (checkout, rows, layouts) = Self.checkoutWithAnOrchestrator()
+        let fleet = Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
+            ],
+            worktrees: [checkout])
+        #expect(ContentView.stepOrder(fleet).map(\.id) == ["s1", "s2", "s3", "conductor"])
+
+        let seated = ContentView.seatedOrchestrators(in: rows)
+        let shown = ContentView.shownLayout(layouts, without: seated)
+        #expect(ContentView.pane(numbered: 1, in: shown)?.id == "s1")
+        #expect(ContentView.pane(numbered: 2, in: shown)?.id == "s2", "⌃B 2 counted another layout")
+        #expect(ContentView.pane(numbered: 3, in: shown) == nil)
+        #expect(ContentView.pane(numbered: 0, in: shown) == nil)
+
+        let own = ContentView.ownLayouts(layouts, without: seated)
+        #expect(ContentView.layout(stepping: 1, from: "@1", in: own)?.id == "@3", "⌃B n into the orchestrator")
+        #expect(ContentView.layout(stepping: 1, from: "@3", in: own)?.id == "@1")
+        #expect(ContentView.layout(stepping: -1, from: "@1", in: own)?.id == "@3")
+        #expect(ContentView.layout(stepping: 1, from: "@2", in: [layouts[1]]) == nil)
     }
 
     // MARK: - Searching for an orchestrator

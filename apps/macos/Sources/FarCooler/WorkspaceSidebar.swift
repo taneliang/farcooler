@@ -312,21 +312,78 @@ extension ContentView {
     /// What the detail pane draws around a selected pane: which of its
     /// worktree's layouts the bar offers, and the window's title.
     ///
-    /// A worktree's own pane gets all of that worktree's layouts and its
-    /// title. An orchestrator's pane is in the checkout only because that is
-    /// where the runner opens it: it gets its own layout and no bar — the
+    /// A worktree's own pane gets that worktree's own layouts — `ownLayouts`,
+    /// without the windows of orchestrators drawn in their own rows — and its
+    /// title. A pane in a layout that isn't one of those (a shell moved into
+    /// an orchestrator's window) gets that layout alone.
+    ///
+    /// An orchestrator's pane is in the checkout only because that is where
+    /// the runner opens it: it gets its own layout and no bar — the
     /// checkout's other layouts are Main's shells and the other workspaces'
     /// orchestrators — and it is titled with its workspace, as the board is.
     static func detailFrame(
-        _ worktree: Worktree, layouts: [PaneGroup]?, holding group: PaneGroup, seat: SidebarEntry?
+        _ worktree: Worktree, layouts: [PaneGroup]?, holding group: PaneGroup, seat: SidebarEntry?,
+        seated: Set<String> = []
     ) -> (groups: [PaneGroup], title: String, subtitle: String) {
         guard let seat, let workspace = seat.workspace else {
-            return (layouts ?? [group], worktree.windowTitle, worktree.windowSubtitle)
+            let own = ownLayouts(layouts ?? [group], without: seated)
+            let groups = own.contains { $0.id == group.id } ? own : [group]
+            return (groups, worktree.windowTitle, worktree.windowSubtitle)
         }
         let subtitle = [seat.project, "Orchestrator", seat.host.isEmpty ? nil : seat.host]
             .compactMap { $0 }
             .joined(separator: " · ")
         return ([group], workspace.name, subtitle)
+    }
+
+    /// The terminals `rows` draw in orchestrator rows: what `ownLayouts`
+    /// leaves out of the checkout they run in.
+    static func seatedOrchestrators(in rows: [SidebarEntry]) -> Set<String> {
+        Set(rows.compactMap { $0.kind == .orchestrator ? $0.orchestrator?.terminal.id : nil })
+    }
+
+    /// A worktree's layouts without the windows of orchestrators drawn in
+    /// their own rows.
+    ///
+    /// The runner opens every workspace's orchestrator as a tmux window in
+    /// the main checkout's session, so the checkout's layouts include
+    /// Billing's orchestrator. It is reached through its own row; offered in
+    /// the checkout's bar, or picked as the checkout's layout because tmux
+    /// calls it the active window since it was last focused, it would put
+    /// Billing's orchestrator under Main's checkout.
+    static func ownLayouts(_ groups: [PaneGroup], without seated: Set<String>) -> [PaneGroup] {
+        guard !seated.isEmpty else { return groups }
+        return groups.filter { !$0.terminals.contains(where: seated.contains) }
+    }
+
+    /// The layout selecting a worktree's own row shows: the active one of its
+    /// own layouts, else the first of them. Nil when it has none.
+    static func shownLayout(_ groups: [PaneGroup]?, without seated: Set<String>) -> PaneGroup? {
+        let own = ownLayouts(groups ?? [], without: seated)
+        return own.first { $0.isActive } ?? own.first
+    }
+
+    /// The pane ⌃B and a digit focuses: that pane of the layout on screen,
+    /// counted in tmux's pane order, or nil past its last.
+    ///
+    /// Picked here rather than by the runner's `layout focus --pane`, which
+    /// counts in the window tmux calls active — an orchestrator's, if it was
+    /// the last one focused, while the checkout's own layout is on screen.
+    static func pane(numbered number: Int, in group: PaneGroup?) -> PaneRect? {
+        guard let group, number >= 1, number <= group.panes.count else { return nil }
+        return group.panes[number - 1]
+    }
+
+    /// The layout ⌃B n or ⌃B p lands on from `current`: the next or previous
+    /// of `groups`, wrapping, or nil when there is nowhere else to go.
+    ///
+    /// Stepped here, through the layouts the bar offers, rather than by the
+    /// runner's `layout select --next`, which walks every window in the
+    /// session — from the main checkout, into the orchestrators'.
+    static func layout(stepping step: Int, from current: String?, in groups: [PaneGroup]) -> PaneGroup? {
+        guard groups.count > 1, let current, let index = groups.firstIndex(where: { $0.id == current })
+        else { return nil }
+        return groups[((index + step) % groups.count + groups.count) % groups.count]
     }
 
     /// The workspace `selection` is in, on its runner, as far as the fleet
