@@ -21,24 +21,6 @@ use uuid::Uuid;
 use crate::runtime::Runtime;
 use crate::{agent_supervisor, foreground, git, hook_ingress, paths, session_discovery};
 
-/// Launch presets. Coding agents run through the user's configured shell so
-/// startup files, version managers, direnv, and aliases behave like a
-/// hand-launched terminal. The default mode is an interactive login shell.
-/// Build the command for a preset.
-///
-/// A preset may carry a model after a colon — `claude:opus`. Encoded in the
-/// preset rather than added as a second field because it travels through the
-/// protocol, the CLI, the store and three clients as one string, and every one
-/// of those would otherwise need a parallel parameter that is almost always
-/// empty.
-///
-/// The model is validated before it reaches a shell. It is the only part of
-/// this that a client supplies freely, and it ends up inside a `-ilc` string.
-///
-/// `session_id`, when given to a `claude` preset, is declared to the process
-/// with `--session-id` rather than left to be discovered later from whichever
-/// `.jsonl` file under `~/.claude/projects` turns out to be newest. Only
-/// `claude` understands the flag, so every other preset ignores it.
 /// The binary that hosts `agent-host`, next to the daemon that is asking.
 ///
 /// NOT `current_exe()`. The daemon is `farcoolerd` and `agent-host` is a
@@ -270,7 +252,26 @@ fn claude_extra_flags(extras: &LaunchExtras) -> String {
     format!("{}{}", flag("--settings", &extras.settings), flag("--plugin-dir", &extras.plugin_dir))
 }
 
-/// The same launch, plus the settings file that makes the pane report itself.
+/// Build the command for a preset, plus the settings file that makes the pane
+/// report itself.
+///
+/// Coding agents run through the user's configured shell so startup files,
+/// version managers, direnv, and aliases behave like a hand-launched terminal.
+/// The default mode is an interactive login shell.
+///
+/// A preset may carry a model after a colon — `claude:opus`. Encoded in the
+/// preset rather than added as a second field because it travels through the
+/// protocol, the CLI, the store and three clients as one string, and every one
+/// of those would otherwise need a parallel parameter that is almost always
+/// empty.
+///
+/// The model is validated before it reaches a shell. It is the only part of
+/// this that a client supplies freely, and it ends up inside a `-ilc` string.
+///
+/// `session_id`, when given to a `claude` preset, is declared to the process
+/// with `--session-id` rather than left to be discovered later from whichever
+/// `.jsonl` file under `~/.claude/projects` turns out to be newest. Only
+/// `claude` understands the flag, so every other preset ignores it.
 ///
 /// `extras.settings` is the file `hook_install::claude_settings` produced,
 /// written into this daemon's runtime directory by `write_claude_hook_settings`
@@ -4143,7 +4144,6 @@ impl Service {
 
     // ---- derivation ----
 
-    /// The live runtime view as of the last refresh.
     /// Compare what the inventory believes against what tmux says.
     ///
     /// Exposed so the watcher can run it: `LiveInventory::backstop_reconcile`
@@ -4153,6 +4153,7 @@ impl Service {
         self.inventory.backstop_reconcile().await;
     }
 
+    /// The live runtime view as of the last refresh.
     pub fn inventory_snapshot(&self) -> farcooler_core::inventory::RuntimeSnapshot {
         self.inventory.snapshot()
     }
@@ -7395,15 +7396,6 @@ mod hook_wiring_tests {
         );
     }
 
-    /// Codex's prose, from the transcript it names, over the SAME production
-    /// path as the test above -- `resume_agent_listeners`, the real socket,
-    /// `HookIngress::serve`'s own `start_transcript_tail` -- rather than
-    /// against `transcript_tail`'s or `hook_ingress`'s pieces in isolation.
-    /// Without this the whole feature could be exactly the shape task 8's own
-    /// tests already proved and still be unreachable, which is precisely how
-    /// the shim path spent its first week: `listen` "was written, tested and
-    /// never called" (`resume_agent_listeners`'s own doc, quoting
-    /// `agent_supervisor::ensure_listening`'s note).
     /// A pane in agent mode is fed by its shim; a hook must not feed it too.
     ///
     /// **The test that did not exist.** `agent_supervisor`'s
@@ -7628,6 +7620,15 @@ mod hook_wiring_tests {
         );
     }
 
+    /// Codex's prose, from the transcript it names, over the SAME production
+    /// path as the test above -- `resume_agent_listeners`, the real socket,
+    /// `HookIngress::serve`'s own `start_transcript_tail` -- rather than
+    /// against `transcript_tail`'s or `hook_ingress`'s pieces in isolation.
+    /// Without this the whole feature could be exactly the shape task 8's own
+    /// tests already proved and still be unreachable, which is precisely how
+    /// the shim path spent its first week: `listen` "was written, tested and
+    /// never called" (`resume_agent_listeners`'s own doc, quoting
+    /// `agent_supervisor::ensure_listening`'s note).
     #[tokio::test]
     async fn a_codex_hooks_own_transcript_reaches_the_terminals_transcript() {
         let dir = tempfile::tempdir().unwrap();
@@ -9170,18 +9171,6 @@ mod launch_hook_install_tests {
         );
     }
 
-    /// A fifth launch path, arriving without hooks.
-    ///
-    /// Every other test in this module drives one of the four paths that exist
-    /// today, and every one of them would still be green on the day somebody
-    /// adds a fifth and forgets. This is the one that would not. It reads this
-    /// file's own production half and asks, of every method on `Service` that
-    /// builds a pane's command, whether it prepared that pane's hooks first --
-    /// so the guard covers the shape of the mistake rather than the four
-    /// instances of it we happen to know about.
-    ///
-    /// Order matters and is checked: the file has to be on disk before the
-    /// process that reads it starts.
     /// This file's production half: everything outside its `#[cfg(test)]`
     /// modules.
     ///
@@ -9252,6 +9241,18 @@ mod launch_hook_install_tests {
         }
     }
 
+    /// A fifth launch path, arriving without hooks.
+    ///
+    /// Every other test in this module drives one of the four paths that exist
+    /// today, and every one of them would still be green on the day somebody
+    /// adds a fifth and forgets. This is the one that would not. It reads this
+    /// file's own production half and asks, of every method on `Service` that
+    /// builds a pane's command, whether it prepared that pane's hooks first --
+    /// so the guard covers the shape of the mistake rather than the four
+    /// instances of it we happen to know about.
+    ///
+    /// Order matters and is checked: the file has to be on disk before the
+    /// process that reads it starts.
     #[test]
     fn every_launch_path_prepares_hooks_before_it_builds_a_command() {
         let production = production_half();

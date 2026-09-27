@@ -152,15 +152,15 @@ mod tests {
     use super::*;
     use farcooler_protocol::Channel;
 
+    const ALL: [Channel; 4] =
+        [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable];
+
     /// The isolation everything else rests on.
     ///
     /// These read no environment and touch no disk, so they are safe to run in
     /// parallel with every other test in this crate — which matters, because
     /// `FARCOOLER_HOME` is process-global and a test that set it would move the
     /// ground under the ones running beside it.
-    const ALL: [Channel; 4] =
-        [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable];
-
     #[test]
     fn each_channel_gets_its_own_runtime_directory() {
         let dirs: Vec<_> = ALL.iter().map(|c| runtime_dir_for(*c).unwrap()).collect();

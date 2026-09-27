@@ -217,53 +217,6 @@ pub struct CardStats {
     pub trace_anchor: Option<i64>,
 }
 
-/// What, if anything, is worth waking a phone for.
-///
-/// Split out from the sending so it can be tested at all: the rule it encodes —
-/// which states reach a phone at all, and as what — is the difference between a
-/// product people keep notifications on for and one they mute, and the sending
-/// half is a spawn and a filesystem read that no test can reach through.
-///
-/// Three states out of five produce a notice, but only two of them BUZZ. The
-/// relay is what separates them: it builds a banner for `blocked` and `done`,
-/// and for `working` it moves the card and nothing else — including raising one
-/// silently when the run has none yet, which is what makes the card follow a
-/// whole run rather than appear only once something has gone wrong. So the
-/// working arm below is not a relaxation of the rule that a busy agent must not
-/// interrupt anyone — that rule is about alerts and it is untouched.
-///
-/// The status the phone acts on is decided HERE, next to the sentence the
-/// person reads, and not anywhere else. Both come off the same `AgentActivity`,
-/// and two matches on it in two files is the pair that drifts: the live card
-/// would say one thing and the notification under it another, for the same
-/// agent, in the same second.
-///
-/// `question` is what the agent is actually asking, when the screen was legible
-/// enough to say. It is the whole point of a lock screen card: "claude needs
-/// you / Do you want to create haiku.txt?" is something a person can answer
-/// from the phone in their hand, and "claude needs you / Waiting for your
-/// answer" is something they have to walk to a Mac to even read. The generic
-/// line stays for when there is no question — a trust gate, or a prompt that
-/// wrapped — because a card that says nothing is still better than no card.
-///
-/// `failed` is how the turn ENDED, and it changes the wording of a `Done` and
-/// nothing else. The phone is where the sidebar's `✗` would otherwise be lost
-/// entirely, and being told an agent "finished" when its turn died is the same
-/// lie in the place it costs most. The relay's status stays `"done"` for the
-/// reason `exit_notice` gives below: a failed turn is a turn that is OVER,
-/// just over badly, and there is no live card to hold open for it.
-///
-/// `started_at` is `Observed::turn_started_at` — when the user's request began,
-/// held across Blocked so that approving a tool call does not restart the clock.
-/// It is passed through unread: nothing here decides anything by it, and the
-/// only shape it can take is the one the caller was already holding. Its whole
-/// job is to reach the attributes of the card the relay starts, which is where
-/// a lock screen gets a timer that ticks with no push behind it.
-///
-/// Every tier carries it, including the two the relay does not start a card
-/// from today. A `Done` turn has no clock to run and arrives as `None` on its
-/// own, so there is nothing to special-case — and a tier that dropped the field
-/// would be a card started from it with the timer silently missing.
 /// What a notice QUOTES beyond naming a state, taken off the record that
 /// produced it.
 ///
@@ -332,6 +285,53 @@ impl Quoted<'_> {
     }
 }
 
+/// What, if anything, is worth waking a phone for.
+///
+/// Split out from the sending so it can be tested at all: the rule it encodes —
+/// which states reach a phone at all, and as what — is the difference between a
+/// product people keep notifications on for and one they mute, and the sending
+/// half is a spawn and a filesystem read that no test can reach through.
+///
+/// Three states out of five produce a notice, but only two of them BUZZ. The
+/// relay is what separates them: it builds a banner for `blocked` and `done`,
+/// and for `working` it moves the card and nothing else — including raising one
+/// silently when the run has none yet, which is what makes the card follow a
+/// whole run rather than appear only once something has gone wrong. So the
+/// working arm below is not a relaxation of the rule that a busy agent must not
+/// interrupt anyone — that rule is about alerts and it is untouched.
+///
+/// The status the phone acts on is decided HERE, next to the sentence the
+/// person reads, and not anywhere else. Both come off the same `AgentActivity`,
+/// and two matches on it in two files is the pair that drifts: the live card
+/// would say one thing and the notification under it another, for the same
+/// agent, in the same second.
+///
+/// `question` is what the agent is actually asking, when the screen was legible
+/// enough to say. It is the whole point of a lock screen card: "claude needs
+/// you / Do you want to create haiku.txt?" is something a person can answer
+/// from the phone in their hand, and "claude needs you / Waiting for your
+/// answer" is something they have to walk to a Mac to even read. The generic
+/// line stays for when there is no question — a trust gate, or a prompt that
+/// wrapped — because a card that says nothing is still better than no card.
+///
+/// `failed` is how the turn ENDED, and it changes the wording of a `Done` and
+/// nothing else. The phone is where the sidebar's `✗` would otherwise be lost
+/// entirely, and being told an agent "finished" when its turn died is the same
+/// lie in the place it costs most. The relay's status stays `"done"` for the
+/// reason `exit_notice` gives below: a failed turn is a turn that is OVER,
+/// just over badly, and there is no live card to hold open for it.
+///
+/// `started_at` is `Observed::turn_started_at` — when the user's request began,
+/// held across Blocked so that approving a tool call does not restart the clock.
+/// It is passed through unread: nothing here decides anything by it, and the
+/// only shape it can take is the one the caller was already holding. Its whole
+/// job is to reach the attributes of the card the relay starts, which is where
+/// a lock screen gets a timer that ticks with no push behind it.
+///
+/// Every tier carries it, including the two the relay does not start a card
+/// from today. A `Done` turn has no clock to run and arrives as `None` on its
+/// own, so there is nothing to special-case — and a tier that dropped the field
+/// would be a card started from it with the timer silently missing.
 fn notification(
     activity: AgentActivity,
     label: &str,
@@ -524,7 +524,6 @@ fn orphaned_pane(
     pane.daemon_id == daemon && !terminals.contains(&pane.terminal_id)
 }
 
-/// The daemon's live view of what every agent is doing.
 /// What the last probe of one worktree left behind for the trace.
 ///
 /// Two running positions rather than two counts: the trace records CHANGE, and
@@ -579,6 +578,7 @@ fn code_share(previous: Option<u32>, total: u32, workers: usize) -> u32 {
     total.saturating_sub(previous) / workers as u32
 }
 
+/// The daemon's live view of what every agent is doing.
 pub struct Watcher {
     service: Arc<Service>,
     /// One client for the life of the daemon, so a night of notifications
@@ -2782,7 +2782,6 @@ impl Watcher {
         self.events.subscribe()
     }
 
-    /// What the watcher last decided, with both clocks.
     /// Add to one terminal's trace, in the bucket `now` belongs to.
     ///
     /// `now` is seconds, not the milliseconds everything else in this loop
@@ -3072,6 +3071,7 @@ impl Watcher {
         ring.tick(now_secs);
     }
 
+    /// What the watcher last decided, with both clocks.
     pub async fn activity(&self, terminal: Uuid) -> (AgentActivity, Option<i64>, Option<i64>) {
         match self.state.lock().await.get(&terminal) {
             Some(o) => (o.activity, Some(o.state_since), o.turn_started_at),

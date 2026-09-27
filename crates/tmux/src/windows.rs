@@ -546,7 +546,6 @@ fn parse_modes(text: &str) -> Option<PaneModes> {
     })
 }
 
-/// Parse `display-message -p "#{cursor_x}\t#{cursor_y}"`.
 /// A single tmux flag format, as a bool.
 ///
 /// **Empty is false, and has to be.** tmux 3.4 renders an unset pane flag as
@@ -571,6 +570,7 @@ fn parse_flag(text: &str) -> Option<bool> {
     }
 }
 
+/// Parse `display-message -p "#{cursor_x}\t#{cursor_y}"`.
 fn parse_cursor(text: &str) -> Option<(u32, u32)> {
     let line = text.lines().next()?;
     let (x, y) = line.split_once('\t')?;

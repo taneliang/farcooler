@@ -477,13 +477,6 @@ pub fn agent_batch(
     }
 }
 
-/// The text an ACP `prompt` turn carries, from the blocks a client sent.
-///
-/// A `file_mention` renders as `@path` — the same syntax a user would have
-/// typed by hand, so the adapter needs no separate representation for it. An
-/// `image` block contributes no text: multimodal prompts are a later slice,
-/// and dropping the bytes here rather than inventing placeholder text keeps
-/// that boundary honest instead of pretending the block was handled.
 /// The images in a prompt, ready for the shim.
 ///
 /// These used to be dropped on the floor here — `prompt_text` matched
@@ -504,6 +497,13 @@ pub fn prompt_images(blocks: &[wire::AgentPromptBlock]) -> Vec<farcooler_agent::
         .collect()
 }
 
+/// The text an ACP `prompt` turn carries, from the blocks a client sent.
+///
+/// A `file_mention` renders as `@path` — the same syntax a user would have
+/// typed by hand, so the adapter needs no separate representation for it. An
+/// `image` block contributes no text: multimodal prompts are a later slice,
+/// and dropping the bytes here rather than inventing placeholder text keeps
+/// that boundary honest instead of pretending the block was handled.
 pub fn prompt_text(blocks: &[wire::AgentPromptBlock]) -> String {
     blocks
         .iter()

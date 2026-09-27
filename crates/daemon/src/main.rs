@@ -330,12 +330,6 @@ async fn run() -> Result<(), i32> {
     result
 }
 
-/// Serve exactly one session over stdin/stdout, then exit.
-///
-/// One session per process, because that is what sshd gives us: a connection is
-/// a process. It opens its own `Service`, which is the one place a second
-/// SQLite handle exists — brief, single-threaded, and gone when the ssh session
-/// ends. Long-lived state stays in tmux, which is shared safely by design.
 /// Write one terminal's live output to stdout until the pane goes away.
 async fn stream_terminal(terminal: &str) -> Result<(), i32> {
     let Ok(id) = terminal.parse::<uuid::Uuid>() else {
@@ -458,6 +452,12 @@ fn requested_session() -> Result<Session, i32> {
     Ok(Session { scope, client: after("--client").filter(|c| !c.is_empty()) })
 }
 
+/// Serve exactly one session over stdin/stdout, then exit.
+///
+/// One session per process, because that is what sshd gives us: a connection is
+/// a process. It opens its own `Service`, which is the one place a second
+/// SQLite handle exists — brief, single-threaded, and gone when the ssh session
+/// ends. Long-lived state stays in tmux, which is shared safely by design.
 async fn serve_stdio_session() -> Result<(), i32> {
     // Before anything else, and before a socket is dialled: a session whose
     // scope is a typo must not be served at either end.

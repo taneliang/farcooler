@@ -228,26 +228,6 @@ fn migration_0005_drop_loss_dismissed(tx: &Transaction) -> rusqlite::Result<()> 
     tx.execute_batch("ALTER TABLE terminals DROP COLUMN loss_dismissed;")
 }
 
-/// Far Cooler manages worktrees, so the table describes worktrees.
-///
-/// `archived` becomes `hidden` because there was only ever one concept.
-/// Archiving meant "hide it without touching git", which is what hiding means,
-/// and having both words for it made users guess which one deleted files.
-///
-/// `is_main_checkout` replaces a comparison against the task name. The old
-/// client test was `task == "main"`, which a linked worktree in a directory
-/// called `main` would defeat — and the thing that guarded was whether the UI
-/// offers to delete the directory you work in. Now that every worktree is
-/// adopted automatically that collision is ordinary rather than exotic.
-///
-/// `worktree_missing` is stored rather than derived because the reconciler is
-/// the only thing that knows. `derive::derive_workspace` runs on every read and
-/// has no business shelling out to git.
-///
-/// The unique index is a backstop, not the mechanism: `Service` serializes per
-/// repository so the race cannot normally happen. It exists so that if that
-/// lock is ever lost in a refactor, the symptom is an error rather than two
-/// sidebar rows for one directory.
 /// What a worktree is compared against, and whether you have read it.
 ///
 /// Edited in place rather than followed by an 0008 that drops what it just
@@ -293,6 +273,26 @@ fn migration_0007_review(tx: &Transaction) -> rusqlite::Result<()> {
     )
 }
 
+/// Far Cooler manages worktrees, so the table describes worktrees.
+///
+/// `archived` becomes `hidden` because there was only ever one concept.
+/// Archiving meant "hide it without touching git", which is what hiding means,
+/// and having both words for it made users guess which one deleted files.
+///
+/// `is_main_checkout` replaces a comparison against the task name. The old
+/// client test was `task == "main"`, which a linked worktree in a directory
+/// called `main` would defeat — and the thing that guarded was whether the UI
+/// offers to delete the directory you work in. Now that every worktree is
+/// adopted automatically that collision is ordinary rather than exotic.
+///
+/// `worktree_missing` is stored rather than derived because the reconciler is
+/// the only thing that knows. `derive::derive_workspace` runs on every read and
+/// has no business shelling out to git.
+///
+/// The unique index is a backstop, not the mechanism: `Service` serializes per
+/// repository so the race cannot normally happen. It exists so that if that
+/// lock is ever lost in a refactor, the symptom is an error rather than two
+/// sidebar rows for one directory.
 fn migration_0006_worktrees_are_managed(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"

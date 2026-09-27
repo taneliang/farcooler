@@ -769,7 +769,6 @@ mod tests {
         assert_eq!(bytes[53 + 12], u8::MAX);
     }
 
-    /// The fleet trace adds rings slot for slot, in phase.
     /// **Constraint: the row's commit count is the axis, summed.**
     ///
     /// `Trace::commits` is the number a card row puts beside `+142 -37` and it
@@ -863,6 +862,7 @@ mod tests {
         assert_eq!(trace.encode(AFTERNOON)[1 + BUCKETS * 4 + BUCKETS - 1], u8::MAX);
     }
 
+    /// The fleet trace adds rings slot for slot, in phase.
     #[test]
     fn absorbing_adds_the_same_wall_clock_slot() {
         let mut one = Trace::new();

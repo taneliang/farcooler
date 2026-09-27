@@ -336,11 +336,6 @@ impl AgentSupervisor {
         tx.send(message).is_ok()
     }
 
-    /// Accept the shim for one terminal and pump it until the pane dies.
-    ///
-    /// `on_events` is how the daemon fans out; it is a callback rather than a
-    /// channel so that the existing event bus stays the only fanout in the
-    /// process.
     /// Start accepting this terminal's shim, once.
     ///
     /// Nothing worked until this existed. `listen` was written, tested and
@@ -371,6 +366,11 @@ impl AgentSupervisor {
         });
     }
 
+    /// Accept the shim for one terminal and pump it until the pane dies.
+    ///
+    /// `on_events` is how the daemon fans out; it is a callback rather than a
+    /// channel so that the existing event bus stays the only fanout in the
+    /// process.
     pub async fn listen<F>(
         &self,
         runtime_dir: &Path,

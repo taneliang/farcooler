@@ -2862,17 +2862,6 @@ pub(crate) fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-/// The agent's activity, as the daemon derived it.
-///
-/// Distinct from `state`, which is about the process. A Claude Code sitting at
-/// a permission prompt and one halfway through a file edit are both `running`;
-/// the difference between them is the reason to look at a fleet at all.
-/// The pane mode, as a word rather than a number.
-///
-/// Same reason `activity_label` exists: a client switching on an integer would
-/// hold a second copy of the enum and drift from it silently. An unknown or
-/// unspecified mode is `terminal` — the mode that needs no ACP adapter and
-/// always works, which is the right guess for an older daemon.
 /// The image type, from the file's extension.
 ///
 /// Not sniffed from the bytes: the adapter needs a MIME type to decode with,
@@ -2888,6 +2877,12 @@ fn mime_for(path: &std::path::Path) -> &'static str {
     }
 }
 
+/// The pane mode, as a word rather than a number.
+///
+/// Same reason `activity_label` exists: a client switching on an integer would
+/// hold a second copy of the enum and drift from it silently. An unknown or
+/// unspecified mode is `terminal` — the mode that needs no ACP adapter and
+/// always works, which is the right guess for an older daemon.
 fn pane_mode_label(mode: i32) -> &'static str {
     match farcooler_protocol::v1::PaneMode::try_from(mode) {
         Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
@@ -2896,6 +2891,11 @@ fn pane_mode_label(mode: i32) -> &'static str {
     }
 }
 
+/// The agent's activity, as the daemon derived it.
+///
+/// Distinct from `state`, which is about the process. A Claude Code sitting at
+/// a permission prompt and one halfway through a file edit are both `running`;
+/// the difference between them is the reason to look at a fleet at all.
 fn activity_label(a: i32) -> &'static str {
     use farcooler_protocol::v1::AgentActivity;
     match AgentActivity::try_from(a).unwrap_or(AgentActivity::Unspecified) {
@@ -3348,7 +3348,6 @@ pub(crate) fn resolve_repository<'a>(
     resolve(repositories, given, |r| &r.id, "repository")
 }
 
-/// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
 /// A worktree by id prefix or by task name.
 pub(crate) async fn resolve_worktree_id(
     link: &mut Link,
@@ -3366,6 +3365,7 @@ pub(crate) async fn resolve_worktree_id(
     Ok(uuid_of(&w.id))
 }
 
+/// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
 fn resolve<'a, T>(
     items: &'a [T],
     prefix: &str,

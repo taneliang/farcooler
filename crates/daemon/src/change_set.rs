@@ -164,45 +164,6 @@ pub async fn merge_base(repo: &Path, base_ref: &str) -> Result<String> {
     Ok(r.stdout.trim().to_string())
 }
 
-/// The commits this branch made, oldest first, each with its own counts.
-///
-/// TWO dots against the resolved merge base. See the module note.
-///
-/// ## Where a commit's counts come from
-///
-/// `--shortstat` on the SAME `git log`, not a diff per commit.
-///
-/// The three count fields were hardcoded zeroes for as long as this function
-/// existed, and both clients worked around it the same way — summing the file
-/// list of whichever commit the reader had SELECTED — so a history row could
-/// not say `+12 -4` until it was opened, and `ChangeCommit`'s three fields
-/// crossed the wire as decoration.
-///
-/// One invocation rather than one per commit, because this is a recompute path:
-/// `change_set` runs behind the diff pane's three-second poll and behind the
-/// sidebar's inbox refresh. Both are cheap-gated in `review::ChangeSets::get`,
-/// but every real edit gets through the gate, so the per-recompute cost is the
-/// one that matters. Measured warm on this repository: a 30-commit range goes
-/// from 4 ms to 40 ms, a 200-commit one from 10 ms to 200 ms — about a
-/// millisecond of tree diff per commit, against roughly 20 ms EACH for the two
-/// `git diff --numstat` calls `numstat()` already makes over the same range. A
-/// `git diff` per commit would instead be N processes and N repository opens per
-/// recompute, which on a 200-commit branch is not a cost this poll can carry.
-///
-/// `--diff-merges=first-parent` because `git log` prints NO stat for a merge by
-/// default, and a merge whose row reads 0/0 is exactly the silence this replaces.
-/// First parent is what `DiffSelector` documents and what `file_diff` computes
-/// for a single commit, so a merge's row and its file list agree; `git show`'s
-/// combined diff would agree with neither. That option is git 2.31 (2021), and a
-/// runner whose distribution still packages an older git would fail the ENTIRE
-/// call — no commits, no change set, a review pane with nothing in it. So a
-/// rejected invocation is retried once without it: on such a runner merges keep
-/// the zeroes they have today and every other commit gains real counts.
-///
-/// A root commit needs no `EMPTY_TREE` here, unlike `file_diff::commit_files`:
-/// `git log` already diffs a parentless commit against the empty tree, so the
-/// first commit of an orphan branch reports everything it added rather than
-/// nothing.
 /// When each commit on this worktree's HEAD landed, out of the reflog.
 ///
 /// The activity trace wants commit marks on its axis, per bucket, going back a
@@ -250,6 +211,45 @@ pub fn reflog_commits(text: &str) -> Vec<i64> {
         .collect()
 }
 
+/// The commits this branch made, oldest first, each with its own counts.
+///
+/// TWO dots against the resolved merge base. See the module note.
+///
+/// ## Where a commit's counts come from
+///
+/// `--shortstat` on the SAME `git log`, not a diff per commit.
+///
+/// The three count fields were hardcoded zeroes for as long as this function
+/// existed, and both clients worked around it the same way — summing the file
+/// list of whichever commit the reader had SELECTED — so a history row could
+/// not say `+12 -4` until it was opened, and `ChangeCommit`'s three fields
+/// crossed the wire as decoration.
+///
+/// One invocation rather than one per commit, because this is a recompute path:
+/// `change_set` runs behind the diff pane's three-second poll and behind the
+/// sidebar's inbox refresh. Both are cheap-gated in `review::ChangeSets::get`,
+/// but every real edit gets through the gate, so the per-recompute cost is the
+/// one that matters. Measured warm on this repository: a 30-commit range goes
+/// from 4 ms to 40 ms, a 200-commit one from 10 ms to 200 ms — about a
+/// millisecond of tree diff per commit, against roughly 20 ms EACH for the two
+/// `git diff --numstat` calls `numstat()` already makes over the same range. A
+/// `git diff` per commit would instead be N processes and N repository opens per
+/// recompute, which on a 200-commit branch is not a cost this poll can carry.
+///
+/// `--diff-merges=first-parent` because `git log` prints NO stat for a merge by
+/// default, and a merge whose row reads 0/0 is exactly the silence this replaces.
+/// First parent is what `DiffSelector` documents and what `file_diff` computes
+/// for a single commit, so a merge's row and its file list agree; `git show`'s
+/// combined diff would agree with neither. That option is git 2.31 (2021), and a
+/// runner whose distribution still packages an older git would fail the ENTIRE
+/// call — no commits, no change set, a review pane with nothing in it. So a
+/// rejected invocation is retried once without it: on such a runner merges keep
+/// the zeroes they have today and every other commit gains real counts.
+///
+/// A root commit needs no `EMPTY_TREE` here, unlike `file_diff::commit_files`:
+/// `git log` already diffs a parentless commit against the empty tree, so the
+/// first commit of an orphan branch reports everything it added rather than
+/// nothing.
 pub async fn commits_since(repo: &Path, base_commit: &str) -> Result<Vec<Commit>> {
     // A record separator that cannot occur in a commit message, and a field
     // separator likewise. %x1e / %x1f are the ASCII record and unit separators,
