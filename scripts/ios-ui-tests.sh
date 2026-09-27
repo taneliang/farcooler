@@ -71,7 +71,55 @@ echo "simulator: $SIMULATOR (OS: ${SIMULATOR_OS:-latest installed})"
 echo
 
 LOG="$(mktemp -t ios-ui-tests)"
-trap 'rm -f "$LOG"' EXIT
+WATCHDOG=""
+trap 'rm -f "$LOG"; [ -z "$WATCHDOG" ] || kill "$WATCHDOG" 2>/dev/null; true' EXIT
+
+# THE WAIT AFTER THE LAST TEST (ov-13). Once the last test has finished, and by
+# default only when something failed, xcodebuild runs
+# `simctl diagnose --timeout=600` as its own child and waits for it before it
+# prints `** TEST … **`. That normally takes 10 to 15 seconds. Sometimes one of
+# its steps never gets a reply from the simulator, and xcodebuild then sits at
+# 0% CPU for the full 600 seconds with every result already printed and no
+# verdict. It reads exactly like a hang, and anything that wraps this script in
+# a timeout shorter than ten minutes after the last test kills it first and
+# loses the verdict.
+#
+# `-collect-test-diagnostics never` below turns that step off; measured on a
+# failing run, no `simctl diagnose` starts and the verdict follows the last
+# suite line within a second. Nothing here reads those archives.
+#
+# The watchdog is the backstop, because diagnose has also been seen after runs
+# where every test passed, for a reason nobody has reproduced, so the flag is
+# not proven to cover every way in. Once the run's top-level suite has reported
+# and DIAGNOSE_GRACE seconds (default 120) have passed, it kills a
+# `simctl diagnose` whose parent is THIS script's xcodebuild, by pid, and
+# nothing else, with SIGKILL so no handler in simctl can hold it up (xcodebuild
+# leaves the child running when its own timeout fires, so nothing waits on a
+# clean exit). xcodebuild takes that as the end of the step and prints its real
+# verdict and exit status at once. So at worst the verdict comes DIAGNOSE_GRACE
+# plus 5 seconds after the last test; a caller's timeout needs that much room
+# past the tests, not ten minutes.
+DIAGNOSE_GRACE="${DIAGNOSE_GRACE:-120}"
+(
+    armed=""
+    while kill -0 $$ 2>/dev/null; do
+        if [ -z "$armed" ]; then
+            if grep -qE "^Test Suite '(All tests|Selected tests)' (passed|failed)" "$LOG"; then
+                armed=$SECONDS
+            fi
+        elif [ $((SECONDS - armed)) -ge "$DIAGNOSE_GRACE" ]; then
+            for xcb in $(pgrep -P $$ -x xcodebuild); do
+                for diag in $(pgrep -P "$xcb" -f 'simctl diagnose'); do
+                    echo "ios-ui-tests: xcodebuild's simctl diagnose (pid $diag) is still running ${DIAGNOSE_GRACE}s after the last test; killing it so the verdict can print" >&2
+                    kill -KILL "$diag" 2>/dev/null
+                done
+            done
+            exit 0
+        fi
+        sleep 5
+    done
+) &
+WATCHDOG=$!
 
 # The assignments go BEFORE xcodebuild. See the note at the top: this position
 # is not a style choice, it is the difference between the suite running and the
@@ -85,8 +133,14 @@ env \
     -project apps/ios/FarCooler.xcodeproj \
     -scheme FarCooler \
     -destination "platform=iOS Simulator,name=$SIMULATOR${SIMULATOR_OS:+,OS=$SIMULATOR_OS}" \
+    -collect-test-diagnostics never \
     ${ONLY[@]+"${ONLY[@]}"} 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
+# The wait is what keeps bash from printing the whole watchdog as a
+# "Terminated" job notice into the output.
+kill "$WATCHDOG" 2>/dev/null
+wait "$WATCHDOG" 2>/dev/null
+WATCHDOG=""
 set -e
 
 # xcodebuild prints its summary once per suite and once for the run, so the
