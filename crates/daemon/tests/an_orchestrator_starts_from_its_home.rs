@@ -262,7 +262,8 @@ async fn a_second_orchestrator_is_refused_unless_replacing() {
 }
 
 /// The pane a real claude would have been started in: the home, pointed back
-/// at the resolved main checkout, told its charter and that it's the manager.
+/// at the resolved main checkout for its files and for its project settings,
+/// told its charter and that it's the manager.
 #[tokio::test]
 async fn a_claude_orchestrator_is_started_from_its_home_with_the_recipe() {
     let h = start().await;
@@ -280,6 +281,9 @@ async fn a_claude_orchestrator_is_started_from_its_home_with_the_recipe() {
     assert_eq!(args[0], "claude");
     let after = |flag: &str| args.iter().position(|a| *a == flag).map(|i| args[i + 1]);
     assert_eq!(after("--add-dir"), Some(resolved(&repo).as_str()), "{args:?}");
+    // The repository's own hooks, allowlist and `.mcp.json`, which
+    // `--add-dir` doesn't carry.
+    assert_eq!(after("--project-config-root"), Some(resolved(&repo).as_str()), "{args:?}");
     let settings = h.dir.path().join("state").join(format!("orchestrator-{id}.json"));
     assert_eq!(after("--settings"), Some(settings.to_str().unwrap()), "{args:?}");
     assert!(after("--plugin-dir").is_some(), "the manager skill: {args:?}");

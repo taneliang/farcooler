@@ -218,7 +218,7 @@ the way `skill_install.rs` already does per harness, and applies:
 
 | | Working directory | Repository context | Memory |
 |---|---|---|---|
-| Claude Code | the home | `--add-dir <main checkout, resolved>` and `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` | `autoMemoryDirectory` = `~/.claude/projects/<slug(realpath(main checkout))>/memory`, where the slug replaces every character outside `[A-Za-z0-9]` with `-`; written into the orchestrator's own `--settings` file under the runtime directory, together with Far Cooler's hooks |
+| Claude Code | the home | `--add-dir <main checkout, resolved>` and `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` for `CLAUDE.md` and the files; `--project-config-root <main checkout, resolved>` (hidden flag) for the repository's `.claude/` settings, hooks and `.mcp.json`, on a fresh launch, a resume and the native chat. Its allowlist applies only once the home is trusted, which is left to claude's own prompt | `autoMemoryDirectory` = `~/.claude/projects/<slug(realpath(main checkout))>/memory`, where the slug replaces every character outside `[A-Za-z0-9]` with `-`; written into the orchestrator's own `--settings` file under the runtime directory, together with Far Cooler's hooks |
 | Cursor | the home | `--workspace <main checkout, resolved>`, because trust follows the spelling | none documented |
 | Codex | the main checkout (`--cd <resolved path>`, since hook trust is keyed by resolved path) | native | none |
 
@@ -415,11 +415,14 @@ the CLI.
 - **Claiming can be wrong.** An agent that passes through someone else's
   unclaimed worktree claims it. Claims stick, so recovery is one
   `worktree assign`, and `worktree list` shows which signal made the claim.
-- **Claude Code settings don't reach an orchestrator** (settled by the
-  spike). Added directories don't contribute `.claude/settings*.json`, so a
-  Claude Code orchestrator runs without the repository's hooks and permission
-  allowlist. Far Cooler's own hooks reach it through `--settings`. Tolerable
-  for an agent that doesn't write code.
+- **Claude Code settings reach an orchestrator only through a hidden flag.**
+  Added directories don't contribute `.claude/settings*.json` (settled by the
+  spike); `--project-config-root` does (see "Spike findings"), and the recipe
+  passes it. It isn't in `claude --help` and may change: a claude that drops
+  it refuses the launch with "unknown option", and Far Cooler doesn't check
+  first. The repository's allowlist also waits on the home being trusted,
+  which is left to claude's own prompt. Far Cooler's own hooks reach it
+  through `--settings` either way.
 - **A worktree nobody's workspace works in stays Unclaimed.** A pane in an
   unclaimed worktree has no workspace and so never claims; only `worktree
   assign`, which no app offers yet, moves it. Worktrees the apps make are

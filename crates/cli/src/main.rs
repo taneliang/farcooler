@@ -199,7 +199,8 @@ enum Command {
         preset: Option<String>,
         /// One more argument for the adapter, after its own (repeatable). A
         /// workspace's Claude Code orchestrator is handed its recipe this
-        /// way: `--add-dir` and the memory directory, as in terminal mode.
+        /// way: `--add-dir`, `--project-config-root` and the memory
+        /// directory, as in terminal mode.
         #[arg(long = "adapter-arg", allow_hyphen_values = true)]
         adapter_args: Vec<String>,
     },

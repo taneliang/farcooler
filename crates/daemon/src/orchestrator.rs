@@ -9,7 +9,7 @@
 //!
 //! | | Working directory | Repository context | Memory |
 //! |---|---|---|---|
-//! | Claude Code | the home | `--add-dir <main>` and `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` | `autoMemoryDirectory` in the `--settings` file |
+//! | Claude Code | the home | `--add-dir <main>`, `--project-config-root <main>` and `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` | `autoMemoryDirectory` in the `--settings` file |
 //! | Cursor | the home | `--workspace <main>` | none |
 //! | Codex | the main checkout | `--cd <main>`, which only restates it | none |
 //!
@@ -18,10 +18,13 @@
 //!   the working directory, which the home doesn't have, so it's pointed back
 //!   at the repository's (`claude_memory_dir`). An added directory's
 //!   `.claude/settings.json` and `.claude/settings.local.json` are NOT read
-//!   (measured: a `SessionStart` hook in either didn't fire from the home), so
-//!   a Claude Code orchestrator runs without the repository's own hooks and
-//!   permission allowlist. Far Cooler's hooks still reach it through
-//!   `--settings`.
+//!   (measured: a `SessionStart` hook in either didn't fire from the home).
+//!   `--project-config-root <main>` reads them, and `.mcp.json`, from the
+//!   repository instead (measured on 2026-09-28: the hook fired). Its
+//!   permission allowlist is applied only once claude trusts the home, which
+//!   is claude's own prompt to ask; Far Cooler doesn't write that trust.
+//!   `--add-dir` stays, for `CLAUDE.md` and access to the files. Far Cooler's
+//!   hooks reach it through `--settings`.
 //! - **Cursor** reads `AGENTS.md`, `CLAUDE.md` and `.cursor/rules` from the
 //!   root `--workspace` names.
 //! - **Codex** reads `AGENTS.md`, skills and `.codex/config.toml` from its
@@ -104,10 +107,16 @@ pub fn working_directory(h: Harness, l: &OrchestratorLaunch) -> PathBuf {
 ///
 /// Codex's `--cd` names the directory it already starts in, so that it
 /// holds the resolved spelling whatever the pane's shell reports.
+///
+/// Claude Code's `--project-config-root` is hidden (2.1.283 doesn't list it
+/// in `--help`) and is passed without checking the installed claude takes
+/// it: a claude that didn't would stop at "unknown option". claude 2.1.283
+/// takes it on a fresh launch, with `--resume`, and with the native chat's
+/// flags, and refuses a directory that doesn't exist.
 pub fn extra_args(h: Harness, l: &OrchestratorLaunch) -> Vec<String> {
     let main = l.main_checkout.to_string_lossy().into_owned();
     match h {
-        Harness::Claude => vec!["--add-dir".into(), main],
+        Harness::Claude => vec!["--add-dir".into(), main.clone(), "--project-config-root".into(), main],
         Harness::Cursor => vec!["--workspace".into(), main],
         Harness::Codex => vec!["--cd".into(), main],
     }
@@ -176,7 +185,7 @@ mod tests {
 
     #[test]
     fn each_harness_is_pointed_back_at_the_repository() {
-        assert_eq!(extra_args(Harness::Claude, &launch()), ["--add-dir", "/r"]);
+        assert_eq!(extra_args(Harness::Claude, &launch()), ["--add-dir", "/r", "--project-config-root", "/r"]);
         assert_eq!(extra_args(Harness::Cursor, &launch()), ["--workspace", "/r"]);
         assert_eq!(extra_args(Harness::Codex, &launch()), ["--cd", "/r"]);
     }

@@ -253,7 +253,7 @@ const CODEX_NO_UPDATE_CHECK: &str = "-c check_for_update_on_startup=false";
 
 /// `--settings <file>` and `--plugin-dir <dir>`, each present only when there
 /// is a file to name, each path `shell_quote`d, then an orchestrator's
-/// `--add-dir`. Both of claude's arms (a fresh launch and a resume) build
+/// `--add-dir` and `--project-config-root`. Both of claude's arms (a fresh launch and a resume) build
 /// their tail here, so the two can't drift apart.
 fn claude_extra_flags(extras: &LaunchExtras) -> String {
     let flag = |name: &str, path: &Option<PathBuf>| {
@@ -3687,10 +3687,10 @@ impl Service {
     /// the orchestrator's is under the home's, and the chat's `--resume` and
     /// its history (`farcooler_claude::backend::transcript_for`) look there.
     /// From the main checkout the chat would find neither. Then `--add-dir
-    /// <main>`, and `autoMemoryDirectory` as inline JSON to `--settings`,
-    /// which Claude Code takes as a file or a JSON string. Only the memory,
-    /// not the terminal's settings file: a chat reports through the shim,
-    /// and no chat is handed Far Cooler's hooks. The recipe's variables
+    /// <main>` and `--project-config-root <main>`, and `autoMemoryDirectory`
+    /// as inline JSON to `--settings`, which Claude Code takes as a file or a
+    /// JSON string. Only the memory, not the terminal's settings file: a chat
+    /// reports through the shim, and no chat is handed Far Cooler's hooks. The recipe's variables
     /// reach it from the pane's own line (`with_pane_env`).
     ///
     /// **Claude Code on an ACP adapter (the built-in one) is refused.** Its
@@ -6845,6 +6845,9 @@ mod orchestrator_launch_tests {
             for other in ["--add-dir", "--cd", "--workspace"].into_iter().filter(|f| *f != flag) {
                 assert!(!inner.contains(other), "{preset} got {other}: {inner}");
             }
+            // Claude Code's project settings come from the repository too.
+            let config_root = inner.contains(&format!(" --project-config-root {main}"));
+            assert_eq!(config_root, flag == "--add-dir", "{preset}: {inner}");
         }
     }
 
@@ -6858,6 +6861,7 @@ mod orchestrator_launch_tests {
         let inner = unquote(command.split_once(" -ilc ").unwrap().1);
         assert!(inner.contains("--resume"), "{inner}");
         assert!(inner.contains(&format!(" --add-dir {}", shell_quote("/src/My Repo"))), "{inner}");
+        assert!(inner.contains(&format!(" --project-config-root {}", shell_quote("/src/My Repo"))), "{inner}");
     }
 
     /// And a resumed codex orchestrator gets its `--cd`, the path as one
@@ -6980,6 +6984,7 @@ mod orchestrator_launch_tests {
         assert!(command.contains("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1"), "{command}");
         let repo = resolved(Path::new(&ws.worktree_path));
         assert_eq!(arg_after(&command, "--add-dir"), repo.to_string_lossy());
+        assert_eq!(arg_after(&command, "--project-config-root"), repo.to_string_lossy());
         let settings = orchestrator_settings_path(&svc.root, main.id);
         assert_eq!(arg_after(&command, "--settings"), settings.to_string_lossy());
         let plugin = svc.root.join(crate::skill_install::PLUGIN_DIR);
@@ -7450,7 +7455,8 @@ mod orchestrator_launch_tests {
 
     /// And so does one switched into a chat, on Claude Code's native
     /// backend: the shim runs in the home, where the conversation is filed,
-    /// and hands the adapter `--add-dir` and the memory directory. On the
+    /// and hands the adapter `--add-dir`, `--project-config-root` and the
+    /// memory directory. On the
     /// built-in ACP adapter the switch is refused, and the pane is left
     /// as it was: that chat would start a new conversation.
     #[tokio::test]
@@ -7479,6 +7485,13 @@ mod orchestrator_launch_tests {
                 assert_eq!(pane_path(&svc, term.id).await, resolved(&home));
                 assert!(
                     command.contains(&format!("--adapter-arg '--add-dir' --adapter-arg '{}'", repo.display())),
+                    "{command}"
+                );
+                assert!(
+                    command.contains(&format!(
+                        "--adapter-arg '--project-config-root' --adapter-arg '{}'",
+                        repo.display()
+                    )),
                     "{command}"
                 );
                 let memory = user_home().map(|h| crate::orchestrator::claude_memory_dir(&h, &repo)).unwrap();
