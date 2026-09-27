@@ -1866,7 +1866,7 @@ final class TerminalScrollTests: XCTestCase {
             "no cached card of A's names a worktree other than \(here), \(barNow) and A's first")
         let wanted = Self.workspaceName(card.label)
         let mountBefore = Self.field(probe.value as? String ?? "", "mount")
-        card.tap()
+        try tapInGrid(app, card)
 
         // Landed: the grid closed, the bar names the card's worktree, and the
         // shell is the one the card was tapped in.
@@ -1954,7 +1954,7 @@ final class TerminalScrollTests: XCTestCase {
             "Runner A left no cached cards behind after the switch")
         let card = try XCTUnwrap(cards.allElementsBoundByIndex.last)
         let tapped = Self.workspaceName(card.label)
-        card.tap()
+        try tapInGrid(app, card)
         try switchToRunner(app, id: runnerIDs.b)
         XCTAssertEqual(
             XCTWaiter.wait(for: [answered(runnerIDs.b)], timeout: 60), .completed,
@@ -2058,6 +2058,29 @@ final class TerminalScrollTests: XCTestCase {
             "Runner A stopped being live when the selection moved to B: its heading reads "
                 + "\(mine.label). With every runner at once the selection decides where a launch "
                 + "lands, not what is connected")
+    }
+
+    /// Tap a card in the overview, scrolling the grid until it can be hit.
+    ///
+    /// The last row of cached cards sits at the bottom edge of the display,
+    /// over the shell's bar, and a tap at a card's centre there lands on the
+    /// bar: the card never hears it and nothing happens. `isHittable` says yes
+    /// to it all the same, so the test is the card's place on the display: it
+    /// is scrolled up until its centre is 200 points clear of the bottom edge,
+    /// well above the bar.
+    private func tapInGrid(_ app: XCUIApplication, _ card: XCUIElement) throws {
+        let grid = app.descendants(matching: .any).matching(identifier: "shell-overview").firstMatch
+        let limit = app.frame.height - 200
+        for _ in 0..<4 where card.frame.midY > limit {
+            let from = grid.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            from.press(
+                forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -250)),
+                withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(
+            card.isHittable && card.frame.midY <= limit,
+            "\(card.label) cannot be scrolled clear of the bar: \(card.frame)")
+        card.tap()
     }
 
     /// `FleetSettings.allRunnersAtOnceKey`, spelled out: this bundle cannot
