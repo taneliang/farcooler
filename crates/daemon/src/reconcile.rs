@@ -395,6 +395,29 @@ mod tests {
         assert_eq!(repository(&svc, repo).await.unwrap().claimed, 0);
     }
 
+    /// A main checkout the user gave another workspace stays there. The pass
+    /// gives Main only a main checkout nobody owns; a claimed row never moves.
+    #[tokio::test]
+    async fn a_main_checkout_given_to_another_workspace_stays_there() {
+        let (_dir, svc, repo) = fixture().await;
+        let checkout = svc
+            .store
+            .list_worktrees_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| w.is_main_checkout)
+            .unwrap();
+        let billing = svc.store.create_workspace(repo, "Billing", "bil").unwrap();
+        svc.store.assign_worktree(checkout.id, billing.id).unwrap();
+
+        for pass in 0..2 {
+            let outcome = repository(&svc, repo).await.unwrap();
+            assert_eq!(outcome.claimed, 0, "pass {pass}: {outcome:?}");
+            let row = svc.store.get_worktree(checkout.id).unwrap();
+            assert_eq!(row.workspace_id, Some(billing.id), "pass {pass}");
+        }
+    }
+
     #[tokio::test]
     async fn a_worktree_made_outside_far_cooler_appears() {
         let (dir, svc, repo) = fixture().await;
