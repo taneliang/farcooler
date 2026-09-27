@@ -88,14 +88,18 @@ async fn a_stream_or_stdio_session_adopts_no_charter_and_the_daemon_does() {
 
     // A stream opens its `Service` before it looks for the terminal, so an
     // unknown one still gets that far.
+    // Bounded, so a stream that waited instead of exiting fails here rather
+    // than hanging the suite.
     let stream = tokio::process::Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .args(["--stream", &uuid::Uuid::now_v7().to_string()])
         .env("FARCOOLER_HOME", &home)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
-        .output()
+        .output();
+    let stream = tokio::time::timeout(Duration::from_secs(30), stream)
         .await
+        .expect("a stream of an unknown terminal exits")
         .expect("run farcoolerd --stream");
     let said = String::from_utf8_lossy(&stream.stderr);
     assert!(said.contains("cannot stream that terminal"), "it never opened the service: {said}");

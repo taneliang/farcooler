@@ -195,9 +195,19 @@ async fn run() -> Result<(), i32> {
     // `prepare_workspace_homes` for why no `--stream` or `--stdio` process
     // does it. On the blocking pool rather than inline, because it reads
     // every repository's main checkout, and one on a slow volume mustn't
-    // keep the socket below from being bound.
+    // keep the socket below from being bound. Awaited from a task only so a
+    // panic reaches the log rather than just stderr.
+    //
+    // A stop while it's stuck on such a volume removes the socket and gives
+    // up the lock as usual, but the process itself lives until that read
+    // returns: a runtime waits for its blocking tasks when it's dropped.
+    // `start_tunnel` already holds the same pool the same way.
     let homes = service.clone();
-    tokio::task::spawn_blocking(move || homes.prepare_workspace_homes());
+    tokio::spawn(async move {
+        if let Err(e) = tokio::task::spawn_blocking(move || homes.prepare_workspace_homes()).await {
+            tracing::error!(error = %e, "making workspace homes failed");
+        }
+    });
 
     // Not fatal, ever. A runner that cannot start its tunnel is still a runner
     // reachable by address, and refusing to boot would take away the access

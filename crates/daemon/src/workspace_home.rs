@@ -271,6 +271,40 @@ mod service_tests {
         assert!(!charter_path(again.root_dir(), billing.id).exists());
     }
 
+    /// A workspace made before the daemon's start has got round to Main's
+    /// adoption (it runs in the background) still starts with the
+    /// repository's charter: Main adopts it on demand, first.
+    #[tokio::test]
+    async fn a_workspace_made_before_mains_adoption_still_gets_the_charter() {
+        let (dir, svc, repo) = fixture().await;
+        std::fs::create_dir_all(dir.path().join("repo/.farcooler")).unwrap();
+        std::fs::write(dir.path().join("repo").join(REPOSITORY_CHARTER), "from the repo").unwrap();
+        let main = svc.store.main_workspace(repo).unwrap();
+        assert!(!charter_path(svc.root_dir(), main.id).exists(), "registration found no charter");
+        let watcher = crate::watch::Watcher::new(svc.clone());
+
+        let req = pb::WorkspaceCreate { name: "Billing".into(), task_prefix: "bil".into() };
+        let made = crate::workspace_ops::create(&svc, &watcher, repo, &req, Scope::HostAdmin).unwrap();
+        let charter = made.charter_path.expect("host_admin sees the path");
+        assert_eq!(read(Path::new(&charter)), "from the repo");
+        assert_eq!(read(&charter_path(svc.root_dir(), main.id)), "from the repo", "Main adopted it");
+    }
+
+    /// Starting Main's orchestrator adopts the repository's charter, even one
+    /// written after the daemon started: that start is the last point before
+    /// the orchestrator reads it.
+    #[tokio::test]
+    async fn starting_mains_orchestrator_adopts_the_repositorys_charter() {
+        let (dir, svc, repo) = fixture().await;
+        let main = svc.store.main_workspace(repo).unwrap();
+        std::fs::create_dir_all(dir.path().join("repo/.farcooler")).unwrap();
+        std::fs::write(dir.path().join("repo").join(REPOSITORY_CHARTER), "from the repo").unwrap();
+
+        let term = svc.start_orchestrator(main.id, "claude", false).await.unwrap();
+        let _ = svc.stop_terminal(term.id).await;
+        assert_eq!(read(&charter_path(svc.root_dir(), main.id)), "from the repo");
+    }
+
     #[tokio::test]
     async fn a_new_workspace_starts_with_a_copy_of_mains_charter() {
         let (_dir, svc, repo) = fixture().await;

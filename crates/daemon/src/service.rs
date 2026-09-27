@@ -2053,6 +2053,7 @@ impl Service {
     /// moment earlier. Never fails: a home that can't be made is logged, and
     /// the next start tries again.
     pub fn prepare_workspace_homes(&self) {
+        let started = std::time::Instant::now();
         let workspaces = match self.store.list_workspaces(None) {
             Ok(all) => all,
             Err(e) => {
@@ -2066,6 +2067,13 @@ impl Service {
                 tracing::warn!(workspace = %workspace.id, error = %e, "could not make a workspace's home");
             }
         }
+        // Timed, because what makes this slow is a repository's volume, and
+        // without it a stuck mount leaves no trace until it times out.
+        tracing::info!(
+            workspaces = workspaces.len(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "made workspace homes"
+        );
     }
 
     /// Make `workspace`'s home if it has none (`workspace_home::make_home`).
@@ -2073,9 +2081,10 @@ impl Service {
     /// Main's charter is adopted from its repository's
     /// `.farcooler/manager.md`, if there is one, for as long as Main has none.
     /// Any other workspace's starts as a copy of Main's, once: when its home
-    /// is made. A home that's already there is left as it is, so a charter
-    /// the user deleted, or one Main didn't have yet when this workspace was
-    /// made, isn't filled in from Main's later. Either way an existing
+    /// is made, and after Main has adopted its repository's. A home that's
+    /// already there is left as it is, so a charter the user deleted, or one
+    /// Main didn't have yet when this workspace was made, isn't filled in
+    /// from Main's later. Either way an existing
     /// charter is kept. Returns the home.
     pub fn ensure_workspace_home(&self, workspace: &models::Workspace) -> std::io::Result<PathBuf> {
         if workspace.is_main {
@@ -2095,6 +2104,14 @@ impl Service {
             .store
             .main_workspace(workspace.repository_id)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
+        // Main's first, so it has adopted its repository's charter before
+        // this copies it. The daemon's start does that in the background, and
+        // a workspace made before it gets there would otherwise be seeded
+        // from nothing, and its home, once made, is never seeded again. Main
+        // failing costs this workspace only the copy, not its home.
+        if let Err(e) = self.ensure_workspace_home(&main) {
+            tracing::warn!(workspace = %main.id, error = %e, "could not make Main's home to seed from");
+        }
         let seed = crate::workspace_home::charter_path(&self.root, main.id);
         crate::workspace_home::make_home(&self.root, workspace.id, Some(&seed))
     }

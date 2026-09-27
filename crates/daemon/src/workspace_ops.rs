@@ -61,7 +61,7 @@ pub fn list(svc: &Service, repository: Option<Uuid>, scope: Scope) -> Result<pb:
 ///
 /// Its home is made here, with a charter copied from Main's when Main has
 /// one. A home that can't be made doesn't undo the workspace: it's logged,
-/// and the next start makes it (`Service::open_in`).
+/// and the daemon's next start makes it (`prepare_workspace_homes`).
 pub fn create(
     svc: &Service,
     watcher: &Watcher,
