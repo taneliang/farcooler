@@ -1805,6 +1805,52 @@ final class DaemonClient: ObservableObject {
         await refresh()
     }
 
+    /// Give a worktree to another workspace: `farcooler worktree assign`,
+    /// what dragging its row onto that workspace does.
+    ///
+    /// Nil once the runner has taken it, or the sentence to show when it
+    /// didn't — the runner's reason in this app's words, never the CLI's
+    /// `error:` line. Followed by a refresh either way, like every other
+    /// mutation here: the row moves when the runner says it has, and a
+    /// refused one never moved.
+    ///
+    /// `--to` is the workspace's id, which the CLI takes as it takes a
+    /// prefix; a name could be another workspace's. `--json` for the `code:`
+    /// line a refusal carries, which is what the sentence is chosen by.
+    func assignWorktree(
+        _ worktree: Worktree, to workspace: WorkspaceSummary
+    ) async -> String? {
+        let (data, message) = await runRaw(
+            ["worktree", "assign", worktree.short, "--to", workspace.id, "--json"])
+        await refresh()
+        if data != nil { return nil }
+        return Self.assignRefusal(message, worktree: worktree, workspace: workspace)
+    }
+
+    /// Why a worktree didn't move to `workspace`, by the `code:` word on the
+    /// CLI's stderr. A failure with no word never reached the daemon's
+    /// answer — the runner wasn't reachable, or the CLI couldn't find one of
+    /// the two by id — and gets the sentence for that.
+    static func assignRefusal(
+        _ message: String?, worktree: Worktree, workspace: WorkspaceSummary
+    ) -> String {
+        let name = "“\(WorktreeName.display(worktree.task))”"
+        switch TaskFailure.code(in: message) {
+        case "not-found":
+            return "\(name) or \(workspace.name) isn’t on this runner anymore."
+        case "capability-unsupported":
+            return "This runner’s Far Cooler is too old to move worktrees between workspaces. Update it there, then try again."
+        case "scope-denied":
+            return "This runner lets Far Cooler see its workspaces but not change them."
+        case "resource-conflict":
+            return "\(workspace.name) changed while \(name) was moving. Try again."
+        case .some:
+            return "This runner couldn’t move \(name) to \(workspace.name) as Far Cooler asked. That’s a problem in the app, not in anything you did."
+        case nil:
+            return "Couldn’t move \(name) to \(workspace.name). Check that the runner is reachable, then try again."
+        }
+    }
+
     /// Put these worktrees in this order on the runner, first one first.
     ///
     /// The whole visible order rather than "move this one up". The sidebar draws

@@ -1367,6 +1367,16 @@ struct BoardRow: View {
 /// moving and splitting workspaces is the CLI's in this release.
 struct WorkspaceHeader: View {
     let name: String
+    /// The workspace's id: what a worktree dropped here is assigned to.
+    let workspace: String
+    /// The one drag in flight, for lighting this header while a worktree is
+    /// over it. See `WorktreeSection.drag`.
+    @ObservedObject private var drag = WorktreeDrag.shared
+
+    init(name: String, workspace: String) {
+        self.name = name
+        self.workspace = workspace
+    }
 
     var body: some View {
         SidebarRow {
@@ -1381,9 +1391,19 @@ struct WorkspaceHeader: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
+            .padding(.top, 2)
+            .padding(.bottom, 1)
         }
-        .padding(.top, 6)
-        .padding(.bottom, 1)
+        // Lit whole while a worktree would move here, as a Finder folder is:
+        // this drop files the worktree in the workspace, it doesn't place it
+        // between two rows, so no insertion line.
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.accentColor.opacity(drag.workspaceLanding == workspace ? 0.2 : 0))
+                .padding(.horizontal, SidebarGrid.highlightInset)
+        )
+        .onDrop(of: [.text], delegate: WorkspaceDropTarget(workspace: workspace))
+        .padding(.top, 4)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }

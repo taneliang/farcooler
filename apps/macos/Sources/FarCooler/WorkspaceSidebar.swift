@@ -83,9 +83,12 @@ extension ContentView {
     /// - Grouped by runner, then repository: two runners can have a
     ///   project of the same name, and they are not the same project. The
     ///   host is only displayed when there is more than one runner.
-    /// - Worktrees matching `query` only. While searching, a workspace with
-    ///   no match is left out: a header with nothing under it would look
-    ///   like a hit.
+    /// - Worktrees matching `query` only, and orchestrators matching it. A
+    ///   worktree is matched as its row draws it, without the orchestrators
+    ///   drawn in their own rows: typing an orchestrator's name finds its
+    ///   row, not the checkout it runs in. While searching, a workspace with
+    ///   no match is left out, and so is a repository: a header with nothing
+    ///   under it would look like a hit.
     /// - A runner without workspaces (`fleet.runnerWorkspaces` has no key for
     ///   it) keeps the layout from before them: repository, board, worktrees.
     /// - `silentHosts` are runners that have contributed nothing yet; each
@@ -101,7 +104,7 @@ extension ContentView {
         }
         var order: [String] = []
         var groups: [String: Group] = [:]
-        for worktree in fleet.worktrees where worktree.matches(query) {
+        for worktree in fleet.worktrees {
             let host = worktree.host ?? ""
             let project = (worktree.repository ?? "").isEmpty ? "Ungrouped" : worktree.repository!
             let key = "\(host)\u{1}\(worktree.repositoryID ?? project)"
@@ -115,7 +118,9 @@ extension ContentView {
         var rows: [SidebarEntry] = []
         for key in order {
             guard let group = groups[key] else { continue }
-            rows += repositoryRows(group.host, group.project, group.repositoryID, group.worktrees, fleet, query)
+            let entries = repositoryRows(group.host, group.project, group.repositoryID, group.worktrees, fleet, query)
+            // Only a header: nothing in this repository matched the search.
+            if entries.count > 1 { rows += entries }
         }
         // A runner that has never connected has no rows of its own, and
         // without this it would simply be missing — leaving you to wonder
@@ -167,20 +172,31 @@ extension ContentView {
         // springs back with nothing to explain why. The runner's rank starts
         // out as exactly what that partition produced — main checkout first,
         // then by worktree path — see migration 0009.
-        let shown = all.filter { !$0.isHidden }
-        let hidden = all.filter(\.isHidden)
         func entry(_ kind: SidebarEntry.Kind) -> SidebarEntry {
             SidebarEntry(kind: kind, host: host, project: project, repositoryID: repositoryID)
         }
-        var header = entry(.repository)
-        header.worktrees = shown
-        var rows = [header]
+        let listed = fleet.runnerWorkspaces[host]
+        let workspaces =
+            project == "Ungrouped"
+            ? [] : (listed ?? []).filter { $0.repository != nil && $0.repository == repositoryID }
 
         // The orchestrators drawn in their own rows, by terminal id: these,
         // and only these, are left out of the worktree rows, so each is drawn
         // exactly once — and an orchestrator-role terminal no row shows (a
-        // stopped one the runner no longer seats) stays where it is.
-        var drawn: Set<String> = []
+        // stopped one the runner no longer seats) stays where it is. Found
+        // before the search, which matches each worktree as it is drawn.
+        var seats: [String: BoardPane] = [:]
+        for workspace in workspaces where !workspace.isImplicit {
+            seats[workspace.id] = Self.orchestrator(of: workspace, host: host, in: fleet)
+        }
+        let drawn = Set(seats.values.map(\.terminal.id))
+        let matched = all.filter { $0.without(drawn).matches(query) }
+        let shown = matched.filter { !$0.isHidden }
+        let hidden = matched.filter(\.isHidden)
+
+        var header = entry(.repository)
+        header.worktrees = shown
+        var rows = [header]
         var body: [SidebarEntry] = []
         var unclaimedIDs: [String] = []
         let byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -189,16 +205,16 @@ extension ContentView {
             // No repository, so no board and no workspaces: the rows alone.
             for worktree in shown { body.append(entry(.worktree(worktree.id))) }
         } else {
-            let listed = fleet.runnerWorkspaces[host]
-            let workspaces = (listed ?? []).filter { $0.repository != nil && $0.repository == repositoryID }
             let grouped = WorkspaceGrouping.group(
                 repository: repositoryID ?? "", workspaces: workspaces,
                 worktrees: shown.map { (id: $0.id, workspace: $0.workspace) },
                 orchestrators: [:])
 
             for group in grouped.workspaces {
-                if !query.isEmpty && group.worktrees.isEmpty { continue }
                 let workspace = group.workspace
+                let seat = seats[workspace.id]
+                let seatMatches = seat.map { Self.matches($0.terminal, query) } ?? false
+                if !query.isEmpty && group.worktrees.isEmpty && !seatMatches { continue }
                 if !workspace.isImplicit {
                     var title = entry(.workspace(workspace.name))
                     title.workspace = workspace
@@ -210,8 +226,7 @@ extension ContentView {
                 if !workspace.isImplicit {
                     var conductor = entry(.orchestrator)
                     conductor.workspace = workspace
-                    conductor.orchestrator = Self.orchestrator(of: workspace, host: host, in: fleet)
-                    if let pane = conductor.orchestrator { drawn.insert(pane.terminal.id) }
+                    conductor.orchestrator = seat
                     body.append(conductor)
                 }
                 for id in group.worktrees where byID[id] != nil { body.append(entry(.worktree(id))) }
@@ -239,6 +254,12 @@ extension ContentView {
             rows.append(group)
         }
         return rows
+    }
+
+    /// Whether an orchestrator row is a hit for `query`: by what its pane is
+    /// called, as a terminal in a worktree row is (`Worktree.matches`).
+    private static func matches(_ terminal: Terminal, _ query: String) -> Bool {
+        query.isEmpty || terminal.label.lowercased().contains(query.lowercased())
     }
 
     /// Who `workspace`'s orchestrator row shows: the runner's live seat,
@@ -271,6 +292,41 @@ extension ContentView {
             }
         }
         return nil
+    }
+
+    /// The orchestrator row `selection` stands for, if it is one: the pane
+    /// an orchestrator row drew, in the checkout it runs in.
+    ///
+    /// Taken from the rows rather than from the terminal's role, so it is the
+    /// same decision the sidebar made: a stopped orchestrator the runner no
+    /// longer seats is drawn among its checkout's terminals, and is framed as
+    /// one of them.
+    static func orchestratorRow(for selection: Selection?, in rows: [SidebarEntry]) -> SidebarEntry? {
+        guard case .terminal(let host, let worktree, let terminal) = selection else { return nil }
+        return rows.first {
+            $0.kind == .orchestrator && $0.host == host
+                && $0.orchestrator?.terminal.id == terminal && $0.orchestrator?.worktree.id == worktree
+        }
+    }
+
+    /// What the detail pane draws around a selected pane: which of its
+    /// worktree's layouts the bar offers, and the window's title.
+    ///
+    /// A worktree's own pane gets all of that worktree's layouts and its
+    /// title. An orchestrator's pane is in the checkout only because that is
+    /// where the runner opens it: it gets its own layout and no bar — the
+    /// checkout's other layouts are Main's shells and the other workspaces'
+    /// orchestrators — and it is titled with its workspace, as the board is.
+    static func detailFrame(
+        _ worktree: Worktree, layouts: [PaneGroup]?, holding group: PaneGroup, seat: SidebarEntry?
+    ) -> (groups: [PaneGroup], title: String, subtitle: String) {
+        guard let seat, let workspace = seat.workspace else {
+            return (layouts ?? [group], worktree.windowTitle, worktree.windowSubtitle)
+        }
+        let subtitle = [seat.project, "Orchestrator", seat.host.isEmpty ? nil : seat.host]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        return ([group], workspace.name, subtitle)
     }
 
     /// The workspace `selection` is in, on its runner, as far as the fleet

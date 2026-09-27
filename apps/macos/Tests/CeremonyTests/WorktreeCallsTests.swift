@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import Testing
 
@@ -62,6 +63,10 @@ struct WorktreeCallsTests {
         id: "w-1", short: "w1", task: "fix-it", branch: "fix-it", repository: "repo",
         host: "", path: "/tmp/fix-it", state: "active", terminals: [])
 
+    private static let billing = WorkspaceSummary(
+        id: "0198f2c0-0000-7000-8000-0000000000dd", name: "Billing", taskPrefix: "bil", isMain: false,
+        ordinal: 1, repository: "0198f2c0-0000-7000-8000-0000000000aa", orchestrator: nil)
+
     /// Each worktree call, the line it should send, and the lines it did.
     private func exercise() async -> [(call: String, expected: [String], sent: [[String]])] {
         var results: [(call: String, expected: [String], sent: [[String]])] = []
@@ -103,6 +108,9 @@ struct WorktreeCallsTests {
         await record("searchFiles", ["worktree", "file-search", "w1", "mai", "--json"]) {
             _ = await $0.searchFiles(in: Self.worktree, query: "mai")
         }
+        await record("assign", ["worktree", "assign", "w1", "--to", Self.billing.id, "--json"]) {
+            _ = await $0.assignWorktree(Self.worktree, to: Self.billing)
+        }
         return results
     }
 
@@ -135,6 +143,46 @@ struct WorktreeCallsTests {
         for (call, expected, sent) in await exercise() {
             #expect(sent.contains(expected), "\(call) sent \(sent)")
         }
+    }
+
+    /// A worktree dragged onto another workspace that the runner refuses
+    /// stays where it was, and the banner says why in this app's words —
+    /// chosen by the `code:` word, never the CLI's `error:` line. One the
+    /// runner takes says nothing. Both re-read the fleet.
+    @Test func aRefusedMoveSaysWhyInItsOwnWords() async {
+        func refusal(_ stderr: String?) async -> (said: String?, calls: [[String]]) {
+            var calls: [[String]] = []
+            let client = DaemonClient(target: "", notifications: NotificationCenter())
+            client.commandRunnerForTesting = { args in
+                calls.append(args)
+                if args.prefix(2) == ["worktree", "assign"], let stderr { return (nil, stderr) }
+                return (Data(), nil)
+            }
+            let said = await client.assignWorktree(Self.worktree, to: Self.billing)
+            return (said, calls)
+        }
+        let taken = await refusal(nil)
+        #expect(taken.said == nil)
+        #expect(taken.calls.contains { $0.prefix(2) == ["worktree", "list"] }, "no re-read: \(taken.calls)")
+
+        let gone = await refusal("error: that worktree or workspace isn't on this runner any more\ncode: not-found")
+        #expect(gone.said == "“fix it” or Billing isn’t on this runner anymore.")
+        #expect(gone.calls.contains { $0.prefix(2) == ["worktree", "list"] }, "no re-read: \(gone.calls)")
+        #expect(
+            await refusal("error: no\ncode: capability-unsupported").said
+                == "This runner’s Far Cooler is too old to move worktrees between workspaces. Update it there, then try again.")
+        #expect(
+            await refusal("error: no\ncode: scope-denied").said
+                == "This runner lets Far Cooler see its workspaces but not change them.")
+        #expect(
+            await refusal("error: no\ncode: resource-conflict").said
+                == "Billing changed while “fix it” was moving. Try again.")
+        #expect(
+            await refusal("error: no\ncode: invalid-argument").said
+                == "This runner couldn’t move “fix it” to Billing as Far Cooler asked. That’s a problem in the app, not in anything you did.")
+        #expect(
+            await refusal("error: no workspace matching \"0198f2c0\"").said
+                == "Couldn’t move “fix it” to Billing. Check that the runner is reachable, then try again.")
     }
 
     /// The symptom the argv bug had, from the outside: a search that finds

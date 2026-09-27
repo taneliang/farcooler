@@ -656,11 +656,10 @@ struct ContentView: View {
     /// The main checkout is always present in the fleet — the daemon adopts it
     /// the moment a repository is registered — so this finds it rather than
     /// asking the CLI to produce or locate it.
-    private func newMainTerminal(host: String, project: String) async {
+    private func newMainTerminal(host: String, repositoryID: String?, project: String) async {
         guard
-            let worktree = store.fleet.worktrees.first(where: {
-                $0.isMainCheckout && $0.repository == project && ($0.host ?? "") == host
-            })
+            let worktree = Self.mainCheckout(
+                host: host, repositoryID: repositoryID, project: project, in: store.fleet.worktrees)
         else { return }
         await act(on: worktree) { client in
             await client.createTerminal(worktree: worktree.short, preset: "shell", title: "")
@@ -668,7 +667,21 @@ struct ContentView: View {
         }
     }
 
-    /// A plain, non-optional entry point into `newMainTerminal(host:project:)`.
+    /// A repository's own checkout on `host`: by the repository's uuid, which
+    /// a header carries as `repositoryID`, and by its display name only from
+    /// a CLI too old to send one — two repositories on one runner can share a
+    /// name, and the first of them is not the one whose header was clicked.
+    static func mainCheckout(
+        host: String, repositoryID: String?, project: String, in worktrees: [Worktree]
+    ) -> Worktree? {
+        worktrees.first {
+            guard $0.isMainCheckout, ($0.host ?? "") == host else { return false }
+            if let repositoryID { return $0.repositoryID == repositoryID }
+            return $0.repository == project
+        }
+    }
+
+    /// A plain, non-optional entry point into `newMainTerminal(host:repositoryID:project:)`.
     ///
     /// `ProjectHeader.onNewTerminal` is optional — nil for a silent host's
     /// placeholder — and a ternary handing back `Task { await ... }` directly
@@ -676,42 +689,120 @@ struct ContentView: View {
     /// `Task.init` overload the closure means, reported as an unhelpful
     /// "ambiguous use of 'init(name:priority:operation:)'" with no line
     /// pointing at the ternary itself. A named function sidesteps it.
-    private func startMainTerminal(host: String, project: String) {
-        Task { await newMainTerminal(host: host, project: project) }
+    private func startMainTerminal(host: String, repositoryID: String?, project: String) {
+        Task { await newMainTerminal(host: host, repositoryID: repositoryID, project: project) }
     }
 
-    /// A drop that landed: work out the new order and tell the runner.
+    /// A drop that landed: what it means, then tell the runner.
     ///
     /// Here rather than in the row because only this level can see a whole
-    /// project group. The group is also what bounds the reorder: every card in
-    /// one is on one runner and in one project, which is what makes a single
-    /// call to a single client the whole of it.
+    /// project group. See `dropMeaning` for which drops mean what; one it
+    /// has no meaning for never got this far, because the row asked it
+    /// while hovering (`WorktreeDrag.accepts`), and is ignored here too.
+    private func landed(_ done: WorktreeDrag.Completion) {
+        guard let dragged = store.fleet.worktrees.first(where: { $0.id == done.dragged }) else { return }
+        let assigns = store.client(for: dragged)?.daemonBuild?.can("workstreams") ?? false
+        switch Self.dropMeaning(dragged, onto: done.target, in: store.fleet, assigns: assigns) {
+        case nil:
+            return
+        case .reorder:
+            if case .worktree(let target, let edge) = done.target { reorder(done.dragged, to: target, edge) }
+        case .assign(let workspace):
+            Task {
+                // Refused first, as every write here is; see `act(on:_:)`.
+                if let why = store.refusal(for: dragged) {
+                    errorBanner = "Cannot do that: \(why)"
+                    return
+                }
+                guard let client = store.client(for: dragged) else { return }
+                // Nothing moves on screen until the runner says it has: a
+                // refused move leaves the row where it was, with the
+                // sentence, and doesn't reorder.
+                if let refused = await client.assignWorktree(dragged, to: workspace) {
+                    errorBanner = refused
+                    return
+                }
+                // Dropped between two of that workspace's rows: there, too.
+                if case .worktree(let target, let edge) = done.target { reorder(done.dragged, to: target, edge) }
+            }
+        }
+    }
+
+    /// Put `dragged` on `edge` of `target` and tell the runner.
     ///
     /// The runner is sent the group's WHOLE order, not "move this one" — see
     /// `WorktreeReorder` in the proto for why an index alone would be
     /// meaningless against a list this has already filtered. The order is the
     /// repository's, which each workspace's rows keep, so a drop within a
-    /// workspace lands where it was dropped. A drop onto another workspace's
-    /// row is ignored: the order can't move a worktree between workspaces,
-    /// and a card that sprang back into its own would say nothing about why.
-    private func reorder(_ done: WorktreeDrag.Completion) {
+    /// workspace lands where it was dropped — and so does one that moved the
+    /// worktree to that workspace first. Every card in a group is on one
+    /// runner and in one project, which is what makes a single call to a
+    /// single client the whole of it.
+    private func reorder(_ dragged: String, to target: String, _ edge: WorktreeOrder.Edge) {
         guard
             let group = sidebarEntries.first(where: { g in
-                g.kind == .repository && g.worktrees.contains { $0.id == done.dragged }
+                g.kind == .repository && g.worktrees.contains { $0.id == dragged }
             })
         else { return }
         let shown = group.worktrees
-        guard let dragged = shown.first(where: { $0.id == done.dragged }),
-            let target = shown.first(where: { $0.id == done.target }),
-            Self.sameSidebarPlace(dragged, target, in: store.fleet)
-        else { return }
+        guard shown.contains(where: { $0.id == target }) else { return }
         let ids = shown.map(\.id)
-        let next = WorktreeOrder.moved(ids, dragging: done.dragged, to: done.target, done.edge)
+        let next = WorktreeOrder.moved(ids, dragging: dragged, to: target, edge)
         // A drop that changes nothing costs no round trip. It is not free: a
         // reorder makes every other connected client re-read the fleet.
         guard next != ids, let anchor = shown.first else { return }
         let order = next.compactMap { id in shown.first { $0.id == id }?.short }
         Task { await act(on: anchor) { client in await client.reorderWorktrees(order) } }
+    }
+
+    /// What dropping a worktree's row means.
+    enum DropMeaning: Equatable {
+        /// Put it between two rows of its own workspace, or of Unclaimed.
+        case reorder
+        /// Give it to this workspace (`farcooler worktree assign`).
+        case assign(WorkspaceSummary)
+    }
+
+    /// What dropping `dragged` on `target` does, or nil for nothing — and a
+    /// drop that would do nothing is refused while hovering, so it draws no
+    /// insertion line.
+    ///
+    /// - On a row in its own workspace, or Unclaimed onto Unclaimed: a
+    ///   reorder, as before.
+    /// - On a row in another workspace of its repository, or on that
+    ///   workspace's header: it moves there, the drag's version of `farcooler
+    ///   worktree assign`. Only on a runner with `workstreams` (`assigns`),
+    ///   which is the one that has the command.
+    /// - Never into Unclaimed: nothing un-assigns a worktree, and the drop
+    ///   has no command to send.
+    /// - Never the main checkout: it is the repository's own directory, where
+    ///   every workspace's orchestrator runs, not one workspace's worktree.
+    /// - Never across repositories or runners, or onto a hidden row.
+    static func dropMeaning(
+        _ dragged: Worktree, onto target: WorktreeDrag.Target, in fleet: Fleet, assigns: Bool
+    ) -> DropMeaning? {
+        let host = dragged.host ?? ""
+        let listed = fleet.runnerWorkspaces[host] ?? []
+        func workspace(_ id: String?) -> WorkspaceSummary? {
+            guard let id, let repository = dragged.repositoryID else { return nil }
+            return listed.first { $0.id == id && $0.repository == repository }
+        }
+        func assign(_ to: WorkspaceSummary?) -> DropMeaning? {
+            guard assigns, !dragged.isMainCheckout, let to, dragged.workspace != to.id else { return nil }
+            return .assign(to)
+        }
+        switch target {
+        case .workspace(let id):
+            return assign(workspace(id))
+        case .worktree(let id, _):
+            guard
+                let onto = fleet.worktrees.first(where: { ($0.host ?? "") == host && $0.id == id }),
+                onto.id != dragged.id, !onto.isHidden, !dragged.isHidden,
+                (onto.repositoryID ?? onto.repository) == (dragged.repositoryID ?? dragged.repository)
+            else { return nil }
+            if sameSidebarPlace(dragged, onto, in: fleet) { return .reorder }
+            return assign(workspace(onto.workspace))
+        }
     }
 
     /// Whether two worktrees are drawn under the same workspace, or both in
@@ -820,7 +911,7 @@ struct ContentView: View {
         case _ where preferences.isProjectCollapsed(key):
             EmptyView()
         case .workspace(let name):
-            WorkspaceHeader(name: name)
+            WorkspaceHeader(name: name, workspace: entry.workspace?.id ?? "")
         case .board:
             boardRow(entry)
         case .orchestrator:
@@ -876,7 +967,10 @@ struct ContentView: View {
                 ? nil : { newWorktree(host: group.host, project: group.project) },
             onNewTerminal: isSilentHost
                 ? nil
-                : { startMainTerminal(host: group.host, project: group.project) },
+                : {
+                    startMainTerminal(
+                        host: group.host, repositoryID: group.repositoryID, project: group.project)
+                },
             onRemove: isSilentHost
                 ? nil
                 : {
@@ -942,7 +1036,20 @@ struct ContentView: View {
         // A finished drag, published by the row that took the drop. The row
         // says only that a card landed on another card's top or bottom edge;
         // what that MEANS needs the whole project group, which is here.
-        .onReceive(WorktreeDrag.shared.$completion.compactMap { $0 }) { reorder($0) }
+        .onReceive(WorktreeDrag.shared.$completion.compactMap { $0 }) { landed($0) }
+        // The rule a row asks while a card hovers over it. Reads the store
+        // it was handed, which is a reference, so it answers from the fleet
+        // as it is at the moment of asking, not as it was here.
+        .onAppear {
+            let store = store
+            WorktreeDrag.shared.accepts = { dragged, target in
+                guard let moving = store.fleet.worktrees.first(where: { $0.id == dragged }) else {
+                    return false
+                }
+                let assigns = store.client(for: moving)?.daemonBuild?.can("workstreams") ?? false
+                return Self.dropMeaning(moving, onto: target, in: store.fleet, assigns: assigns) != nil
+            }
+        }
         // Declared in exactly one place. A second declaration on the
         // `NavigationSplitView`'s sidebar closure made which width the column
         // settled on nondeterministic, and the window drifted with it.
@@ -1573,11 +1680,16 @@ struct ContentView: View {
             // layout you left active, so the pane on screen was another
             // terminal's, drawn live and indistinguishable from the one asked
             // for. Measured at 123ms and 269ms of that on a quiet local runner.
+            //
+            // An orchestrator's pane is framed as its workspace's, not as the
+            // checkout's it happens to run in. See `detailFrame`.
             if let ws = worktree(host: host, id: wsID),
                 let c = store.client(for: ws),
                 let group = c.group(holding: termID, in: wsID)
             {
-                tiled(ws, client: c, group: group)
+                tiled(
+                    ws, client: c, group: group,
+                    seat: Self.orchestratorRow(for: selection, in: Self.sidebarRows(fleet: store.fleet)))
             } else if let ws = worktree(host: host, id: wsID),
                 let term = ws.terminals.first(where: { $0.id == termID })
             {
@@ -1674,9 +1786,12 @@ struct ContentView: View {
     /// and while they were written out twice they drifted: the drag handler was
     /// fixed in one copy and not the other, so dropping a pane behaved differently
     /// depending on which sidebar row you had clicked last.
-    private func tiled(_ ws: Worktree, client: DaemonClient, group: PaneGroup) -> some View {
-        TileView(
-            groups: client.layouts[ws.id] ?? [group],
+    private func tiled(
+        _ ws: Worktree, client: DaemonClient, group: PaneGroup, seat: SidebarEntry? = nil
+    ) -> some View {
+        let frame = Self.detailFrame(ws, layouts: client.layouts[ws.id], holding: group, seat: seat)
+        return TileView(
+            groups: frame.groups,
             showing: group.id,
             worktree: ws,
             changes: changesStore(for: ws, client: client),
@@ -1713,7 +1828,9 @@ struct ContentView: View {
                 resizeDivider(terminal, side: side, cells: cells, in: ws)
             },
             onSearchFiles: { query in await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? [] },
-            onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal, in: ws) } }
+            onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal, in: ws) } },
+            title: frame.title,
+            subtitle: frame.subtitle
         )
     }
 

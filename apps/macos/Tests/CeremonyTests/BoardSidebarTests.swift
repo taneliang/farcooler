@@ -999,4 +999,186 @@ struct BoardSidebarTests {
         let older = Self.fleet(workspaces: nil, worktrees: [Self.worktree("a", workspace: nil)])
         #expect(ContentView.claim(newWorktreeIn: Self.repoA, on: "", from: .board(host: "", workspace: Self.repoA), in: older) == nil)
     }
+
+    // MARK: - A repository header's actions
+
+    /// "New Terminal in X" opens in the checkout of the repository whose
+    /// header was clicked, found by its uuid: two repositories on one runner
+    /// can both be called "overnight", and the first checkout by that name is
+    /// the other one's. Only a CLI too old to send `repository_id` is matched
+    /// by the name.
+    @Test func newTerminalFindsItsCheckoutByTheRepositorysID() {
+        var first = Self.worktree("first", workspace: nil, repository: Self.repoA)
+        first.is_main_checkout = true
+        var second = Self.worktree("second", workspace: nil, repository: Self.repoB)
+        second.is_main_checkout = true
+        let lane = Self.worktree("lane", workspace: nil, repository: Self.repoB)
+        let worktrees = [first, lane, second]
+        func checkout(_ repository: String?, host: String = "") -> String? {
+            ContentView.mainCheckout(
+                host: host, repositoryID: repository, project: "overnight", in: worktrees)?.id
+        }
+        #expect(checkout(Self.repoB) == "second")
+        #expect(checkout(Self.repoA) == "first")
+        #expect(checkout(Self.repoB, host: "remote") == nil, "another runner's")
+        var older = first
+        older.repositoryID = nil
+        #expect(
+            ContentView.mainCheckout(host: "", repositoryID: nil, project: "overnight", in: [lane, older])?.id
+                == "first")
+    }
+
+    // MARK: - Dragging a worktree onto another workspace
+
+    /// Dropping a row reorders within its own workspace, and moves the
+    /// worktree to another workspace of its repository — dropped on one of
+    /// that workspace's rows or on its header — the drag's version of
+    /// `farcooler worktree assign`. Never into Unclaimed, never the main
+    /// checkout, never on a runner without `workstreams`, and never across
+    /// repositories.
+    @Test func aWorktreeDroppedOnAnotherWorkspaceMovesThere() {
+        let billing = Self.summary(Self.billing, "Billing")
+        let main = Self.summary(Self.main, "Main", isMain: true)
+        let lane = Self.worktree("lane", workspace: Self.main)
+        let next = Self.worktree("next", workspace: Self.main)
+        let bill = Self.worktree("bill", workspace: Self.billing)
+        let stray = Self.worktree("stray", workspace: nil)
+        var checkout = Self.worktree("checkout", workspace: Self.main)
+        checkout.is_main_checkout = true
+        let elsewhere = Self.worktree("elsewhere", workspace: Self.otherMain, repository: Self.repoB)
+        let hidden = Self.worktree("old", workspace: Self.billing, state: "hidden")
+        let fleet = Self.fleet(
+            workspaces: [main, billing, Self.summary(Self.otherMain, "Main", isMain: true, repository: Self.repoB)],
+            worktrees: [lane, next, bill, stray, checkout, elsewhere, hidden])
+        func meaning(
+            _ dragged: Worktree, _ target: WorktreeDrag.Target, assigns: Bool = true
+        ) -> ContentView.DropMeaning? {
+            ContentView.dropMeaning(dragged, onto: target, in: fleet, assigns: assigns)
+        }
+        #expect(meaning(lane, .worktree("next", .above)) == .reorder)
+        #expect(meaning(lane, .worktree("bill", .below)) == .assign(billing))
+        #expect(meaning(lane, .workspace(Self.billing)) == .assign(billing))
+        #expect(meaning(stray, .worktree("bill", .above)) == .assign(billing), "Unclaimed is claimed")
+        #expect(meaning(stray, .workspace(Self.main)) == .assign(main))
+        #expect(meaning(lane, .workspace(Self.main)) == nil, "already there")
+        #expect(meaning(lane, .worktree("stray", .above)) == nil, "into Unclaimed")
+        #expect(meaning(bill, .worktree("stray", .below)) == nil, "into Unclaimed")
+        #expect(meaning(checkout, .workspace(Self.billing)) == nil, "the main checkout")
+        #expect(meaning(checkout, .worktree("bill", .above)) == nil, "the main checkout")
+        #expect(meaning(checkout, .worktree("lane", .above)) == .reorder, "the checkout still reorders")
+        #expect(meaning(lane, .workspace(Self.billing), assigns: false) == nil, "no workstreams")
+        #expect(meaning(lane, .worktree("bill", .above), assigns: false) == nil, "no workstreams")
+        #expect(meaning(lane, .workspace(Self.otherMain)) == nil, "another repository's")
+        #expect(meaning(lane, .worktree("elsewhere", .above)) == nil, "another repository's")
+        #expect(meaning(lane, .worktree("old", .above)) == nil, "a hidden row")
+
+        var remote = lane
+        remote.host = "remote"
+        #expect(meaning(remote, .workspace(Self.billing)) == nil, "another runner's")
+    }
+
+    /// A row refuses a card it would only ignore — no insertion line, no
+    /// drop — by asking the sidebar's rule while it hovers, and a header
+    /// lights only for a card it would take.
+    @Test func aRowTakesOnlyADropThatMeansSomething() {
+        let drag = WorktreeDrag.shared
+        let before = drag.accepts
+        defer {
+            drag.accepts = before
+            drag.cancel()
+        }
+        drag.accepts = { _, target in target != .workspace("unclaimed") && target != .worktree("stray", .above) }
+
+        drag.begin("lane")
+        drag.hover("stray", .above)
+        #expect(drag.landing == nil, "an insertion line for a drop that does nothing")
+        drag.hover(workspace: "unclaimed")
+        #expect(drag.workspaceLanding == nil)
+        #expect(!drag.drop(on: .worktree("stray", .above)))
+        #expect(drag.completion?.target != .worktree("stray", .above))
+
+        drag.begin("lane")
+        drag.hover(workspace: "billing")
+        #expect(drag.workspaceLanding == "billing")
+        #expect(drag.drop(on: .workspace("billing")))
+        #expect(drag.completion?.target == .workspace("billing"))
+        #expect(drag.workspaceLanding == nil, "the header stayed lit after the drop")
+    }
+
+    // MARK: - An orchestrator's pane in the detail
+
+    /// Selecting an orchestrator's row selects its pane, which the runner
+    /// opens in the main checkout — as its own tmux window, so the layout
+    /// holding it is its own. The detail shows that layout alone, titled
+    /// with the workspace, rather than as one of the checkout's layouts
+    /// under the checkout's name. A shell in the checkout keeps the
+    /// checkout's layouts and title.
+    @Test func anOrchestratorsPaneIsFramedAsItsWorkspaces() {
+        let conductor = Self.orchestrator("conductor", workspace: Self.billing)
+        let shell = Self.terminal("shell", preset: "zsh", taskId: nil)
+        var checkout = Self.worktree("checkout", workspace: Self.main, terminals: [conductor, shell])
+        checkout.is_main_checkout = true
+        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
+            ],
+            worktrees: [checkout]))
+        func pane(_ id: String) -> PaneRect {
+            PaneRect(id: id, short: id, title: nil, left: 0, top: 0, columns: 80, rows: 24, focused: true, zoomed: false)
+        }
+        let shells = PaneGroup(id: "@1", name: "zsh", active: true, columns: 80, rows: 24, layout: "a", panes: [pane("shell")])
+        let own = PaneGroup(id: "@2", name: "orchestrator", active: false, columns: 80, rows: 24, layout: "b", panes: [pane("conductor")])
+
+        let seat = ContentView.orchestratorRow(
+            for: .terminal(host: "", worktree: "checkout", terminal: "conductor"), in: rows)
+        #expect(seat?.workspace?.id == Self.billing)
+        let framed = ContentView.detailFrame(checkout, layouts: [shells, own], holding: own, seat: seat)
+        #expect(framed.groups.map(\.id) == ["@2"], "the checkout's other layouts offered beside it")
+        #expect(framed.title == "Billing")
+        #expect(framed.subtitle == "overnight · Orchestrator")
+
+        let plain = ContentView.orchestratorRow(
+            for: .terminal(host: "", worktree: "checkout", terminal: "shell"), in: rows)
+        #expect(plain == nil)
+        let asShell = ContentView.detailFrame(checkout, layouts: [shells, own], holding: shells, seat: plain)
+        #expect(asShell.groups.map(\.id) == ["@1", "@2"])
+        #expect(asShell.title == checkout.windowTitle)
+        #expect(ContentView.orchestratorRow(for: .worktree(host: "", id: "checkout"), in: rows) == nil)
+        #expect(
+            ContentView.orchestratorRow(
+                for: .terminal(host: "remote", worktree: "checkout", terminal: "conductor"), in: rows) == nil)
+    }
+
+    // MARK: - Searching for an orchestrator
+
+    /// Typing an orchestrator's name finds its own row, under its
+    /// workspace, and not the checkout it runs in — which, with the
+    /// orchestrator drawn elsewhere, would be a hit with nothing in it that
+    /// matched. A search for the checkout's own shell still finds the
+    /// checkout, and a search nothing matches leaves the repository out.
+    @Test func searchingForAnOrchestratorFindsItsRow() {
+        var conductor = Self.orchestrator("conductor", workspace: Self.billing)
+        conductor.title = "orchestrator"
+        var shell = Self.terminal("shell", preset: "zsh", taskId: nil)
+        shell.title = "server"
+        var checkout = Self.worktree("checkout", workspace: Self.main, terminals: [conductor, shell])
+        checkout.is_main_checkout = true
+        let fleet = Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
+            ],
+            worktrees: [checkout, Self.worktree("bill", workspace: Self.billing)])
+
+        let found = ContentView.sidebarRows(fleet: fleet, query: "orchestr")
+        #expect(found.map(\.kind) == [.repository, .workspace("Billing"), .board, .orchestrator])
+        #expect(found.last?.orchestrator?.terminal.id == "conductor")
+
+        let server = ContentView.sidebarRows(fleet: fleet, query: "server")
+        #expect(server.map(\.kind) == [.repository, .workspace("Main"), .board, .orchestrator, .worktree("checkout")])
+        #expect(server.last?.worktree?.terminals.map(\.id) == ["shell"])
+
+        #expect(ContentView.sidebarRows(fleet: fleet, query: "nothing like it").isEmpty)
+    }
 }

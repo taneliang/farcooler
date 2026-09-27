@@ -80,6 +80,10 @@ struct TileView: View {
     let onSearchFiles: (String) async -> [String]
     /// Switch a pane between its terminal and its chat.
     let onSwitchPaneMode: (Terminal) -> Void
+    /// The window's title and subtitle: the worktree's, or, for an
+    /// orchestrator's pane, its workspace's. See `ContentView.detailFrame`.
+    let title: String
+    let subtitle: String
 
     @ObservedObject private var prefix = PrefixMode.shared
     @ObservedObject private var preferences = Preferences.shared
@@ -141,8 +145,8 @@ struct TileView: View {
         .onAppear { prefix.tiledPanes = group?.panes.count ?? 0 }
         .onChange(of: group?.panes.count ?? 0) { _, count in prefix.tiledPanes = count }
         .onDisappear { prefix.tiledPanes = 0 }
-        .navigationTitle(worktree.windowTitle)
-        .navigationSubtitle(worktree.windowSubtitle)
+        .navigationTitle(title)
+        .navigationSubtitle(subtitle)
     }
 
     /// Zoom gets the tiny bit of energy `.smooth` deliberately lacks.
