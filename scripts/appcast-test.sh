@@ -95,13 +95,18 @@ PYEOF
 # An unknown channel is refused rather than silently producing a feed, for the
 # reason version.sh and icon-label.swift refuse one: a name we cannot read
 # must not be able to pass itself off as a real channel.
+#
+# Exit 1 alone can't tell a refusal from a crash, since an uncaught Python
+# exception exits 1 too, so the refusal's own line has to be on stderr.
 set +e
 ./scripts/appcast.py --channel production --version 1.0 --build 1 \
   --url "https://example.com/x.dmg" --length 1 --signature x --notes "https://example.com" \
-  >/dev/null 2>&1
+  >/dev/null 2>"$out/refusal.err"
 code=$?
 set -e
 check "an unknown channel is refused" "1" "$code"
+check "the refusal names the channel it didn't know" \
+  "yes" "$(grep -q '^unknown channel: production ' "$out/refusal.err" && echo yes || echo no)"
 
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
