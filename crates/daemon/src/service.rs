@@ -535,18 +535,28 @@ fn test_stub_switch(raw: Option<&std::ffi::OsStr>) -> bool {
     raw.is_some_and(|v| v != "0")
 }
 
+/// Why the tmux boundary refuses `command`, or `None` to let it launch: the
+/// one decision both builds make. `stand_in` is a named stand-in, which
+/// vouches for what follows it as the stub does. The daemon's unit tests
+/// panic with this (`test_agent::refuse_a_real_agent`); a daemon under
+/// `FARCOOLER_TEST_STUB_AGENTS` answers the launch with `InvalidArgument`
+/// (`refuse_a_real_agent`).
+fn refusal(command: &str, stand_in: Option<&str>) -> Option<String> {
+    agent_stub::real_agent_in(command, stand_in).map(|r| r.message(command))
+}
+
 /// The tmux boundary's check, on every command a launch path is about to
 /// hand tmux. In the daemon's unit tests it is `test_agent::refuse_a_real_agent`,
 /// which panics. Outside them it does nothing unless `test_stub_agents()`,
-/// and then answers a command naming a real agent with no stub (or stand-in)
-/// in front of it with an error, so the launch never starts.
+/// and then answers a command `refusal` refuses with an error, so the launch
+/// never starts.
 fn refuse_a_real_agent(command: &str) -> Result<()> {
     #[cfg(test)]
     test_agent::refuse_a_real_agent(command);
     #[cfg(not(test))]
     if test_stub_agents() {
-        if let Some(refusal) = agent_stub::real_agent_in(command, stand_in_agent()) {
-            tracing::error!("{}", refusal.message(&format!("a daemon under {TEST_STUB_AGENTS}"), command));
+        if let Some(message) = refusal(command, stand_in_agent()) {
+            tracing::error!("{TEST_STUB_AGENTS} refused a launch: {message}");
             return Err(DomainError::InvalidArgument {
                 what: "a real agent launch, refused by FARCOOLER_TEST_STUB_AGENTS",
             });
@@ -647,18 +657,18 @@ pub(crate) mod agent_stub {
     }
 
     impl Refusal {
-        /// What went wrong, for `who` ("a daemon unit test").
-        pub(crate) fn message(&self, who: &str, command: &str) -> String {
+        /// What went wrong, in words for whoever reads the panic or the log.
+        pub(crate) fn message(&self, command: &str) -> String {
             match self {
                 Refusal::PastASeparator(program) => format!(
-                    "{who}'s command names `{program}` after the stub, but past one of \
+                    "an agent launch's command names `{program}` after the stub, but past one of \
                      `;&|()<>$`, a backtick or a newline, so the stub does not vouch for it. This check \
                      splits on those without regard to quoting: if that separator is inside a quoted \
                      prompt or payload, reword it; if it is not, a real `{program}` was about to start \
                      (a launch that did not go through `agent_program`): {command}"
                 ),
                 Refusal::Unstubbed(program) => format!(
-                    "{who} was about to start a real `{program}` in a tmux pane. Every launch \
+                    "an agent launch was about to start a real `{program}` in a tmux pane. Every launch \
                      names its program through `agent_program`, which stubs it under test; this one did \
                      not: {command}"
                 ),
@@ -787,8 +797,8 @@ pub(crate) mod test_agent {
             "a test built this command with test_agent::real_names() and then launched it; \
              real names are for checking a builder's string, never for a pane: {command}"
         );
-        if let Some(refusal) = super::agent_stub::real_agent_in(command, None) {
-            panic!("{}", refusal.message("a daemon unit test", command));
+        if let Some(message) = super::refusal(command, None) {
+            panic!("{message}");
         }
     }
 }
@@ -5759,6 +5769,63 @@ mod test_stub_switch_tests {
         for raw in ["1", "true", "", "yes"] {
             assert!(test_stub_switch(Some(raw.as_ref())), "{raw:?}");
         }
+    }
+}
+
+/// `refusal`, the boundary's decision in both builds, called directly: the
+/// only way a test reaches the branch a daemon under
+/// `FARCOOLER_TEST_STUB_AGENTS` takes, since the integration tests' launches
+/// all go through `agent_program` and so never need refusing.
+#[cfg(test)]
+mod refusal_tests {
+    use super::agent_stub::{PROGRAM, Refusal, real_agent_in};
+    use super::refusal;
+
+    const STAND_IN: &str = "/tmp/fc-x/stand-in/claude";
+
+    /// A real name past a separator is refused, whatever vouched for the
+    /// launch before it.
+    #[test]
+    fn a_real_name_after_a_separator_is_refused() {
+        let stubbed = format!("zsh -ilc '{PROGRAM} claude; codex'");
+        let message = refusal(&stubbed, None).expect("the stub vouches for nothing past `;`");
+        assert!(message.contains("`codex`"), "{message}");
+        let stood_in = format!("zsh -ilc '{STAND_IN} claude; codex'");
+        assert!(refusal(&stood_in, Some(STAND_IN)).is_some(), "nor does the stand-in");
+    }
+
+    /// A launch with no stub and no stand-in in front of it is refused.
+    #[test]
+    fn an_unstubbed_launch_is_refused() {
+        let message = refusal("zsh -ilc 'claude --resume x'", None).expect("a bare claude");
+        assert!(message.contains("agent_program"), "{message}");
+    }
+
+    /// The stub, and a named stand-in (even one whose file is called
+    /// `claude`), are accepted.
+    #[test]
+    fn the_stub_and_a_named_stand_in_are_accepted() {
+        assert_eq!(refusal(&format!("zsh -ilc '{PROGRAM} claude --resume x'"), None), None);
+        let stood_in = format!("zsh -ilc '{STAND_IN} claude --resume x'");
+        assert_eq!(refusal(&stood_in, Some(STAND_IN)), None);
+        // The control: the same launch with no stand-in named is refused, so
+        // the acceptance above is the stand-in's doing.
+        assert!(refusal(&stood_in, None).is_some());
+    }
+
+    /// `real_agent_in` with a stand-in given: it vouches as the stub does,
+    /// not across a separator, and only when it is the stand-in named.
+    #[test]
+    fn a_stand_in_vouches_like_the_stub() {
+        assert!(real_agent_in(&format!("sh -c '{STAND_IN} claude'"), Some(STAND_IN)).is_none());
+        assert!(matches!(
+            real_agent_in(&format!("sh -c '{STAND_IN} claude; codex'"), Some(STAND_IN)),
+            Some(Refusal::PastASeparator("codex"))
+        ));
+        assert!(matches!(
+            real_agent_in(&format!("sh -c '{STAND_IN} codex'"), Some("/tmp/other/claude")),
+            Some(Refusal::Unstubbed("claude"))
+        ));
     }
 }
 
