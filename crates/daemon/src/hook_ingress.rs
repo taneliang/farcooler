@@ -188,6 +188,22 @@ pub struct HookIngress {
     sink: Arc<Mutex<Option<EventSink>>>,
 }
 
+/// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
+/// the `alive` flag the start that is giving up inserted.
+///
+/// A start's failure is reported after the slot has been out of its hands:
+/// `forget` can remove its entry while the start is still running, and the
+/// next hook payload can then insert a new start's entry under the same
+/// terminal. Removing by key alone would take that newer entry out. Its tail
+/// keeps delivering with nothing left that can stop it, and the payload after
+/// that starts another tail on the same file, so every line arrives twice.
+fn release_tail_slot(tails: &Mutex<HashMap<Uuid, Arc<AtomicBool>>>, terminal: Uuid, mine: &Arc<AtomicBool>) {
+    let mut tails = tails.lock().unwrap_or_else(|e| e.into_inner());
+    if tails.get(&terminal).is_some_and(|entry| Arc::ptr_eq(entry, mine)) {
+        tails.remove(&terminal);
+    }
+}
+
 /// The erased shape of a `listen`/`start_transcript_tail` sink. Named so
 /// neither call site spells out the `Arc<dyn Fn(...) + Send + Sync>` clippy's
 /// `type_complexity` lint (CI's `-D warnings`) refuses inline.
@@ -472,7 +488,8 @@ impl HookIngress {
     /// starting a tail; whichever loses the race sees the entry already
     /// there and returns. If starting genuinely fails (`TranscriptTail::
     /// follow` returns `false`, or the task that runs it panics), the entry
-    /// is removed again so the NEXT payload gets another attempt — a failed
+    /// is removed again, if it is still this start's (`release_tail_slot`),
+    /// so the NEXT payload gets another attempt — a failed
     /// watch registration must not brick this terminal's prose for the rest
     /// of the session, which is what an insert with no way back out would
     /// do.
@@ -512,7 +529,7 @@ impl HookIngress {
             tails.insert(terminal, alive.clone());
         }
         let Some(sink) = self.sink.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
-            self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+            release_tail_slot(&self.tails, terminal, &alive);
             return;
         };
 
@@ -571,7 +588,7 @@ impl HookIngress {
                         terminal = %terminal,
                         "a transcript tail could not be started; the next payload for this terminal will retry"
                     );
-                    this.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+                    release_tail_slot(&this.tails, terminal, &stop);
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -580,7 +597,7 @@ impl HookIngress {
                         "the task starting a transcript tail did not finish; the next payload for this terminal will retry"
                     );
                     stop.store(false, Ordering::Relaxed);
-                    this.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+                    release_tail_slot(&this.tails, terminal, &stop);
                 }
             }
         });
@@ -1192,6 +1209,110 @@ mod tests {
         assert!(
             !ingress.is_tailing(terminal),
             "a terminal whose tail never started must be left free for its next payload to retry"
+        );
+    }
+
+    /// A start that fails after `forget` has already taken its slot must not
+    /// free the slot the NEXT start claimed since. The nearest wrong
+    /// implementation removes by terminal alone: the newer tail keeps
+    /// delivering with no entry left for `forget` to stop it by, and the
+    /// payload after that starts a second tail on the same file.
+    ///
+    /// The first start fails in the `Err` arm: its task panics during the
+    /// catch-up read, because the sink panics on the one line written
+    /// between the first start's `stat` and its read. The sink holds that
+    /// panic until `forget` and the second start have both landed, which
+    /// fixes the order. The second start's `stat` comes after the line, so
+    /// its tail never reads it.
+    #[tokio::test]
+    async fn a_start_that_panics_after_forget_leaves_the_next_starts_slot_alone() {
+        let ingress = ingress_for_test();
+        let reached = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let (sink_reached, sink_release) = (reached.clone(), release.clone());
+        ingress.install_sink(move |_, batch| {
+            if batch.iter().any(|e| matches!(e, AgentEvent::Message { text, .. } if text == "boom")) {
+                sink_reached.store(true, Ordering::SeqCst);
+                // A blocking-pool thread, so this wait stalls nothing the test needs.
+                let start = std::time::Instant::now();
+                while !sink_release.load(Ordering::SeqCst) && start.elapsed() < std::time::Duration::from_secs(10) {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                panic!("the first start's catch-up read fails here, on purpose");
+            }
+        });
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, "").expect("seed");
+        let f = Facts { transcript_path: Some(path.clone()), ..Facts::default() };
+        let terminal = Uuid::from_u128(108);
+
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).expect("open");
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": { "type": "agent_message", "phase": "commentary", "message": "boom" },
+            })
+        )
+        .expect("append");
+
+        let start = std::time::Instant::now();
+        while !reached.load(Ordering::SeqCst) && start.elapsed() < std::time::Duration::from_secs(10) {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(reached.load(Ordering::SeqCst), "the first start never reached its catch-up read");
+
+        ingress.forget(terminal);
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+        assert!(ingress.is_tailing(terminal), "the second start claimed the slot");
+        release.store(true, Ordering::SeqCst);
+
+        // The `Err` arm runs on this runtime once the panic has unwound and
+        // this test yields. A second is ample for that.
+        let start = std::time::Instant::now();
+        while ingress.is_tailing(terminal) && start.elapsed() < std::time::Duration::from_secs(1) {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(
+            ingress.is_tailing(terminal),
+            "the first start's failure freed the slot the second start holds"
+        );
+    }
+
+    /// The same race through the `Ok(false)` arm: `/` has no parent directory
+    /// to watch, so the first start returns `false` (as in
+    /// `a_tail_that_could_not_start_releases_the_terminal_for_the_next_payload`).
+    /// There is no signal for when it has, so this waits a second, which is
+    /// far longer than a failed read of `/` takes.
+    #[tokio::test]
+    async fn a_start_that_could_not_start_after_forget_leaves_the_next_starts_slot_alone() {
+        let ingress = ingress_for_test();
+        ingress.install_sink(|_, _| {});
+
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(&path, "").expect("seed");
+        let terminal = Uuid::from_u128(109);
+
+        let root = Facts { transcript_path: Some(PathBuf::from("/")), ..Facts::default() };
+        ingress.start_transcript_tail(terminal, Agent::Codex, &root);
+        ingress.forget(terminal);
+        let f = Facts { transcript_path: Some(path), ..Facts::default() };
+        ingress.start_transcript_tail(terminal, Agent::Codex, &f);
+        assert!(ingress.is_tailing(terminal), "the second start claimed the slot");
+
+        let start = std::time::Instant::now();
+        while ingress.is_tailing(terminal) && start.elapsed() < std::time::Duration::from_secs(1) {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(
+            ingress.is_tailing(terminal),
+            "the first start's failure freed the slot the second start holds"
         );
     }
 
