@@ -268,6 +268,13 @@ private struct TaskBoardCardRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // "Updated 2h ago" or "Added 3d ago" on every card; nil on a
+            // stale one, whose sentence above already says how long.
+            if let time = row.timeNote(at: Date()) {
+                Text(time)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if let progress = row.acceptanceProgress {
                 AcceptanceLine(progress: progress)
             }
@@ -307,6 +314,11 @@ private struct TaskCardDetail: View {
                     }
                     if let note = row.stalenessNote(at: Date()) {
                         Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let time = row.timeNote(at: Date()) {
+                        Text(time)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

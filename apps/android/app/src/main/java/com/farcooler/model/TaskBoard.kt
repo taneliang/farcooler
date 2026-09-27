@@ -39,7 +39,7 @@ enum class TaskStatus(val wire: String, val title: String) {
     DONE("done", "Done"),
     CANCELLED("cancelled", "Canceled");
 
-    /** Done or canceled: work stopped for good, so staleness does not apply. */
+    /** Done or canceled: work stopped for good. See [TaskRow.isStale] for where staleness applies. */
     val isFinished: Boolean get() = this == DONE || this == CANCELLED
 
     companion object {
@@ -83,18 +83,53 @@ data class TaskRow(
     val labels: List<String> = emptyList(),
     val acceptance: List<TaskAcceptanceLine> = emptyList(),
     val workspaceId: String? = null,
+    /** Unix milliseconds the task was filed, or null from a runner too old to say. */
+    val createdAt: Long? = null,
+    /**
+     * Unix milliseconds anything on the card last changed — a move, a note, an
+     * edit — or null from a runner too old to say. Equal to [createdAt] on a
+     * card nothing has happened to.
+     */
+    val updatedAt: Long? = null,
 ) {
     /** How long it has sat where it is. Never negative: a runner ahead of this clock. */
     fun stoppedForMs(nowMs: Long): Long = maxOf(0L, nowMs - statusSince)
 
-    /** Stopped moving: a day in an unfinished status. */
-    fun isStale(nowMs: Long): Boolean = !status.isFinished && stoppedForMs(nowMs) >= STALE_AFTER_MS
+    /**
+     * Stopped moving when it should be moving: a day in In Progress or In
+     * Review, the two statuses where an agent is meant to be working. Backlog
+     * and To Do wait their turn, Needs Decision waits on the person reading
+     * (who asked not to be nagged), and Done and Canceled have stopped for
+     * good. The one place this rule lives on Android; AgentKit's
+     * `TaskRow.staleness(at:)` is its twin. Exhaustive, so a new status has to
+     * be decided rather than inherited.
+     */
+    fun isStale(nowMs: Long): Boolean = when (status) {
+        TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW -> stoppedForMs(nowMs) >= STALE_AFTER_MS
+        TaskStatus.NEEDS_DECISION, TaskStatus.BACKLOG, TaskStatus.TODO,
+        TaskStatus.DONE, TaskStatus.CANCELLED -> false
+    }
 
     /** The sentence under a stale card, or null for one still moving. */
     fun stalenessNote(nowMs: Long): String? {
         if (!isStale(nowMs)) return null
         val days = stoppedForMs(nowMs) / DAY_MS
         return if (days <= 1) "Hasn’t moved in a day" else "Hasn’t moved in $days days"
+    }
+
+    /**
+     * The quiet line on every card: "Updated 2h ago" when anything changed
+     * after it was filed, else "Added 3d ago". Null on a stale card, whose
+     * [stalenessNote] already says how long, and from a runner that sent no
+     * `created_at`. Equal clocks are "Added": the runner sends them equal for
+     * a card nothing has happened to.
+     */
+    fun timeNote(nowMs: Long): String? {
+        if (stalenessNote(nowMs) != null) return null
+        val created = createdAt ?: return null
+        val updated = updatedAt
+        return if (updated != null && updated > created) "Updated ${ago(nowMs - updated)}"
+        else "Added ${ago(nowMs - created)}"
     }
 
     /** What the card asks of the person reading it: only Needs Decision asks. */
@@ -124,6 +159,26 @@ data class TaskRow(
     companion object {
         const val DAY_MS = 24L * 60 * 60 * 1000
         const val STALE_AFTER_MS = DAY_MS
+
+        /**
+         * `just now`, `5m ago`, `2h ago`, `3d ago`, `2mo ago`, `1y ago`.
+         * AgentKit's `TaskRow.ago`, transcribed, so the three boards say the
+         * same words; Android's `DateUtils` says "2 hours ago". Floors, so a
+         * card is never called older than it is; negative is "just now".
+         */
+        fun ago(elapsedMs: Long): String {
+            val ms = maxOf(0L, elapsedMs)
+            val minute = 60_000L
+            val hour = 60 * minute
+            return when {
+                ms < minute -> "just now"
+                ms < hour -> "${ms / minute}m ago"
+                ms < DAY_MS -> "${ms / hour}h ago"
+                ms < 30 * DAY_MS -> "${ms / DAY_MS}d ago"
+                ms < 365 * DAY_MS -> "${ms / (30 * DAY_MS)}mo ago"
+                else -> "${ms / (365 * DAY_MS)}y ago"
+            }
+        }
     }
 }
 
@@ -209,6 +264,10 @@ data class TaskBoard(
                         .mapNotNull { it.jsonPrimitive.contentOrNull },
                     acceptance = acceptance,
                     workspaceId = text("workspace_id"),
+                    // Absent, `null`, or an older runner's zero: not said.
+                    // No time line rather than "Added 56y ago".
+                    createdAt = t["created_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
+                    updatedAt = t["updated_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
                 )
             }
             return TaskBoard(

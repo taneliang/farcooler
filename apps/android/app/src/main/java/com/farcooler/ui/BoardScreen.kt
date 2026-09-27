@@ -377,6 +377,15 @@ private fun CardDetails(row: TaskRow, now: Long) {
             Text(it, color = amber, style = MaterialTheme.typography.labelMedium)
         }
         row.stalenessNote(now)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        // "Updated 2h ago" or "Added 3d ago"; null on a stale card, whose
+        // sentence above already says how long.
+        row.timeNote(now)?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         row.acceptanceProgress?.let { AcceptanceLine(it) }
     }
 }

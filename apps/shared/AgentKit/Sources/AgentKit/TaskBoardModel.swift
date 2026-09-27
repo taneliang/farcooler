@@ -73,10 +73,10 @@ public enum TaskStatus: String, CaseIterable, Sendable, Hashable {
 
     /// Whether work on this task has stopped for good, either way.
     ///
-    /// The two states staleness does not apply to. `done` is finished, not
-    /// forgotten, and a board that flagged a task shipped in March would be
-    /// training people to ignore the flag by summer. The runner draws the same
-    /// line — `TaskListRequest.stale_after_millis` excludes both outright.
+    /// `done` is finished, not forgotten, and a board that flagged a task
+    /// shipped in March would be training people to ignore the flag by
+    /// summer. Staleness does not apply to either — nor to the three waiting
+    /// states; see `TaskRow.staleness(at:)` for the whole rule.
     public var isFinished: Bool { self == .done || self == .cancelled }
 }
 
@@ -127,9 +127,8 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     /// this is tuned is findable — and so the number is arguable rather than
     /// buried. A day is the shortest span over which "nothing happened" is
     /// news rather than noise: an agent working a task moves it through
-    /// `in_progress` and `in_review` within a session, and a person picking
-    /// work up in the morning wants yesterday's untouched `todo` to look
-    /// different from the one they just filed.
+    /// `in_progress` and `in_review` within a session, so one that has sat
+    /// in either overnight is one whose agent stopped.
     public static let staleAfter: TimeInterval = 24 * 60 * 60
 
     /// The task's UUID, as the wire spells it. `Identifiable` uses it so a
@@ -160,6 +159,12 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     /// asked", not "nothing", and the detail is the only place a block
     /// summary is drawn.
     public var blockedBy: [TaskBlockRef] = []
+    /// When the task was filed, or nil from a runner too old to say.
+    public var createdAt: Date?
+    /// When anything on the card last changed — a move, a note, or an edit —
+    /// or nil from a runner too old to say. Equal to `createdAt` on a card
+    /// nothing has happened to since it was filed. See `timeNote(at:)`.
+    public var updatedAt: Date?
 
     public init(
         id: String,
@@ -172,7 +177,9 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         acceptance: [TaskAcceptanceLine] = [],
         constraints: [String] = [],
         workspaceID: String? = nil,
-        blockedBy: [TaskBlockRef] = []
+        blockedBy: [TaskBlockRef] = [],
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
     ) {
         self.id = id
         self.key = key
@@ -185,6 +192,8 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         self.constraints = constraints
         self.workspaceID = workspaceID
         self.blockedBy = blockedBy
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 
     /// How long this task has sat where it is, as of `now`.
@@ -197,15 +206,32 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         max(0, now.timeIntervalSince(statusSince))
     }
 
-    /// Whether this task has stopped moving.
+    /// Whether this task has stopped moving when it should be moving.
     ///
     /// The board's whole job beyond showing state. The failure mode of the
-    /// factory is not an agent doing the wrong thing; it is a task sitting in
-    /// `todo` that you assumed was in flight, and a board that renders it
+    /// factory is not an agent doing the wrong thing; it is a task you
+    /// assumed was in flight that stopped, and a board that renders it
     /// identically to one that moved a minute ago is what lets that happen.
+    ///
+    /// Only `in_progress` and `in_review` can go stale, because only there is
+    /// an agent meant to be working. `backlog` and `todo` are waiting their
+    /// turn and are not expected to move; `needs_decision` is waiting on the
+    /// person reading the board, who already has its call to action and asked
+    /// not to be nagged twice; `done` and `cancelled` have stopped for good.
+    /// A card that is not expected to move and says "Hasn’t moved" is a flag
+    /// people learn to read past — including on the card where it matters.
+    ///
+    /// The one place this rule lives on Apple platforms: the Mac board, the
+    /// phone board and the card details all read this. Exhaustive rather than
+    /// a `default`, so a status added later has to be decided, not inherited.
+    /// Android's twin is `TaskRow.isStale` in model/TaskBoard.kt.
     public func staleness(at now: Date) -> TaskStaleness {
-        if status.isFinished { return .fresh }
-        return stoppedFor(at: now) >= TaskRow.staleAfter ? .stale : .fresh
+        switch status {
+        case .inProgress, .inReview:
+            return stoppedFor(at: now) >= TaskRow.staleAfter ? .stale : .fresh
+        case .backlog, .todo, .needsDecision, .done, .cancelled:
+            return .fresh
+        }
     }
 
     /// `staleness(at:)` against the clock, for a caller with no reason to
@@ -226,6 +252,53 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         // is the kind of thing nobody can name and everybody sees.
         if days <= 1 { return "Hasn’t moved in a day" }
         return "Hasn’t moved in \(days) days"
+    }
+
+    /// The quiet line every card carries: "Updated 2h ago" when anything on
+    /// it changed after it was filed, else "Added 3d ago".
+    ///
+    /// Nil in two cases, and both are decisions. A stale card already says
+    /// how long in `stalenessNote(at:)`, and two lines telling one card's
+    /// time in two ways is one too many — the stale sentence is the one that
+    /// asks for something, so it wins. And a runner too old to send
+    /// `created_at` gets no line rather than a guess.
+    ///
+    /// "Updated" is `updatedAt` strictly after `createdAt`. The runner sends
+    /// the two equal for a card nothing has happened to, so equality is
+    /// "Added" and not an update made in the same instant.
+    public func timeNote(at now: Date) -> String? {
+        guard stalenessNote(at: now) == nil, let createdAt else { return nil }
+        if let updatedAt, updatedAt > createdAt {
+            return "Updated " + TaskRow.ago(now.timeIntervalSince(updatedAt))
+        }
+        return "Added " + TaskRow.ago(now.timeIntervalSince(createdAt))
+    }
+
+    /// `just now`, `5m ago`, `2h ago`, `3d ago`, `2mo ago`, `1y ago`.
+    ///
+    /// Written out rather than taken from `RelativeDateTimeFormatter`, for
+    /// three reasons. Its abbreviated style is "2 hr. ago", longer than a
+    /// card's quiet line wants; it localizes, and this suite's assertions are
+    /// English (`listed`'s reason); and Android has no formatter that says the
+    /// same words, while the three boards must. `TaskRow.ago` in
+    /// model/TaskBoard.kt is this, transcribed, and each has its own test.
+    ///
+    /// Floors rather than rounds — "1h ago" until two full hours have passed
+    /// — so a card never claims to be older than it is. Negative (a runner
+    /// clock ahead of this one) is "just now", the answer `stoppedFor` gives.
+    public static func ago(_ interval: TimeInterval) -> String {
+        let seconds = max(0, interval)
+        let minute: TimeInterval = 60
+        let hour = 60 * minute
+        let day = 24 * hour
+        switch seconds {
+        case ..<minute: return "just now"
+        case ..<hour: return "\(Int(seconds / minute))m ago"
+        case ..<day: return "\(Int(seconds / hour))h ago"
+        case ..<(30 * day): return "\(Int(seconds / day))d ago"
+        case ..<(365 * day): return "\(Int(seconds / (30 * day)))mo ago"
+        default: return "\(Int(seconds / (365 * day)))y ago"
+        }
     }
 
     /// What this task is waiting on, in one line, or nil if it is waiting on
@@ -483,11 +556,18 @@ public struct WireTask: Decodable, Sendable {
     public var constraints: [String]
     public var acceptance: [WireAcceptance]
     public var workspaceID: String?
+    /// Unix milliseconds, or nil from a runner that did not say. Both absent
+    /// and `null` (what `tasks_json` sends for an older runner's zero) land
+    /// here as nil; so does a zero, for a producer that passed one through.
+    public var createdAt: Int64?
+    public var updatedAt: Int64?
 
     enum CodingKeys: String, CodingKey {
         case id, key, title, status, intent, labels, constraints, acceptance
         case statusSince = "status_since"
         case workspaceID = "workspace_id"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
 
     public init(from decoder: Decoder) throws {
@@ -508,6 +588,11 @@ public struct WireTask: Decodable, Sendable {
         constraints = try c.decodeIfPresent([String].self, forKey: .constraints) ?? []
         acceptance = try c.decodeIfPresent([WireAcceptance].self, forKey: .acceptance) ?? []
         workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID)
+        // Unlike `status_since`, a missing clock here is quiet rather than
+        // loud: the worst a card without it does is carry no time line, and
+        // 1970 would be "Added 56y ago" on every card of an older runner.
+        createdAt = (try c.decodeIfPresent(Int64.self, forKey: .createdAt)).flatMap { $0 > 0 ? $0 : nil }
+        updatedAt = (try c.decodeIfPresent(Int64.self, forKey: .updatedAt)).flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// This wire row as a card, given the status it was placed under.
@@ -524,7 +609,9 @@ public struct WireTask: Decodable, Sendable {
                 TaskAcceptanceLine(id: $0.id, text: $0.text, met: $0.met)
             },
             constraints: constraints,
-            workspaceID: workspaceID)
+            workspaceID: workspaceID,
+            createdAt: createdAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+            updatedAt: updatedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) })
     }
 }
 

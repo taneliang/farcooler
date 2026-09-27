@@ -29,6 +29,8 @@ class TaskBoardTest {
         status: TaskStatus = TaskStatus.IN_PROGRESS,
         acceptance: List<Boolean> = emptyList(),
         since: Long = 0L,
+        createdAt: Long? = null,
+        updatedAt: Long? = null,
     ) = TaskRow(
         id = id,
         key = "-$id",
@@ -36,6 +38,8 @@ class TaskBoardTest {
         status = status,
         statusSince = since,
         acceptance = acceptance.mapIndexed { i, met -> TaskAcceptanceLine("a$i", "line $i", met) },
+        createdAt = createdAt,
+        updatedAt = updatedAt,
     )
 
     // ---- the wire ----
@@ -45,12 +49,14 @@ class TaskBoardTest {
         {"tasks": [
           {"id": "t1", "short": "a001", "repository_id": "r", "resource_version": 3,
            "key": "-19", "title": "Board in the sidebar", "status": "needs_decision",
-           "status_since": 1000, "stale_for_seconds": 60, "intent": "why",
+           "status_since": 1000, "stale_for_seconds": 60,
+           "created_at": 500, "updated_at": 900, "intent": "why",
            "acceptance": [{"id": "a1", "text": "one", "met": true},
                           {"id": "a2", "text": "two", "met": false}],
            "constraints": [], "labels": ["ios"], "workspace_id": "w1"},
           {"id": "t2", "key": "-20", "title": "Phones", "status": "in_progress",
-           "status_since": 2000, "acceptance": [], "labels": []},
+           "status_since": 2000, "created_at": null, "updated_at": 0,
+           "acceptance": [], "labels": []},
           {"id": "t3", "key": "-9", "title": "From the future", "status": "parked"},
           {"id": "t4", "title": "No key, so not drawable", "status": "todo"}
         ]}
@@ -68,6 +74,24 @@ class TaskBoardTest {
         assertEquals("w1", first.workspaceId)
         assertEquals(listOf(true, false), first.acceptance.map { it.met })
         assertEquals("two", first.acceptance[1].text)
+        assertEquals(500L, first.createdAt)
+        assertEquals(900L, first.updatedAt)
+    }
+
+    /**
+     * A runner too old to say when: `null` (what `tasks_json` sends), an
+     * older producer's zero, or no key at all. None of them is 1970.
+     */
+    @Test
+    fun aClockTheRunnerDidNotSendIsNotTheEpoch() {
+        val board = TaskBoard.decode(listJson)
+        val second = board.row("t2")!!
+        assertNull(second.createdAt)
+        assertNull(second.updatedAt)
+        assertNull(second.timeNote(3000))
+        val bare = TaskBoard.decode("""{"tasks": [{"id": "b", "key": "-1", "title": "x", "status": "backlog"}]}""")
+        assertNull(bare.row("b")!!.createdAt)
+        assertNull(bare.row("b")!!.timeNote(3000))
     }
 
     /** A status this build does not know is shown, not dropped; a row it cannot draw is skipped. */
@@ -127,6 +151,79 @@ class TaskBoardTest {
     }
 
     // ---- staleness and the ask ----
+
+    /**
+     * Only In Progress and In Review go stale: the two where an agent is meant
+     * to be working (ov-28). Each status a week old; a rule written back as
+     * "every unfinished status" turns Backlog, To Do and Needs Decision red.
+     */
+    @Test
+    fun onlyActiveWorkGoesStale() {
+        val week = 7 * TaskRow.DAY_MS
+        for (status in TaskStatus.entries) {
+            val expected = status == TaskStatus.IN_PROGRESS || status == TaskStatus.IN_REVIEW
+            val card = row(status = status, since = 0)
+            assertEquals("$status", expected, card.isStale(week))
+            assertEquals("$status", expected, card.stalenessNote(week) != null)
+        }
+    }
+
+    // ---- the time line ----
+
+    @Test
+    fun aCardNothingHasHappenedToSaysWhenItWasAdded() {
+        val day = TaskRow.DAY_MS
+        val card = row(status = TaskStatus.BACKLOG, since = 0, createdAt = 0, updatedAt = 0)
+        assertEquals("Added 3d ago", card.timeNote(3 * day))
+    }
+
+    @Test
+    fun aCardThatChangedSaysWhenItWasUpdated() {
+        val hour = 3_600_000L
+        val card = row(status = TaskStatus.TODO, since = 0, createdAt = 1, updatedAt = 10 * hour)
+        assertEquals("Updated 2h ago", card.timeNote(12 * hour + 60_000))
+    }
+
+    @Test
+    fun aCardWithOnlyOneClockSaysWhatItCan() {
+        // `updated_at` alone cannot tell an update from a creation.
+        assertNull(row(status = TaskStatus.BACKLOG, updatedAt = 5).timeNote(10))
+        assertEquals("Added 1m ago", row(status = TaskStatus.BACKLOG, createdAt = 0).timeNote(90_000))
+    }
+
+    /** The stale sentence already says the time; the two lines are never both drawn. */
+    @Test
+    fun aStaleCardSaysHasntMovedInsteadOfItsTime() {
+        val day = TaskRow.DAY_MS
+        val stuck = row(status = TaskStatus.IN_PROGRESS, since = 0, createdAt = 0, updatedAt = 0)
+        assertEquals("Hasn’t moved in 3 days", stuck.stalenessNote(3 * day))
+        assertNull(stuck.timeNote(3 * day))
+        val waiting = row(status = TaskStatus.BACKLOG, since = 0, createdAt = 0, updatedAt = 0)
+        assertNull(waiting.stalenessNote(3 * day))
+        assertEquals("Added 3d ago", waiting.timeNote(3 * day))
+    }
+
+    /** AgentKit's `theRelativeTimeIsShortAndNeverRoundsUp`, value for value. */
+    @Test
+    fun theRelativeTimeIsShortAndNeverRoundsUp() {
+        val m = 60_000L
+        val h = 60 * m
+        val d = TaskRow.DAY_MS
+        assertEquals("just now", TaskRow.ago(-30_000))
+        assertEquals("just now", TaskRow.ago(0))
+        assertEquals("just now", TaskRow.ago(59_000))
+        assertEquals("1m ago", TaskRow.ago(m))
+        assertEquals("59m ago", TaskRow.ago(h - 1_000))
+        assertEquals("1h ago", TaskRow.ago(h))
+        assertEquals("1h ago", TaskRow.ago(2 * h - 1_000))
+        assertEquals("23h ago", TaskRow.ago(d - 1_000))
+        assertEquals("1d ago", TaskRow.ago(d))
+        assertEquals("29d ago", TaskRow.ago(30 * d - 1_000))
+        assertEquals("1mo ago", TaskRow.ago(30 * d))
+        assertEquals("12mo ago", TaskRow.ago(365 * d - 1_000))
+        assertEquals("1y ago", TaskRow.ago(365 * d))
+        assertEquals("2y ago", TaskRow.ago(800 * d))
+    }
 
     @Test
     fun aCardThatStoppedMovingSaysSoButAFinishedOneDoesNot() {

@@ -554,6 +554,13 @@ private struct TaskCardRow: View {
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.orange)
             }
+            // "Updated 2h ago" or "Added 3d ago", quiet, on every card. Nil
+            // on a stale one, whose orange sentence already says how long.
+            if let time = row.timeNote(at: Date()) {
+                Text(time)
+                    .font(.system(size: WorkspaceStyle.PaneText.minimum))
+                    .foregroundStyle(.secondary)
+            }
             // How far along it is, and who is on it: the two things a card
             // says about the work rather than about the task.
             if row.acceptanceProgress != nil || presence.title != nil {
@@ -819,6 +826,11 @@ private struct TaskCard: View {
             Text(note)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
                 .foregroundStyle(.orange)
+        }
+        if let time = row.timeNote(at: Date()) {
+            Text(time)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                .foregroundStyle(.secondary)
         }
         if !row.intent.isEmpty {
             section("Intent") {

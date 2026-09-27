@@ -23,7 +23,9 @@ extension TaskRow {
         title: String = "A task",
         status: TaskStatus = .todo,
         statusSince: Date = .now,
-        blockedBy: [TaskBlockRef] = []
+        blockedBy: [TaskBlockRef] = [],
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
     ) -> TaskRow {
         TaskRow(
             id: "0198f2c0-0000-7000-8000-00000000000\(abs(key.hashValue) % 10)",
@@ -31,21 +33,44 @@ extension TaskRow {
             title: title,
             status: status,
             statusSince: statusSince,
-            blockedBy: blockedBy)
+            blockedBy: blockedBy,
+            createdAt: createdAt,
+            updatedAt: updatedAt)
     }
 }
 
 /// The board's whole job beyond showing state.
 ///
 /// The failure mode of the factory is not an agent doing the wrong thing. It
-/// is a task sitting in `todo` that you assumed was in flight, and a board
-/// that renders it identically to one that moved a minute ago is what lets
-/// that happen.
+/// is a task you assumed was in flight that stopped, and a board that renders
+/// it identically to one that moved a minute ago is what lets that happen.
 @Test func aTaskThatHasNotMovedReadsAsStale() {
-    let fresh = TaskRow.fixture(status: .todo, statusSince: .now)
-    let old = TaskRow.fixture(status: .todo, statusSince: .now.addingTimeInterval(-3 * 86_400))
+    let fresh = TaskRow.fixture(status: .inProgress, statusSince: .now)
+    let old = TaskRow.fixture(
+        status: .inProgress, statusSince: .now.addingTimeInterval(-3 * 86_400))
     #expect(fresh.staleness == .fresh)
     #expect(old.staleness == .stale)
+}
+
+/// Which statuses can go stale, one case per status, each a week old.
+///
+/// Only the two where an agent is meant to be working. The owner's words
+/// (ov-28): "backlog shouldn't have 'hasn't moved' indicators since they're
+/// not expected to move", and "def present on in progress cards because
+/// those should always be moving". `needs_decision` waits on the owner, who
+/// asked for no nag. A rule written back as "every unfinished status" turns
+/// the backlog, todo and needs_decision cases red.
+@Test(arguments: TaskStatus.allCases)
+func onlyActiveWorkGoesStale(status: TaskStatus) {
+    let now = Date()
+    let row = TaskRow.fixture(status: status, statusSince: now.addingTimeInterval(-7 * 86_400))
+    let expected: TaskStaleness
+    switch status {
+    case .inProgress, .inReview: expected = .stale
+    case .backlog, .todo, .needsDecision, .done, .cancelled: expected = .fresh
+    }
+    #expect(row.staleness(at: now) == expected, "\(status)")
+    #expect((row.stalenessNote(at: now) != nil) == (expected == .stale), "\(status)")
 }
 
 @Test func aFinishedTaskIsNeverStale() {
@@ -64,8 +89,9 @@ extension TaskRow {
 @Test func stalenessTurnsOverExactlyAtTheNamedThreshold() {
     let now = Date()
     let justUnder = TaskRow.fixture(
-        statusSince: now.addingTimeInterval(-TaskRow.staleAfter + 60))
-    let atIt = TaskRow.fixture(statusSince: now.addingTimeInterval(-TaskRow.staleAfter))
+        status: .inProgress, statusSince: now.addingTimeInterval(-TaskRow.staleAfter + 60))
+    let atIt = TaskRow.fixture(
+        status: .inProgress, statusSince: now.addingTimeInterval(-TaskRow.staleAfter))
     #expect(justUnder.staleness(at: now) == .fresh)
     #expect(atIt.staleness(at: now) == .stale)
 }
@@ -74,7 +100,7 @@ extension TaskRow {
 /// future.
 @Test func aStatusStampFromTheFutureReadsAsJustNow() {
     let now = Date()
-    let ahead = TaskRow.fixture(statusSince: now.addingTimeInterval(3600))
+    let ahead = TaskRow.fixture(status: .inProgress, statusSince: now.addingTimeInterval(3600))
     #expect(ahead.stoppedFor(at: now) == 0)
     #expect(ahead.staleness(at: now) == .fresh)
 }
@@ -83,17 +109,88 @@ extension TaskRow {
 /// somebody act.
 @Test func aStaleRowSaysHowLongItHasSatThere() {
     let now = Date()
-    #expect(TaskRow.fixture(statusSince: now).stalenessNote(at: now) == nil)
+    #expect(TaskRow.fixture(status: .inReview, statusSince: now).stalenessNote(at: now) == nil)
     #expect(
-        TaskRow.fixture(statusSince: now.addingTimeInterval(-30 * 3600))
+        TaskRow.fixture(status: .inReview, statusSince: now.addingTimeInterval(-30 * 3600))
             .stalenessNote(at: now) == "Hasn’t moved in a day")
     #expect(
-        TaskRow.fixture(statusSince: now.addingTimeInterval(-3 * 86_400))
+        TaskRow.fixture(status: .inProgress, statusSince: now.addingTimeInterval(-3 * 86_400))
             .stalenessNote(at: now) == "Hasn’t moved in 3 days")
     #expect(
         TaskRow.fixture(status: .done, statusSince: now.addingTimeInterval(-3 * 86_400))
             .stalenessNote(at: now) == nil,
         "a finished task was given a sentence about having stopped")
+}
+
+// ---------------------------------------------------------------------------
+// The time line every card carries
+// ---------------------------------------------------------------------------
+
+/// A card nothing has happened to says when it was filed. The runner sends
+/// the two clocks equal for it, so equality is "Added".
+@Test func aCardNothingHasHappenedToSaysWhenItWasAdded() {
+    let now = Date()
+    let filed = now.addingTimeInterval(-3 * 86_400)
+    let row = TaskRow.fixture(status: .backlog, statusSince: filed, createdAt: filed, updatedAt: filed)
+    #expect(row.timeNote(at: now) == "Added 3d ago")
+}
+
+/// A card that changed after it was filed says when it last changed.
+@Test func aCardThatChangedSaysWhenItWasUpdated() {
+    let now = Date()
+    let row = TaskRow.fixture(
+        status: .todo, statusSince: now.addingTimeInterval(-5 * 86_400),
+        createdAt: now.addingTimeInterval(-5 * 86_400),
+        updatedAt: now.addingTimeInterval(-2 * 3600 - 60))
+    #expect(row.timeNote(at: now) == "Updated 2h ago")
+}
+
+/// A runner too old to send `created_at` gets no line, never "Added 56y ago".
+@Test func aCardFromARunnerThatDidNotSayHasNoTimeLine() {
+    let now = Date()
+    #expect(TaskRow.fixture(status: .backlog).timeNote(at: now) == nil)
+    // `updated_at` alone is not enough to know whether it is an update.
+    #expect(TaskRow.fixture(status: .backlog, updatedAt: now).timeNote(at: now) == nil)
+    // And `created_at` alone still says when it was added.
+    #expect(
+        TaskRow.fixture(status: .backlog, createdAt: now.addingTimeInterval(-90))
+            .timeNote(at: now) == "Added 1m ago")
+}
+
+/// A stale active card already says how long in its stale sentence; a second
+/// line telling the same card's time another way is dropped. The same card a
+/// minute fresher carries the time line instead — and an old backlog card,
+/// which can no longer be stale, carries its time line rather than nothing.
+@Test func aStaleCardSaysHasntMovedInsteadOfItsTime() {
+    let now = Date()
+    let long = now.addingTimeInterval(-3 * 86_400)
+    let stuck = TaskRow.fixture(status: .inProgress, statusSince: long, createdAt: long, updatedAt: long)
+    #expect(stuck.stalenessNote(at: now) == "Hasn’t moved in 3 days")
+    #expect(stuck.timeNote(at: now) == nil, "two lines saying one card's time")
+
+    let waiting = TaskRow.fixture(status: .backlog, statusSince: long, createdAt: long, updatedAt: long)
+    #expect(waiting.stalenessNote(at: now) == nil)
+    #expect(waiting.timeNote(at: now) == "Added 3d ago")
+}
+
+/// Every unit, on both sides of every boundary. Floors, so a card is never
+/// called older than it is.
+@Test func theRelativeTimeIsShortAndNeverRoundsUp() {
+    let m: TimeInterval = 60, h = 3600.0, d = 86_400.0
+    #expect(TaskRow.ago(-30) == "just now", "a runner clock ahead of this one")
+    #expect(TaskRow.ago(0) == "just now")
+    #expect(TaskRow.ago(59) == "just now")
+    #expect(TaskRow.ago(m) == "1m ago")
+    #expect(TaskRow.ago(h - 1) == "59m ago")
+    #expect(TaskRow.ago(h) == "1h ago")
+    #expect(TaskRow.ago(2 * h - 1) == "1h ago")
+    #expect(TaskRow.ago(d - 1) == "23h ago")
+    #expect(TaskRow.ago(d) == "1d ago")
+    #expect(TaskRow.ago(30 * d - 1) == "29d ago")
+    #expect(TaskRow.ago(30 * d) == "1mo ago")
+    #expect(TaskRow.ago(365 * d - 1) == "12mo ago")
+    #expect(TaskRow.ago(365 * d) == "1y ago")
+    #expect(TaskRow.ago(800 * d) == "2y ago")
 }
 
 @Test func aBlockedTaskSaysWhatItIsWaitingOn() {
@@ -184,14 +281,16 @@ private let realBoardJSON = """
       {"id":"0198f2c0-0000-7000-8000-000000000001","short":"00000001",
        "repository_id":"0198f2c0-0000-7000-8000-0000000000ff","resource_version":3,
        "key":"fc-1","title":"Wire the board","status":"in_progress",
-       "status_since":1757260800000,"stale_for_seconds":120,"intent":"Make it move",
+       "status_since":1757260800000,"stale_for_seconds":120,
+       "created_at":1757170800000,"updated_at":1757260900000,"intent":"Make it move",
        "acceptance":[{"id":"0198f2c0-0000-7000-8000-00000000000a","text":"It moves","met":false}],
        "constraints":["No new migrations"],"labels":["board"],
        "workspace_id":"0198f2c0-0000-7000-8000-0000000000ee"},
       {"id":"0198f2c0-0000-7000-8000-000000000002","short":"00000002",
        "repository_id":"0198f2c0-0000-7000-8000-0000000000ff","resource_version":1,
        "key":"fc-2","title":"Decide the threshold","status":"needs_decision",
-       "status_since":1757260800000,"stale_for_seconds":120,"intent":"",
+       "status_since":1757260800000,"stale_for_seconds":120,
+       "created_at":null,"updated_at":null,"intent":"",
        "acceptance":[],"constraints":[],"labels":[],"workspace_id":null}
     ]}
     """
@@ -213,9 +312,14 @@ private let realBoardJSON = """
     // factor of a thousand puts every task in 1970 and marks the whole board
     // stale, which looks like a working feature.
     #expect(doing.statusSince == Date(timeIntervalSince1970: 1_757_260_800))
+    #expect(doing.createdAt == Date(timeIntervalSince1970: 1_757_170_800))
+    #expect(doing.updatedAt == Date(timeIntervalSince1970: 1_757_260_900))
 
     let asking = try #require(board.columns.first { $0.status == .needsDecision }?.rows.first)
     #expect(asking.workspaceID == nil, "a task with no lane was given one")
+    // `null` is what `tasks_json` sends for a runner too old to say.
+    #expect(asking.createdAt == nil)
+    #expect(asking.updatedAt == nil)
 }
 
 /// A field this app has not heard of does not cost the board.
@@ -234,6 +338,22 @@ private let realBoardJSON = """
     #expect(row.key == "fc-7")
     #expect(row.intent == "")
     #expect(row.labels.isEmpty)
+    // Neither clock: no time line, and no crash on the way to it.
+    #expect(row.createdAt == nil)
+    #expect(row.updatedAt == nil)
+    #expect(row.timeNote(at: Date()) == nil)
+}
+
+/// A producer that passes an older runner's proto3 zero straight through
+/// still reads as "did not say", not as 1970.
+@Test func aZeroClockIsNotTheEpoch() throws {
+    let zero = """
+        {"tasks":[{"id":"a","key":"fc-9","title":"Zero","status":"backlog",
+                   "created_at":0,"updated_at":0}]}
+        """
+    let row = try #require(try TaskBoardModel.decode(Data(zero.utf8)).rows.first)
+    #expect(row.createdAt == nil)
+    #expect(row.timeNote(at: Date()) == nil)
 }
 
 /// A status this build has never heard of is shown, not dropped and not

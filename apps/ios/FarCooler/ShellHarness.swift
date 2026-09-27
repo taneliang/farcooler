@@ -427,19 +427,25 @@ enum HarnessBoard {
         Pane(boardTaskID: "t-21", runsAgent: false, tab: "ws-3-tab-0", title: "shell"),
     ]
 
+    /// `age` is how long it has sat in its status, and so when it last
+    /// changed; `filed` is how long ago it was added. A card filed and never
+    /// moved passes the same for both and reads "Added".
     private static func row(
         _ n: Int, _ title: String, _ status: TaskStatus, _ acceptance: [Bool],
-        age: TimeInterval = 600
+        age: TimeInterval = 600, filed: TimeInterval = 3 * 24 * 60 * 60
     ) -> TaskRow {
-        TaskRow(
+        let now = Date()
+        return TaskRow(
             id: "t-\(n)", key: "-\(n)", title: title, status: status,
-            statusSince: Date().addingTimeInterval(-age),
+            statusSince: now.addingTimeInterval(-age),
             intent: "Why task \(n) exists, in the words of whoever filed it.",
             acceptance: acceptance.enumerated().map {
                 TaskAcceptanceLine(
                     id: "a\(n)-\($0.offset)", text: "Line \($0.offset + 1) of task \(n) holds",
                     met: $0.element)
-            })
+            },
+            createdAt: now.addingTimeInterval(-filed),
+            updatedAt: now.addingTimeInterval(-min(age, filed)))
     }
 
     static var board: TaskBoardModel {
@@ -450,7 +456,11 @@ enum HarnessBoard {
                 [true, true, false, false, false]),
             row(21, "Android’s board", .inProgress, [], age: 2 * 24 * 60 * 60),
             row(18, "Acceptance progress on cards", .inReview, [true, true, true, true]),
-            row(17, "A board across every repository", .backlog, []),
+            // Filed five days ago and never touched: a backlog card is not
+            // expected to move, so it says when it was added and nothing
+            // about having stopped.
+            row(17, "A board across every repository", .backlog, [],
+                age: 5 * 24 * 60 * 60, filed: 5 * 24 * 60 * 60),
         ]
         return TaskBoardModel(
             columns: TaskBoardModel.order.map { status in

@@ -89,6 +89,19 @@ final class ShellBoardTests: XCTestCase {
         XCTAssertTrue(card18.label.contains("All 4 met"), "-18's acceptance: \(card18.label)")
         // And the question it is waiting on, which only Needs Decision asks.
         XCTAssertTrue(card19.label.contains("Answer to unblock this"), card19.label)
+        // Every card says when it last changed, or when it was added: -19
+        // moved ten minutes ago; -17 was filed five days ago and sits in the
+        // backlog, which is not expected to move, so it is never "Hasn’t
+        // moved". -21 has sat in progress for two days, so its stale sentence
+        // stands in for the time line.
+        XCTAssertTrue(card19.label.contains("Updated 10m ago"), card19.label)
+        let card17 = app.descendants(matching: .any)["board-card--17"]
+        XCTAssertTrue(card17.exists, "-17 is not on the board")
+        XCTAssertTrue(card17.label.contains("Added 5d ago"), card17.label)
+        XCTAssertFalse(card17.label.contains("Hasn’t moved"), card17.label)
+        let card21 = app.descendants(matching: .any)["board-card--21"]
+        XCTAssertTrue(card21.label.contains("Hasn’t moved in 2 days"), card21.label)
+        XCTAssertFalse(card21.label.contains(" ago"), card21.label)
         // In progress with nobody on it: said, quietly. The dispatched shell
         // on it is not an agent.
         XCTAssertTrue(app.descendants(matching: .any)["board-no-agent--21"].exists)
