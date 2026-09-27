@@ -58,6 +58,7 @@
 		1D2E1EBB71985A1CBA44AEEC /* ShellNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A109ED1973485D5680C3F889; };
 		3BAAD065CACA537284F18061 /* ShellIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F685DE2F091F550EAD8F687F; };
 		3F4F6C9EBD2D5BCBBEEB6250 /* ShellRunnerSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B4F574F343A5A7E8660762E; };
+		47951482C56658C9BE349045 /* ShellWorkspaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E1543D8310F5CBDBEFFBD0D; };
 		1118F5A2DF8858BB87B47A8D /* ShellClose.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AB2C59AAEF5EA08D568AAD; };
 		A97DC3D4564555F5B87F6741 /* ShellBringUp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2175859E81D057B885EE8E5D; };
 		81B3A9343E45553A982E5903 /* NotLivePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C7A2999D305877A619CF82; };
@@ -108,6 +109,7 @@
 		E8052914E2C95A1D8C38A3F1 /* TaskBoardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1A7FEE33435A79A9B20ADF; };
 		5E88F5B7D4E35B1787938B7D /* TaskBoardAgents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE27674E334533B8BE7C7BD; };
 		3AEDDF986DE55B539988F40C /* RunnerBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BBD929AC34859148CDFEB80; };
+		0D650BC429815BE5A56B05BA /* WorkspaceGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB159548D52F5D658261D46D; };
 		CD6C16F15EBD5CDF92BC911F /* BoardClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 562C497530DD51F9AF94BCB8; };
 		47ABCA46F37C53F8B31FA67E /* farcooler_vt.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C58051F3AA0C5DE2A3B15416; };
 		1590685CD3625030B862EAED /* farcooler_client.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 78C00FC7C5AC5565A723E44C; };
@@ -226,6 +228,7 @@
 		A109ED1973485D5680C3F889 /* ShellNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellNavigation.swift; sourceTree = "<group>"; };
 		F685DE2F091F550EAD8F687F /* ShellIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellIdentity.swift; sourceTree = "<group>"; };
 		2B4F574F343A5A7E8660762E /* ShellRunnerSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRunnerSections.swift; sourceTree = "<group>"; };
+		2E1543D8310F5CBDBEFFBD0D /* ShellWorkspaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellWorkspaces.swift; sourceTree = "<group>"; };
 		46AB2C59AAEF5EA08D568AAD /* ShellClose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellClose.swift; sourceTree = "<group>"; };
 		2175859E81D057B885EE8E5D /* ShellBringUp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellBringUp.swift; sourceTree = "<group>"; };
 		C4C7A2999D305877A619CF82 /* NotLivePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotLivePane.swift; sourceTree = "<group>"; };
@@ -276,6 +279,7 @@
 		EA1A7FEE33435A79A9B20ADF /* TaskBoardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardModel.swift; sourceTree = "<group>"; };
 		CBE27674E334533B8BE7C7BD /* TaskBoardAgents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardAgents.swift; sourceTree = "<group>"; };
 		3BBD929AC34859148CDFEB80 /* RunnerBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerBoards.swift; sourceTree = "<group>"; };
+		DB159548D52F5D658261D46D /* WorkspaceGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroups.swift; sourceTree = "<group>"; };
 		562C497530DD51F9AF94BCB8 /* BoardClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardClock.swift; sourceTree = "<group>"; };
 		73BE33D4405A51BF837B4F76 /* FarCoolerActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarCoolerActivityBundle.swift; sourceTree = "<group>"; };
 		7CD12E9188AE54C68252C53C /* AgentActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityWidget.swift; sourceTree = "<group>"; };
@@ -497,6 +501,7 @@
 				A109ED1973485D5680C3F889 /* ShellNavigation.swift */,
 				F685DE2F091F550EAD8F687F /* ShellIdentity.swift */,
 				2B4F574F343A5A7E8660762E /* ShellRunnerSections.swift */,
+				2E1543D8310F5CBDBEFFBD0D /* ShellWorkspaces.swift */,
 				46AB2C59AAEF5EA08D568AAD /* ShellClose.swift */,
 				2175859E81D057B885EE8E5D /* ShellBringUp.swift */,
 				C4C7A2999D305877A619CF82 /* NotLivePane.swift */,
@@ -547,6 +552,7 @@
 				EA1A7FEE33435A79A9B20ADF /* TaskBoardModel.swift */,
 				CBE27674E334533B8BE7C7BD /* TaskBoardAgents.swift */,
 				3BBD929AC34859148CDFEB80 /* RunnerBoards.swift */,
+				DB159548D52F5D658261D46D /* WorkspaceGroups.swift */,
 				562C497530DD51F9AF94BCB8 /* BoardClock.swift */,
 				E9FD7C5018885874ABB83E7F /* WatchState.swift */,
 			);
@@ -881,6 +887,7 @@
 				1D2E1EBB71985A1CBA44AEEC /* ShellNavigation.swift in Sources */,
 				3BAAD065CACA537284F18061 /* ShellIdentity.swift in Sources */,
 				3F4F6C9EBD2D5BCBBEEB6250 /* ShellRunnerSections.swift in Sources */,
+				47951482C56658C9BE349045 /* ShellWorkspaces.swift in Sources */,
 				1118F5A2DF8858BB87B47A8D /* ShellClose.swift in Sources */,
 				A97DC3D4564555F5B87F6741 /* ShellBringUp.swift in Sources */,
 				81B3A9343E45553A982E5903 /* NotLivePane.swift in Sources */,
@@ -931,6 +938,7 @@
 				E8052914E2C95A1D8C38A3F1 /* TaskBoardModel.swift in Sources */,
 				5E88F5B7D4E35B1787938B7D /* TaskBoardAgents.swift in Sources */,
 				3AEDDF986DE55B539988F40C /* RunnerBoards.swift in Sources */,
+				0D650BC429815BE5A56B05BA /* WorkspaceGroups.swift in Sources */,
 				CD6C16F15EBD5CDF92BC911F /* BoardClock.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

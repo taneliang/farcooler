@@ -13,7 +13,7 @@ out=$2
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 export PATH="/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"
 cd "$repo"
-FAKE_CLI="$fake" SKILL_OUT="$out" CARGO_BUILD_JOBS=6 \
+FAKE_CLI="$fake" SKILL_OUT="$out" CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-6}" \
   cargo test -q -p farcooler-daemon --lib render_for_the_pressure_harness -- --ignored >/dev/null
 test -s "$out" || { echo "render-skill: nothing was written to $out" >&2; exit 1; }
 grep -q '{{' "$out" && { echo "render-skill: a placeholder was left open in $out" >&2; exit 1; }

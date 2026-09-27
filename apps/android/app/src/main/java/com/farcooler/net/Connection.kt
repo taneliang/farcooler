@@ -10,6 +10,7 @@ import com.farcooler.data.Runner
 import com.farcooler.data.Theme
 import com.farcooler.model.AdapterInfo
 import com.farcooler.model.AdapterTestOutcome
+import com.farcooler.model.BoardNotice
 import com.farcooler.model.BranchListReply
 import com.farcooler.model.BranchRef
 import com.farcooler.model.ChangeSet
@@ -27,9 +28,11 @@ import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryList
 import com.farcooler.model.RepositoryRoot
 import com.farcooler.model.RepositoryRootList
+import com.farcooler.model.RunnerBoards
 import com.farcooler.model.StackReply
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.Terminal
+import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.Worktree
 import com.farcooler.model.toJson
 import com.farcooler.core.refusalWord
@@ -502,22 +505,36 @@ class Connection(
     private val boardReads = BoardReads(
         scope = scope,
         canRead = { _phase.value is Phase.Connected && _daemon.value?.can("tasks") == true },
-        read = { repository ->
-            attempt { core.call("task.list", buildJsonObject { put("repository", repository) }) }
+        read = { workspace ->
+            attempt { core.call("task.list", BoardReads.request(workspace)) }
                 .getOrNull()
                 ?.let { runCatching { TaskBoard.decode(it) }.getOrNull() }
         },
     )
 
-    /** Each repository's board as last read, by repository id. */
+    /** Each board as last read, by workspace id. */
     val boards: StateFlow<Map<String, TaskBoard>> = boardReads.boards
 
-    /** Repositories whose last board read failed. */
+    /** Boards, by workspace id, whose last read failed. */
     val unreadBoards: StateFlow<Set<String>> = boardReads.unread
 
-    /** Read every board, without making anything wait on it. */
+    /**
+     * Every board this runner keeps, as of the fleet and repositories last
+     * read: each repository's workspaces, or its one implicit board on a
+     * runner that names none. See [RunnerBoards.boards].
+     */
+    fun boardList(): List<WorkspaceSummary> =
+        RunnerBoards.boards(_repositories.value.map { it.id }, fleet.value.workspaces)
+
+    /**
+     * Read every board, without making anything wait on it.
+     *
+     * A reconnect ends here, after the fleet it lists the workspaces from:
+     * this is what reads an open board again once the link is back, whatever
+     * notices went missing while it was down.
+     */
     fun loadBoardsDetached() {
-        scope.launch { boardReads.sweep(_repositories.value.map { it.id }) }
+        scope.launch { boardReads.sweep(boardList()) }
     }
 
     /**
@@ -526,7 +543,16 @@ class Connection(
      * screen that leaves stops waiting and never stops the read; see
      * [BoardReads].
      */
-    suspend fun readBoard(repository: String) = boardReads.readOne(repository)
+    suspend fun readBoard(workspace: WorkspaceSummary) = boardReads.readOne(workspace)
+
+    /**
+     * The board a route names, by workspace id: the one in [boardList], or —
+     * one the fleet has not listed, a route restored before the fleet was
+     * read — the implicit board of the repository with that id, which is what
+     * a runner without workspaces keys its boards by.
+     */
+    fun board(workspaceId: String): WorkspaceSummary =
+        boardList().firstOrNull { it.id == workspaceId } ?: WorkspaceSummary.implicit(workspaceId)
 
     /**
      * Whether a board notice arrived while the app was in the background and
@@ -539,7 +565,7 @@ class Connection(
     /** A runner notice, on the core's thread. Only boards read these; see [ClientCore.onNotice]. */
     private fun noticeArrived(notice: JsonObject) {
         val event = notice["event"]?.jsonPrimitive?.contentOrNull
-        val repository = notice["repository"]?.jsonPrimitive?.contentOrNull
+        val moved = BoardNotice.of(notice)
         if (event != "task" && event != "resync") return
         scope.launch {
             if (!isForeground) {
@@ -547,8 +573,10 @@ class Connection(
                 return@launch
             }
             when (event) {
-                "task" -> if (repository != null) boardReads.readOne(repository)
-                "resync" -> boardReads.sweep(_repositories.value.map { it.id })
+                // The boards this notice moved: the workspace the task is on,
+                // and on a move the one it left. See [RunnerBoards.touched].
+                "task" -> if (moved != null) boardReads.noticed(moved, boardList())
+                "resync" -> boardReads.sweep(boardList())
             }
         }
     }
@@ -976,7 +1004,7 @@ class Connection(
             body["branchPrefix"]?.jsonPrimitive?.contentOrNull ?: DEFAULT_BRANCH_PREFIX
         // Boards this link never read: a sweep before the build was known
         // could not tell the runner keeps a board, and read nothing.
-        scope.launch { boardReads.buildLanded(_repositories.value.map { it.id }) }
+        scope.launch { boardReads.buildLanded(boardList()) }
     }
 
     /**

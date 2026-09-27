@@ -89,7 +89,7 @@ fn store_with_terminal(worktree: &str, preset: &str, session: Option<&str>) -> (
 /// runtime view it means rather than depending on whether the machine running
 /// it happens to have a server up.
 fn ingress_over(store: Arc<Store>, snapshot: RuntimeSnapshot) -> HookIngress {
-    HookIngress::new(store, Arc::new(FakeInventory { snapshot }))
+    HookIngress::new(store, Arc::new(FakeInventory { snapshot }), Arc::default())
 }
 
 /// The default view: tmux is readable, and it claims a live pane for each of
@@ -195,7 +195,11 @@ async fn listening(
     live: &[Uuid],
     dir: &std::path::Path,
 ) -> (std::path::PathBuf, Seen) {
-    let ingress = ingress_claiming(store, live);
+    listening_on(ingress_claiming(store, live), dir).await
+}
+
+/// `listening`, for an ingress the caller built.
+async fn listening_on(ingress: HookIngress, dir: &std::path::Path) -> (std::path::PathBuf, Seen) {
     let seen: Seen = Arc::new(Mutex::new(Vec::new()));
     {
         let seen = seen.clone();
@@ -843,4 +847,176 @@ async fn a_connection_that_says_nothing_is_eventually_dropped() {
     .expect("read");
 
     assert_eq!(read, 0, "the daemon let go of a connection that never said anything");
+}
+
+// ---- claiming: where a session works claims the worktree it works in ----
+//
+// Every payload here is one the spike recorded from the real agent
+// (`docs/superpowers/specs/2026-09-27-workspaces-spike-hooks/`, copied
+// verbatim into `tests/fixtures/hooks/`). Each harness was asked to `cd
+// .worktrees/nested` and work there. `before-move` is the turn's prompt, from
+// the repository; `after-move` is the event that ends the turn.
+
+/// Where the spike ran. Every path in a fixture is under it.
+const SPIKE: &str = "/private/tmp/fc-ws/spike";
+
+/// A recorded payload, with the spike's directory swapped for `root`.
+///
+/// Swapped rather than used as recorded so the test doesn't depend on
+/// whether `/private/tmp/fc-ws/spike` happens to exist on the machine
+/// running it (it does on the one that recorded it).
+fn recorded(name: &str, root: &std::path::Path) -> HookLine {
+    let path = format!("{}/tests/fixtures/hooks/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path).expect("a recorded payload");
+    let payload: serde_json::Value =
+        serde_json::from_str(&text.replace(SPIKE, &root.to_string_lossy())).expect("json");
+    let agent = match name.split('-').next() {
+        Some("claude") => Agent::Claude,
+        Some("codex") => Agent::Codex,
+        _ => Agent::Cursor,
+    };
+    let event = payload["hook_event_name"].as_str().expect("an event name").to_string();
+    HookLine { agent, event, payload }
+}
+
+/// The spike's layout, as rows: a repository whose main checkout is Main's,
+/// an unclaimed worktree nested in it at `.worktrees/nested`, and one pane in
+/// the main checkout running `preset` for another workspace, Billing.
+struct Spike {
+    _dir: tempfile::TempDir,
+    root: std::path::PathBuf,
+    store: Arc<Store>,
+    main_checkout: Uuid,
+    nested: Uuid,
+    billing: Uuid,
+    terminal: Uuid,
+}
+
+fn spike(preset: &str, session: Option<&str>) -> Spike {
+    use farcooler_store::models::ClaimSource;
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let repo_path = root.join("repo");
+    let nested_path = repo_path.join(".worktrees").join("nested");
+    std::fs::create_dir_all(&nested_path).unwrap();
+
+    let store = Store::open_in_memory().expect("an in-memory store");
+    let host = Uuid::now_v7();
+    let root_row = store.create_repository_root(host, &root.to_string_lossy(), 1_000).unwrap();
+    let repo = store
+        .create_repository(host, root_row.id, "repo", &repo_path.join(".git").to_string_lossy(), "")
+        .unwrap();
+    let main = store.ensure_main_workspace(repo.id).unwrap();
+    let billing = store.create_workspace(repo.id, "Billing", "bil").unwrap();
+    let main_checkout = store.create_worktree(repo.id, "main", &repo_path.to_string_lossy(), true).unwrap();
+    store.claim_worktree(main_checkout.id, main.id, ClaimSource::Explicit).unwrap();
+    let nested = store.create_unclaimed_worktree_for_test(repo.id, &nested_path.to_string_lossy());
+
+    let term = store.create_terminal(main_checkout.id, "pane", preset, TerminalIntent::Running, 80, 24).unwrap();
+    let term = store.set_terminal_workspace(term.id, billing.id).unwrap();
+    if let Some(session) = session {
+        store
+            .set_pane_mode(term.id, term.resource_version, PaneMode::Terminal, Some(session.to_string()), false)
+            .unwrap();
+    }
+    Spike {
+        _dir: dir,
+        root,
+        store: Arc::new(store),
+        main_checkout: main_checkout.id,
+        nested,
+        billing: billing.id,
+        terminal: term.id,
+    }
+}
+
+/// What `farcooler hook` writes for each of `lines`, on one connection, so
+/// they're served in order.
+async fn send_all(socket: &std::path::Path, lines: &[HookLine]) {
+    let mut stream = tokio::net::UnixStream::connect(socket).await.expect("connect");
+    for line in lines {
+        stream.write_all(encode_line(line).unwrap().as_bytes()).await.expect("write");
+    }
+    stream.shutdown().await.expect("shutdown");
+}
+
+/// Serve `turn` to an ingress over `s`, with a live pane for its terminal,
+/// and wait until `prompts` user messages have reached it: proof every line
+/// was routed, since each is served in order on one connection.
+async fn serve_turn(s: &Spike, turn: &[HookLine], prompts: usize) -> Arc<farcooler_daemon::claims::Ledger> {
+    let claims = Arc::new(farcooler_daemon::claims::Ledger::default());
+    let snapshot = RuntimeSnapshot::healthy(vec![live_pane(s.terminal)]);
+    let ingress = HookIngress::new(s.store.clone(), Arc::new(FakeInventory { snapshot }), claims.clone());
+    let sock = tempfile::tempdir().unwrap();
+    let (socket, seen) = listening_on(ingress, sock.path()).await;
+    send_all(&socket, turn).await;
+    let routed = eventually(|| {
+        let seen = seen.lock().unwrap();
+        let users = seen
+            .iter()
+            .filter(|(id, _)| *id == s.terminal)
+            .flat_map(|(_, events)| events)
+            .filter(|e| matches!(e, AgentEvent::Message { role: Role::User, .. }))
+            .count();
+        (users >= prompts).then_some(())
+    })
+    .await;
+    assert!(routed.is_some(), "every recorded hook reached the pane: {:?}", seen.lock().unwrap());
+    claims
+}
+
+/// Claude's `Stop` reports the directory the turn ended in, so the worktree
+/// its session moved into is claimed for its pane's workspace, by `hook`.
+#[tokio::test]
+async fn a_claude_session_that_moved_into_a_worktree_claims_it_for_its_workspace() {
+    let s = spike("claude", Some("00000000-0000-4000-8000-000000000001"));
+    let turn = [recorded("claude-before-move", &s.root), recorded("claude-after-move", &s.root)];
+    let claims = serve_turn(&s, &turn, 1).await;
+
+    let row = eventually(|| {
+        let row = s.store.get_worktree(s.nested).unwrap();
+        row.workspace_id.is_some().then_some(row)
+    })
+    .await
+    .expect("the worktree the session moved into is claimed");
+    use farcooler_store::models::ClaimSource;
+    assert_eq!((row.workspace_id, row.claim_source), (Some(s.billing), Some(ClaimSource::Hook)));
+    // The prompt came from the main checkout, which Main owns: Billing's
+    // session was a writer there, reported and not taken. Its `Stop` then
+    // found it in the worktree it claimed, which clears that report: one
+    // turn in Main's checkout doesn't mark it for the pane's whole life.
+    let cleared = eventually(|| claims.terminals_in(s.main_checkout).is_empty().then_some(())).await;
+    assert!(cleared.is_some(), "still reported in Main's checkout: {:?}", claims.terminals_in(s.main_checkout));
+    let main = s.store.get_worktree(s.main_checkout).unwrap();
+    assert_eq!(main.claim_source, Some(ClaimSource::Explicit), "Main keeps its checkout");
+    assert!(claims.take_changed(), "the claim is news for the watcher to announce");
+}
+
+/// Codex reports its launch directory in every hook, wherever its commands
+/// ran, so its hooks claim nothing and report nothing. Its move is the
+/// process walk's to find.
+#[tokio::test]
+async fn a_codex_sessions_hooks_claim_nothing_because_its_cwd_never_moves() {
+    let s = spike("codex", None);
+    let before = recorded("codex-before-move", &s.root);
+    let turn = [before.clone(), recorded("codex-after-move", &s.root), before];
+    let claims = serve_turn(&s, &turn, 2).await;
+
+    assert_eq!(s.store.get_worktree(s.nested).unwrap().workspace_id, None);
+    assert!(claims.terminals_in(s.main_checkout).is_empty(), "nor is its launch directory news");
+    assert!(!claims.take_changed());
+}
+
+/// Cursor's registered events carry no `cwd` at all, only
+/// `workspace_roots`, which stays its launch directory. Nothing is claimed.
+#[tokio::test]
+async fn a_cursor_sessions_hooks_claim_nothing_because_they_carry_no_cwd() {
+    let s = spike("cursor", None);
+    let before = recorded("cursor-before-move", &s.root);
+    let turn = [before.clone(), recorded("cursor-after-move", &s.root), before];
+    let claims = serve_turn(&s, &turn, 2).await;
+
+    assert_eq!(s.store.get_worktree(s.nested).unwrap().workspace_id, None);
+    assert!(claims.terminals_in(s.main_checkout).is_empty());
+    assert!(!claims.take_changed());
 }

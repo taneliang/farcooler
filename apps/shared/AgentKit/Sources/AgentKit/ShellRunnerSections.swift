@@ -75,9 +75,17 @@ struct ShellCard: Identifiable, Hashable, Sendable {
     var index: Int
 }
 
-/// One runner's worktrees, in the order that runner keeps them.
+/// One runner's worktrees, in the order that runner keeps them — or, on a
+/// runner with workspaces, one workspace's worktrees under that runner.
 struct ShellRunnerSection: Identifiable, Hashable {
     var runner: ShellRunnerLabel
+    /// The workspace heading these cards are under, or nil for a runner with
+    /// no workspace level. See `runnerSections(_:headings:matching:pending:)`.
+    var heading: ShellWorkspaceHeading? = nil
+    /// Whether this is the runner's first section, which is the one that
+    /// draws the runner's own heading and menu. Every section of a runner
+    /// without workspaces is its first, because it has only the one.
+    var leadsRunner: Bool = true
     var cards: [ShellCard]
     /// Whether a card in this section can be dragged to a new place in it.
     ///
@@ -95,7 +103,13 @@ struct ShellRunnerSection: Identifiable, Hashable {
     /// - **There are two cards.** One card has nowhere else to be.
     var canReorder: Bool
 
-    var id: String { runner.id }
+    /// The runner's id for its one section, and the runner's and the
+    /// heading's for each section of a runner with workspaces: the grid's
+    /// identity for the section, and the collection a drop names.
+    var id: String {
+        guard let heading else { return leadsRunner ? runner.id : "\(runner.id)/-" }
+        return "\(runner.id)/\(heading.id)"
+    }
 
     /// What dropping `sources` just before `target` — or at the end, for a nil
     /// target — asks this section's runner for, or nil when it asks nothing.
@@ -227,30 +241,60 @@ extension ShellFleet {
     /// runner's own order: the merge appends each runner's list as it arrived,
     /// and a runner lists its worktrees by the rank it keeps. Hidden ones are
     /// the Hidden section's — see `hiddenOrder`.
+    ///
+    /// **A runner with workspaces is several sections**, one per heading in
+    /// `headings(runner.id)` — the workspace level under the runner's, which
+    /// stays the outer one. Each holds the cards whose `ShellWorktree.heading`
+    /// is its id, and only the first draws the runner's own heading
+    /// (`leadsRunner`). A heading with no cards keeps its section while
+    /// nothing is searched for: it still has a board and may have an
+    /// orchestrator. A card under no heading it names — a fleet read a moment
+    /// before its layout — is not lost: it goes in a last section with no
+    /// heading. A runner `headings` names none for keeps its one section.
+    ///
+    /// A drop in a workspace's section is a reorder of that workspace's cards
+    /// only. The runner permutes exactly the rows it is named among the ranks
+    /// those rows hold, so one workspace's order moves nobody else's.
     func runnerSections(
-        _ runners: [ShellRunnerLabel], matching query: String = "",
+        _ runners: [ShellRunnerLabel],
+        headings: (String) -> [ShellWorkspaceHeading] = { _ in [] },
+        matching query: String = "",
         pending: ShellPendingOrders = ShellPendingOrders()
     ) -> [ShellRunnerSection] {
         let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return runners.compactMap { runner in
+        return runners.flatMap { runner -> [ShellRunnerSection] in
             let mine = worktrees.indices.filter {
                 worktrees[$0].runner == runner.id && !worktrees[$0].isHidden
             }
             var shown = ShellFleet.matching(query, in: mine, of: worktrees)
-            if searching && shown.isEmpty { return nil }
             if let order = pending.order(for: runner.id) {
                 let byID = Dictionary(
                     shown.map { (worktrees[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
                 shown = permuting(shown.map { worktrees[$0].id }, into: order)
                     .compactMap { byID[$0] }
             }
-            let canReorder =
-                !searching && runner.isAnswering && shown.count > 1
-                && runner.keepsOrder
-            return ShellRunnerSection(
-                runner: runner,
-                cards: shown.map { ShellCard(id: worktrees[$0].id, index: $0) },
-                canReorder: canReorder)
+            func section(_ heading: ShellWorkspaceHeading?, _ cards: [Int]) -> ShellRunnerSection {
+                ShellRunnerSection(
+                    runner: runner, heading: heading,
+                    cards: cards.map { ShellCard(id: worktrees[$0].id, index: $0) },
+                    canReorder: !searching && runner.isAnswering && cards.count > 1
+                        && runner.keepsOrder)
+            }
+
+            let named = headings(runner.id)
+            guard !named.isEmpty else {
+                if searching && shown.isEmpty { return [] }
+                return [section(nil, shown)]
+            }
+            let known = Set(named.map(\.id))
+            var sections = named.map { heading in
+                section(heading, shown.filter { worktrees[$0].heading == heading.id })
+            }
+            let strays = shown.filter { worktrees[$0].heading.map { !known.contains($0) } ?? true }
+            if !strays.isEmpty { sections.append(section(nil, strays)) }
+            if searching { sections.removeAll { $0.cards.isEmpty } }
+            for index in sections.indices { sections[index].leadsRunner = index == 0 }
+            return sections
         }
     }
 

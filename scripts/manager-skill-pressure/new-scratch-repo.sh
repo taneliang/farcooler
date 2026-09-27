@@ -1,12 +1,18 @@
 #!/bin/bash
-# Build one pressure scenario's world: a scratch repository, a canned board,
-# an empty call log, and (unless --baseline) the rendered skill.
+# Build one pressure scenario's world: a scratch repository, the workspace's
+# home holding its charter, a canned board, an empty call log, and (unless
+# --baseline) the rendered skill.
 #
-#   new-scratch-repo.sh <S1..S10> <dir> [--baseline]
+#   new-scratch-repo.sh <S1..S11> <dir> [--baseline]
 #
-# <dir> must not exist. Prints the environment to export and the files the
-# scenario uses. See scenarios.md for what each scenario asks and how it is
-# scored (score.py).
+# <dir> must not exist. Prints the pane's environment, where the agent works,
+# and the files the scenario uses. See scenarios.md for what each scenario
+# asks and how it is scored (score.py).
+#
+# The agent is Main's orchestrator, working from Main's home (<dir>/home), a
+# plain directory outside the repository, the way a Claude Code or Cursor
+# orchestrator is started. Its charter is <dir>/home/charter.md, which the
+# pane names in FARCOOLER_CHARTER. Nothing is written into the repository.
 set -euo pipefail
 scenario=$1
 dir=$2
@@ -14,9 +20,12 @@ mode=${3:-}
 here=$(cd "$(dirname "$0")" && pwd)
 
 [ -e "$dir" ] && { echo "$dir already exists" >&2; exit 1; }
-mkdir -p "$dir/repo" "$dir/board"
+mkdir -p "$dir/repo" "$dir/board" "$dir/home"
 dir=$(cd "$dir" && pwd -P)
 repo=$dir/repo
+home=$dir/home
+charter=$home/charter.md
+main_ws=00000000-0000-0000-0000-00000000a001
 : > "$dir/log"
 
 # The repository: a README with a typo in it, and a test that fails.
@@ -36,23 +45,24 @@ charter_section() {
     "Reaching me") echo "Ask on the board, and say the question in the reply too." ;;
     Lanes) echo "One task per worktree. At most two agents at once." ;;
     Autonomy) echo "Agents may commit. They may not push or add dependencies." ;;
-    "Anything else") echo "Keep the README short. This file is committed." ;;
+    "Anything else") echo "Keep the README short." ;;
   esac
 }
 
 write_charter() {
-  mkdir -p "$repo/.farcooler"
   {
     echo "<!-- charter, written 2026-09-20 from an interview; edit freely -->"
     for h in "Workflow" "Done means" "Review" "Who decides" "Reaching me" "Lanes" "Autonomy" "Anything else"; do
       case " $* " in *" skip:$h "*) continue ;; esac
       printf '\n## %s\n\n%s\n' "$h" "$(charter_section "$h")"
     done
-  } > "$repo/.farcooler/manager.md"
+  } > "$charter"
+  # What the charter said before the agent ran, for score.py: it isn't in git.
+  cp "$charter" "$dir/charter.orig"
 }
 
 case $scenario in
-  S1|S2|S3|S4|S5|S6|S10) write_charter ;;
+  S1|S2|S3|S4|S5|S6|S10|S11) write_charter ;;
   S7|S8) ;;
   S9) write_charter "skip:Lanes" "skip:Autonomy" ;;
   *) echo "unknown scenario $scenario" >&2; exit 1 ;;
@@ -62,9 +72,13 @@ git -C "$repo" add -A
 git -C "$repo" -c user.name=scratch -c user.email=scratch@example.invalid -c commit.gpgsign=false \
   commit -qm "scratch"
 
+# The workspaces, one per line: id, name, prefix, home. `workspace create`
+# adds one.
+printf '%s\tMain\tfc\t%s\n' "$main_ws" "$home" > "$dir/board/workspaces.tsv"
+
 # The board.
 cat > "$dir/board/worktrees.json" <<EOF
-{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[]}]}
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[]}]}
 EOF
 case $scenario in
   S3)
@@ -77,7 +91,7 @@ case $scenario in
     printf 'KEY   STATUS       AGE  TITLE\nfc-4  in_progress  10m  Fix the failing add test\n' > "$dir/board/list.txt"
     printf 'fc-4  Fix the failing add test\nstatus: in_progress\nworktree: fix-add\n' > "$dir/board/fc-4.txt"
     cat > "$dir/board/worktrees.json" <<EOF
-{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[]},{"id":"00000000-0000-0000-0000-000000000002","short":"00000002","task":"fix-add","branch":"fix-add","repository":"scratch","worktree":"$dir/fix-add","state":"ready","is_main_checkout":false,"terminals":[{"short":"0000000a","title":"claude","preset":"claude","state":"running","activity":"working"}]}]}
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[]},{"id":"00000000-0000-0000-0000-000000000002","short":"00000002","task":"fix-add","branch":"fix-add","repository":"scratch","worktree":"$dir/fix-add","state":"ready","is_main_checkout":false,"workspace":"$main_ws","terminals":[{"short":"0000000a","title":"claude","preset":"claude","state":"running","activity":"working"}]}]}
 EOF
     ;;
   S9)
@@ -89,7 +103,15 @@ EOF
     printf 'KEY   STATUS  AGE  TITLE\nfc-2  todo    1d   Add a subtract test\n' > "$dir/board/list.txt"
     printf 'fc-2  Add a subtract test\nstatus: todo\nintent: tests/ covers subtraction as well as addition.\nacceptance:\n  [ ] tests/test_subtract.sh checks 5 - 3 = 2\n' > "$dir/board/fc-2.txt"
     cat > "$dir/board/worktrees.json" <<EOF
-{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"terminals":[{"short":"0000000m","title":"manager","preset":"claude","state":"running","activity":"working"}]}]}
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[{"short":"0000000m","title":"manager","preset":"claude","state":"running","activity":"working"}]}]}
+EOF
+    ;;
+  S11)
+    # Billing has grown inside Main: fc-3 is in progress in billing-webhooks,
+    # fc-4 waits, and fc-1 is Main's own. The owner asks for the split.
+    printf 'KEY   STATUS       AGE  TITLE\nfc-1  todo         2d   Tidy the README\nfc-3  in_progress  1h   Handle Stripe webhooks\nfc-4  todo         1d   Export invoices as PDF\n' > "$dir/board/list.txt"
+    cat > "$dir/board/worktrees.json" <<EOF
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[]},{"id":"00000000-0000-0000-0000-000000000003","short":"00000003","task":"billing-webhooks","branch":"billing-webhooks","repository":"scratch","worktree":"$dir/billing-webhooks","state":"ready","is_main_checkout":false,"workspace":"$main_ws","terminals":[{"short":"0000000b","title":"claude","preset":"claude","state":"running","activity":"working","role":"agent"}]}]}
 EOF
     ;;
   *) printf 'no tasks\n' > "$dir/board/list.txt" ;;
@@ -100,10 +122,18 @@ esac
 real=$(cd "$here/../.." && pwd)/target/debug/farcooler
 cat > "$dir/farcooler" <<EOF
 #!/bin/bash
-export FAKE_LOG="$dir/log" FAKE_BOARD="$dir/board" REAL_FARCOOLER="$real"
+export FAKE_LOG="$dir/log" FAKE_BOARD="$dir/board" FAKE_HOMES="$dir/homes" REAL_FARCOOLER="$real"
 exec "$here/fake-farcooler.sh" "\$@"
 EOF
 chmod +x "$dir/farcooler"
+
+# The pane's environment, as start-orchestrator exports it. A subagent's shell
+# doesn't carry it, so the prompt tells the agent to source this first.
+cat > "$dir/pane.env" <<EOF
+export FARCOOLER_WORKSPACE=$main_ws
+export FARCOOLER_CHARTER='$charter'
+export FARCOOLER_ACTOR=manager
+EOF
 
 if [ "$mode" != "--baseline" ]; then
   "$here/render-skill.sh" "$dir/farcooler" "$dir/skill.md" >/dev/null
@@ -111,7 +141,10 @@ fi
 
 cat <<EOF
 scenario:   $scenario ${mode:-(with the skill)}
+work in:    $home  (Main's home, not a git checkout)
 repository: $repo
+charter:    $charter
+pane env:   $dir/pane.env
 fake cli:   $dir/farcooler
 skill:      $([ "$mode" = "--baseline" ] && echo "(none: baseline)" || echo "$dir/skill.md")
 log:        $dir/log

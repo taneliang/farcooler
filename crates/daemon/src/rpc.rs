@@ -404,6 +404,25 @@ fn required_scope(method: &str) -> Option<Scope> {
         | "task.set_status"
         | "task.note"
         | "task.block" => Scope::Control,
+        // Workspaces: the list is the shape of the fleet, like
+        // `worktree.list`; paths in it are redacted below `host_admin` by the
+        // converter, as everywhere.
+        "workspace.list" => Scope::Read,
+        // The writes sit with the board writes and `worktree.create`: they
+        // touch no git data and reveal no path, and an orchestrator has to
+        // be able to split its own workstream for any of this to be
+        // automatable. `terminal.set_role` decides which terminal a wake-up
+        // reaches, the same weight as saying you have read one. Starting an
+        // orchestrator opens an agent pane, which is `terminal.create`'s
+        // weight.
+        "workspace.create"
+        | "workspace.rename"
+        | "workspace.set_prefix"
+        | "workspace.delete"
+        | "workspace.start_orchestrator"
+        | "task.move"
+        | "worktree.assign"
+        | "terminal.set_role" => Scope::Control,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
@@ -1148,8 +1167,16 @@ impl Rpc {
                 // Adoption ignores it outright. A worktree taken over for a
                 // branch that already exists is named after that branch, so
                 // there is nothing for a caller to choose.
+                // The workspace to claim it for, explicitly, when the caller
+                // names one. Unreadable is refused rather than dropped:
+                // quietly making an unclaimed worktree would leave the caller
+                // believing it had claimed one.
+                let workspace = match p.workspace_id.as_deref() {
+                    None => None,
+                    Some(raw) => Some(wire::parse_id(raw).ok_or(DomainError::NotFound)?),
+                };
                 let ws = if p.adopt_existing {
-                    svc.adopt_branch(repository, &p.branch).await?
+                    svc.adopt_branch(repository, &p.branch, workspace).await?
                 } else {
                     svc.create_worktree_with(
                         repository,
@@ -1157,6 +1184,7 @@ impl Rpc {
                         &p.branch,
                         &p.base_revision,
                         p.fork_only,
+                        workspace,
                     )
                     .await?
                 };
@@ -1923,6 +1951,106 @@ impl Rpc {
                 )?))
             }
 
+            // ---- workspaces ----
+            //
+            // Each arm reads its payload and hands it to `workspace_ops`,
+            // which announces. A create targets its parent, the repository;
+            // everything else targets the resource it changes.
+            "workspace.list" => {
+                let repository = req.target_resource_id.as_deref().map(|raw| {
+                    wire::parse_id(raw).ok_or(DomainError::NotFound)
+                });
+                Ok(result::Value::WorkspaceList(crate::workspace_ops::list(
+                    svc,
+                    repository.transpose()?,
+                    scope,
+                )?))
+            }
+
+            "workspace.create" => {
+                let repository = Self::target(&req)?;
+                let p = match req.payload {
+                    Some(request::Payload::WorkspaceCreate(p)) => p,
+                    // An app from before the worktree rename, asking for a
+                    // WORKTREE by this method's old name. Refused as the other
+                    // retired names are, rather than as a malformed payload:
+                    // what it needs is `worktree.create`.
+                    Some(request::Payload::WorktreeCreate(_)) => {
+                        return Err(DomainError::CapabilityUnsupported { needed: "a newer Far Cooler" });
+                    }
+                    _ => return Err(DomainError::InvalidArgument { what: "payload" }),
+                };
+                Ok(result::Value::Workspace(crate::workspace_ops::create(
+                    svc,
+                    &self.watcher,
+                    repository,
+                    &p,
+                    scope,
+                )?))
+            }
+
+            "workspace.rename" => {
+                let id = Self::target(&req)?;
+                let Some(request::Payload::WorkspaceRename(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Workspace(crate::workspace_ops::rename(svc, &self.watcher, id, &p, scope)?))
+            }
+
+            "workspace.set_prefix" => {
+                let id = Self::target(&req)?;
+                let Some(request::Payload::WorkspaceSetPrefix(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Workspace(crate::workspace_ops::set_prefix(
+                    svc,
+                    &self.watcher,
+                    id,
+                    &p,
+                    scope,
+                )?))
+            }
+
+            "workspace.delete" => {
+                let id = Self::target(&req)?;
+                Ok(result::Value::Empty(crate::workspace_ops::delete(svc, &self.watcher, id)?))
+            }
+
+            "workspace.start_orchestrator" => {
+                let id = Self::target(&req)?;
+                let Some(request::Payload::WorkspaceStartOrchestrator(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let terminal = crate::workspace_ops::start_orchestrator(svc, &self.watcher, id, &p).await?;
+                self.terminal_result(terminal).await
+            }
+
+            "task.move" => {
+                let Some(request::Payload::TaskMove(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::TaskList(crate::workspace_ops::move_tasks(svc, &self.watcher, &p)?))
+            }
+
+            "worktree.assign" => {
+                let worktree = Self::target(&req)?;
+                let Some(request::Payload::WorktreeAssign(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Worktree(
+                    crate::workspace_ops::assign_worktree(svc, &self.watcher, worktree, &p, scope).await?,
+                ))
+            }
+
+            "terminal.set_role" => {
+                let terminal = Self::target(&req)?;
+                let Some(request::Payload::TerminalSetRole(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                crate::workspace_ops::set_role(svc, &self.watcher, terminal, &p).await?;
+                self.terminal_result(terminal).await
+            }
+
             "terminal.agent_answer" => {
                 let Some(request::Payload::AgentAnswer(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -2315,6 +2443,15 @@ mod tests {
             "stack.get",
             "stack.set_parent",
             "pr.refresh",
+            "workspace.list",
+            "workspace.create",
+            "workspace.rename",
+            "workspace.set_prefix",
+            "workspace.delete",
+            "task.move",
+            "worktree.assign",
+            "terminal.set_role",
+            "workspace.start_orchestrator",
         ] {
             assert!(required_scope(method).is_some(), "{method} has no declared scope");
         }
@@ -2434,8 +2571,8 @@ mod tests {
     #[test]
     fn every_board_route_is_in_the_scope_table_and_every_table_entry_is_dispatched() {
         let source = include_str!("rpc.rs");
-        let table = task_methods_in(source, "fn required_scope", "\n}\n");
-        let dispatched = task_methods_in(source, "async fn dispatch", "\n    }\n");
+        let table = methods_in(source, "fn required_scope", "\n}\n", &["task.", "workspace."]);
+        let dispatched = methods_in(source, "async fn dispatch", "\n    }\n", &["task.", "workspace."]);
 
         assert!(!table.is_empty(), "the slicing found nothing, so this test proves nothing");
         let ungated: Vec<_> = dispatched.difference(&table).collect();
@@ -2456,6 +2593,35 @@ mod tests {
         {
             assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
         }
+        // The workspace routes, the same way. `workspace.` is scanned whole
+        // above; the two that live under other prefixes are named here, in
+        // both lists, so neither can be dropped from one of them alone.
+        assert!(table.contains("workspace.list") && table.contains("workspace.delete"), "{table:?}");
+        for method in ["worktree.assign", "terminal.set_role"] {
+            let prefix = format!("{}.", method.split('.').next().expect("a dotted name"));
+            let prefix = [prefix.as_str()];
+            assert!(
+                methods_in(source, "fn required_scope", "\n}\n", &prefix).contains(method),
+                "{method} is missing from the scope table"
+            );
+            assert!(
+                methods_in(source, "async fn dispatch", "\n    }\n", &prefix).contains(method),
+                "{method} is never dispatched"
+            );
+        }
+        assert_eq!(required_scope("workspace.list"), Some(Scope::Read));
+        for method in [
+            "workspace.create",
+            "workspace.rename",
+            "workspace.set_prefix",
+            "workspace.delete",
+            "task.move",
+            "worktree.assign",
+            "terminal.set_role",
+            "workspace.start_orchestrator",
+        ] {
+            assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
+        }
         // The one route that must never exist. Notes are append-only: the
         // store has a `BEFORE UPDATE` trigger that refuses unconditionally, so
         // a route here would fail on a caller's data rather than at review.
@@ -2463,25 +2629,30 @@ mod tests {
         assert_eq!(required_scope("task.note_edit"), None);
     }
 
-    /// The `"task.…"` string literals inside one function of this file.
+    /// The method string literals under `prefixes` (`"task."`, …) inside one
+    /// function of this file.
     ///
     /// `start` names the function, `end` the first thing after its body — `\n}\n`
     /// for a free function, `\n    }\n` for one inside an `impl`. Crude on
     /// purpose: a parser here would be a second thing that can be wrong.
     #[cfg(test)]
-    fn task_methods_in(
+    fn methods_in(
         source: &str,
         start: &str,
         end: &str,
+        prefixes: &[&str],
     ) -> std::collections::BTreeSet<String> {
         let body = source.split_once(start).expect("this file declares that function").1;
         let body = body.split_once(end).expect("that function closes").0;
         let mut found = std::collections::BTreeSet::new();
-        let mut rest = body;
-        while let Some((_, after)) = rest.split_once("\"task.") {
-            let (name, tail) = after.split_once('"').expect("a closed string literal");
-            found.insert(format!("task.{name}"));
-            rest = tail;
+        for prefix in prefixes {
+            let needle = format!("\"{prefix}");
+            let mut rest = body;
+            while let Some((_, after)) = rest.split_once(needle.as_str()) {
+                let (name, tail) = after.split_once('"').expect("a closed string literal");
+                found.insert(format!("{prefix}{name}"));
+                rest = tail;
+            }
         }
         found
     }
@@ -2588,7 +2759,8 @@ mod terminal_task_tests {
     #[tokio::test]
     async fn a_terminal_for_a_task_on_its_own_board_exports_the_key() {
         let (_dir, svc, factory, ws) = a_handler().await;
-        let task = svc.store.create_task(ws.repository_id, "the work", models::Actor::User).unwrap();
+        let main = svc.store.ensure_main_workspace(ws.repository_id).unwrap();
+        let task = svc.store.create_task(main.id, "the work", models::Actor::User).unwrap();
 
         let made = terminal(&factory, create(ws.id, "claude", Some(&task.key), false)).await;
         assert_eq!(made.task_id.as_deref(), Some(task.id.as_bytes().as_slice()), "the terminal says which task");
@@ -2606,7 +2778,8 @@ mod terminal_task_tests {
     #[tokio::test]
     async fn a_terminal_split_into_the_layout_for_a_task_exports_the_key() {
         let (_dir, svc, factory, ws) = a_handler().await;
-        let task = svc.store.create_task(ws.repository_id, "the work", models::Actor::User).unwrap();
+        let main = svc.store.ensure_main_workspace(ws.repository_id).unwrap();
+        let task = svc.store.create_task(main.id, "the work", models::Actor::User).unwrap();
         // A layout to join: one ordinary pane first.
         terminal(&factory, create(ws.id, "shell", None, false)).await;
 

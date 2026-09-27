@@ -333,13 +333,14 @@ private let realBoardJSON = """
        "created_at":1757170800000,"updated_at":1757260900000,"intent":"Make it move",
        "acceptance":[{"id":"0198f2c0-0000-7000-8000-00000000000a","text":"It moves","met":false}],
        "constraints":["No new migrations"],"labels":["board"],
-       "worktree_id":"0198f2c0-0000-7000-8000-0000000000ee"},
+       "worktree_id":"0198f2c0-0000-7000-8000-0000000000ee",
+       "workspace":"0198f2c0-0000-7000-8000-0000000000dd"},
       {"id":"0198f2c0-0000-7000-8000-000000000002","short":"00000002",
        "repository_id":"0198f2c0-0000-7000-8000-0000000000ff","resource_version":1,
        "key":"fc-2","title":"Decide the threshold","status":"needs_decision",
        "status_since":1757260800000,"stale_for_seconds":120,
        "created_at":null,"updated_at":null,"intent":"",
-       "acceptance":[],"constraints":[],"labels":[],"worktree_id":null}
+       "acceptance":[],"constraints":[],"labels":[],"worktree_id":null,"workspace":null}
     ]}
     """
 
@@ -362,9 +363,14 @@ private let realBoardJSON = """
     #expect(doing.statusSince == Date(timeIntervalSince1970: 1_757_260_800))
     #expect(doing.createdAt == Date(timeIntervalSince1970: 1_757_170_800))
     #expect(doing.updatedAt == Date(timeIntervalSince1970: 1_757_260_900))
+    // The board it is on, as `workspace`: what a board keyed by workspace
+    // files it under.
+    #expect(doing.workspaceID == "0198f2c0-0000-7000-8000-0000000000dd")
 
     let asking = try #require(board.columns.first { $0.status == .needsDecision }?.rows.first)
     #expect(asking.worktreeID == nil, "a task with no lane was given one")
+    // `null` from a runner without `workstreams`.
+    #expect(asking.workspaceID == nil)
     // `null` is what `tasks_json` sends for a runner too old to say.
     #expect(asking.createdAt == nil)
     #expect(asking.updatedAt == nil)

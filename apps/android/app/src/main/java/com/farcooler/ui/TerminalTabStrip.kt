@@ -151,6 +151,12 @@ fun TerminalTabStrip(
      * disabled for the one chip that can never have one.
      */
     onClose: (Terminal) -> Unit = {},
+    /**
+     * Orchestrators' tab titles, by terminal id: "Billing Orchestrator" for a
+     * workspace's manager running in this checkout, which another workspace
+     * may own. See `FleetLayout.orchestratorTitles`.
+     */
+    titles: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier,
 ) {
     data class Chip(
@@ -178,7 +184,7 @@ fun TerminalTabStrip(
         .map { terminal ->
             Chip(
                 pane = Pane.Terminal(terminal.id),
-                label = terminal.displayName(numbering[terminal.id]),
+                label = titles[terminal.id] ?: terminal.displayName(numbering[terminal.id]),
                 kind = StateKind.parse(terminal.state),
                 wantsAttention = terminal.agent.wantsAttention,
                 terminal = terminal,

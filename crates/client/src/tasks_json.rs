@@ -124,6 +124,10 @@ pub fn task_json(task: &pb::Task, now: i64) -> serde_json::Value {
         "constraints": task.constraints,
         "labels": task.labels,
         "worktree_id": task.worktree_id.as_ref().map(|b| uuid_of(b).to_string()),
+        // The board this task is on: its workspace's id. Null from a runner
+        // without `workstreams`, whose proto3 zero is empty bytes, never the
+        // nil uuid, which a client would key a board by.
+        "workspace": crate::workspaces_json::workspace_of(Some(&task.workspace_id)),
     })
 }
 
@@ -204,6 +208,16 @@ mod tests {
         for key in ["intent", "constraints", "title", "short", "repository_id"] {
             assert!(row.get(key).is_some(), "{key} is missing");
         }
+    }
+
+    /// A row names its board as `workspace`, the key the apps decode, and a
+    /// runner without workstreams sends null rather than the nil uuid.
+    #[test]
+    fn a_row_names_its_board() {
+        let on = task_json(&pb::Task { workspace_id: id(6), ..Default::default() }, 0);
+        assert_eq!(on["workspace"], uuid_of(&id(6)).to_string());
+        let old = task_json(&pb::Task::default(), 0);
+        assert!(old["workspace"].is_null(), "{old}");
     }
 
     #[test]

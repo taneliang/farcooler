@@ -106,6 +106,31 @@ struct WorktreeCallsTests {
         return results
     }
 
+    /// The lines `createWorktree` sends, asked to claim for a workspace, on
+    /// a runner that advertises `capabilities`.
+    private static func madeWorktree(on capabilities: [String]) async -> [[String]] {
+        let runner = StartTaskTests.Runner(capabilities: capabilities)
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.commandRunnerForTesting = { args in runner.answer(args) }
+        _ = await client.createWorktree(
+            repo: "repo", task: "fix-it", branch: "fix-it", base: "HEAD",
+            workspace: "0198f2c0-0000-7000-8000-0000000000cc")
+        return runner.calls
+    }
+
+    /// "New Worktree in X…" claims what it makes for the workspace it's
+    /// handed, so the worktree isn't Unclaimed for good; on a runner without
+    /// workspaces, which would refuse the flag, it claims nothing.
+    @Test func aNewWorktreeFromTheSheetIsClaimed() async throws {
+        let create = { (calls: [[String]]) in calls.first { Array($0.prefix(2)) == ["worktree", "create"] } }
+        let made = try #require(create(await Self.madeWorktree(on: ["workspaces", "terminals", "workstreams"])))
+        let at = try #require(made.firstIndex(of: "--workspace"), "\(made)")
+        #expect(made[at + 1] == "0198f2c0-0000-7000-8000-0000000000cc", "\(made)")
+
+        let old = try #require(create(await Self.madeWorktree(on: ["workspaces", "terminals"])))
+        #expect(!old.contains("--workspace"), "\(old)")
+    }
+
     @Test func eachWorktreeCallSendsTheWorktreeCommand() async {
         for (call, expected, sent) in await exercise() {
             #expect(sent.contains(expected), "\(call) sent \(sent)")
@@ -133,16 +158,32 @@ struct WorktreeCallsTests {
         // `startTask` builds its create from the runner's capabilities, so it
         // runs against a runner that has all of them.
         let runner = StartTaskTests.Runner(
-            capabilities: ["workspaces", "terminals", "launch_prompt", "workspace_fork_only"])
+            capabilities: [
+                "workspaces", "terminals", "launch_prompt", "workspace_fork_only", "workstreams",
+            ])
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         client.commandRunnerForTesting = { args in runner.answer(args) }
         client.copyToClipboard = { _ in }
         _ = await client.startTask(
-            project: "repo", description: "Fix the flaky test", name: "fix-flaky", agent: "claude")
+            project: "repo", description: "Fix the flaky test", name: "fix-flaky", agent: "claude",
+            workspace: "0198f2c0-0000-7000-8000-0000000000dd")
         #expect(
-            runner.calls.contains { $0.contains("create") && $0.contains("--fork-only") },
+            runner.calls.contains {
+                $0.contains("create") && $0.contains("--fork-only") && $0.contains("--workspace")
+            },
             "startTask made its worktree: \(runner.calls)")
         lines += runner.calls
+
+        // "New Worktree in X…", claimed for a workspace.
+        lines += await Self.madeWorktree(on: ["workspaces", "terminals", "workstreams"])
+
+        // A board keyed by workspace, and one on a runner without them.
+        let boards = Recorder()
+        let reader = self.client(boards)
+        _ = await reader.taskBoard(repository: "repo", workspace: "0198f2c0-0000-7000-8000-0000000000dd")
+        _ = await reader.taskBoard(repository: "repo", workspace: nil)
+        #expect(boards.calls.count == 2)
+        lines += boards.calls
 
         var seen = Set<[String]>()
         for line in lines where seen.insert(line).inserted {

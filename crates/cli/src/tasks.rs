@@ -33,8 +33,12 @@ use farcooler_store::models::{Actor, NoteKind, TaskStatus};
 use farcooler_transport::ClientError;
 use uuid::Uuid;
 
+use crate::workspaces::{
+    NO_WORKSPACES, WORKSPACE_ENV, has_workstreams, needs_workstreams, pane_workspace, resolve_workspace,
+    workspaces_on,
+};
 use crate::{
-    Fallible, Link, connect_to, expect_value, id_bytes, list_repositories, req, req_for,
+    Fallible, connect_to, expect_value, id_bytes, list_repositories, req, req_for,
     resolve_repository, short_bytes, truncate, uuid_of, with,
 };
 
@@ -71,9 +75,16 @@ pub enum TaskCmd {
     /// history — so that surveying the whole board costs one call whatever is
     /// on it. `--json` also carries each row's intent and acceptance; history
     /// and blocks are `task show`'s.
+    ///
+    /// Which board: `--workspace`'s. Otherwise the pane's own workspace's
+    /// (FARCOOLER_WORKSPACE). Otherwise every board in the repository, each
+    /// row naming its workspace.
     List {
-        /// Which repository's board. Defaults to the pane's own, then to the
-        /// only one there is.
+        /// One workspace's board, by name, task prefix or id.
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Which repository. Defaults to the pane's own, then to the only one
+        /// there is.
         #[arg(long)]
         repo: Option<String>,
         /// Only tasks sitting in this status.
@@ -131,7 +142,13 @@ pub enum TaskCmd {
         /// The worktree this task will use, if it already has one.
         #[arg(long)]
         worktree: Option<String>,
-        /// Which repository's board. Defaults to the only one there is.
+        /// Which workspace's board, by name, task prefix or id. Defaults to
+        /// the pane's own workspace (FARCOOLER_WORKSPACE), then to the
+        /// repository's Main.
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Which repository. Defaults to the pane's own, then to the only one
+        /// there is.
         #[arg(long)]
         repo: Option<String>,
         /// Who this write is from: `user`, `manager`, or `agent:<terminal id>`.
@@ -283,6 +300,28 @@ pub enum TaskCmd {
         #[arg(long)]
         actor: Option<String>,
     },
+    /// Move tasks to another workspace's board, in the same repository.
+    ///
+    /// Each keeps its key, its history and its lane, and gets a note saying
+    /// where it came from. A task already on that board is left alone.
+    Move {
+        /// Keys like `fc-42`, or the last eight of a task's id.
+        #[arg(required = true, allow_negative_numbers = true)]
+        keys: Vec<String>,
+        /// The workspace, by name, task prefix or id, in the tasks'
+        /// repository.
+        #[arg(long)]
+        to: String,
+        /// Which board the keys are on. Only needed when two repositories
+        /// are registered here and both use one.
+        #[arg(long)]
+        repo: Option<String>,
+        /// Who this write is from: `user`, `manager`, or `agent:<terminal id>`.
+        /// Read from FARCOOLER_ACTOR when not given, and `user` when neither
+        /// says — always sent, never left for the runner to assume.
+        #[arg(long)]
+        actor: Option<String>,
+    },
     /// Every note in a repository whose body carries a phrase.
     ///
     /// What makes the board a memory rather than a queue. "Why did we do it
@@ -315,8 +354,10 @@ pub enum TaskCmd {
     /// or a new one (`--new` and `--branch`). A worktree that already has an
     /// agent running gets a warning and is dispatched into anyway: two
     /// writers in one worktree commit over each other's work, and whether
-    /// that's acceptable is the caller's call. A task that still waits on
-    /// another is warned about too. A task whose own agent is still running
+    /// that's acceptable is the caller's call. So does one another
+    /// workspace owns, or that another workspace's terminal is working in.
+    /// One nobody has claimed becomes the task's workspace's. A task that
+    /// still waits on another is warned about too. A task whose own agent is still running
     /// is refused, unless `--again` says a second one is meant.
     ///
     /// A pane the runner can't see running within 3 seconds is still
@@ -370,8 +411,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
 
     match cmd {
-        TaskCmd::List { repo, status, stale_for } => {
-            let repository = repository_for(&mut link, repo.as_deref()).await?;
+        TaskCmd::List { workspace, repo, status, stale_for } => {
             let status = match status.as_deref() {
                 Some(word) => Some(status_named(word)?),
                 None => None,
@@ -380,7 +420,10 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 Some(word) => Some(parse_gap(word)?),
                 None => None,
             };
-            let items = tasks_in(&mut link, repository, status, stale).await?;
+            let board =
+                board_for(&mut link, repo.as_deref(), workspace.as_deref(), std::env::var(WORKSPACE_ENV).ok())
+                    .await?;
+            let items = tasks_in(&mut link, &board, status, stale).await?;
 
             if json {
                 println!("{}", render_list_json(&items));
@@ -390,20 +433,18 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 println!("nothing on this board");
                 return Ok(());
             }
-            let now = now_millis();
-            for t in &items {
-                // How long since anything moved on it -- a move, a note, an
-                // edit -- the one clock "stale" reads everywhere, and the one
-                // `--stale-for` picked these rows by.
-                let since = tasks_json::last_moved(t);
-                println!(
-                    "{:<8}  {:<14}  {:>6}  {}",
-                    t.key,
-                    status_word(t.status),
-                    spoken_gap(stale_for_seconds(since, now)),
-                    truncate(&t.title, 60)
-                );
-            }
+            // Every board in the repository at once: each row says whose.
+            let names = match (&board.workspace, board.has_workspaces) {
+                (None, true) => Some(
+                    workspaces_on(&mut link, Some(board.repository))
+                        .await?
+                        .into_iter()
+                        .map(|w| (uuid_of(&w.id), w.name))
+                        .collect(),
+                ),
+                _ => None,
+            };
+            print!("{}", render_list(&items, names.as_ref(), now_millis()));
         }
 
         TaskCmd::Show { key, fields, notes, repo } => {
@@ -432,29 +473,34 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             constraint,
             label,
             worktree,
+            workspace,
             repo,
             actor,
         } => {
             let actor = actor_for(actor.as_deref())?;
-            let repository = repository_for(&mut link, repo.as_deref()).await?;
+            let board =
+                board_for(&mut link, repo.as_deref(), workspace.as_deref(), std::env::var(WORKSPACE_ENV).ok())
+                    .await?;
             let worktree_id = match worktree.as_deref() {
                 Some(name) => Some(crate::resolve_worktree_id(&mut link, name).await?),
                 None => None,
             };
+            let create = task_create_request(
+                &board,
+                pb::TaskCreate {
+                    repository_id: bytes::Bytes::new(),
+                    title: title.trim().to_string(),
+                    intent: intent.unwrap_or_default(),
+                    acceptance: accept.iter().map(|t| new_acceptance(t)).collect(),
+                    constraints: constraint,
+                    labels: label,
+                    worktree_id: worktree_id.map(id_bytes),
+                    actor: actor.to_string(),
+                    workspace_id: None,
+                },
+            );
             let r = link
-                .call(with(
-                    req_for("task.create", repository),
-                    request::Payload::TaskCreate(pb::TaskCreate {
-                        repository_id: id_bytes(repository),
-                        title: title.trim().to_string(),
-                        intent: intent.unwrap_or_default(),
-                        acceptance: accept.iter().map(|t| new_acceptance(t)).collect(),
-                        constraints: constraint,
-                        labels: label,
-                        worktree_id: worktree_id.map(id_bytes),
-                        actor: actor.to_string(),
-                    }),
-                ))
+                .call(create)
                 .await
                 .map_err(|e| refused(e, "a task needs a title of at most 200 characters"))?;
             let result::Value::Task(created) = expect_value(r.value, "task")? else {
@@ -608,6 +654,43 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             println!("{}", dispatched_output(&task.key, &done, json));
         }
 
+        TaskCmd::Move { keys, to, repo, actor } => {
+            let actor = actor_for(actor.as_deref())?;
+            if !has_workstreams(&link.capabilities()) {
+                return Err(NO_WORKSPACES.into());
+            }
+            let mut tasks = Vec::with_capacity(keys.len());
+            for key in &keys {
+                tasks.push(find_task(&mut link, repo.as_deref(), key).await?);
+            }
+            // The first task's repository: a board is only ever moved to
+            // within one, and the runner refuses the rest in words.
+            let repository = uuid_of(&tasks[0].repository_id);
+            let repositories = list_repositories(&mut link).await?;
+            let mine = workspaces_on(&mut link, Some(repository)).await?;
+            let target = resolve_workspace(&mine, &repositories, &to)?;
+            let r = link
+                .call(move_request(&tasks, uuid_of(&target.id), actor))
+                .await
+                .map_err(|e| refused(e, "those tasks could not be moved"))?;
+            let result::Value::TaskList(moved) = expect_value(r.value, "task_list")? else {
+                return Err("the daemon returned the wrong resource".into());
+            };
+            if json {
+                println!("{}", render_list_json(&moved.items));
+                return Ok(());
+            }
+            // The runner answers with every task named, moved or not: one
+            // already on the board was left alone, and is said to be.
+            for (before, after) in tasks.iter().zip(&moved.items) {
+                if before.workspace_id == target.id {
+                    println!("{}  was on {} already", after.key, target.name);
+                } else {
+                    println!("{}  moved to {}", after.key, target.name);
+                }
+            }
+        }
+
         TaskCmd::Note { key, kind, body, rejected, supersedes, repo, actor } => {
             let kind = writable_kind(&kind)?;
             let actor = actor_for(actor.as_deref())?;
@@ -734,7 +817,11 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
         }
 
         TaskCmd::Search { query, kind, repo } => {
-            let repository = repository_for(&mut link, repo.as_deref()).await?;
+            // The record is the repository's, every board of it: the pane's
+            // workspace only says which repository.
+            let repository = board_for(&mut link, repo.as_deref(), None, std::env::var(WORKSPACE_ENV).ok())
+                .await?
+                .repository;
             let kind = match kind.as_deref() {
                 Some(word) => Some(kind_named(word)?),
                 None => None,
@@ -758,7 +845,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             // A hit names a task by id, and the whole point of this read is a
             // task nobody remembers the key of. One listing turns every id in
             // the answer back into the word a person would type next.
-            let keys = key_index(&tasks_in(&mut link, repository, None, None).await?);
+            let keys = key_index(&tasks_in(&mut link, &Board::repository(repository), None, None).await?);
 
             if json {
                 let items: Vec<_> = l
@@ -899,6 +986,35 @@ fn wants(fields: &[&str], section: &str) -> bool {
 /// on a Tuesday.
 fn render_list_json(tasks: &[pb::Task]) -> String {
     tasks_json::list_json(tasks, now_millis()).to_string()
+}
+
+/// The board as a table. `names` is set when the rows are every board in a
+/// repository, and each row then says whose it is, in a WORKSPACE column; a
+/// single workspace's board has no such column, since every row would say
+/// the same thing.
+fn render_list(tasks: &[pb::Task], names: Option<&std::collections::HashMap<Uuid, String>>, now: i64) -> String {
+    let mut out = String::new();
+    if names.is_some() {
+        out.push_str(&format!("{:<8}  {:<14}  {:<16}  {:>6}  {}\n", "KEY", "STATUS", "WORKSPACE", "MOVED", "TITLE"));
+    }
+    for t in tasks {
+        // How long since anything moved on it -- a move, a note, an edit --
+        // the one clock "stale" reads everywhere, and the one `--stale-for`
+        // picked these rows by.
+        let since = spoken_gap(stale_for_seconds(tasks_json::last_moved(t), now));
+        let (key, status, title) = (&t.key, status_word(t.status), truncate(&t.title, 60));
+        match names {
+            Some(names) => {
+                let workspace = names
+                    .get(&uuid_of(&t.workspace_id))
+                    .cloned()
+                    .unwrap_or_else(|| short_bytes(&t.workspace_id));
+                out.push_str(&format!("{key:<8}  {status:<14}  {:<16}  {since:>6}  {title}\n", truncate(&workspace, 16)));
+            }
+            None => out.push_str(&format!("{key:<8}  {status:<14}  {since:>6}  {title}\n")),
+        }
+    }
+    out
 }
 
 fn render_show_json(detail: &pb::TaskDetail) -> String {
@@ -1177,15 +1293,89 @@ fn actor_for(given: Option<&str>) -> Result<Actor, String> {
 // Reaching the board
 // ---------------------------------------------------------------------------
 
+/// A board a command reads or writes: one workspace's, or, with no
+/// workspace, every board in the repository at once.
+#[derive(Debug, Clone, PartialEq)]
+struct Board {
+    repository: Uuid,
+    workspace: Option<pb::Workspace>,
+    /// Whether the runner has workspaces at all. Without them its one board
+    /// is the repository's, and no row names a workspace.
+    has_workspaces: bool,
+}
+
+impl Board {
+    /// The whole repository, on a runner whose boards aren't asked about.
+    fn repository(repository: Uuid) -> Board {
+        Board { repository, workspace: None, has_workspaces: false }
+    }
+}
+
+/// Which board a command means.
+///
+/// `--workspace` first, looked for in `--repo` if that's given (see
+/// `workspaces::scope`). Then the pane's own workspace, `from_env`
+/// (FARCOOLER_WORKSPACE), unless `--repo` names a different repository.
+/// Then the whole repository `repository_for` picks, with no workspace:
+/// `task list` shows every board, each row naming its own, and `task create`
+/// files on the repository's Main.
+///
+/// A pane whose workspace this runner doesn't have is refused rather than
+/// widened to the repository: a board read as the whole repository would be
+/// read as that workspace's, and a task created there would land on Main.
+async fn board_for<L: DispatchLink>(
+    link: &mut L,
+    repo: Option<&str>,
+    workspace: Option<&str>,
+    from_env: Option<String>,
+) -> Result<Board, Box<dyn std::error::Error>> {
+    let has_workspaces = has_workstreams(&link.capabilities());
+    let pane = pane_workspace(from_env);
+    if let Some(named) = workspace {
+        if !has_workspaces {
+            return Err(NO_WORKSPACES.into());
+        }
+        let repositories = list_repositories(link).await?;
+        let all = workspaces_on(link, None).await?;
+        let scoped = crate::workspaces::scope(&all, &repositories, repo, pane)?;
+        let ws = resolve_workspace(&scoped, &repositories, named)?.clone();
+        return Ok(Board { repository: uuid_of(&ws.repository_id), workspace: Some(ws), has_workspaces });
+    }
+    if let (true, Some(own)) = (has_workspaces, pane) {
+        let all = workspaces_on(link, None).await?;
+        match (all.into_iter().find(|w| uuid_of(&w.id) == own), repo) {
+            (Some(ws), None) => {
+                return Ok(Board { repository: uuid_of(&ws.repository_id), workspace: Some(ws), has_workspaces });
+            }
+            (Some(ws), Some(name)) => {
+                let repositories = list_repositories(link).await?;
+                let named = uuid_of(&resolve_repository(&repositories, name)?.id);
+                let workspace = (named == uuid_of(&ws.repository_id)).then_some(ws);
+                return Ok(Board { repository: named, workspace, has_workspaces });
+            }
+            (None, None) => {
+                return Err(format!(
+                    "{WORKSPACE_ENV} names a workspace this runner doesn't have. name a board with \
+                     --workspace, or a repository with --repo"
+                )
+                .into());
+            }
+            (None, Some(_)) => {}
+        }
+    }
+    let repository = repository_for(link, repo).await?;
+    Ok(Board { repository, workspace: None, has_workspaces })
+}
+
 /// Which repository a command works in.
 ///
 /// `--repo` first. Then the only repository, when there is only one. Then the
-/// repository the pane's own task lives in, since keys are per repository and
-/// `FARCOOLER_TASK` therefore names one. A runner with several repositories and
-/// no hint at all is asked rather than guessed at: writing a task onto the
-/// wrong board is not something a person would notice for days.
-async fn repository_for(
-    link: &mut Link,
+/// repository the pane's own task lives in, since `FARCOOLER_TASK` names one.
+/// A runner with several repositories and no hint at all is asked rather than
+/// guessed at: writing a task onto the wrong board is not something a person
+/// would notice for days.
+async fn repository_for<L: DispatchLink>(
+    link: &mut L,
     given: Option<&str>,
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
     let repositories = list_repositories(link).await?;
@@ -1213,21 +1403,16 @@ async fn repository_for(
     }
 }
 
-async fn tasks_in(
-    link: &mut Link,
-    repository: Uuid,
+/// Every task on `board`, or those in `status`, or those nothing has moved
+/// on for `stale_after`.
+async fn tasks_in<L: DispatchLink>(
+    link: &mut L,
+    board: &Board,
     status: Option<TaskStatus>,
     stale_after: Option<Duration>,
 ) -> Result<Vec<pb::Task>, Box<dyn std::error::Error>> {
     let r = link
-        .call(with(
-            req_for("task.list", repository),
-            request::Payload::TaskList(pb::TaskListRequest {
-                repository_id: id_bytes(repository),
-                status: status.map(pb_status).unwrap_or_default(),
-                stale_after_millis: stale_after.map(|d| d.as_millis() as u64),
-            }),
-        ))
+        .call(task_list_request(board, status, stale_after))
         .await
         .map_err(|e| refused(e, "that board could not be read"))?;
     let result::Value::TaskList(l) = expect_value(r.value, "task_list")? else {
@@ -1236,8 +1421,57 @@ async fn tasks_in(
     Ok(l.items)
 }
 
+/// `task.list` for `board`. A workspace's board names `workstreams`: a runner
+/// too old to know the field would drop it and answer with the whole
+/// repository, which would read as that workspace's board.
+fn task_list_request(board: &Board, status: Option<TaskStatus>, stale_after: Option<Duration>) -> pb::Request {
+    let workspace = board.workspace.as_ref().map(|w| w.id.clone());
+    let asking_a_workspace = workspace.is_some();
+    let r = with(
+        req_for("task.list", board.repository),
+        request::Payload::TaskList(pb::TaskListRequest {
+            repository_id: id_bytes(board.repository),
+            status: status.map(pb_status).unwrap_or_default(),
+            stale_after_millis: stale_after.map(|d| d.as_millis() as u64),
+            workspace_id: workspace,
+        }),
+    );
+    if asking_a_workspace { needs_workstreams(r) } else { r }
+}
+
+/// `task.create` of `create` onto `board`: its repository, and its workspace
+/// when it names one, which then names `workstreams` for `task_list_request`'s
+/// reason. A runner too old to know the field would drop it and file the task
+/// on Main. `create`'s own repository and workspace are ignored; the board
+/// says both.
+fn task_create_request(board: &Board, create: pb::TaskCreate) -> pb::Request {
+    let workspace = board.workspace.as_ref().map(|w| w.id.clone());
+    let filing_on_a_workspace = workspace.is_some();
+    let r = with(
+        req_for("task.create", board.repository),
+        request::Payload::TaskCreate(pb::TaskCreate {
+            repository_id: id_bytes(board.repository),
+            workspace_id: workspace,
+            ..create
+        }),
+    );
+    if filing_on_a_workspace { needs_workstreams(r) } else { r }
+}
+
+/// `task.move` of `tasks` to `workspace`, as `actor`.
+fn move_request(tasks: &[pb::Task], workspace: Uuid, actor: Actor) -> pb::Request {
+    needs_workstreams(with(
+        req("task.move"),
+        request::Payload::TaskMove(pb::TaskMove {
+            task_ids: tasks.iter().map(|t| t.id.clone()).collect(),
+            workspace_id: id_bytes(workspace),
+            actor: actor.to_string(),
+        }),
+    ))
+}
+
 async fn detail_of(
-    link: &mut Link,
+    link: &mut crate::Link,
     task: Uuid,
     notes: Option<NoteKind>,
 ) -> Result<pb::TaskDetail, Box<dyn std::error::Error>> {
@@ -1262,7 +1496,7 @@ async fn detail_of(
 /// The only write in this file that touches a note, and it only ever adds one.
 /// `supersedes` names an earlier entry and changes nothing about it.
 async fn append_note(
-    link: &mut Link,
+    link: &mut crate::Link,
     task: Uuid,
     kind: NoteKind,
     body: &str,
@@ -1307,8 +1541,8 @@ async fn append_note(
 /// Any OTHER refusal is passed on. A board that cannot be read is a fact the
 /// caller needs, and swallowing it here would hide a scope denial behind a
 /// slower path that would only be denied again.
-async fn tasks_with_key(
-    link: &mut Link,
+async fn tasks_with_key<L: DispatchLink>(
+    link: &mut L,
     repository: Option<Uuid>,
     key: &str,
 ) -> Result<Vec<pb::Task>, Box<dyn std::error::Error>> {
@@ -1343,13 +1577,16 @@ async fn tasks_with_key(
 
 /// One task, by the key a person types or by the short id `show` prints.
 ///
-/// Without `--repo` every registered board is asked and an ambiguous answer is
-/// refused rather than picked from — writing to the wrong board is the failure
-/// that would be found days later. That the refusal is nearly unreachable is
-/// not a reason to drop it: a key is `<prefix>-<n>` and `task_key_prefix` has
-/// a unique index, so a runner cannot mint one key twice, but a task still
-/// answers to the `-1` it had before its board got a prefix, and two boards
-/// that were both prefixless each had a `-1` — see `Store::tasks_with_key`.
+/// Without `--repo` every registered repository is asked and an ambiguous
+/// answer is refused rather than picked from — writing to the wrong board is
+/// the failure that would be found days later. That the refusal is nearly
+/// unreachable is not a reason to drop it: a key is `<prefix>-<n>`, a prefix
+/// belongs to one workspace on the whole runner (`workspaces_one_prefix`, a
+/// unique index that ignores case), and numbering counts every key and former
+/// key on the runner, so a runner cannot mint one key twice — and a task
+/// moved to another workspace keeps its key. But a task still answers to the
+/// `-1` it had before its board got a prefix, and two boards that were both
+/// prefixless each had a `-1` — see `Store::tasks_with_key`.
 ///
 /// Two questions, asked cheapest first. A key goes straight to the runner's
 /// index; only if that names nothing does this fall back to reading the boards
@@ -1357,8 +1594,8 @@ async fn tasks_with_key(
 /// prints — there is no index for the last eight characters of a uuid, and
 /// `task block` is not worth a second table to avoid one listing on a miss.
 /// The fallback is also what answers for a runner too old to have the route.
-async fn find_task(
-    link: &mut Link,
+async fn find_task<L: DispatchLink>(
+    link: &mut L,
     repo: Option<&str>,
     needle: &str,
 ) -> Result<pb::Task, Box<dyn std::error::Error>> {
@@ -1376,7 +1613,7 @@ async fn find_task(
             None => repositories.iter().map(|r| uuid_of(&r.id)).collect(),
         };
         for repository in searched {
-            for task in tasks_in(link, repository, None, None).await? {
+            for task in tasks_in(link, &Board::repository(repository), None, None).await? {
                 if task.key.to_lowercase() == wanted || short_bytes(&task.id) == wanted {
                     found.push(task);
                 }
@@ -1505,6 +1742,10 @@ pub(crate) struct Refused {
 }
 
 impl Refused {
+    pub(crate) fn new(said: String, code: Option<i32>) -> Refused {
+        Refused { said, code }
+    }
+
     /// The runner's stable word for this refusal, if it sent one.
     pub(crate) fn word(&self) -> Option<&'static str> {
         self.code.map(farcooler_core::error::word_for)
@@ -1525,7 +1766,7 @@ impl std::fmt::Display for Refused {
 impl std::error::Error for Refused {}
 
 /// `refused`, unboxed, for a caller that rewords it before it's returned.
-fn refusal(err: ClientError, invalid: &str) -> Refused {
+pub(crate) fn refusal(err: ClientError, invalid: &str) -> Refused {
     let (code, what) = match err {
         ClientError::Daemon { code, what, .. } => (code, what),
         // `Codec` is transparent over `CodecError`, which is transparent over
@@ -1545,7 +1786,14 @@ fn refusal(err: ClientError, invalid: &str) -> Refused {
     let word = farcooler_core::error::word_for(code);
     let said: String = match word {
         "not-found" => "that task is not on this runner".to_string(),
-        "invalid-argument" => said_about(&what).unwrap_or(invalid).to_string(),
+        // This CLI's sentence about its own flag first, then the runner's own
+        // sentence for the word (the workspace refusals: "That prefix is
+        // already used by another workspace."), and only then the call
+        // site's guess. Never the word itself.
+        "invalid-argument" => said_about(&what)
+            .or_else(|| farcooler_core::error::sentence(&what))
+            .unwrap_or(invalid)
+            .to_string(),
         "resource-conflict" => {
             "this task changed while you were reading it. read it again and reapply the change"
                 .to_string()
@@ -1621,7 +1869,10 @@ struct Dispatch<'a> {
 /// answer. Everything `dispatch` sends is built in `dispatch` itself, so a
 /// test that fakes this sees the real requests, keys and actors and all. No
 /// test in this crate starts a daemon.
-trait DispatchLink {
+///
+/// The board reads that choose which board a command means (`board_for`,
+/// `repository_for`, `find_task`) go through it too, for the same reason.
+pub(crate) trait DispatchLink {
     /// What the runner said it can do, in its handshake.
     fn capabilities(&self) -> Vec<String>;
     async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError>;
@@ -1630,12 +1881,12 @@ trait DispatchLink {
     async fn pause(&mut self, wait: Duration);
 }
 
-impl DispatchLink for Link {
+impl DispatchLink for crate::Link {
     fn capabilities(&self) -> Vec<String> {
         self.daemon_capabilities().to_vec()
     }
     async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError> {
-        Link::call(self, req).await
+        crate::Link::call(self, req).await
     }
     async fn pause(&mut self, wait: Duration) {
         tokio::time::sleep(wait).await;
@@ -1756,6 +2007,72 @@ fn working_on(t: &pb::Terminal, task: &[u8]) -> bool {
     use pb::TerminalState::{Running, Starting, Unknown};
     t.task_id.as_deref() == Some(task)
         && [Running as i32, Starting as i32, Unknown as i32].contains(&t.state)
+}
+
+/// The two-writers warnings for dispatching `task` into `row`, a worktree
+/// that already exists (spec, "Claiming worktrees": "a terminal from
+/// Billing is working in a worktree Main owns").
+///
+/// - Another workspace's terminal is working there
+///   (`foreign_writer_workspace_ids`): one warning per workspace.
+/// - The worktree belongs to a workspace other than the task's: the pane
+///   will work Billing's task in Main's worktree, and be Main's, as every
+///   pane is its worktree's. `worktree assign` is how ownership moves, so
+///   it's named.
+///
+/// An unclaimed worktree has neither: the runner claims it for the task's
+/// workspace when the pane opens. Names come from `workspace.list`, asked
+/// only when there's something to say; a list that can't be read leaves
+/// short ids, since the warning matters more than the names. A runner
+/// without workspaces is asked nothing.
+async fn other_workspaces<L: DispatchLink>(
+    link: &mut L,
+    task: &pb::Task,
+    row: &pb::Worktree,
+    name: &str,
+) -> Vec<String> {
+    if !has_workstreams(&link.capabilities()) {
+        return Vec::new();
+    }
+    let Some(owner) = row.workspace_id.as_ref().filter(|o| !o.is_empty()) else { return Vec::new() };
+    let mismatch = !task.workspace_id.is_empty() && *owner != task.workspace_id;
+    if row.foreign_writer_workspace_ids.is_empty() && !mismatch {
+        return Vec::new();
+    }
+    let workspaces = workspaces_on(link, Some(uuid_of(&row.repository_id))).await.unwrap_or_default();
+    let name_of = |id: &[u8]| {
+        workspaces.iter().find(|w| w.id.as_ref() == id).map_or_else(|| short_bytes(id), |w| w.name.clone())
+    };
+    let owner_name = name_of(owner);
+    let mut said: Vec<String> = farcooler_client::workspaces_json::foreign_writers(row, &workspaces)
+        .into_iter()
+        .map(|writer| {
+            format!(
+                "warning: a terminal from {writer} is working in {name}, a worktree {owner_name} owns. two \
+                 workspaces in one worktree commit over each other's work"
+            )
+        })
+        .collect();
+    if mismatch {
+        let board = name_of(&task.workspace_id);
+        // By prefix, which is one word where a name may not be, unless some
+        // workspace is NAMED that: `--to` tries names before prefixes. Then
+        // by the whole id, which nothing else matches.
+        let to = match workspaces.iter().find(|w| w.id == task.workspace_id) {
+            Some(w) if !workspaces.iter().any(|o| o.name.eq_ignore_ascii_case(&w.task_prefix)) => {
+                w.task_prefix.clone()
+            }
+            _ => uuid_of(&task.workspace_id).to_string(),
+        };
+        said.push(format!(
+            "warning: {name} is a worktree {owner_name} owns, and {key} is on {board}'s board. its agent \
+             will work {board}'s task in {owner_name}'s worktree. to give the worktree to {board}, run \
+             `farcooler worktree assign {} --to {to}`",
+            crate::remote::shell_quote(name),
+            key = task.key,
+        ));
+    }
+    said
 }
 
 /// `farcooler task show <key>`, with a key that starts with `-` after `--`.
@@ -2025,6 +2342,13 @@ async fn dispatch<L: DispatchLink>(
             ));
         }
     }
+    if let Some((id, name)) = &existing
+        && let Some(row) = worktrees.items.iter().find(|w| uuid_of(&w.id) == *id)
+    {
+        for w in other_workspaces(link, task, row, name).await {
+            warn(w);
+        }
+    }
     if let Some(TaskStatus::Done | TaskStatus::Cancelled | TaskStatus::InReview | TaskStatus::NeedsDecision) =
         status_of(task.status)
     {
@@ -2092,6 +2416,15 @@ async fn dispatch<L: DispatchLink>(
                 .capabilities()
                 .iter()
                 .any(|c| c == farcooler_protocol::capability::WORKTREE_FORK_ONLY);
+            // Made for the task's own workspace, so the worktree is that
+            // workstream's from the start rather than waiting for its agent
+            // to be seen working there. A runner without workspaces has one
+            // board, and is asked nothing it doesn't know.
+            let workspace = if has_workstreams(&link.capabilities()) {
+                farcooler_client::session::some_uuid(Some(&task.workspace_id))
+            } else {
+                None
+            };
             let r = link
                 .call(crate::worktree_create_request(
                     uuid_of(&task.repository_id),
@@ -2100,6 +2433,7 @@ async fn dispatch<L: DispatchLink>(
                     base.clone(),
                     String::new(),
                     fork_only,
+                    workspace,
                 ))
                 .await
                 .map_err(|e| {
@@ -2258,6 +2592,7 @@ mod tests {
             worktree_id: None,
             created_at: now_millis() - 86_400_000,
             updated_at: now_millis() - 7_200_000,
+            workspace_id: id_bytes(Uuid::now_v7()),
         };
         let task_id = task.id.clone();
         let note = |kind: NoteKind, body: &str, extra: &str| pb::TaskNote {
@@ -2847,6 +3182,55 @@ mod tests {
             commands.iter().filter(|c| c.starts_with("farcooler task dispatch ")).collect();
         assert!(dispatches.iter().any(|c| c.contains("--new")), "{commands:?}");
         assert!(dispatches.iter().any(|c| c.contains("--worktree")), "{commands:?}");
+        // Splitting a workstream off, and finding the board from the home,
+        // are commands too, and are held to the same parse.
+        for verb in [
+            "farcooler workspace show ",
+            "farcooler --json workspace show ",
+            "farcooler workspace create ",
+            "farcooler task move ",
+            "farcooler worktree assign ",
+            "farcooler workspace start-orchestrator ",
+        ] {
+            assert!(commands.iter().any(|c| c.starts_with(verb)), "the skill never names {verb:?}: {commands:?}");
+        }
+    }
+
+    /// The skill's `--actor manager` rule names the commands it covers, and
+    /// they are exactly the ones the skill shows that take the flag. A rule
+    /// read as "every write" sends `--actor` to `workspace create`, `worktree
+    /// assign` and `workspace start-orchestrator`, which refuse it, and the
+    /// orchestrator is stopped partway through a split.
+    #[test]
+    fn the_actor_rule_covers_exactly_the_commands_that_take_it() {
+        use clap::Parser;
+        use farcooler_daemon::skill_install::{Harness, render};
+        let skill = render(Harness::Claude, "farcooler")
+            .into_iter()
+            .find(|f| f.relative.ends_with("SKILL.md"))
+            .expect("claude's copy has a SKILL.md")
+            .contents;
+        let rule = skill
+            .split("\n\n")
+            .find(|p| p.contains("carries `--actor manager`"))
+            .expect("the skill states who carries --actor manager");
+        let covered: Vec<&str> =
+            rule.split('`').skip(1).step_by(2).filter(|s| !s.starts_with("--") && *s != "farcooler").collect();
+        assert!(!covered.is_empty(), "the rule names no command, so it reads as every write: {rule}");
+
+        let commands = commands_the_skill_names();
+        let mut takes = 0;
+        for line in &commands {
+            let with_actor = if line.contains("--actor") { line.clone() } else { format!("{line} --actor manager") };
+            let accepts = crate::Cli::try_parse_from(shell_words(&with_actor)).is_ok();
+            // A line the skill already gives `--actor` has to take it.
+            assert!(accepts || !line.contains("--actor"), "the skill gives --actor to a command that refuses it:\n  {line}");
+            let named = covered.iter().any(|verb| line.starts_with(&format!("farcooler {verb} ")));
+            assert_eq!(named, accepts, "the rule ({covered:?}) and the CLI disagree about --actor on:\n  {line}");
+            takes += usize::from(accepts);
+        }
+        // A rule and a skill that both named nothing would agree.
+        assert!(takes >= 5, "{takes} commands take --actor: {commands:?}");
     }
 
     // ---- dispatch ----
@@ -2857,6 +3241,8 @@ mod tests {
     const MADE: Uuid = Uuid::from_u128(0xabc);
     const PANE: Uuid = Uuid::from_u128(0xdef);
     const TASK: Uuid = Uuid::from_u128(0x7a5);
+    const MAIN: Uuid = Uuid::from_u128(0x3a1);
+    const BILLING: Uuid = Uuid::from_u128(0xb11);
 
     fn lane(id: Uuid, name: &str, repository: [u8; 16]) -> pb::Worktree {
         pb::Worktree {
@@ -2902,6 +3288,10 @@ mod tests {
         /// When set, a wait is really waited (on tokio's clock) and each
         /// look for the new pane takes this long.
         look_takes: Duration,
+        /// What `repository.list`, `workspace.list` and `task.list` answer.
+        repositories: Vec<pb::Repository>,
+        workspaces: Vec<pb::Workspace>,
+        tasks: Vec<pb::Task>,
         sent: Vec<pb::Request>,
     }
 
@@ -2919,6 +3309,28 @@ mod tests {
                 pane_reads: Vec::new(),
                 paused: Vec::new(),
                 look_takes: Duration::ZERO,
+                repositories: vec![
+                    pb::Repository { id: REPO.to_vec().into(), display_name: "repo".into(), ..Default::default() },
+                    pb::Repository { id: OTHER_REPO.to_vec().into(), display_name: "other".into(), ..Default::default() },
+                ],
+                workspaces: vec![
+                    pb::Workspace {
+                        id: id_bytes(MAIN),
+                        repository_id: REPO.to_vec().into(),
+                        name: "Main".into(),
+                        task_prefix: "fc".into(),
+                        is_main: true,
+                        ..Default::default()
+                    },
+                    pb::Workspace {
+                        id: id_bytes(BILLING),
+                        repository_id: REPO.to_vec().into(),
+                        name: "Billing".into(),
+                        task_prefix: "bil".into(),
+                        ..Default::default()
+                    },
+                ],
+                tasks: Vec::new(),
                 sent: Vec::new(),
             }
         }
@@ -2964,6 +3376,20 @@ mod tests {
             };
             let value = match method.as_str() {
                 "worktree.list" => result::Value::WorktreeList(pb::WorktreeList { items: self.worktrees.clone() }),
+                "repository.list" => {
+                    result::Value::RepositoryList(pb::RepositoryList { items: self.repositories.clone() })
+                }
+                "workspace.list" => {
+                    let asked = self.sent.last().and_then(|r| r.target_resource_id.clone());
+                    let items = self
+                        .workspaces
+                        .iter()
+                        .filter(|w| asked.as_ref().is_none_or(|repo| w.repository_id == *repo))
+                        .cloned()
+                        .collect();
+                    result::Value::WorkspaceList(pb::WorkspaceList { items })
+                }
+                "task.list" => result::Value::TaskList(pb::TaskList { items: self.tasks.clone() }),
                 "terminal.list" => {
                     let mut items = self.terminals.clone();
                     if self.sent.iter().any(|r| r.method == "terminal.create") {
@@ -3064,6 +3490,152 @@ mod tests {
         (e.to_string(), crate::error_code_line(e.as_ref(), true))
     }
 
+    /// `--new` makes the worktree for the task's own workspace, so it is that
+    /// workstream's from the start; on a runner without workspaces it is
+    /// asked nothing it doesn't know.
+    #[tokio::test]
+    async fn dispatch_into_a_new_worktree_claims_it_for_the_tasks_workspace() {
+        let task = pb::Task { workspace_id: id_bytes(BILLING), ..fc_2() };
+        let mut link = FakeLink::default();
+        run_as(&mut link, &task, new_lane(), "claude", false).await.0.expect("dispatched");
+        let req = link.sent("worktree.create");
+        let Some(request::Payload::WorktreeCreate(p)) = &req.payload else { panic!("payload") };
+        assert_eq!(p.workspace_id.as_deref(), Some(id_bytes(BILLING).as_ref()));
+        assert!(req.required_capabilities.iter().any(|c| c == farcooler_protocol::capability::WORKSTREAMS));
+
+        let mut old = FakeLink::default();
+        old.capabilities.retain(|c| c != farcooler_protocol::capability::WORKSTREAMS);
+        run_as(&mut old, &task, new_lane(), "claude", false).await.0.expect("dispatched");
+        let req = old.sent("worktree.create");
+        let Some(request::Payload::WorktreeCreate(p)) = &req.payload else { panic!("payload") };
+        assert_eq!(p.workspace_id, None);
+        assert!(!req.required_capabilities.iter().any(|c| c == farcooler_protocol::capability::WORKSTREAMS));
+    }
+
+    /// The workspace `task.list` was sent for, if any, and whether the
+    /// request names the capability a workspace needs.
+    fn listed(link: &FakeLink) -> (Option<Uuid>, bool) {
+        let req = link.sent("task.list");
+        let Some(request::Payload::TaskList(p)) = &req.payload else { panic!("payload") };
+        let needs = req.required_capabilities.iter().any(|c| c == farcooler_protocol::capability::WORKSTREAMS);
+        (p.workspace_id.as_deref().map(uuid_of), needs)
+    }
+
+    async fn list_as(link: &mut FakeLink, repo: Option<&str>, workspace: Option<&str>, env: Option<Uuid>) -> Board {
+        let board = board_for(link, repo, workspace, env.map(|u| u.to_string())).await.expect("a board");
+        tasks_in(link, &board, None, None).await.expect("read");
+        board
+    }
+
+    /// `task list` reads the pane's own workspace's board; with no pane
+    /// workspace it reads the whole repository; `--workspace` beats both.
+    #[tokio::test]
+    async fn task_list_defaults_to_the_panes_workspace() {
+        let mut link = FakeLink::default();
+        list_as(&mut link, None, None, Some(BILLING)).await;
+        assert_eq!(listed(&link), (Some(BILLING), true), "the pane's own board");
+
+        let mut link = FakeLink::default();
+        let board = list_as(&mut link, Some("repo"), None, None).await;
+        assert_eq!(listed(&link), (None, false), "the whole repository");
+        assert_eq!(board.repository, uuid_of(&REPO));
+
+        let mut link = FakeLink::default();
+        list_as(&mut link, None, Some("main"), Some(BILLING)).await;
+        assert_eq!(listed(&link), (Some(MAIN), true), "--workspace beats the pane");
+
+        // `--repo` naming another repository than the pane's is that whole
+        // repository, not the pane's board.
+        let mut link = FakeLink::default();
+        let board = list_as(&mut link, Some("other"), None, Some(BILLING)).await;
+        assert_eq!((listed(&link), board.repository), ((None, false), uuid_of(&OTHER_REPO)));
+
+        // A runner without workspaces reads the repository whatever the
+        // pane says, and refuses a named workspace.
+        let mut old = FakeLink::default();
+        old.capabilities.retain(|c| c != farcooler_protocol::capability::WORKSTREAMS);
+        list_as(&mut old, Some("repo"), None, Some(BILLING)).await;
+        assert_eq!(listed(&old), (None, false));
+        assert!(board_for(&mut old, None, Some("Billing"), None).await.is_err());
+
+        // A pane whose workspace is gone is refused, not widened.
+        let mut link = FakeLink::default();
+        let gone = board_for(&mut link, None, None, Some(Uuid::from_u128(0x90).to_string())).await;
+        assert!(gone.expect_err("refused").to_string().contains(WORKSPACE_ENV));
+    }
+
+    /// `task create` from a pane files onto the pane's own board
+    /// (`FARCOOLER_WORKSPACE`), naming the capability; `--workspace` beats
+    /// the pane; with neither it names no workspace, which the runner files
+    /// on Main.
+    #[tokio::test]
+    async fn task_create_files_onto_the_panes_workspace() {
+        let created = |board: &Board| {
+            let req = task_create_request(board, pb::TaskCreate { title: "t".into(), ..Default::default() });
+            let needs = req.required_capabilities.iter().any(|c| c == farcooler_protocol::capability::WORKSTREAMS);
+            let Some(request::Payload::TaskCreate(p)) = req.payload else { panic!("payload") };
+            assert_eq!(p.title, "t");
+            (uuid_of(&p.repository_id), p.workspace_id.as_deref().map(uuid_of), needs)
+        };
+        let mut link = FakeLink::default();
+        let pane = board_for(&mut link, None, None, Some(BILLING.to_string())).await.expect("a board");
+        assert_eq!(created(&pane), (uuid_of(&REPO), Some(BILLING), true), "the pane's own board");
+
+        let named = board_for(&mut link, None, Some("main"), Some(BILLING.to_string())).await.expect("a board");
+        assert_eq!(created(&named), (uuid_of(&REPO), Some(MAIN), true), "--workspace beats the pane");
+
+        let whole = board_for(&mut link, Some("repo"), None, None).await.expect("a board");
+        assert_eq!(created(&whole), (uuid_of(&REPO), None, false));
+    }
+
+    /// Every board in a repository at once names each row's workspace, in a
+    /// WORKSPACE column; one workspace's board doesn't.
+    #[test]
+    fn a_whole_repository_board_names_each_rows_workspace() {
+        let tasks = [
+            pb::Task { key: "fc-1".into(), title: "one".into(), workspace_id: id_bytes(MAIN), ..Default::default() },
+            pb::Task { key: "bil-2".into(), title: "two".into(), workspace_id: id_bytes(BILLING), ..Default::default() },
+        ];
+        let names = [(MAIN, "Main".to_string()), (BILLING, "Billing".to_string())].into_iter().collect();
+        let all = render_list(&tasks, Some(&names), 0);
+        assert!(all.lines().next().unwrap().contains("WORKSPACE"), "{all}");
+        let row = all.lines().find(|l| l.starts_with("bil-2")).expect("row");
+        assert!(row.contains("Billing"), "{all}");
+        let one = render_list(&tasks, None, 0);
+        assert!(!one.contains("WORKSPACE") && !one.contains("Billing"), "{one}");
+        assert!(one.lines().next().unwrap().starts_with("fc-1"));
+    }
+
+    /// `task move` sends every task named, to the workspace, as the actor,
+    /// and names the capability.
+    #[test]
+    fn a_move_names_every_task_and_the_board_they_go_to() {
+        let tasks = [fc_2(), pb::Task { id: id_bytes(PANE), ..fc_2() }];
+        let req = move_request(&tasks, BILLING, Actor::Manager);
+        assert_eq!(req.required_capabilities, [farcooler_protocol::capability::WORKSTREAMS]);
+        let Some(request::Payload::TaskMove(p)) = req.payload else { panic!("payload") };
+        assert_eq!(p.task_ids, [id_bytes(TASK), id_bytes(PANE)]);
+        assert_eq!(p.workspace_id, id_bytes(BILLING));
+        assert_eq!(p.actor, "manager");
+    }
+
+    /// A workspace refusal on a board command is the runner's own sentence
+    /// for the word, not the word, and not the call site's guess.
+    #[test]
+    fn a_workspace_refusal_on_the_board_is_the_runners_sentence() {
+        let said = refused(
+            ClientError::Daemon {
+                code: pb::ErrorCode::InvalidArgument as i32,
+                retryable: false,
+                message: "invalid argument: other_repository".into(),
+                what: "other_repository".into(),
+            },
+            "those tasks could not be moved",
+        )
+        .to_string();
+        assert_eq!(said, "That workspace is in a different repository.");
+    }
+
     /// The pane is asked for with the task's key, and the capability without
     /// which an older runner would drop the key. Read off the request
     /// `dispatch` really sent.
@@ -3144,6 +3716,76 @@ mod tests {
         shell.command_preset = "shell".into();
         let mut link = FakeLink { terminals: vec![shell], ..Default::default() };
         assert!(run(&mut link, existing()).await.1.is_empty(), "a shell is nobody working");
+    }
+
+    /// Dispatch into a worktree another workspace owns, or one another
+    /// workspace's terminal is working in, says so by name, and still
+    /// dispatches. `workspace.list` is asked only when there's something to
+    /// say, and never of a runner without workspaces.
+    #[tokio::test]
+    async fn dispatch_warns_of_another_workspace_in_the_worktree() {
+        let on = |workspace: Uuid| pb::Task { workspace_id: id_bytes(workspace), ..fc_2() };
+        let owned = |owner: Uuid, writers: &[Uuid]| pb::Worktree {
+            workspace_id: Some(id_bytes(owner)),
+            foreign_writer_workspace_ids: writers.iter().map(|w| id_bytes(*w)).collect(),
+            ..lane(LANE, "lane", REPO)
+        };
+
+        let mut link = FakeLink { worktrees: vec![owned(MAIN, &[BILLING])], ..Default::default() };
+        let (done, warned) = run_as(&mut link, &on(MAIN), existing(), "claude", false).await;
+        done.expect("a warning, not a refusal");
+        assert_eq!(
+            warned,
+            ["warning: a terminal from Billing is working in lane, a worktree Main owns. two workspaces in one \
+              worktree commit over each other's work"]
+        );
+        assert!(link.writes().contains(&"task.set_status"), "{:?}", link.methods());
+
+        let mut link = FakeLink { worktrees: vec![owned(MAIN, &[])], ..Default::default() };
+        let (_, warned) = run_as(&mut link, &on(BILLING), existing(), "claude", false).await;
+        assert_eq!(
+            warned,
+            ["warning: lane is a worktree Main owns, and fc-2 is on Billing's board. its agent will work \
+              Billing's task in Main's worktree. to give the worktree to Billing, run `farcooler worktree \
+              assign lane --to bil`"]
+        );
+
+        // A command meant to be copied: the worktree quoted, and the
+        // workspace by id when a workspace is named like its prefix.
+        let spaced = pb::Worktree { task_name: "my lane".into(), ..owned(MAIN, &[]) };
+        let mut link = FakeLink { worktrees: vec![spaced], ..Default::default() };
+        link.workspaces.push(pb::Workspace {
+            id: id_bytes(Uuid::from_u128(0x0b)),
+            repository_id: REPO.to_vec().into(),
+            name: "BIL".into(),
+            task_prefix: "b".into(),
+            ..Default::default()
+        });
+        let (_, warned) = run_as(&mut link, &on(BILLING), Lane::Existing("my lane".into()), "claude", false).await;
+        assert!(warned[0].ends_with(&format!("`farcooler worktree assign 'my lane' --to {BILLING}`")), "{warned:?}");
+
+        // A workspace the list doesn't know is its short id, not dropped.
+        let gone = Uuid::from_u128(0xdead_beef);
+        let mut link = FakeLink { worktrees: vec![owned(MAIN, &[gone])], ..Default::default() };
+        let (_, warned) = run_as(&mut link, &on(MAIN), existing(), "claude", false).await;
+        assert!(warned.iter().any(|w| w.contains(&format!("from {} is", short_bytes(&id_bytes(gone))))), "{warned:?}");
+
+        // Its own workspace's worktree, alone: nothing to say, nothing asked.
+        let mut link = FakeLink { worktrees: vec![owned(MAIN, &[])], ..Default::default() };
+        let (_, warned) = run_as(&mut link, &on(MAIN), existing(), "claude", false).await;
+        assert!(warned.is_empty(), "{warned:?}");
+        assert!(!link.methods().contains(&"workspace.list"), "{:?}", link.methods());
+
+        // Unclaimed: the runner claims it for the task's workspace.
+        let mut link = FakeLink::default();
+        let (_, warned) = run_as(&mut link, &on(BILLING), existing(), "claude", false).await;
+        assert!(warned.is_empty(), "{warned:?}");
+
+        let mut link = FakeLink { worktrees: vec![owned(MAIN, &[BILLING])], ..Default::default() };
+        link.capabilities.retain(|c| c != farcooler_protocol::capability::WORKSTREAMS);
+        let (_, warned) = run_as(&mut link, &on(BILLING), existing(), "claude", false).await;
+        assert!(warned.is_empty(), "{warned:?}");
+        assert!(!link.methods().contains(&"workspace.list"), "{:?}", link.methods());
     }
 
     /// The board never says somebody is working a task nobody is.

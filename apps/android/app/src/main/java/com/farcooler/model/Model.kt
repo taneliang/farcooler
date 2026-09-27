@@ -12,6 +12,20 @@ data class Fleet(
     @SerialName("runtime_healthy") val runtimeHealthy: Boolean = false,
     @SerialName("live_panes") val livePanes: Int = 0,
     val worktrees: List<Worktree> = emptyList(),
+    /**
+     * The runner's workstreams, Main first within each repository, or null
+     * from a runner without the `workstreams` capability.
+     *
+     * Null and empty are different claims. Null is a runner with no
+     * workspaces at all, which [WorkspaceGrouping] draws as one implicit
+     * workspace per repository — the flat layout this app had before. Empty
+     * is a runner that has them and nothing registered.
+     *
+     * Not the persisted `"workspaces"` key the iPhone's `RunnerDirectory`
+     * keeps worktrees under from before the rename; same word, different
+     * thing. `FleetDecodeTest` pins this one.
+     */
+    val workspaces: List<WorkspaceSummary>? = null,
 ) {
     companion object {
         val EMPTY = Fleet()
@@ -69,6 +83,22 @@ data class Worktree(
      * field must never fail the decode of the whole fleet.
      */
     val ordinal: Int? = null,
+    /**
+     * The workspace that owns this worktree, as its id, or null while it is
+     * unclaimed and from a runner without `workstreams`. An id the fleet's
+     * [Fleet.workspaces] does not list is drawn as unclaimed; see
+     * [WorkspaceGrouping.group].
+     */
+    val workspace: String? = null,
+    /**
+     * What made the claim: `explicit`, `hook`, `process` or `migration`. A
+     * machine word for tracing a wrong claim, never shown as it stands.
+     * Snake_case because `Session::fleet` takes it from `workspaces_json`,
+     * which the CLI shares.
+     */
+    @SerialName("claim_source") val claimSource: String? = null,
+    /** The names of the other workspaces with a live terminal in this worktree. */
+    @SerialName("foreign_writers") val foreignWriters: List<String>? = null,
     val terminals: List<Terminal> = emptyList(),
 ) {
     /**
@@ -311,7 +341,22 @@ data class Terminal(
      * says then.
      */
     val taskId: String? = null,
+    /**
+     * Whose work this pane is doing, as a workspace id: not always the owner
+     * of the worktree it runs in, since an orchestrator may run in a checkout
+     * another workspace owns. Null in an unclaimed worktree and from a runner
+     * without `workstreams`.
+     */
+    val workspace: String? = null,
+    /**
+     * `shell`, `agent` or `orchestrator`, or null from a runner without
+     * `workstreams`. A word this build does not know is not an orchestrator.
+     */
+    val role: String? = null,
 ) {
+    /** Whether this pane is its workspace's orchestrator. */
+    val isOrchestrator: Boolean get() = role == "orchestrator"
+
     val agent: AgentActivity get() = AgentActivity.parse(activity)
 
     /** Whether the last turn ended badly. Only `done` can answer this. */

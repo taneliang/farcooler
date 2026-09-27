@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 
 /// Changes pushed from the daemon, one JSON object per line.
@@ -93,9 +94,9 @@ struct LayoutEvent: Sendable, Decodable {
     var groups: [PaneGroup]
 }
 
-/// A repository's board moved.
+/// A board moved.
 ///
-/// The repository and not the task, because `task list` answers a whole board
+/// The board and not the task, because `task list` answers a whole board
 /// in one call and a board is the thing on screen: a client told only which
 /// task moved would still have to read the board to know where the row goes
 /// now. Carries no delta for the same reason every other event here does not —
@@ -109,9 +110,46 @@ struct LayoutEvent: Sendable, Decodable {
 /// This app deliberately re-reads either way — see `TaskBoardStore.reload` —
 /// but the field has to reach Swift for that to be a decision rather than an
 /// omission.
+///
+/// `workspace` is the board the task is on now and `fromWorkspace` the one it
+/// left, set only on a move; both are null from a runner without workspaces,
+/// whose one board per repository is the repository's. Which boards that
+/// re-reads is AgentKit's rule, `BoardNotice.touches`, so this app and the
+/// phones can't disagree about it — see `notice`.
 struct TaskEvent: Sendable, Decodable {
     var repository: String
+    var workspace: String?
+    var fromWorkspace: String?
     var actor: String?
+
+    init(
+        repository: String, workspace: String? = nil, fromWorkspace: String? = nil,
+        actor: String?
+    ) {
+        self.repository = repository
+        self.workspace = workspace
+        self.fromWorkspace = fromWorkspace
+        self.actor = actor
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case repository, workspace, actor
+        case fromWorkspace = "from_workspace"
+    }
+
+    /// This line as AgentKit's notice.
+    ///
+    /// Built field by field rather than by handing the line to
+    /// `BoardNotice(notice:)`, which reads the client core's line: that one
+    /// says `"event": "task"`, and the CLI's `events` says `"kind": "task"`,
+    /// so every CLI line would read as not board news and be dropped. An
+    /// empty string is absent here too, as it is there.
+    var notice: BoardNotice {
+        func word(_ value: String?) -> String? { value.flatMap { $0.isEmpty ? nil : $0 } }
+        return BoardNotice(
+            repository: repository, workspace: word(workspace),
+            fromWorkspace: word(fromWorkspace), actor: word(actor))
+    }
 }
 
 /// Which resource a line is about.
@@ -199,31 +237,9 @@ final class EventStream {
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
             for line in buffer.take(chunk) {
-                // Dispatched on `kind` rather than by trying each shape in turn.
-                // Guessing worked while there was one shape; with two, a layout
-                // line that happened to decode as a terminal would have been
-                // applied as one.
-                guard let kind = try? decoder.decode(EventKind.self, from: line) else { continue }
-                switch kind.kind {
-                case "terminal":
-                    if let event = try? decoder.decode(TerminalEvent.self, from: line) {
-                        onEvent(event)
-                    }
-                case "layout":
-                    if let event = try? decoder.decode(LayoutEvent.self, from: line) {
-                        onLayout(event)
-                    }
-                case "fleet":
-                    onFleet()
-                case "change_set":
-                    onChangeSet()
-                case "task":
-                    if let event = try? decoder.decode(TaskEvent.self, from: line) {
-                        onTask(event)
-                    }
-                // Resources this app does not track yet are skipped, not an error.
-                default: continue
-                }
+                Self.dispatch(
+                    line, decoder: decoder, onEvent: onEvent, onLayout: onLayout,
+                    onFleet: onFleet, onChangeSet: onChangeSet, onTask: onTask)
             }
         }
 
@@ -239,6 +255,47 @@ final class EventStream {
             process = nil
             outputHandle = nil
             onEnd()
+        }
+    }
+
+    /// One line of `farcooler events`, handed to whichever callback it is
+    /// for.
+    ///
+    /// Static, and apart from the pipe, so the suite can feed it the lines
+    /// the CLI really prints: a line this decodes into nothing is a change
+    /// the window never hears about, with no error anywhere to say so.
+    static func dispatch(
+        _ line: Data, decoder: JSONDecoder,
+        onEvent: (TerminalEvent) -> Void = { _ in },
+        onLayout: (LayoutEvent) -> Void = { _ in },
+        onFleet: () -> Void = {},
+        onChangeSet: () -> Void = {},
+        onTask: (TaskEvent) -> Void = { _ in }
+    ) {
+        // Dispatched on `kind` rather than by trying each shape in turn.
+        // Guessing worked while there was one shape; with two, a layout
+        // line that happened to decode as a terminal would have been
+        // applied as one.
+        guard let kind = try? decoder.decode(EventKind.self, from: line) else { return }
+        switch kind.kind {
+        case "terminal":
+            if let event = try? decoder.decode(TerminalEvent.self, from: line) {
+                onEvent(event)
+            }
+        case "layout":
+            if let event = try? decoder.decode(LayoutEvent.self, from: line) {
+                onLayout(event)
+            }
+        case "fleet":
+            onFleet()
+        case "change_set":
+            onChangeSet()
+        case "task":
+            if let event = try? decoder.decode(TaskEvent.self, from: line) {
+                onTask(event)
+            }
+        // Resources this app does not track yet are skipped, not an error.
+        default: return
         }
     }
 

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -44,6 +45,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -54,6 +56,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +68,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
 import com.farcooler.model.AgentActivity
+import com.farcooler.model.BoardRow
+import com.farcooler.model.FleetHeading
+import com.farcooler.model.FleetLayout
 import com.farcooler.model.FleetReading
 import com.farcooler.model.GlanceMarkSize
 import com.farcooler.model.RunnerLink
@@ -102,6 +110,7 @@ import kotlinx.coroutines.launch
 fun FleetDrawer(
     model: AppModel,
     onSelect: (TerminalRef) -> Unit,
+    onOpenBoard: (BoardRow) -> Unit,
     onSettings: () -> Unit,
     onAuthorize: () -> Unit,
 ) {
@@ -110,6 +119,7 @@ fun FleetDrawer(
             FleetBody(
                 model = model,
                 onSelect = onSelect,
+                onOpenBoard = onOpenBoard,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = 8.dp),
             )
@@ -147,6 +157,7 @@ fun FleetDrawer(
 fun FleetScreen(
     model: AppModel,
     onSelect: (TerminalRef) -> Unit,
+    onOpenBoard: (BoardRow) -> Unit,
     onOpenDrawer: () -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
@@ -185,7 +196,12 @@ fun FleetScreen(
             },
             modifier = Modifier.padding(padding),
         ) {
-            FleetBody(model = model, onSelect = onSelect, modifier = Modifier.fillMaxSize())
+            FleetBody(
+                model = model,
+                onSelect = onSelect,
+                onOpenBoard = onOpenBoard,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
@@ -194,6 +210,7 @@ fun FleetScreen(
 private fun FleetBody(
     model: AppModel,
     onSelect: (TerminalRef) -> Unit,
+    onOpenBoard: (BoardRow) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
@@ -226,6 +243,34 @@ private fun FleetBody(
     val visible = entries.filter { showHidden || !it.worktree.isHidden }
     val hiddenCount = entries.count { it.worktree.isHidden }
 
+    // Each runner's workspace headings, or none for a runner without
+    // workspaces. Read off the connections whose fleets these entries are, so
+    // they change when the entries do.
+    val layouts: Map<String, List<FleetHeading>?> = visible.map { it.connection }.distinct()
+        .associate { connection ->
+            val names = connection.repositories.value
+                .associate { it.id to it.displayName.ifEmpty { it.short } }
+            connection.host.id to FleetLayout.of(connection.fleet.value, names)
+        }
+    // Each runner's Board rows, by the heading they go under: a workspace's
+    // own board, as the iPhone and the Mac draw it. See [FleetLayout.boardRows].
+    val boardRows: Map<String, Map<String, BoardRow>> = visible.map { it.connection }.distinct()
+        .associate { connection ->
+            val hostId = connection.host.id
+            hostId to key(hostId) { FleetLayout.boardRows(layouts[hostId], rememberBoardRows(connection)) }
+        }
+    // The stretch of the list a card can be dragged within: its runner's, and
+    // on a runner with workspaces its workspace's. A card dropped under
+    // another workspace's heading would be put back under its own on the next
+    // read, since dragging does not claim.
+    val groupOf: Map<String, String> = buildMap {
+        for ((hostId, headings) in layouts) {
+            headings?.forEach { heading ->
+                heading.worktrees.forEach { put("$hostId/$it", "$hostId/${heading.id}") }
+            }
+        }
+    }
+
     // The list's own state, because a drag has to ask where things ARE. Nothing
     // else on this screen needed it — `rememberLazyListState` saves the scroll
     // position either way.
@@ -237,6 +282,7 @@ private fun FleetBody(
     var landing by remember { mutableStateOf<WorktreeOrder.Landing?>(null) }
 
     fun keyOf(entry: FleetEntry) = "${entry.host.id}/${entry.worktree.id}"
+    fun stretchOf(entry: FleetEntry) = groupOf[keyOf(entry)] ?: entry.host.id
 
     // Only cards on the SAME runner take part in a drag. Each runner keeps its
     // own order in its own database, so a card cannot move into another
@@ -244,8 +290,8 @@ private fun FleetBody(
     // not be read as asking for that. Clamping to this runner's own cards is
     // what turns such a wander into "the end of my own stretch", which is
     // almost always what was meant.
-    fun spans(hostId: String): List<WorktreeOrder.Card> {
-        val mine = visible.filter { it.host.id == hostId }.map(::keyOf).toSet()
+    fun spans(stretch: String): List<WorktreeOrder.Card> {
+        val mine = visible.filter { stretchOf(it) == stretch }.map(::keyOf).toSet()
         val laid = listState.layoutInfo.visibleItemsInfo.map {
             WorktreeOrder.Laid(it.key.toString(), it.offset, it.size)
         }
@@ -260,7 +306,7 @@ private fun FleetBody(
         landing = null
         if (dragged == null || landed == null) return
         val entry = visible.firstOrNull { keyOf(it) == dragged } ?: return
-        val group = visible.filter { it.host.id == entry.host.id }
+        val group = visible.filter { stretchOf(it) == stretchOf(entry) }
         val order = group.map(::keyOf)
         val next = WorktreeOrder.moved(order, dragged, landed.target, landed.edge)
         // A drop that changes nothing costs no round trip. It is not free: a
@@ -336,81 +382,146 @@ private fun FleetBody(
             }
         }
 
-        for (entry in visible) {
-            item(key = "${entry.host.id}/${entry.worktree.id}") {
-                WorktreeHeader(
-                    entry = entry,
-                    showRunner = namesRunners,
-                    drag = HeaderDrag(
-                        key = keyOf(entry),
-                        // Offered only where the runner keeps an order. A daemon
-                        // that predates `worktree.reorder` sends no `ordinal`,
-                        // and a drag against one would rearrange the screen and
-                        // put it all back on the next refresh with nothing
-                        // failing anywhere.
-                        enabled = entry.worktree.ordinal != null,
-                        lifted = lifted == keyOf(entry),
-                        edge = landing?.takeIf { it.target == keyOf(entry) }?.edge,
-                        onStart = {
-                            lifted = keyOf(entry)
-                            landing = null
-                        },
-                        // The finger's position arrives relative to this card;
-                        // where the cards are is in the list's coordinates. This
-                        // card's own laid-out offset is what joins the two.
-                        onMove = { y ->
-                            val me = listState.layoutInfo.visibleItemsInfo
-                                .firstOrNull { it.key == keyOf(entry) }
-                            if (me != null) {
-                                landing = WorktreeOrder.landing(
-                                    spans(entry.host.id), me.offset + y.toInt())
-                            }
-                        },
-                        onEnd = { commitDrag() },
-                        onCancel = {
-                            lifted = null
-                            landing = null
-                        },
-                    ),
-                    onHide = { hidden ->
-                        scope.launch { entry.connection.setHidden(entry.worktree, hidden) }
+        // One worktree: its header, then its terminals — every one but an
+        // orchestrator's, which is drawn as its workspace's own row.
+        // `orchestrators` are those terminals, by id, with their tab titles.
+        fun LazyListScope.worktreeItems(entry: FleetEntry, orchestrators: Map<String, String>) {
+        item(key = "${entry.host.id}/${entry.worktree.id}") {
+            WorktreeHeader(
+                entry = entry,
+                showRunner = namesRunners,
+                drag = HeaderDrag(
+                    key = keyOf(entry),
+                    // Offered only where the runner keeps an order. A daemon
+                    // that predates `worktree.reorder` sends no `ordinal`,
+                    // and a drag against one would rearrange the screen and
+                    // put it all back on the next refresh with nothing
+                    // failing anywhere.
+                    enabled = entry.worktree.ordinal != null,
+                    lifted = lifted == keyOf(entry),
+                    edge = landing?.takeIf { it.target == keyOf(entry) }?.edge,
+                    onStart = {
+                        lifted = keyOf(entry)
+                        landing = null
                     },
-                    onNewTerminal = { newTerminalIn = entry.connection to entry.worktree },
-                    onStack = { stackFor = entry },
-                    onRemove = { removing = entry },
+                    // The finger's position arrives relative to this card;
+                    // where the cards are is in the list's coordinates. This
+                    // card's own laid-out offset is what joins the two.
+                    onMove = { y ->
+                        val me = listState.layoutInfo.visibleItemsInfo
+                            .firstOrNull { it.key == keyOf(entry) }
+                        if (me != null) {
+                            landing = WorktreeOrder.landing(
+                                spans(stretchOf(entry)), me.offset + y.toInt())
+                        }
+                    },
+                    onEnd = { commitDrag() },
+                    onCancel = {
+                        lifted = null
+                        landing = null
+                    },
+                ),
+                onHide = { hidden ->
+                    scope.launch { entry.connection.setHidden(entry.worktree, hidden) }
+                },
+                onNewTerminal = { newTerminalIn = entry.connection to entry.worktree },
+                onStack = { stackFor = entry },
+                onRemove = { removing = entry },
+            )
+        }
+        // Creation order, always. Sorting whatever needs you to the top
+        // read well until you watched it happen: an agent three rows down
+        // finishes, every row under it slides, and the tap you had already
+        // committed to lands on something else. Attention is a mark on a
+        // row, and a mark you can find in a list that holds still beats one
+        // that comes to you by moving the list.
+        val numbering = entry.worktree.ordinals()
+        // Without the orchestrators, which are their workspaces' own rows.
+        val listed = entry.worktree.terminals.filter { it.id !in orchestrators }
+        items(listed, key = { "${entry.host.id}/${it.id}" }) { terminal ->
+            val phase by entry.connection.phase.collectAsStateWithLifecycle()
+            TerminalRow(
+                terminal = terminal,
+                ordinal = numbering[terminal.id],
+                answering = phase.link == RunnerLink.ANSWERING,
+                onClick = {
+                    onSelect(TerminalRef(entry.host.id, entry.worktree.id, terminal.id))
+                },
+                onAction = { action ->
+                    scope.launch { entry.connection.act(action, terminal) }
+                },
+            )
+        }
+        val note = FleetLayout.noTerminalsNote(entry.worktree, orchestrators)
+        if (note != null) {
+            item(key = "${entry.host.id}/${entry.worktree.id}/empty") {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 8.dp),
                 )
             }
-            // Creation order, always. Sorting whatever needs you to the top
-            // read well until you watched it happen: an agent three rows down
-            // finishes, every row under it slides, and the tap you had already
-            // committed to lands on something else. Attention is a mark on a
-            // row, and a mark you can find in a list that holds still beats one
-            // that comes to you by moving the list.
-            val numbering = entry.worktree.ordinals()
-            items(entry.worktree.terminals, key = { "${entry.host.id}/${it.id}" }) { terminal ->
-                val phase by entry.connection.phase.collectAsStateWithLifecycle()
-                TerminalRow(
-                    terminal = terminal,
-                    ordinal = numbering[terminal.id],
-                    answering = phase.link == RunnerLink.ANSWERING,
-                    onClick = {
-                        onSelect(TerminalRef(entry.host.id, entry.worktree.id, terminal.id))
-                    },
-                    onAction = { action ->
-                        scope.launch { entry.connection.act(action, terminal) }
-                    },
-                )
+        }
+        }
+
+        // Runner by runner, in the order the entries come. A runner with
+        // workspaces is laid out by them — a heading per workspace, its
+        // orchestrator, its worktrees, then each repository's Unclaimed — and
+        // one without keeps the flat list. See [FleetLayout].
+        for ((hostId, run) in visible.groupBy { it.host.id }) {
+            val headings = layouts[hostId]
+            if (headings == null) {
+                run.forEach { worktreeItems(it, emptyMap()) }
+                continue
             }
-            if (entry.worktree.terminals.isEmpty()) {
-                item(key = "${entry.host.id}/${entry.worktree.id}/empty") {
-                    Text(
-                        "No terminals",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 8.dp),
-                    )
+            val orchestrators = FleetLayout.orchestratorTitles(headings)
+            val byId = run.associateBy { it.worktree.id }
+            val placed = mutableSetOf<String>()
+            for (heading in headings) {
+                item(key = "$hostId/workspace/${heading.id}") {
+                    WorkspaceHeading(heading, isEmpty = heading.worktrees.isEmpty())
+                }
+                boardRows[hostId]?.get(heading.id)?.let { row ->
+                    item(key = "$hostId/board/${heading.id}") {
+                        Box(Modifier.testTag("fleet-board-${heading.id}")) {
+                            BoardRowItem(row, runner = null, onOpen = onOpenBoard)
+                        }
+                    }
+                }
+                val orchestrator = heading.orchestrator?.let { id ->
+                    run.firstNotNullOfOrNull { entry ->
+                        entry.worktree.terminals.firstOrNull { it.id == id }?.let { entry to it }
+                    }
+                }
+                if (orchestrator != null) {
+                    val (entry, terminal) = orchestrator
+                    item(key = "$hostId/orchestrator/${heading.id}") {
+                        val phase by entry.connection.phase.collectAsStateWithLifecycle()
+                        Box(Modifier.testTag("fleet-orchestrator-${heading.id}")) {
+                            TerminalRow(
+                                terminal = terminal,
+                                ordinal = null,
+                                answering = phase.link == RunnerLink.ANSWERING,
+                                onClick = {
+                                    onSelect(TerminalRef(entry.host.id, entry.worktree.id, terminal.id))
+                                },
+                                onAction = { action ->
+                                    scope.launch { entry.connection.act(action, terminal) }
+                                },
+                            )
+                        }
+                    }
+                }
+                for (id in heading.worktrees) {
+                    val entry = byId[id] ?: continue
+                    placed += id
+                    worktreeItems(entry, orchestrators)
                 }
             }
+            // A worktree the layout does not name — a fleet read a moment
+            // before its workspaces — is drawn after the rest, not lost.
+            run.filter { it.worktree.id !in placed }.forEach { worktreeItems(it, orchestrators) }
         }
 
         if (hiddenCount > 0) {
@@ -863,6 +974,52 @@ private class HeaderDrag(
     val onEnd: () -> Unit,
     val onCancel: () -> Unit,
 )
+
+/**
+ * A workspace's heading in the worktree list: its name, and its repository
+ * where the runner has more than one. Drawn for Main alone too — the workspace
+ * level is the model, and it should be visible before anything is split.
+ * "Unclaimed", the worktrees no workspace has taken, is quieter. Not a button:
+ * a workspace has no actions on a phone.
+ */
+@Composable
+private fun WorkspaceHeading(heading: FleetHeading, isEmpty: Boolean) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 2.dp)
+            .testTag("fleet-workspace-${heading.id}")
+            .semantics { heading() },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                heading.name,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (heading.isUnclaimed) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            heading.repository?.let {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+        if (isEmpty) {
+            Text(
+                "No worktrees",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
 
 @Composable
 private fun WorktreeHeader(

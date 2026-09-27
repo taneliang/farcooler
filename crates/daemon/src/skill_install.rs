@@ -107,9 +107,10 @@ const BODY: &str = include_str!("../assets/manager/SKILL.md");
 /// cursor reads `.agents/skills` as well.
 fn frontmatter(name: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: Manage this repository's Far Cooler task board. Reads the \
-         charter, reads the board, then creates, revises, answers or reports. Never does the work \
-         itself. Use only when the owner asks for the manager.\ndisable-model-invocation: true\n---\n"
+        "---\nname: {name}\ndescription: Manage a Far Cooler workspace's task board as its \
+         orchestrator. Reads the charter, reads the board, then creates, revises, answers or \
+         reports. Never does the work itself. Use only when the owner asks for the \
+         manager.\ndisable-model-invocation: true\n---\n"
     )
 }
 
@@ -129,6 +130,12 @@ pub const CHARTER_SECTIONS: &[&str] = &[
 
 /// Whether anything can wake a manager that has ended its turn. Nothing can
 /// yet (see `WAIT_STEP`).
+///
+/// Until something can, the manager's next wake-up is the owner talking to it
+/// again, and step 1 of the skill tells it to re-read `$FARCOOLER_CHARTER`
+/// then. The wake-up prompt that replaces this has to say the same (the spec's
+/// "every wake-up prompt tells it to re-read" the charter): the owner edits the
+/// charter between turns, and a compacted conversation remembers it wrong.
 pub const WAKE_LOOP_EXISTS: bool = false;
 
 /// Step 4 of the skill: stop, and say so honestly.
@@ -686,7 +693,7 @@ mod tests {
         let writes: Vec<&str> = body
             .lines()
             .filter(|l| {
-                ["create", "set", "note", "ask", "block", "dispatch"]
+                ["create", "set", "note", "ask", "block", "dispatch", "move"]
                     .iter()
                     .any(|verb| l.contains(&format!("farcooler task {verb} ")))
             })
@@ -730,14 +737,106 @@ mod tests {
         assert!(asks.contains("only after they say yes"), "{asks}");
     }
 
-    /// Keeping the charter local goes in `.git/info/exclude`, which is not
-    /// itself a tracked change the way `.gitignore` is.
+    /// The charter is the workspace's, in its home outside the repository,
+    /// and the pane is told where (`FARCOOLER_CHARTER`). The skill reads and
+    /// writes that file, and nothing of the repository's: not the
+    /// `.farcooler/manager.md` it used to, nor an `info/exclude` line to keep
+    /// that local.
     #[test]
-    fn a_local_charter_goes_in_info_exclude() {
-        let asks = skill_body(Harness::Claude);
-        let asks = interview(&asks);
-        assert!(asks.contains("info/exclude"), "{asks}");
-        assert!(!asks.contains("to .gitignore"), "{asks}");
+    fn the_charter_is_the_file_the_pane_names() {
+        for h in ALL {
+            let body = skill_body(h);
+            let read = body.find("## 1. Read the charter").expect("step 1");
+            assert!(body[read..].contains("`$FARCOOLER_CHARTER`"), "{h:?}: step 1 reads it");
+            assert!(interview(&body).contains("write `$FARCOOLER_CHARTER`"), "{h:?}: the interview writes it");
+            assert!(!body.contains(".farcooler/manager.md"), "{h:?}");
+            assert!(!body.contains("info/exclude"), "{h:?}");
+        }
+    }
+
+    /// Step `n`'s text: from its `## n.` heading to the next `## `.
+    fn step(body: &str, n: u32) -> String {
+        let start = body.find(&format!("\n## {n}. ")).unwrap_or_else(|| panic!("no step {n}"));
+        let rest = &body[start + 1..];
+        let end = rest[3..].find("\n## ").map_or(rest.len(), |i| i + 3);
+        rest[..end].split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Nothing wakes the manager yet, so the next "wake-up" is the owner
+    /// talking to it again, possibly after the conversation was compacted and
+    /// after the owner edited the charter. The spec: every wake-up re-reads it.
+    #[test]
+    fn the_charter_is_read_again_whenever_the_work_is_picked_up() {
+        for h in ALL {
+            let first = step(&skill_body(h), 1);
+            assert!(first.contains("Read it again every time you pick the work back up"), "{h:?}: {first}");
+        }
+    }
+
+    /// An orchestrator runs from its workspace's home, which isn't a git
+    /// checkout (Claude Code and Cursor), so `git rev-parse` fails there. Its
+    /// pane names its workspace, and `workspace show` names the repository.
+    /// Only a pane with no workspace falls back to git.
+    #[test]
+    fn the_board_is_found_from_the_workspace_before_git() {
+        for h in ALL {
+            let second = step(&skill_body(h), 2);
+            let show = second
+                .find("farcooler workspace show \"$FARCOOLER_WORKSPACE\"")
+                .unwrap_or_else(|| panic!("{h:?}: step 2 never asks for its workspace: {second}"));
+            let git = second.find("git rev-parse --show-toplevel").expect("the fallback for a pane with no workspace");
+            assert!(show < git, "{h:?}: git comes first, and fails in the home: {second}");
+            assert!(second.contains("If `$FARCOOLER_WORKSPACE` is empty"), "{h:?}: {second}");
+        }
+    }
+
+    /// The spec's five steps, in order, with the handoff written before the
+    /// new orchestrator starts: a thin handoff strands what this conversation
+    /// knew, which defeats the split. The order is looked for from step 1 on,
+    /// so the section's opening words about the handoff don't count as step 4.
+    #[test]
+    fn the_skill_teaches_splitting_with_a_handoff_before_the_new_orchestrator() {
+        for h in ALL {
+            let text = skill_body(h);
+            let split = text.find("\n## Splitting a workstream off\n").expect("no split section");
+            let rest = &text[split + 1..];
+            let end = rest[3..].find("\n## ").map_or(rest.len(), |i| i + 3);
+            let section = rest[..end].split_whitespace().collect::<Vec<_>>().join(" ");
+            let steps = &section[section.find(" 1. ").expect("numbered steps")..];
+            let order = [
+                "farcooler workspace create",
+                "farcooler task move",
+                "farcooler worktree assign",
+                "Write the handoff",
+                "farcooler workspace start-orchestrator",
+            ];
+            let at: Vec<usize> =
+                order.iter().map(|s| steps.find(s).unwrap_or_else(|| panic!("{h:?}: missing {s}"))).collect();
+            assert!(at.windows(2).all(|w| w[0] < w[1]), "{h:?}: out of order: {order:?} at {at:?}");
+
+            // Step 4 is two kinds of note: why each task moved, and what the
+            // board doesn't know.
+            let handoff = &steps[at[3]..at[4]];
+            assert!(handoff.contains("--kind decision"), "{h:?}: {handoff}");
+            assert!(handoff.contains("on each moved task"), "{h:?}: {handoff}");
+            assert!(handoff.contains("--kind comment"), "{h:?}: {handoff}");
+            assert!(handoff.contains("what this conversation knows that the board doesn't"), "{h:?}: {handoff}");
+            assert!(handoff.contains("isn't optional"), "{h:?}: {handoff}");
+
+            assert!(text.contains("$FARCOOLER_CHARTER"), "{h:?}");
+            assert!(!text.contains(".farcooler/manager.md"), "{h:?}");
+        }
+    }
+
+    /// A dispatched agent is never told where the charter is (only an
+    /// orchestrator's pane carries `FARCOOLER_CHARTER`), so what it needs from
+    /// the charter has to reach it on its task.
+    #[test]
+    fn what_an_agent_needs_from_the_charter_goes_on_its_task() {
+        for h in ALL {
+            let third = step(&skill_body(h), 3);
+            assert!(third.contains("A dispatched agent reads its task and never the charter"), "{h:?}: {third}");
+        }
     }
 
     /// A manager unsure whether a dispatch took reads the board before
@@ -773,11 +872,14 @@ mod tests {
         }
     }
 
-    /// The spec wants the skill read in a minute.
+    /// The spec wants the skill read in a minute. It was held to 120 lines
+    /// until the split section (spec, "Splitting is done by agents") and
+    /// finding the board from the home added about 35; the split and the
+    /// interview are read only when they're needed.
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 120, "{lines} lines");
+        assert!(lines <= 160, "{lines} lines");
     }
 
     /// Not a check: the pressure harness's way to get the skill exactly as an

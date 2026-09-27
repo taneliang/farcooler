@@ -50,6 +50,9 @@ struct FleetDecodeTests {
           "state": "worktree_missing",
           "isMainCheckout": true,
           "ordinal": 3,
+          "workspace": "0198f2c0-0000-7000-8000-0000000000bb",
+          "claim_source": "hook",
+          "foreign_writers": ["Payments"],
           "terminals": [
             {
               "id": "aab3238922bcc25a6f606eb525ffdc56",
@@ -80,9 +83,25 @@ struct FleetDecodeTests {
               "agentMode": "plan",
               "availableAgentModes": ["plan", "edit"],
               "agentFailure": "not-authenticated",
-              "taskId": "0198f2c0-0000-7000-8000-00000000a001"
+              "taskId": "0198f2c0-0000-7000-8000-00000000a001",
+              "workspace": "0198f2c0-0000-7000-8000-0000000000cc",
+              "role": "orchestrator"
             }
           ]
+        }
+      ],
+      "workspaces": [
+        {
+          "id": "0198f2c0-0000-7000-8000-0000000000bb",
+          "short": "000000bb",
+          "repository": "1c383cd3-0b0f-4a63-b8a1-000000000002",
+          "name": "Billing",
+          "task_prefix": "bil",
+          "is_main": true,
+          "ordinal": 4,
+          "orchestrator": "aab3238922bcc25a6f606eb525ffdc56",
+          "home": null,
+          "charter": null
         }
       ]
     }
@@ -140,6 +159,56 @@ struct FleetDecodeTests {
         #expect(worktree.worktreeMissing)
         #expect(!worktree.isHidden)
         #expect(worktree.terminals.count == 1)
+    }
+
+    /// The workstreams, off the envelope's `workspaces`, and the workspace
+    /// fields on a worktree and a terminal.
+    ///
+    /// Values are non-default for this file's reason: `is_main` true and an
+    /// ordinal of 4, so a decode that did nothing cannot pass. The three
+    /// worktree keys are snake_case, the one exception inside the envelope,
+    /// because `Session::fleet` takes them from `workspaces_json`, which the
+    /// CLI shares.
+    @Test func everyWorkspaceFieldOnTheWireLandsOnTheModel() throws {
+        let fleet = try Self.decodeFleet()
+        let workspace = try #require(fleet.workspaces?.first)
+        #expect(workspace.id == "0198f2c0-0000-7000-8000-0000000000bb")
+        #expect(workspace.repository == "1c383cd3-0b0f-4a63-b8a1-000000000002")
+        #expect(workspace.name == "Billing")
+        #expect(workspace.taskPrefix == "bil")
+        #expect(workspace.isMain)
+        #expect(workspace.ordinal == 4)
+        #expect(workspace.orchestrator == "aab3238922bcc25a6f606eb525ffdc56")
+        #expect(!workspace.isImplicit)
+
+        let worktree = try #require(fleet.worktrees.first)
+        #expect(worktree.workspace == "0198f2c0-0000-7000-8000-0000000000bb")
+        #expect(worktree.claimSource == "hook")
+        #expect(worktree.foreignWriters == ["Payments"])
+
+        let terminal = try terminal()
+        #expect(terminal.workspace == "0198f2c0-0000-7000-8000-0000000000cc")
+        #expect(terminal.role == "orchestrator")
+        #expect(terminal.isOrchestrator)
+    }
+
+    /// Two keys spelled `workspaces`, meaning two different things, and both
+    /// frozen: the fleet envelope's list of workstreams, and the key
+    /// `RunnerDirectory` stores its WORKTREES under on disk, from before the
+    /// rename. Changing either to match the other would lose data — the
+    /// fleet's workstreams, or every cached runner's cards.
+    @Test func theFleetsWorkspacesAndTheDirectorysWorkspacesAreDifferentKeys() throws {
+        let fleet = try Self.decodeFleet()
+        #expect(fleet.workspaces?.map(\.name) == ["Billing"])
+
+        let directory = RunnerDirectory(
+            runner: "r", label: "box", seenAt: Date(timeIntervalSince1970: 0),
+            worktrees: [.init(id: "w1", name: "one", isHidden: false, tabs: [], tail: [])])
+        let written = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(directory)) as? [String: Any]
+        let stored = try #require(written?["workspaces"] as? [[String: Any]])
+        #expect(stored.first?["id"] as? String == "w1", "the directory's worktrees moved key")
+        #expect(written?["worktrees"] == nil)
     }
 
     /// The bug `07e75e8` fixed, standing as a test.
@@ -283,6 +352,19 @@ struct FleetDecodeTests {
         // No task, and a shell: nothing a board could take anyone to.
         #expect(terminal.taskId == nil)
         #expect(!terminal.runsAgent)
+        // A runner without `workstreams`: no list, no owner, no role — and
+        // the fleet groups as today's layout.
+        #expect(fleet.workspaces == nil)
+        #expect(worktree.workspace == nil)
+        #expect(worktree.claimSource == nil)
+        #expect(worktree.foreignWriters == nil)
+        #expect(terminal.workspace == nil)
+        #expect(terminal.role == nil)
+        #expect(!terminal.isOrchestrator)
+        let groups = fleet.repositoryGroups()
+        #expect(groups.count == 1)
+        #expect(groups.first?.workspaces.first?.workspace.isImplicit == true)
+        #expect(groups.first?.workspaces.first?.worktrees == ["w"])
     }
 
     /// The trace's two keys, which `Session::fleet` does NOT send yet.

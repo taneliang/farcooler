@@ -236,9 +236,21 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
         // the fleet's size and not the board's. A line without the actor would
         // coalesce more and tell a client nothing about who moved the row,
         // which is the whole reason the field crosses at all.
-        FleetEvent::Task { repository, actor } => {
-            json!({ "event": "task", "repository": repository.to_string(), "actor": actor })
-        }
+        //
+        // The board is on the line too, and for the same reason it must not
+        // coalesce away: two writes to two boards in one repository are two
+        // boards to re-read, and a line naming only the repository would fold
+        // them into one notice that names neither. `workspace` is null from a
+        // runner without `workstreams`, which a client reads as every board in
+        // the repository; `from_workspace` is set only on a move. See
+        // `FleetEvent::Task`.
+        FleetEvent::Task { repository, workspace, from_workspace, actor } => json!({
+            "event": "task",
+            "repository": repository.to_string(),
+            "workspace": workspace.map(|w| w.to_string()),
+            "from_workspace": from_workspace.map(|w| w.to_string()),
+            "actor": actor,
+        }),
     }
     .to_string()
 }
@@ -1460,6 +1472,26 @@ pub unsafe extern "C" fn farcooler_client_connected(handle: *mut c_void) -> bool
     })
 }
 
+/// An id argument a caller may leave out: absent or null is `None`.
+///
+/// Present and not a uuid is a refusal, not `None`. A board read handed a
+/// malformed workspace and quietly widened to the whole repository would
+/// draw every board's cards on one board, which looks like an answer.
+fn optional_id(
+    args: &Value,
+    key: &str,
+    method: &str,
+) -> Result<Option<uuid::Uuid>, SessionError> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_str()
+            .and_then(|s| s.parse::<uuid::Uuid>().ok())
+            .map(Some)
+            .ok_or_else(|| SessionError::Protocol(format!("{method} needs a {key}"))),
+    }
+}
+
 async fn dispatch(
     session: &mut Session,
     method: &str,
@@ -1846,10 +1878,17 @@ async fn dispatch(
         // `tasks`; see `Session::tasks`.
         //
         // Board news is already on the event queue as `{"event": "task",
-        // "repository": ...}`, which is what tells an app to call `task.list`
-        // again for that one repository.
+        // "repository": ..., "workspace": ..., "from_workspace": ...}`, which
+        // is what tells an app to call `task.list` again for that one board
+        // (or, with no `workspace`, for every board in that repository).
 
-        "task.list" => Ok(session.tasks(id("repository")?).await?),
+        // `workspace` is optional: absent is the whole repository, which is
+        // what every client before workstreams sends. See
+        // `task_list_request` for a workspace on a runner without them.
+        "task.list" => {
+            let workspace = optional_id(args, "workspace", method)?;
+            Ok(session.tasks(id("repository")?, workspace).await?)
+        }
 
         "task.get" => Ok(session.task(id("task")?).await?),
 
@@ -2922,10 +2961,64 @@ mod identity_tests {
     fn a_board_notice_names_the_repository_to_read_again() {
         use crate::session::FleetEvent;
         let repository = uuid::Uuid::now_v7();
-        let line = super::event_line(&FleetEvent::Task { repository, actor: "manager".into() });
+        let line = super::event_line(&FleetEvent::Task {
+            repository,
+            workspace: None,
+            from_workspace: None,
+            actor: "manager".into(),
+        });
         let parsed: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert_eq!(parsed["event"], "task");
         assert_eq!(parsed["repository"], repository.to_string());
+    }
+
+    /// Two boards in one repository are two notices, and each names its own.
+    ///
+    /// A board view is keyed by workspace now. If the line named only the
+    /// repository, a write to Billing and a write to Main would be the same
+    /// line, the queue would keep one, and the board it did not name would
+    /// never re-read. A move names the board it left as well, as
+    /// `from_workspace`, because that board changed too.
+    #[test]
+    fn two_boards_in_one_repository_are_two_notices() {
+        use crate::session::FleetEvent;
+        let repository = uuid::Uuid::now_v7();
+        let main = uuid::Uuid::now_v7();
+        let billing = uuid::Uuid::now_v7();
+        let on = |workspace, from_workspace| {
+            super::event_line(&FleetEvent::Task {
+                repository,
+                workspace: Some(workspace),
+                from_workspace,
+                actor: "user".into(),
+            })
+        };
+        let mut queue = super::EventQueue::default();
+        queue.push(on(main, None));
+        queue.push(on(billing, None));
+        queue.push(on(main, None));
+        queue.push(on(main, Some(billing)));
+        let lines: Vec<serde_json::Value> =
+            queue.pending.iter().map(|l| serde_json::from_str(l).expect("json")).collect();
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert_eq!(lines[0]["workspace"], main.to_string());
+        assert_eq!(lines[1]["workspace"], billing.to_string());
+        assert!(lines[0]["from_workspace"].is_null());
+        assert_eq!(lines[2]["workspace"], main.to_string());
+        assert_eq!(lines[2]["from_workspace"], billing.to_string());
+    }
+
+    /// A board read's workspace is optional, and a malformed one is refused
+    /// rather than read as "the whole repository".
+    #[test]
+    fn a_board_reads_workspace_is_optional_but_never_guessed() {
+        let billing = uuid::Uuid::now_v7();
+        let read = |args: serde_json::Value| super::optional_id(&args, "workspace", "task.list");
+        assert_eq!(read(serde_json::json!({ "repository": "r" })).unwrap(), None);
+        assert_eq!(read(serde_json::json!({ "workspace": null })).unwrap(), None);
+        assert_eq!(read(serde_json::json!({ "workspace": billing.to_string() })).unwrap(), Some(billing));
+        assert!(read(serde_json::json!({ "workspace": "billing" })).is_err());
+        assert!(read(serde_json::json!({ "workspace": 7 })).is_err());
     }
 
     /// News about different things is not collapsed together.

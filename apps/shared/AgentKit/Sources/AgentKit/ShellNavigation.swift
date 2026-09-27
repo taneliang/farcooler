@@ -304,15 +304,27 @@ struct ShellTab: Identifiable, Hashable {
     /// process.
     var closable: Bool
 
+    /// Whether this tab is a workspace's orchestrator.
+    ///
+    /// The daemon opens every orchestrator in its repository's main checkout
+    /// (`Service::start_orchestrator`), so Billing's orchestrator is a pane in
+    /// a worktree Main may own. The overview draws it once, as its
+    /// workspace's own row (`ShellWorkspaceHeading.orchestrator`), and leaves
+    /// it off that worktree's card — see `ShellWorktree.listedTabs`. It stays
+    /// a tab of the worktree it runs in, because that is where its pane is:
+    /// the row lands on it there.
+    var isOrchestrator: Bool
+
     init(
         id: String, title: String, mark: GlanceMark, wantsAttention: Bool = false,
-        closable: Bool = false
+        closable: Bool = false, isOrchestrator: Bool = false
     ) {
         self.id = id
         self.title = title
         self.mark = mark
         self.wantsAttention = wantsAttention
         self.closable = closable
+        self.isOrchestrator = isOrchestrator
     }
 }
 
@@ -414,12 +426,17 @@ struct ShellWorktree: Identifiable, Hashable {
     /// a drag's request both have to name the machine a worktree is actually
     /// on. See `ShellFleet.runnerSections`.
     var runner: String?
+    /// The workspace heading this worktree is drawn under, by
+    /// `ShellWorkspaceHeading.id`, or nil where the runner has no workspace
+    /// level — a runner without `workstreams`, or a fixture. See
+    /// `ShellFleet.runnerSections`.
+    var heading: String?
 
     init(
         id: String, name: String, server: String? = nil,
         tail: [String] = [], resume: Int? = nil, isHidden: Bool = false,
         isPrimaryCheckout: Bool = false, runner: String? = nil,
-        tabs: [ShellTab]
+        heading: String? = nil, tabs: [ShellTab]
     ) {
         self.id = id
         self.name = name
@@ -430,6 +447,27 @@ struct ShellWorktree: Identifiable, Hashable {
         self.isHidden = isHidden
         self.isPrimaryCheckout = isPrimaryCheckout
         self.runner = runner
+        self.heading = heading
+    }
+
+    /// The tabs this worktree's CARD shows: every tab but an orchestrator's,
+    /// which is drawn once, as its workspace's row, and not again among the
+    /// worktrees. The bar and the column still show it — it is a pane in this
+    /// worktree, and a pane you cannot swipe to is a pane you cannot reach.
+    var listedTabs: [ShellTab] { tabs.filter { !$0.isOrchestrator } }
+
+    /// The card's last line, `server · N tabs`, with the server left out when
+    /// it is the local one — the same rule the bar follows.
+    ///
+    /// N counts every tab, an orchestrator's too, because it is the bar's
+    /// count: open the card and that is how many tabs there are to swipe
+    /// through. The ribbon above it is `listedTabs`, since the orchestrator's
+    /// mark is its workspace's row's to show.
+    var cardSubtitle: String {
+        let count = tabs.count
+        let tabs = "\(count) \(count == 1 ? "tab" : "tabs")"
+        guard let server else { return tabs }
+        return "\(server) · \(tabs)"
     }
 
     /// The tab a deliberate arrival lands on: the remembered one where it

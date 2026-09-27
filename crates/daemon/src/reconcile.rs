@@ -60,6 +60,12 @@ pub struct Outcome {
     /// is: a row that just started telling the truth about itself is news a
     /// client should see, not something to swallow.
     pub healed: usize,
+    /// A main checkout that had no owner and was just given to Main. Nearly
+    /// always zero: the pass that adopts the row claims it in the same pass.
+    /// Nonzero when that claim failed, or when the row was written by
+    /// something that doesn't claim (an older Far Cooler, a restore). News,
+    /// like `healed`: the worktree now says whose it is.
+    pub claimed: usize,
 }
 
 impl Outcome {
@@ -71,6 +77,7 @@ impl Outcome {
             && self.recovered == 0
             && self.conflicts == 0
             && self.healed == 0
+            && self.claimed == 0
     }
 
     fn absorb(&mut self, other: Outcome) {
@@ -80,6 +87,7 @@ impl Outcome {
         self.recovered += other.recovered;
         self.conflicts += other.conflicts;
         self.healed += other.healed;
+        self.claimed += other.claimed;
     }
 }
 
@@ -188,6 +196,8 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             &worktree.path,
             worktree.is_main,
         ) {
+            // The main checkout's claim is made below, with every other
+            // unclaimed main checkout, rather than here: here runs once.
             Ok(_) => outcome.adopted += 1,
             // The unique index rejecting this means another writer got there
             // first, which is the index doing its job rather than an error
@@ -195,6 +205,40 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
             Err(e) => {
                 outcome.conflicts += 1;
                 tracing::warn!(path = %worktree.path, error = ?e, "could not adopt worktree");
+            }
+        }
+    }
+
+    // ---- the main checkout is Main's ----
+
+    // Explicitly, from the moment it has a row: every other worktree waits
+    // for a signal, but there is no question whose this one is.
+    //
+    // On every pass, not only the one that adopts the row. A claim made only
+    // at adoption is made once: if it failed, the row exists from then on,
+    // no later pass adopts it again, and the main checkout would stay
+    // unclaimed for good. Read after adoption, so a row adopted or healed
+    // into the main checkout above is claimed in this same pass.
+    // `claim_worktree` is sticky, so this can't take a worktree from an owner
+    // it already has (`worktree assign` moved it, say), and with nothing to
+    // claim it writes nothing.
+    let unclaimed: Vec<_> = svc
+        .store
+        .list_worktrees_for_repository(repository_id)?
+        .into_iter()
+        .filter(|w| w.is_main_checkout && w.workspace_id.is_none())
+        .collect();
+    for checkout in unclaimed {
+        let explicit = farcooler_store::models::ClaimSource::Explicit;
+        let claimed = svc
+            .store
+            .ensure_main_workspace(repository_id)
+            .and_then(|main| svc.store.claim_worktree(checkout.id, main.id, explicit));
+        match claimed {
+            Ok(Some(_)) => outcome.claimed += 1,
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(path = %checkout.worktree_path, error = ?e, "could not give the main checkout to Main")
             }
         }
     }
@@ -286,6 +330,69 @@ mod tests {
         let all = svc.store.list_worktrees_for_repository(repo).unwrap();
         assert_eq!(all.len(), 1, "the main checkout, and only it: {all:?}");
         assert!(all[0].is_main_checkout, "flagged, not inferred from its name");
+    }
+
+    /// Adopting the main checkout gives it to Main, explicitly, and adopting
+    /// any other worktree claims nothing: that is left to the signals.
+    #[tokio::test]
+    async fn adopting_the_main_checkout_gives_it_to_main() {
+        let (dir, svc, repo) = fixture().await;
+        let main = svc.store.main_workspace(repo).unwrap();
+        let checkout = svc
+            .store
+            .list_worktrees_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| w.is_main_checkout)
+            .unwrap();
+        // Forget the row, so the next pass adopts it afresh.
+        svc.store.delete_worktree(checkout.id, checkout.resource_version).unwrap();
+        let side = dir.path().join("side");
+        git::git(
+            &dir.path().join("repo"),
+            &["worktree", "add", "-q", "-b", "side", &side.to_string_lossy()],
+        )
+        .await
+        .unwrap();
+
+        let outcome = repository(&svc, repo).await.unwrap();
+        assert_eq!(outcome.adopted, 2, "{outcome:?}");
+        let all = svc.store.list_worktrees_for_repository(repo).unwrap();
+        let checkout = all.iter().find(|w| w.is_main_checkout).expect("adopted again");
+        assert_eq!(checkout.workspace_id, Some(main.id));
+        assert_eq!(checkout.claim_source, Some(farcooler_store::models::ClaimSource::Explicit));
+        let other = all.iter().find(|w| !w.is_main_checkout).expect("the side worktree");
+        assert_eq!(other.workspace_id, None, "no signal has said whose this is");
+    }
+
+    /// A main checkout whose claim didn't happen when it was adopted is
+    /// claimed by a later pass. The row here is written the way adoption
+    /// writes it, unclaimed, and then left for the pass to find already
+    /// registered: exactly where a failed claim at adoption leaves it.
+    #[tokio::test]
+    async fn a_main_checkout_left_unclaimed_is_claimed_by_a_later_pass() {
+        let (_dir, svc, repo) = fixture().await;
+        let main = svc.store.main_workspace(repo).unwrap();
+        let checkout = svc
+            .store
+            .list_worktrees_for_repository(repo)
+            .unwrap()
+            .into_iter()
+            .find(|w| w.is_main_checkout)
+            .unwrap();
+        svc.store.delete_worktree(checkout.id, checkout.resource_version).unwrap();
+        let bare = svc.store.create_worktree(repo, &checkout.branch, &checkout.worktree_path, true).unwrap();
+        assert_eq!(bare.workspace_id, None, "the state a failed claim leaves");
+
+        let outcome = repository(&svc, repo).await.unwrap();
+        assert_eq!((outcome.adopted, outcome.claimed), (0, 1), "{outcome:?}");
+        assert!(!outcome.is_quiet(), "a claim is news: {outcome:?}");
+        let row = svc.store.get_worktree(bare.id).unwrap();
+        assert_eq!(row.workspace_id, Some(main.id));
+        assert_eq!(row.claim_source, Some(farcooler_store::models::ClaimSource::Explicit));
+
+        // And once it's claimed, a pass has nothing to say about it.
+        assert_eq!(repository(&svc, repo).await.unwrap().claimed, 0);
     }
 
     #[tokio::test]

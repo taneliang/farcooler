@@ -229,6 +229,7 @@ async fn create_worktree(
             terminal_preset: preset.into(),
             adopt_existing: false,
             fork_only: false,
+            workspace_id: None,
         },
     ));
     let result = client.call(create).await.expect("worktree.create");
@@ -731,6 +732,7 @@ async fn a_root_with_worktrees_under_it_is_refused_with_an_actionable_reason() {
             terminal_preset: String::new(),
             adopt_existing: false,
             fork_only: false,
+            workspace_id: None,
         },
     ));
     client.call(create).await.expect("worktree.create");
@@ -976,6 +978,7 @@ async fn a_worktree_named(
             terminal_preset: String::new(),
             adopt_existing: false,
             fork_only: false,
+            workspace_id: None,
         },
     ));
     let result = client.call(create).await.expect("worktree.create");
@@ -1969,6 +1972,7 @@ async fn a_fork_only_create_refuses_a_branch_a_remote_already_has() {
             terminal_preset: String::new(),
             adopt_existing: false,
             fork_only: true,
+            workspace_id: None,
         },
     ));
     match client.call(create).await {
@@ -2122,14 +2126,32 @@ async fn a_method_this_daemon_never_heard_of_says_so_precisely() {
 /// The rename moved these on purpose and kept no aliases: every app and the
 /// runner update together. What an older app meets is the refusal above, not
 /// an empty success that would read as a runner with no worktrees on it.
+///
+/// `workspace.list` and `workspace.create` are names again, for workspaces as
+/// workstreams (see the spec's CLI section). An old app's `workspace.create`
+/// is still told apart by its payload, a `WorktreeCreate`, and refused the
+/// same way; its `workspace.list` now answers with a `WorkspaceList`, which
+/// that app decodes as a result it doesn't know rather than as no worktrees.
 #[tokio::test]
 async fn a_method_retired_by_the_worktree_rename_is_refused_not_answered() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
 
+    let mut old_create = request("workspace.create");
+    old_create.target_resource_id = Some(bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()));
+    old_create.payload = Some(request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
+        task_name: "old".into(),
+        branch: "old".into(),
+        ..Default::default()
+    }));
+    match client.call(old_create).await {
+        Err(ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, ErrorCode::CapabilityUnsupported as i32, "an old app's worktree create")
+        }
+        other => panic!("an old app's workspace.create must be refused, got {other:?}"),
+    }
+
     for method in [
-        "workspace.list",
-        "workspace.create",
         "workspace.hide",
         "workspace.unhide",
         "workspace.reorder",
@@ -3135,6 +3157,7 @@ async fn a_task_created_over_the_wire_comes_back_with_a_key() {
             repository_id: repository,
             status: 0,
             stale_after_millis: None,
+            workspace_id: None,
         },
     ));
     let result = client.call(list).await.expect("task.list");
@@ -3216,6 +3239,7 @@ async fn a_read_only_device_can_list_tasks_and_cannot_write_one() {
             repository_id: bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
             status: 0,
             stale_after_millis: None,
+            workspace_id: None,
         },
     ));
     client.call(list).await.expect("reading is allowed");
@@ -3730,6 +3754,7 @@ async fn a_create_that_is_refused_leaves_no_task_behind_and_burns_no_key() {
                 repository_id: repository,
                 status: 0,
                 stale_after_millis: None,
+                workspace_id: None,
             },
         ));
         let result = client.call(list).await.expect("task.list");
@@ -3788,4 +3813,419 @@ async fn a_create_that_is_refused_leaves_no_task_behind_and_burns_no_key() {
     let good = create_task(&mut client, repository.clone(), "fix the thing").await;
     assert_eq!(good.key, format!("{prefix}-1"), "a refused create burned a key number");
     assert_eq!(board(&mut client, repository).await.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces
+// ---------------------------------------------------------------------------
+
+type SocketClient = Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>;
+
+/// Every workspace in a repository, Main first.
+async fn workspaces_in(
+    client: &mut SocketClient,
+    repository: bytes::Bytes,
+) -> Vec<farcooler_protocol::v1::Workspace> {
+    let mut r = request("workspace.list");
+    r.target_resource_id = Some(repository);
+    let Some(result::Value::WorkspaceList(list)) = client.call(r).await.expect("workspace.list").value
+    else {
+        panic!("wrong result")
+    };
+    list.items
+}
+
+async fn main_workspace(
+    client: &mut SocketClient,
+    repository: bytes::Bytes,
+) -> farcooler_protocol::v1::Workspace {
+    let all = workspaces_in(client, repository).await;
+    all.into_iter().find(|w| w.is_main).expect("every registered repository has a Main")
+}
+
+fn workspace_create(repository: bytes::Bytes, name: &str, prefix: &str) -> farcooler_protocol::v1::Request {
+    let mut r = request("workspace.create");
+    r.target_resource_id = Some(repository);
+    r.payload = Some(request::Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
+        name: name.into(),
+        task_prefix: prefix.into(),
+    }));
+    r
+}
+
+async fn create_workspace(
+    client: &mut SocketClient,
+    repository: bytes::Bytes,
+    name: &str,
+    prefix: &str,
+) -> farcooler_protocol::v1::Workspace {
+    let result = client.call(workspace_create(repository, name, prefix)).await.expect("workspace.create");
+    let Some(result::Value::Workspace(workspace)) = result.value else { panic!("wrong result") };
+    workspace
+}
+
+/// A task filed on one board by naming the workspace alone.
+async fn create_task_on(
+    client: &mut SocketClient,
+    workspace: bytes::Bytes,
+    title: &str,
+) -> farcooler_protocol::v1::Task {
+    let mut req = request("task.create");
+    req.required_capabilities = vec![farcooler_protocol::capability::WORKSTREAMS.into()];
+    req.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        workspace_id: Some(workspace),
+        title: title.to_string(),
+        ..Default::default()
+    }));
+    into_task(client.call(req).await.expect("task.create"))
+}
+
+/// One board, by the workspace alone.
+async fn list_tasks_on(
+    client: &mut SocketClient,
+    workspace: bytes::Bytes,
+) -> Vec<farcooler_protocol::v1::Task> {
+    let mut list = request("task.list");
+    list.required_capabilities = vec![farcooler_protocol::capability::WORKSTREAMS.into()];
+    list.payload = Some(request::Payload::TaskList(farcooler_protocol::v1::TaskListRequest {
+        workspace_id: Some(workspace),
+        ..Default::default()
+    }));
+    let result = client.call(list).await.expect("task.list");
+    let Some(result::Value::TaskList(board)) = result.value else { panic!("wrong result") };
+    board.items
+}
+
+/// Every board in a repository.
+async fn list_tasks_in(
+    client: &mut SocketClient,
+    repository: bytes::Bytes,
+) -> Vec<farcooler_protocol::v1::Task> {
+    let mut list = request("task.list");
+    list.payload = Some(request::Payload::TaskList(farcooler_protocol::v1::TaskListRequest {
+        repository_id: repository,
+        ..Default::default()
+    }));
+    let result = client.call(list).await.expect("task.list");
+    let Some(result::Value::TaskList(board)) = result.value else { panic!("wrong result") };
+    board.items
+}
+
+/// The next `task_changed` naming this task, or a panic after two seconds.
+async fn next_task_changed(
+    events: &mut tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>,
+    task_id: &bytes::Bytes,
+) -> farcooler_protocol::v1::TaskChanged {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let event = events.recv().await.expect("the watcher is alive");
+            if let Some(farcooler_protocol::v1::event::Payload::TaskChanged(changed)) = event.payload
+                && changed.task_id == task_id
+            {
+                return changed;
+            }
+        }
+    })
+    .await
+    .expect("a task_changed for this task")
+}
+
+/// The refusal's `what` and `message`, or a panic naming what came back.
+fn refusal(outcome: Result<farcooler_protocol::v1::Result, ClientError>) -> (String, String) {
+    match outcome {
+        Err(ClientError::Daemon { code, what, message, .. }) => {
+            assert_eq!(code, ErrorCode::InvalidArgument as i32, "{what}: {message}");
+            (what, message)
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// Registering a repository makes its Main, and Main owns the main checkout
+/// from the start: claimed explicitly, not left for a signal to guess.
+#[tokio::test]
+async fn a_registered_repository_lists_its_main_workspace() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, prefix) = board_repository(&mut client).await;
+
+    let list = workspaces_in(&mut client, repository.clone()).await;
+    assert_eq!(list.len(), 1, "{list:?}");
+    let main = &list[0];
+    assert!(main.is_main);
+    assert_eq!(main.name, "Main");
+    assert_eq!(main.task_prefix, prefix);
+    assert_eq!(main.repository_id, repository);
+    assert!(
+        main.home.as_deref().is_some_and(|home| home.ends_with(&uuid_of(&main.id).to_string())),
+        "the home is keyed by id, for host_admin: {:?}",
+        main.home
+    );
+
+    let checkout = worktrees(&mut client)
+        .await
+        .into_iter()
+        .find(|w| w.is_main_checkout && w.repository_id == repository)
+        .expect("registration adopts the main checkout");
+    assert_eq!(checkout.workspace_id.as_ref(), Some(&main.id), "Main owns the main checkout");
+    assert_eq!(checkout.claim_source.as_deref(), Some("explicit"));
+}
+
+fn uuid_of(bytes: &[u8]) -> uuid::Uuid {
+    uuid::Uuid::from_slice(bytes).expect("a uuid")
+}
+
+#[tokio::test]
+async fn a_task_created_on_a_workspace_is_announced_with_it() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, _prefix) = board_repository(&mut client).await;
+    let billing = create_workspace(&mut client, repository.clone(), "Billing", "bil").await;
+    assert!(!billing.is_main);
+    assert_eq!(billing.ordinal, 1);
+
+    let mut events = h.watcher.subscribe();
+    let task = create_task_on(&mut client, billing.id.clone(), "t").await;
+    assert_eq!(task.key, "bil-1", "the workspace's prefix, not the repository's");
+    assert_eq!(task.workspace_id, billing.id);
+    assert_eq!(task.repository_id, repository, "found from the workspace");
+    let changed = next_task_changed(&mut events, &task.id).await;
+    assert_eq!(changed.workspace_id.as_ref(), Some(&billing.id));
+    assert_eq!(changed.from_workspace_id, None, "nothing moved");
+
+    // A caller that names only the repository, as every client before
+    // workspaces does, files on Main.
+    let main = main_workspace(&mut client, repository.clone()).await;
+    let old = create_task(&mut client, repository.clone(), "old").await;
+    assert_eq!(old.workspace_id, main.id);
+    assert_eq!(next_task_changed(&mut events, &old.id).await.workspace_id.as_ref(), Some(&main.id));
+
+    // A workspace in another repository than the one named is refused.
+    let (_other_dir, other) = registered_repository(&mut client).await;
+    let mut req = request("task.create");
+    req.payload = Some(request::Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: other,
+        workspace_id: Some(billing.id.clone()),
+        title: "t".into(),
+        ..Default::default()
+    }));
+    assert_eq!(refusal(client.call(req).await).0, "other_repository");
+}
+
+#[tokio::test]
+async fn moving_a_task_moves_its_board() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, prefix) = board_repository(&mut client).await;
+    let main = main_workspace(&mut client, repository.clone()).await;
+    let billing = create_workspace(&mut client, repository.clone(), "Billing", "bil").await;
+    let task = create_task_on(&mut client, main.id.clone(), "t").await;
+    assert_eq!(task.key, format!("{prefix}-1"));
+
+    let mut events = h.watcher.subscribe();
+    let mut r = request("task.move");
+    r.payload = Some(request::Payload::TaskMove(farcooler_protocol::v1::TaskMove {
+        task_ids: vec![task.id.clone()],
+        workspace_id: billing.id.clone(),
+        actor: "manager".into(),
+    }));
+    let Some(result::Value::TaskList(moved)) = client.call(r).await.expect("task.move").value else {
+        panic!("wrong result")
+    };
+    assert_eq!(moved.items.len(), 1);
+    assert_eq!(moved.items[0].workspace_id, billing.id);
+    assert_eq!(moved.items[0].key, task.key, "a moved task keeps its key");
+
+    let changed = next_task_changed(&mut events, &task.id).await;
+    assert_eq!(changed.workspace_id.as_ref(), Some(&billing.id), "the board it arrived on");
+    assert_eq!(changed.from_workspace_id.as_ref(), Some(&main.id), "and the board it left");
+    assert_eq!(changed.actor, "manager");
+
+    assert!(list_tasks_on(&mut client, main.id.clone()).await.is_empty());
+    assert_eq!(list_tasks_on(&mut client, billing.id.clone()).await[0].key, task.key);
+    // The whole repository still lists it, naming its board.
+    let all = list_tasks_in(&mut client, repository).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].workspace_id, billing.id);
+}
+
+#[tokio::test]
+async fn read_scope_can_list_workspaces_and_cannot_change_one() {
+    let h = start(Scope::Read).await;
+    let mut client = connect(&h).await;
+    let nowhere = bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes());
+
+    // The scope check comes before the payload is read, so an id that names
+    // nothing is enough to tell the table's answer from the store's.
+    // No target lists every workspace on the runner, of which there are none.
+    let Some(result::Value::WorkspaceList(all)) =
+        client.call(request("workspace.list")).await.expect("listing is a read").value
+    else {
+        panic!("wrong result")
+    };
+    assert!(all.items.is_empty());
+
+    let mut writes = vec![workspace_create(nowhere.clone(), "B", "b")];
+    for method in [
+        "workspace.rename",
+        "workspace.set_prefix",
+        "workspace.delete",
+        "task.move",
+        "worktree.assign",
+        "terminal.set_role",
+    ] {
+        let mut r = request(method);
+        r.target_resource_id = Some(nowhere.clone());
+        writes.push(r);
+    }
+    for r in writes {
+        let method = r.method.clone();
+        match client.call(r).await {
+            Err(ClientError::Daemon { code, .. }) => {
+                assert_eq!(code, ErrorCode::ScopeDenied as i32, "{method} is not gated")
+            }
+            other => panic!("expected {method} to be denied, got {other:?}"),
+        }
+    }
+}
+
+/// Each workspace refusal names itself and says a sentence of its own.
+#[tokio::test]
+async fn a_workspace_refusal_says_which_and_says_it_in_words() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, prefix) = board_repository(&mut client).await;
+    let main = main_workspace(&mut client, repository.clone()).await;
+    let billing = create_workspace(&mut client, repository.clone(), "Billing", "bil").await;
+
+    let mut said = std::collections::HashMap::new();
+    let mut check = |(what, message): (String, String), expected: &str| {
+        assert_eq!(what, expected);
+        assert!(!message.contains("invalid argument"), "{what} reads as a Rust error: {message}");
+        assert!(said.insert(message.clone(), what.clone()).is_none(), "{what} reads like another: {message}");
+    };
+
+    // Main's own prefix, in another case: taken, not malformed.
+    let taken = workspace_create(repository.clone(), "Again", &prefix.to_uppercase());
+    check(refusal(client.call(taken).await), "task_prefix_taken");
+    check(refusal(client.call(workspace_create(repository.clone(), "Bad", "1x")).await), "task_prefix");
+    check(refusal(client.call(workspace_create(repository.clone(), " ", "ok")).await), "name");
+
+    let mut delete_main = request("workspace.delete");
+    delete_main.target_resource_id = Some(main.id.clone());
+    check(refusal(client.call(delete_main).await), "main_workspace");
+
+    create_task_on(&mut client, billing.id.clone(), "holds it").await;
+    let mut delete_billing = request("workspace.delete");
+    delete_billing.target_resource_id = Some(billing.id.clone());
+    check(refusal(client.call(delete_billing).await), "workspace_not_empty");
+
+    let (_other_dir, other) = registered_repository(&mut client).await;
+    let elsewhere = main_workspace(&mut client, other).await;
+    let task = create_task_on(&mut client, main.id.clone(), "t").await;
+    let mut away = request("task.move");
+    away.payload = Some(request::Payload::TaskMove(farcooler_protocol::v1::TaskMove {
+        task_ids: vec![task.id.clone()],
+        workspace_id: elsewhere.id.clone(),
+        actor: String::new(),
+    }));
+    check(refusal(client.call(away).await), "other_repository");
+
+    let mut rename = request("workspace.rename");
+    rename.target_resource_id = Some(billing.id.clone());
+    rename.payload = Some(request::Payload::WorkspaceRename(farcooler_protocol::v1::WorkspaceRename {
+        name: "Payments".into(),
+        expected_version: Some(billing.resource_version),
+    }));
+    let Some(result::Value::Workspace(renamed)) = client.call(rename.clone()).await.expect("rename").value else {
+        panic!("wrong result")
+    };
+    assert_eq!(renamed.name, "Payments");
+    match client.call(rename).await {
+        Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::ResourceConflict as i32, "a stale version"),
+        other => panic!("expected a conflict, got {other:?}"),
+    }
+
+    let mut set_prefix = request("workspace.set_prefix");
+    set_prefix.target_resource_id = Some(billing.id.clone());
+    set_prefix.payload = Some(request::Payload::WorkspaceSetPrefix(farcooler_protocol::v1::WorkspaceSetPrefix {
+        task_prefix: "pay".into(),
+        expected_version: None,
+    }));
+    let Some(result::Value::Workspace(repriced)) = client.call(set_prefix).await.expect("set_prefix").value else {
+        panic!("wrong result")
+    };
+    assert_eq!(repriced.task_prefix, "pay");
+    // Numbered under the new prefix from one; the task filed as `bil-1` keeps
+    // its key.
+    assert_eq!(create_task_on(&mut client, billing.id.clone(), "new").await.key, "pay-1");
+    assert!(list_tasks_on(&mut client, billing.id.clone()).await.iter().any(|t| t.key == "bil-1"));
+}
+
+/// A worktree made for a workspace is claimed by it, its terminal does that
+/// workspace's work, and an assignment moves the worktree but not whose work
+/// the terminal is doing.
+#[tokio::test]
+async fn a_worktree_made_for_a_workspace_is_its_until_assigned_away() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let (_dir, repository, _prefix) = board_repository(&mut client).await;
+    let main = main_workspace(&mut client, repository.clone()).await;
+    let billing = create_workspace(&mut client, repository.clone(), "Billing", "bil").await;
+
+    let mut create = request("worktree.create");
+    create.target_resource_id = Some(repository.clone());
+    create.required_capabilities = vec![farcooler_protocol::capability::WORKSTREAMS.into()];
+    create.payload = Some(request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
+        task_name: "invoices".into(),
+        branch: "invoices".into(),
+        base_revision: "HEAD".into(),
+        terminal_preset: "shell".into(),
+        workspace_id: Some(billing.id.clone()),
+        ..Default::default()
+    }));
+    let Some(result::Value::Worktree(worktree)) = client.call(create).await.expect("worktree.create").value else {
+        panic!("wrong result")
+    };
+    assert_eq!(worktree.workspace_id.as_ref(), Some(&billing.id));
+    assert_eq!(worktree.claim_source.as_deref(), Some("explicit"));
+
+    let terminal = terminals(&mut client)
+        .await
+        .into_iter()
+        .find(|t| t.worktree_id == worktree.id)
+        .expect("the worktree opened with a shell");
+    assert_eq!(terminal.workspace_id.as_ref(), Some(&billing.id), "the owner's work");
+    assert_eq!(terminal.role, farcooler_protocol::v1::TerminalRole::Shell as i32);
+
+    let mut set_role = request("terminal.set_role");
+    set_role.target_resource_id = Some(terminal.id.clone());
+    set_role.payload = Some(request::Payload::TerminalSetRole(farcooler_protocol::v1::TerminalSetRole {
+        role: farcooler_protocol::v1::TerminalRole::Agent as i32,
+    }));
+    let Some(result::Value::Terminal(agent)) = client.call(set_role).await.expect("set_role").value else {
+        panic!("wrong result")
+    };
+    assert_eq!(agent.role, farcooler_protocol::v1::TerminalRole::Agent as i32);
+
+    let mut assign = request("worktree.assign");
+    assign.target_resource_id = Some(worktree.id.clone());
+    assign.payload = Some(request::Payload::WorktreeAssign(farcooler_protocol::v1::WorktreeAssign {
+        workspace_id: main.id.clone(),
+    }));
+    let Some(result::Value::Worktree(assigned)) = client.call(assign).await.expect("assign").value else {
+        panic!("wrong result")
+    };
+    assert_eq!(assigned.workspace_id.as_ref(), Some(&main.id));
+    assert_eq!(
+        assigned.foreign_writer_workspace_ids,
+        vec![billing.id.clone()],
+        "Billing's agent is still working in a worktree Main now owns"
+    );
+
+    let mut unspecified = request("terminal.set_role");
+    unspecified.target_resource_id = Some(terminal.id.clone());
+    unspecified.payload =
+        Some(request::Payload::TerminalSetRole(farcooler_protocol::v1::TerminalSetRole { role: 0 }));
+    assert_eq!(refusal(client.call(unspecified).await).0, "role");
 }

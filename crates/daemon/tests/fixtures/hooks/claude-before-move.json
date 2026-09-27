@@ -1,0 +1,10 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/tmp/fc-ws/user/.claude/projects/-private-tmp-fc-ws-spike-repo/00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/private/tmp/fc-ws/spike/repo",
+  "scratchpad_dir": "/tmp/fc-ws/scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "permission_mode": "auto",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Use your Bash tool to run exactly: cd .worktrees/nested && ls   -- then, in a second separate Bash call, run: pwd. Reply in one line."
+}

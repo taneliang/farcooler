@@ -91,6 +91,11 @@ data class TaskRow(
      * card nothing has happened to.
      */
     val updatedAt: Long? = null,
+    /**
+     * The board this task is on: its workspace's id, sent as `workspace`, or
+     * null from a runner without `workstreams`.
+     */
+    val workspaceId: String? = null,
 ) {
     /**
      * When anything last moved on the card: [updatedAt] (a move, a note or an
@@ -287,6 +292,7 @@ data class TaskBoard(
                     // No time line rather than "Added 56y ago".
                     createdAt = t["created_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
                     updatedAt = t["updated_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
+                    workspaceId = text("workspace"),
                 )
             }
             return TaskBoard(
@@ -368,14 +374,31 @@ object TaskAgentLink {
     const val PANE_HAS_CLOSED = "That agent’s pane has closed."
 }
 
-/** One repository's Board row on the front door. */
+/**
+ * One workspace's Board row on the front door.
+ *
+ * A repository has a board per workspace now. On a runner without
+ * `workstreams` the one workspace is implicit — its id the repository's — and
+ * the row is the repository's board, named for the repository, as it was.
+ */
 data class BoardRow(
     val hostId: String,
     val repository: String,
     val name: String,
     val decisions: Int,
     val agents: Int,
+    /** The board: which workspace, and how to read it ([WorkspaceSummary.boardWorkspace]). */
+    val workspace: WorkspaceSummary = WorkspaceSummary.implicit(repository),
+    /**
+     * The repository's display name, for a real workspace's row: "Main board"
+     * alone would not say which repository's Main. Null for an implicit one,
+     * whose [name] already is the repository's.
+     */
+    val repositoryName: String? = null,
 ) {
+    /** What the boards are keyed by: the workspace's id. */
+    val key: String get() = workspace.id
+
     /**
      * What a screen reader says after the row's name: the counts in words, or
      * null. Joined with ", " as the iPhone joins them (`RunnerBoardRow.spoken`).
@@ -403,14 +426,96 @@ data class BoardRow(
 
 object RunnerBoards {
     /**
-     * One runner's Board rows, in the order the runner lists its repositories.
+     * Every board a runner keeps, in the order a sweep reads them: each
+     * repository's workspaces, Main first and then by ordinal, or its one
+     * implicit workspace where the runner names none — a runner without
+     * `workstreams` ([workspaces] null), or one whose list left it out. A
+     * workspace in a repository [repositories] has not listed yet comes after.
+     *
+     * What a link coming up, a reconnect and a `resync` read — and so what
+     * reads an open board again after a dropped link, whatever notices were
+     * lost with it. A sweep over repositories while the boards are keyed by
+     * workspace would leave every workspace's board as the previous link read
+     * it. The same rule as AgentKit's `RunnerBoards.boards`.
+     */
+    fun boards(repositories: List<String>, workspaces: List<WorkspaceSummary>?): List<WorkspaceSummary> {
+        val all = workspaces.orEmpty()
+        val order = repositories.toMutableList()
+        for (workspace in all) {
+            val repository = workspace.repository ?: continue
+            if (repository !in order) order += repository
+        }
+        return order.flatMap { repository ->
+            WorkspaceGrouping.group(
+                repository = repository,
+                workspaces = all.filter { it.repository == repository },
+                worktrees = emptyList(),
+                orchestrators = emptyMap(),
+            ).workspaces.map { it.workspace }
+        }
+    }
+
+    /**
+     * The boards [notice] moved, of [boards] — plus a board it names that is
+     * not among them yet: a workspace the CLI made a moment ago, whose first
+     * task was filed before the fleet read that would list it. Reading it now
+     * puts its row up the moment the fleet names it, rather than at the next
+     * sweep. [BoardNotice.touches] decides the rest.
+     */
+    fun touched(notice: BoardNotice, boards: List<WorkspaceSummary>): List<WorkspaceSummary> {
+        val found = boards.filter { notice.touches(it) }.toMutableList()
+        for (named in listOfNotNull(notice.workspace, notice.fromWorkspace)) {
+            if (found.none { it.id == named }) found += WorkspaceSummary(id = named, repository = notice.repository)
+        }
+        return found
+    }
+
+    /**
+     * One runner's Board rows, in the order [boards] lists them.
      *
      * - A runner that does not advertise `tasks` has no board, and gets no rows;
      *   nor does one no link has asked yet ([build] null).
-     * - A repository gets a row only once its board has been read and has
-     *   something on it. An empty board is most repositories on most runners.
+     * - A workspace gets a row only once its board has been read and has
+     *   something on it. An empty board is most workspaces on most runners.
      * - [BoardRow.agents] is counted only where [TaskAgentLink.speaksOfAgents]
      *   holds; anywhere else it is 0, which draws nothing — "can't say".
+     * - A workspace's row is called by its name; an implicit one's by its
+     *   repository's, from [repositories], as the row always was.
+     *
+     * [models] are the last good reads, by workspace id.
+     */
+    fun rows(
+        hostId: String,
+        boards: List<WorkspaceSummary>,
+        repositories: List<Repository>,
+        models: Map<String, TaskBoard>,
+        panes: List<Terminal>,
+        build: DaemonBuild?,
+        connected: Boolean,
+    ): List<BoardRow> {
+        if (build?.can("tasks") != true) return emptyList()
+        val speaks = TaskAgentLink.speaksOfAgents(connected, build)
+        val names = repositories.associate { it.id to it.displayName.ifEmpty { it.short } }
+        return boards.mapNotNull { workspace ->
+            val board = models[workspace.id] ?: return@mapNotNull null
+            if (board.isEmpty) return@mapNotNull null
+            val repository = workspace.repository ?: workspace.id
+            val repositoryName = names[repository]
+            BoardRow(
+                hostId = hostId,
+                repository = repository,
+                name = if (workspace.isImplicit) repositoryName ?: workspace.name else workspace.name,
+                decisions = board.waitingOnYou,
+                agents = if (speaks) board.tasksWithLiveAgents(panes) else 0,
+                workspace = workspace,
+                repositoryName = if (workspace.isImplicit) null else repositoryName,
+            )
+        }
+    }
+
+    /**
+     * The Board rows of a runner without workspaces: one per repository, each
+     * its repository's implicit board. [rows] over [WorkspaceSummary.implicit].
      */
     fun rows(
         hostId: String,
@@ -419,21 +524,15 @@ object RunnerBoards {
         panes: List<Terminal>,
         build: DaemonBuild?,
         connected: Boolean,
-    ): List<BoardRow> {
-        if (build?.can("tasks") != true) return emptyList()
-        val speaks = TaskAgentLink.speaksOfAgents(connected, build)
-        return repositories.mapNotNull { repository ->
-            val board = boards[repository.id] ?: return@mapNotNull null
-            if (board.isEmpty) return@mapNotNull null
-            BoardRow(
-                hostId = hostId,
-                repository = repository.id,
-                name = repository.displayName.ifEmpty { repository.short },
-                decisions = board.waitingOnYou,
-                agents = if (speaks) board.tasksWithLiveAgents(panes) else 0,
-            )
-        }
-    }
+    ): List<BoardRow> = rows(
+        hostId = hostId,
+        boards = repositories.map { WorkspaceSummary.implicit(it.id) },
+        repositories = repositories,
+        models = boards,
+        panes = panes,
+        build = build,
+        connected = connected,
+    )
 }
 
 /**

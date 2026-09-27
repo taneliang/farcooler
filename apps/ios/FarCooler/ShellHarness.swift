@@ -77,9 +77,19 @@ struct ShellHarness: View {
                 runnerSections: ShellOverviewRunners(
                     live: [ShellRunnerLabel(id: Self.runner, name: "this-mac", keepsOrder: true)],
                     // `-shell-board` puts a Board row over this runner's
-                    // cards; see `HarnessBoard`.
-                    boards: { _ in HarnessBoard.rows },
+                    // cards; see `HarnessBoard`. `-shell-workspaces` splits
+                    // the runner into workspaces, a Board row each; see
+                    // `HarnessWorkspaces`.
+                    boards: { _ in
+                        HarnessWorkspaces.isRequested ? HarnessWorkspaces.rows : HarnessBoard.rows
+                    },
                     onOpenBoard: { _, _ in boardOpen = true },
+                    headings: { _ in HarnessWorkspaces.headings },
+                    // The orchestrator's row hands back a harness TAB id,
+                    // which is what `request` takes; in the app it is a
+                    // terminal id and `ShellScreen.requestedTab` turns it
+                    // into one.
+                    onOpenOrchestrator: { _, row in request = row.id },
                     elsewhere: Self.elsewhere,
                     // A menu on each heading, so the heading is the height it
                     // is in the app and the grid under it lands where it does
@@ -163,9 +173,15 @@ struct ShellHarness: View {
     /// launchers is a harness the tests cannot use.
     static var fleet: ShellFleet {
         let args = CommandLine.arguments
-        if args.contains("-shell-4") { return canned(count: 4) }
-        if args.contains("-shell-40") { return canned(count: 40) }
-        return canned(count: 10)
+        let fleet: ShellFleet
+        if args.contains("-shell-4") {
+            fleet = canned(count: 4)
+        } else if args.contains("-shell-40") {
+            fleet = canned(count: 40)
+        } else {
+            fleet = canned(count: 10)
+        }
+        return HarnessWorkspaces.isRequested ? HarnessWorkspaces.split(fleet) : fleet
     }
 
     /// Whether this launch asked for some of the fleet to be put away.
@@ -516,6 +532,87 @@ enum HarnessBoard {
                     attention: row.status == .needsDecision ? .needsYou : .quiet,
                     core: row.status == .needsDecision ? .atAPrompt : .producing))
         }
+    }
+}
+
+/// A runner split into workspaces, for `-shell-workspaces`: Main and Billing
+/// in one repository, and a worktree neither has claimed.
+///
+/// What the workspace level looks like in the grid, and what
+/// `ShellBoardTests.testEachWorkspaceHasItsOwnBoardRow` drives. The layout is
+/// `ShellFleet.runnerSections`' and the rows are `RunnerBoards.rows`', over
+/// this fixture, so the harness draws what the rules decide.
+///
+/// Billing's orchestrator runs in `ws-0`, the repository's checkout, which
+/// Main owns — where the daemon opens every orchestrator. It is a tab there
+/// (`ws-0-orch`), off that card, and Billing's own row.
+enum HarnessWorkspaces {
+    static var isRequested: Bool { CommandLine.arguments.contains("-shell-workspaces") }
+
+    static let main = WorkspaceSummary(
+        id: "ws-main", name: "Main", taskPrefix: "ov", isMain: true, ordinal: 0,
+        repository: "repo-overnight")
+    static let billing = WorkspaceSummary(
+        id: "ws-billing", name: "Billing", taskPrefix: "bil", isMain: false, ordinal: 1,
+        repository: "repo-overnight", orchestrator: "ws-0-orch")
+
+    static let orchestrator = ShellOrchestratorRow(
+        id: "ws-0-orch", line: "Splitting the invoices work",
+        mark: GlanceMark(attention: .quiet, core: .producing))
+
+    static var headings: [ShellWorkspaceHeading] {
+        guard isRequested else { return [] }
+        return [
+            ShellWorkspaceHeading(id: main.id, name: main.name),
+            ShellWorkspaceHeading(id: billing.id, name: billing.name, orchestrator: orchestrator),
+            ShellWorkspaceHeading(
+                id: ShellWorkspaceHeading.unclaimedID(repository: "repo-overnight"),
+                name: "Unclaimed", isUnclaimed: true),
+        ]
+    }
+
+    /// `ws-0` and `ws-1` Main's, `ws-2` Billing's, the rest unclaimed — in
+    /// that order, which is the order the app builds a fleet in (see
+    /// `ShellFleetMap.of`) — and Billing's orchestrator a tab of `ws-0`.
+    static func split(_ fleet: ShellFleet) -> ShellFleet {
+        let unclaimed = ShellWorkspaceHeading.unclaimedID(repository: "repo-overnight")
+        var worktrees = fleet.worktrees.enumerated().map { index, worktree in
+            var worktree = worktree
+            worktree.heading = index < 2 ? main.id : index == 2 ? billing.id : unclaimed
+            return worktree
+        }
+        if !worktrees.isEmpty {
+            worktrees[0].tabs.append(
+                ShellTab(
+                    id: orchestrator.id, title: ShellTab.orchestratorTitle(workspace: billing.name),
+                    mark: orchestrator.mark,
+                    closable: true, isOrchestrator: true))
+        }
+        return ShellFleet(worktrees: worktrees)
+    }
+
+    /// A Board row each: Main's board is `HarnessBoard`'s, and Billing's has
+    /// one task waiting on a decision.
+    static var rows: [RunnerBoardRow] {
+        let now = Date()
+        let billingBoard = TaskBoardModel(
+            columns: TaskBoardModel.order.map { status in
+                TaskBoardColumn(
+                    status: status,
+                    rows: status == .needsDecision
+                        ? [TaskRow(
+                            id: "b-1", key: "bil-1", title: "Invoices by customer",
+                            status: .needsDecision, statusSince: now)]
+                        : [])
+            })
+        return RunnerBoards.rows(
+            boards: [main, billing], names: ["repo-overnight": "overnight"],
+            models: [main.id: HarnessBoard.board, billing.id: billingBoard],
+            panes: HarnessBoard.panes,
+            build: DaemonBuild(
+                version: "harness", matches: true, platform: "",
+                capabilities: ["workspaces", "terminals", "tasks", "terminal_task", "workstreams"]),
+            connected: true)
     }
 }
 

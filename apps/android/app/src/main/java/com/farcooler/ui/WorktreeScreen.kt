@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
+import com.farcooler.model.FleetLayout
 import com.farcooler.model.InboxRow
 import com.farcooler.model.ShellClose
 import com.farcooler.model.Terminal
@@ -144,7 +145,13 @@ fun WorktreeScreen(
     val focus by model.focus.collectAsStateWithLifecycle()
     val entries by model.fleet.entries.collectAsStateWithLifecycle()
     val connections by model.fleet.active.collectAsStateWithLifecycle()
-    connection.fleet.collectAsStateWithLifecycle()
+    val runnerFleet by connection.fleet.collectAsStateWithLifecycle()
+    // An orchestrator's tab is called after its workspace — "Billing
+    // Orchestrator" — since the main checkout it runs in may be another
+    // workspace's. See [FleetLayout.orchestratorTitles].
+    val orchestratorTitles = remember(runnerFleet) {
+        FleetLayout.orchestratorTitles(FleetLayout.of(runnerFleet, emptyMap()))
+    }
 
     // Not `collectAsStateWithLifecycle`, deliberately. That one stops
     // collecting below STARTED, and the transition this drives — the app
@@ -320,7 +327,7 @@ fun WorktreeScreen(
         // every poll, so a pane that appears becomes a neighbour without anyone
         // telling the track; `rememberUpdatedState` inside `paneTrack` is what
         // makes an in-flight swipe see it.
-        val fleet = trackFleet(worktree, route.worktreeId, route.hostId)
+        val fleet = trackFleet(worktree, route.worktreeId, route.hostId, orchestratorTitles)
         val position = fleet.position(panes.current.id)
         val track = rememberPaneTrack()
 
@@ -425,6 +432,7 @@ fun WorktreeScreen(
         TerminalTabStrip(
             worktree = worktree,
             counts = counts,
+            titles = orchestratorTitles,
             current = panes.current,
             onSelect = { model.choose(route.hostId, route.worktreeId, it) },
             // **Asks only where there is something to interrupt.**

@@ -174,6 +174,17 @@ message Request {
     TaskBlockSet task_block_set = 77;
     TaskSearchRequest task_search = 78;
     TaskGetByKeyRequest task_get_by_key = 79;
+    // Workspaces: workstreams that own a board and, once claimed, worktrees.
+    // Every one of these is behind the `workstreams` capability.
+    // `workspace.list` and `workspace.delete` carry `Empty` and name what they
+    // act on in `target_resource_id`.
+    WorkspaceCreate workspace_create = 80;
+    WorkspaceRename workspace_rename = 81;
+    WorkspaceSetPrefix workspace_set_prefix = 82;
+    TaskMove task_move = 83;
+    WorktreeAssign worktree_assign = 84;
+    TerminalSetRole terminal_set_role = 85;
+    WorkspaceStartOrchestrator workspace_start_orchestrator = 86;
   }
 }
 
@@ -254,6 +265,8 @@ message Result {
     TaskNote task_note = 40;
     TaskBlockList task_block_list = 41;
     TaskNoteHitList task_note_hit_list = 42;
+    Workspace workspace = 43;
+    WorkspaceList workspace_list = 44;
   }
 }
 
@@ -768,6 +781,20 @@ message Worktree {
   // worktree. That is why a client must tie-break rather than trust it alone,
   // and why `workspace_order` is a capability it can ask about first.
   uint32 ordinal = 10;
+  // The workspace that owns this worktree. Absent means unclaimed, and a
+  // client draws it in its repository's "Unclaimed" group. Also absent from a
+  // runner without the `workstreams` capability, which has no workspaces.
+  optional bytes workspace_id = 11;
+  // Which signal made the claim: `explicit`, `hook`, `process` or `migration`.
+  // A machine word, never a sentence, so a wrong claim can be traced to
+  // whatever made it. Absent while unclaimed.
+  optional string claim_source = 12;
+  // Workspaces other than the owner whose terminals are working in this
+  // worktree: the two-writers hazard, reported rather than resolved. A
+  // claim never moves because of it; `worktree.assign` is how ownership
+  // moves. Orchestrators are left out, because a harness may require one to
+  // run in a worktree another workspace owns. Empty while unclaimed.
+  repeated bytes foreign_writer_workspace_ids = 13;
 }
 
 message WorktreeList { repeated Worktree items = 1; }
@@ -1127,6 +1154,21 @@ message Terminal {
   // `farcooler task dispatch` reads to refuse a second agent on a task whose
   // first is still running.
   optional bytes task_id = 37;
+  // Whose work this terminal is doing, which is not always the owner of the
+  // worktree it runs in (`worktree_id`): a Codex orchestrator for one
+  // workspace may run in the main checkout another owns. Absent for a terminal
+  // in an unclaimed worktree, and from a runner without `workstreams`.
+  optional bytes workspace_id = 39;
+  // UNSPECIFIED from a runner without `workstreams`.
+  TerminalRole role = 40;
+}
+
+// What a terminal is for. At most one live orchestrator per workspace.
+enum TerminalRole {
+  TERMINAL_ROLE_UNSPECIFIED = 0;
+  TERMINAL_ROLE_SHELL = 1;
+  TERMINAL_ROLE_AGENT = 2;
+  TERMINAL_ROLE_ORCHESTRATOR = 3;
 }
 
 // What a pane is hosting.
@@ -1413,6 +1455,14 @@ message WorktreeCreate {
   // names that capability in `Request.required_capabilities`: an older
   // daemon drops an unknown field and would check the branch out anyway.
   bool fork_only = 6;
+  // The workspace to claim the new worktree for, explicitly. It must be in
+  // the target repository. Absent leaves the worktree unclaimed, for the
+  // runner's other signals to decide.
+  //
+  // Gated by the `workstreams` capability, named in
+  // `Request.required_capabilities` by a client that sets it: an older daemon
+  // drops the field and makes an unclaimed worktree without a word.
+  optional bytes workspace_id = 7;
 }
 
 message Branch {
@@ -1883,6 +1933,14 @@ message TaskChanged {
   // disagree, and nothing would stop a `manager` row from also carrying a
   // terminal.
   string actor = 3;
+  // The board the task is on now, so a board view re-reads only when its own
+  // board moved. Absent from a runner without the `workstreams` capability,
+  // which a client reads as "any board in this repository may have moved".
+  optional bytes workspace_id = 4;
+  // The board it just left, set only when `task.move` moved it. A move
+  // changes two boards and this one event names both, so the board a task
+  // left re-reads too, not only the board it arrived on.
+  optional bytes from_workspace_id = 5;
 }
 
 // Where a base came from, because a guessed one silently produces a wrong diff
@@ -2588,6 +2646,10 @@ message Task {
   // is how a client tells "Added" from "Updated". Zero from an older runner,
   // as above. Blocks do not move it: a block is about another card.
   int64 updated_at = 14;
+  // The board this task is on: a workspace in `repository_id`. Always set by
+  // a runner with the `workstreams` capability; empty from an older one.
+  // `task.move` changes it, and the key stays the same.
+  bytes workspace_id = 15;
 }
 
 message TaskList { repeated Task items = 1; }
@@ -2667,6 +2729,14 @@ message TaskListRequest {
   // expected to move, NEEDS_DECISION waits on the owner, and DONE and
   // CANCELLED have stopped for good.
   optional uint64 stale_after_millis = 3;
+  // One board: the tasks on this workspace. `repository_id` may then be
+  // empty; if it is set, the workspace must be in it. Absent lists every
+  // board in `repository_id`, each task naming its own in `Task.workspace_id`.
+  //
+  // Gated by the `workstreams` capability, named in
+  // `Request.required_capabilities` by a client that sets it: an older daemon
+  // drops the field and answers with the whole repository.
+  optional bytes workspace_id = 4;
 }
 
 message TaskGetRequest {
@@ -2718,6 +2788,14 @@ message TaskCreate {
   repeated string labels = 6;
   optional bytes worktree_id = 7;
   string actor = 8;
+  // The board to file it on. `repository_id` may then be empty; if it is set,
+  // the workspace must be in it. Absent files it on the repository's Main, so
+  // a caller that predates workspaces still lands somewhere sane.
+  //
+  // Gated by the `workstreams` capability, named in
+  // `Request.required_capabilities` by a client that sets it: an older daemon
+  // drops the field and files the task on the repository's only board.
+  optional bytes workspace_id = 9;
 }
 
 // Revise what is currently understood. The mutable half of the design.
@@ -2826,4 +2904,105 @@ message TaskSearchRequest {
   string query = 2;
   // UNSPECIFIED means every kind.
   TaskNoteKind kind = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces
+//
+// A workspace is a workstream: a name, a task prefix, a board, at most one
+// live orchestrator, and the worktrees it owns. Every repository has one
+// called Main, made when the repository is registered and never deleted.
+//
+// Every method here is behind the `workstreams` capability. The older
+// `workspaces` capability value means worktrees and is frozen; see
+// `capability::WORKSTREAMS` in `crates/protocol`.
+//
+// A refusal is INVALID_ARGUMENT with `Error.what` naming it, and
+// `Error.message` is a sentence a client can say as it is:
+//
+//   `task_prefix`          a prefix is a letter, then up to seven letters or digits
+//   `task_prefix_taken`    another workspace on this runner holds that prefix
+//   `name`                 a workspace needs a name
+//   `main_workspace`       Main can't be deleted
+//   `workspace_not_empty`  tasks, worktrees or terminals still belong to it
+//   `other_repository`     the workspace is in another repository
+//   `orchestrator_taken`   the workspace already has a live orchestrator
+//   `workspace`            the terminal belongs to no workspace
+//   `role`                 no role was named
+//   `task_ids`             `task.move` named no task
+//
+// A stale `expected_version` is RESOURCE_CONFLICT; a workspace, task,
+// worktree or terminal that isn't there is NOT_FOUND.
+// ---------------------------------------------------------------------------
+
+message Workspace {
+  bytes id = 1;
+  uint64 resource_version = 2;
+  bytes repository_id = 3;
+  string name = 4;
+  // What new keys on this board start with: `bil` in `bil-3`. Unique on the
+  // runner, ignoring case. Changing it changes only keys issued afterwards.
+  string task_prefix = 5;
+  bool is_main = 6;
+  // Order within the repository. Main is 0.
+  uint32 ordinal = 7;
+  // The live orchestrator, when there is one.
+  optional bytes orchestrator_terminal_id = 8;
+  // The workspace's home on the runner, and the charter in it. Paths, so
+  // host_admin only, like `Worktree.worktree_path`; absent for any other
+  // scope. The home is keyed by id, so a rename never moves it.
+  optional string home = 9;
+  optional string charter_path = 10;
+}
+
+message WorkspaceList { repeated Workspace items = 1; }
+
+// `workspace.create`. `target_resource_id` is the repository.
+message WorkspaceCreate {
+  string name = 1;
+  string task_prefix = 2;
+}
+
+// `workspace.rename`. `target_resource_id` is the workspace.
+message WorkspaceRename {
+  string name = 1;
+  // The `resource_version` the caller read. Absent renames whatever is there.
+  optional uint64 expected_version = 2;
+}
+
+// `workspace.set_prefix`. `target_resource_id` is the workspace. Keys already
+// issued keep resolving; only new tasks take the new prefix.
+message WorkspaceSetPrefix {
+  string task_prefix = 1;
+  // As in `WorkspaceRename`.
+  optional uint64 expected_version = 2;
+}
+
+// `task.move`: put tasks on another board in the same repository. All or
+// nothing. Each task keeps its key and gets a note saying where it went. A
+// task already on that board is left alone.
+message TaskMove {
+  repeated bytes task_ids = 1;
+  bytes workspace_id = 2;
+  // As on every board write. Empty means `user`.
+  string actor = 3;
+}
+
+// `worktree.assign`: give a worktree to a workspace, whoever owned it. The
+// one way a claim moves. `target_resource_id` is the worktree.
+message WorktreeAssign { bytes workspace_id = 1; }
+
+// `terminal.set_role`. `target_resource_id` is the terminal.
+message TerminalSetRole { TerminalRole role = 1; }
+
+// `workspace.start_orchestrator`: open the workspace's orchestrator, a pane
+// with role ORCHESTRATOR in the repository's main checkout, launched from
+// the recipe for its harness. `target_resource_id` is the workspace. Answers
+// with the new `Terminal`.
+message WorkspaceStartOrchestrator {
+  // `claude`, `codex` or `cursor`, optionally `:<model>` as in a preset.
+  string harness = 1;
+  // A workspace with a live orchestrator refuses a second
+  // (`orchestrator_taken`); with this set, the live one is stopped first.
+  bool replace = 2;
 }

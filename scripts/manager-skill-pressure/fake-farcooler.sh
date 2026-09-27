@@ -10,12 +10,21 @@
 #                              list.txt, else a task this world created
 #   worktree list ...       -> $FAKE_BOARD/worktrees.json
 #   task search ...         -> $FAKE_BOARD/search.txt
+#   workspace show <ws> ... -> the workspace in $FAKE_BOARD/workspaces.tsv
+#                              (id, name, prefix, home) named by its id, name
+#                              or prefix, as the real `workspace show` prints
+#                              it, or under --json as its JSON object
+#   workspace list ...      -> every workspace in workspaces.tsv
 #
 # Writes print one plausible line and exit 0. `task create` hands out a new key
 # each time -- fc-9, fc-10, ... -- from the counter $FAKE_BOARD/next-key, and
-# records it in $FAKE_BOARD/created.txt so `task show` answers for it. `--help` is handed to the real
-# CLI named by $REAL_FARCOOLER when there is one, so a baseline agent sees the
-# real command tree; clap answers `--help` without reaching a daemon.
+# records it in $FAKE_BOARD/created.txt so `task show` answers for it.
+# `workspace create` adds a row to workspaces.tsv and gives the new workspace a
+# home under $FAKE_HOMES holding a copy of Main's charter, as the real one does,
+# so a split can be scored on whether that charter was edited. `--help` is
+# handed to the real CLI named by $REAL_FARCOOLER when there is one, so a
+# baseline agent sees the real command tree; clap answers `--help` without
+# reaching a daemon.
 set -u
 : "${FAKE_LOG:?FAKE_LOG must name the log file}"
 : "${FAKE_BOARD:?FAKE_BOARD must name the board fixture directory}"
@@ -27,12 +36,14 @@ for a in "$@"; do
     if [ -n "${REAL_FARCOOLER:-}" ] && [ -x "$REAL_FARCOOLER" ]; then
       exec "$REAL_FARCOOLER" "$@"
     fi
-    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch}; worktree {create,list}; see the skill"
+    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch,move}; worktree {create,list,assign}; workspace {create,list,show,start-orchestrator}; see the skill"
     exit 0
   fi
 done
 
 # Global flags may come before the subcommand (`--json worktree list`).
+json=0
+for a in "$@"; do [ "$a" = "--json" ] && json=1; done
 args=("$@")
 while [ ${#args[@]} -gt 0 ]; do
   case "${args[0]}" in
@@ -108,6 +119,94 @@ create_task() {
   echo "fc-$n  created"
 }
 
+# The workspace a word names, as its workspaces.tsv line: by id (whole, or
+# its end), by name or by prefix, ignoring case. The first line, Main, for an
+# empty word: an agent that ran `workspace show "$FARCOOLER_WORKSPACE"` without
+# sourcing pane.env asked about nothing, and the log shows the empty word.
+find_workspace() {
+  local word
+  word=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  if [ -z "$word" ]; then head -n 1 "$FAKE_BOARD/workspaces.tsv"; return; fi
+  awk -F '\t' -v w="$word" '
+    { id = tolower($1); gsub("-", "", id); ww = w; gsub("-", "", ww)
+      if (tolower($2) == w || tolower($3) == w || (length(ww) >= 4 && substr(id, length(id) - length(ww) + 1) == ww)) { print; exit } }
+  ' "$FAKE_BOARD/workspaces.tsv"
+}
+
+# One workspace as `workspace show` prints it, or its JSON object.
+print_workspace() {
+  local id name prefix home main=false
+  IFS=$'\t' read -r id name prefix home <<<"$1"
+  [ "$name" = "Main" ] && main=true
+  if [ "$json" = 1 ]; then
+    printf '{"id":"%s","short":"%s","repository":"00000000-0000-0000-0000-0000000000ee","name":"%s","task_prefix":"%s","is_main":%s,"ordinal":0,"orchestrator":null,"home":"%s","charter":"%s/charter.md"}\n' \
+      "$id" "${id: -8}" "$name" "$prefix" "$main" "$home" "$home"
+  else
+    printf '%s  %s%s\n' "${id: -8}" "$name" "$([ "$main" = true ] && echo '  (main)')"
+    printf '  repository    scratch\n  task prefix   %s\n  orchestrator  none running\n  charter       %s/charter.md\n' "$prefix" "$home"
+    printf '  worktrees     none listed by this fake: see `worktree list --json`\n'
+  fi
+}
+
+# The first word after `<noun> <verb>` that isn't a flag or a flag's value.
+first_word() {
+  shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo|--name|--prefix|--harness|--to|--actor|--runner|--host) shift; [ $# -gt 0 ] && shift ;;
+      -*) shift ;;
+      *) echo "$1"; return ;;
+    esac
+  done
+}
+
+# Every such word: the keys of `task move`.
+positional_words() {
+  shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo|--name|--prefix|--harness|--to|--actor|--runner|--host) shift; [ $# -gt 0 ] && shift ;;
+      -*) shift ;;
+      *) echo "$1"; shift ;;
+    esac
+  done
+}
+
+# A flag's value, as `--flag value` or `--flag=value`.
+flag_value() {
+  local flag=$1 prev="" a
+  shift
+  for a in "$@"; do
+    case "$a" in "$flag="*) echo "${a#"$flag="}"; return ;; esac
+    [ "$prev" = "$flag" ] && { echo "$a"; return; }
+    prev=$a
+  done
+}
+
+# `workspace create`: a new row, and a home holding a copy of Main's charter.
+create_workspace() {
+  local name prefix n home main_home
+  name=$(flag_value --name "$@")
+  prefix=$(flag_value --prefix "$@")
+  if [ -z "$name" ] || [ -z "$prefix" ]; then
+    echo "error: workspace create needs --name and --prefix" >&2
+    exit 2
+  fi
+  n=$(($(wc -l < "$FAKE_BOARD/workspaces.tsv") + 1))
+  home="$FAKE_HOMES/$n"
+  mkdir -p "$home"
+  main_home=$(head -n 1 "$FAKE_BOARD/workspaces.tsv" | cut -f4)
+  if [ -f "$main_home/charter.md" ]; then
+    cp "$main_home/charter.md" "$home/charter.md"
+    # What the copy said, for score.py's "edited down": Main's charter may
+    # have changed before the split, so charter.orig isn't the baseline.
+    cp "$main_home/charter.md" "$home/charter.at-create"
+  fi
+  printf '00000000-0000-0000-0000-00000000b%03d\t%s\t%s\t%s\n' "$n" "$name" "$prefix" "$home" \
+    >> "$FAKE_BOARD/workspaces.tsv"
+  print_workspace "$(tail -n 1 "$FAKE_BOARD/workspaces.tsv")"
+}
+
 case "${1:-} ${2:-}" in
   "task list")      show_file "$FAKE_BOARD/list.txt" "no tasks" ;;
   "task show")      show_task "$(shown_key "$@")" ;;
@@ -120,8 +219,17 @@ case "${1:-} ${2:-}" in
   # What the real `task dispatch` prints, word for word but for the ids.
   "task dispatch")  echo "${3:-fc-?} is in progress in the new lane, terminal 0000abcd"
                     echo "  it won't report back by itself: check the board or \`worktree list --json\`" ;;
+  "task move")      for k in $(positional_words "$@"); do echo "$k  moved to $(flag_value --to "$@")"; done ;;
   "worktree list") show_file "$FAKE_BOARD/worktrees.json" '{"worktrees":[]}' ;;
   "worktree create") echo "created worktree ${4:-}" ;;
+  "worktree assign") echo "$(first_word "$@") now belongs to $(flag_value --to "$@")" ;;
+  "workspace show"|"workspace start-orchestrator")
+                    ws=$(find_workspace "$(first_word "$@")")
+                    if [ -z "$ws" ]; then echo "error: no workspace matching \"$(first_word "$@")\"" >&2; exit 1; fi
+                    if [ "$2" = "show" ]; then print_workspace "$ws"
+                    else echo "started the orchestrator of $(echo "$ws" | cut -f2), terminal 0000orch"; fi ;;
+  "workspace list") while IFS= read -r ws; do print_workspace "$ws"; done < "$FAKE_BOARD/workspaces.tsv" ;;
+  "workspace create") create_workspace "$@" ;;
   *)                echo "ok" ;;
 esac
 exit 0

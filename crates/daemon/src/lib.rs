@@ -2,6 +2,7 @@
 pub mod agent_supervisor;
 pub mod allowlist;
 pub mod change_set;
+pub mod claims;
 pub mod codex_trust;
 pub mod enrollment;
 pub mod fanout;
@@ -14,8 +15,10 @@ pub mod hook_install;
 pub mod layout;
 pub mod log_join;
 pub mod log_watch;
+pub mod orchestrator;
 pub mod pastes;
 pub mod paths;
+pub mod proc_cwd;
 pub mod push;
 pub mod reconcile;
 pub mod rendezvous;
@@ -34,6 +37,8 @@ pub(crate) mod test_support;
 pub mod transcript_tail;
 pub mod watch;
 pub mod wire;
+pub mod workspace_home;
+pub mod workspace_ops;
 
 /// This machine's name, for rejecting it as a pane title.
 ///

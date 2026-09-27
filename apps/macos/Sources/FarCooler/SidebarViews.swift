@@ -1263,10 +1263,10 @@ struct HiddenWorktrees: View {
     }
 }
 
-/// A repository's board, as the first row under its header.
+/// A workspace's board, as the first row under its header.
 ///
 /// Above the worktrees because the board is about all of them: a task sits on
-/// one repository's board whichever worktree an agent takes it into. Drawn
+/// one workspace's board whichever worktree an agent takes it into. Drawn
 /// like a worktree row — one line, the same band, the same selection pill —
 /// because it is a place you go, not a section label.
 ///
@@ -1278,7 +1278,7 @@ struct HiddenWorktrees: View {
 struct BoardRow: View {
     @ObservedObject var store: TaskBoardStore
     /// Observed for its board generations: the row holds its board open, so it
-    /// is what re-reads when the runner says this repository's board moved.
+    /// is what re-reads when the runner says this workspace's board moved.
     @ObservedObject var client: DaemonClient
     let agents: BoardAgents
     let isSelected: Bool
@@ -1351,10 +1351,170 @@ struct BoardRow: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // Read here as well as by the board, because the counts are the
         // row's and the board is usually not on screen. Only this
-        // repository's `task` events, and reconnections, wake it — see
+        // workspace's `task` events, and reconnections, wake it — see
         // `boardGeneration(for:)`. Keyed on the store for the reason
         // `TaskBoardView`'s first read is: a replacement store is read.
         .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
-        .task(id: client.boardGeneration(for: store.repository.id)) { await store.reloadIfMoved() }
+        .task(id: client.boardGeneration(for: store.workspace)) { await store.reloadIfMoved() }
+    }
+}
+
+/// A workspace's name, heading its board, its orchestrator and its worktrees.
+///
+/// Drawn even when Main is the only workspace, and Main like any other, so
+/// the shape is visible before anybody splits a repository in two. A label
+/// and not a place: it is not selectable, and it offers nothing — making,
+/// moving and splitting workspaces is the CLI's in this release.
+struct WorkspaceHeader: View {
+    let name: String
+
+    var body: some View {
+        SidebarRow {
+            HStack(spacing: 0) {
+                Image(systemName: "square.stack.3d.up")
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: SidebarGrid.gutter, alignment: .leading)
+                Text(name)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A workspace's orchestrator: the agent that runs its board.
+///
+/// Its own row because it belongs to the workspace, not to the checkout it
+/// happens to run in — which is where the runner lists it, and why the
+/// worktree rows leave it out. "No orchestrator", dimmed, when none is
+/// running, rather than no row: an empty seat is worth seeing.
+struct OrchestratorRow: View {
+    /// The orchestrator and the worktree it runs in, or nil for none.
+    let pane: BoardPane?
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    @State private var hovering = false
+    @Environment(\.controlActiveState) private var controlActiveState
+    private var windowActive: Bool { controlActiveState == .key }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 0) {
+            Group {
+                if let pane {
+                    StatusGlyph(status: pane.terminal.status)
+                } else {
+                    Image(systemName: "circle.dashed")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .frame(width: SidebarGrid.gutter, height: 16, alignment: .leading)
+
+            if let pane {
+                Text("Orchestrator")
+                    .font(WorkspaceStyle.sidebarPrimary)
+                    .lineLimit(1)
+                // Which harness, in the word the rest of the sidebar uses
+                // for it: `claude`, `codex`, `cursor`.
+                Text(Terminal.name(of: pane.terminal.preset))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.leading, SidebarGrid.gap)
+            } else {
+                Text("No orchestrator")
+                    .font(WorkspaceStyle.sidebarPrimary)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, SidebarGrid.rowVerticalPadding)
+        .padding(.horizontal, SidebarGrid.edge - SidebarGrid.highlightInset)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    isSelected
+                        ? WorkspaceStyle.navigatorSelection(active: windowActive)
+                        : (hovering && pane != nil ? Color.primary.opacity(0.045) : .clear))
+        )
+        .padding(.horizontal, SidebarGrid.highlightInset)
+        .animation(Motion.snap, value: hovering)
+        .contentShape(Rectangle())
+        .onTapGesture { if pane != nil { onSelect() } }
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(
+            pane == nil ? [] : (isSelected ? [.isButton, .isSelected] : .isButton))
+    }
+}
+
+/// A repository's worktrees that no workspace owns, below its workspaces.
+///
+/// Collapsed by default, like `HiddenWorktrees` which it is modeled on: a
+/// worktree lands here until something claims it, and most of them are
+/// claimed as soon as an agent works in one. Unlike a hidden worktree, one
+/// in here is live, so expanding draws the ordinary row — `row` — and not an
+/// Unhide button.
+struct UnclaimedWorktrees<Row: View>: View {
+    let worktrees: [Worktree]
+    let isExpanded: Bool
+    let onToggle: () -> Void
+    @ViewBuilder let row: (Worktree) -> Row
+
+    private var attention: Int {
+        worktrees.flatMap(\.terminals).filter(\.status.wantsAttention).count
+    }
+
+    /// The same rule the rows inside use, so expanding the group cannot
+    /// change what it was already saying.
+    private var attentionStatus: Status? {
+        Status.mostUrgent(in: worktrees.flatMap(\.terminals).map(\.status))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SidebarRow(indent: 0) {
+                Button(action: onToggle) {
+                    HStack(spacing: SidebarGrid.gap) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: SidebarGrid.gutter - SidebarGrid.gap, alignment: .leading)
+                        Text("Unclaimed")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("\(worktrees.count)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                        if let waiting = attentionStatus {
+                            StatusGlyph(status: waiting, inAppDiameter: 5)
+                                .help(
+                                    attention == 1
+                                        ? "1 waiting on you, in a worktree no workspace owns"
+                                        : "\(attention) waiting on you, in worktrees no workspace owns")
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Worktrees no workspace owns yet")
+            }
+            .padding(.top, 6)
+            .padding(.bottom, 3)
+
+            if isExpanded {
+                ForEach(worktrees) { worktree in row(worktree) }
+            }
+        }
     }
 }

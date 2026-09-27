@@ -44,6 +44,9 @@ class FleetDecodeTest {
               "state": "worktree_missing",
               "isMainCheckout": true,
               "ordinal": 3,
+              "workspace": "0198f2c0-0000-7000-8000-0000000000bb",
+              "claim_source": "hook",
+              "foreign_writers": ["Payments"],
               "terminals": [
                 {
                   "id": "aab3238922bcc25a6f606eb525ffdc56",
@@ -74,9 +77,25 @@ class FleetDecodeTest {
                   "agentMode": "plan",
                   "availableAgentModes": ["plan", "edit"],
                   "agentFailure": "not-authenticated",
-                  "taskId": "0198f2c0-0000-7000-8000-00000000a001"
+                  "taskId": "0198f2c0-0000-7000-8000-00000000a001",
+                  "workspace": "0198f2c0-0000-7000-8000-0000000000cc",
+                  "role": "orchestrator"
                 }
               ]
+            }
+          ],
+          "workspaces": [
+            {
+              "id": "0198f2c0-0000-7000-8000-0000000000bb",
+              "short": "000000bb",
+              "repository": "1c383cd3-0b0f-4a63-b8a1-000000000002",
+              "name": "Billing",
+              "task_prefix": "bil",
+              "is_main": true,
+              "ordinal": 4,
+              "orchestrator": "aab3238922bcc25a6f606eb525ffdc56",
+              "home": null,
+              "charter": null
             }
           ]
         }
@@ -146,6 +165,37 @@ class FleetDecodeTest {
         assertFalse(w.isHidden)
     }
 
+    /**
+     * The workstreams, off the envelope's `workspaces`, and the workspace
+     * fields on a worktree and a terminal. `is_main` true and an ordinal of 4,
+     * so a decode that did nothing cannot pass. The worktree's two multi-word
+     * keys are snake_case because `Session::fleet` takes them from
+     * `workspaces_json`, which the CLI shares.
+     */
+    @Test
+    fun everyWorkspaceFieldOnTheWireLandsOnTheModel() {
+        val fleet = json.decodeFromString(Fleet.serializer(), payload)
+        val ws = fleet.workspaces!!.single()
+        assertEquals("0198f2c0-0000-7000-8000-0000000000bb", ws.id)
+        assertEquals("1c383cd3-0b0f-4a63-b8a1-000000000002", ws.repository)
+        assertEquals("Billing", ws.name)
+        assertEquals("bil", ws.taskPrefix)
+        assertTrue(ws.isMain)
+        assertEquals(4, ws.ordinal)
+        assertEquals("aab3238922bcc25a6f606eb525ffdc56", ws.orchestrator)
+        assertFalse(ws.isImplicit)
+
+        val w = fleet.worktrees.first()
+        assertEquals("0198f2c0-0000-7000-8000-0000000000bb", w.workspace)
+        assertEquals("hook", w.claimSource)
+        assertEquals(listOf("Payments"), w.foreignWriters)
+
+        val t = terminal
+        assertEquals("0198f2c0-0000-7000-8000-0000000000cc", t.workspace)
+        assertEquals("orchestrator", t.role)
+        assertTrue(t.isOrchestrator)
+    }
+
     @Test
     fun aFleetFromADaemonThatSendsNoneOfThemStillDecodes() {
         // The whole reason every added field is nullable. A runner that has not
@@ -157,7 +207,21 @@ class FleetDecodeTest {
                "terminals":[{"id":"t1","short":"t1","title":"","preset":"zsh",
                              "state":"running","epoch":1}]}]}
         """.trimIndent()
-        val w = json.decodeFromString(Fleet.serializer(), old).worktrees.first()
+        val fleet = json.decodeFromString(Fleet.serializer(), old)
+        val w = fleet.worktrees.first()
+        // A runner without `workstreams`: no list, no owner, no role — and
+        // the fleet groups as the flat layout it always had.
+        assertNull(fleet.workspaces)
+        assertNull(w.workspace)
+        assertNull(w.claimSource)
+        assertNull(w.foreignWriters)
+        assertNull(w.terminals.first().workspace)
+        assertNull(w.terminals.first().role)
+        assertFalse(w.terminals.first().isOrchestrator)
+        val groups = WorkspaceGrouping.groups(fleet)
+        assertEquals(1, groups.size)
+        assertTrue(groups.single().workspaces.single().workspace.isImplicit)
+        assertEquals(listOf("w"), groups.single().workspaces.single().worktrees)
         // A runner too old to keep an order says nothing rather than 0, which is
         // what lets the fleet screen offer no drag instead of offering one that
         // silently springs back on the next refresh.

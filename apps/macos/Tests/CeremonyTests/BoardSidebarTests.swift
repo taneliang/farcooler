@@ -107,10 +107,10 @@ struct BoardSidebarTests {
         ])) == 0)
     }
 
-    /// A board selection is a repository's, and nothing about a terminal
+    /// A board selection is a workspace's, and nothing about a terminal
     /// closing moves it.
     @Test func aBoardSelectionIsLeftWhereItIs() {
-        let board = ContentView.Selection.board(host: "", repository: "r1")
+        let board = ContentView.Selection.board(host: "", workspace: "w1")
         #expect(ContentView.healed(board, in: [Self.worktree("lane", [])]) == board)
         #expect(ContentView.healed(board, in: []) == board)
     }
@@ -119,8 +119,16 @@ struct BoardSidebarTests {
 
     private static let repoA = "0198f2c0-0000-7000-8000-0000000000aa"
     private static let repoB = "0198f2c0-0000-7000-8000-0000000000bb"
+    /// Two workspaces in ONE repository, `repoA`: the case that matters now
+    /// that a repository holds several boards.
+    private static let main = "0198f2c0-0000-7000-8000-0000000000cc"
+    private static let billing = "0198f2c0-0000-7000-8000-0000000000dd"
+    /// `repoB`'s Main.
+    private static let otherMain = "0198f2c0-0000-7000-8000-0000000000ee"
 
-    /// Every `task list` the stub was asked for, by repository.
+    /// Every `task list` the stub was asked for, by the board it named: the
+    /// `--workspace` when there is one, and the `--repo` when there is not
+    /// (a runner without workspaces, whose one board is the repository's).
     @MainActor
     final class Reads {
         var calls: [String] = []
@@ -131,6 +139,9 @@ struct BoardSidebarTests {
         /// The repositories `repo list` answers with, or nil to answer with
         /// nothing it can decode.
         var listed: [String]?
+        /// The workspaces `worktree list` names, all in `repoA`, or nil for a
+        /// runner without workspaces (the key absent, as the CLI sends it).
+        var workspaces: [String]?
         func count(_ repository: String) -> Int { calls.filter { $0 == repository }.count }
     }
 
@@ -141,7 +152,9 @@ struct BoardSidebarTests {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         client.commandRunnerForTesting = { args in
             let words = args.filter { $0 != "--json" }
-            if words.starts(with: ["task", "list"]), let at = words.firstIndex(of: "--repo") {
+            if words.starts(with: ["task", "list"]),
+                let at = words.firstIndex(of: "--workspace") ?? words.firstIndex(of: "--repo")
+            {
                 reads.calls.append(words[at + 1])
                 let nth = reads.calls.count
                 reads.inFlight += 1
@@ -163,50 +176,186 @@ struct BoardSidebarTests {
                 return (Data(#"{"repositories":[\#(rows.joined(separator: ","))]}"#.utf8), nil)
             }
             if words.starts(with: ["worktree", "list"]) {
-                return (Data(#"{"runtime_healthy":true,"live_panes":0,"worktrees":[]}"#.utf8), nil)
+                let listed = reads.workspaces.map { ids in
+                    let rows = ids.map { #"{"id":"\#($0)","repository":"\#(Self.repoA)","name":"W"}"# }
+                    return #","workspaces":[\#(rows.joined(separator: ","))]"#
+                } ?? ""
+                return (Data(#"{"runtime_healthy":true,"live_panes":0,"worktrees":[]\#(listed)}"#.utf8), nil)
             }
             return (Data(), nil)
         }
         return client
     }
 
-    private static func repository(_ id: String) -> Repository {
-        Repository(id: id, short: String(id.suffix(8)), displayName: id, remote: "", repositoryRootId: "")
+    /// A workspace in `repoA`, as the runner lists it.
+    private static func summary(
+        _ id: String, _ name: String, isMain: Bool = false, ordinal: Int = 1,
+        repository: String = repoA, orchestrator: String? = nil
+    ) -> WorkspaceSummary {
+        WorkspaceSummary(
+            id: id, name: name, taskPrefix: String(name.prefix(3)).lowercased(), isMain: isMain,
+            ordinal: isMain ? 0 : ordinal, repository: repository, orchestrator: orchestrator)
     }
 
-    /// A `task` event about one repository re-reads that repository's board
-    /// and no other. It used to be one counter per runner, so a busy agent on
-    /// one repository re-read every board the window held.
-    @Test func aBoardEventReReadsOnlyTheBoardItNames() async {
+    /// The one board a runner without workspaces has in a repository.
+    private static func implicit(_ repository: String) -> WorkspaceSummary {
+        WorkspaceSummary.implicit(repository: repository)
+    }
+
+    /// Two boards in ONE repository: an event naming Billing re-reads Billing
+    /// only. A counter per repository would re-read Main for every write to
+    /// Billing, and each read is a CLI process.
+    @Test func aBoardEventReReadsOnlyTheWorkspaceItNames() async {
         let reads = Reads()
         let client = client(reads)
-        let a = TaskBoardStore(client: client, repository: Self.repository(Self.repoA))
-        let b = TaskBoardStore(client: client, repository: Self.repository(Self.repoB))
+        let m = TaskBoardStore(client: client, workspace: Self.summary(Self.main, "Main", isMain: true))
+        let b = TaskBoardStore(client: client, workspace: Self.summary(Self.billing, "Billing"))
+        await m.readIfNeverRead()
+        await b.readIfNeverRead()
+        #expect(reads.count(Self.main) == 1)
+        #expect(reads.count(Self.billing) == 1)
+
+        client.boardMoved(TaskEvent(repository: Self.repoA, workspace: Self.billing, actor: "user"))
+        await m.reloadIfMoved()
+        await b.reloadIfMoved()
+        #expect(reads.count(Self.billing) == 2, "the board that moved was read again")
+        #expect(reads.count(Self.main) == 1, "Main’s board was read again for Billing’s change")
+
+        // And once acted on, the same event is not read twice.
+        await b.reloadIfMoved()
+        #expect(reads.count(Self.billing) == 2)
+    }
+
+    /// A move names the board the task left as well as the one it is on, and
+    /// both re-read: the card has to disappear from one and appear on the
+    /// other. A third board in the repository is not read.
+    @Test func aMoveReReadsTheBoardItLeftAndTheBoardItJoined() async {
+        let reads = Reads()
+        let client = client(reads)
+        let ops = "0198f2c0-0000-7000-8000-0000000000ee"
+        let m = TaskBoardStore(client: client, workspace: Self.summary(Self.main, "Main", isMain: true))
+        let b = TaskBoardStore(client: client, workspace: Self.summary(Self.billing, "Billing"))
+        let o = TaskBoardStore(client: client, workspace: Self.summary(ops, "Ops", ordinal: 2))
+        for store in [m, b, o] { await store.readIfNeverRead() }
+
+        client.boardMoved(
+            TaskEvent(repository: Self.repoA, workspace: Self.billing, fromWorkspace: Self.main, actor: "user"))
+        for store in [m, b, o] { await store.reloadIfMoved() }
+        #expect(reads.count(Self.billing) == 2, "the board it joined wasn’t read again")
+        #expect(reads.count(Self.main) == 2, "the board it left wasn’t read again")
+        #expect(reads.count(ops) == 1, "a board the move didn’t touch was read again")
+    }
+
+    /// A runner without workspaces names no workspace, and its one board per
+    /// repository is the whole repository's: the notice reaches that board,
+    /// and not another repository's.
+    @Test func aNoticeNamingNoWorkspaceReachesItsRepositorysBoardsOnly() async {
+        let reads = Reads()
+        let client = client(reads)
+        let a = TaskBoardStore(client: client, workspace: Self.implicit(Self.repoA))
+        let b = TaskBoardStore(client: client, workspace: Self.implicit(Self.repoB))
         await a.readIfNeverRead()
         await b.readIfNeverRead()
-        #expect(reads.count(Self.repoA) == 1)
-        #expect(reads.count(Self.repoB) == 1)
+        #expect(reads.count(Self.repoA) == 1, "an implicit board reads the whole repository")
 
         client.boardMoved(TaskEvent(repository: Self.repoA, actor: "user"))
         await a.reloadIfMoved()
         await b.reloadIfMoved()
-        #expect(reads.count(Self.repoA) == 2, "the board that moved was read again")
-        #expect(reads.count(Self.repoB) == 1, "the board that didn’t move was read again")
-
-        // And once acted on, the same event is not read twice.
-        await a.reloadIfMoved()
         #expect(reads.count(Self.repoA) == 2)
+        #expect(reads.count(Self.repoB) == 1)
+    }
+
+    /// The re-read rule is AgentKit's `BoardNotice.touches`, which the phones
+    /// follow too. This app counts the news it hears and asks `touches` which
+    /// of it a board cares about, and the two are checked against each other
+    /// here: every board a notice touches moves, and no other.
+    @Test func whichBoardsMoveIsTheSharedNoticeRule() {
+        let boards = [
+            Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
+            Self.summary("0198f2c0-0000-7000-8000-0000000000ee", "Ops", repository: Self.repoB),
+            Self.implicit(Self.repoA), Self.implicit(Self.repoB),
+        ]
+        let events = [
+            TaskEvent(repository: Self.repoA, workspace: Self.billing, actor: "user"),
+            TaskEvent(repository: Self.repoA, workspace: Self.billing, fromWorkspace: Self.main, actor: nil),
+            TaskEvent(repository: Self.repoA, actor: "manager"),
+            TaskEvent(repository: Self.repoB, actor: nil),
+        ]
+        for event in events {
+            let client = DaemonClient(target: "", notifications: NotificationCenter())
+            let before = boards.map { client.boardGeneration(for: $0) }
+            client.boardMoved(event)
+            for (board, was) in zip(boards, before) {
+                #expect(
+                    (client.boardGeneration(for: board) != was) == event.notice.touches(board),
+                    "\(board.name) in \(board.repository ?? "-") for \(event)")
+            }
+        }
+    }
+
+    /// The line the CLI's `events` actually prints for a move — `kind`, not
+    /// the FFI's `event`, which is the key AgentKit's `BoardNotice(notice:)`
+    /// reads — decoded by the stream and handed to the client, re-reads both
+    /// boards. Copied from `task_event_json` in `crates/cli/src/main.rs`.
+    @Test func aRealCLIEventLineReReadsTheBoard() async throws {
+        let line = Data(
+            #"{"kind":"task","task":"0198f2c0-0000-7000-8000-00000000b001","short":"0000b001","repository":"\#(Self.repoA)","actor":"user","workspace":"\#(Self.billing)","from_workspace":"\#(Self.main)"}"#
+                .utf8)
+        var heard: [TaskEvent] = []
+        EventStream.dispatch(line, decoder: JSONDecoder(), onTask: { heard.append($0) })
+        let event = try #require(heard.first, "the stream dropped the CLI’s board line")
+        #expect(event.notice == BoardNotice(
+            repository: Self.repoA, workspace: Self.billing, fromWorkspace: Self.main, actor: "user"))
+
+        let reads = Reads()
+        let client = client(reads)
+        let m = TaskBoardStore(client: client, workspace: Self.summary(Self.main, "Main", isMain: true))
+        let b = TaskBoardStore(client: client, workspace: Self.summary(Self.billing, "Billing"))
+        await m.readIfNeverRead()
+        await b.readIfNeverRead()
+        client.boardMoved(event)
+        await m.reloadIfMoved()
+        await b.reloadIfMoved()
+        #expect(reads.count(Self.billing) == 2)
+        #expect(reads.count(Self.main) == 2)
+
+        // And the line from a runner without workspaces: both keys null.
+        let older = Data(
+            #"{"kind":"task","task":"t","short":"t","repository":"\#(Self.repoA)","actor":"user","workspace":null,"from_workspace":null}"#
+                .utf8)
+        EventStream.dispatch(older, decoder: JSONDecoder(), onTask: { heard.append($0) })
+        #expect(heard.count == 2)
+        #expect(heard.last?.notice == BoardNotice(repository: Self.repoA, workspace: nil, actor: "user"))
+    }
+
+    /// A board reads its own workspace, in its own repository — the CLI
+    /// resolves `--workspace` within `--repo` — and a runner without
+    /// workspaces is asked for the whole repository with no `--workspace`
+    /// at all, which it would refuse.
+    @Test func aBoardReadNamesItsWorkspaceOnlyWhenItHasOne() async {
+        var lines: [[String]] = []
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.commandRunnerForTesting = { args in
+            lines.append(args)
+            return (Data(#"{"tasks":[]}"#.utf8), nil)
+        }
+        await TaskBoardStore(client: client, workspace: Self.summary(Self.billing, "Billing")).reload()
+        await TaskBoardStore(client: client, workspace: Self.implicit(Self.repoB)).reload()
+        #expect(lines == [
+            ["task", "list", "--repo", Self.repoA, "--workspace", Self.billing, "--json"],
+            ["task", "list", "--repo", Self.repoB, "--json"],
+        ])
     }
 
     /// The sidebar row and the board both ask for the first read when the row
     /// is selected. One read, not two.
     @Test func twoViewsAskingForTheFirstReadLaunchOne() async {
         let reads = Reads()
-        let store = TaskBoardStore(client: client(reads), repository: Self.repository(Self.repoA))
+        let store = TaskBoardStore(client: client(reads), workspace: Self.summary(Self.main, "Main", isMain: true))
         async let first: Void = store.readIfNeverRead()
         async let second: Void = store.readIfNeverRead()
         _ = await (first, second)
-        #expect(reads.count(Self.repoA) == 1)
+        #expect(reads.count(Self.main) == 1)
         #expect(store.hasRead)
     }
 
@@ -221,7 +370,7 @@ struct BoardSidebarTests {
         let reads = Reads()
         reads.delay = .milliseconds(80)
         let client = client(reads)
-        let store = TaskBoardStore(client: client, repository: Self.repository(Self.repoA))
+        let store = TaskBoardStore(client: client, workspace: Self.summary(Self.main, "Main", isMain: true))
 
         async let first: Void = store.readIfNeverRead()
         // Until the first read is actually in flight — not a guessed sleep.
@@ -230,12 +379,12 @@ struct BoardSidebarTests {
         }
         #expect(reads.inFlight == 1)
         for _ in 0..<3 {
-            client.boardMoved(TaskEvent(repository: Self.repoA, actor: "agent:x"))
+            client.boardMoved(TaskEvent(repository: Self.repoA, workspace: Self.main, actor: "agent:x"))
             await store.reloadIfMoved()
         }
         await first
 
-        #expect(reads.count(Self.repoA) == 2, "one read running and one after it")
+        #expect(reads.count(Self.main) == 2, "one read running and one after it")
         #expect(reads.mostAtOnce == 1, "two reads of one board ran at once")
         #expect(store.board.rows.count == 2, "the board is the last read's")
         #expect(!store.reading)
@@ -288,19 +437,19 @@ struct BoardSidebarTests {
     @Test func aReconnectionReReadsTheBoard() async {
         let reads = Reads()
         let client = client(reads)
-        let store = TaskBoardStore(client: client, repository: Self.repository(Self.repoA))
+        let store = TaskBoardStore(client: client, workspace: Self.summary(Self.main, "Main", isMain: true))
         await store.readIfNeverRead()
-        #expect(reads.count(Self.repoA) == 1)
+        #expect(reads.count(Self.main) == 1)
 
         await client.refresh()  // .connecting → .connected: the link comes up
         #expect(client.state == .connected)
         await store.reloadIfMoved()
-        #expect(reads.count(Self.repoA) == 2, "the link came up and the board wasn’t re-read")
+        #expect(reads.count(Self.main) == 2, "the link came up and the board wasn’t re-read")
 
         // A refresh on a link that was already up is not a reconnection.
         await client.refresh()
         await store.reloadIfMoved()
-        #expect(reads.count(Self.repoA) == 2)
+        #expect(reads.count(Self.main) == 2)
         client.stopEvents()
     }
 
@@ -343,7 +492,7 @@ struct BoardSidebarTests {
         let after = Reads()
         let oldClient = client(before)
         let holder = Holder(
-            oldClient, TaskBoardStore(client: oldClient, repository: Self.repository(Self.repoA)))
+            oldClient, TaskBoardStore(client: oldClient, workspace: Self.summary(Self.main, "Main", isMain: true)))
         let view: AnyView = which == "row"
             ? AnyView(RowHost(holder: holder)) : AnyView(BoardHost(holder: holder))
         let host = NSHostingView(rootView: view.frame(width: 600, height: 300))
@@ -352,22 +501,22 @@ struct BoardSidebarTests {
             styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        for _ in 0..<100 where before.count(Self.repoA) == 0 {
+        for _ in 0..<100 where before.count(Self.main) == 0 {
             host.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(10))
         }
-        #expect(before.count(Self.repoA) == 1, "the first store was read")
+        #expect(before.count(Self.main) == 1, "the first store was read")
 
         let newClient = client(after)
         holder.client = newClient
-        holder.store = TaskBoardStore(client: newClient, repository: Self.repository(Self.repoA))
+        holder.store = TaskBoardStore(client: newClient, workspace: Self.summary(Self.main, "Main", isMain: true))
         // Until the read has LANDED, not just started: the stub counts a
         // read when it is asked, and answers a beat later.
         for _ in 0..<100 where !holder.store.hasRead {
             host.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(10))
         }
-        #expect(after.count(Self.repoA) == 1, "the replacement store was never read")
+        #expect(after.count(Self.main) == 1, "the replacement store was never read")
         #expect(holder.store.hasRead)
         window.close()
     }
@@ -423,8 +572,8 @@ struct BoardSidebarTests {
     @Test func aStoreIsLetGoWithItsRunner() {
         let reads = Reads()
         let old = client(reads), current = client(reads)
-        let stale = TaskBoardStore(client: old, repository: Self.repository(Self.repoA))
-        let live = TaskBoardStore(client: current, repository: Self.repository(Self.repoA))
+        let stale = TaskBoardStore(client: old, workspace: Self.implicit(Self.repoA))
+        let live = TaskBoardStore(client: current, workspace: Self.implicit(Self.repoA))
         stale.opened = Self.row()
         live.opened = Self.row()
 
@@ -441,8 +590,8 @@ struct BoardSidebarTests {
     @Test func aStoreIsLetGoOnlyOnceItsRunnerHasListedWithoutIt() async {
         let reads = Reads()
         let client = client(reads)
-        let a = TaskBoardStore(client: client, repository: Self.repository(Self.repoA))
-        let b = TaskBoardStore(client: client, repository: Self.repository(Self.repoB))
+        let a = TaskBoardStore(client: client, workspace: Self.implicit(Self.repoA))
+        let b = TaskBoardStore(client: client, workspace: Self.implicit(Self.repoB))
         let stores = ["/a": a, "/b": b]
 
         // Not connected, nothing listed: both kept.
@@ -461,5 +610,393 @@ struct BoardSidebarTests {
         #expect(client.repositoriesListed)
         #expect(Array(ContentView.heldBoardStores(stores, clients: ["": client]).keys) == ["/a"])
         client.stopEvents()
+    }
+
+    /// A workspace deleted on a connected runner takes its board store with
+    /// it — the fleet no longer lists it — while one still listed is kept, and
+    /// a runner that lists no workspaces at all (older, or not read yet)
+    /// can't say one is gone.
+    @Test func aStoreIsLetGoOnceItsWorkspaceIsNoLongerListed() async {
+        let reads = Reads()
+        reads.listed = [Self.repoA]
+        reads.workspaces = [Self.main, Self.billing]
+        let client = client(reads)
+        let m = TaskBoardStore(client: client, workspace: Self.summary(Self.main, "Main", isMain: true))
+        let b = TaskBoardStore(client: client, workspace: Self.summary(Self.billing, "Billing"))
+        let stores = ["/m": m, "/b": b]
+        await client.refresh()
+        await client.refreshRepositories()
+        #expect(ContentView.heldBoardStores(stores, clients: ["": client]).count == 2)
+
+        reads.workspaces = [Self.main]
+        await client.refresh()
+        #expect(Array(ContentView.heldBoardStores(stores, clients: ["": client]).keys) == ["/m"])
+        client.stopEvents()
+    }
+
+    // MARK: - The sidebar: repository, workspace, then its rows
+
+    private static func worktree(
+        _ id: String, workspace: String?, repository: String = repoA, name: String = "overnight",
+        terminals: [Terminal] = [], state: String = "active"
+    ) -> Worktree {
+        Worktree(
+            id: id, short: id, task: id, branch: "feat/\(id)", repository: name, host: "",
+            path: "/tmp/\(id)", state: state, terminals: terminals, repositoryID: repository,
+            workspace: workspace)
+    }
+
+    /// One runner's fleet, with its workspaces — or nil for a runner without
+    /// `workstreams`, whose envelope has no `workspaces` key.
+    private static func fleet(workspaces: [WorkspaceSummary]?, worktrees: [Worktree]) -> Fleet {
+        var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: worktrees, branchPrefix: nil)
+        if let workspaces { fleet.runnerWorkspaces[""] = workspaces }
+        return fleet
+    }
+
+    private static func orchestrator(_ id: String, workspace: String) -> Terminal {
+        var t = terminal(id, taskId: nil)
+        t.workspace = workspace
+        t.role = "orchestrator"
+        return t
+    }
+
+    /// The workspace level is drawn even when Main is the only workspace, so
+    /// the model is visible before the first split.
+    @Test func theSidebarShowsTheWorkspaceLevelEvenWithOnlyMain() {
+        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [Self.summary(Self.main, "Main", isMain: true)],
+            worktrees: [Self.worktree("lane", workspace: Self.main)]))
+        #expect(rows.map(\.kind) == [.repository, .workspace("Main"), .board, .orchestrator, .worktree("lane")])
+    }
+
+    @Test func unclaimedWorktreesSitBelowTheWorkspaces() {
+        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [Self.summary(Self.main, "Main", isMain: true)],
+            worktrees: [Self.worktree("lane", workspace: Self.main), Self.worktree("stray", workspace: nil)]))
+        #expect(rows.map(\.kind).last == .unclaimed(count: 1))
+        #expect(rows.last?.worktrees.map(\.id) == ["stray"])
+        #expect(!rows.map(\.kind).contains(.worktree("stray")), "an unclaimed worktree was drawn twice")
+    }
+
+    /// Main first, then the rest by their ordinal, each with its own board,
+    /// orchestrator row and worktrees — a workspace with none still listed,
+    /// because it still has a board. Hidden worktrees stay the repository's,
+    /// last.
+    @Test func eachWorkspaceHasItsBoardItsOrchestratorAndItsWorktrees() {
+        let ops = "0198f2c0-0000-7000-8000-0000000000ee"
+        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [
+                Self.summary(ops, "Ops", ordinal: 2), Self.summary(Self.billing, "Billing", ordinal: 1),
+                Self.summary(Self.main, "Main", isMain: true),
+            ],
+            worktrees: [
+                Self.worktree("bill", workspace: Self.billing), Self.worktree("lane", workspace: Self.main),
+                Self.worktree("stray", workspace: nil),
+                Self.worktree("old", workspace: Self.main, state: "hidden"),
+            ]))
+        #expect(rows.map(\.kind) == [
+            .repository,
+            .workspace("Main"), .board, .orchestrator, .worktree("lane"),
+            .workspace("Billing"), .board, .orchestrator, .worktree("bill"),
+            .workspace("Ops"), .board, .orchestrator,
+            .unclaimed(count: 1), .hidden(count: 1),
+        ])
+        // Each board row is its own workspace's.
+        #expect(rows.filter { $0.kind == .board }.map(\.workspace?.id) == [Self.main, Self.billing, ops])
+        // One step in under the repository, so the workspace level reads.
+        #expect(rows.map(\.depth) == [0] + Array(repeating: 1, count: rows.count - 1))
+    }
+
+    /// A runner without `workstreams` keeps the layout from before
+    /// workspaces: the repository, its one board, its worktrees. No
+    /// workspace level, no orchestrator row, nothing unclaimed.
+    @Test func aRunnerWithoutWorkspacesKeepsTodaysLayout() {
+        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: nil,
+            worktrees: [Self.worktree("a", workspace: nil), Self.worktree("b", workspace: nil)]))
+        #expect(rows.map(\.kind) == [.repository, .board, .worktree("a"), .worktree("b")])
+        #expect(rows[1].workspace == WorkspaceSummary.implicit(repository: Self.repoA))
+        #expect(rows.allSatisfy { $0.depth == 0 }, "the old layout was indented")
+    }
+
+    /// The orchestrator runs in the main checkout, so the runner lists it
+    /// among that worktree's terminals. It gets its own row under ITS
+    /// workspace and is left out of the worktree's, so it is drawn once.
+    @Test func theOrchestratorIsDrawnOnceInItsOwnRow() {
+        let conductor = Self.orchestrator("conductor", workspace: Self.billing)
+        let shell = Self.terminal("shell", preset: "zsh", taskId: nil)
+        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
+            ],
+            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [conductor, shell])]))
+        let orchestrators = rows.filter { $0.kind == .orchestrator }
+        #expect(orchestrators.map(\.orchestrator?.terminal.id) == [nil, "conductor"])
+        #expect(orchestrators.last?.orchestrator?.worktree.id == "checkout", "where selecting it goes")
+        let checkout = rows.first { $0.kind == .worktree("checkout") }?.worktree
+        #expect(checkout?.terminals.map(\.id) == ["shell"], "the orchestrator was drawn twice")
+    }
+
+    /// The row shows the runner's live seat, `WorkspaceSummary.orchestrator`.
+    /// A stopped orchestrator left beside it — stopped, then a new one started
+    /// without `--replace` — is not the seat, so it stays among its
+    /// worktree's terminals rather than being drawn nowhere, whichever of the
+    /// two the runner lists last.
+    @Test func aStoppedOrchestratorBesideTheLiveOneIsNotLost() {
+        var stopped = Self.orchestrator("stopped", workspace: Self.billing)
+        stopped.state = "exited"
+        let live = Self.orchestrator("live", workspace: Self.billing)
+        for terminals in [[live, stopped], [stopped, live]] {
+            let rows = ContentView.sidebarRows(fleet: Self.fleet(
+                workspaces: [
+                    Self.summary(Self.main, "Main", isMain: true),
+                    Self.summary(Self.billing, "Billing", orchestrator: "live"),
+                ],
+                worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: terminals)]))
+            let seat = rows.last { $0.kind == .orchestrator }?.orchestrator?.terminal.id
+            #expect(seat == "live", "\(terminals.map(\.id))")
+            let checkout = rows.first { $0.kind == .worktree("checkout") }?.worktree
+            #expect(checkout?.terminals.map(\.id) == ["stopped"], "\(terminals.map(\.id))")
+        }
+
+        // The seat wins over a role match even when both are running: the
+        // runner's word for which one is live, not whichever it lists first.
+        let other = Self.orchestrator("other", workspace: Self.billing)
+        let seated = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(Self.billing, "Billing", orchestrator: "live"),
+            ],
+            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [other, live])]))
+        #expect(seated.last { $0.kind == .orchestrator }?.orchestrator?.terminal.id == "live")
+        #expect(
+            seated.first { $0.kind == .worktree("checkout") }?.worktree?.terminals.map(\.id)
+                == ["other"])
+
+        // A runner that names no seat: only a live orchestrator is taken by
+        // its role, and a stopped one alone leaves the row empty and itself
+        // in its worktree.
+        let unseated = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
+            ],
+            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [stopped])]))
+        #expect(unseated.last { $0.kind == .orchestrator }?.orchestrator == nil)
+        #expect(
+            unseated.first { $0.kind == .worktree("checkout") }?.worktree?.terminals.map(\.id)
+                == ["stopped"])
+    }
+
+    /// ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑, ⌘1… and the attention cycle walk the terminals
+    /// in the order the sidebar draws them — Main's rows, then Billing's with
+    /// its orchestrator in its own row, then Unclaimed — not the runner's
+    /// order, which the grouping no longer draws.
+    @Test func steppingFollowsTheSidebarsOrder() {
+        let conductor = Self.orchestrator("conductor", workspace: Self.billing)
+        let shell = Self.terminal("shell", preset: "zsh", taskId: nil)
+        let fleet = Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
+            ],
+            // The runner's order: none of it the order drawn.
+            worktrees: [
+                Self.worktree("bill", workspace: Self.billing, terminals: [Self.terminal("b1")]),
+                Self.worktree("stray", workspace: nil, terminals: [Self.terminal("s1")]),
+                Self.worktree("checkout", workspace: Self.main, terminals: [conductor, shell]),
+                Self.worktree("lane", workspace: Self.main, terminals: [Self.terminal("l1")]),
+                Self.worktree(
+                    "old", workspace: Self.main, terminals: [Self.terminal("h1")], state: "hidden"),
+            ])
+        let order = ContentView.stepOrder(fleet).map(\.id)
+        #expect(order == ["shell", "l1", "conductor", "b1", "s1", "h1"])
+    }
+
+    /// A board's store survives its orchestrator starting or stopping — a new
+    /// one would close the open card and read the board again — and is
+    /// replaced for a rename, which its title shows, or a new client.
+    @Test func aBoardStoreOutlivesItsOrchestratorChanging() {
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        let store = TaskBoardStore(client: client, workspace: Self.summary(Self.billing, "Billing"))
+        #expect(ContentView.keeps(
+            store, for: Self.summary(Self.billing, "Billing", orchestrator: "t1"), client: client))
+        #expect(!ContentView.keeps(store, for: Self.summary(Self.billing, "Payments"), client: client))
+        #expect(!ContentView.keeps(
+            store, for: Self.summary(Self.billing, "Billing"),
+            client: DaemonClient(target: "", notifications: NotificationCenter())))
+    }
+
+    /// Rows are joined to their repository by the uuid, not the display name:
+    /// two repositories called the same are two groups, and an unclaimed
+    /// worktree lands under its own.
+    @Test func rowsJoinTheirRepositoryByItsID() {
+        let otherMain = "0198f2c0-0000-7000-8000-0000000000ff"
+        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(otherMain, "Main", isMain: true, repository: Self.repoB),
+            ],
+            worktrees: [
+                Self.worktree("a", workspace: Self.main),
+                Self.worktree("loose", workspace: nil, repository: Self.repoB),
+            ]))
+        #expect(rows.map(\.kind) == [
+            .repository, .workspace("Main"), .board, .orchestrator, .worktree("a"),
+            .repository, .workspace("Main"), .board, .orchestrator, .unclaimed(count: 1),
+        ])
+        #expect(rows.filter { $0.kind == .repository }.map(\.repositoryID) == [Self.repoA, Self.repoB])
+        #expect(rows.last?.repositoryID == Self.repoB)
+    }
+
+    /// A drag reorders within one workspace, or within Unclaimed — where a
+    /// worktree naming a workspace the runner doesn't list is drawn too — and
+    /// not across: the order can't move a worktree to another workspace.
+    @Test func aDragReordersOnlyWithinOnePlace() {
+        let lane = Self.worktree("lane", workspace: Self.main)
+        let next = Self.worktree("next", workspace: Self.main)
+        let bill = Self.worktree("bill", workspace: Self.billing)
+        let stray = Self.worktree("stray", workspace: nil)
+        let orphan = Self.worktree("orphan", workspace: "0198f2c0-0000-7000-8000-0000000000ee")
+        let fleet = Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
+            ],
+            worktrees: [lane, next, bill, stray, orphan])
+        #expect(ContentView.sameSidebarPlace(lane, next, in: fleet))
+        #expect(!ContentView.sameSidebarPlace(lane, bill, in: fleet))
+        #expect(!ContentView.sameSidebarPlace(lane, stray, in: fleet))
+        #expect(ContentView.sameSidebarPlace(stray, orphan, in: fleet))
+    }
+
+    // MARK: - Decoding the fields the sidebar groups by
+
+    /// What `worktree list --json` sends: the envelope's `workspaces`, each
+    /// row's `repository_id` and `workspace`, and each terminal's `workspace`
+    /// and `role` — all landing on the model. The client files the list
+    /// under its own runner, because the wire doesn't say which that is.
+    @Test func theFleetsWorkspaceFieldsLandOnTheModel() async throws {
+        let json = #"""
+            {"runtime_healthy":true,"live_panes":1,"branch_prefix":"","worktrees":[
+              {"id":"w1","short":"w1","task":"lane","branch":"lane","repository":"overnight",
+               "repository_id":"\#(Self.repoA)","workspace":"\#(Self.billing)","claim_source":"explicit",
+               "foreign_writers":[],"host":"","worktree":"/tmp/lane","state":"active","terminals":[
+                 {"id":"t1","short":"t1","title":"","preset":"claude","state":"running","epoch":0,
+                  "workspace":"\#(Self.billing)","role":"orchestrator"}]}],
+             "workspaces":[{"id":"\#(Self.billing)","short":"000000dd","repository":"\#(Self.repoA)",
+               "name":"Billing","task_prefix":"bil","is_main":false,"ordinal":1,"orchestrator":"t1",
+               "home":null,"charter":null}]}
+            """#
+        let fleet = try JSONDecoder().decode(Fleet.self, from: Data(json.utf8))
+        let row = try #require(fleet.worktrees.first)
+        #expect(row.repositoryID == Self.repoA)
+        #expect(row.workspace == Self.billing)
+        #expect(row.terminals.first?.workspace == Self.billing)
+        #expect(row.terminals.first?.isOrchestrator == true)
+        #expect(fleet.workspaces?.map(\.name) == ["Billing"])
+
+        // An older runner sends none of them, and still decodes.
+        let older = #"""
+            {"runtime_healthy":true,"live_panes":0,"worktrees":[
+              {"id":"w1","short":"w1","task":"lane","branch":"lane","repository":"overnight",
+               "worktree":"/tmp/lane","state":"active","terminals":[
+                 {"id":"t1","short":"t1","title":"","preset":"claude","state":"running","epoch":0}]}]}
+            """#
+        let old = try JSONDecoder().decode(Fleet.self, from: Data(older.utf8))
+        #expect(old.workspaces == nil)
+        #expect(old.worktrees.first?.repositoryID == nil)
+        #expect(old.worktrees.first?.terminals.first?.isOrchestrator == false)
+
+        // Read through a client, the list is filed under that client's runner.
+        let reads = Reads()
+        reads.workspaces = [Self.main]
+        let client = client(reads)
+        await client.refresh()
+        #expect(client.fleet.runnerWorkspaces[""]?.map(\.id) == [Self.main])
+        client.stopEvents()
+    }
+
+    /// Every runner's workspaces survive the merge, each under its own runner.
+    @Test func theMergedFleetKeepsEachRunnersWorkspaces() {
+        var here = Self.fleet(workspaces: [Self.summary(Self.main, "Main", isMain: true)], worktrees: [])
+        here.workspaces = here.runnerWorkspaces[""]
+        var there = Fleet.empty
+        there.runnerWorkspaces["remote"] = [Self.summary(Self.billing, "Billing")]
+        let merged = FleetStore.merge([
+            (host: "", state: .connected, fleet: here), (host: "remote", state: .connected, fleet: there),
+            (host: "old", state: .connected, fleet: .empty),
+        ]).fleet
+        #expect(merged.runnerWorkspaces[""]?.map(\.id) == [Self.main])
+        #expect(merged.runnerWorkspaces["remote"]?.map(\.id) == [Self.billing])
+        #expect(merged.runnerWorkspaces["old"] == nil, "a runner without workspaces was given some")
+    }
+
+    // MARK: - Where ⇧⌘B and ⌘N go
+
+    /// ⇧⌘B opens the board of the workspace the selection is in: a claimed
+    /// worktree's own, Main's for one in Unclaimed, the orchestrator's own
+    /// workspace for its row, and the repository's one board on a runner
+    /// without workspaces.
+    @Test func showBoardOpensTheSelectionsWorkspace() {
+        let conductor = Self.orchestrator("conductor", workspace: Self.billing)
+        let workspaces = [
+            Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
+        ]
+        let fleet = Self.fleet(
+            workspaces: workspaces,
+            worktrees: [
+                Self.worktree("bill", workspace: Self.billing), Self.worktree("stray", workspace: nil),
+                Self.worktree("checkout", workspace: Self.main, terminals: [conductor]),
+            ])
+        func target(_ selection: ContentView.Selection) -> String? {
+            ContentView.boardWorkspace(for: selection, in: fleet)?.id
+        }
+        #expect(target(.worktree(host: "", id: "bill")) == Self.billing)
+        #expect(target(.worktree(host: "", id: "stray")) == Self.main)
+        #expect(target(.terminal(host: "", worktree: "checkout", terminal: "conductor")) == Self.billing)
+        #expect(target(.worktree(host: "", id: "checkout")) == Self.main)
+        #expect(target(.board(host: "", workspace: Self.billing)) == Self.billing)
+        #expect(target(.worktree(host: "", id: "gone")) == nil)
+
+        let older = Self.fleet(workspaces: nil, worktrees: [Self.worktree("a", workspace: nil)])
+        #expect(
+            ContentView.boardWorkspace(for: .worktree(host: "", id: "a"), in: older)
+                == WorkspaceSummary.implicit(repository: Self.repoA))
+    }
+
+    /// A new worktree — from ⌘N, or a repository header's "New Worktree in
+    /// X…" — is claimed for the workspace you are in, or have selected, when
+    /// it is being made in that workspace's repository on that runner.
+    /// Anywhere else it is claimed for the repository's Main: from
+    /// Unclaimed, from another repository or runner, or with nothing
+    /// selected. Never left Unclaimed, where nothing would ever claim it.
+    /// Only a runner without workspaces gets no claim.
+    @Test func aNewWorktreeIsClaimedForTheWorkspaceYouAreIn() {
+        let fleet = Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
+                Self.summary(Self.otherMain, "Main", isMain: true, repository: Self.repoB),
+            ],
+            worktrees: [Self.worktree("bill", workspace: Self.billing), Self.worktree("stray", workspace: nil)])
+        func claim(_ selection: ContentView.Selection?, host: String = "", repository: String = Self.repoA) -> String? {
+            ContentView.claim(newWorktreeIn: repository, on: host, from: selection, in: fleet)
+        }
+        #expect(claim(.worktree(host: "", id: "bill")) == Self.billing)
+        #expect(claim(.board(host: "", workspace: Self.main)) == Self.main)
+        #expect(claim(.worktree(host: "", id: "stray")) == Self.main, "Unclaimed claims for Main")
+        #expect(claim(.worktree(host: "", id: "bill"), repository: Self.repoB) == Self.otherMain)
+        #expect(claim(.worktree(host: "", id: "bill"), host: "remote") == nil, "no workspaces there")
+        // Not even where another runner lists a workspace by the same id: a
+        // selection on this Mac says nothing about a worktree made there, so
+        // it's that runner's Main.
+        var twice = fleet
+        twice.runnerWorkspaces["remote"] = fleet.runnerWorkspaces[""]
+        #expect(
+            ContentView.claim(
+                newWorktreeIn: Self.repoA, on: "remote", from: .worktree(host: "", id: "bill"), in: twice)
+                == Self.main)
+        #expect(claim(nil) == Self.main, "nothing selected claims for Main")
+        let older = Self.fleet(workspaces: nil, worktrees: [Self.worktree("a", workspace: nil)])
+        #expect(ContentView.claim(newWorktreeIn: Self.repoA, on: "", from: .board(host: "", workspace: Self.repoA), in: older) == nil)
     }
 }

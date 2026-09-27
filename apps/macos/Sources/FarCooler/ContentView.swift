@@ -12,6 +12,9 @@ struct ContentView: View {
     /// Which projects have their hidden worktrees showing. Collapsed is the
     /// point of hiding, so absence means collapsed.
     @State private var hiddenExpanded: Set<String> = []
+    /// Which repositories have their Unclaimed group open, by
+    /// `SidebarEntry.group`. Collapsed by default: absence means collapsed.
+    @State private var unclaimedExpanded: Set<String> = []
 
     /// What a `+` meant, carried whole from the control that was clicked to
     /// the sheet it opens — or nil when no sheet is up.
@@ -55,11 +58,13 @@ struct ContentView: View {
     /// which owns every rectangle in this window. The diff is a tmux pane now,
     /// so where it sits is tmux's answer like every other pane's.
     @State private var changesStores: [String: ChangesStore] = [:]
-    /// One board store per repository, keyed by runner and repository id.
+    /// One board store per workspace, keyed by runner and workspace id — the
+    /// repository's id for a runner without workspaces, whose one board per
+    /// repository is the repository's.
     ///
-    /// Keyed by both because a repository's id is minted per daemon: two
-    /// runners can hand back rows that collide on id alone. Same lifetime rule
-    /// as `changesStores` — see `boardStore(for:client:)`.
+    /// Keyed by both because an id is minted per daemon: two runners can
+    /// hand back rows that collide on id alone. Same lifetime rule as
+    /// `changesStores` — see `boardStore(for:client:host:)`.
     @State private var boardStores: [String: TaskBoardStore] = [:]
     @State private var showAddRepository = false
     @State private var showAdd = false
@@ -128,9 +133,11 @@ struct ContentView: View {
     enum Selection: Hashable {
         case worktree(host: String, id: String)
         case terminal(host: String, worktree: String, terminal: String)
-        /// A repository's board, by the repository's uuid. The row above its
-        /// worktrees in the sidebar, and where ⇧⌘B goes.
-        case board(host: String, repository: String)
+        /// A workspace's board, by the workspace's uuid — or by the
+        /// repository's, on a runner without workspaces, where that is the
+        /// one board. The row above its worktrees in the sidebar, and where
+        /// ⇧⌘B goes.
+        case board(host: String, workspace: String)
     }
 
     /// What confirming a pane-mode switch would do, and to which pane.
@@ -472,8 +479,17 @@ struct ContentView: View {
                 guard let client = store.clients[host] else {
                     return "that runner is not connected"
                 }
+                // Claimed as ⌘N claims: for the workspace you're in when
+                // it's in this repository, else the repository's Main. The
+                // sheet names the repository by its short id.
+                let repository = store.repositories.first {
+                    $0.host == host && $0.repository.short == repo
+                }?.repository.id
                 let created = await client.createWorktree(
-                    repo: repo, task: task, branch: branch, base: base)
+                    repo: repo, task: task, branch: branch, base: base,
+                    workspace: repository.flatMap {
+                        Self.claim(newWorktreeIn: $0, on: host, from: selection, in: store.fleet)
+                    })
                 if let failure = created.failure { return failure }
                 // Land in the terminal it came up with, exactly as starting a
                 // task does. Creating a worktree is not a filing act — you make
@@ -557,30 +573,20 @@ struct ContentView: View {
 
     // MARK: - Sidebar
 
-    /// Worktrees matching the search, grouped by runner and project.
-    ///
-    /// The key carries the host because two runners can have a project of the
-    /// same name, and they are not the same project. The host is only DISPLAYED
-    /// when there is more than one runner — on a fleet of one, saying which
-    /// runner is noise.
+    /// The sidebar's rows: worktrees matching the search, under their
+    /// repository and workspace, on every runner. See
+    /// `ContentView.sidebarRows(fleet:query:silentHosts:)`.
     ///
     /// Hidden worktrees are separated rather than filtered out: they still
     /// belong to the project, and a collapsed section at the bottom is how you
     /// get back to one.
     ///
-    /// A struct with a stable `id`, not a bare tuple keyed by array position:
-    /// `ForEach` used to key this list by `.offset`, so inserting a group
-    /// renumbered every header after it and any transient `@State` (row
-    /// hovering) followed the index instead of following the row it belonged
-    /// to. `groupKey(host:project:)` was already computed for `hiddenExpanded`
-    /// three lines below — `id` is the same value, just attached to the
-    /// element itself so `ForEach` can use it too.
-    private struct ProjectGroup: Identifiable {
-        let host: String
-        let project: String
-        let shown: [Worktree]
-        let hidden: [Worktree]
-        var id: String { "\(host)\u{1}\(project)" }
+    /// Each row has a stable `id`, not its position: `ForEach` used to key
+    /// this list by `.offset`, so inserting a group renumbered every header
+    /// after it and any transient `@State` (row hovering) followed the index
+    /// instead of following the row it belonged to.
+    private var sidebarEntries: [SidebarEntry] {
+        Self.sidebarRows(fleet: store.fleet, query: query, silentHosts: silentHosts)
     }
 
     /// A project header's repository, on its way to `RemoveRepositorySheet`.
@@ -589,52 +595,6 @@ struct ContentView: View {
         let host: String
         let repository: Repository
         var id: String { "\(host)\u{1}\(repository.id)" }
-    }
-
-    private var groups: [ProjectGroup] {
-        let visible = store.fleet.worktrees.filter { $0.matches(query) }
-        var order: [String] = []
-        var byKey: [String: [Worktree]] = [:]
-
-        for worktree in visible {
-            let host = worktree.host ?? ""
-            let project = (worktree.repository ?? "").isEmpty
-                ? "Ungrouped" : worktree.repository!
-            let key = "\(host)\u{1}\(project)"
-            if byKey[key] == nil { order.append(key) }
-            byKey[key, default: []].append(worktree)
-        }
-
-        var result: [ProjectGroup] = order.map { key in
-            let parts = key.split(separator: "\u{1}", maxSplits: 1, omittingEmptySubsequences: false)
-            let host = String(parts[0])
-            let project = String(parts.count > 1 ? parts[1] : "")
-            let all = byKey[key] ?? []
-            // The runner's order, and nothing else. This used to partition the
-            // main checkout to the top, which was stable and was still the app
-            // deciding: with rows draggable, a rule here silently outranks the
-            // one the person dragging just expressed, and the card they moved
-            // springs back with nothing to explain why.
-            //
-            // Nobody's list moves because of this. The runner's rank starts out
-            // as exactly what this partition produced — main checkout first,
-            // then by worktree path — see migration 0009.
-            let shown = all.filter { !$0.isHidden }
-            return ProjectGroup(host: host, project: project, shown: shown, hidden: all.filter(\.isHidden))
-        }
-
-        // A runner that has never connected has no rows of its own, and
-        // without this it would simply be missing — leaving you to wonder
-        // where it went rather than seeing that it needs attention. Skipped
-        // while searching: a runner with nothing on it can never match a
-        // query, and a header appearing only here would look like a hit.
-        if query.isEmpty {
-            for host in silentHosts {
-                result.append(ProjectGroup(host: host, project: "", shown: [], hidden: []))
-            }
-        }
-
-        return result
     }
 
     /// Whether to name runners at all.
@@ -673,25 +633,13 @@ struct ContentView: View {
         }
     }
 
-    /// A group's identity for `hiddenExpanded`'s key.
-    ///
-    /// Two runners can have a project of the same name, and a lone project
-    /// name is no longer unique on its own now that the group carries the host
-    /// separately — so `hiddenExpanded`, keyed by this rather than by
-    /// `project` alone, cannot conflate "hidden expanded on this runner" with
-    /// "hidden expanded on that one." Same value as `ProjectGroup.id` above.
-    private func groupKey(host: String, project: String) -> String {
-        "\(host)\u{1}\(project)"
-    }
-
-    /// The repository a project header's name and host actually stand for.
-    ///
-    /// `ProjectGroup.project` is a display name, not an id — see
-    /// `groups`'s own use of `worktree.repository` — so removing it needs
-    /// this lookup rather than something already in hand.
-    private func repository(host: String, project: String) -> Repository? {
-        store.repositories.first { $0.host == host && $0.repository.displayName == project }?
-            .repository
+    /// The repository a project header stands for: by its uuid, which a
+    /// worktree row carries as `repository_id`, and by its display name only
+    /// from a CLI too old to send that — two repositories can share a name.
+    private func repository(host: String, id: String?, project: String) -> Repository? {
+        let here = store.repositories.filter { $0.host == host }.map(\.repository)
+        if let id { return here.first { $0.id == id } }
+        return here.first { $0.displayName == project }
     }
 
     /// Start a worktree in a named project.
@@ -741,40 +689,75 @@ struct ContentView: View {
     ///
     /// The runner is sent the group's WHOLE order, not "move this one" — see
     /// `WorktreeReorder` in the proto for why an index alone would be
-    /// meaningless against a list this has already filtered.
+    /// meaningless against a list this has already filtered. The order is the
+    /// repository's, which each workspace's rows keep, so a drop within a
+    /// workspace lands where it was dropped. A drop onto another workspace's
+    /// row is ignored: the order can't move a worktree between workspaces,
+    /// and a card that sprang back into its own would say nothing about why.
     private func reorder(_ done: WorktreeDrag.Completion) {
-        guard let group = groups.first(where: { g in g.shown.contains { $0.id == done.dragged } })
+        guard
+            let group = sidebarEntries.first(where: { g in
+                g.kind == .repository && g.worktrees.contains { $0.id == done.dragged }
+            })
         else { return }
-        let ids = group.shown.map(\.id)
+        let shown = group.worktrees
+        guard let dragged = shown.first(where: { $0.id == done.dragged }),
+            let target = shown.first(where: { $0.id == done.target }),
+            Self.sameSidebarPlace(dragged, target, in: store.fleet)
+        else { return }
+        let ids = shown.map(\.id)
         let next = WorktreeOrder.moved(ids, dragging: done.dragged, to: done.target, done.edge)
         // A drop that changes nothing costs no round trip. It is not free: a
         // reorder makes every other connected client re-read the fleet.
-        guard next != ids, let anchor = group.shown.first else { return }
-        let order = next.compactMap { id in group.shown.first { $0.id == id }?.short }
+        guard next != ids, let anchor = shown.first else { return }
+        let order = next.compactMap { id in shown.first { $0.id == id }?.short }
         Task { await act(on: anchor) { client in await client.reorderWorktrees(order) } }
     }
 
-    /// A repository's board row, above its worktrees — or nothing, for a
-    /// group that is not a repository or a runner that has no board.
+    /// Whether two worktrees are drawn under the same workspace, or both in
+    /// Unclaimed: the rows a drag may reorder between.
+    static func sameSidebarPlace(_ a: Worktree, _ b: Worktree, in fleet: Fleet) -> Bool {
+        let listed = Set((fleet.runnerWorkspaces[a.host ?? ""] ?? []).map(\.id))
+        func place(_ w: Worktree) -> String? { w.workspace.flatMap { listed.contains($0) ? $0 : nil } }
+        return place(a) == place(b)
+    }
+
+    /// A workspace's board row, above its worktrees — or nothing, for a
+    /// runner that has no board or a repository it hasn't listed.
     ///
     /// Gated on `tasks`, the capability a board needs: on an older runner the
     /// row would be a dead link under every repository. Shown whenever the
     /// runner has it, even for an empty board, because the row is also how
     /// anybody finds out there is a board at all.
     @ViewBuilder
-    private func boardRow(_ group: ProjectGroup) -> some View {
-        if !group.project.isEmpty, group.project != "Ungrouped",
-            let repo = repository(host: group.host, project: group.project),
-            let client = store.clients[group.host],
+    private func boardRow(_ entry: SidebarEntry) -> some View {
+        if let workspace = entry.workspace,
+            let repo = repository(host: entry.host, id: entry.repositoryID, project: entry.project),
+            let client = store.clients[entry.host],
             client.daemonBuild?.can("tasks") == true
         {
+            // An implicit board's id is its repository's, which a CLI too
+            // old to send `repository_id` left to be found by name.
+            let board = workspace.isImplicit ? WorkspaceSummary.implicit(repository: repo.id) : workspace
             BoardRow(
-                store: boardStore(for: repo, client: client, host: group.host),
+                store: boardStore(for: board, client: client, host: entry.host),
                 client: client,
-                agents: boardAgents(host: group.host, client: client),
-                isSelected: selection == .board(host: group.host, repository: repo.id),
-                onSelect: { selection = .board(host: group.host, repository: repo.id) })
+                agents: boardAgents(host: entry.host, client: client),
+                isSelected: selection == .board(host: entry.host, workspace: board.id),
+                onSelect: { selection = .board(host: entry.host, workspace: board.id) })
         }
+    }
+
+    /// A workspace's orchestrator row. Selecting it selects the orchestrator's
+    /// pane, in the checkout it runs in.
+    private func orchestratorRow(_ entry: SidebarEntry) -> some View {
+        let pane = entry.orchestrator
+        let target = pane.map {
+            Selection.terminal(host: entry.host, worktree: $0.worktree.id, terminal: $0.terminal.id)
+        }
+        return OrchestratorRow(
+            pane: pane, isSelected: target != nil && selection == target,
+            onSelect: { if let target { selection = target } })
     }
 
     /// Every pane on one runner, for the board to find the ones working a
@@ -795,7 +778,7 @@ struct ContentView: View {
         guard client.state == .connected, client.repositoriesListed else {
             return "Far Cooler is still loading this runner’s projects."
         }
-        return "This project isn’t on its runner anymore. Choose another board in the sidebar."
+        return "This board isn’t on its runner anymore. Choose another board in the sidebar."
     }
 
     /// Go to a pane a card offered, as the fleet has it now. See
@@ -813,21 +796,57 @@ struct ContentView: View {
         }
     }
 
-    /// One project's worktrees, plus its hidden section.
+    /// One row of the sidebar, drawn from its entry.
     ///
     /// Lifted out of `sidebar` when projects became collapsible: the rows had to
     /// go behind an `if`, and wrapping fifty lines of view builder in one would
     /// have re-indented the whole block to say one thing. A builder method is
     /// what this file already does for the detail side — see `tiled(_:group:)`.
+    private func sidebarRow(_ entry: SidebarEntry) -> some View {
+        // One gutter in per level, so repository, workspace and the rows under
+        // it read as three levels and not as one list in three fonts.
+        sidebarRowContent(entry)
+            .padding(.leading, CGFloat(entry.depth) * SidebarGrid.gutter)
+    }
+
     @ViewBuilder
-    private func projectRows(_ group: ProjectGroup, key: String, usable: Bool) -> some View {
-        ForEach(group.shown) { ws in
-            worktreeRow(ws, usable: usable)
-        }
-        if !group.hidden.isEmpty {
+    private func sidebarRowContent(_ entry: SidebarEntry) -> some View {
+        let key = entry.collapseKey
+        let usable = store.refusal(for: entry.host) == nil
+        switch entry.kind {
+        case .repository:
+            projectHeader(entry)
+        // Everything under the header is what a collapsed project hides.
+        case _ where preferences.isProjectCollapsed(key):
+            EmptyView()
+        case .workspace(let name):
+            WorkspaceHeader(name: name)
+        case .board:
+            boardRow(entry)
+        case .orchestrator:
+            orchestratorRow(entry)
+        case .worktree:
+            if let worktree = entry.worktree { worktreeRow(worktree, usable: usable) }
+        case .unclaimed:
+            UnclaimedWorktrees(
+                worktrees: entry.worktrees,
+                // Open while the selection is inside it, too: a worktree
+                // chosen from the palette or the attention cycle has to be
+                // somewhere you can see.
+                isExpanded: unclaimedExpanded.contains(entry.group)
+                    || entry.worktrees.contains { $0.id == currentWorktree?.id },
+                onToggle: {
+                    if unclaimedExpanded.contains(entry.group) {
+                        unclaimedExpanded.remove(entry.group)
+                    } else {
+                        unclaimedExpanded.insert(entry.group)
+                    }
+                },
+                row: { worktree in worktreeRow(worktree, usable: usable) })
+        case .hidden:
             HiddenWorktrees(
                 project: key,
-                worktrees: group.hidden,
+                worktrees: entry.worktrees,
                 isExpanded: hiddenExpanded.contains(key),
                 onToggle: {
                     if hiddenExpanded.contains(key) {
@@ -843,26 +862,63 @@ struct ContentView: View {
         }
     }
 
+    /// A repository's header — or a silent runner's, which names the runner.
+    private func projectHeader(_ group: SidebarEntry) -> some View {
+        let key = group.collapseKey
+        // A silent host's placeholder has no project of its own to name or add
+        // into — the header names the runner instead, and there is nothing yet
+        // to route a `+` to.
+        let isSilentHost = group.project.isEmpty
+        return ProjectHeader(
+            name: isSilentHost ? (group.host.isEmpty ? "This Mac" : group.host) : group.project,
+            count: group.worktrees.count,
+            onNewWorktree: isSilentHost
+                ? nil : { newWorktree(host: group.host, project: group.project) },
+            onNewTerminal: isSilentHost
+                ? nil
+                : { startMainTerminal(host: group.host, project: group.project) },
+            onRemove: isSilentHost
+                ? nil
+                : {
+                    guard
+                        let repo = repository(
+                            host: group.host, id: group.repositoryID, project: group.project)
+                    else { return }
+                    removeRepository = RepositoryToRemove(host: group.host, repository: repo)
+                },
+            host: group.host,
+            hostState: store.state(of: group.host),
+            daemonUpdate: daemonUpdate(for: group.host),
+            showHost: isSilentHost ? false : showHosts,
+            onReconnect: { store.reconnect(group.host) },
+            isCollapsed: preferences.isProjectCollapsed(key),
+            // A silent host's header has no worktrees under it, so there is
+            // nothing for a chevron to do.
+            onToggleCollapse: isSilentHost ? nil : { preferences.toggleProject(key) }
+        )
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
             sidebarHeader
             searchField
 
-            // Gated on `groups`, not the raw merged worktree count: a
+            // Gated on the rows, not the raw merged worktree count: a
             // runner that has never connected contributes no worktrees but
-            // still gets a `silentHosts` header in `groups` (unless it's the
+            // still gets a `silentHosts` header in them (unless it's the
             // local runner, which has its own placeholder below). Gating on
             // `worktrees.isEmpty` instead used to short-circuit straight to
             // the LOCAL runner's empty state whenever the merged fleet had
             // no rows — even with a remote runner configured and its header
-            // sitting in `groups` right below — making that remote runner
-            // vanish from the sidebar entirely rather than showing as
-            // unreachable. `query.isEmpty` keeps this from swallowing a
-            // plain "no search results" into the same screen.
-            if groups.isEmpty && query.isEmpty {
+            // sitting right below — making that remote runner vanish from
+            // the sidebar entirely rather than showing as unreachable.
+            // `query.isEmpty` keeps this from swallowing a plain "no search
+            // results" into the same screen.
+            let entries = sidebarEntries
+            if entries.isEmpty && query.isEmpty {
                 fleetPlaceholder
                 Spacer(minLength: 0)
-            } else if groups.isEmpty {
+            } else if entries.isEmpty {
                 VStack(spacing: 6) {
                     Text("Nothing matches").font(.callout.weight(.medium))
                     Text("\u{201c}\(query)\u{201d}")
@@ -874,51 +930,7 @@ struct ContentView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(groups) { group in
-                            let key = groupKey(host: group.host, project: group.project)
-                            // A silent host's placeholder has no project of its
-                            // own to name or add into — the header names the
-                            // runner instead, and there is nothing yet to
-                            // route a `+` to.
-                            let isSilentHost = group.project.isEmpty
-                            let usable = store.refusal(for: group.host) == nil
-                            ProjectHeader(
-                                name: isSilentHost
-                                    ? (group.host.isEmpty ? "This Mac" : group.host) : group.project,
-                                count: group.shown.count,
-                                onNewWorktree: isSilentHost
-                                    ? nil : { newWorktree(host: group.host, project: group.project) },
-                                onNewTerminal: isSilentHost
-                                    ? nil
-                                    : { startMainTerminal(host: group.host, project: group.project) },
-                                onRemove: isSilentHost
-                                    ? nil
-                                    : {
-                                        guard
-                                            let repo = repository(
-                                                host: group.host, project: group.project)
-                                        else { return }
-                                        removeRepository = RepositoryToRemove(
-                                            host: group.host, repository: repo)
-                                    },
-                                host: group.host,
-                                hostState: store.state(of: group.host),
-                                daemonUpdate: daemonUpdate(for: group.host),
-                                showHost: isSilentHost ? false : showHosts,
-                                onReconnect: { store.reconnect(group.host) },
-                                isCollapsed: preferences.isProjectCollapsed(key),
-                                // A silent host's header has no worktrees under
-                                // it, so there is nothing for a chevron to do.
-                                onToggleCollapse: isSilentHost
-                                    ? nil : { preferences.toggleProject(key) }
-                            )
-                            // Everything under the header, which is everything a
-                            // collapsed project hides.
-                            if !preferences.isProjectCollapsed(key) {
-                                boardRow(group)
-                                projectRows(group, key: key, usable: usable)
-                            }
-                        }
+                        ForEach(entries) { entry in sidebarRow(entry) }
                     }
                     .padding(.bottom, 10)
                 }
@@ -1415,22 +1427,38 @@ struct ContentView: View {
         }
     }
 
-    /// One board store per repository.
+    /// One board store per workspace.
     ///
     /// Cached on the client for the reason `changesStore(for:client:)` gives:
     /// `FleetStore` drops a `DaemonClient` when its runner leaves and builds a
     /// fresh one when it comes back, and a store held over from the old one
-    /// would go on talking to a connection nobody is answering.
-    private func boardStore(for repository: Repository, client: DaemonClient, host: String)
+    /// would go on talking to a connection nobody is answering. A workspace
+    /// renamed since is a new store too, so the board's title follows it.
+    private func boardStore(for workspace: WorkspaceSummary, client: DaemonClient, host: String)
         -> TaskBoardStore
     {
-        let key = "\(host)/\(repository.id)"
-        if let existing = boardStores[key], existing.client === client { return existing }
-        let made = TaskBoardStore(client: client, repository: repository)
+        let key = "\(host)/\(workspace.id)"
+        if let existing = boardStores[key], Self.keeps(existing, for: workspace, client: client) {
+            return existing
+        }
+        let made = TaskBoardStore(client: client, workspace: workspace)
         // Outside the view update, because creating it IS a state change and
         // SwiftUI is reading that state right now. See `changesStore`.
         DispatchQueue.main.async { boardStores[key] = made }
         return made
+    }
+
+    /// Whether `existing` still serves `workspace`'s board on `client`.
+    ///
+    /// Compared by what the board shows — its name — and not the whole
+    /// summary: an orchestrator starting or stopping changes the summary, and
+    /// a new store would close the card that is open and read the board again.
+    static func keeps(
+        _ existing: TaskBoardStore, for workspace: WorkspaceSummary, client: DaemonClient
+    ) -> Bool {
+        existing.client === client && existing.workspace.id == workspace.id
+            && existing.workspace.name == workspace.name
+            && existing.workspace.isImplicit == workspace.isImplicit
     }
 
     /// The board stores still worth holding, given the runners there are now.
@@ -1456,26 +1484,51 @@ struct ContentView: View {
 
     /// Whose board ⇧⌘B selects.
     ///
-    /// The repository of whatever the sidebar is showing, and the only
-    /// repository there is when nothing is selected. Never a guess between
-    /// several: a board is repository-scoped, and opening the wrong one looks
-    /// exactly like a repository with somebody else's work on it.
-    ///
-    /// Matched by display name, because that is what the CLI puts on a
-    /// worktree — see `Worktree.repository`, which carries the name here and
-    /// a uuid on the phone.
-    private var boardTarget: (host: String, repository: Repository, client: DaemonClient)? {
-        if let ws = currentWorktree, let client = store.client(for: ws),
-            let name = ws.repository,
-            let match = client.repositories.first(where: { $0.displayName == name })
-        {
-            return (ws.host ?? "", match, client)
+    /// The workspace of whatever the sidebar is showing — Main's for a
+    /// worktree in Unclaimed — and the only repository's Main when nothing is
+    /// selected. Never a guess between several: opening the wrong board looks
+    /// exactly like a workspace with somebody else's work on it. See
+    /// `ContentView.boardWorkspace(for:in:)`.
+    private var boardTarget: (host: String, workspace: WorkspaceSummary)? {
+        if let selection, let host = Self.host(of: selection) {
+            if let found = Self.boardWorkspace(for: selection, in: store.fleet) {
+                return (host, found)
+            }
+            // A CLI too old to send `repository_id`, on a runner without
+            // workspaces: the repository is found by the name it does send.
+            if let ws = currentWorktree, let client = store.client(for: ws),
+                let name = ws.repository,
+                let match = client.repositories.first(where: { $0.displayName == name })
+            {
+                return (host, .implicit(repository: match.id))
+            }
+            return nil
         }
         let all = store.repositories
-        guard all.count == 1, let only = all.first,
-            let client = store.clients[only.host]
-        else { return nil }
-        return (only.host, only.repository, client)
+        guard all.count == 1, let only = all.first else { return nil }
+        let main = store.fleet.runnerWorkspaces[only.host]?.first {
+            $0.isMain && $0.repository == only.repository.id
+        }
+        return (only.host, main ?? .implicit(repository: only.repository.id))
+    }
+
+    /// Which runner a selection is on.
+    private static func host(of selection: Selection) -> String? {
+        switch selection {
+        case .worktree(let host, _), .terminal(let host, _, _), .board(let host, _): return host
+        }
+    }
+
+    /// The board a `.board` selection names, as its runner lists it now: a
+    /// workspace it lists, or on a runner without workspaces the repository
+    /// whose id it is. Nil once it is gone.
+    private func board(host: String, id: String) -> WorkspaceSummary? {
+        guard let client = store.clients[host] else { return nil }
+        if let listed = client.fleet.workspaces {
+            return listed.first { $0.id == id }
+        }
+        guard client.repositories.contains(where: { $0.id == id }) else { return nil }
+        return .implicit(repository: id)
     }
 
     /// One changes store per worktree.
@@ -1582,18 +1635,23 @@ struct ContentView: View {
                 placeholder
             }
 
-        case .board(let host, let repositoryID):
-            if let client = store.clients[host],
-                let repository = client.repositories.first(where: { $0.id == repositoryID })
+        case .board(let host, let id):
+            if let client = store.clients[host], let workspace = board(host: host, id: id),
+                let repository = client.repositories.first(where: {
+                    $0.id == (workspace.repository ?? workspace.id)
+                })
             {
                 TaskBoardView(
-                    store: boardStore(for: repository, client: client, host: host),
+                    store: boardStore(for: workspace, client: client, host: host),
                     client: client,
                     agents: boardAgents(host: host, client: client),
                     onGoTo: { pane in go(to: pane) }
                 )
-                .navigationTitle(repository.displayName)
-                .navigationSubtitle("Board")
+                // The workspace, and the repository it is in beneath it; the
+                // repository alone on a runner without workspaces, as before.
+                .navigationTitle(workspace.isImplicit ? repository.displayName : workspace.name)
+                .navigationSubtitle(
+                    workspace.isImplicit ? "Board" : "\(repository.displayName) · Board")
             } else {
                 // Said, rather than the generic "Select a worktree": this
                 // was a board, and the reader should know where it went.
@@ -1808,9 +1866,15 @@ struct ContentView: View {
     /// Every terminal in the fleet, in the order the sidebar shows them.
     ///
     /// One definition, so ⌘1 and a click select the same thing and ⌘] walks the
-    /// list a user can actually see.
-    private var allTerminals: [Terminal] {
-        store.fleet.worktrees.flatMap(\.terminals)
+    /// list a user can actually see. Grouped by workspace, that is no longer
+    /// the runner's order — see `ContentView.terminalOrder(_:)`. Every
+    /// terminal, whatever the search: stepping never walked only the hits.
+    private var allTerminals: [Terminal] { Self.stepOrder(store.fleet) }
+
+    /// `allTerminals` for a fleet: the sidebar's rows, unsearched, walked by
+    /// `terminalOrder`.
+    static func stepOrder(_ fleet: Fleet) -> [Terminal] {
+        terminalOrder(sidebarRows(fleet: fleet))
     }
 
     private var selectedTerminal: (worktree: Worktree, terminal: Terminal)? {
@@ -2297,11 +2361,11 @@ struct ContentView: View {
             } else if case .board(let host, let id) = selection {
                 // Already there — unless "there" has gone, which is said
                 // rather than answered with nothing.
-                if store.clients[host]?.repositories.contains(where: { $0.id == id }) != true {
+                if board(host: host, id: id) == nil {
                     errorBanner = missingBoardSentence(host: host)
                 }
             } else if let target = boardTarget {
-                selection = .board(host: target.host, repository: target.repository.id)
+                selection = .board(host: target.host, workspace: target.workspace.id)
             } else {
                 // Never a guess between several. The rows are in the sidebar
                 // for exactly this case.
@@ -2452,6 +2516,11 @@ struct ContentView: View {
             name: request.name,
             agent: request.preset.isEmpty ? Preferences.shared.defaultAgent : request.preset,
             reusing: request.worktree,
+            // Claimed for the workspace the window is in, when the new
+            // worktree is going into that workspace's repository, and
+            // otherwise for that repository's Main.
+            workspace: Self.claim(
+                newWorktreeIn: request.project, on: host, from: selection, in: store.fleet),
             // After the start has returned and the panel has let go of the
             // draft, so it's said over the pane instead.
             undelivered: { sentence in errorBanner = sentence })

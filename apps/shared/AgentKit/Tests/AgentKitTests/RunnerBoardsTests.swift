@@ -153,3 +153,101 @@ private let panes = [
     sweep.linkCameUp()
     #expect(sweep.owedWhenBuildLands, "a new link has read nothing")
 }
+
+// MARK: - Boards by workspace
+
+private func workspace(
+    _ id: String, _ name: String, in repository: String, main: Bool = false, ordinal: Int = 0
+) -> WorkspaceSummary {
+    WorkspaceSummary(
+        id: id, name: name, taskPrefix: id, isMain: main, ordinal: ordinal,
+        repository: repository)
+}
+
+/// A repository split in two is two boards, and so two rows: keyed by the
+/// workspace, called by the workspace's name, each counting its own board.
+@Test func twoWorkspacesInOneRepositoryAreTwoBoardRows() {
+    let main = workspace("w-main", "Main", in: "r-busy", main: true)
+    let billing = workspace("w-billing", "Billing", in: "r-busy", ordinal: 1)
+    let rows = RunnerBoards.rows(
+        boards: [main, billing], names: ["r-busy": "overnight"],
+        models: [
+            "w-main": board([row("1", .needsDecision), row("3", .inProgress)]),
+            "w-billing": board([row("2", .needsDecision), row("6", .needsDecision)]),
+        ],
+        panes: panes, build: both, connected: true)
+    #expect(rows.map(\.id) == ["w-main", "w-billing"])
+    #expect(rows.map(\.name) == ["Main", "Billing"])
+    #expect(rows.map(\.decisions) == [1, 2])
+    #expect(rows.map(\.repository) == ["r-busy", "r-busy"])
+    // Read by workspace, not as the whole repository.
+    #expect(rows.map(\.workspace.boardWorkspace) == ["w-main", "w-billing"])
+}
+
+/// A workspace's empty board is no row, as a repository's was.
+@Test func anEmptyWorkspaceBoardIsNoRow() {
+    let main = workspace("w-main", "Main", in: "r", main: true)
+    let billing = workspace("w-billing", "Billing", in: "r", ordinal: 1)
+    let rows = RunnerBoards.rows(
+        boards: [main, billing], names: [:],
+        models: ["w-main": board([]), "w-billing": board([row("2", .todo)])],
+        panes: panes, build: both, connected: true)
+    #expect(rows.map(\.id) == ["w-billing"])
+}
+
+/// What a sweep reads — a link coming up, a reconnect: every workspace's
+/// board, Main first within its repository, and the repository's whole board
+/// where the runner names no workspace for it. An open board is one of these,
+/// which is what reads it again after a reconnect.
+@Test func aSweepReadsEveryWorkspacesBoardAndTheWholeRepositoryWhereThereAreNone() {
+    let billing = workspace("w-billing", "Billing", in: "r1", ordinal: 1)
+    let main = workspace("w-main", "Main", in: "r1", main: true)
+    let elsewhere = workspace("w-late", "Main", in: "r3", main: true)
+    let swept = RunnerBoards.boards(
+        repositories: ["r1", "r2"], workspaces: [billing, main, elsewhere])
+    #expect(swept.map(\.id) == ["w-main", "w-billing", "r2", "w-late"])
+    #expect(swept.map(\.boardWorkspace) == ["w-main", "w-billing", nil, "w-late"])
+
+    // A runner without workstreams: one implicit board per repository, read
+    // whole — exactly the sweep from before workspaces.
+    let old = RunnerBoards.boards(repositories: ["r1", "r2"], workspaces: nil)
+    #expect(old.map(\.id) == ["r1", "r2"])
+    #expect(old.allSatisfy { $0.boardWorkspace == nil })
+}
+
+/// A notice reads the board it names and the board it left, not the others —
+/// and a board the fleet has not listed yet is read anyway, so its row is
+/// there the moment the fleet names its workspace.
+@Test func aNoticeReadsItsOwnBoardsAndOneTheFleetHasNotListedYet() {
+    let main = workspace("w-main", "Main", in: "r1", main: true)
+    let billing = workspace("w-billing", "Billing", in: "r1", ordinal: 1)
+    let held = [main, billing]
+
+    let own = BoardNotice(repository: "r1", workspace: "w-billing")
+    #expect(RunnerBoards.touched(by: own, among: held).map(\.id) == ["w-billing"])
+
+    let move = BoardNotice(repository: "r1", workspace: "w-main", fromWorkspace: "w-billing")
+    #expect(RunnerBoards.touched(by: move, among: held).map(\.id) == ["w-main", "w-billing"])
+
+    let new = BoardNotice(repository: "r1", workspace: "w-new")
+    let read = RunnerBoards.touched(by: new, among: held)
+    #expect(read.map(\.id) == ["w-new"])
+    #expect(read.first?.boardWorkspace == "w-new")
+    #expect(read.first?.repository == "r1")
+
+    // A runner without workstreams names no workspace: its repository's board.
+    let implicit = [WorkspaceSummary.implicit(repository: "r1"), .implicit(repository: "r2")]
+    let old = BoardNotice(repository: "r2", workspace: nil)
+    #expect(RunnerBoards.touched(by: old, among: implicit).map(\.id) == ["r2"])
+}
+
+/// An implicit board is the whole repository's, so a notice that names a
+/// workspace still reads it: a runner upgraded under a connected app sends
+/// workspaces before the fleet read that would key the boards by them.
+@Test func anImplicitBoardReadsForANoticeThatNamesAWorkspace() {
+    let implicit = [WorkspaceSummary.implicit(repository: "r1"), .implicit(repository: "r2")]
+    let named = BoardNotice(repository: "r1", workspace: "w-main")
+    let read = RunnerBoards.touched(by: named, among: implicit)
+    #expect(read.map(\.id) == ["r1", "w-main"])
+    #expect(read.first?.boardWorkspace == nil, "the implicit board is read whole")
+}

@@ -31,8 +31,10 @@ use clap::{Parser, Subcommand};
 mod changes;
 mod clients;
 mod tasks;
+mod workspaces;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_client::actions::RemoveRootOutcome;
+use farcooler_client::workspaces_json::{self, workspace_json};
 use farcooler_daemon::runtime::Runtime;
 use farcooler_protocol::v1::{
     Repository, RepositoryRoot, Terminal, TerminalState, Worktree, WorktreeState, request, result,
@@ -112,6 +114,15 @@ enum Command {
     /// Manage terminals inside a worktree.
     #[command(subcommand)]
     Terminal(TerminalCmd),
+    /// Workstreams: a board, a task prefix and an orchestrator each, inside
+    /// one repository.
+    ///
+    /// Not directories: those are worktrees, and a workspace owns some of
+    /// them. `workspace create` used to make a worktree; that is `worktree
+    /// create` now, and the old spelling says so rather than making a
+    /// workspace named after a branch.
+    #[command(subcommand)]
+    Workspace(workspaces::WorkspaceCmd),
     /// What a worktree changed.
     #[command(subcommand)]
     Changes(changes::ChangesCmd),
@@ -526,6 +537,12 @@ struct CreateArgs {
     /// else's commits. Needs a runner new enough to have it.
     #[arg(long)]
     fork_only: bool,
+    /// The workspace that owns the new worktree, by name, prefix or id, in
+    /// this repository. Defaults to the pane's own (FARCOOLER_WORKSPACE)
+    /// when that is in this repository; otherwise nobody owns it until one
+    /// of the workspace's agents works in it, or it is assigned.
+    #[arg(long)]
+    workspace: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -567,6 +584,18 @@ enum WorktreeCmd {
     Hide { worktree: String },
     /// Bring a hidden worktree back.
     Unhide { worktree: String },
+    /// Give a worktree to a workspace, whoever owned it before.
+    ///
+    /// The strongest claim there is: a worktree a workspace's agents were
+    /// seen working in stays with the first workspace that claimed it, and
+    /// this is how it moves.
+    Assign {
+        /// By name or id.
+        worktree: String,
+        /// The workspace, by name, prefix or id, in the worktree's repository.
+        #[arg(long)]
+        to: String,
+    },
     /// Remove the worktree. Keeps the branch and everything committed.
     Remove {
         worktree: String,
@@ -660,6 +689,16 @@ enum TerminalCmd {
     Restart { terminal: String },
     /// Delete a terminal's record. Refused while it is still running.
     Remove { terminal: String },
+    /// Say what a terminal is for: its workspace's orchestrator, an agent, or
+    /// a person's shell.
+    ///
+    /// A workspace has at most one orchestrator, and only a terminal that
+    /// belongs to a workspace can be one.
+    SetRole {
+        terminal: String,
+        #[arg(value_enum)]
+        role: workspaces::Role,
+    },
     /// Mark a terminal as looked at, clearing a `done` badge.
     ///
     /// Its own command rather than a side effect of `screen`, because a
@@ -896,8 +935,18 @@ fn read_token() -> Result<String, Box<dyn std::error::Error>> {
     Ok(token)
 }
 
+/// What can be refused from the command line alone, before anything
+/// connects: today, `workspace create` in its old spelling, which must never
+/// reach a runner as a workspace named after a branch.
+fn run_parse_only(cli: Cli) -> Result<Cli, String> {
+    if let Command::Workspace(cmd) = &cli.command {
+        cmd.check()?;
+    }
+    Ok(cli)
+}
+
 async fn run() -> Fallible {
-    let cli = Cli::parse();
+    let cli = run_parse_only(Cli::parse())?;
     let runner = cli.runner.as_deref();
     match cli.command {
         Command::Status => status(runner, cli.json).await,
@@ -908,6 +957,7 @@ async fn run() -> Fallible {
         Command::Settings(c) => settings(runner, c, cli.json).await,
         Command::Adapter(c) => adapter(runner, c, cli.json).await,
         Command::Terminal(c) => terminal(runner, c, cli.json).await,
+        Command::Workspace(c) => workspaces::workspace(runner, c, cli.json).await,
         Command::Changes(c) => changes::changes(runner, c, cli.json).await,
         Command::Task(c) => tasks::task(runner, c, cli.json).await,
         Command::Worktree(c) => worktree(runner, c, cli.json).await,
@@ -1668,6 +1718,10 @@ async fn repo(runner: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
 /// `fork_only` is set: a daemon too old to know the field then refuses the
 /// request rather than dropping it and checking out a branch a remote already
 /// has. See `capability::WORKTREE_FORK_ONLY`.
+///
+/// `workspace` claims the new worktree for that workspace, and names
+/// `workstreams` for the same reason: an older daemon would drop the field
+/// and leave the worktree unclaimed without a word.
 pub(crate) fn worktree_create_request(
     repository: uuid::Uuid,
     name: String,
@@ -1675,6 +1729,7 @@ pub(crate) fn worktree_create_request(
     base: String,
     terminal_preset: String,
     fork_only: bool,
+    workspace: Option<uuid::Uuid>,
 ) -> farcooler_protocol::v1::Request {
     let mut req = with(
         req_for("worktree.create", repository),
@@ -1688,11 +1743,15 @@ pub(crate) fn worktree_create_request(
             terminal_preset,
             adopt_existing: false,
             fork_only,
+            workspace_id: workspace.map(id_bytes),
         }),
     );
     if fork_only {
         req.required_capabilities
             .push(farcooler_protocol::capability::WORKTREE_FORK_ONLY.to_string());
+    }
+    if workspace.is_some() {
+        req = workspaces::needs_workstreams(req);
     }
     req
 }
@@ -1700,13 +1759,36 @@ pub(crate) fn worktree_create_request(
 /// The `worktree.create` a parsed `worktree create` sends: every flag the
 /// command line carries, as the request says it. Its own function so a test
 /// can go from the argv a client sends to the request the daemon gets.
+///
+/// `workspace` is `--workspace` resolved, or the pane's own: see
+/// `worktree_workspace`.
 fn worktree_create_from_args(
     repository: uuid::Uuid,
     args: CreateArgs,
+    workspace: Option<uuid::Uuid>,
 ) -> farcooler_protocol::v1::Request {
-    let CreateArgs { repo: _, name, branch, base, terminal, no_terminal, fork_only } = args;
+    let CreateArgs { repo: _, name, branch, base, terminal, no_terminal, fork_only, workspace: _ } = args;
     let terminal = if no_terminal { String::new() } else { terminal };
-    worktree_create_request(repository, name, branch, base, terminal, fork_only)
+    worktree_create_request(repository, name, branch, base, terminal, fork_only, workspace)
+}
+
+/// The workspace a new worktree in `repository` is made for: `--workspace`,
+/// looked for in that repository; or else the pane's own, `pane`, when it is
+/// in that repository. A pane in another repository's workspace claims
+/// nothing here, and neither does a runner without workspaces.
+fn worktree_workspace(
+    workspaces: &[farcooler_protocol::v1::Workspace],
+    repositories: &[Repository],
+    repository: uuid::Uuid,
+    named: Option<&str>,
+    pane: Option<uuid::Uuid>,
+) -> Result<Option<uuid::Uuid>, String> {
+    let mine: Vec<_> =
+        workspaces.iter().filter(|w| uuid_of(&w.repository_id) == repository).cloned().collect();
+    if let Some(name) = named {
+        return Ok(Some(uuid_of(&workspaces::resolve_workspace(&mine, repositories, name)?.id)));
+    }
+    Ok(pane.filter(|id| mine.iter().any(|w| uuid_of(&w.id) == *id)))
 }
 
 async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible {
@@ -1714,8 +1796,18 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
     match cmd {
         WorktreeCmd::Create(args) => {
             let repos = list_repositories(&mut link).await?;
-            let target = resolve_repository(&repos, &args.repo)?;
-            let r = link.call(worktree_create_from_args(uuid_of(&target.id), args)).await?;
+            let target = uuid_of(&resolve_repository(&repos, &args.repo)?.id);
+            let pane = workspaces::pane_workspace(std::env::var(workspaces::WORKSPACE_ENV).ok());
+            let asking = args.workspace.is_some() || pane.is_some();
+            let workspace = if asking && workspaces::has_workstreams(link.daemon_capabilities()) {
+                let all = workspaces::workspaces_on(&mut link, Some(target)).await?;
+                worktree_workspace(&all, &repos, target, args.workspace.as_deref(), pane)?
+            } else if args.workspace.is_some() {
+                return Err(workspaces::NO_WORKSPACES.into());
+            } else {
+                None
+            };
+            let r = link.call(worktree_create_from_args(target, args, workspace)).await?;
             let result::Value::Worktree(ws) = expect_value(r.value, "worktree")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
@@ -1749,50 +1841,25 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
             let healthy =
                 host_facts.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
 
+            // Only from a runner that has them: the key is absent, not empty,
+            // from one that doesn't, as it is on the phones' fleet.
+            let workspaces = if workspaces::has_workstreams(link.daemon_capabilities()) {
+                Some(workspaces::workspaces_on(&mut link, None).await?)
+            } else {
+                None
+            };
+
             if json {
                 let items: Vec<_> = worktrees
                     .iter()
                     .map(|w| {
-                        serde_json::json!({
-                            "id": uuid_of(&w.id).to_string(),
-                            "short": short_bytes(&w.id),
-                            "task": w.task_name,
-                            "branch": w.branch,
-                            // Which project this belongs to. A fleet is grouped
-                            // by project in the UI, and a client cannot join
-                            // ids to names by itself.
-                            // Which runner. Empty means this one; a client
-                            // merges several runners into one fleet and needs
-                            // to know where to route an action back to.
-                            //
-                            // Still spelled `host` because the apps decode this
-                            // key. `--json` is an interface, so renaming a
-                            // field is a compatibility change with a migration
-                            // in it, not a vocabulary one.
-                            "host": runner.unwrap_or_default(),
-                            "repository": repositories.iter()
-                                .find(|r| r.id == w.repository_id)
-                                .map(|r| r.display_name.clone())
-                                .unwrap_or_default(),
-                            "worktree": w.worktree_path,
-                            "state": worktree_label(w.state()),
-                            "is_main_checkout": w.is_main_checkout,
-                            // Where this card sits on its runner. The list is
-                            // already in this order, so a client that draws
-                            // what it is handed needs nothing here; a client
-                            // that MERGES several runners into one fleet needs
-                            // it to keep each runner's stretch in order, and
-                            // every client needs it to send an order back.
-                            //
-                            // 0 for every worktree against a runner too old to
-                            // store a rank, so a client tie-breaks rather than
-                            // trusting it alone.
-                            "ordinal": w.ordinal,
-                            "terminals": terminals.iter()
-                                .filter(|t| t.worktree_id == w.id)
-                                .map(worktree_list_terminal_json)
-                                .collect::<Vec<_>>(),
-                        })
+                        worktree_list_row(
+                            w,
+                            runner,
+                            &repositories,
+                            &terminals,
+                            workspaces.as_deref().unwrap_or_default(),
+                        )
                     })
                     .collect();
 
@@ -1803,7 +1870,12 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
                 println!(
                     "{}",
                     worktree_list_envelope(
-                        healthy, host_facts.live_terminal_count, branch_prefix, items)
+                        healthy,
+                        host_facts.live_terminal_count,
+                        branch_prefix,
+                        items,
+                        workspaces.as_deref().map(|all| all.iter().map(workspace_json).collect()),
+                    )
                 );
                 return Ok(());
             }
@@ -1812,13 +1884,9 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
                 println!("no worktrees yet");
             }
             for w in &worktrees {
-                println!(
-                    "{}  {:22}  {:8}  {}",
-                    short_bytes(&w.id),
-                    truncate(&w.task_name, 22),
-                    worktree_label(w.state()),
-                    w.branch
-                );
+                for line in worktree_list_lines(w, workspaces.as_deref().unwrap_or_default()) {
+                    println!("{line}");
+                }
                 for t in terminals.iter().filter(|t| t.worktree_id == w.id) {
                     let activity = activity_label(t.activity);
                     println!(
@@ -1887,6 +1955,7 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
                         terminal_preset: String::new(),
                         adopt_existing: true,
                         fork_only: false,
+                        workspace_id: None,
                     }),
                 ))
                 .await?;
@@ -1915,6 +1984,10 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
             } else {
                 println!("reordered {} worktrees", ordered.len());
             }
+        }
+
+        WorktreeCmd::Assign { worktree, to } => {
+            workspaces::assign_worktree(&mut link, &worktree, &to, json).await?;
         }
 
         WorktreeCmd::Hide { worktree } => {
@@ -2358,6 +2431,10 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             println!("removed {}", short(id));
         }
 
+        TerminalCmd::SetRole { terminal, role } => {
+            workspaces::set_role(runner, &terminal, role, json).await?;
+        }
+
         TerminalCmd::Seen { terminal } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             link.call(req_for("terminal.seen", id)).await?;
@@ -2786,7 +2863,9 @@ async fn list_roots(link: &mut Link) -> Result<Vec<RepositoryRoot>, Box<dyn std:
     }
 }
 
-pub(crate) async fn list_repositories(link: &mut Link) -> Result<Vec<Repository>, Box<dyn std::error::Error>> {
+pub(crate) async fn list_repositories<L: tasks::DispatchLink>(
+    link: &mut L,
+) -> Result<Vec<Repository>, Box<dyn std::error::Error>> {
     let r = link.call(req("repository.list")).await?;
     match expect_value(r.value, "repositories")? {
         result::Value::RepositoryList(l) => Ok(l.items),
@@ -2804,7 +2883,7 @@ async fn list_themes(
     }
 }
 
-async fn list_worktrees(link: &mut Link) -> Result<Vec<Worktree>, Box<dyn std::error::Error>> {
+pub(crate) async fn list_worktrees(link: &mut Link) -> Result<Vec<Worktree>, Box<dyn std::error::Error>> {
     let r = link.call(req("worktree.list")).await?;
     match expect_value(r.value, "worktrees")? {
         result::Value::WorktreeList(l) => Ok(l.items),
@@ -2812,7 +2891,7 @@ async fn list_worktrees(link: &mut Link) -> Result<Vec<Worktree>, Box<dyn std::e
     }
 }
 
-async fn list_terminals(
+pub(crate) async fn list_terminals(
     link: &mut Link,
     worktree: Option<Uuid>,
 ) -> Result<Vec<Terminal>, Box<dyn std::error::Error>> {
@@ -2949,18 +3028,126 @@ fn task_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
     t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }
 
+/// One row of `worktree list --json`: the object the Mac app decodes a
+/// worktree from.
+///
+/// Its own function so a test can reach it. `repository` is the display name
+/// the rows have always carried; `repository_id` is the id beside it, which
+/// is what joins a row to a workspace (`workspaces_json`'s `repository` is an
+/// id) and so what places a worktree nobody has claimed. `workspace`,
+/// `claim_source` and `foreign_writers` are `workspaces_json`'s, the same
+/// words the phones' fleet carries.
+fn worktree_list_row(
+    w: &Worktree,
+    runner: Option<&str>,
+    repositories: &[Repository],
+    terminals: &[Terminal],
+    workspaces: &[farcooler_protocol::v1::Workspace],
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": uuid_of(&w.id).to_string(),
+        "short": short_bytes(&w.id),
+        "task": w.task_name,
+        "branch": w.branch,
+        // Which project this belongs to. A fleet is grouped
+        // by project in the UI, and a client cannot join
+        // ids to names by itself.
+        // Which runner. Empty means this one; a client
+        // merges several runners into one fleet and needs
+        // to know where to route an action back to.
+        //
+        // Still spelled `host` because the apps decode this
+        // key. `--json` is an interface, so renaming a
+        // field is a compatibility change with a migration
+        // in it, not a vocabulary one.
+        "host": runner.unwrap_or_default(),
+        "repository": repositories.iter()
+            .find(|r| r.id == w.repository_id)
+            .map(|r| r.display_name.clone())
+            .unwrap_or_default(),
+        "worktree": w.worktree_path,
+        "state": worktree_label(w.state()),
+        "is_main_checkout": w.is_main_checkout,
+        // Where this card sits on its runner. The list is
+        // already in this order, so a client that draws
+        // what it is handed needs nothing here; a client
+        // that MERGES several runners into one fleet needs
+        // it to keep each runner's stretch in order, and
+        // every client needs it to send an order back.
+        //
+        // 0 for every worktree against a runner too old to
+        // store a rank, so a client tie-breaks rather than
+        // trusting it alone.
+        "ordinal": w.ordinal,
+        "terminals": terminals.iter()
+            .filter(|t| t.worktree_id == w.id)
+            .map(worktree_list_terminal_json)
+            .collect::<Vec<_>>(),
+        "repository_id": uuid_of(&w.repository_id).to_string(),
+        // The workspace that owns it, how it came to (`explicit`, `hook`,
+        // `process` or `migration`), and the names of any other workspace
+        // with a live terminal in it: the two-writers hazard, across
+        // workstreams.
+        "workspace": workspaces_json::workspace_of(w.workspace_id.as_deref()),
+        "claim_source": w.claim_source,
+        "foreign_writers": workspaces_json::foreign_writers(w, workspaces),
+    })
+}
+
+/// A worktree's lines in the plain `worktree list`, above its panes.
+///
+/// The owner is shown with the signal that claimed it, `[Main, hook]`, so a
+/// wrong claim can be diagnosed at a terminal and not only through `--json`.
+/// Every other workspace with a live terminal in it gets a line of its own,
+/// `also writing here: Billing`: the two-writers hazard, which nothing else a
+/// person reads says outside a dispatch warning. An owner this runner's list
+/// doesn't name is its short id, as `foreign_writers` does, rather than
+/// dropped.
+fn worktree_list_lines(w: &Worktree, workspaces: &[farcooler_protocol::v1::Workspace]) -> Vec<String> {
+    let owner = w.workspace_id.as_deref().map(|id| {
+        let name = workspaces
+            .iter()
+            .find(|ws| ws.id.as_ref() == id)
+            .map(|ws| ws.name.clone())
+            .unwrap_or_else(|| short_bytes(id));
+        match w.claim_source.as_deref().filter(|s| !s.is_empty()) {
+            Some(source) => format!("  [{name}, {source}]"),
+            None => format!("  [{name}]"),
+        }
+    });
+    let mut lines = vec![format!(
+        "{}  {:22}  {:8}  {}{}",
+        short_bytes(&w.id),
+        truncate(&w.task_name, 22),
+        worktree_label(w.state()),
+        w.branch,
+        owner.unwrap_or_default()
+    )];
+    let foreign = workspaces_json::foreign_writers(w, workspaces);
+    if !foreign.is_empty() {
+        lines.push(format!("    also writing here: {}", foreign.join(", ")));
+    }
+    lines
+}
+
 /// `worktree list --json`'s envelope around its rows.
 ///
 /// Its own function so a test can pin the key the rows ride under. The Mac
-/// decodes `worktrees`, and a later `workspaces` key (the workstreams) will sit
-/// beside it in this same object, so the two must never be confused.
+/// decodes `worktrees`, and `workspaces` (the workstreams) sits beside it in
+/// this same object, so the two must never be confused.
+///
+/// `workspaces` is `None` from a runner without them, and the key is then
+/// absent rather than empty, as it is on the phones' fleet: an empty list
+/// would say a runner that has workspaces has none. Its objects are
+/// `workspace list --json`'s, so the Mac reads the whole fleet in one call.
 fn worktree_list_envelope(
     healthy: bool,
     live_panes: u32,
     branch_prefix: String,
     items: Vec<serde_json::Value>,
+    workspaces: Option<Vec<serde_json::Value>>,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let mut envelope = serde_json::json!({
         "runtime_healthy": healthy,
         "live_panes": live_panes,
         // The Mac app reads this on every refresh, which is why it rides the
@@ -2968,7 +3155,11 @@ fn worktree_list_envelope(
         // subprocess per branch it names.
         "branch_prefix": branch_prefix,
         "worktrees": items,
-    })
+    });
+    if let Some(workspaces) = workspaces {
+        envelope["workspaces"] = serde_json::Value::Array(workspaces);
+    }
+    envelope
 }
 
 /// One terminal, projected for a client — the shape `WorktreeCmd::List` and
@@ -3064,6 +3255,11 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // indistinguishable from one that has not finished starting, which is
         // the endless spinner this whole path exists to end.
         "agentFailure": t.agent_failure,
+        // Which workspace the pane works for, and what it is: `orchestrator`,
+        // `agent` or `shell`, or null from a runner without workspaces. The
+        // Mac keeps an orchestrator out of its worktree's rows by this word.
+        "workspace": workspaces_json::workspace_of(t.workspace_id.as_deref()),
+        "role": workspaces_json::role_word(t.role),
     })
 }
 
@@ -3181,6 +3377,13 @@ fn task_event_json(t: &farcooler_protocol::v1::TaskChanged) -> serde_json::Value
         // that can disagree, which is the argument the proto's own comment on
         // this field makes.
         "actor": t.actor,
+        // Which board moved, and on a move the board it left too, so a
+        // client showing either one reads it again and a client showing
+        // neither doesn't. Null from a runner without workspaces, where the
+        // repository is the one board. The FFI's event line spells them the
+        // same way.
+        "workspace": workspaces_json::workspace_of(t.workspace_id.as_deref()),
+        "from_workspace": workspaces_json::workspace_of(t.from_workspace_id.as_deref()),
     })
 }
 
@@ -3281,6 +3484,10 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // indistinguishable from one that has not finished starting, which is
         // the endless spinner this whole path exists to end.
         "agentFailure": t.agent_failure,
+        // Watched for the reason the task is: a role set, or a workspace
+        // claimed, reaches a row without a full re-read.
+        "workspace": workspaces_json::workspace_of(t.workspace_id.as_deref()),
+        "role": workspaces_json::role_word(t.role),
     })
 }
 
@@ -3354,19 +3561,24 @@ pub(crate) async fn resolve_worktree_id(
     needle: &str,
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
     let worktrees = list_worktrees(link).await?;
-    // Name first: people type the task they gave it, and an id prefix is the
-    // fallback rather than the other way round.
+    Ok(uuid_of(&find_worktree(&worktrees, needle)?.id))
+}
+
+/// A worktree by the name it was given, then by the end of its id.
+///
+/// Name first: people type the task they gave it, and an id prefix is the
+/// fallback rather than the other way round.
+pub(crate) fn find_worktree<'a>(worktrees: &'a [Worktree], needle: &str) -> Result<&'a Worktree, String> {
     let by_name: Vec<&Worktree> =
         worktrees.iter().filter(|w| w.task_name == needle).collect();
-    if by_name.len() == 1 {
-        return Ok(uuid_of(&by_name[0].id));
+    if let [one] = by_name.as_slice() {
+        return Ok(one);
     }
-    let w = resolve(&worktrees, needle, |w| &w.id, "worktree")?;
-    Ok(uuid_of(&w.id))
+    resolve(worktrees, needle, |w| &w.id, "worktree")
 }
 
 /// Resolve a short id suffix, refusing an ambiguous match rather than guessing.
-fn resolve<'a, T>(
+pub(crate) fn resolve<'a, T>(
     items: &'a [T],
     prefix: &str,
     id_of: impl Fn(&T) -> &[u8],
@@ -3410,7 +3622,7 @@ mod tests {
         let repo = uuid::Uuid::now_v7();
         let create = |fork_only| {
             worktree_create_request(
-                repo, "fix-it".into(), "fix-it".into(), "HEAD".into(), String::new(), fork_only)
+                repo, "fix-it".into(), "fix-it".into(), "HEAD".into(), String::new(), fork_only, None)
         };
         let forking = create(true);
         assert_eq!(forking.required_capabilities, [farcooler_protocol::capability::WORKTREE_FORK_ONLY]);
@@ -3476,7 +3688,7 @@ mod tests {
         let Command::Worktree(WorktreeCmd::Create(args)) = cli.command else { panic!("worktree create") };
         assert_eq!(args.repo, "repo");
         // What the command's own arm passes: the parsed struct, whole.
-        let req = worktree_create_from_args(uuid::Uuid::now_v7(), args);
+        let req = worktree_create_from_args(uuid::Uuid::now_v7(), args, None);
         assert_eq!(req.required_capabilities, [farcooler_protocol::capability::WORKTREE_FORK_ONLY]);
         let Some(request::Payload::WorktreeCreate(p)) = req.payload else { panic!("payload") };
         assert!(p.fork_only);
@@ -3498,22 +3710,173 @@ mod tests {
             else {
                 panic!("worktree create")
             };
-            let req = worktree_create_from_args(uuid::Uuid::now_v7(), args);
+            let req = worktree_create_from_args(uuid::Uuid::now_v7(), args, None);
             let Some(request::Payload::WorktreeCreate(p)) = req.payload else { panic!("payload") };
             assert_eq!((p.fork_only, p.terminal_preset.as_str()), (fork_only, preset), "{flags:?}");
         }
     }
 
-    /// The rows of `worktree list --json` ride under `worktrees`, and only
-    /// the four envelope keys are there: the Mac reads this object by name.
+    /// The rows of `worktree list --json` ride under `worktrees`, and from a
+    /// runner without workspaces only the four envelope keys are there: the
+    /// Mac reads this object by name.
     #[test]
     fn the_worktree_list_envelope_names_its_rows_worktrees() {
         let row = serde_json::json!({ "id": "w1" });
-        let v = worktree_list_envelope(true, 2, "e/".into(), vec![row.clone()]);
+        let v = worktree_list_envelope(true, 2, "e/".into(), vec![row.clone()], None);
         assert_eq!(v["worktrees"], serde_json::json!([row]), "{v}");
         let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();
         assert_eq!(keys, ["branch_prefix", "live_panes", "runtime_healthy", "worktrees"]);
+    }
+
+    /// The workstreams ride beside the worktrees, as `workspace list
+    /// --json`'s objects, so the Mac reads the whole fleet in one call — and
+    /// an empty list is still a list, where a runner without workspaces
+    /// sends no key at all.
+    #[test]
+    fn the_envelope_carries_the_workspaces_beside_the_worktrees() {
+        let billing = farcooler_protocol::v1::Workspace {
+            id: bytes::Bytes::copy_from_slice(&[1; 16]),
+            repository_id: bytes::Bytes::copy_from_slice(&[2; 16]),
+            name: "Billing".into(),
+            task_prefix: "bil".into(),
+            ..Default::default()
+        };
+        let v = worktree_list_envelope(true, 0, String::new(), vec![], Some(vec![workspace_json(&billing)]));
+        assert_eq!(v["workspaces"], serde_json::json!([workspace_json(&billing)]), "{v}");
+        assert_eq!(v["workspaces"][0]["task_prefix"], "bil");
+        assert_eq!(v["workspaces"][0]["repository"], uuid_of(&[2; 16]).to_string());
+        assert_eq!(v["worktrees"], serde_json::json!([]));
+        let none = worktree_list_envelope(true, 0, String::new(), vec![], Some(vec![]));
+        assert_eq!(none["workspaces"], serde_json::json!([]));
+    }
+
+    /// A worktree row names its repository by id as well as by name, which
+    /// is how the Mac places a worktree nobody has claimed; and its owner,
+    /// how it was claimed, and who else is writing in it, by name. Each of
+    /// its panes says its workspace and its role.
+    #[test]
+    fn a_worktree_row_names_its_repository_its_workspace_and_its_panes_roles() {
+        use farcooler_protocol::v1 as pb;
+        let id = |n: u8| bytes::Bytes::copy_from_slice(&[n; 16]);
+        let repositories = [pb::Repository { id: id(2), display_name: "api".into(), ..Default::default() }];
+        let workspaces = [
+            pb::Workspace { id: id(3), repository_id: id(2), name: "Main".into(), ..Default::default() },
+            pb::Workspace { id: id(4), repository_id: id(2), name: "Billing".into(), ..Default::default() },
+        ];
+        let w = Worktree {
+            id: id(1),
+            repository_id: id(2),
+            workspace_id: Some(id(3)),
+            claim_source: Some("hook".into()),
+            foreign_writer_workspace_ids: vec![id(4)],
+            ..Default::default()
+        };
+        let pane = |n: u8, role: pb::TerminalRole, workspace: Option<bytes::Bytes>| Terminal {
+            id: id(n),
+            worktree_id: id(1),
+            role: role as i32,
+            workspace_id: workspace,
+            ..Default::default()
+        };
+        let terminals = [
+            pane(5, pb::TerminalRole::Orchestrator, Some(id(3))),
+            pane(6, pb::TerminalRole::Agent, Some(id(4))),
+            Terminal { worktree_id: id(9), ..pane(7, pb::TerminalRole::Shell, None) },
+        ];
+        let row = worktree_list_row(&w, None, &repositories, &terminals, &workspaces);
+        assert_eq!(row["repository"], "api", "the name the rows have always carried");
+        assert_eq!(row["repository_id"], uuid_of(&id(2)).to_string());
+        assert_eq!(row["workspace"], uuid_of(&id(3)).to_string());
+        assert_eq!(row["claim_source"], "hook");
+        assert_eq!(row["foreign_writers"], serde_json::json!(["Billing"]));
+        let panes = row["terminals"].as_array().expect("terminals");
+        assert_eq!(panes.len(), 2, "only this worktree's panes");
+        assert_eq!((&panes[0]["role"], &panes[0]["workspace"]), (&serde_json::json!("orchestrator"), &serde_json::json!(uuid_of(&id(3)).to_string())));
+        assert_eq!((&panes[1]["role"], &panes[1]["workspace"]), (&serde_json::json!("agent"), &serde_json::json!(uuid_of(&id(4)).to_string())));
+
+        let unclaimed = Worktree { workspace_id: None, claim_source: None, foreign_writer_workspace_ids: vec![], ..w };
+        let row = worktree_list_row(&unclaimed, None, &repositories, &[], &workspaces);
+        assert_eq!(row["workspace"], serde_json::json!(null));
+        assert_eq!(row["claim_source"], serde_json::json!(null));
+        assert_eq!(row["foreign_writers"], serde_json::json!([]));
+        assert_eq!(row["repository_id"], uuid_of(&id(2)).to_string(), "unclaimed still says where it is");
+    }
+
+    /// The plain listing says who owns a worktree and which signal claimed
+    /// it, and names every other workspace writing there on a line of its
+    /// own; an unclaimed worktree says neither.
+    #[test]
+    fn the_plain_worktree_list_shows_the_claim_and_who_else_is_writing() {
+        use farcooler_protocol::v1 as pb;
+        let id = |n: u8| bytes::Bytes::copy_from_slice(&[n; 16]);
+        let workspaces = [
+            pb::Workspace { id: id(3), repository_id: id(2), name: "Main".into(), ..Default::default() },
+            pb::Workspace { id: id(4), repository_id: id(2), name: "Billing".into(), ..Default::default() },
+        ];
+        let w = Worktree {
+            id: id(1),
+            repository_id: id(2),
+            task_name: "fix-it".into(),
+            branch: "fix-it".into(),
+            workspace_id: Some(id(3)),
+            claim_source: Some("hook".into()),
+            foreign_writer_workspace_ids: vec![id(4)],
+            ..Default::default()
+        };
+        let lines = worktree_list_lines(&w, &workspaces);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with(&short_bytes(&id(1))), "{lines:?}");
+        assert!(lines[0].ends_with("fix-it  [Main, hook]"), "{lines:?}");
+        assert_eq!(lines[1], "    also writing here: Billing");
+
+        let quiet = Worktree { foreign_writer_workspace_ids: vec![], claim_source: None, ..w.clone() };
+        let lines = worktree_list_lines(&quiet, &workspaces);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].ends_with("fix-it  [Main]"), "{lines:?}");
+
+        let unclaimed = Worktree { workspace_id: None, claim_source: None, foreign_writer_workspace_ids: vec![], ..w };
+        let lines = worktree_list_lines(&unclaimed, &workspaces);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].ends_with("fix-it") && !lines[0].contains('['), "{lines:?}");
+    }
+
+    /// `worktree create` claims for `--workspace`, looked for in the target
+    /// repository, or else for the pane's own workspace when that is in the
+    /// target repository; and the request names the capability.
+    #[test]
+    fn a_new_worktree_is_claimed_for_the_workspace_asking() {
+        use farcooler_protocol::v1 as pb;
+        let id = |n: u8| bytes::Bytes::copy_from_slice(&[n; 16]);
+        let repositories = [
+            pb::Repository { id: id(1), display_name: "api".into(), ..Default::default() },
+            pb::Repository { id: id(2), display_name: "web".into(), ..Default::default() },
+        ];
+        let workspaces = [
+            pb::Workspace { id: id(11), repository_id: id(1), name: "Main".into(), task_prefix: "api".into(), ..Default::default() },
+            pb::Workspace { id: id(12), repository_id: id(1), name: "Billing".into(), task_prefix: "bil".into(), ..Default::default() },
+            pb::Workspace { id: id(21), repository_id: id(2), name: "Billing".into(), task_prefix: "wb".into(), ..Default::default() },
+        ];
+        let api = uuid_of(&id(1));
+        let pick = |named: Option<&str>, pane: Option<u8>| {
+            worktree_workspace(&workspaces, &repositories, api, named, pane.map(|n| uuid_of(&id(n))))
+        };
+        assert_eq!(pick(Some("billing"), None), Ok(Some(uuid_of(&id(12)))), "in the target repository only");
+        assert_eq!(pick(None, Some(12)), Ok(Some(uuid_of(&id(12)))));
+        assert_eq!(pick(Some("Main"), Some(12)), Ok(Some(uuid_of(&id(11)))), "the flag beats the pane");
+        assert_eq!(pick(None, Some(21)), Ok(None), "a pane in another repository claims nothing here");
+        assert_eq!(pick(None, None), Ok(None));
+        assert!(pick(Some("wb"), None).is_err(), "another repository's workspace is refused");
+
+        let argv = ["farcooler", "worktree", "create", "api", "fix-it", "--branch", "fix-it", "--workspace", "Billing"];
+        let Command::Worktree(WorktreeCmd::Create(args)) = Cli::try_parse_from(argv).expect("parses").command else {
+            panic!("worktree create")
+        };
+        assert_eq!(args.workspace.as_deref(), Some("Billing"));
+        let req = worktree_create_from_args(api, args, Some(uuid_of(&id(12))));
+        assert_eq!(req.required_capabilities, [farcooler_protocol::capability::WORKSTREAMS]);
+        let Some(request::Payload::WorktreeCreate(p)) = req.payload else { panic!("payload") };
+        assert_eq!(p.workspace_id.as_deref(), Some(id(12).as_ref()));
     }
 
     /// Every command that manages a worktree is under `worktree`, with the
@@ -3538,14 +3901,71 @@ mod tests {
             Cli::try_parse_from(line.split_whitespace()).unwrap_or_else(|e| panic!("{line}: {e}"));
         }
         // The old spellings are gone rather than kept as aliases: `workspace`
-        // comes back meaning a workstream, and a stale script should fail
-        // here instead of being read as that.
-        for line in [
-            "farcooler workspace list",
-            "farcooler workspace create repo fix-it --branch fix-it",
-            "farcooler worktree remove-worktree a",
-        ] {
+        // is back meaning a workstream. A stale `workspace create` parses, so
+        // that it can be refused by name (`the_old_create_spelling_points_at_
+        // worktree`); a stale verb fails here.
+        for line in ["farcooler worktree remove-worktree a", "farcooler workspace hide a"] {
             assert!(Cli::try_parse_from(line.split_whitespace()).is_err(), "{line} still parses");
+        }
+        Cli::try_parse_from("farcooler workspace list".split_whitespace()).expect("a workstream list");
+    }
+
+    /// `farcooler workspace create <repo> <name> --branch <b>` made a
+    /// worktree until the rename. Read now, it would make a workspace named
+    /// after a branch, so it is refused before anything connects, pointing
+    /// at the command it meant — with its own words filled in.
+    #[test]
+    fn the_old_create_spelling_points_at_worktree() {
+        let refused = |line: &str| {
+            Cli::try_parse_from(line.split_whitespace())
+                .map_err(|e| e.to_string())
+                .and_then(run_parse_only)
+                .err()
+                .unwrap_or_else(|| panic!("{line} was taken as a workspace"))
+        };
+        let err = refused("farcooler workspace create repo fix-it --branch fix-it");
+        assert!(err.contains("farcooler worktree create repo fix-it --branch fix-it"), "{err}");
+        // Every flag the old command took is the old command.
+        for line in [
+            "farcooler --json workspace create repo fix-it --branch el/fix-it --no-terminal --fork-only",
+            "farcooler workspace create repo fix-it --branch b --base main --terminal claude",
+            "farcooler workspace create repo --name x --prefix x --fork-only",
+        ] {
+            assert!(refused(line).contains("farcooler worktree create"), "{line}");
+        }
+        // And the new spelling is not refused.
+        let ok = Cli::try_parse_from("farcooler workspace create --name Billing --prefix bil".split_whitespace())
+            .map_err(|e| e.to_string())
+            .and_then(run_parse_only);
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn workspace_commands_parse() {
+        for line in [
+            "farcooler workspace create repo --name Billing --prefix bil",
+            "farcooler workspace create --name Billing --prefix bil",
+            "farcooler --json workspace list",
+            "farcooler workspace list repo",
+            "farcooler --json workspace show Billing --repo repo",
+            "farcooler workspace rename Billing Payments",
+            "farcooler workspace set-prefix Billing pay",
+            "farcooler workspace delete Billing",
+            "farcooler workspace start-orchestrator Billing --harness codex --replace",
+            "farcooler workspace start-orchestrator Billing --harness claude:opus",
+            "farcooler worktree assign fix-it --to Billing",
+            "farcooler terminal set-role abc orchestrator",
+            "farcooler terminal set-role abc agent",
+            "farcooler terminal set-role abc shell",
+            "farcooler task move ov-3 ov-4 --to Billing",
+            "farcooler task move -3 --to Billing",
+            "farcooler task list --workspace Billing",
+            "farcooler task create --title t --workspace Billing",
+        ] {
+            Cli::try_parse_from(line.split_whitespace()).unwrap_or_else(|e| panic!("{line}: {e}"));
+        }
+        for line in ["farcooler terminal set-role abc manager", "farcooler task move --to Billing"] {
+            assert!(Cli::try_parse_from(line.split_whitespace()).is_err(), "{line} parses");
         }
     }
 
@@ -3615,6 +4035,7 @@ mod tests {
             task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
             repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
             actor: "agent:0198f2c0-0000-7000-8000-000000000001".into(),
+            ..Default::default()
         });
         assert_eq!(json["kind"], "task");
         // The repository is the read a client makes, so it is the field a
@@ -3626,6 +4047,30 @@ mod tests {
             json["actor"], "agent:0198f2c0-0000-7000-8000-000000000001",
             "the actor was dropped, and a client can no longer tell its own write apart"
         );
+        // A write that didn't move the task names its board and no other.
+        assert_eq!(json["workspace"], serde_json::json!(null), "no workspace was sent");
+        assert_eq!(json["from_workspace"], serde_json::json!(null));
+    }
+
+    /// A board event names its board, and a move names both boards, so the
+    /// board the task left reads itself again too. Spelled as the FFI's line
+    /// spells them.
+    #[test]
+    fn a_board_change_names_its_board_and_a_move_names_both() {
+        let (billing, main) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
+        let bytes = |u: uuid::Uuid| bytes::Bytes::copy_from_slice(u.as_bytes());
+        let json = task_event_json(&farcooler_protocol::v1::TaskChanged {
+            workspace_id: Some(bytes(billing)),
+            from_workspace_id: Some(bytes(main)),
+            ..Default::default()
+        });
+        assert_eq!(json["workspace"], billing.to_string());
+        assert_eq!(json["from_workspace"], main.to_string());
+        let nil = task_event_json(&farcooler_protocol::v1::TaskChanged {
+            workspace_id: Some(bytes(uuid::Uuid::nil())),
+            ..Default::default()
+        });
+        assert_eq!(nil["workspace"], serde_json::json!(null), "never the nil uuid");
     }
 
     /// Every actor word crosses whole, including the two that have no id in
@@ -3637,6 +4082,7 @@ mod tests {
                 task_id: bytes::Bytes::new(),
                 repository_id: bytes::Bytes::new(),
                 actor: word.to_string(),
+                ..Default::default()
             });
             assert_eq!(json["actor"], word, "the actor was rewritten on the way out");
         }
@@ -3844,6 +4290,8 @@ mod tests {
             "turnFailed",
             "agentFailure",
             "taskId",
+            "workspace",
+            "role",
         ] {
             assert!(event.contains(field), "{field} is in neither projection");
         }

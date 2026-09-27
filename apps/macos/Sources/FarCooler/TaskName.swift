@@ -82,7 +82,7 @@ enum TaskName {
         let all = words(description)
         let meaningful = all.filter { !fillerWords.contains($0) }
         let name = pack(meaningful.isEmpty ? all : meaningful)
-        return name.isEmpty ? "workspace" : name
+        return name.isEmpty ? "worktree" : name
     }
 
     /// A model's answer as a name, or nil when there is nothing usable in it.

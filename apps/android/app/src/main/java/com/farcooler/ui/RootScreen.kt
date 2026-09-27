@@ -133,6 +133,10 @@ fun RootScreen(model: AppModel) {
                             model.open(ref)
                             scope.launch { drawer.close() }
                         },
+                        onOpenBoard = { row ->
+                            scope.launch { drawer.close() }
+                            model.navigate(Route.Board(row.hostId, row.key))
+                        },
                         onSettings = {
                             scope.launch { drawer.close() }
                             model.navigate(Route.Settings)
@@ -224,6 +228,7 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
             is Route.Fleet -> FleetScreen(
                 model = model,
                 onSelect = { model.open(it) },
+                onOpenBoard = { model.navigate(Route.Board(it.hostId, it.key)) },
                 onOpenDrawer = onOpenDrawer,
                 onBack = { model.back() },
             )
@@ -238,7 +243,7 @@ private fun Ground(model: AppModel, route: Route, visible: Boolean, onOpenDrawer
                 onSelect = { model.open(it) },
                 onReviewChanges = { host, worktree -> model.openChanges(host, worktree) },
                 onOpenWorktrees = { model.navigate(Route.Fleet) },
-                onOpenBoard = { model.navigate(Route.Board(it.hostId, it.repository)) },
+                onOpenBoard = { model.navigate(Route.Board(it.hostId, it.key)) },
                 onOpenDrawer = onOpenDrawer,
             )
         }
@@ -285,8 +290,8 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
             } else {
                 BoardScreen(
                     connection = live,
-                    repository = route.repositoryId,
-                    onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.repositoryId, it)) },
+                    workspaceId = route.workspaceId,
+                    onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
                     onJump = { model.openFromBoard(it) },
                     onBack = { model.back() },
                 )
@@ -300,7 +305,7 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
             } else {
                 TaskDetailScreen(
                     connection = live,
-                    repository = route.repositoryId,
+                    workspaceId = route.workspaceId,
                     taskId = route.taskId,
                     onJump = { model.openFromBoard(it) },
                     onBack = { model.back() },

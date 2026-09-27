@@ -25,6 +25,7 @@ use farcooler_protocol::v1 as pb;
 use farcooler_store::models::{
     AcceptanceItem, Actor, NoteHit, NoteKind, Task, TaskBlock, TaskNote, TaskStatus,
 };
+use farcooler_store::TaskScope;
 use uuid::Uuid;
 
 use crate::service::Service;
@@ -105,7 +106,7 @@ fn note_kind_from_wire(raw: i32) -> Option<NoteKind> {
 ///
 /// `Actor::parse` is the store's own reader, paired with the `Display` that
 /// wrote the column and the event. There is no second stringifier here.
-fn actor_from_wire(raw: &str) -> Result<Actor> {
+pub(crate) fn actor_from_wire(raw: &str) -> Result<Actor> {
     if raw.is_empty() {
         return Ok(Actor::User);
     }
@@ -115,7 +116,7 @@ fn actor_from_wire(raw: &str) -> Result<Actor> {
 /// A uuid a request must carry. `NotFound` rather than `InvalidArgument`, the
 /// same answer `Rpc::target` gives: to a caller, an id that cannot be read and
 /// an id that names nothing are the same fact.
-fn required_id(bytes: &[u8]) -> Result<Uuid> {
+pub(crate) fn required_id(bytes: &[u8]) -> Result<Uuid> {
     crate::wire::parse_id(bytes).ok_or(DomainError::NotFound)
 }
 
@@ -184,7 +185,7 @@ fn acceptance_from_wire(item: &pb::TaskAcceptanceItem) -> Result<AcceptanceItem>
     Ok(AcceptanceItem { id, text: item.text.clone(), met: item.met })
 }
 
-fn pb_task(task: &Task) -> pb::Task {
+pub(crate) fn pb_task(task: &Task) -> pb::Task {
     pb::Task {
         id: id_bytes(task.id),
         resource_version: task.resource_version,
@@ -200,6 +201,7 @@ fn pb_task(task: &Task) -> pb::Task {
         labels: task.labels.clone(),
         created_at: task.created_at,
         updated_at: task.updated_at,
+        workspace_id: id_bytes(task.workspace_id),
     }
 }
 
@@ -230,19 +232,42 @@ fn pb_hit(hit: &NoteHit) -> pb::TaskNoteHit {
     pb::TaskNoteHit { note: Some(pb_note(&hit.note)), superseded: hit.superseded }
 }
 
-/// Say that a task moved, naming who moved it.
+/// Say that a task moved, naming who moved it and the board it is on.
 ///
 /// Every write in this file ends here. See the module doc for why it is not
-/// left to the dispatch arm.
+/// left to the dispatch arm. `task.move` announces through the watcher
+/// directly, because it also names the board the task left.
 fn announce(watcher: &Watcher, task: &Task, actor: Actor) {
-    watcher.announce_task_changed(task.id, task.repository_id, actor);
+    watcher.announce_task_changed(task, None, actor);
+}
+
+/// The workspace a request names, which must be in `repository` when the
+/// request names one of those too.
+///
+/// `NotFound` for a workspace that isn't there, and `other_repository` for
+/// one in another repository than the request says: a caller naming both
+/// has said two things, and filing on either would be a guess.
+fn named_workspace(
+    svc: &Service,
+    workspace: &bytes::Bytes,
+    repository: &bytes::Bytes,
+) -> Result<farcooler_store::models::Workspace> {
+    let workspace = svc.store.get_workspace(required_id(workspace)?)?;
+    if !repository.is_empty() && required_id(repository)? != workspace.repository_id {
+        return Err(DomainError::InvalidArgument { what: "other_repository" });
+    }
+    Ok(workspace)
 }
 
 // ---------------------------------------------------------------------------
 // reads
 // ---------------------------------------------------------------------------
 
-/// `task.list`: a repository's board, or the part of it that has gone quiet.
+/// `task.list`: one board, or every board in a repository, or the part of
+/// either that has gone quiet.
+///
+/// `workspace_id` names one board; without it, every workspace in
+/// `repository_id` is listed, each task naming its own.
 ///
 /// `stale_after_millis` swaps the question rather than filtering the answer,
 /// because staleness is a different query with a different order — oldest
@@ -251,12 +276,13 @@ fn announce(watcher: &Watcher, task: &Task, actor: Actor) {
 /// that listed every finished or waiting task beside the ones needing
 /// attention is a view nobody reads.
 pub fn list(svc: &Service, req: &pb::TaskListRequest) -> Result<pb::TaskList> {
-    let repository = required_id(&req.repository_id)?;
+    let scope = match &req.workspace_id {
+        Some(workspace) => TaskScope::Workspace(named_workspace(svc, workspace, &req.repository_id)?.id),
+        None => TaskScope::Repository(required_id(&req.repository_id)?),
+    };
     let tasks = match req.stale_after_millis.filter(|ms| *ms > 0) {
-        Some(millis) => svc
-            .store
-            .list_tasks_stale_for(repository, std::time::Duration::from_millis(millis))?,
-        None => svc.store.list_tasks(repository, status_from_wire(req.status))?,
+        Some(millis) => svc.store.list_tasks_stale_for(scope, std::time::Duration::from_millis(millis))?,
+        None => svc.store.list_tasks(scope, status_from_wire(req.status))?,
     };
     Ok(pb::TaskList { items: tasks.iter().map(pb_task).collect() })
 }
@@ -346,7 +372,18 @@ pub fn search(svc: &Service, req: &pb::TaskSearchRequest) -> Result<pb::TaskNote
 /// that writes the whole row at once, which is a change to `farcooler-store`
 /// rather than to this seam.
 pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<pb::Task> {
-    let repository = required_id(&req.repository_id)?;
+    // The board, read and checked before anything is written. A named
+    // workspace is looked up; otherwise the repository must be readable, and
+    // its Main is made below if it has none yet.
+    let named = req
+        .workspace_id
+        .as_ref()
+        .map(|workspace| named_workspace(svc, workspace, &req.repository_id))
+        .transpose()?;
+    let repository = match &named {
+        Some(workspace) => workspace.repository_id,
+        None => required_id(&req.repository_id)?,
+    };
     let actor = actor_from_wire(&req.actor)?;
     let update = farcooler_store::models::TaskUpdate {
         title: checked_title(&req.title)?.to_string(),
@@ -361,8 +398,15 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
         worktree_id: optional_id(req.worktree_id.as_ref(), "worktree_id")?,
     };
 
-    // Nothing above this line has written anything.
-    let created = svc.store.create_task(repository, &update.title, actor)?;
+    // Nothing above this line has written anything. A task is filed on a
+    // workspace: the one the request named, or else the repository's Main,
+    // made here if it has none yet. `create_task` takes a WORKSPACE id, and a
+    // repository id handed to it would type-check and fail as `NotFound`.
+    let workspace = match named {
+        Some(workspace) => workspace.id,
+        None => svc.store.ensure_main_workspace(repository)?.id,
+    };
+    let created = svc.store.create_task(workspace, &update.title, actor)?;
     // Skipped when there is nothing to revise, so the common case is one write
     // and the task comes back at version 1 rather than at 2 for no reason.
     // `fill_in_new_task` and not `update_task`: this is the rest of the act of

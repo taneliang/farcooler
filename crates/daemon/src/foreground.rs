@@ -39,6 +39,14 @@ pub struct Foreground {
     /// is often not the one the pane is showing. The same walk already has
     /// both columns, so this costs a map and no extra process.
     groups: HashMap<i32, i32>,
+    /// Every process's children, by parent pid.
+    ///
+    /// For claiming (`claims::scan`), which has to reach the commands codex
+    /// and cursor run. Those have no controlling tty (`??`), so no per-tty
+    /// reading finds them; only their parent does.
+    children: HashMap<i32, Vec<i32>>,
+    /// Every process that has a controlling tty, by tty name.
+    on_tty: HashMap<String, Vec<i32>>,
 }
 
 impl Foreground {
@@ -72,6 +80,28 @@ impl Foreground {
             }
         }
         by_group
+    }
+
+    /// Every process on `tty`, and every descendant of those by parent pid,
+    /// whether or not it has a tty of its own.
+    ///
+    /// Rooted at the tty rather than at a pid because a pane is known by its
+    /// tty (`TaggedPane::tty`). Descended by parent rather than by tty
+    /// because codex and cursor run each command as a child with no tty, and
+    /// that child is the only process that goes where the command goes.
+    pub fn under_tty(&self, tty: &str) -> Vec<i32> {
+        let mut found: Vec<i32> = self.on_tty.get(tty).cloned().unwrap_or_default();
+        let mut seen: std::collections::HashSet<i32> = found.iter().copied().collect();
+        let mut next = 0;
+        while next < found.len() {
+            for &child in self.children.get(&found[next]).into_iter().flatten() {
+                if seen.insert(child) {
+                    found.push(child);
+                }
+            }
+            next += 1;
+        }
+        found
     }
 }
 
@@ -209,7 +239,7 @@ const MONTHS: [&str; 12] =
 /// It has changed three times now, to carry the pid, then the pgid, then the
 /// ppid, and a silent misparse would cost every label its arguments while
 /// everything kept running.
-fn parse(stdout: &str) -> Foreground {
+pub(crate) fn parse(stdout: &str) -> Foreground {
     let mut found = Foreground::default();
     // Each tty's foreground rows, in the order `ps` listed them.
     let mut foreground: HashMap<&str, Vec<Row<'_>>> = HashMap::new();
@@ -219,6 +249,10 @@ fn parse(stdout: &str) -> Foreground {
         // the ports join reads, and the process holding a socket may be a
         // daemonized child that has left its tty behind.
         found.groups.insert(row.pid, row.pgid);
+        found.children.entry(row.ppid).or_default().push(row.pid);
+        if row.tty != "??" {
+            found.on_tty.entry(row.tty.to_string()).or_default().push(row.pid);
+        }
         if !row.stat.contains('+') || row.tty == "??" || row.args.is_empty() {
             continue;
         }
@@ -394,11 +428,16 @@ const LONG_VALUED: &[&str] = &["rcfile", "init-file", "init-command", "features"
 /// `env -u NAME` and `env -P path` (and GNU `env -C dir`), `nice -n 10`, GNU
 /// `time -f fmt` and `-o file`. Anything else not understood here names some
 /// other program, and the wrapper reads as itself, which is the old answer.
+///
+/// An assignment whose value is quoted and holds a space arrives split
+/// across words, and the words up to the closing quote are still its value.
+/// An orchestrator's `FARCOOLER_CHARTER='…/Application Support/…'` is one;
+/// read word by word, its second half would be taken for the program.
 fn target<'a>(words: &[&'a str]) -> Option<&'a str> {
     let mut words = words.iter();
     let mut prefix = "";
-    while let Some(word) = words.next() {
-        let word = word.trim_matches(QUOTES).trim_end_matches(';').trim_matches(QUOTES);
+    while let Some(raw) = words.next() {
+        let word = raw.trim_matches(QUOTES).trim_end_matches(';').trim_matches(QUOTES);
         if word.is_empty() {
             continue;
         }
@@ -413,6 +452,17 @@ fn target<'a>(words: &[&'a str]) -> Option<&'a str> {
         }
         if let Some((name, _)) = word.split_once('=') {
             if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                // The untrimmed word, because trimming took the closing quote.
+                let value = raw.split_once('=').map_or("", |(_, v)| v);
+                if let Some(quote) = value.chars().next().filter(|c| QUOTES.contains(c))
+                    && (value.len() == 1 || !value.ends_with(quote))
+                {
+                    for rest in words.by_ref() {
+                        if rest.trim_end_matches(';').ends_with(quote) {
+                            break;
+                        }
+                    }
+                }
                 continue;
             }
         }
@@ -687,6 +737,45 @@ mod tests {
         assert_eq!(f.pane("ttys002").map(|r| r.pid), Some(43992));
         // A tty nobody is looking at.
         assert_eq!(f.pane("ttys999"), Option::None);
+    }
+
+    /// A pane's processes, for claiming, are everything on its tty and
+    /// everything under those by parent pid, including the tool shells that
+    /// run on no tty at all.
+    ///
+    /// ttys000 is `PS` as read: claude's two `/bin/zsh -c` tool shells are
+    /// `??` rows, children of claude (12618), and are the processes that go
+    /// where a tool call goes. Its neighbors under the same tmux server
+    /// (11924, the parent of every pane's first shell) are not its.
+    ///
+    /// `TOOLS` adds what the spike found for codex and cursor (spec, "Spike
+    /// findings (2026-09-27)"): each command is a child of the agent with no
+    /// tty, and a command's own children are found through it. Pids and
+    /// arguments are made up; the shape is the finding.
+    #[test]
+    fn a_panes_processes_include_the_children_that_left_its_tty() {
+        const TOOLS: &str = "\
+  900   800   900 ttys020  Ss   /opt/homebrew/bin/fish -il
+  901   900   901 ttys020  S+   codex
+  902   901   902 ??       Ss   /bin/zsh -lc cargo test
+  903   902   902 ??       S    cargo test
+  910   800   910 ttys021  Ss   /opt/homebrew/bin/fish -il
+  911   910   911 ttys021  S+   cursor-agent
+  912   911   912 ??       Ss   zsh -c ls
+";
+        let f = parse(PS);
+        let mut under = f.under_tty("ttys000");
+        under.sort();
+        assert_eq!(under, vec![8017, 11925, 11950, 12618, 27895, 31741]);
+        assert!(f.under_tty("ttys999").is_empty(), "a tty with nothing on it");
+
+        let f = parse(&format!("{PS}{TOOLS}"));
+        let mut under = f.under_tty("ttys020");
+        under.sort();
+        assert_eq!(under, vec![900, 901, 902, 903], "codex's command, and what that runs");
+        let mut under = f.under_tty("ttys021");
+        under.sort();
+        assert_eq!(under, vec![910, 911, 912], "cursor's shell, and nothing of codex's");
     }
 
     /// A wrapper holds no socket; its child does, and shares its group.
@@ -983,6 +1072,20 @@ mod tests {
         );
         assert_eq!(target_of("fish -ilc 'claude --session-id x'"), Some("claude"));
         assert_eq!(target_of("sh -c exec /bin/sleep 600"), Some("sleep"));
+        // An orchestrator's charter is a quoted path, and on a Mac it has a
+        // space in it. `ps` prints it split, and the half after the space is
+        // still the value, not the program.
+        assert_eq!(
+            target_of(
+                "fish -c env FARCOOLER_ACTOR=agent:x FARCOOLER_WORKSPACE=w \
+                 FARCOOLER_CHARTER='/Users/x/Library/Application Support/FarCooler/workspaces/w/charter.md' \
+                 /opt/homebrew/bin/fish -ilc 'claude'"
+            ),
+            Some("fish")
+        );
+        assert_eq!(target_of("sh -c env A='one two three' claude"), Some("claude"));
+        assert_eq!(target_of("sh -c env A='one' claude"), Some("claude"));
+        assert_eq!(target_of("sh -c env A=\"one two\" claude"), Some("claude"));
         assert_eq!(target_of("sh -c"), Option::None);
     }
 

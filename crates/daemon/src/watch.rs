@@ -3271,8 +3271,22 @@ impl Watcher {
     /// see `task_changed_event` and the comment on `task_changed` in the
     /// proto for why: without it, whatever eventually wakes a manager on this
     /// event would wake it on its own write.
-    pub fn announce_task_changed(&self, task_id: Uuid, repository_id: Uuid, actor: farcooler_store::models::Actor) {
-        let _ = self.events.send(task_changed_event(task_id, repository_id, actor));
+    ///
+    /// Carries the board the task is on, and the board it left when it was
+    /// just moved, so a board view re-reads only when its own board changed.
+    pub fn announce_task_changed(
+        &self,
+        task: &farcooler_store::models::Task,
+        from_workspace: Option<Uuid>,
+        actor: farcooler_store::models::Actor,
+    ) {
+        let _ = self.events.send(task_changed_event(
+            task.id,
+            task.repository_id,
+            task.workspace_id,
+            from_workspace,
+            actor,
+        ));
     }
 
     /// Start a change-set pass, unless one is still going.
@@ -3757,6 +3771,15 @@ impl Watcher {
         // loop, and a fleet of thirty panes must not mean thirty processes a
         // second.
         let foreground = crate::foreground::read().await;
+        // Claiming's weakest signal, on the process table this tick already
+        // read: where every pane's processes are working. See `claims`.
+        crate::claims::scan(&self.service, &fleet, &panes, &foreground);
+        // A claim or a foreign writer since the last tick, from the walk just
+        // now or from a hook in between. The hook path has no watcher to
+        // call, so it leaves a flag, and this is where it's read.
+        if self.service.claims().take_changed() {
+            self.announce_fleet_changed();
+        }
         // One `lsof` for the whole host, on the same cadence and for the
         // same reason as the one `ps`.
         //
@@ -4519,7 +4542,13 @@ pub fn worktrees_changed(
 /// same split `announce_fleet_changed` and `announce_change_set` above do not
 /// need, because nothing has to assert on their payload's shape independent
 /// of delivery.
-fn task_changed_event(task_id: Uuid, repository_id: Uuid, actor: farcooler_store::models::Actor) -> Event {
+fn task_changed_event(
+    task_id: Uuid,
+    repository_id: Uuid,
+    workspace_id: Uuid,
+    from_workspace: Option<Uuid>,
+    actor: farcooler_store::models::Actor,
+) -> Event {
     Event {
         event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
         sequence: 0,
@@ -4528,6 +4557,8 @@ fn task_changed_event(task_id: Uuid, repository_id: Uuid, actor: farcooler_store
                 task_id: bytes::Bytes::copy_from_slice(task_id.as_bytes()),
                 repository_id: bytes::Bytes::copy_from_slice(repository_id.as_bytes()),
                 actor: actor.to_string(),
+                workspace_id: Some(bytes::Bytes::copy_from_slice(workspace_id.as_bytes())),
+                from_workspace_id: from_workspace.map(|id| bytes::Bytes::copy_from_slice(id.as_bytes())),
             },
         )),
     }
@@ -4543,6 +4574,72 @@ fn now_millis() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    /// A claim made on the hook path, which has no watcher to call, is
+    /// announced at the next tick, and only then.
+    #[tokio::test]
+    async fn a_claim_made_between_ticks_is_announced_at_the_next() {
+        use farcooler_protocol::v1::event::Payload;
+        let fleet_changed = |rx: &mut broadcast::Receiver<Event>| {
+            let mut seen = false;
+            while let Ok(event) = rx.try_recv() {
+                seen |= matches!(event.payload, Some(Payload::FleetChanged(_)));
+            }
+            seen
+        };
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let billing = svc.store.create_workspace(repo, "Billing", "bil").unwrap();
+        let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
+        let main = rows.iter().find(|w| w.is_main_checkout).unwrap();
+        let path = std::fs::canonicalize(&main.worktree_path).unwrap().join(".worktrees/x");
+        std::fs::create_dir_all(&path).unwrap();
+        let wt = svc.store.create_unclaimed_worktree_for_test(repo, &path.to_string_lossy());
+        let term = svc.store.create_terminal_for_test(main.id, billing.id);
+        let watcher = Watcher::new(svc.clone());
+        let mut rx = watcher.subscribe();
+
+        watcher.sample().await;
+        assert!(!fleet_changed(&mut rx), "a quiet tick says nothing");
+
+        let source = farcooler_store::models::ClaimSource::Hook;
+        crate::claims::observe(&svc, term, &path, source).unwrap();
+        assert_eq!(svc.store.get_worktree(wt).unwrap().workspace_id, Some(billing.id));
+        watcher.sample().await;
+        assert!(fleet_changed(&mut rx), "the claim is announced");
+        watcher.sample().await;
+        assert!(!fleet_changed(&mut rx), "once");
+    }
+
+    /// Every tick walks the panes' processes: a real shell in a real pane,
+    /// working in a worktree nobody has claimed, claims it for the workspace
+    /// the pane works for, by `process`.
+    #[tokio::test]
+    async fn a_tick_claims_the_worktree_a_panes_shell_is_working_in() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let billing = svc.store.create_workspace(repo, "Billing", "bil").unwrap();
+        let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
+        let main = rows.iter().find(|w| w.is_main_checkout).unwrap();
+        let path = std::fs::canonicalize(&main.worktree_path).unwrap().join(".worktrees/x");
+        std::fs::create_dir_all(&path).unwrap();
+        let wt = svc.store.create_unclaimed_worktree_for_test(repo, &path.to_string_lossy());
+        // Opened in the unclaimed worktree, so it has no workspace until it's
+        // given one; then it's Billing's, working in a worktree nobody owns.
+        let term = svc.create_terminal(wt, "shell", "shell").await.expect("a shell pane");
+        svc.store.set_terminal_workspace(term.id, billing.id).unwrap();
+        let watcher = Watcher::new(svc.clone());
+
+        let mut row = svc.store.get_worktree(wt).unwrap();
+        for _ in 0..20 {
+            watcher.sample().await;
+            row = svc.store.get_worktree(wt).unwrap();
+            if row.workspace_id.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let process = farcooler_store::models::ClaimSource::Process;
+        assert_eq!((row.workspace_id, row.claim_source), (Some(billing.id), Some(process)));
+    }
+
     /// The upper half of the trace, and every case where it must say nothing.
     ///
     /// The three zeroes matter more than the number: each of them is a
@@ -7416,7 +7513,7 @@ mod tests {
     /// remember not to answer itself will one day forget.
     #[test]
     fn a_task_event_names_who_caused_it() {
-        let event = task_changed_event(Uuid::now_v7(), Uuid::now_v7(), Actor::Manager);
+        let event = task_changed_event(Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), None, Actor::Manager);
         let Some(Payload::TaskChanged(payload)) = event.payload else {
             panic!("wrong payload");
         };
@@ -7426,10 +7523,25 @@ mod tests {
     #[test]
     fn an_agents_event_names_the_terminal_that_caused_it() {
         let terminal = Uuid::now_v7();
-        let event = task_changed_event(Uuid::now_v7(), Uuid::now_v7(), Actor::Agent { terminal });
+        let event =
+            task_changed_event(Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), None, Actor::Agent { terminal });
         let Some(Payload::TaskChanged(payload)) = event.payload else {
             panic!("wrong payload");
         };
         assert_eq!(payload.actor, format!("agent:{terminal}"));
+    }
+
+    /// A board view re-reads only when its own board moved, so the event
+    /// names the board, and on a move the board the task left as well.
+    #[test]
+    fn a_task_event_names_its_board_and_the_one_it_left() {
+        let (task, repository, billing, main) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        let event = task_changed_event(task, repository, billing, Some(main), Actor::User);
+        let Some(Payload::TaskChanged(payload)) = event.payload else {
+            panic!("wrong payload");
+        };
+        assert_eq!(payload.workspace_id.as_deref(), Some(&billing.as_bytes()[..]));
+        assert_eq!(payload.from_workspace_id.as_deref(), Some(&main.as_bytes()[..]));
+        assert_eq!(payload.repository_id.as_ref(), repository.as_bytes());
     }
 }

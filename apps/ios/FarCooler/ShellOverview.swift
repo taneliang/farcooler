@@ -124,11 +124,10 @@ struct ShellCardFace: View {
 
     /// `server · N tabs`, with the server left out when it is the local one —
     /// the same rule the bar follows, so a card and the bar never disagree
-    /// about whether a worktree is worth naming a runner for.
+    /// about whether a worktree is worth naming a runner for, nor about how
+    /// many tabs it has. See `ShellWorktree.cardSubtitle`.
     private static func subtitle(for worktree: ShellWorktree) -> String {
-        let tabs = "\(worktree.tabs.count) \(worktree.tabs.count == 1 ? "tab" : "tabs")"
-        guard let server = worktree.server else { return tabs }
-        return "\(server) · \(tabs)"
+        worktree.cardSubtitle
     }
 
     var body: some View {
@@ -181,7 +180,9 @@ struct ShellCardFace: View {
             // WORKTREE, and which tab you are on inside it is not a fact
             // about the worktree. The amber outline says which worktree
             // you are in.
-            ShellRibbon(tabs: worktree.tabs, current: -1, size: 5)
+            //
+            // Without an orchestrator's tab, which its workspace's row draws.
+            ShellRibbon(tabs: worktree.listedTabs, current: -1, size: 5)
 
             Text(Self.subtitle(for: worktree))
                 // Mono, because the runner's name came off a machine and
@@ -455,14 +456,15 @@ private struct ShellElsewhereCard: View {
     }
 }
 
-/// A repository's Board row, at the top of its runner's section.
+/// A workspace's Board row: under its workspace's heading, or at the top of
+/// its runner's section on a runner without workspaces.
 ///
-/// The Mac's sidebar row, on a phone: the repository's name, the tasks an agent
+/// The Mac's sidebar row, on a phone: the board's name, the tasks an agent
 /// is on as a quiet count, and the tasks waiting on a decision in amber — both
 /// counts drawn only when they are more than zero, per `waitingSentence`'s
 /// rule, and both decided in `RunnerBoards`. Drawn on the card's own fill and
 /// corner so it reads as a thing in the grid you can open, and a full row wide
-/// because it is about the whole repository and not one worktree.
+/// because it is about the whole workspace and not one worktree.
 private struct ShellBoardRow: View {
     let board: RunnerBoardRow
     let runner: String
@@ -520,7 +522,59 @@ private struct ShellBoardRow: View {
         .accessibilityLabel("\(board.name) Board")
         .accessibilityValue(board.spoken ?? "")
         .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("shell-board-\(runner)-\(board.repository)")
+        .accessibilityIdentifier("shell-board-\(runner)-\(board.id)")
+    }
+}
+
+/// A workspace's orchestrator, as its heading's own row.
+///
+/// Drawn once, here, and not among the worktrees: the daemon opens every
+/// orchestrator in its repository's main checkout, so on that checkout's card
+/// it would be one more tab of a worktree its workspace may not even own. The
+/// Board row's shape, so the two read as the workspace's own things, with the
+/// pane's mark where the board has its icon and its one line after the name.
+/// A tap lands on the pane, as a board card's Agent button does.
+private struct ShellOrchestratorRowView: View {
+    let row: ShellOrchestratorRow
+    let identifier: String
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: PaneMetrics.step) {
+                ShellMarkView(mark: row.mark, size: 7)
+                    .frame(width: 20)
+                HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.tight) {
+                    Text("Orchestrator")
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    if let line = row.line, !line.isEmpty {
+                        Text(line)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                Spacer(minLength: PaneMetrics.step)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, PaneMetrics.card)
+            .frame(maxWidth: .infinity, minHeight: PaneMetrics.target, alignment: .leading)
+            .background(
+                TranscriptFill.container,
+                in: RoundedRectangle(cornerRadius: ShellMotion.cardRadius, style: .continuous))
+            .contentShape(.rect)
+        }
+        .buttonStyle(ShellCardStyle())
+        .dynamicTypeSize(...DynamicTypeSize.large)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Orchestrator")
+        .accessibilityValue([row.mark.phrase, row.line].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -551,12 +605,18 @@ struct ShellOverviewRunners {
     /// in. Each one is a section, and the cards in it are the fleet's
     /// worktrees whose `runner` is that runner's id.
     var live: [ShellRunnerLabel] = []
-    /// Each live runner's Board rows, one per repository with a board — see
-    /// `RunnerBoards.rows`, which decides them. Drawn under the runner's
-    /// heading and above its worktrees, where the Mac's sidebar draws its
-    /// Board row above a repository's.
+    /// Each live runner's Board rows, one per workspace with a board — see
+    /// `RunnerBoards.rows`, which decides them. Drawn under the workspace's
+    /// heading, where the Mac's sidebar draws its Board row, and on a runner
+    /// without workspaces under the runner's heading and above its worktrees.
     var boards: (ShellRunnerLabel) -> [RunnerBoardRow] = { _ in [] }
     var onOpenBoard: (ShellRunnerLabel, RunnerBoardRow) -> Void = { _, _ in }
+    /// Each live runner's workspace headings, by the runner's id, in drawing
+    /// order, or none for a runner without workspaces, which keeps its one
+    /// section. See `ShellFleet.runnerSections`.
+    var headings: (String) -> [ShellWorkspaceHeading] = { _ in [] }
+    /// A workspace's orchestrator row, tapped.
+    var onOpenOrchestrator: (ShellRunnerLabel, ShellOrchestratorRow) -> Void = { _, _ in }
     /// The runners this app knows and is NOT connected to, as it last saw
     /// them. See `ShellServerGroup`.
     var elsewhere: [ShellServerGroup] = []
@@ -742,10 +802,13 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
     /// by then.
     @State private var pending = ShellPendingOrders()
 
-    /// One section per connected runner, each in that runner's order. See
+    /// One section per connected runner, each in that runner's order — or,
+    /// on a runner with workspaces, one per workspace under it. See
     /// `ShellFleet.runnerSections`.
     private var sections: [ShellRunnerSection] {
-        fleet.runnerSections(runnerSections.live, matching: search, pending: pending)
+        fleet.runnerSections(
+            runnerSections.live, headings: runnerSections.headings, matching: search,
+            pending: pending)
     }
 
     /// The worktrees the runners have been told to stop showing, as cards.
@@ -1008,6 +1071,94 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
         }
     }
 
+    /// What a live section's heading draws.
+    ///
+    /// The runner's own heading on its first section, as always. Then, on a
+    /// runner with workspaces, the workspace's heading, its Board row and its
+    /// orchestrator. A Board row whose workspace has no heading — a runner
+    /// without workspaces, or a board read a moment before the fleet named
+    /// its workspace — is drawn under the runner's heading, where every Board
+    /// row used to be.
+    ///
+    /// Boards and orchestrators are empty during a search, which is a search
+    /// for a worktree.
+    @ViewBuilder
+    private func sectionHeader(_ section: ShellRunnerSection) -> some View {
+        let runner = section.runner
+        let boards = search.isEmpty ? runnerSections.boards(runner) : []
+        let headings = runnerSections.headings(runner.id)
+        let placed = Set(headings.map(\.id))
+        VStack(alignment: .leading, spacing: PaneMetrics.step) {
+            if section.leadsRunner {
+                header(
+                    runner.name, runner: runner.id, detail: runner.detail,
+                    // With workspaces, each heading says it is empty; the
+                    // runner's heading says so only for a runner without.
+                    isEmpty: headings.isEmpty && section.cards.isEmpty,
+                    actions: runnerSections.liveActions(runner),
+                    boards: boards.filter { !placed.contains($0.id) },
+                    onOpenBoard: { runnerSections.onOpenBoard(runner, $0) })
+            }
+            if let heading = section.heading {
+                workspaceHeading(heading, runner: runner.id, isEmpty: section.cards.isEmpty)
+                ForEach(boards.filter { $0.id == heading.id }) { board in
+                    ShellBoardRow(board: board, runner: runner.id) {
+                        runnerSections.onOpenBoard(runner, board)
+                    }
+                    .opacity(chrome ? 1 : 0)
+                    .disabled(!chrome)
+                }
+                if search.isEmpty, let orchestrator = heading.orchestrator {
+                    ShellOrchestratorRowView(
+                        row: orchestrator,
+                        identifier: "shell-orchestrator-\(runner.id)-\(heading.id)"
+                    ) { runnerSections.onOpenOrchestrator(runner, orchestrator) }
+                    .opacity(chrome ? 1 : 0)
+                    .disabled(!chrome)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A workspace's heading, under its runner's: the workspace's name, and
+    /// its repository where the runner has more than one.
+    ///
+    /// A step quieter than the runner's, because it is the level under it,
+    /// and drawn for Main alone too: the workspace level is the model, and it
+    /// should be visible before anybody has split anything. "Unclaimed" is
+    /// quieter again — it is the worktrees no workspace has taken, not a
+    /// workspace. Not a button: a workspace has no actions on a phone.
+    private func workspaceHeading(
+        _ heading: ShellWorkspaceHeading, runner: String, isEmpty: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
+                Text(heading.name)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(heading.isUnclaimed ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let repository = heading.repository {
+                    Text(repository)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            if isEmpty {
+                Text("No worktrees")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, PaneMetrics.step)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("shell-workspace-\(runner)-\(heading.id)")
+    }
+
     /// A section heading: the runner, and one line about how current it is.
     ///
     /// Left-aligned across the whole grid rather than sitting over one column,
@@ -1262,18 +1413,14 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                     // the order the runner list is in and each in the order
                     // its runner keeps — which is the order the Mac's sidebar
                     // draws, because it is the same table.
+                    //
+                    // A runner with workspaces is a section per workspace, and
+                    // only its first draws the runner's own heading.
                     ForEach(sections) { section in
                         Section {
                             liveCards(section, width: cardWidth)
                         } header: {
-                            header(
-                                section.runner.name, runner: section.runner.id,
-                                detail: section.runner.detail,
-                                isEmpty: section.cards.isEmpty,
-                                actions: runnerSections.liveActions(section.runner),
-                                boards: search.isEmpty
-                                    ? runnerSections.boards(section.runner) : [],
-                                onOpenBoard: { runnerSections.onOpenBoard(section.runner, $0) })
+                            sectionHeader(section)
                         }
                     }
 

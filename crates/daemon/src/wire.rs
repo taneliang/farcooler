@@ -155,6 +155,29 @@ pub fn repository(model: &models::Repository, scope: Scope) -> wire::Repository 
     }
 }
 
+/// A workspace, with its live orchestrator and, for `host_admin`, where its
+/// home and charter are. Paths are `host_admin` only, as everywhere here.
+pub fn workspace(
+    model: &models::Workspace,
+    orchestrator: Option<Uuid>,
+    home: &std::path::Path,
+    scope: Scope,
+) -> wire::Workspace {
+    wire::Workspace {
+        id: id_bytes(model.id),
+        resource_version: model.resource_version,
+        repository_id: id_bytes(model.repository_id),
+        name: model.name.clone(),
+        task_prefix: model.task_prefix.clone(),
+        is_main: model.is_main,
+        ordinal: model.ordinal,
+        orchestrator_terminal_id: orchestrator.map(id_bytes),
+        home: admin(scope).then(|| home.to_string_lossy().into_owned()),
+        charter_path: admin(scope)
+            .then(|| home.join(crate::workspace_home::CHARTER_FILE).to_string_lossy().into_owned()),
+    }
+}
+
 /// A worktree with its DERIVED state.
 ///
 /// Taking a view rather than a row is the point: `models::Worktree` has no
@@ -179,6 +202,73 @@ pub fn worktree(view: &WorktreeView, scope: Scope) -> wire::Worktree {
         // client applying `worktree_changed` as a delta holds one worktree
         // and no list to infer a position from.
         ordinal: ws.ordinal,
+        workspace_id: ws.workspace_id.map(id_bytes),
+        claim_source: ws.claim_source.map(|source| source.as_str().to_string()),
+        foreign_writer_workspace_ids: foreign_writers(view).into_iter().map(id_bytes).collect(),
+    }
+}
+
+/// Workspaces other than the owner whose terminals are working in this
+/// worktree: the two-writers hazard, reported and never acted on.
+///
+/// Two ways in. A terminal that sits in this worktree, and a terminal that
+/// sits elsewhere but was seen working here (`view.observed_writers`, from
+/// `claims`: a Claude hook's `cwd`, or a process under its pane).
+///
+/// A terminal counts while it has not ended (`has_ended`), the same reading
+/// `Store::unended_orchestrators` makes of a row. Orchestrators are left out: a
+/// harness may need one to run in a worktree another workspace owns, and
+/// that is expected rather than a second writer. Empty for an unclaimed
+/// worktree, which has no owner to be foreign to. In the order first seen,
+/// sitting before seen, without repeats.
+pub fn foreign_writers(view: &WorktreeView) -> Vec<Uuid> {
+    let Some(owner) = view.worktree.workspace_id else { return Vec::new() };
+    let mut found = Vec::new();
+    for t in view.terminals.iter().map(|v| &v.terminal) {
+        if has_ended(t) || t.role == models::TerminalRole::Orchestrator {
+            continue;
+        }
+        if let Some(workspace) = t.workspace_id
+            && workspace != owner
+            && !found.contains(&workspace)
+        {
+            found.push(workspace);
+        }
+    }
+    // Already without the owner: `Service::worktree_view` read them against
+    // this same row.
+    for &workspace in &view.observed_writers {
+        if !found.contains(&workspace) {
+            found.push(workspace);
+        }
+    }
+    found
+}
+
+/// A terminal whose intent is stopped or failed, or whose exit was seen.
+pub(crate) fn has_ended(t: &models::Terminal) -> bool {
+    matches!(t.intent, wire::TerminalIntent::Stopped | wire::TerminalIntent::Failed)
+        || t.exit_code.is_some()
+        || t.exit_signal.is_some()
+}
+
+/// A terminal's role, as the wire names it.
+pub fn terminal_role(role: models::TerminalRole) -> i32 {
+    (match role {
+        models::TerminalRole::Shell => wire::TerminalRole::Shell,
+        models::TerminalRole::Agent => wire::TerminalRole::Agent,
+        models::TerminalRole::Orchestrator => wire::TerminalRole::Orchestrator,
+    }) as i32
+}
+
+/// The role a request names, or `None` for UNSPECIFIED or a number this
+/// build does not know.
+pub fn terminal_role_from_wire(raw: i32) -> Option<models::TerminalRole> {
+    match wire::TerminalRole::try_from(raw).ok()? {
+        wire::TerminalRole::Unspecified => None,
+        wire::TerminalRole::Shell => Some(models::TerminalRole::Shell),
+        wire::TerminalRole::Agent => Some(models::TerminalRole::Agent),
+        wire::TerminalRole::Orchestrator => Some(models::TerminalRole::Orchestrator),
     }
 }
 
@@ -279,6 +369,9 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // `None` is "nothing has said this pane failed", which is also what a
         // pane still starting up looks like.
         agent_failure: None,
+        // The record's own, like `task_id`.
+        workspace_id: t.workspace_id.map(id_bytes),
+        role: terminal_role(t.role),
     }
 }
 
@@ -756,7 +849,6 @@ mod tests {
             canonical_git_dir: "/Users/someone/farcooler/.git".into(),
             remote_summary: "github".into(),
             resource_version: 1,
-            task_key_prefix: String::new(),
         };
         assert_eq!(repository(&model, Scope::Read).canonical_git_dir, None);
         assert!(repository(&model, Scope::HostAdmin).canonical_git_dir.is_some());

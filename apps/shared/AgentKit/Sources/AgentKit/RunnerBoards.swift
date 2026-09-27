@@ -1,21 +1,29 @@
 import Foundation
 
-// The phone's Board rows: one per repository that has a board, at the top of
-// its runner's section in the shell overview, above that runner's worktrees.
+// The phone's Board rows: one per workspace that has a board, in its runner's
+// section of the shell overview.
 //
 // The Mac's sidebar has had this row since card -19 (`BoardRow` in
 // `apps/macos/Sources/FarCooler/SidebarViews.swift`), and it draws the same two
 // numbers: the tasks waiting on a decision, amber, and a quiet count of the
 // tasks an agent is on. The rules for both are AgentKit's already —
 // `TaskBoardModel.waitingOnYou`, `tasksWithLiveAgents`, `TaskAgentLink` — and
-// what this file adds is which repositories get a row at all, which is a rule
-// a view body would otherwise decide and no suite would read.
+// what this file adds is which boards get a row at all, which boards a sweep
+// reads, and which boards a notice moves: rules a view body or a connection
+// would otherwise decide and no suite would read.
+//
+// A board is a WORKSPACE's now. A repository has one board per workspace, and
+// a runner without `workstreams` has one implicit workspace per repository
+// (`WorkspaceSummary.implicit`), whose board is the whole repository's — which
+// is exactly the board the phone had before workspaces existed.
 
-/// One repository's Board row.
+/// One workspace's Board row.
 public struct RunnerBoardRow: Equatable, Sendable, Identifiable {
-    /// The repository's uuid, which is what `task.list` takes.
-    public var repository: String
-    /// What to call it: the repository's display name.
+    /// The board: which workspace, and how to read it
+    /// (`WorkspaceSummary.boardWorkspace`).
+    public var workspace: WorkspaceSummary
+    /// What to call it: the workspace's name, or for an implicit workspace the
+    /// repository's display name, which is what the row said before.
     public var name: String
     /// Tasks in Needs Decision. Drawn in amber, and not at all at zero.
     public var decisions: Int
@@ -23,13 +31,26 @@ public struct RunnerBoardRow: Equatable, Sendable, Identifiable {
     /// zero — which is also what a runner that cannot say reads as.
     public var agents: Int
 
-    public var id: String { repository }
+    /// The workspace's id, which is what the boards are keyed by.
+    public var id: String { workspace.id }
 
-    public init(repository: String, name: String, decisions: Int, agents: Int) {
-        self.repository = repository
+    /// The repository's uuid, which is what `task.list` takes beside the
+    /// workspace.
+    public var repository: String { workspace.repository ?? workspace.id }
+
+    public init(workspace: WorkspaceSummary, name: String, decisions: Int, agents: Int) {
+        self.workspace = workspace
         self.name = name
         self.decisions = decisions
         self.agents = agents
+    }
+
+    /// A row for a repository's one implicit board: a runner without
+    /// workspaces, or a fixture.
+    public init(repository: String, name: String, decisions: Int, agents: Int) {
+        self.init(
+            workspace: .implicit(repository: repository), name: name, decisions: decisions,
+            agents: agents)
     }
 
     /// What VoiceOver reads after the row's name: the two counts in words,
@@ -43,24 +64,83 @@ public struct RunnerBoardRow: Equatable, Sendable, Identifiable {
 }
 
 public enum RunnerBoards {
-    /// The Board rows for one runner, in the order the runner lists its
-    /// repositories.
+    /// Every board a runner keeps, in the order its sections draw them: each
+    /// repository's workspaces, Main first and then by ordinal, or its one
+    /// implicit workspace where the runner named none.
+    ///
+    /// What a sweep reads — a link coming up, a reconnect, a `resync` — and so
+    /// what an open board relies on to be read again after a dropped link
+    /// whatever notices were lost with it. A sweep that walked repositories
+    /// while the boards were keyed by workspace would read the whole
+    /// repository into a key no view looks at, and leave every workspace's
+    /// board showing what the previous link read.
+    ///
+    /// - `repositories` are the runner's, in its order. A repository no
+    ///   workspace names is implicit: a runner without `workstreams`
+    ///   (`workspaces` nil), or one whose list left it out.
+    /// - A workspace in a repository missing from `repositories` still has a
+    ///   board, and comes after the rest: `repositories` is a separate read
+    ///   that can lag the fleet.
+    public static func boards(
+        repositories: [String], workspaces: [WorkspaceSummary]?
+    ) -> [WorkspaceSummary] {
+        let all = workspaces ?? []
+        var order = repositories
+        for workspace in all {
+            if let repository = workspace.repository, !order.contains(repository) {
+                order.append(repository)
+            }
+        }
+        return order.flatMap { repository in
+            WorkspaceGrouping.group(
+                repository: repository,
+                workspaces: all.filter { $0.repository == repository },
+                worktrees: [], orchestrators: [:]
+            ).workspaces.map(\.workspace)
+        }
+    }
+
+    /// The boards a notice moved, of `boards`, which is what a connection
+    /// holds — plus the board it names when that board is not among them yet.
+    ///
+    /// `BoardNotice.touches` decides. The addition is for a workspace the
+    /// fleet has not listed yet: made by the CLI a moment ago, its first task
+    /// filed before the fleet read that would have listed it. Reading its
+    /// board now means its row is there the moment the fleet names it, rather
+    /// than after the next sweep, which on a quiet link is the next reconnect.
+    public static func touched(
+        by notice: BoardNotice, among boards: [WorkspaceSummary]
+    ) -> [WorkspaceSummary] {
+        var found = boards.filter { notice.touches($0) }
+        for named in [notice.workspace, notice.fromWorkspace].compactMap({ $0 })
+        where !found.contains(where: { $0.id == named }) {
+            found.append(
+                WorkspaceSummary(
+                    id: named, name: "", taskPrefix: "", isMain: false, ordinal: 0,
+                    repository: notice.repository))
+        }
+        return found
+    }
+
+    /// The Board rows for one runner, in the order `boards` lists them.
     ///
     /// - A runner that does not advertise `tasks` has no board, and gets no
     ///   rows. Nor does one no link has asked yet (`build` and
     ///   `lastKnownBuild` both nil): a row that appeared and then vanished on
     ///   the first answer would move every card under it.
-    /// - A repository gets a row only once its board has been read and has
+    /// - A workspace gets a row only once its board has been read and has
     ///   something on it, unreadable rows included. An empty board is most
-    ///   repositories on most runners, and a row for each would push the
+    ///   workspaces on most runners, and a row for each would push the
     ///   worktrees down for nothing to look at. This is where the phone
     ///   differs from the Mac, whose sidebar row is also the board's only
     ///   way in and so is drawn for an empty one too.
     /// - `agents` is counted only where `TaskAgentLink.speaksOfAgents` says
     ///   the runner can be believed about its panes. Anywhere else it is 0,
     ///   which draws nothing: "can't say", not "none".
+    /// - A workspace's row is called by the workspace's name; an implicit
+    ///   one's by its repository's, from `names`, as the row always was.
     ///
-    /// `boards` holds the last good read of each repository's board. It is
+    /// `models` holds the last good read of each board, by workspace id. It is
     /// kept through a reconnect on purpose, like the fleet: the decisions are
     /// what the runner last said, and a row that blinked out for every
     /// dropped link would be a row nobody could find twice.
@@ -73,8 +153,9 @@ public enum RunnerBoards {
     /// only against `build` — the fresh one — so in the gap the rows stay and
     /// say nothing about agents.
     public static func rows<P: TaskBoardPane>(
-        repositories: [(id: String, name: String)],
-        boards: [String: TaskBoardModel],
+        boards: [WorkspaceSummary],
+        names: [String: String],
+        models: [String: TaskBoardModel],
         panes: [P],
         build: DaemonBuild?,
         lastKnownBuild: DaemonBuild? = nil,
@@ -82,15 +163,36 @@ public enum RunnerBoards {
     ) -> [RunnerBoardRow] {
         guard (build ?? lastKnownBuild)?.can("tasks") == true else { return [] }
         let speaks = TaskAgentLink.speaksOfAgents(connected: connected, build: build)
-        return repositories.compactMap { repository in
-            guard let board = boards[repository.id],
+        return boards.compactMap { workspace in
+            guard let board = models[workspace.id],
                 !board.rows.isEmpty || !board.unreadable.isEmpty
             else { return nil }
+            let repository = workspace.repository ?? workspace.id
             return RunnerBoardRow(
-                repository: repository.id, name: repository.name,
+                workspace: workspace,
+                name: workspace.isImplicit ? (names[repository] ?? workspace.name) : workspace.name,
                 decisions: board.waitingOnYou,
                 agents: speaks ? board.tasksWithLiveAgents(in: panes) : 0)
         }
+    }
+
+    /// The Board rows of a runner without workspaces: one per repository, in
+    /// the order the runner lists them, each the repository's implicit board.
+    /// `rows(boards:…)` over `WorkspaceSummary.implicit`, for a caller that
+    /// holds repositories and not workspaces.
+    public static func rows<P: TaskBoardPane>(
+        repositories: [(id: String, name: String)],
+        boards: [String: TaskBoardModel],
+        panes: [P],
+        build: DaemonBuild?,
+        lastKnownBuild: DaemonBuild? = nil,
+        connected: Bool
+    ) -> [RunnerBoardRow] {
+        rows(
+            boards: repositories.map { WorkspaceSummary.implicit(repository: $0.id) },
+            names: Dictionary(repositories.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
+            models: boards, panes: panes, build: build, lastKnownBuild: lastKnownBuild,
+            connected: connected)
     }
 }
 

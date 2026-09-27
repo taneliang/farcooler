@@ -738,7 +738,11 @@ final class DaemonClient: ObservableObject {
             return
         }
         do {
-            fleet = try JSONDecoder().decode(Fleet.self, from: data)
+            var read = try JSONDecoder().decode(Fleet.self, from: data)
+            // Filed under this runner, because the list doesn't say whose it
+            // is — see `Fleet.runnerWorkspaces`.
+            if let workspaces = read.workspaces { read.runnerWorkspaces[target] = workspaces }
+            fleet = read
             hasLoaded = true
             // Diff status for the whole sidebar, in one more call. Cheap by
             // construction: the daemon answers it from counts it already holds
@@ -926,25 +930,37 @@ final class DaemonClient: ObservableObject {
     // note --supersedes` and is not composed from this app yet.
     // -----------------------------------------------------------------------
 
-    /// Bumped, per repository, every time a runner says that repository's
-    /// board moved. Keyed by the repository's uuid, the id `repo list` and the
-    /// `task` event both spell.
+    /// How many times the runner has sent each kind of board news, keyed by
+    /// what a notice says about boards: its repository, the board it names,
+    /// and the board it left. The actor is left out of the key, so the number
+    /// of keys is bounded by the boards on the runner, not by the notices.
     ///
-    /// A counter rather than the event, for the same reason `linkGeneration`
-    /// is one: what a board needs to know is "something changed since the read
-    /// you are showing", and a value that settles back to its old self would
-    /// be missed by a view comparing it. It is also what keeps the re-read out
-    /// of this object — one `DaemonClient` serves a window full of surfaces
-    /// and only a board wants a board.
+    /// Counts rather than the latest event, for the same reason
+    /// `linkGeneration` is one: what a board needs to know is "something
+    /// changed since the read you are showing", and a value that settles back
+    /// to its old self would be missed by a view comparing it. It is also what
+    /// keeps the re-read out of this object — one `DaemonClient` serves a
+    /// window full of surfaces and only a board wants a board.
     ///
-    /// Per repository since every repository's sidebar row holds its board
-    /// open. One counter for the whole runner made every board on it re-read
-    /// on any write, and each read is a CLI process: a runner with six
-    /// repositories and one busy agent was launching six a minute to learn
-    /// about one.
-    @Published private(set) var boardGenerations: [String: Int] = [:]
+    /// Kept by notice rather than by board, because this object doesn't hold
+    /// the boards — the window does — and a counter per board would have to
+    /// restate `BoardNotice.touches` to know which to bump. It did once, and
+    /// drifted from it when an implicit board started re-reading on news that
+    /// names a workspace. `boardGeneration(for:)` asks `touches` itself.
+    @Published private(set) var boardNews: [BoardNews: Int] = [:]
 
-    /// A number that changes whenever `repository`'s board may have moved.
+    /// A notice's say about boards, without its actor.
+    struct BoardNews: Hashable {
+        var repository: String
+        var workspace: String?
+        var fromWorkspace: String?
+
+        var notice: BoardNotice {
+            BoardNotice(repository: repository, workspace: workspace, fromWorkspace: fromWorkspace)
+        }
+    }
+
+    /// A number that changes whenever `board` may have moved.
     ///
     /// Its own events, plus every reconnection: a write made while the event
     /// stream was down — a daemon restart, a network flap, a laptop asleep —
@@ -952,8 +968,13 @@ final class DaemonClient: ObservableObject {
     /// people act on. `linkGeneration` moves exactly when the link comes back,
     /// so adding it re-reads every board once per reconnection and never
     /// otherwise.
-    func boardGeneration(for repository: String) -> Int {
-        linkGeneration + (boardGenerations[repository] ?? 0)
+    ///
+    /// Which news moves which board is AgentKit's `BoardNotice.touches`, the
+    /// rule the phones follow too, asked here of every kind of news heard.
+    func boardGeneration(for board: WorkspaceSummary) -> Int {
+        boardNews.reduce(linkGeneration) { sum, heard in
+            heard.key.notice.touches(board) ? sum + heard.value : sum
+        }
     }
 
     /// Who caused the last board move, verbatim: `user`, `manager`, or
@@ -982,17 +1003,29 @@ final class DaemonClient: ObservableObject {
     /// Internal rather than private so the suite can hand it the event the
     /// stream would have; nothing else here calls it.
     func boardMoved(_ event: TaskEvent) {
-        lastBoardActor = event.actor
-        boardGenerations[event.repository, default: 0] += 1
+        let notice = event.notice
+        lastBoardActor = notice.actor
+        let news = BoardNews(
+            repository: notice.repository, workspace: notice.workspace,
+            fromWorkspace: notice.fromWorkspace)
+        boardNews[news, default: 0] += 1
     }
 
-    /// A repository's board, as `task list --json` prints it.
+    /// One board, as `task list --json` prints it: a workspace's, or with no
+    /// workspace the whole repository's, which is what a runner without
+    /// workspaces has.
+    ///
+    /// `--repo` as well as `--workspace`, because the CLI looks a workspace up
+    /// within `--repo`'s repository, and without one within the pane's.
     ///
     /// `background: true` because a board re-read must not toggle `busy`,
     /// which is `@Published` and re-evaluates every terminal surface in the
     /// window — and a busy repository moves its board several times a minute.
-    func taskBoard(repository: String) async -> (data: Data?, message: String?) {
-        await runRaw(["task", "list", "--repo", repository, "--json"], background: true)
+    func taskBoard(repository: String, workspace: String?) async -> (data: Data?, message: String?) {
+        await runRaw(
+            ["task", "list", "--repo", repository] + (workspace.map { ["--workspace", $0] } ?? [])
+                + ["--json"],
+            background: true)
     }
 
     /// One task's card with its record and what it waits on, in one call.
@@ -1454,7 +1487,8 @@ final class DaemonClient: ObservableObject {
     /// gives up: the description is on the clipboard by then.
     func startTask(
         project: String, description: String, name: String, agent: String,
-        reusing: String? = nil, undelivered: (@MainActor (String) -> Void)? = nil
+        reusing: String? = nil, workspace: String? = nil,
+        undelivered: (@MainActor (String) -> Void)? = nil
     ) async -> TaskStart {
         if let problem = TaskPrompt.problem(description) { return .failed(problem, made: nil) }
         // Asked, if the first status read has not landed yet: the create and
@@ -1519,11 +1553,19 @@ final class DaemonClient: ObservableObject {
         // the base's own commit — so even a fetch that lands after its check
         // gives a new branch, never a checkout. An older runner has only the
         // list's word for it. `"workspace_fork_only"` is
-        // `farcooler_protocol::capability::WORKSPACE_FORK_ONLY`.
+        // `farcooler_protocol::capability::WORKTREE_FORK_ONLY`.
         let forkOnly = daemonBuild?.can("workspace_fork_only") ?? false
+        // Claimed for the workspace the window is in, or its repository's
+        // Main, so it is that workspace's from the start rather than
+        // Unclaimed for good: a pane in an unclaimed worktree has no
+        // workspace, so nothing done there claims it. Only where the runner has workspaces: an
+        // older one would refuse the flag, and the create with it.
+        // `"workstreams"` is `farcooler_protocol::capability::WORKSTREAMS`.
+        let claim = (daemonBuild?.can("workstreams") ?? false) ? workspace : nil
         let (made, makeFailure) = await runRaw(
             ["--json", "worktree", "create", project, name, "--branch", branch, "--no-terminal"]
-                + (forkOnly ? ["--fork-only"] : []))
+                + (forkOnly ? ["--fork-only"] : [])
+                + (claim.map { ["--workspace", $0] } ?? []))
         guard let worktree = made.flatMap(Created.decode) else {
             // Taken, by something neither list shows: a directory left behind
             // under `worktrees/` that no worktree owns, or a branch that came
@@ -1721,22 +1763,31 @@ final class DaemonClient: ObservableObject {
         let worktree: String?
     }
 
-    func createWorktree(repo: String, task: String, branch: String, base: String) async
-        -> CreatedWorktree
-    {
+    func createWorktree(
+        repo: String, task: String, branch: String, base: String, workspace: String? = nil
+    ) async -> CreatedWorktree {
+        // Asked, if the first status read has not landed yet: whether the
+        // claim goes with the create is decided on what this runner can do.
+        if daemonBuild == nil { await readDaemonBuild() }
+        // Claimed for `workspace` as it's made, as `startTask` claims, so it
+        // isn't Unclaimed for good. Only where the runner has workspaces: an
+        // older one would refuse the flag, and the create with it.
+        // `"workstreams"` is `farcooler_protocol::capability::WORKSTREAMS`.
+        let claim = (daemonBuild?.can("workstreams") ?? false) ? workspace : nil
         // Sampled before the create, and diffed after the refresh — the same
         // way `startTask` finds the worktree it just made. The daemon does not
         // report the id it minted, and matching on the name would find the
         // wrong one the second time a name is reused across projects.
         let before = Set(fleet.worktrees.map(\.id))
-        let failure = await runReportingError([
-            "worktree", "create", repo, task, "--branch", branch, "--base", base,
-            // A worktree with nothing running in it is a directory. `shell`
-            // rather than an agent, because this is the manual path — `startTask`
-            // is the one that starts an agent — and it matches what
-            // "New terminal in <project>" already opens in the main checkout.
-            "--terminal", "shell",
-        ])
+        let failure = await runReportingError(
+            [
+                "worktree", "create", repo, task, "--branch", branch, "--base", base,
+                // A worktree with nothing running in it is a directory. `shell`
+                // rather than an agent, because this is the manual path — `startTask`
+                // is the one that starts an agent — and it matches what
+                // "New terminal in <project>" already opens in the main checkout.
+                "--terminal", "shell",
+            ] + (claim.map { ["--workspace", $0] } ?? []))
         await refresh()
         guard failure == nil else { return CreatedWorktree(failure: failure, worktree: nil) }
         return CreatedWorktree(

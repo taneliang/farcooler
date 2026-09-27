@@ -100,6 +100,10 @@ struct CloseTerminalRequest: Identifiable {
 struct ShellFleetMap {
     var fleet: ShellFleet
     var refs: [String: ShellPaneRef]
+    /// Each runner's workspace headings, by the runner's id, in drawing order.
+    /// Absent for a runner without `workstreams`, which keeps its one flat
+    /// section. See `Fleet.shellLayout` and `ShellFleet.runnerSections`.
+    var headings: [String: [ShellWorkspaceHeading]] = [:]
 
     /// Which runner each shell worktree is on, and what it said, keyed by the
     /// composite id `ShellWorktree.id` now carries.
@@ -157,20 +161,82 @@ struct ShellFleetMap {
     /// The merge itself, over the entries rather than the store that published
     /// them, so the one caller that has a runner instead of a fleet can reach
     /// it too.
+    ///
+    /// **Each runner's worktrees in its workspace order**, where it has
+    /// workspaces: a repository's workspaces, Main first, each with its
+    /// worktrees in the runner's own order, then the repository's unclaimed
+    /// ones (`Fleet.shellLayout`). The grid draws them under those headings,
+    /// and the fleet is BUILT in the same order so the bar's swipe walks the
+    /// grid as it is drawn rather than in an order nobody can see. A runner
+    /// without workspaces keeps its order exactly.
     static func of(_ entries: [FleetEntry], now: Date = Date()) -> ShellFleetMap {
         var map = ShellFleetMap(fleet: ShellFleet(worktrees: []), refs: [:])
         var worktrees: [ShellWorktree] = []
         // More than one runner in the merge is what makes a card name its
         // machine. See `server` below.
         let servers = Set(entries.map(\.host.id)).count
-        for entry in entries {
-            let built = one(entry, naming: servers > 1, now: now)
-            worktrees.append(built.worktree)
-            for (id, ref) in built.refs { map.refs[id] = ref }
-            map.entries[built.worktree.id] = entry
+        for run in byRunner(entries) {
+            let connection = run[0].connection
+            let runner = run[0].host.id.uuidString
+            let layout = connection.fleet.shellLayout(
+                names: Dictionary(
+                    connection.repositories.map { ($0.id, $0.displayName) },
+                    uniquingKeysWith: { first, _ in first }))
+            var ordered = run
+            if let layout {
+                let rank = Dictionary(
+                    layout.order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+                ordered = run.enumerated().sorted { a, b in
+                    let (x, y) = (rank[a.element.worktree.id] ?? .max, rank[b.element.worktree.id] ?? .max)
+                    return x != y ? x < y : a.offset < b.offset
+                }.map(\.element)
+                map.headings[runner] = layout.headings.map { heading in
+                    var drawn = heading.heading
+                    drawn.orchestrator = heading.orchestrator.flatMap {
+                        orchestratorRow($0, in: connection.fleet, now: now)
+                    }
+                    return drawn
+                }
+            }
+            let headingOf = layout?.headingOf ?? [:]
+            let orchestrators = layout?.orchestratorTitles ?? [:]
+            for entry in ordered {
+                var built = one(entry, naming: servers > 1, orchestrators: orchestrators, now: now)
+                built.worktree.heading = headingOf[entry.worktree.id]
+                worktrees.append(built.worktree)
+                for (id, ref) in built.refs { map.refs[id] = ref }
+                map.entries[built.worktree.id] = entry
+            }
         }
         map.fleet = ShellFleet(worktrees: worktrees)
         return map
+    }
+
+    /// `entries` in runs of one runner each, in the order the runners first
+    /// appear. The store appends a runner at a time, so this is a split and
+    /// never a reshuffle.
+    private static func byRunner(_ entries: [FleetEntry]) -> [[FleetEntry]] {
+        var order: [UUID] = []
+        var runs: [UUID: [FleetEntry]] = [:]
+        for entry in entries {
+            if runs[entry.host.id] == nil { order.append(entry.host.id) }
+            runs[entry.host.id, default: []].append(entry)
+        }
+        return order.compactMap { runs[$0] }
+    }
+
+    /// A workspace's orchestrator as its heading's row: the pane's mark and
+    /// its one line. Opening it hands back the terminal's id, which the screen
+    /// lands on the way a board card's Agent button does.
+    private static func orchestratorRow(
+        _ id: String, in fleet: Fleet, now: Date
+    ) -> ShellOrchestratorRow? {
+        guard
+            let terminal = fleet.worktrees.lazy.flatMap(\.terminals).first(where: { $0.id == id })
+        else { return nil }
+        return ShellOrchestratorRow(
+            id: terminal.id, line: terminal.line ?? terminal.headline,
+            mark: mark(of: terminal, now: now))
     }
 
     /// One runner's fleet, on its own, for the one caller that is about a
@@ -195,8 +261,14 @@ struct ShellFleetMap {
     }
 
     /// One entry, as a worktree and the refs of its tabs.
+    ///
+    /// `orchestrators` are the terminals drawn as a workspace's own row, by
+    /// id, with the title their tab takes (`orchestratorTitles`). They stay
+    /// tabs here — this worktree is where their panes are — marked so the
+    /// card's ribbon leaves them off (`ShellWorktree.listedTabs`) and the tail
+    /// does not speak for them.
     private static func one(
-        _ entry: FleetEntry, naming server: Bool, now: Date
+        _ entry: FleetEntry, naming server: Bool, orchestrators: [String: String] = [:], now: Date
     ) -> (worktree: ShellWorktree, refs: [String: ShellPaneRef]) {
         var refs: [String: ShellPaneRef] = [:]
         let connection = entry.connection
@@ -231,7 +303,10 @@ struct ShellFleetMap {
             tabs.append(
                 ShellTab(
                     id: tabID(runner: runner, worktree: worktree.id, pane: pane),
-                    title: terminal.label,
+                    // An orchestrator's by its workspace, so the bar says
+                    // whose it is: in Main's checkout, Billing's manager is
+                    // not one more terminal of Main's.
+                    title: orchestrators[terminal.id] ?? terminal.label,
                     mark: mark(of: terminal, now: now),
                     // The rank's own question, kept separate from the
                     // drawing's. See `ShellTab.wantsAttention`.
@@ -240,7 +315,8 @@ struct ShellFleetMap {
                     // above defaults to false and must: it is synthesized here
                     // rather than being a pane, and it is what closing the last
                     // terminal in a worktree lands on.
-                    closable: true))
+                    closable: true,
+                    isOrchestrator: orchestrators[terminal.id] != nil))
             order.append(ShellPaneRef(runner: runner, worktree: worktree.id, pane: pane))
         }
 
@@ -274,7 +350,7 @@ struct ShellFleetMap {
                 // where its worktree is would leave the one question a
                 // merged grid raises unanswered.
                 server: server ? entry.host.label : nil,
-                tail: tail(of: worktree),
+                tail: tail(of: worktree, leavingOut: Set(orchestrators.keys)),
                 resume: resume(worktree, connection: connection, tabs: order),
                 // The daemon's own view preference, carried rather than
                 // re-derived. iOS had no consumer for it at all, so a
@@ -399,8 +475,16 @@ struct ShellFleetMap {
     /// has anything to say, and to nothing at all — a worktree whose agents
     /// have said nothing has nothing to show, and a placeholder there would be
     /// forty lies.
-    private static func tail(of worktree: Worktree) -> [String] {
-        let speaking = worktree.terminals.filter { !$0.isChangesPane && !$0.recentSteps.isEmpty }
+    ///
+    /// Never an orchestrator's: it is drawn as its workspace's row, and a card
+    /// speaking in its voice would draw it a second time, under a worktree
+    /// that may not even be its workspace's.
+    private static func tail(of worktree: Worktree, leavingOut orchestrators: Set<String> = [])
+        -> [String]
+    {
+        let speaking = worktree.terminals.filter {
+            !$0.isChangesPane && !$0.recentSteps.isEmpty && !orchestrators.contains($0.id)
+        }
         let latest = speaking.max { a, b in
             (a.activityChangedAt ?? .distantPast) < (b.activityChangedAt ?? .distantPast)
         }
@@ -1602,8 +1686,13 @@ struct ShellScreen: View {
                 boards: boardRows,
                 onOpenBoard: { label, row in
                     boardSheet = BoardSheet(
-                        runner: label.id, repository: row.repository, name: row.name)
+                        runner: label.id, workspace: row.workspace, name: row.name)
                 },
+                headings: { map.headings[$0] ?? [] },
+                // The orchestrator's pane, landed on as a board card's Agent
+                // button lands: somebody chose that tab, and its worktree
+                // should remember it. See `boardTerminal`.
+                onOpenOrchestrator: { _, row in boardTerminal = row.id },
                 elsewhere: elsewhere,
                 liveActions: runnerActions,
                 cachedActions: cachedActions,
@@ -2079,8 +2168,11 @@ extension ShellScreen {
             })?.connection
         else { return [] }
         return RunnerBoards.rows(
-            repositories: connection.repositories.map { (id: $0.id, name: $0.displayName) },
-            boards: connection.boards,
+            boards: connection.boardList,
+            names: Dictionary(
+                connection.repositories.map { ($0.id, $0.displayName) },
+                uniquingKeysWith: { first, _ in first }),
+            models: connection.boards,
             panes: connection.fleet.worktrees.flatMap(\.terminals),
             build: connection.daemon,
             lastKnownBuild: connection.lastDaemon,
@@ -2126,17 +2218,19 @@ private struct BoardSheetHost: View {
     var body: some View {
         TaskBoardView(
             name: sheet.name,
-            board: connection.boards[sheet.repository],
-            unread: connection.unreadBoards.contains(sheet.repository),
+            board: connection.boards[sheet.workspace.id],
+            unread: connection.unreadBoards.contains(sheet.workspace.id),
             speaksOfAgents: TaskAgentLink.speaksOfAgents(
                 connected: connection.phase == .connected, build: connection.daemon),
             agents: agents(for:),
             onJump: onJump,
-            onRefresh: { await connection.readBoard(sheet.repository) },
+            onRefresh: { await connection.readBoard(sheet.workspace) },
             onDone: onDone)
             // Read on opening, whatever was last read: the row that opened
             // this may be showing a count from before the last reconnect.
-            .task { await connection.readBoard(sheet.repository) }
+            // While it is open, a reconnect's sweep reads it again, and a
+            // notice for this workspace does; see `Connection.loadBoards`.
+            .task { await connection.readBoard(sheet.workspace) }
     }
 
     /// The panes working `row` on this runner, in fleet order, each named

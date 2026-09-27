@@ -1,6 +1,9 @@
 package com.farcooler.net
 
+import com.farcooler.model.BoardNotice
+import com.farcooler.model.RunnerBoards
 import com.farcooler.model.TaskBoard
+import com.farcooler.model.WorkspaceSummary
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -11,6 +14,8 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Test
 
 /**
@@ -28,9 +33,9 @@ class BoardReadsTest {
         val gates = ArrayDeque<CompletableDeferred<TaskBoard?>>()
         val order = mutableListOf<String>()
 
-        suspend fun read(repository: String): TaskBoard? {
+        suspend fun read(workspace: WorkspaceSummary): TaskBoard? {
             started += 1
-            order += repository
+            order += workspace.id
             inFlight += 1
             mostAtOnce = maxOf(mostAtOnce, inFlight)
             val gate = CompletableDeferred<TaskBoard?>()
@@ -46,6 +51,9 @@ class BoardReadsTest {
         fun answer(board: TaskBoard? = TaskBoard.EMPTY) = gates.removeFirst().complete(board)
     }
 
+    /** A repository's one implicit board, which is how a runner without workspaces keys them. */
+    private fun ws(repository: String) = WorkspaceSummary.implicit(repository)
+
     /** The connection's scope, which outlives the screens that ask for reads. */
     private fun TestScope.connection(): CoroutineScope = backgroundScope
 
@@ -58,10 +66,10 @@ class BoardReadsTest {
         val reads = Reads()
         val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
 
-        val first = launch { boards.readOne("r") }
+        val first = launch { boards.readOne(ws("r")) }
         runCurrent()
         assertEquals(1, reads.started)
-        repeat(3) { launch { boards.readOne("r") } }
+        repeat(3) { launch { boards.readOne(ws("r")) } }
         runCurrent()
         assertEquals("folded into the read under way", 1, reads.started)
 
@@ -85,9 +93,9 @@ class BoardReadsTest {
         val reads = Reads()
         val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
 
-        val screen = launch { boards.readOne("r") }
+        val screen = launch { boards.readOne(ws("r")) }
         runCurrent()
-        launch { boards.readOne("r") } // the notice, folded in
+        launch { boards.readOne(ws("r")) } // the notice, folded in
         runCurrent()
         screen.cancel() // Back
         runCurrent()
@@ -106,11 +114,11 @@ class BoardReadsTest {
         val reads = Reads()
         val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
 
-        launch { boards.readOne("r") }
+        launch { boards.readOne(ws("r")) }
         runCurrent()
         var refreshed = false
         launch {
-            boards.readOne("r")
+            boards.readOne(ws("r"))
             refreshed = true
         }
         runCurrent()
@@ -128,7 +136,7 @@ class BoardReadsTest {
         val reads = Reads()
         val boards = BoardReads(connection(), canRead = { true }, read = reads::read, clock = { 42L })
 
-        val sweep = launch { boards.sweep(listOf("a", "b", "c")) }
+        val sweep = launch { boards.sweep(listOf(ws("a"), ws("b"), ws("c"))) }
         runCurrent()
         while (reads.gates.isNotEmpty()) {
             reads.answer()
@@ -147,12 +155,12 @@ class BoardReadsTest {
         val reads = Reads()
         val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
 
-        val good = launch { boards.readOne("r") }
+        val good = launch { boards.readOne(ws("r")) }
         runCurrent()
         reads.answer()
         good.join()
 
-        val bad = launch { boards.readOne("r") }
+        val bad = launch { boards.readOne(ws("r")) }
         runCurrent()
         reads.answer(null)
         bad.join()
@@ -174,20 +182,153 @@ class BoardReadsTest {
         val boards = BoardReads(connection(), canRead = { buildIn }, read = reads::read, clock = { 7L })
         boards.ledger.linkCameUp()
 
-        boards.sweep(listOf("a", "b"))
+        boards.sweep(listOf(ws("a"), ws("b")))
         assertEquals(0, reads.started)
         assertEquals("a refused sweep is not stamped", 0L, boards.lastSweepAt)
         assertTrue(boards.ledger.owedWhenBuildLands)
 
         buildIn = true
-        val landed = launch { boards.buildLanded(listOf("a")) }
+        val landed = launch { boards.buildLanded(listOf(ws("a"))) }
         runCurrent()
         reads.answer()
         landed.join()
         assertEquals(1, reads.started)
         assertFalse(boards.ledger.owedWhenBuildLands)
 
-        boards.buildLanded(listOf("a"))
+        boards.buildLanded(listOf(ws("a")))
         assertEquals("already swept on this link", 1, reads.started)
+    }
+
+    // ---- boards by workspace ----
+
+    private val main = WorkspaceSummary(id = "w-main", name = "Main", isMain = true, repository = "r1")
+    private val billing = WorkspaceSummary(id = "w-billing", name = "Billing", ordinal = 1, repository = "r1")
+
+    /**
+     * A workspace's board is read by naming the workspace: `task.list` with the
+     * repository AND the workspace. An implicit board — a runner without
+     * workspaces — names only the repository, which is its whole board.
+     */
+    @Test
+    fun aBoardIsReadByWorkspace() {
+        assertEquals(
+            buildJsonObject {
+                put("repository", "r1")
+                put("workspace", "w-billing")
+            },
+            BoardReads.request(billing),
+        )
+        assertEquals(buildJsonObject { put("repository", "r1") }, BoardReads.request(ws("r1")))
+    }
+
+    /** Each board lands under its own workspace, and one failing marks only that one. */
+    @Test
+    fun twoBoardsInOneRepositoryAreKeptApart() = runTest {
+        val reads = Reads()
+        val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
+        val a = launch { boards.readOne(main) }
+        runCurrent()
+        reads.answer()
+        a.join()
+        val b = launch { boards.readOne(billing) }
+        runCurrent()
+        reads.answer(null)
+        b.join()
+        assertEquals(setOf("w-main"), boards.boards.value.keys)
+        assertEquals(setOf("w-billing"), boards.unread.value)
+    }
+
+    /**
+     * A notice reads the board it names and, on a move, the board it left —
+     * not the other workspace's in the same repository.
+     */
+    @Test
+    fun aNoticeReadsOnlyTheBoardsItMoved() = runTest {
+        val reads = Reads()
+        val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
+        val held = listOf(main, billing)
+
+        val own = launch { boards.noticed(BoardNotice("r1", "w-billing"), held) }
+        runCurrent()
+        reads.answer()
+        runCurrent()
+        // Asked before waiting: a notice that read Main's board too would be
+        // waiting on a second read here, and the order says which.
+        assertEquals(listOf("w-billing"), reads.order)
+        assertTrue("no other board is being read", reads.gates.isEmpty())
+        own.join()
+
+        val move = launch { boards.noticed(BoardNotice("r1", "w-main", fromWorkspace = "w-billing"), held) }
+        runCurrent()
+        while (reads.gates.isNotEmpty()) {
+            reads.answer()
+            runCurrent()
+        }
+        move.join()
+        assertEquals(listOf("w-billing", "w-main", "w-billing"), reads.order)
+    }
+
+    /**
+     * **A board restored from a stack saved before workspaces reads again.**
+     * `Route.Board` named the repository, which opens its implicit board; the
+     * runner's list is by workspace and never names it. A notice from that
+     * repository still reads it, and so does a sweep.
+     */
+    @Test
+    fun aBoardRestoredByRepositoryReadsAgainOnItsRepositorysNews() = runTest {
+        val reads = Reads()
+        val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
+        val held = listOf(main, billing)
+        suspend fun drain() {
+            runCurrent()
+            while (reads.gates.isNotEmpty()) {
+                reads.answer()
+                runCurrent()
+            }
+        }
+
+        val opened = launch { boards.readOne(ws("r1")) }
+        drain()
+        opened.join()
+
+        val news = launch { boards.noticed(BoardNotice("r1", "w-main"), held) }
+        drain()
+        news.join()
+        assertEquals(listOf("r1", "w-main", "r1"), reads.order)
+
+        // Another repository's news leaves it alone.
+        val elsewhere = launch { boards.noticed(BoardNotice("r2", "w-other"), held) }
+        drain()
+        elsewhere.join()
+        assertEquals(listOf("r1", "w-main", "r1", "w-other"), reads.order)
+
+        val sweep = launch { boards.sweep(held) }
+        drain()
+        sweep.join()
+        assertEquals(listOf("w-main", "w-billing", "r1"), reads.order.takeLast(3))
+    }
+
+    /**
+     * **A reconnect reads every workspace's board again**, whatever notices
+     * the dropped link lost: the sweep a new link starts is over every board
+     * the runner keeps ([RunnerBoards.boards]), so a board open on screen —
+     * Billing's here — is among them, and not only the repository's.
+     */
+    @Test
+    fun aReconnectReadsEveryWorkspacesBoard() = runTest {
+        val reads = Reads()
+        val boards = BoardReads(connection(), canRead = { true }, read = reads::read)
+        boards.ledger.linkCameUp()
+
+        val sweep = launch { boards.sweep(RunnerBoards.boards(listOf("r1"), listOf(billing, main))) }
+        runCurrent()
+        while (reads.gates.isNotEmpty()) {
+            reads.answer()
+            runCurrent()
+        }
+        sweep.join()
+        assertEquals(listOf("w-main", "w-billing"), reads.order)
+        assertEquals(setOf("w-main", "w-billing"), boards.boards.value.keys)
+        assertFalse(boards.ledger.owedWhenBuildLands)
     }
 }

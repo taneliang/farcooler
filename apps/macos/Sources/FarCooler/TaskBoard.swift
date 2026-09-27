@@ -1,7 +1,7 @@
 import AgentKit
 import SwiftUI
 
-// A repository's board.
+// A workspace's board.
 //
 // Everything with a rule in it lives in `TaskBoardModel` in AgentKit, which is
 // what `swift test --package-path apps/shared/AgentKit` runs on every push.
@@ -22,10 +22,10 @@ import SwiftUI
 // `rewritesTheRecord` is asserted over in `TaskBoardModelTests`. A new write
 // belongs in that list, not in a `Button` written by hand here.
 
-/// One repository's board, as this window last read it.
+/// One workspace's board, as this window last read it.
 ///
-/// One store per repository per client, held by `ContentView` — see
-/// `boardStore(for:client:)` there, which follows `changesStore(for:client:)`
+/// One store per workspace per client, held by `ContentView` — see
+/// `boardStore(for:client:host:)` there, which follows `changesStore(for:client:)`
 /// exactly: a `DaemonClient` is dropped when its runner leaves, and a store
 /// held over from the old one would go on talking to a connection nobody is
 /// answering.
@@ -51,21 +51,35 @@ final class TaskBoardStore: ObservableObject {
     /// tooltip, because a tooltip is still a screen.
     @Published private(set) var trouble: String?
 
-    let repository: Repository
+    /// The workspace whose board this is. An implicit one — a runner without
+    /// workspaces — is its repository's whole board.
+    let workspace: WorkspaceSummary
     /// Held, and readable, so the window can tell a store built against a
     /// dropped connection from one built against the live link — see
     /// `boardStore(for:client:)` in `ContentView`, which is the same identity
     /// check `changesStore(for:client:)` makes for the same reason.
     let client: DaemonClient
-    /// The generation of THIS repository's board this store has already acted
-    /// on, so an event that arrives while a read is in flight is not read
-    /// twice — and an event about another repository is not read at all.
+    /// The generation of THIS board this store has already acted on, so an
+    /// event that arrives while a read is in flight is not read twice — and
+    /// an event about another board is not read at all.
     private var seenGeneration = 0
 
-    init(client: DaemonClient, repository: Repository) {
+    init(client: DaemonClient, workspace: WorkspaceSummary) {
         self.client = client
-        self.repository = repository
-        self.seenGeneration = client.boardGeneration(for: repository.id)
+        self.workspace = workspace
+        self.seenGeneration = client.boardGeneration(for: workspace)
+    }
+
+    /// The repository this board is in, by its uuid: what `task show` and
+    /// `task set` are scoped by. An implicit workspace's id is its
+    /// repository's.
+    var repositoryID: String { workspace.repository ?? workspace.id }
+
+    /// What the board's title says: the workspace, or for a runner without
+    /// workspaces the repository, as it was before there were several.
+    var title: String {
+        guard workspace.isImplicit else { return workspace.name }
+        return client.repositories.first { $0.id == repositoryID }?.displayName ?? "Board"
     }
 
     /// Whether the window should go on holding this store, given the runners
@@ -78,16 +92,20 @@ final class TaskBoardStore: ObservableObject {
     /// one isn't among them. Yes otherwise, and in particular while the
     /// runner is reconnecting: "the project is gone" can't be told from "the
     /// runner isn't answering" then, which is `missingBoardSentence`'s rule.
+    /// And no, once that runner lists workspaces and this one isn't among
+    /// them: it was deleted. A runner that lists none can't say.
     func isHeld(by clients: [String: DaemonClient]) -> Bool {
         guard clients.values.contains(where: { $0 === client }) else { return false }
         guard client.state == .connected, client.repositoriesListed else { return true }
-        return client.repositories.contains { $0.id == repository.id }
+        guard client.repositories.contains(where: { $0.id == repositoryID }) else { return false }
+        guard !workspace.isImplicit, let listed = client.fleet.workspaces else { return true }
+        return listed.contains { $0.id == workspace.id }
     }
 
-    /// A number that moves whenever this repository's board may have moved:
-    /// its own `task` events, and every reconnection. See
+    /// A number that moves whenever this board may have moved: its own
+    /// `task` events, and every reconnection. See
     /// `DaemonClient.boardGeneration(for:)`.
-    var generation: Int { client.boardGeneration(for: repository.id) }
+    var generation: Int { client.boardGeneration(for: workspace) }
 
     /// Set when a read was asked for while one was already in flight.
     ///
@@ -139,7 +157,8 @@ final class TaskBoardStore: ObservableObject {
     }
 
     private func readOnce() async {
-        let (data, _) = await client.taskBoard(repository: repository.id)
+        let (data, _) = await client.taskBoard(
+            repository: repositoryID, workspace: workspace.boardWorkspace)
         guard let data else {
             trouble = "Far Cooler couldn’t read this board."
             return
@@ -185,7 +204,7 @@ final class TaskBoardStore: ObservableObject {
     func open(_ row: TaskRow) async {
         opened = row
         detail = .empty
-        let (data, _) = await client.taskDetail(key: row.key, repository: repository.id)
+        let (data, _) = await client.taskDetail(key: row.key, repository: repositoryID)
         guard let data, let read = try? TaskDetailModel.decode(data) else {
             trouble = "Far Cooler couldn’t read this task."
             return
@@ -204,7 +223,7 @@ final class TaskBoardStore: ObservableObject {
     /// rather than one the record holds.
     func move(_ row: TaskRow, to status: TaskStatus) async {
         if let refused = await client.moveTask(
-            key: row.key, to: status.rawValue, repository: repository.id)
+            key: row.key, to: status.rawValue, repository: repositoryID)
         {
             // The runner's own words are not drawn — see `trouble`. What is
             // worth saying is which task did not move, because a board full of
@@ -418,7 +437,7 @@ struct TaskBoardView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text(store.repository.displayName).font(WorkspaceStyle.sectionTitle)
+            Text(store.title).font(WorkspaceStyle.sectionTitle)
             // The one count worth putting in a title bar, and the sentence is
             // the model's like every other one here. Nothing when nothing is
             // waiting — `waitingSentence` is nil at zero, because a badge

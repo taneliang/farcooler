@@ -18,8 +18,8 @@ use uuid::Uuid;
 use crate::error::map_err;
 use crate::migrate;
 use crate::models::{
-    IdempotencyRecord, PaneMode, Repository, RepositoryRoot, Terminal, TerminalUpdate, Worktree,
-    get_uuid, row_to_repository, row_to_repository_root, row_to_terminal, row_to_worktree,
+    IdempotencyRecord, PaneMode, Repository, RepositoryRoot, Terminal, TerminalRole, TerminalUpdate,
+    Worktree, get_uuid, row_to_repository, row_to_repository_root, row_to_terminal, row_to_worktree,
     uuid_blob,
 };
 
@@ -208,16 +208,13 @@ impl Store {
             canonical_git_dir: canonical_git_dir.to_string(),
             remote_summary: remote_summary.to_string(),
             resource_version: 1,
-            // The schema's own default for a freshly inserted row; assigned
-            // later, once, by `Store::assign_task_key_prefix`.
-            task_key_prefix: String::new(),
         })
     }
 
     pub fn get_repository(&self, id: Uuid) -> Result<Repository> {
         self.conn()
             .query_row(
-                "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version, task_key_prefix
+                "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version
                  FROM repositories WHERE id = ?1",
                 params![uuid_blob(id)],
                 row_to_repository,
@@ -229,7 +226,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version, task_key_prefix
+                "SELECT id, host_id, repository_root_id, display_name, canonical_git_dir, remote_summary, resource_version
                  FROM repositories WHERE repository_root_id = ?1",
             )
             .map_err(map_err)?;
@@ -280,7 +277,7 @@ impl Store {
     /// a silent field swap rather than a compile error.
     const WORKTREE_COLUMNS: &'static str = "id, repository_id, branch, \
          worktree_path, hidden, creation_failed, resource_version, is_main_checkout, \
-         worktree_missing, ordinal";
+         worktree_missing, ordinal, workspace_id, claim_source";
 
     /// How every listing of worktrees is ordered, in one place.
     ///
@@ -608,6 +605,11 @@ impl Store {
     /// In the same INSERT rather than a write after it, so there is no moment
     /// at which the pane exists and its task does not. A task id that names no
     /// task is refused by the foreign key.
+    ///
+    /// The terminal's workspace starts as its worktree's owner, read in the
+    /// same INSERT (none, if the worktree is unclaimed), and its role follows
+    /// from the preset (`TerminalRole::for_preset`). Both can be changed
+    /// afterwards: `Store::set_terminal_workspace`, `Store::set_terminal_role`.
     #[allow(clippy::too_many_arguments)]
     pub fn create_terminal_for_task(
         &self,
@@ -625,8 +627,9 @@ impl Store {
                 r#"INSERT INTO terminals
                  (id, worktree_id, title, command_preset, intent, runtime_confirmed,
                   exit_code, exit_signal, lease_generation, epoch,
-                  "columns", "rows", resource_version, task_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, ?6, ?7, 1, ?8)"#,
+                  "columns", "rows", resource_version, task_id, workspace_id, role)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, NULL, 0, 0, ?6, ?7, 1, ?8,
+                         (SELECT workspace_id FROM worktrees WHERE id = ?2), ?9)"#,
                 params![
                     uuid_blob(id),
                     uuid_blob(worktree_id),
@@ -636,27 +639,12 @@ impl Store {
                     columns,
                     rows,
                     task_id.map(uuid_blob),
+                    TerminalRole::for_preset(command_preset).as_i64(),
                 ],
             )
             .map_err(map_err)?;
-        Ok(Terminal {
-            id,
-            worktree_id,
-            title: title.to_string(),
-            command_preset: command_preset.to_string(),
-            intent,
-            runtime_confirmed: false,
-            exit_code: None,
-            exit_signal: None,
-            lease_generation: 0,
-            epoch: 0,
-            columns,
-            rows,
-            resource_version: 1,
-            pane_mode: PaneMode::Terminal,
-            agent_session_id: None,
-            task_id,
-        })
+        // Read back: the workspace was decided by the INSERT's own subquery.
+        self.get_terminal(id)
     }
 
     pub fn get_terminal(&self, id: Uuid) -> Result<Terminal> {
@@ -664,7 +652,8 @@ impl Store {
             .query_row(
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
-                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
+                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
+                          workspace_id, role
                    FROM terminals WHERE id = ?1"#,
                 params![uuid_blob(id)],
                 row_to_terminal,
@@ -678,7 +667,8 @@ impl Store {
             .prepare(
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
-                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
+                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
+                          workspace_id, role
                    FROM terminals WHERE worktree_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -714,7 +704,8 @@ impl Store {
             .prepare(
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
-                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id
+                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
+                          workspace_id, role
                    FROM terminals WHERE agent_session_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -966,6 +957,11 @@ mod tests {
             "agent_session_id",
             // Intent again: the task this pane was opened to work.
             "task_id",
+            // And again: whose work it is, and what it is to that workspace.
+            // An orchestrator is one because somebody said so, not because
+            // anything was seen running.
+            "workspace_id",
+            "role",
         ];
         assert_eq!(cols.len(), expected.len(), "unexpected column set: {cols:?}");
         for e in expected {
@@ -1034,8 +1030,11 @@ mod tests {
             .execute_batch(
                 "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
                  INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
-                 INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
-                     VALUES (x'04', x'03', 'fc-1', 'a task', 'backlog', 0, 0, 1);
+                 INSERT INTO workspaces (id, repository_id, name, task_prefix, is_main, ordinal, created_at)
+                     VALUES (x'06', x'03', 'Main', 'fc', 1, 0, 0);
+                 INSERT INTO tasks (id, repository_id, workspace_id, key, title, status, status_since,
+                                    created_at, resource_version)
+                     VALUES (x'04', x'03', x'06', 'fc-1', 'a task', 'backlog', 0, 0, 1);
                  INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
                      VALUES (x'05', x'04', 'decision', 'user', 0, 'because', '{}');",
             )
@@ -1081,14 +1080,17 @@ mod tests {
         let host = Uuid::now_v7();
         let root = s.create_repository_root(host, "/repos/one", 1_000).unwrap();
         let repo = s.create_repository(host, root.id, "r", "/repos/one/.git", "").unwrap();
+        let main = s.ensure_main_workspace(repo.id).unwrap();
+        let side = s.create_workspace(repo.id, "Side", "side").unwrap();
         let task_id = Uuid::now_v7();
 
         {
             let conn = s.conn();
             conn.execute(
-                "INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
-                 VALUES (?1, ?2, 'fc-1', 'a task', 'backlog', 0, 0, 1)",
-                params![uuid_blob(task_id), uuid_blob(repo.id)],
+                "INSERT INTO tasks (id, repository_id, workspace_id, key, title, status, status_since,
+                                    created_at, resource_version)
+                 VALUES (?1, ?2, ?3, 'fc-1', 'a task', 'backlog', 0, 0, 1)",
+                params![uuid_blob(task_id), uuid_blob(repo.id), uuid_blob(side.id)],
             )
             .unwrap();
             conn.execute(
@@ -1116,6 +1118,13 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
+        let workspaces: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM workspaces WHERE id IN (?1, ?2)",
+                params![uuid_blob(main.id), uuid_blob(side.id)],
+                |r| r.get(0),
+            )
+            .unwrap();
         let notes: i64 = conn
             .query_row(
                 "SELECT count(*) FROM task_notes WHERE task_id = ?1",
@@ -1124,9 +1133,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            (repos, tasks, notes),
-            (0, 0, 0),
-            "the repository, its task, and the task's note must all be gone"
+            (repos, tasks, notes, workspaces),
+            (0, 0, 0, 0),
+            "the repository, its task, the task's note, and its workspaces, Main included, must all be gone"
         );
     }
 

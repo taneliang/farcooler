@@ -354,6 +354,17 @@ async fn a_worktree_created_through_the_client_comes_back_in_the_fleet() {
     // Derived, never stored — and a fresh worktree with no terminals is ready.
     assert_eq!(created["state"], "ready");
     assert!(created["terminals"].as_array().unwrap().is_empty());
+    // Claimed for the repository's Main as it's made, not left Unclaimed:
+    // a pane opened in an unclaimed worktree has no workspace, so nothing
+    // done there would ever claim it.
+    let main = fleet["workspaces"]
+        .as_array()
+        .expect("the fleet names its workstreams")
+        .iter()
+        .find(|w| w["is_main"] == true)
+        .expect("a Main");
+    assert_eq!(created["workspace"], main["id"], "{created}");
+    assert_eq!(created["claim_source"], "explicit", "{created}");
 }
 
 #[tokio::test]
@@ -1092,7 +1103,7 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
 
     // An empty board is an empty list, not an error: the phone reads every
     // repository and draws a row only for the ones with something on them.
-    let empty = session.tasks(repository).await.expect("an empty board");
+    let empty = session.tasks(repository, None).await.expect("an empty board");
     assert_eq!(empty["tasks"], serde_json::json!([]));
 
     let mut raw = raw_client(&daemon.socket).await;
@@ -1115,7 +1126,7 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
     };
     let task_id = farcooler_client::session::uuid_of(&task.id);
 
-    let board = session.tasks(repository).await.expect("task.list");
+    let board = session.tasks(repository, None).await.expect("task.list");
     let rows = board["tasks"].as_array().expect("tasks");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["id"], task_id.to_string());
@@ -1154,7 +1165,7 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
     let Some(farcooler_protocol::v1::result::Value::TaskNote(written)) = noted.value else {
         panic!("task.note answered with something else");
     };
-    let board = session.tasks(repository).await.expect("task.list after a note");
+    let board = session.tasks(repository, None).await.expect("task.list after a note");
     assert_eq!(board["tasks"][0]["created_at"], created_at, "creation does not move");
     assert_eq!(board["tasks"][0]["updated_at"], written.at, "a note moves updated_at");
     assert!(written.at > created_at);
@@ -1220,6 +1231,158 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
         "the agent pane resolved `claude` by searching, and found the trap"
     );
     assert!(stand_in.ran.exists(), "the agent pane never ran the stand-in");
+}
+
+/// Two workstreams in one repository come back through the client apart: in
+/// the fleet, on their boards, and in the news a board is keyed by.
+///
+/// Against the real daemon for the reason the board test above gives: the
+/// fleet's `workspaces`, a worktree's `workspace` and `claim_source`, a
+/// terminal's `workspace` and `role`, a task row's `workspace`, and a task
+/// event's `workspace` and `from_workspace` are all shapes AgentKit and
+/// Android decode, and a stub would agree with whatever this file believed.
+#[tokio::test]
+async fn two_workspaces_in_one_repository_come_back_apart_through_the_client() {
+    use farcooler_client::session::{FleetEvent, uuid_of};
+    use farcooler_protocol::capability::WORKSTREAMS;
+    use farcooler_protocol::v1::request::Payload;
+    use farcooler_protocol::v1::result::Value;
+
+    let daemon = start().await;
+    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    assert!(session.can(WORKSTREAMS), "this daemon keeps workstreams");
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("demo");
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap();
+    }
+    register_root_and_repository(&daemon.socket, dir.path(), &repo).await;
+    let repositories = session.repositories().await.expect("repositories");
+    let repository = uuid_of(&repositories[0].id);
+
+    // Registering a repository gives it Main, and the fleet says so.
+    let fleet = session.fleet().await.expect("fleet");
+    let listed = fleet["workspaces"].as_array().expect("the fleet names its workstreams");
+    assert_eq!(listed.len(), 1, "{fleet}");
+    assert_eq!(listed[0]["is_main"], true);
+    assert_eq!(listed[0]["repository"], repository.to_string());
+    let main: uuid::Uuid = listed[0]["id"].as_str().unwrap().parse().unwrap();
+
+    let mut raw = raw_client(&daemon.socket).await;
+    let mut create = farcooler_transport::request("workspace.create");
+    create.target_resource_id = Some(bytes::Bytes::copy_from_slice(repository.as_bytes()));
+    create.required_capabilities = vec![WORKSTREAMS.to_string()];
+    create.payload = Some(Payload::WorkspaceCreate(farcooler_protocol::v1::WorkspaceCreate {
+        name: "Billing".into(),
+        task_prefix: "bil".into(),
+    }));
+    let Some(Value::Workspace(made)) = raw.call(create).await.expect("workspace.create").value
+    else {
+        panic!("workspace.create answered with something else");
+    };
+    let billing = uuid_of(&made.id);
+
+    // A worktree made for Billing is Billing's, and so is the shell in it.
+    let mut lane = farcooler_transport::request("worktree.create");
+    lane.target_resource_id = Some(bytes::Bytes::copy_from_slice(repository.as_bytes()));
+    lane.required_capabilities = vec![WORKSTREAMS.to_string()];
+    lane.payload = Some(Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
+        task_name: "billing lane".into(),
+        branch: "feat/billing".into(),
+        base_revision: "HEAD".into(),
+        terminal_preset: "shell".into(),
+        workspace_id: Some(bytes::Bytes::copy_from_slice(billing.as_bytes())),
+        ..Default::default()
+    }));
+    raw.call(lane).await.expect("worktree.create for Billing");
+
+    let fleet = session.fleet().await.expect("fleet");
+    let names: Vec<&str> =
+        fleet["workspaces"].as_array().unwrap().iter().map(|w| w["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Main", "Billing"], "Main first, then the rest");
+    let row = fleet["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["task"] == "billing lane")
+        .expect("Billing's worktree is in the fleet");
+    assert_eq!(row["workspace"], billing.to_string(), "{row}");
+    assert_eq!(row["claim_source"], "explicit");
+    assert_eq!(row["foreign_writers"], serde_json::json!([]));
+    let shell = &row["terminals"][0];
+    assert_eq!(shell["workspace"], billing.to_string(), "{shell}");
+    assert_eq!(shell["role"], "shell");
+
+    // A task filed on Billing is on Billing's board and not on Main's.
+    let mut file = farcooler_transport::request("task.create");
+    file.required_capabilities = vec![WORKSTREAMS.to_string()];
+    file.payload = Some(Payload::TaskCreate(farcooler_protocol::v1::TaskCreate {
+        repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+        workspace_id: Some(bytes::Bytes::copy_from_slice(billing.as_bytes())),
+        title: "Invoice run".into(),
+        actor: "user".into(),
+        ..Default::default()
+    }));
+    let Some(Value::Task(task)) = raw.call(file).await.expect("task.create").value else {
+        panic!("task.create answered with something else");
+    };
+    assert!(task.key.starts_with("bil-"), "{}", task.key);
+
+    let on_billing = session.tasks(repository, Some(billing)).await.expect("Billing's board");
+    assert_eq!(on_billing["tasks"].as_array().map(Vec::len), Some(1), "{on_billing}");
+    assert_eq!(on_billing["tasks"][0]["workspace"], billing.to_string());
+    let on_main = session.tasks(repository, Some(main)).await.expect("Main's board");
+    assert_eq!(on_main["tasks"], serde_json::json!([]), "Billing's task is on Main's board");
+    let whole = session.tasks(repository, None).await.expect("the repository");
+    assert_eq!(whole["tasks"].as_array().map(Vec::len), Some(1));
+
+    // Moving it to Main is news that names both boards.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let _subscription = session
+        .subscribe(std::sync::Arc::new(move |what| {
+            let _ = tx.send(what);
+        }))
+        .await
+        .expect("subscribe");
+    while tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await.is_ok() {}
+
+    let mut shift = farcooler_transport::request("task.move");
+    shift.required_capabilities = vec![WORKSTREAMS.to_string()];
+    shift.payload = Some(Payload::TaskMove(farcooler_protocol::v1::TaskMove {
+        task_ids: vec![task.id.clone()],
+        workspace_id: bytes::Bytes::copy_from_slice(main.as_bytes()),
+        actor: "user".into(),
+    }));
+    raw.call(shift).await.expect("task.move");
+
+    let moved = loop {
+        let news = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("a move is news")
+            .expect("the subscription is still open");
+        if let FleetEvent::Task { .. } = news {
+            break news;
+        }
+    };
+    assert_eq!(
+        moved,
+        FleetEvent::Task {
+            repository,
+            workspace: Some(main),
+            from_workspace: Some(billing),
+            actor: "user".into(),
+        }
+    );
+    let on_main = session.tasks(repository, Some(main)).await.expect("Main's board");
+    assert_eq!(on_main["tasks"][0]["workspace"], main.to_string(), "{on_main}");
 }
 
 /// A raw protocol client on the daemon's socket, for the writes the phone's

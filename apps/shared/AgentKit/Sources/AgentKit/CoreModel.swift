@@ -70,6 +70,20 @@ struct Fleet: Decodable {
     /// `TerminalList.fleet_trace_anchor`, sent by `Session::fleet` as a number
     /// beside the base64 and only with it. See `FleetSnapshot.fleetTraceAnchor`.
     var fleetTraceAnchor: Int?
+    /// The runner's workstreams, Main first within each repository, or nil
+    /// from a runner without the `workstreams` capability.
+    ///
+    /// Nil and empty are different claims. Nil is a runner that has no
+    /// workspaces at all, which `WorkspaceGrouping` draws as one implicit
+    /// workspace per repository — today's layout. Empty is a runner that has
+    /// them and nothing registered. `Session::fleet` sends no key for the
+    /// first and `[]` for the second.
+    ///
+    /// **Not `RunnerDirectory`'s `"workspaces"`.** That key is older, is on
+    /// disk, and holds WORKTREES under their name from before the rename; it
+    /// is frozen. This is the fleet envelope's list of workstreams, which is a
+    /// different thing under the same word. `FleetDecodeTests` pins both.
+    var workspaces: [WorkspaceSummary]?
 
     enum CodingKeys: String, CodingKey {
         case runtimeHealthy = "runtime_healthy"
@@ -77,6 +91,7 @@ struct Fleet: Decodable {
         case worktrees
         case fleetTrace
         case fleetTraceAnchor
+        case workspaces
     }
 
     static let empty = Fleet(runtimeHealthy: false, livePanes: 0, worktrees: [])
@@ -171,6 +186,32 @@ struct Worktree: Decodable, Identifiable, Hashable {
     /// matches on the property NAME, and this app reads `Session::fleet`, not
     /// the CLI.
     var ordinal: Int?
+
+    /// The workspace that owns this worktree, as its id, or nil while it is
+    /// unclaimed — and from a runner without `workstreams`, where nothing is
+    /// claimed because there is nothing to claim it.
+    ///
+    /// An id this runner's `Fleet.workspaces` does not list is drawn as
+    /// unclaimed rather than dropped; see `WorkspaceGrouping.group`.
+    var workspace: String?
+    /// What made the claim: `explicit`, `hook`, `process` or `migration`. A
+    /// machine word for tracing a wrong claim, never shown as it stands.
+    var claimSource: String?
+    /// The names of the other workspaces with a live terminal in this
+    /// worktree. Empty or nil is nobody else.
+    var foreignWriters: [String]?
+
+    /// Every key but the three workspace ones is the property's own name;
+    /// see `isMainCheckout` for why that matters. Those three are snake_case
+    /// because `Session::fleet` takes them from `workspaces_json`, which the
+    /// CLI shares, and a workspace key spelled two ways across two producers
+    /// is the trap this file's header describes.
+    enum CodingKeys: String, CodingKey {
+        case id, short, repository, task, branch, worktree, state, terminals
+        case isMainCheckout, ordinal, workspace
+        case claimSource = "claim_source"
+        case foreignWriters = "foreign_writers"
+    }
 
     /// The decided answer, for the two screens that draw it.
     ///
@@ -388,6 +429,18 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// runner that does not advertise `terminal_task`; see
     /// `TaskAgentLink.speaksOfAgents` for what a board says then.
     var taskId: String?
+    /// Whose work this pane is doing, as a workspace id: not always the owner
+    /// of the worktree it runs in, since an orchestrator may run in a
+    /// checkout another workspace owns. Nil in an unclaimed worktree and from
+    /// a runner without `workstreams`.
+    var workspace: String?
+    /// `shell`, `agent` or `orchestrator`, or nil from a runner without
+    /// `workstreams`. A word this build does not know is not an orchestrator.
+    var role: String?
+
+    /// Whether this pane is its workspace's orchestrator — drawn once, as the
+    /// workspace's own row, and not again among its worktree's panes.
+    var isOrchestrator: Bool { role == "orchestrator" }
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
 

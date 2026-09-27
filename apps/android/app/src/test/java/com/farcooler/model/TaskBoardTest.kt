@@ -53,10 +53,10 @@ class TaskBoardTest {
            "created_at": 500, "updated_at": 900, "intent": "why",
            "acceptance": [{"id": "a1", "text": "one", "met": true},
                           {"id": "a2", "text": "two", "met": false}],
-           "constraints": [], "labels": ["ios"], "worktree_id": "w1"},
+           "constraints": [], "labels": ["ios"], "worktree_id": "w1", "workspace": "ws1"},
           {"id": "t2", "key": "-20", "title": "Phones", "status": "in_progress",
            "status_since": 2000, "created_at": 0, "updated_at": 0,
-           "acceptance": [], "labels": []},
+           "acceptance": [], "labels": [], "workspace": null},
           {"id": "t3", "key": "-9", "title": "From the future", "status": "parked"},
           {"id": "t4", "title": "No key, so not drawable", "status": "todo"}
         ]}
@@ -76,6 +76,9 @@ class TaskBoardTest {
         assertEquals("two", first.acceptance[1].text)
         assertEquals(500L, first.createdAt)
         assertEquals(900L, first.updatedAt)
+        // The board it is on, and `null` from a runner without workstreams.
+        assertEquals("ws1", first.workspaceId)
+        assertNull(board.row("t2")!!.workspaceId)
     }
 
     /**
@@ -400,6 +403,71 @@ class TaskBoardTest {
         pane(taskId = "3", id = "x"), pane(taskId = "3", id = "y"), pane(taskId = "4", id = "z"),
         pane(taskId = "1", state = "exited", id = "gone"),
     )
+
+    /**
+     * A repository split in two is two boards and two rows: keyed by the
+     * workspace, called by its name, each counting its own board, and naming
+     * the repository the row itself does not.
+     */
+    @Test
+    fun twoWorkspacesInOneRepositoryAreTwoBoardRows() {
+        val main = WorkspaceSummary(id = "w-main", name = "Main", isMain = true, repository = "r-busy")
+        val billing = WorkspaceSummary(id = "w-billing", name = "Billing", ordinal = 1, repository = "r-busy")
+        val rows = RunnerBoards.rows(
+            hostId = "h",
+            boards = listOf(main, billing),
+            repositories = repositories,
+            models = mapOf("w-main" to busy, "w-billing" to busy, "r-busy" to TaskBoard.EMPTY),
+            panes = panes,
+            build = both,
+            connected = true,
+        )
+        assertEquals(listOf("w-main", "w-billing"), rows.map { it.key })
+        assertEquals(listOf("Main", "Billing"), rows.map { it.name })
+        assertEquals(listOf("r-busy", "r-busy"), rows.map { it.repository })
+        assertEquals(listOf("overnight", "overnight"), rows.map { it.repositoryName })
+        assertEquals(listOf("w-main", "w-billing"), rows.map { it.workspace.boardWorkspace })
+    }
+
+    /** An implicit board's row is the repository's, as it always was, and names nothing twice. */
+    @Test
+    fun anImplicitBoardIsTheRepositorysRow() {
+        val row = RunnerBoards.rows("h", repositories, boards, panes, both, connected = true).single()
+        assertEquals("r-busy", row.key)
+        assertEquals(null, row.repositoryName)
+        assertEquals(null, row.workspace.boardWorkspace)
+    }
+
+    /**
+     * What a sweep reads: every workspace's board, Main first, and the whole
+     * repository where the runner names no workspace for it.
+     */
+    @Test
+    fun aSweepReadsEveryWorkspacesBoardAndTheWholeRepositoryWhereThereAreNone() {
+        val billing = WorkspaceSummary(id = "w-billing", name = "Billing", ordinal = 1, repository = "r1")
+        val main = WorkspaceSummary(id = "w-main", name = "Main", isMain = true, repository = "r1")
+        val late = WorkspaceSummary(id = "w-late", name = "Main", isMain = true, repository = "r3")
+        val swept = RunnerBoards.boards(listOf("r1", "r2"), listOf(billing, main, late))
+        assertEquals(listOf("w-main", "w-billing", "r2", "w-late"), swept.map { it.id })
+        assertEquals(listOf("w-main", "w-billing", null, "w-late"), swept.map { it.boardWorkspace })
+        assertEquals(listOf("r1", "r2"), RunnerBoards.boards(listOf("r1", "r2"), null).map { it.id })
+    }
+
+    /** A notice reads its own boards, and one the fleet has not listed yet. */
+    @Test
+    fun aNoticeReadsItsOwnBoardsAndOneTheFleetHasNotListedYet() {
+        val main = WorkspaceSummary(id = "w-main", name = "Main", isMain = true, repository = "r1")
+        val billing = WorkspaceSummary(id = "w-billing", name = "Billing", ordinal = 1, repository = "r1")
+        val held = listOf(main, billing)
+        assertEquals(listOf("w-billing"), RunnerBoards.touched(BoardNotice("r1", "w-billing"), held).map { it.id })
+        assertEquals(
+            listOf("w-main", "w-billing"),
+            RunnerBoards.touched(BoardNotice("r1", "w-main", "w-billing"), held).map { it.id },
+        )
+        val new = RunnerBoards.touched(BoardNotice("r1", "w-new"), held).single()
+        assertEquals("w-new", new.boardWorkspace)
+        assertEquals("r1", new.repository)
+    }
 
     @Test
     fun onlyARepositoryWithSomethingOnItsBoardGetsARow() {

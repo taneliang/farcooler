@@ -20,12 +20,28 @@ struct Fleet: Decodable, Equatable {
     /// distinction between unset and deliberately empty is the daemon's to draw,
     /// and it has already drawn it by the time this arrives.
     var branchPrefix: String?
+    /// This runner's workspaces — its workstreams, each with a board — as the
+    /// envelope sends them.
+    ///
+    /// Nil, and not empty, from a runner without `workstreams`: the CLI
+    /// leaves the key out for one, and that absence is what tells the sidebar
+    /// to keep the layout from before workspaces. Optional by the rule on
+    /// `Worktree` below as well.
+    var workspaces: [WorkspaceSummary]?
+    /// Every runner's workspaces, by runner — `""` for this Mac.
+    ///
+    /// Never decoded. The wire doesn't say which runner sent it, so
+    /// `DaemonClient` files its own read under its target, and
+    /// `FleetStore.merge` gathers them, the way each worktree row carries its
+    /// `host`. A runner without `workstreams` has no key here.
+    var runnerWorkspaces: [String: [WorkspaceSummary]] = [:]
 
     enum CodingKeys: String, CodingKey {
         case runtimeHealthy = "runtime_healthy"
         case livePanes = "live_panes"
         case worktrees
         case branchPrefix = "branch_prefix"
+        case workspaces
     }
 
     static let empty =
@@ -106,11 +122,39 @@ struct Worktree: Decodable, Identifiable, Hashable {
     var worktreeMissing: Bool { state == "worktree_missing" }
     var state: String
     var terminals: [Terminal]
+    /// The project this worktree belongs to, as its UUID: what the sidebar
+    /// joins a row to its repository and its workspaces on.
+    ///
+    /// `repository` above is the display name, and two repositories can share
+    /// one. Nil from a CLI older than the key, which groups by the name as
+    /// before.
+    var repositoryID: String?
+    /// The workspace that owns this worktree, or nil for an unclaimed one.
+    var workspace: String?
 
     enum CodingKeys: String, CodingKey {
         case id, short, task, branch, repository, host, ordinal, state, terminals
         case is_main_checkout
         case path = "worktree"
+        case repositoryID = "repository_id"
+        case workspace
+    }
+
+    /// This worktree as its sidebar row draws it: without the terminals
+    /// `drawn` elsewhere — the orchestrators shown in their workspaces' own
+    /// rows.
+    ///
+    /// An orchestrator runs in the main checkout, so the runner lists it
+    /// among that worktree's terminals — but it belongs to its workspace, and
+    /// it has its own row there. Left in, it would be drawn twice, and under
+    /// Main when it may be Billing's. Only those actually drawn there are
+    /// taken out: an orchestrator-role terminal no row shows would otherwise
+    /// be drawn nowhere.
+    func without(_ drawn: Set<String>) -> Worktree {
+        guard !drawn.isEmpty else { return self }
+        var copy = self
+        copy.terminals = terminals.filter { !drawn.contains($0.id) }
+        return copy
     }
 
     /// Terminals wanting the user, across this worktree.
@@ -369,8 +413,17 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// board on such a runner offers no link rather than guessing one — see
     /// `TaskRow.agentPresence` in AgentKit.
     var taskId: String?
+    /// The workspace this terminal works for, or nil. Absent from a runner
+    /// without `workstreams`.
+    var workspace: String?
+    /// `orchestrator`, `agent` or `shell`, or nil when the runner set none.
+    var role: String?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
+
+    /// Whether this is its workspace's orchestrator, which the sidebar draws
+    /// in its own row rather than among its worktree's terminals.
+    var isOrchestrator: Bool { role == "orchestrator" }
 
     /// Whether to draw a chat or a VT grid.
     var isAgentPane: Bool { paneMode == "agent" }

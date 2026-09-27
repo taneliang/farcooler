@@ -15,3 +15,4 @@ pub mod ffi;
 pub mod session;
 pub mod ssh;
 pub mod tasks_json;
+pub mod workspaces_json;

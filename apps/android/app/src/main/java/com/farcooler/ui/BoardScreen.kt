@@ -75,15 +75,15 @@ import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.launch
 
-// A repository's task board on Android: a Board row on the front door, the
+// A workspace's task board on Android: a Board row on the front door, the
 // board itself, and a card opened. Read-and-jump: see the board, see how far
 // along each card is, go to the agent on it. Every rule and sentence is in
 // `model/TaskBoard.kt`, the Android twin of AgentKit's, so a card reads the
 // same here as on the Mac and the iPhone.
 
 /**
- * One runner's Board rows, for the front door: a row per repository whose board
- * has something on it. Collected here rather than in the screen because each
+ * One runner's Board rows, for the front door: a row per workspace whose board
+ * has something on it (per repository, on a runner without workspaces). Collected here rather than in the screen because each
  * runner's boards are their own flows, and a runner that drops keeps its rows
  * as last read — its agent count goes quiet, the row does not vanish.
  */
@@ -93,32 +93,49 @@ fun RunnerBoardRows(
     namesRunner: Boolean,
     onOpen: (BoardRow) -> Unit,
 ) {
+    val rows = rememberBoardRows(connection)
+    Column {
+        rows.forEach { row -> BoardRowItem(row, if (namesRunner) connection.host.label else null, onOpen) }
+    }
+}
+
+/**
+ * One runner's Board rows, as last read: what the front door lists, and what
+ * the worktree list draws under each workspace's heading
+ * (`FleetLayout.boardRows`).
+ */
+@Composable
+fun rememberBoardRows(connection: Connection): List<BoardRow> {
     val repositories by connection.repositories.collectAsStateWithLifecycle()
     val boards by connection.boards.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val phase by connection.phase.collectAsStateWithLifecycle()
 
-    val rows = RunnerBoards.rows(
+    // A row per workspace with something on its board, or per repository on
+    // a runner without workspaces. The list is the fleet's and the
+    // repositories', which is why both are read above.
+    return RunnerBoards.rows(
         hostId = connection.host.id,
+        boards = RunnerBoards.boards(repositories.map { it.id }, fleet.workspaces),
         repositories = repositories,
-        boards = boards,
+        models = boards,
         panes = fleet.worktrees.flatMap { it.terminals },
         build = daemon,
         connected = phase is Connection.Phase.Connected,
     )
-    Column {
-        rows.forEach { row -> BoardRowItem(row, if (namesRunner) connection.host.label else null, onOpen) }
-    }
 }
 
-/** One Board row: the repository, a quiet count of tasks with agents, and the decisions in amber. */
+/** One Board row: the workspace, a quiet count of tasks with agents, and the decisions in amber. */
 @Composable
-private fun BoardRowItem(row: BoardRow, runner: String?, onOpen: (BoardRow) -> Unit) {
+internal fun BoardRowItem(row: BoardRow, runner: String?, onOpen: (BoardRow) -> Unit) {
     val amber = glanceColor(GlancePalette.amber)
     ListItem(
         headlineContent = { Text("${row.name} board", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = runner?.let { { Text(it) } },
+        // Which repository's workspace, and which runner's, as far as either
+        // needs saying: "Main board" alone would not say whose Main it is.
+        supportingContent = listOfNotNull(row.repositoryName, runner).joinToString(" · ")
+            .takeIf { it.isNotEmpty() }?.let { { Text(it) } },
         leadingContent = {
             Icon(
                 Icons.Outlined.Checklist,
@@ -158,7 +175,7 @@ private fun BoardRowItem(row: BoardRow, runner: String?, onOpen: (BoardRow) -> U
         },
         modifier = Modifier
             .clickable { onOpen(row) }
-            .testTag("board-row-${row.hostId}-${row.repository}")
+            .testTag("board-row-${row.hostId}-${row.key}")
             .semantics {
                 contentDescription = listOfNotNull("${row.name} board", row.spoken).joinToString(", ")
             },
@@ -178,14 +195,16 @@ fun boardAgents(row: TaskRow, worktrees: List<Worktree>): List<Pair<Terminal, St
 }
 
 /**
- * One repository's board: a list grouped by status, Needs Decision first, and
- * only the statuses with something in them.
+ * One workspace's board: a list grouped by status, Needs Decision first, and
+ * only the statuses with something in them. On a runner without workspaces
+ * the workspace is its repository's implicit one, and the board the
+ * repository's.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BoardScreen(
     connection: Connection,
-    repository: String,
+    workspaceId: String,
     onOpenTask: (taskId: String) -> Unit,
     onJump: (TerminalRef) -> Unit,
     onBack: () -> Unit,
@@ -201,13 +220,23 @@ fun BoardScreen(
     var refreshing by remember { mutableStateOf(false) }
 
     // Read on opening, whatever was last read: the row that opened this may
-    // be showing a count from before the last reconnect.
-    LaunchedEffect(repository) { connection.readBoard(repository) }
+    // be showing a count from before the last reconnect. While it is open, a
+    // reconnect's sweep reads it again (`Connection.loadBoardsDetached`), and
+    // so does a notice naming this workspace.
+    val workspace = remember(workspaceId, fleet.workspaces, repositories) {
+        connection.board(workspaceId)
+    }
+    LaunchedEffect(workspaceId) { connection.readBoard(workspace) }
 
-    // The row's own fallback, so the board is titled what its row was.
-    val name = repositories.firstOrNull { it.id == repository }
-        ?.let { it.displayName.ifEmpty { it.short } } ?: "Board"
-    val board = boards[repository]
+    // The row's own name, so the board is titled what its row was: the
+    // workspace's, or for an implicit one the repository's.
+    val name = if (workspace.isImplicit) {
+        repositories.firstOrNull { it.id == workspace.id }
+            ?.let { it.displayName.ifEmpty { it.short } } ?: "Board"
+    } else {
+        workspace.name.ifEmpty { "Board" }
+    }
+    val board = boards[workspaceId]
     val speaks = TaskAgentLink.speaksOfAgents(phase is Connection.Phase.Connected, daemon)
     val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }
@@ -243,14 +272,14 @@ fun BoardScreen(
             onRefresh = {
                 scope.launch {
                     refreshing = true
-                    connection.readBoard(repository)
+                    connection.readBoard(workspace)
                     refreshing = false
                 }
             },
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
             when {
-                board == null && repository in unread -> Empty(
+                board == null && workspaceId in unread -> Empty(
                     "Couldn’t read this board",
                     "Far Cooler couldn’t read this board. Pull down to try again.",
                 )
@@ -259,7 +288,7 @@ fun BoardScreen(
                 }
                 board.isEmpty -> Empty("No tasks", "Nothing is on this board yet.")
                 else -> LazyColumn(Modifier.fillMaxSize().testTag("board")) {
-                    if (repository in unread) {
+                    if (workspaceId in unread) {
                         item(key = "unread") {
                             ListItem(
                                 headlineContent = {
@@ -494,7 +523,7 @@ private fun AgentControl(
 @Composable
 fun TaskDetailScreen(
     connection: Connection,
-    repository: String,
+    workspaceId: String,
     taskId: String,
     onJump: (TerminalRef) -> Unit,
     onBack: () -> Unit,
@@ -506,7 +535,7 @@ fun TaskDetailScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
-    val row = boards[repository]?.row(taskId)
+    val row = boards[workspaceId]?.row(taskId)
     val speaks = TaskAgentLink.speaksOfAgents(phase is Connection.Phase.Connected, daemon)
     val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }

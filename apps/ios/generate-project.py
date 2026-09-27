@@ -159,6 +159,12 @@ AGENTKIT_SOURCES = [
     # reason — a drop sent to the wrong runner looks fine on screen. See
     # `ShellRunnerSectionsTests`.
     "ShellRunnerSections.swift",
+    # Inside a runner's section, a heading per workspace — its Board row, its
+    # orchestrator, its worktrees — and an Unclaimed heading per repository.
+    # Here for the same reason: a card under the wrong workspace, or an
+    # orchestrator drawn twice, looks fine on screen. See
+    # `ShellWorkspacesTests`.
+    "ShellWorkspaces.swift",
     # What a phone says before it closes a terminal, and the rule for when it
     # says anything at all. Here for `ShellNavigation.swift`'s reason and for
     # one of its own: closing is irreversible — the pane is killed and the
@@ -402,6 +408,11 @@ AGENTKIT_SOURCES = [
     "TaskBoardModel.swift",
     "TaskBoardAgents.swift",
     "RunnerBoards.swift",
+    # Repository, then workspace, then its worktrees: the one grouping rule
+    # the Mac and the phone share, and the board notice that says which
+    # workspace's board to read again. `CoreModel.swift` decodes the fleet's
+    # `workspaces` into its `WorkspaceSummary`, so the two go together.
+    "WorkspaceGroups.swift",
     # The clock the cards read and the tick that redraws them, shared so the
     # phone's card turns stale on the minute by the same rule as the Mac's.
     # See `BoardClockTests`.

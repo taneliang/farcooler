@@ -144,6 +144,24 @@ class BackstackTest {
         )
     }
 
+    /**
+     * A board saved before workspaces, by repository, still decodes: that id
+     * is the repository's implicit workspace, which is the board it named.
+     * Written back under the new name.
+     */
+    @Test
+    fun aBoardSavedByRepositoryStillDecodes() {
+        val restored = Backstack.decodeStack(
+            """[{"type":"needs-you"},{"type":"board","hostId":"h","repositoryId":"r"},""" +
+                """{"type":"board-task","hostId":"h","repositoryId":"r","taskId":"t"}]"""
+        )
+        assertEquals(listOf(Backstack.ROOT, Route.Board("h", "r"), Route.BoardTask("h", "r", "t")), restored)
+        assertEquals(
+            """[{"type":"board","hostId":"h","workspaceId":"r"}]""",
+            Backstack.encodeStack(listOf(Route.Board("h", "r"))),
+        )
+    }
+
     /** A field added by a later build must not cost an older one its place. */
     @Test
     fun anUnknownFieldIsIgnored() {

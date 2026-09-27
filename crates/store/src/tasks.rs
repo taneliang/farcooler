@@ -11,10 +11,10 @@
 //! the reasoning, and the reasoning is the part you want in three weeks.
 //!
 //! The other half of this module is the key people and agents actually use:
-//! `fc-42`. A repository's task key prefix is computed once, at registration
-//! (or, for one registered before the board, by migration 12), from its
-//! name -- and then stored, never recomputed. See `derive_prefix` and
-//! `Store::assign_task_key_prefix` for why: a prefix that answered to the
+//! `fc-42`. The prefix belongs to a workspace (see `workspaces.rs`): Main's is
+//! derived once from the repository's name when Main is made, and every other
+//! workspace's is the user's. Either way it is stored, never recomputed from a
+//! name, and a key is stored whole on its task. A prefix that answered to the
 //! CURRENT name would change under a rename, and every key ever written into
 //! a note, spoken aloud, or handed to an agent in its opening prompt would
 //! stop resolving. Keys are the one identifier in this system that leaves the
@@ -36,19 +36,24 @@ use crate::models::{
 };
 use crate::store::Store;
 
-/// A repository's task key prefix, from its name.
+/// A repository's task key prefix, from its name: what its Main starts with.
 ///
 /// Initials for a multi-word name, the first two letters otherwise. Short
 /// because a person types these and says them out loud.
 ///
-/// Computed ONCE, when a repository is registered, and stored. See
+/// Computed ONCE, when a repository's Main is made, and stored. See
 /// `renaming_a_repository_does_not_change_its_task_keys` in this module's
 /// tests for why this must never become a function of the current name.
+///
+/// Not held to `valid_prefix` here: a name starting with a digit, or of nine
+/// words, derives a prefix a person could not have typed. A new Main clamps
+/// it (`workspaces::main_prefix`); migration 0015 stored what earlier
+/// migrations derived, and keys minted under those resolve all the same.
 ///
 /// Word-splitting is `is_ascii_alphanumeric`, so a name with no ASCII
 /// letters or digits in it -- a name written entirely in a non-Latin script,
 /// for instance -- collapses to the `"t"` fallback below, same as `"---"`
-/// does. Not a correctness bug: `assign_task_key_prefix`'s collision
+/// does. Not a correctness bug: `free_prefix`'s collision
 /// resolution handles two repositories landing on the same prefix regardless
 /// of why they did, including two differently-named repositories that both
 /// fall back to `"t"`. But it does mean prefixes for such names carry no
@@ -82,12 +87,14 @@ fn is_unique_violation(err: &rusqlite::Error) -> bool {
     matches!(err, rusqlite::Error::SqliteFailure(e, _) if e.code == ErrorCode::ConstraintViolation)
 }
 
-/// The derivation and collision rule `Store::assign_task_key_prefix`
-/// documents, on any connection -- the store's own at registration, or the
-/// transaction `migration_0012_every_board_has_a_prefix` runs in, which is
-/// why this takes a `&Connection` and a name rather than a `Store` and a
-/// lookup. One function, so a repository that got its prefix late gets it
-/// by exactly the rule one registered today does.
+/// How a repository registered before the board got its prefix, in the
+/// transaction `migration_0012_every_board_has_a_prefix` runs in: derived from
+/// its name, with a digit appended until no other repository holds it.
+///
+/// Only that migration calls this now. Since migration 0015 a prefix is a
+/// workspace's, and `workspaces::free_prefix` is the same rule over
+/// workspaces; this one stays because a database older than 0012 still runs
+/// 0012 on its way to the current schema.
 ///
 /// Inside a transaction the retry still works: a constraint failure aborts
 /// only the one `UPDATE` (SQLite's default `ABORT` resolution), not the
@@ -132,67 +139,60 @@ pub(crate) fn claim_task_key_prefix(conn: &Connection, repo: &[u8], name: &str) 
     }
 }
 
-impl Store {
-    /// Assigns and stores this repository's task key prefix, derived once
-    /// from its name at the moment this is called.
-    ///
-    /// A collision with a prefix already claimed by another repository on
-    /// this runner is resolved by appending a digit and trying again. The
-    /// database is the referee: `repositories_one_task_prefix` (the partial
-    /// unique index over non-empty prefixes) is what actually notices a
-    /// collision, not a count this function takes on faith, so two
-    /// registrations racing each other still cannot both win the same
-    /// prefix.
-    ///
-    /// Bumps `resource_version` in the same `UPDATE`, so a watcher or an RPC
-    /// layer that treats an unchanged version as "nothing to refresh" notices
-    /// this write too.
-    /// There is no `expected_version` parameter here to check against --
-    /// unlike this crate's versioned mutations, this one is not a client
-    /// request replaying a version it read; it is called exactly once, from
-    /// inside repository registration, against a row nothing else has had a
-    /// chance to see yet. A repository registered before the board existed
-    /// got its prefix from `migration_0012_every_board_has_a_prefix` instead,
-    /// by the same `claim_task_key_prefix`.
-    pub fn assign_task_key_prefix(&self, repo: Uuid) -> Result<String> {
-        let name = self.get_repository(repo)?.display_name;
-        claim_task_key_prefix(&self.conn(), &uuid_blob(repo), &name).map_err(map_err)
-    }
+/// The next key under `prefix`: one more than the highest number any task on
+/// the runner carries under it, in its key or in its former key.
+///
+/// Runner-wide rather than per workspace, and counting former keys, so a key
+/// is never issued twice: not after a task moves to another workspace (it
+/// keeps its key), not after a workspace renames its prefix away and back
+/// (`bil-3` was minted, `pay` came and went, the next `bil` is `bil-4`), and
+/// not after migration 0012 renamed `-3` to `ov-3` and kept `-3` as a former
+/// key. The one number that can come back is the top one, if the task holding
+/// it is deleted: there is deliberately no stored high-water mark.
+///
+/// A plain aggregate query always returns exactly one row, even when nothing
+/// matches: it is `MAX` that comes back NULL, not the row that goes missing.
+fn next_key_under(conn: &Connection, prefix: &str) -> rusqlite::Result<String> {
+    let max: Option<i64> = conn.query_row(
+        "SELECT MAX(n) FROM (
+             SELECT CAST(SUBSTR(key, LENGTH(?1) + 2) AS INTEGER) AS n
+               FROM tasks WHERE key LIKE ?1 || '-%'
+             UNION ALL
+             SELECT CAST(SUBSTR(former_key, LENGTH(?1) + 2) AS INTEGER)
+               FROM tasks WHERE former_key LIKE ?1 || '-%')",
+        params![prefix],
+        |r| r.get(0),
+    )?;
+    Ok(format!("{prefix}-{}", max.unwrap_or(0) + 1))
+}
 
-    /// The next key this repository has not used yet: `<prefix>-<n>`.
-    ///
-    /// `n` is one more than the highest numeric suffix any task CURRENTLY in
-    /// this repository carries, read fresh from `tasks` rather than kept in a
-    /// counter column. There is deliberately no persisted high-water mark: if
-    /// the task holding the highest number is later deleted, the next key
-    /// issued reuses that number. The prefix itself is read from the
-    /// repository row, never derived from its current name; see this
-    /// module's doc for why.
-    pub fn next_task_key(&self, repo: Uuid) -> Result<String> {
-        let mut prefix = self.get_repository(repo)?.task_key_prefix;
-        // A repository with no prefix claims one before its first key, by
-        // registration's own rule, rather than minting `-1`: a key a command
-        // line reads as a flag. Registration assigns one, but only after the
-        // repository row is already committed, so a registration that failed
-        // in between leaves a row that would otherwise mint `-1` forever.
-        if prefix.is_empty() {
-            prefix = self.assign_task_key_prefix(repo)?;
+/// Which tasks a listing covers: one board, or every board in a repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskScope {
+    Workspace(Uuid),
+    Repository(Uuid),
+}
+
+impl TaskScope {
+    /// The WHERE clause and its one parameter, for a query reading `FROM
+    /// tasks` unaliased.
+    fn clause(self) -> (&'static str, Vec<u8>) {
+        match self {
+            TaskScope::Workspace(id) => ("workspace_id = ?1", uuid_blob(id)),
+            TaskScope::Repository(id) => ("repository_id = ?1", uuid_blob(id)),
         }
+    }
+}
 
-        // A plain aggregate query always returns exactly one row, even when
-        // nothing matches the WHERE clause -- it is the aggregate itself
-        // (here, MAX) that comes back NULL, not the row that goes missing.
-        let max: Option<i64> = self
-            .conn()
-            .query_row(
-                "SELECT MAX(CAST(SUBSTR(key, LENGTH(?1) + 2) AS INTEGER))
-                 FROM tasks WHERE repository_id = ?2 AND key LIKE ?1 || '-%'",
-                params![prefix, uuid_blob(repo)],
-                |r| r.get::<_, Option<i64>>(0),
-            )
-            .map_err(map_err)?;
-
-        Ok(format!("{prefix}-{}", max.unwrap_or(0) + 1))
+impl Store {
+    /// The next key this workspace would issue: `<prefix>-<n>`. See
+    /// `next_key_under` for how `n` is counted.
+    ///
+    /// The prefix is the workspace's own, read from its row, never derived
+    /// from a name; see this module's doc for why.
+    pub fn next_task_key(&self, workspace: Uuid) -> Result<String> {
+        let prefix = self.get_workspace(workspace)?.task_prefix;
+        next_key_under(&self.conn(), &prefix).map_err(map_err)
     }
 }
 
@@ -203,7 +203,7 @@ impl Store {
 /// deliberately does not. `status_since` and a note's `at` say when a task
 /// actually moved, and moving one is meant to be driven from the wire, where
 /// a timestamp parameter would be a clock a client could set.
-fn now_millis() -> i64 {
+pub(crate) fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -266,7 +266,8 @@ const UPDATED_AT: &str = updated_at_sql!();
 /// `task_notes_by_task (task_id, at)` keeps the subquery to one task's notes.
 const TASK_COLUMNS: &str = concat!(
     "id, repository_id, key, title, status, status_since, \
-     intent, acceptance, constraints, labels, worktree_id, resource_version, created_at, ",
+     intent, acceptance, constraints, labels, worktree_id, resource_version, created_at, \
+     workspace_id, ",
     updated_at_sql!()
 );
 
@@ -284,7 +285,7 @@ const NOTE_COLUMNS: &str = "id, task_id, kind, actor, at, body, extra, supersede
 /// carries triggers that refuse an UPDATE outright and refuse a DELETE while
 /// the note's task still exists, so an edit path could not work even if
 /// somebody wrote one; correcting the record is `add_note_superseding`.
-fn insert_note(
+pub(crate) fn insert_note(
     conn: &Connection,
     task: Uuid,
     kind: NoteKind,
@@ -324,25 +325,26 @@ fn insert_note(
 impl Store {
     // ---- the task row: current understanding ----
 
-    /// A new task, in the backlog, carrying this repository's next key.
+    /// A new task on `workspace`'s board, in the backlog, carrying the
+    /// workspace's next key.
     ///
-    /// The key is read before the transaction opens, not inside it, so two
-    /// creations racing can both read the same next key. `UNIQUE
-    /// (repository_id, key)` is the referee when they do: the loser gets a
-    /// conflict rather than a duplicate key.
+    /// The key is counted inside the transaction that writes the row, on the
+    /// store's one connection, so two creations cannot both take it.
     ///
     /// `actor` is recorded as the first entry in the record. The row has no
     /// author column -- who made a task is history, not current understanding,
     /// and history lives in notes.
-    pub fn create_task(&self, repository: Uuid, title: &str, actor: Actor) -> Result<Task> {
-        // Before the connection is locked: `next_task_key` locks it itself,
-        // and the mutex is not reentrant.
-        let key = self.next_task_key(repository)?;
+    pub fn create_task(&self, workspace: Uuid, title: &str, actor: Actor) -> Result<Task> {
+        let workspace = self.get_workspace(workspace)?;
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        let key = next_key_under(&tx, &workspace.task_prefix).map_err(map_err)?;
         let now = now_millis();
         let task = Task {
             id: Uuid::now_v7(),
             key,
-            repository_id: repository,
+            repository_id: workspace.repository_id,
+            workspace_id: workspace.id,
             title: title.to_string(),
             status: TaskStatus::Backlog,
             status_since: now,
@@ -357,15 +359,15 @@ impl Store {
             updated_at: now,
         };
 
-        let mut conn = self.conn();
-        let tx = conn.transaction().map_err(map_err)?;
         tx.execute(
             "INSERT INTO tasks
-             (id, repository_id, key, title, status, status_since, created_at, resource_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+             (id, repository_id, workspace_id, key, title, status, status_since, created_at,
+              resource_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
             params![
                 uuid_blob(task.id),
                 uuid_blob(task.repository_id),
+                uuid_blob(task.workspace_id),
                 task.key,
                 task.title,
                 task.status.as_str(),
@@ -413,8 +415,9 @@ impl Store {
     ///
     /// A list rather than an `Option`, and the reason is narrower than it
     /// looks. A runner that has always worked cannot mint the same key twice:
-    /// `task_key_prefix` carries a unique index (see `migrate.rs`) and every
-    /// key is `<prefix>-<n>`. Former keys can collide, though: two boards that
+    /// a workspace's prefix is unique on the runner, every key is
+    /// `<prefix>-<n>`, and `n` is counted across the whole runner (see
+    /// `next_key_under`). Former keys can collide, though: two boards that
     /// were both prefixless each had a `-1`, and asked without a board, `-1`
     /// still names two tasks. So the shape here lets a caller REFUSE an
     /// ambiguous key rather than pick from it, because picking is how a write
@@ -442,23 +445,25 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
-    /// Every task in a repository, optionally narrowed to one status.
+    /// Every task on one board, or on every board in a repository,
+    /// optionally narrowed to one status.
     ///
     /// Ordered by when each was created, so a listing read twice reads the
     /// same both times. `rowid` breaks a tie between two tasks created in the
     /// same millisecond, which is why the order does not depend on how coarse
     /// the clock happens to be.
-    pub fn list_tasks(&self, repository: Uuid, status: Option<TaskStatus>) -> Result<Vec<Task>> {
+    pub fn list_tasks(&self, scope: TaskScope, status: Option<TaskStatus>) -> Result<Vec<Task>> {
+        let (within, id) = scope.clause();
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {TASK_COLUMNS} FROM tasks
-                  WHERE repository_id = ?1 AND (?2 IS NULL OR status = ?2)
+                  WHERE {within} AND (?2 IS NULL OR status = ?2)
                   ORDER BY created_at, rowid"
             ))
             .map_err(map_err)?;
         let rows = stmt
-            .query_map(params![uuid_blob(repository), status.map(TaskStatus::as_str)], row_to_task)
+            .query_map(params![id, status.map(TaskStatus::as_str)], row_to_task)
             .map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
@@ -992,8 +997,8 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
-    /// Tasks in `repository` that have sat in their current status longer
-    /// than `threshold`, oldest-sitting first.
+    /// Tasks in `scope` that have sat in their current status longer than
+    /// `threshold`, oldest-sitting first.
     ///
     /// The failure mode this whole arrangement is built to surface is not an
     /// agent doing the wrong thing -- it is a task a manager assumed was in
@@ -1014,20 +1019,21 @@ impl Store {
     /// however long it has been in progress. The same clock the boards use
     /// ("Hasn’t moved in N days"), from the same expression, so this sweep
     /// and the cards never disagree about which card stopped.
-    pub fn list_tasks_stale_for(&self, repository: Uuid, threshold: Duration) -> Result<Vec<Task>> {
+    pub fn list_tasks_stale_for(&self, scope: TaskScope, threshold: Duration) -> Result<Vec<Task>> {
+        let (within, id) = scope.clause();
         let cutoff = now_millis() - threshold.as_millis() as i64;
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {TASK_COLUMNS} FROM tasks
-                  WHERE repository_id = ?1
+                  WHERE {within}
                     AND status IN ('in_progress', 'in_review')
                     AND {UPDATED_AT} < ?2
                   ORDER BY {UPDATED_AT}, rowid"
             ))
             .map_err(map_err)?;
         let rows = stmt
-            .query_map(params![uuid_blob(repository), cutoff], row_to_task)
+            .query_map(params![id, cutoff], row_to_task)
             .map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
@@ -1080,9 +1086,8 @@ fn blocking_walk_reaches(conn: &Connection, start: Uuid, target: Uuid, limit: us
 
 #[cfg(test)]
 impl Store {
-    /// A repository with a real, assigned task key prefix -- not the schema's
-    /// bare `''` default. Every collision and every prefix-stability test
-    /// needs a genuinely non-empty prefix to have anything to prove.
+    /// A repository, registered as the daemon registers one, bar its Main:
+    /// `ensure_main_workspace` makes that, and the helpers below call it.
     pub(crate) fn register_repository_for_test(&self, name: &str) -> Uuid {
         let host = Uuid::now_v7();
         // A fresh path per call: `repository_roots.path` is globally unique,
@@ -1093,7 +1098,6 @@ impl Store {
         let repo = self
             .create_repository(host, root.id, name, &format!("{path}/.git"), "")
             .expect("repo");
-        self.assign_task_key_prefix(repo.id).expect("prefix");
         repo.id
     }
 
@@ -1103,17 +1107,19 @@ impl Store {
             .expect("rename");
     }
 
-    /// A task whose key is whatever `next_task_key` currently says, so a test
-    /// creating one and then asking for the next key exercises the exact same
-    /// counting the real thing does.
+    /// A task on `repo`'s Main whose key is whatever `next_task_key`
+    /// currently says, so a test creating one and then asking for the next key
+    /// exercises the exact same counting the real thing does.
     pub(crate) fn create_task_for_test(&self, repo: Uuid, title: &str) -> Uuid {
-        let key = self.next_task_key(repo).expect("key");
+        let main = self.ensure_main_workspace(repo).expect("Main").id;
+        let key = self.next_task_key(main).expect("key");
         let id = Uuid::now_v7();
         self.conn()
             .execute(
-                "INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
-                 VALUES (?1, ?2, ?3, ?4, 'backlog', 0, 0, 1)",
-                params![uuid_blob(id), uuid_blob(repo), key, title],
+                "INSERT INTO tasks (id, repository_id, workspace_id, key, title, status, status_since,
+                                    created_at, resource_version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'backlog', 0, 0, 1)",
+                params![uuid_blob(id), uuid_blob(repo), uuid_blob(main), key, title],
             )
             .expect("insert task");
         id
@@ -1132,14 +1138,16 @@ impl Store {
         status: TaskStatus,
         ago: Duration,
     ) -> Uuid {
-        let key = self.next_task_key(repo).expect("key");
+        let main = self.ensure_main_workspace(repo).expect("Main").id;
+        let key = self.next_task_key(main).expect("key");
         let id = Uuid::now_v7();
         let since = now_millis() - ago.as_millis() as i64;
         self.conn()
             .execute(
-                "INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1)",
-                params![uuid_blob(id), uuid_blob(repo), key, title, status.as_str(), since],
+                "INSERT INTO tasks (id, repository_id, workspace_id, key, title, status, status_since,
+                                    created_at, resource_version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 1)",
+                params![uuid_blob(id), uuid_blob(repo), uuid_blob(main), key, title, status.as_str(), since],
             )
             .expect("insert a card that sat");
         id
@@ -1207,6 +1215,11 @@ mod tests {
         assert!(!derive_prefix("").is_empty());
     }
 
+    /// `repo`'s Main, made if need be.
+    fn main_of(store: &Store, repo: Uuid) -> Uuid {
+        store.ensure_main_workspace(repo).expect("Main").id
+    }
+
     /// The reason the prefix is stored and not computed on read.
     ///
     /// A prefix derived on every read changes when a repository is renamed,
@@ -1217,96 +1230,62 @@ mod tests {
     fn renaming_a_repository_does_not_change_its_task_keys() {
         let store = Store::open_in_memory().expect("store");
         let repo = store.register_repository_for_test("Far Cooler");
-        let before = store.next_task_key(repo).expect("key");
+        let main = main_of(&store, repo);
+        let before = store.next_task_key(main).expect("key");
         store.rename_repository_for_test(repo, "Something Else");
-        let after = store.next_task_key(repo).expect("key");
-        assert_eq!(
-            before.split('-').next(),
-            after.split('-').next(),
-            "the prefix is the repository's, once, forever"
-        );
+        let after = store.next_task_key(main).expect("key");
+        assert_eq!(before, "fc-1");
+        assert_eq!(after, before, "the prefix is Main's, once, forever");
     }
 
-    /// A second claim on a repository that already has a prefix changes
-    /// nothing, even after a rename: it is how a claim that lost a race
-    /// learns the winner's prefix instead of overwriting it.
+    /// Asking for a repository's Main again, even after a rename, hands back
+    /// the one it has rather than deriving another.
     #[test]
-    fn a_prefix_already_held_is_never_claimed_again() {
+    fn a_main_already_made_is_never_made_again() {
         let store = Store::open_in_memory().expect("store");
         let repo = store.register_repository_for_test("Far Cooler");
-        let version = store.get_repository(repo).unwrap().resource_version;
+        let main = store.ensure_main_workspace(repo).unwrap();
         store.rename_repository_for_test(repo, "Something Else");
-        assert_eq!(store.assign_task_key_prefix(repo).unwrap(), "fc", "the stored prefix, not a new one");
-        let after = store.get_repository(repo).unwrap();
-        assert_eq!(after.task_key_prefix, "fc");
-        assert_eq!(after.resource_version, version + 1, "only the rename wrote the row");
+        assert_eq!(store.ensure_main_workspace(repo).unwrap(), main, "the stored Main, not a new one");
+        assert_eq!(store.list_workspaces(Some(repo)).unwrap().len(), 1);
     }
 
     #[test]
-    fn keys_count_up_within_a_repository() {
+    fn keys_count_up_within_a_workspace() {
         let store = Store::open_in_memory().expect("store");
         let repo = store.register_repository_for_test("Far Cooler");
-        assert_eq!(store.next_task_key(repo).unwrap(), "fc-1");
+        let main = main_of(&store, repo);
+        assert_eq!(store.next_task_key(main).unwrap(), "fc-1");
         store.create_task_for_test(repo, "first");
-        assert_eq!(store.next_task_key(repo).unwrap(), "fc-2");
+        assert_eq!(store.next_task_key(main).unwrap(), "fc-2");
     }
 
-    /// A single repository proves the mechanism works; it proves nothing
-    /// about collision resolution, since there is nothing to collide with.
     /// Two repositories that would derive the SAME prefix from their names
-    /// ("Far Cooler" and "Far Corral" both reduce to "fc") is the fixture
-    /// that actually exercises `assign_task_key_prefix`'s retry loop -- and
-    /// distinguishes a real resolver from one that only ever returns the
-    /// base prefix and lets the database's unique index fail the second
-    /// registration outright.
+    /// ("Far Cooler" and "Far Corral" both reduce to "fc") is the fixture that
+    /// exercises `free_prefix`'s retry loop -- and distinguishes a real
+    /// resolver from one that only ever returns the base prefix and lets the
+    /// unique index fail the second Main outright.
     #[test]
     fn two_repositories_that_derive_the_same_prefix_do_not_collide() {
         let store = Store::open_in_memory().expect("store");
         let first = store.register_repository_for_test("Far Cooler");
         let second = store.register_repository_for_test("Far Corral");
+        let (first, second) =
+            (store.ensure_main_workspace(first).unwrap(), store.ensure_main_workspace(second).unwrap());
 
-        let first_prefix = store.get_repository(first).unwrap().task_key_prefix;
-        let second_prefix = store.get_repository(second).unwrap().task_key_prefix;
+        assert_eq!(first.task_prefix, "fc", "the first Main gets the plain prefix");
+        assert_eq!(second.task_prefix, "fc2", "the second is still recognizably derived from its name");
 
-        assert_eq!(first_prefix, "fc", "the first registrant gets the plain prefix");
-        assert_ne!(
-            second_prefix, first_prefix,
-            "the second registrant must not silently share the first's prefix"
-        );
-        assert!(
-            second_prefix.starts_with("fc"),
-            "the resolved prefix is still recognizably derived from the name, got {second_prefix}"
-        );
-
-        // And each repository's tasks count up independently under its own,
-        // now-distinct, prefix.
-        assert_eq!(store.next_task_key(first).unwrap(), "fc-1");
-        assert_eq!(store.next_task_key(second).unwrap(), format!("{second_prefix}-1"));
+        // And each counts up independently under its own, distinct, prefix.
+        assert_eq!(store.next_task_key(first.id).unwrap(), "fc-1");
+        assert_eq!(store.next_task_key(second.id).unwrap(), "fc2-1");
     }
 
-    /// A watcher polling on version alone must be able to tell a bare
-    /// `create_repository` (version 1, empty prefix) apart from a fully
-    /// registered one (version 2, real prefix), so this write bumps
-    /// `resource_version`. The nearest wrong implementation is exactly what this
-    /// function looked like before this test existed: an `UPDATE` that
-    /// writes `task_key_prefix` and leaves `resource_version` untouched,
-    /// which this test would catch by seeing `2` come back as `1`.
+    /// Two tasks in one repository and none in another: each prefix counts
+    /// its own keys, and the nearest wrong implementation, a `MAX` over every
+    /// key whatever its prefix, would say `tp-3`.
     #[test]
-    fn assigning_a_prefix_bumps_the_repositorys_version() {
-        let store = Store::open_in_memory().expect("store");
-        let repo = store.register_repository_for_test("Far Cooler");
-        assert_eq!(
-            store.get_repository(repo).unwrap().resource_version,
-            2,
-            "create_repository left it at 1; assign_task_key_prefix must bump it to 2"
-        );
-    }
-
-    /// Two tasks in two different repositories both counting from `-1` proves
-    /// the count is scoped per repository, not global -- the nearest wrong
-    /// implementation reads `MAX` over the whole `tasks` table.
-    #[test]
-    fn key_numbering_does_not_leak_across_repositories() {
+    fn key_numbering_does_not_leak_across_prefixes() {
         let store = Store::open_in_memory().expect("store");
         let one = store.register_repository_for_test("One Project");
         let two = store.register_repository_for_test("Two Project");
@@ -1314,10 +1293,8 @@ mod tests {
         store.create_task_for_test(one, "first in one");
         store.create_task_for_test(one, "second in one");
 
-        // `two` has had no tasks created yet: if the count were global, this
-        // would come back "tp-3", not "tp-1".
-        assert_eq!(store.next_task_key(two).unwrap(), "tp-1");
-        assert_eq!(store.next_task_key(one).unwrap(), "op-3");
+        assert_eq!(store.next_task_key(main_of(&store, two)).unwrap(), "tp-1");
+        assert_eq!(store.next_task_key(main_of(&store, one)).unwrap(), "op-3");
     }
 
     // ---- the board ----
@@ -1330,9 +1307,9 @@ mod tests {
         Uuid::from_u128(0x0000_fc00_0000_0000_0000_0000_0000_0001)
     }
 
-    /// A store holding exactly that repository, with its task key prefix
-    /// assigned by the real `assign_task_key_prefix`, so the keys these tests
-    /// see are the keys production issues.
+    /// A store holding exactly that repository and its Main, made by the real
+    /// `ensure_main_workspace`, so the keys these tests see are the keys
+    /// production issues.
     fn seeded() -> Store {
         let store = Store::open_in_memory().expect("store");
         let host = Uuid::now_v7();
@@ -1349,8 +1326,19 @@ mod tests {
                 params![uuid_blob(repo()), uuid_blob(host), uuid_blob(root.id)],
             )
             .expect("repository");
-        store.assign_task_key_prefix(repo()).expect("prefix");
+        store.ensure_main_workspace(repo()).expect("Main");
         store
+    }
+
+    /// The board every test here files on: `repo()`'s Main.
+    fn board(store: &Store) -> Uuid {
+        store.main_workspace(repo()).expect("Main").id
+    }
+
+    /// Every board in `repo()`: what the listings here read, as they did
+    /// when a repository had one board.
+    fn ours() -> TaskScope {
+        TaskScope::Repository(repo())
     }
 
     /// The key a person types, resolved from the index rather than by reading
@@ -1362,8 +1350,8 @@ mod tests {
     #[test]
     fn a_key_resolves_to_the_task_it_names() {
         let store = seeded();
-        let first = store.create_task(repo(), "fix the thing", Actor::User).unwrap();
-        store.create_task(repo(), "and the other thing", Actor::User).unwrap();
+        let first = store.create_task(board(&store), "fix the thing", Actor::User).unwrap();
+        store.create_task(board(&store), "and the other thing", Actor::User).unwrap();
 
         let found = store.tasks_with_key(Some(repo()), &first.key).unwrap();
         assert_eq!(found.len(), 1, "one key, one task on one board: {found:?}");
@@ -1393,16 +1381,16 @@ mod tests {
     /// ask about, which is how a write lands somewhere nobody looks for days.
     ///
     /// The two keys here are DIFFERENT, and that is worth saying: this runner
-    /// cannot mint the same key twice, because `task_key_prefix` carries a
-    /// unique index (see `migrate.rs`) and every key is `<prefix>-<n>`. See
+    /// cannot mint the same key twice, because a workspace's prefix is
+    /// unique on the runner and every key is `<prefix>-<n>`. See
     /// `tasks_with_key` for why the answer is a list anyway.
     #[test]
     fn a_key_is_looked_for_on_every_board_and_narrowed_by_one() {
         let store = seeded();
         let other = store.register_repository_for_test("Far Cooler");
 
-        let here = store.create_task(repo(), "ours", Actor::User).unwrap();
-        let there = store.create_task(other, "theirs", Actor::User).unwrap();
+        let here = store.create_task(board(&store), "ours", Actor::User).unwrap();
+        let there = store.create_task(main_of(&store, other), "theirs", Actor::User).unwrap();
         assert_ne!(here.key, there.key, "two boards on one runner cannot share a prefix");
 
         let found = store.tasks_with_key(None, &there.key).unwrap();
@@ -1422,7 +1410,7 @@ mod tests {
     #[test]
     fn a_status_change_records_when_it_happened_and_who_did_it() {
         let store = seeded();
-        let task = store.create_task(repo(), "fix the thing", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "fix the thing", Actor::User).unwrap();
         let before = task.status_since;
         std::thread::sleep(std::time::Duration::from_millis(5));
 
@@ -1445,7 +1433,7 @@ mod tests {
     #[test]
     fn correcting_the_record_supersedes_rather_than_edits() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let first = store
             .add_note(task.id, NoteKind::Decision, Actor::Manager, "use sqlite", json!({}))
             .unwrap();
@@ -1468,7 +1456,7 @@ mod tests {
     #[test]
     fn a_decision_keeps_what_it_rejected() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let note = store
             .add_note(
                 task.id,
@@ -1484,7 +1472,7 @@ mod tests {
     #[test]
     fn an_agent_note_names_the_terminal_you_can_go_and_read() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let terminal = Uuid::now_v7();
         let note = store
             .add_note(task.id, NoteKind::Progress, Actor::Agent { terminal }, "building", json!({}))
@@ -1495,11 +1483,11 @@ mod tests {
     #[test]
     fn listing_filters_by_status_and_reports_staleness() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        store.create_task(board(&store), "b", Actor::User).unwrap();
         store.set_task_status(a.id, TaskStatus::InProgress, Actor::Manager).unwrap();
 
-        let in_progress = store.list_tasks(repo(), Some(TaskStatus::InProgress)).unwrap();
+        let in_progress = store.list_tasks(ours(), Some(TaskStatus::InProgress)).unwrap();
         assert_eq!(in_progress.len(), 1);
         assert_eq!(in_progress[0].id, a.id);
     }
@@ -1512,8 +1500,8 @@ mod tests {
     #[test]
     fn a_created_task_carries_the_repositorys_next_key() {
         let store = seeded();
-        let first = store.create_task(repo(), "first", Actor::User).unwrap();
-        let second = store.create_task(repo(), "second", Actor::User).unwrap();
+        let first = store.create_task(board(&store), "first", Actor::User).unwrap();
+        let second = store.create_task(board(&store), "second", Actor::User).unwrap();
         assert_eq!(first.key, "fc-1");
         assert_eq!(second.key, "fc-2");
         assert_eq!(first.status, TaskStatus::Backlog, "a task is born in the backlog");
@@ -1526,7 +1514,7 @@ mod tests {
     #[test]
     fn revising_the_understanding_rewrites_the_row_and_records_nothing() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let notes_before = store.notes_for(task.id, None).unwrap().len();
         let item = Uuid::now_v7();
 
@@ -1570,7 +1558,7 @@ mod tests {
     #[test]
     fn a_revision_against_a_stale_version_is_refused() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let update = TaskUpdate {
             title: "t".to_string(),
             intent: "first".to_string(),
@@ -1594,7 +1582,7 @@ mod tests {
     #[test]
     fn re_asserting_the_status_a_task_already_has_does_not_restart_its_clock() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
 
         let again = store.set_task_status(task.id, TaskStatus::Backlog, Actor::Manager).unwrap();
@@ -1634,8 +1622,8 @@ mod tests {
     #[test]
     fn notes_do_not_leak_between_tasks() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
         store.add_note(a.id, NoteKind::Decision, Actor::User, "a's", json!({})).unwrap();
         store.add_note(b.id, NoteKind::Decision, Actor::User, "b's", json!({})).unwrap();
 
@@ -1653,7 +1641,7 @@ mod tests {
     #[test]
     fn there_is_no_path_that_rewrites_a_note() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let note =
             store.add_note(task.id, NoteKind::Decision, Actor::Manager, "as written", json!({}))
                 .unwrap();
@@ -1731,8 +1719,8 @@ mod tests {
     #[test]
     fn a_note_cannot_supersede_another_tasks_note() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
         let theirs =
             store.add_note(b.id, NoteKind::Decision, Actor::Manager, "b's call", json!({})).unwrap();
 
@@ -1767,7 +1755,7 @@ mod tests {
     #[test]
     fn a_supersede_link_survives_the_database() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let first = store
             .add_note(task.id, NoteKind::Decision, Actor::Manager, "use sqlite", json!({}))
             .unwrap();
@@ -1800,7 +1788,7 @@ mod tests {
     #[test]
     fn an_agents_terminal_and_a_decisions_alternatives_survive_the_database() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let terminal = Uuid::now_v7();
         store
             .add_note(task.id, NoteKind::Progress, Actor::Agent { terminal }, "building", json!({}))
@@ -1835,7 +1823,7 @@ mod tests {
     fn creating_a_task_records_who_made_it() {
         let store = seeded();
         let terminal = Uuid::now_v7();
-        let task = store.create_task(repo(), "fix the thing", Actor::Agent { terminal }).unwrap();
+        let task = store.create_task(board(&store), "fix the thing", Actor::Agent { terminal }).unwrap();
 
         let created = store.notes_for(task.id, Some(NoteKind::Created)).unwrap();
         assert_eq!(created.len(), 1, "a task's record starts with how it started");
@@ -1855,7 +1843,7 @@ mod tests {
     #[test]
     fn a_status_change_whose_note_is_refused_leaves_the_row_where_it_was() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         store
             .conn()
             .execute_batch(
@@ -1884,7 +1872,7 @@ mod tests {
     #[test]
     fn a_note_cannot_supersede_a_note_of_another_kind() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let decision = store
             .add_note(task.id, NoteKind::Decision, Actor::Manager, "sqlite", json!({}))
             .unwrap();
@@ -1915,7 +1903,7 @@ mod tests {
     #[test]
     fn a_caller_cannot_append_a_status_change_or_a_creation_by_hand() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
 
         for forged in [NoteKind::StatusChange, NoteKind::Created] {
             let err = store
@@ -1943,7 +1931,7 @@ mod tests {
     #[test]
     fn a_status_move_does_not_conflict_with_a_revision_in_flight() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let terminal = Uuid::now_v7();
 
         // The manager holds the version it read; an agent moves the task.
@@ -1991,7 +1979,7 @@ mod tests {
     fn a_created_and_moved_task_reads_back_as_what_was_returned() {
         let store = seeded();
 
-        let created = store.create_task(repo(), "fix the thing", Actor::User).unwrap();
+        let created = store.create_task(board(&store), "fix the thing", Actor::User).unwrap();
         assert_eq!(
             store.get_task(created.id).unwrap(),
             created,
@@ -2041,7 +2029,7 @@ mod tests {
     #[test]
     fn a_card_nothing_has_happened_to_was_added_and_not_updated() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         assert_eq!(task.updated_at, task.created_at);
         assert!(task.created_at > 0);
 
@@ -2055,7 +2043,7 @@ mod tests {
     #[test]
     fn a_note_moves_updated_at() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         tick();
         let note =
             store.add_note(task.id, NoteKind::Finding, Actor::User, "it leaks", json!({})).unwrap();
@@ -2066,14 +2054,14 @@ mod tests {
 
         // Every read path, not just `get_task`: they share `TASK_COLUMNS`,
         // and the board reads `list_tasks`.
-        let listed = store.list_tasks(repo(), None).unwrap();
+        let listed = store.list_tasks(ours(), None).unwrap();
         assert_eq!(listed[0].updated_at, note.at);
     }
 
     #[test]
     fn a_move_moves_updated_at() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         tick();
         let moved = store.set_task_status(task.id, TaskStatus::InProgress, Actor::User).unwrap();
         assert!(moved.updated_at > task.created_at);
@@ -2085,7 +2073,7 @@ mod tests {
     #[test]
     fn a_revision_moves_updated_at_and_one_that_changes_nothing_does_not() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         tick();
         let edited =
             store.update_task(task.id, task.resource_version, &revision("t", "why")).unwrap();
@@ -2102,7 +2090,7 @@ mod tests {
     #[test]
     fn filling_in_a_new_task_is_not_an_update() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         tick();
         let filled =
             store.fill_in_new_task(task.id, task.resource_version, &revision("t", "why")).unwrap();
@@ -2122,8 +2110,8 @@ mod tests {
     #[test]
     fn a_block_does_not_move_updated_at() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
-        let other = store.create_task(repo(), "u", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
+        let other = store.create_task(board(&store), "u", Actor::User).unwrap();
         tick();
         store.set_block(task.id, other.id, Some("needs it")).unwrap();
         assert_eq!(store.get_task(task.id).unwrap().updated_at, task.created_at);
@@ -2136,10 +2124,10 @@ mod tests {
     fn a_listing_shows_only_its_own_repositorys_tasks() {
         let store = seeded();
         let other = store.register_repository_for_test("Other Thing");
-        store.create_task(repo(), "ours", Actor::User).unwrap();
-        store.create_task(other, "theirs", Actor::User).unwrap();
+        store.create_task(board(&store), "ours", Actor::User).unwrap();
+        store.create_task(main_of(&store, other), "theirs", Actor::User).unwrap();
 
-        let ours = store.list_tasks(repo(), None).unwrap();
+        let ours = store.list_tasks(ours(), None).unwrap();
         assert_eq!(ours.len(), 1);
         assert_eq!(ours[0].title, "ours");
     }
@@ -2149,9 +2137,9 @@ mod tests {
     #[test]
     fn a_task_can_be_blocked_on_several_things_each_with_a_reason() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
-        let c = store.create_task(repo(), "c", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
+        let c = store.create_task(board(&store), "c", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("needs the migration first")).unwrap();
         store.set_block(a.id, c.id, Some("needs the CLI")).unwrap();
 
@@ -2175,8 +2163,8 @@ mod tests {
     #[test]
     fn re_blocking_a_pair_replaces_the_reason_rather_than_refusing() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("needs the cheap lookup")).unwrap();
 
         store.set_block(a.id, b.id, Some("corrected reason")).expect("a re-set is not a conflict");
@@ -2195,9 +2183,9 @@ mod tests {
     #[test]
     fn a_corrected_reason_keeps_the_edge_where_it_was_in_the_listing() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
-        let c = store.create_task(repo(), "c", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
+        let c = store.create_task(board(&store), "c", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("needs the migration first")).unwrap();
         store.set_block(a.id, c.id, Some("needs the CLI")).unwrap();
 
@@ -2231,8 +2219,8 @@ mod tests {
     #[test]
     fn re_blocking_without_a_reason_leaves_the_reason_that_was_there() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("needs the migration first")).unwrap();
 
         store.set_block(a.id, b.id, None).expect("re-asserting a block is not a conflict");
@@ -2258,8 +2246,8 @@ mod tests {
     #[test]
     fn re_blocking_with_an_empty_reason_clears_the_reason_that_was_there() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("needs the cheap lookup")).unwrap();
 
         store.set_block(a.id, b.id, Some("")).unwrap();
@@ -2284,8 +2272,8 @@ mod tests {
     #[test]
     fn a_first_block_with_no_reason_reads_back_as_an_empty_reason() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
 
         store.set_block(a.id, b.id, None).expect("a block with no reason is still a block");
 
@@ -2311,7 +2299,7 @@ mod tests {
     #[test]
     fn a_block_on_a_task_that_is_not_there_names_the_argument_and_not_a_conflict() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
 
         let err = store
             .set_block(a.id, Uuid::now_v7(), Some("waiting on a ghost"))
@@ -2349,7 +2337,7 @@ mod tests {
     #[test]
     fn a_block_on_a_task_that_is_not_there_is_still_not_found() {
         let store = seeded();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
 
         let err = store
             .set_block(Uuid::now_v7(), b.id, Some(""))
@@ -2362,8 +2350,8 @@ mod tests {
     #[test]
     fn a_cycle_is_refused_rather_than_stored() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("")).unwrap();
 
         let err = store.set_block(b.id, a.id, Some("")).expect_err("must refuse");
@@ -2383,9 +2371,9 @@ mod tests {
     #[test]
     fn a_cycle_three_tasks_long_is_also_refused() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
-        let c = store.create_task(repo(), "c", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
+        let c = store.create_task(board(&store), "c", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("a waits on b")).unwrap();
         store.set_block(b.id, c.id, Some("b waits on c")).unwrap();
 
@@ -2415,11 +2403,11 @@ mod tests {
     #[test]
     fn a_diamond_of_shared_dependencies_is_allowed() {
         let store = seeded();
-        let p = store.create_task(repo(), "p", Actor::User).unwrap();
-        let q1 = store.create_task(repo(), "q1", Actor::User).unwrap();
-        let q2 = store.create_task(repo(), "q2", Actor::User).unwrap();
-        let r = store.create_task(repo(), "r", Actor::User).unwrap();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let p = store.create_task(board(&store), "p", Actor::User).unwrap();
+        let q1 = store.create_task(board(&store), "q1", Actor::User).unwrap();
+        let q2 = store.create_task(board(&store), "q2", Actor::User).unwrap();
+        let r = store.create_task(board(&store), "r", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
 
         // p waits on both q1 and q2, and both of those wait on the same r.
         store.set_block(p.id, q1.id, Some("")).unwrap();
@@ -2438,7 +2426,7 @@ mod tests {
     #[test]
     fn a_task_cannot_block_on_itself() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
         assert!(store.set_block(a.id, a.id, Some("")).is_err());
     }
 
@@ -2449,9 +2437,9 @@ mod tests {
     #[test]
     fn unblocking_removes_the_edge_and_only_that_edge() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
-        let c = store.create_task(repo(), "c", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
+        let c = store.create_task(board(&store), "c", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("needs the migration first")).unwrap();
         store.set_block(a.id, c.id, Some("needs the CLI")).unwrap();
 
@@ -2468,8 +2456,8 @@ mod tests {
     #[test]
     fn unblocking_something_never_blocked_is_not_an_error() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
         store.unblock(a.id, b.id).unwrap();
         assert!(store.blocks_for(a.id).unwrap().is_empty());
     }
@@ -2480,8 +2468,8 @@ mod tests {
     #[test]
     fn unblocking_a_link_in_a_cycle_lets_it_be_closed_the_other_way() {
         let store = seeded();
-        let a = store.create_task(repo(), "a", Actor::User).unwrap();
-        let b = store.create_task(repo(), "b", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "a", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "b", Actor::User).unwrap();
         store.set_block(a.id, b.id, Some("")).unwrap();
         store.set_block(b.id, a.id, Some("")).expect_err("still a cycle while a->b stands");
 
@@ -2506,8 +2494,8 @@ mod tests {
     #[test]
     fn decisions_are_searchable_across_every_task_in_a_repository() {
         let store = seeded();
-        let a = store.create_task(repo(), "storage", Actor::User).unwrap();
-        let b = store.create_task(repo(), "unrelated", Actor::User).unwrap();
+        let a = store.create_task(board(&store), "storage", Actor::User).unwrap();
+        let b = store.create_task(board(&store), "unrelated", Actor::User).unwrap();
         store
             .add_note(a.id, NoteKind::Decision, Actor::Manager, "sqlite over files", json!({}))
             .unwrap();
@@ -2533,7 +2521,7 @@ mod tests {
     #[test]
     fn a_percent_or_underscore_in_the_query_is_matched_literally_not_as_a_wildcard() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         store.add_note(task.id, NoteKind::Finding, Actor::User, "grep task_notes", json!({})).unwrap();
         store.add_note(task.id, NoteKind::Finding, Actor::User, "taskXnotes typo", json!({})).unwrap();
         store.add_note(task.id, NoteKind::Finding, Actor::User, "hit rate is 50%", json!({})).unwrap();
@@ -2564,7 +2552,7 @@ mod tests {
     #[test]
     fn a_literal_backslash_in_the_query_is_matched_literally() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         store
             .add_note(task.id, NoteKind::Finding, Actor::User, "rate is 50%\\d always", json!({}))
             .unwrap();
@@ -2588,8 +2576,8 @@ mod tests {
     fn search_does_not_leak_across_repositories() {
         let store = seeded();
         let other = store.register_repository_for_test("Other Thing");
-        let ours = store.create_task(repo(), "ours", Actor::User).unwrap();
-        let theirs = store.create_task(other, "theirs", Actor::User).unwrap();
+        let ours = store.create_task(board(&store), "ours", Actor::User).unwrap();
+        let theirs = store.create_task(main_of(&store, other), "theirs", Actor::User).unwrap();
         store.add_note(ours.id, NoteKind::Decision, Actor::User, "sqlite", json!({})).unwrap();
         store.add_note(theirs.id, NoteKind::Decision, Actor::User, "sqlite", json!({})).unwrap();
 
@@ -2609,7 +2597,7 @@ mod tests {
     #[test]
     fn search_does_not_hide_a_note_that_was_later_superseded() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let first = store
             .add_note(task.id, NoteKind::Decision, Actor::Manager, "sqlite over files", json!({}))
             .unwrap();
@@ -2651,7 +2639,7 @@ mod tests {
     #[test]
     fn search_flags_a_hit_that_was_later_superseded_even_when_the_retracting_note_does_not_match() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
         let first = store
             .add_note(task.id, NoteKind::Decision, Actor::Manager, "use sqlite", json!({}))
             .unwrap();
@@ -2689,7 +2677,7 @@ mod tests {
     #[test]
     fn search_orders_by_at_not_by_insertion_order() {
         let store = seeded();
-        let task = store.create_task(repo(), "t", Actor::User).unwrap();
+        let task = store.create_task(board(&store), "t", Actor::User).unwrap();
 
         let first_inserted =
             store.insert_note_with_at_for_test(task.id, NoteKind::Finding, "sqlite alpha", 2_000);
@@ -2715,7 +2703,7 @@ mod tests {
             repo(), "forgotten", TaskStatus::InProgress, Duration::from_secs(3 * 86_400));
         store.a_card_that_sat_for_test(repo(), "fresh", TaskStatus::InProgress, Duration::ZERO);
 
-        let stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
+        let stale = store.list_tasks_stale_for(ours(), Duration::from_secs(86_400)).unwrap();
         assert_eq!(stale.len(), 1);
         assert_eq!(stale[0].id, old);
     }
@@ -2737,7 +2725,7 @@ mod tests {
         let more_stale = store.a_card_that_sat_for_test(
             repo(), "more stale", TaskStatus::InReview, Duration::from_secs(5 * 86_400));
 
-        let stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
+        let stale = store.list_tasks_stale_for(ours(), Duration::from_secs(86_400)).unwrap();
         assert_eq!(stale.len(), 2);
         assert_eq!(stale[0].id, more_stale, "the one that has sat longest sorts first");
         assert_eq!(stale[1].id, less_stale);
@@ -2765,7 +2753,7 @@ mod tests {
         let silent = store.a_card_that_sat_for_test(repo(), "silent", TaskStatus::InProgress, 5 * day);
 
         let stale: Vec<Uuid> =
-            store.list_tasks_stale_for(repo(), day).unwrap().into_iter().map(|t| t.id).collect();
+            store.list_tasks_stale_for(ours(), day).unwrap().into_iter().map(|t| t.id).collect();
         assert_eq!(stale, [silent, noted], "the card that moved least recently sorts first");
     }
 
@@ -2791,7 +2779,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.get_task(moved).unwrap().updated_at, an_hour_ago);
-        assert!(store.list_tasks_stale_for(repo(), day).unwrap().is_empty(), "moved an hour ago");
+        assert!(store.list_tasks_stale_for(ours(), day).unwrap().is_empty(), "moved an hour ago");
     }
 
     /// Done and cancelled tasks sit still forever and are not stale, they are
@@ -2802,7 +2790,7 @@ mod tests {
         let store = seeded();
         store.a_card_that_sat_for_test(
             repo(), "shipped", TaskStatus::Done, Duration::from_secs(30 * 86_400));
-        assert!(store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap().is_empty());
+        assert!(store.list_tasks_stale_for(ours(), Duration::from_secs(86_400)).unwrap().is_empty());
     }
 
     /// The brief's own fixture above only exercises `done`. The
@@ -2815,7 +2803,7 @@ mod tests {
         let store = seeded();
         store.a_card_that_sat_for_test(
             repo(), "abandoned", TaskStatus::Cancelled, Duration::from_secs(30 * 86_400));
-        assert!(store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap().is_empty());
+        assert!(store.list_tasks_stale_for(ours(), Duration::from_secs(86_400)).unwrap().is_empty());
     }
 
     /// Which statuses the staleness view lists: a week-old card in each of
@@ -2840,7 +2828,7 @@ mod tests {
                 repo(), status.as_str(), status, Duration::from_secs(7 * 86_400));
         }
         let mut listed: Vec<TaskStatus> = store
-            .list_tasks_stale_for(repo(), Duration::from_secs(86_400))
+            .list_tasks_stale_for(ours(), Duration::from_secs(86_400))
             .unwrap()
             .into_iter()
             .map(|t| t.status)
@@ -2860,7 +2848,7 @@ mod tests {
         let noted = store.a_card_that_sat_for_test(repo(), "noted", TaskStatus::InProgress, 3 * day);
         let edited = store.a_card_that_sat_for_test(repo(), "edited", TaskStatus::InReview, 3 * day);
         let listed = |store: &Store| -> Vec<Uuid> {
-            store.list_tasks_stale_for(repo(), day).unwrap().into_iter().map(|t| t.id).collect()
+            store.list_tasks_stale_for(ours(), day).unwrap().into_iter().map(|t| t.id).collect()
         };
         assert_eq!(listed(&store).len(), 2, "the control: both have sat three days");
 
@@ -2882,12 +2870,12 @@ mod tests {
         store.a_card_that_sat_for_test(
             other, "theirs, forgotten", TaskStatus::InProgress, Duration::from_secs(3 * 86_400));
         assert_eq!(
-            store.list_tasks_stale_for(other, Duration::from_secs(86_400)).unwrap().len(),
+            store.list_tasks_stale_for(TaskScope::Repository(other), Duration::from_secs(86_400)).unwrap().len(),
             1,
             "the control: it is stale on its own board"
         );
 
-        let ours_stale = store.list_tasks_stale_for(repo(), Duration::from_secs(86_400)).unwrap();
+        let ours_stale = store.list_tasks_stale_for(ours(), Duration::from_secs(86_400)).unwrap();
         assert!(ours_stale.is_empty(), "another repository's stale task must not appear in ours");
     }
 }
@@ -2972,7 +2960,9 @@ mod prefixless_boards {
     #[test]
     fn a_board_registered_before_prefixes_gets_one_by_the_registration_rule() {
         let (dir, store) = opened();
-        let prefix = |n| store.get_repository(id(n)).unwrap().task_key_prefix;
+        // Migration 0012 gave each repository its prefix, and 0015 gave it
+        // to the repository's Main.
+        let prefix = |n| store.main_workspace(id(n)).unwrap().task_prefix;
         assert_eq!(prefix(10), "ov");
         assert_eq!(prefix(11), "fc", "an assigned prefix is never recomputed");
         assert_eq!(prefix(12), "fc2", "a contested prefix resolves like registration's");
@@ -3027,27 +3017,34 @@ mod prefixless_boards {
         assert_eq!(blocks[0].blocked_by, id(20));
         assert_eq!(store.get_terminal(id(41)).unwrap().task_id, Some(id(20)));
 
-        assert_eq!(store.next_task_key(id(10)).unwrap(), "ov-3");
+        let main = store.main_workspace(id(10)).unwrap();
+        assert_eq!(store.next_task_key(main.id).unwrap(), "ov-3");
+        assert_eq!(
+            store.list_tasks(TaskScope::Workspace(main.id), None).unwrap().len(),
+            2,
+            "both renamed tasks are on overnight's Main"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A repository that never got a prefix (created, then its registration
-    /// failed before the prefix was assigned) claims one at its first task,
-    /// by registration's rule, and never mints `-1`.
+    /// A repository that has no Main yet (created, then its registration
+    /// failed before Main was made) gets one on asking, with a prefix by the
+    /// collision rule, and never mints `-1`.
     #[test]
-    fn a_repository_with_no_prefix_claims_one_at_its_first_key() {
+    fn a_repository_without_a_main_gets_one_with_a_free_prefix() {
         let store = Store::open_in_memory().unwrap();
         let host = Uuid::now_v7();
         let root = store.create_repository_root(host, "/r", 0).unwrap();
         let taken = store.create_repository(host, root.id, "Far Cooler", "/r/a/.git", "").unwrap().id;
-        store.assign_task_key_prefix(taken).unwrap();
+        store.ensure_main_workspace(taken).unwrap();
         let bare = store.create_repository(host, root.id, "Far Cry", "/r/b/.git", "").unwrap().id;
-        assert_eq!(store.get_repository(bare).unwrap().task_key_prefix, "");
+        assert!(matches!(store.main_workspace(bare), Err(DomainError::NotFound)));
 
-        let first = store.create_task(bare, "first", Actor::User).unwrap();
+        let main = store.ensure_main_workspace(bare).unwrap().id;
+        let first = store.create_task(main, "first", Actor::User).unwrap();
         assert_eq!(first.key, "fc2-1", "a real prefix, by the collision rule, not -1");
-        assert_eq!(store.get_repository(bare).unwrap().task_key_prefix, "fc2", "and it is stored");
-        assert_eq!(store.create_task(bare, "second", Actor::User).unwrap().key, "fc2-2");
+        assert_eq!(store.main_workspace(bare).unwrap().task_prefix, "fc2", "and it is stored");
+        assert_eq!(store.create_task(main, "second", Actor::User).unwrap().key, "fc2-2");
     }
 
     /// The old key still names its task: the note above says `-1`, and a pane

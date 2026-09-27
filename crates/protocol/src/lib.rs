@@ -217,6 +217,27 @@ pub mod capability {
     /// The value keeps the old word, *workspace*: shipped clients ask for it
     /// by this name.
     pub const WORKTREES: &str = "workspaces";
+    /// Workspaces as workstreams: `workspace.*`, `task.move`,
+    /// `worktree.assign` and `terminal.set_role`, and the workspace fields on
+    /// `Worktree`, `Terminal`, `Task`, `TaskChanged`, `TaskCreate`,
+    /// `TaskListRequest` and `WorktreeCreate`.
+    ///
+    /// **Not `"workspaces"`.** That value is `WORKTREES` above: it named what
+    /// is now called a worktree, every shipped client asks for it by that
+    /// word, and every daemon that ever existed advertises it. Reusing it
+    /// would have every runner in the field claim workspaces it does not have.
+    /// So the new level takes a new word, `workstreams`, which is what the
+    /// design calls a workspace.
+    ///
+    /// Its own capability for the reason every one below is its own, and
+    /// several of its parts are FIELDS on existing payloads, which is the case
+    /// `Request.required_capabilities` exists for: an older daemon drops
+    /// `TaskCreate.workspace_id` and files the task on the only board it has.
+    /// A client that sets one of those fields names this in the request.
+    ///
+    /// Absent means the runner has one board per repository and no
+    /// workspaces, and a client draws no workspace level.
+    pub const WORKSTREAMS: &str = "workstreams";
     /// Terminals, their screens and their input. Also the floor.
     pub const TERMINALS: &str = "terminals";
     /// Agent pane mode: the structured conversation, its prompts and its queue.
@@ -366,7 +387,7 @@ pub mod capability {
         &[
             WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
-            LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY,
+            LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -436,6 +457,15 @@ pub mod capability {
             | "task.note"
             | "task.block"
             | "task.search" => TASKS,
+            "workspace.list"
+            | "workspace.create"
+            | "workspace.rename"
+            | "workspace.set_prefix"
+            | "workspace.delete"
+            | "task.move"
+            | "worktree.assign"
+            | "terminal.set_role"
+            | "workspace.start_orchestrator" => WORKSTREAMS,
             "terminal.watching" => WATCHING,
             "terminal.attach" => TERMINAL_STREAM,
             _ => return None,
@@ -588,6 +618,11 @@ mod tests {
             ("Worktree", "state", 8, ".farcooler.v1.WorktreeState"),
             ("Worktree", "is_main_checkout", 9, ""),
             ("Worktree", "ordinal", 10, ""),
+            // Added after the rename by workspaces-as-workstreams, on fresh
+            // tags. Listed so the whole-message check below still holds.
+            ("Worktree", "workspace_id", 11, ""),
+            ("Worktree", "claim_source", 12, ""),
+            ("Worktree", "foreign_writer_workspace_ids", 13, ""),
             ("WorktreeList", "items", 1, WT),
             ("WorktreeReorder", "worktree_ids", 1, ""),
             ("WorktreeCreate", "task_name", 1, ""),
@@ -596,6 +631,7 @@ mod tests {
             ("WorktreeCreate", "terminal_preset", 4, ""),
             ("WorktreeCreate", "adopt_existing", 5, ""),
             ("WorktreeCreate", "fork_only", 6, ""),
+            ("WorktreeCreate", "workspace_id", 7, ""),
             ("DiscoveredWorktree", "path", 1, ""),
             ("DiscoveredWorktree", "branch", 3, ""),
             ("DiscoveredWorktree", "head", 4, ""),
@@ -688,6 +724,80 @@ mod tests {
         );
     }
 
+    /// The workspace additions, pinned the way the rename's numbers are
+    /// above: each on a tag nothing held before, so an app built before them
+    /// decodes every message exactly as it did.
+    #[test]
+    fn workspace_additions_take_fresh_tags() {
+        use prost::Message;
+        use prost_types::FileDescriptorSet;
+
+        let set = FileDescriptorSet::decode(
+            &include_bytes!(concat!(env!("OUT_DIR"), "/farcooler_descriptor.bin"))[..],
+        )
+        .expect("the build writes a descriptor");
+        let file = set.file.iter().find(|f| f.package() == "farcooler.v1").expect("farcooler.v1");
+        let number = |m: &str, f: &str| {
+            file.message_type
+                .iter()
+                .find(|x| x.name() == m)
+                .unwrap_or_else(|| panic!("no message {m}"))
+                .field
+                .iter()
+                .find(|x| x.name() == f)
+                .unwrap_or_else(|| panic!("{m} has no field {f}"))
+                .number()
+        };
+        for (m, f, n) in [
+            ("Request", "workspace_create", 80),
+            ("Request", "workspace_rename", 81),
+            ("Request", "workspace_set_prefix", 82),
+            ("Request", "task_move", 83),
+            ("Request", "worktree_assign", 84),
+            ("Request", "terminal_set_role", 85),
+            ("Request", "workspace_start_orchestrator", 86),
+            ("Result", "workspace", 43),
+            ("Result", "workspace_list", 44),
+            ("Terminal", "workspace_id", 39),
+            ("Terminal", "role", 40),
+            ("Task", "workspace_id", 15),
+            ("TaskCreate", "workspace_id", 9),
+            ("TaskListRequest", "workspace_id", 4),
+            ("TaskChanged", "workspace_id", 4),
+            ("TaskChanged", "from_workspace_id", 5),
+        ] {
+            assert_eq!(number(m, f), n, "{m}.{f} moved off tag {n}");
+        }
+        // The last field each of these carried before, still where it was.
+        assert_eq!(number("Request", "task_get_by_key"), 79);
+        assert_eq!(number("Result", "task_note_hit_list"), 42);
+        assert_eq!(number("Terminal", "task_id"), 37);
+        assert_eq!(number("Task", "updated_at"), 14);
+        assert_eq!(number("TaskChanged", "actor"), 3);
+    }
+
+    /// `workspaces` already means worktrees and is frozen; workspaces as
+    /// workstreams are asked for by a word of their own.
+    #[test]
+    fn workstreams_is_not_the_frozen_worktrees_word() {
+        assert_eq!(capability::WORKTREES, "workspaces", "shipped clients ask for this word");
+        assert_eq!(capability::WORKSTREAMS, "workstreams");
+        assert!(capability::ALL.contains(&capability::WORKSTREAMS));
+        for method in [
+            "workspace.list",
+            "workspace.create",
+            "workspace.rename",
+            "workspace.set_prefix",
+            "workspace.delete",
+            "task.move",
+            "worktree.assign",
+            "terminal.set_role",
+            "workspace.start_orchestrator",
+        ] {
+            assert_eq!(capability::for_method(method), Some(capability::WORKSTREAMS), "{method}");
+        }
+    }
+
     /// Every channel, so a match arm added to one list and forgotten in another
     /// fails here rather than shipping.
     const ALL_CHANNELS: [Channel; 4] =
@@ -744,6 +854,15 @@ mod tests {
             "worktree.reorder",
             "task.create",
             "task.note",
+            "workspace.list",
+            "workspace.create",
+            "workspace.rename",
+            "workspace.set_prefix",
+            "workspace.delete",
+            "task.move",
+            "worktree.assign",
+            "terminal.set_role",
+            "workspace.start_orchestrator",
         ] {
             let cap = capability::for_method(method).expect("a known method");
             assert!(capability::ALL.contains(&cap), "{method} names {cap}, which is not advertised");

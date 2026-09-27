@@ -138,12 +138,18 @@ fn changes_host_command() -> String {
 ///   launch only" is kept: every other launch path builds its extras from
 ///   `prepare_launch_hooks`, which never sets it, so a restart, a split or a
 ///   pane coming back from chat cannot send the task a second time.
+/// - `orchestrator` is set when the pane is its workspace's orchestrator
+///   (`Service::orchestrator_launch`), and adds the arguments that point the
+///   harness back at the repository (`orchestrator::extra_args`). For such a
+///   claude pane, `settings` is the orchestrator's own file
+///   (`write_orchestrator_settings`), not `claude-hooks.json`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchExtras {
     pub settings: Option<PathBuf>,
     pub plugin_dir: Option<PathBuf>,
     pub trust_workspace: bool,
     pub prompt: Option<LaunchPrompt>,
+    pub orchestrator: Option<crate::orchestrator::OrchestratorLaunch>,
 }
 
 /// An agent's first message, and how it reaches the agent's argv.
@@ -166,8 +172,13 @@ pub enum LaunchPrompt {
 
 impl LaunchExtras {
     /// An ordinary launch: nothing handed over.
-    pub const NONE: LaunchExtras =
-        LaunchExtras { settings: None, plugin_dir: None, trust_workspace: false, prompt: None };
+    pub const NONE: LaunchExtras = LaunchExtras {
+        settings: None,
+        plugin_dir: None,
+        trust_workspace: false,
+        prompt: None,
+        orchestrator: None,
+    };
 
     #[cfg(test)]
     fn settings_only(path: &Path) -> Self {
@@ -241,15 +252,32 @@ fn guarded(text: &str) -> std::borrow::Cow<'_, str> {
 const CODEX_NO_UPDATE_CHECK: &str = "-c check_for_update_on_startup=false";
 
 /// `--settings <file>` and `--plugin-dir <dir>`, each present only when there
-/// is a file to name, each path `shell_quote`d. Both of claude's arms (a fresh
-/// launch and a resume) build their tail here, so the two can't drift apart.
+/// is a file to name, each path `shell_quote`d, then an orchestrator's
+/// `--add-dir`. Both of claude's arms (a fresh launch and a resume) build
+/// their tail here, so the two can't drift apart.
 fn claude_extra_flags(extras: &LaunchExtras) -> String {
     let flag = |name: &str, path: &Option<PathBuf>| {
         path.as_deref()
             .map(|p| format!(" {name} {}", shell_quote(&p.display().to_string())))
             .unwrap_or_default()
     };
-    format!("{}{}", flag("--settings", &extras.settings), flag("--plugin-dir", &extras.plugin_dir))
+    format!(
+        "{}{}{}",
+        flag("--settings", &extras.settings),
+        flag("--plugin-dir", &extras.plugin_dir),
+        orchestrator_flags(crate::orchestrator::Harness::Claude, extras)
+    )
+}
+
+/// An orchestrator's arguments for `harness` (`orchestrator::extra_args`),
+/// each with a space in front, and each path `shell_quote`d. Empty for any
+/// other pane.
+fn orchestrator_flags(harness: crate::orchestrator::Harness, extras: &LaunchExtras) -> String {
+    let Some(launch) = &extras.orchestrator else { return String::new() };
+    crate::orchestrator::extra_args(harness, launch)
+        .iter()
+        .map(|a| if is_safe_model(a) { format!(" {a}") } else { format!(" {}", shell_quote(a)) })
+        .collect()
 }
 
 /// Build the command for a preset, plus the settings file that makes the pane
@@ -359,10 +387,16 @@ pub fn preset_command_with_hooks(
         // The key was checked against the installed codex: it is a field of
         // codex's config (a wrong type there fails `codex doctor`'s config
         // load, where an unknown key is ignored).
-        "codex" => format!(
-            "{shell} -ilc {}",
-            shell_quote(&format!("{}{flag} {CODEX_NO_UPDATE_CHECK}{prompt}", agent_program("codex")))
-        ),
+        "codex" => {
+            let orchestrator = orchestrator_flags(crate::orchestrator::Harness::Codex, extras);
+            format!(
+                "{shell} -ilc {}",
+                shell_quote(&format!(
+                    "{}{flag} {CODEX_NO_UPDATE_CHECK}{orchestrator}{prompt}",
+                    agent_program("codex")
+                ))
+            )
+        }
         // `shell_quote` around the payload for claude's reason: the plugin
         // path is quoted in turn. With no plugin directory, no trust and no
         // prompt the payload holds no quote, and this is the
@@ -374,9 +408,13 @@ pub fn preset_command_with_hooks(
                 .map(|p| format!(" --plugin-dir {}", shell_quote(&p.display().to_string())))
                 .unwrap_or_default();
             let trust = if extras.trust_workspace { " --trust" } else { "" };
+            let orchestrator = orchestrator_flags(crate::orchestrator::Harness::Cursor, extras);
             format!(
                 "{shell} -ilc {}",
-                shell_quote(&format!("{}{flag}{trust}{plugin}{prompt}", agent_program("cursor-agent")))
+                shell_quote(&format!(
+                    "{}{flag}{trust}{plugin}{orchestrator}{prompt}",
+                    agent_program("cursor-agent")
+                ))
             )
         }
         other if is_safe_model(other) => format!("{shell} -ilc '{}{flag}'", agent_program(other)),
@@ -666,9 +704,9 @@ fn preset_runs_an_agent(preset: &str) -> bool {
 /// what `Registry::rules_for_command` identifies an agent from, reads exactly
 /// what it read before this existed.
 ///
-/// Nothing is quoted because nothing here needs it: a uuid is thirty-six
-/// characters of hex and dashes, and `command` was already built to be handed
-/// to a shell.
+/// Nothing but the charter's path is quoted, because nothing else needs it: a
+/// uuid is thirty-six characters of hex and dashes, a task key is a plain
+/// identifier, and `command` was already built to be handed to a shell.
 ///
 /// **`FARCOOLER_TASK` beside it, when the terminal was opened for a task**
 /// (`terminals.task_id`, written by `task dispatch` through `terminal.create`).
@@ -677,19 +715,84 @@ fn preset_runs_an_agent(preset: &str) -> bool {
 /// no task on the record there is no honest answer, so nothing is exported:
 /// a guessed key files an agent's notes on somebody else's ticket. A key that
 /// is not a plain identifier (`pane_task_key`) is dropped rather than quoted.
-fn with_pane_env(terminal: Uuid, preset: &str, task_key: Option<&str>, command: String) -> String {
-    if !preset_runs_an_agent(preset) {
+///
+/// **`FARCOOLER_WORKSPACE` on every pane whose terminal has a workspace**,
+/// agent or not: a person in a shell pane that belongs to Billing who runs
+/// `farcooler worktree create` is making Billing's worktree, exactly as an
+/// agent there would. It sits outside the agent-only half for that reason,
+/// and `ACTOR` and `TASK` stay inside it. A uuid, so unquoted.
+///
+/// **`FARCOOLER_CHARTER` beside it on an orchestrator's pane** (see
+/// `PaneWorkspace`). The one value here that needs quoting: the runtime
+/// directory is under `Application Support` on a Mac. `shell_quote`, which
+/// every shell this line can meet reads the same way.
+///
+/// **An orchestrator's recipe last** (`PaneWorkspace::env`,
+/// `orchestrator::extra_env`). A name already on the line takes the recipe's
+/// value in its place, so an orchestrator's `FARCOOLER_ACTOR` is `manager`
+/// rather than `agent:<id>`, and nothing is exported twice. Its values are
+/// `shell_quote`d unless they're plain.
+///
+/// A pane with nothing to export is launched exactly as `command`.
+fn with_pane_env(
+    terminal: Uuid,
+    preset: &str,
+    task_key: Option<&str>,
+    workspace: Option<&PaneWorkspace>,
+    command: String,
+) -> String {
+    use farcooler_core::pane_env;
+    let mut vars: Vec<(String, String)> = Vec::new();
+    if preset_runs_an_agent(preset) {
+        vars.push((pane_env::ACTOR.to_string(), format!("agent:{terminal}")));
+        if let Some(key) = task_key.filter(|k| is_safe_model(k)) {
+            vars.push((pane_env::TASK.to_string(), key.to_string()));
+        }
+    }
+    if let Some(workspace) = workspace {
+        vars.push((pane_env::WORKSPACE.to_string(), workspace.id.to_string()));
+        if let Some(charter) = &workspace.charter {
+            vars.push((pane_env::CHARTER.to_string(), shell_quote(&charter.to_string_lossy())));
+        }
+        for (name, value) in &workspace.env {
+            let value = if is_safe_model(value) { value.clone() } else { shell_quote(value) };
+            match vars.iter_mut().find(|(n, _)| n == name) {
+                Some(held) => held.1 = value,
+                None => vars.push((name.clone(), value)),
+            }
+        }
+    }
+    if vars.is_empty() {
         return command;
     }
-    let task = task_key
-        .filter(|k| is_safe_model(k))
-        .map(|k| format!(" {}={k}", farcooler_core::pane_env::TASK))
-        .unwrap_or_default();
-    format!("env {}=agent:{terminal}{task} {command}", farcooler_core::pane_env::ACTOR)
+    let vars: Vec<String> = vars.into_iter().map(|(name, value)| format!("{name}={value}")).collect();
+    format!("env {} {command}", vars.join(" "))
+}
+
+/// Which workstream a pane works for, as its launch exports it.
+///
+/// Read off the terminal's record on every launch (`Service::pane_workspace`),
+/// the first and every relaunch after, so a restarted pane names the same
+/// workspace. `charter` is set for its workspace's orchestrator and nobody
+/// else: the charter is the orchestrator's instructions, and a worker told
+/// where they are would be reading someone else's brief. `env` is an
+/// orchestrator's recipe (`orchestrator::extra_env`), empty for everyone
+/// else and for an orchestrator running something that isn't a harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PaneWorkspace {
+    pub id: Uuid,
+    pub charter: Option<PathBuf>,
+    pub env: Vec<(String, String)>,
 }
 
 /// The first message of a pane opened for a task: where the brief is, and
 /// nothing else.
+///
+/// The task is the whole brief. The charter is its workspace orchestrator's,
+/// and a task agent isn't told where it is (`PaneWorkspace::charter`); the
+/// manager skill puts what an agent needs from it on the task instead. So a
+/// task that doesn't say where it goes when it's done goes to review, which
+/// leaves the owner or the orchestrator to call it done.
 ///
 /// It carries no free text. The task on the board is the brief, and this
 /// says to read it, so the board stays the only place the work is described
@@ -710,11 +813,12 @@ fn opening_prompt(cli: &str, key: &str) -> String {
     let arg = if key.starts_with('-') { String::new() } else { format!(" {key}") };
     format!(
         "You're working {key} on this repository's Far Cooler board. Read the task first: \
-         {cli} task show{arg}. If the main checkout has a .farcooler/manager.md, it's the \
-         owner's charter; follow it. Work to the task's acceptance items. Record each decision \
-         as you make it with {cli} task note{arg} --kind decision --body \"<what, and why>\". \
-         If only the owner can decide something, ask with {cli} task ask{arg} --body \
-         \"<the question>\" and stop. When you're done, move the task the way the charter says."
+         {cli} task show{arg}. The task is your whole brief: work to its acceptance items and \
+         within its constraints. Record each decision as you make it with {cli} task note{arg} \
+         --kind decision --body \"<what, and why>\". If only the owner can decide something, \
+         ask with {cli} task ask{arg} --body \"<the question>\" and stop. When you're done, \
+         move the task the way it says, or if it doesn't say, to review with {cli} task \
+         set{arg} --status in_review."
     )
 }
 
@@ -751,6 +855,48 @@ fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
                 error = %e,
                 path = %path.display(),
                 "could not write claude's hook settings; this pane reports nothing"
+            );
+            None
+        }
+    }
+}
+
+/// Where an orchestrator's claude settings go: `orchestrator-<workspace>.json`
+/// in the runtime directory. Its own file, because the memory directory in it
+/// is per repository and `claude-hooks.json` is shared by every agent pane.
+fn orchestrator_settings_path(runtime_dir: &Path, workspace: Uuid) -> PathBuf {
+    runtime_dir.join(format!("orchestrator-{workspace}.json"))
+}
+
+/// Write an orchestrator's claude settings, and say where they went: the
+/// hooks every claude pane gets (`hook_install::claude_settings`) plus
+/// `autoMemoryDirectory`, pointed at the repository's memory directory
+/// (`orchestrator::claude_memory_dir`). Measured: claude launched outside a
+/// repository takes the memory directory from `--settings`.
+///
+/// Far Cooler's own file in its own directory, like `claude-hooks.json`. The
+/// memory directory is only named here; nothing creates or writes it.
+///
+/// `None` on any failure, and the pane launches anyway, as it does without
+/// its hooks.
+fn write_orchestrator_settings(
+    runtime_dir: &Path,
+    launch: &crate::orchestrator::OrchestratorLaunch,
+) -> Option<PathBuf> {
+    let socket = hook_ingress::HookIngress::socket_path(runtime_dir);
+    let mut settings = crate::hook_install::claude_settings(&socket);
+    if let (Some(memory), Some(map)) = (&launch.memory_dir, settings.as_object_mut()) {
+        map.insert("autoMemoryDirectory".into(), serde_json::Value::String(memory.to_string_lossy().into()));
+    }
+    let text = serde_json::to_string_pretty(&settings).ok()?;
+    let path = orchestrator_settings_path(runtime_dir, launch.workspace);
+    match std::fs::write(&path, text) {
+        Ok(()) => Some(path),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %path.display(),
+                "could not write an orchestrator's claude settings; this pane reports nothing"
             );
             None
         }
@@ -888,6 +1034,7 @@ fn validate_launch_prompt(prompt: &str) -> Result<()> {
 /// directory is shared by nothing but this user's own daemon. A file that
 /// cannot be written costs the prompt, not the pane: the agent opens with an
 /// empty composer, which is what happened to every prompt before this existed.
+#[allow(clippy::too_many_arguments)]
 fn launch_command_with_prompt(
     runtime_dir: &Path,
     terminal: Uuid,
@@ -896,9 +1043,11 @@ fn launch_command_with_prompt(
     mut extras: LaunchExtras,
     prompt: Option<&str>,
     task_key: Option<&str>,
+    workspace: Option<&PaneWorkspace>,
 ) -> String {
     let build = |extras: &LaunchExtras| {
-        with_pane_env(terminal, preset, task_key, preset_command_with_hooks(preset, session_id, extras))
+        let command = preset_command_with_hooks(preset, session_id, extras);
+        with_pane_env(terminal, preset, task_key, workspace, command)
     };
     // Trimmed first, the way the Mac trims its draft, and only THEN guarded:
     // "update" and nine kilobytes of newlines has whitespace in it, so
@@ -1750,6 +1899,10 @@ pub struct Service {
     /// has to be able to drop it. A `HookIngress` nobody holds is one nothing
     /// can ever tell that a terminal went away.
     hooks: hook_ingress::HookIngress,
+    /// Terminals seen working in a worktree another workspace owns, and
+    /// whether a claim changed since the watcher last looked. Shared with
+    /// `hooks`, which observes a Claude session's `cwd` and has no `Service`.
+    claims: Arc<crate::claims::Ledger>,
     /// Change sets, cached behind a two-syscall gate.
     ///
     /// Not in the store: nothing here is durable. It is a derivation of git, and
@@ -1813,6 +1966,10 @@ pub struct WorktreeView {
     pub worktree: models::Worktree,
     pub state: WorktreeState,
     pub terminals: Vec<TerminalView>,
+    /// Workspaces of live terminals that sit elsewhere but were seen working
+    /// here (`claims`). `wire::foreign_writers` adds these to the ones that
+    /// sit here.
+    pub observed_writers: Vec<Uuid>,
 }
 
 #[derive(Debug)]
@@ -1849,8 +2006,9 @@ impl Service {
         inventory.refresh().await;
 
         let registry = std::sync::RwLock::new(Arc::new(farcooler_core::config::load_registry()));
+        let claims = Arc::new(crate::claims::Ledger::default());
 
-        Ok(Self {
+        let service = Self {
             store: store.clone(),
             tmux,
             inventory: inventory.clone(),
@@ -1861,7 +2019,8 @@ impl Service {
             sessions: crate::sessions::Sessions::new(),
             registry,
             agents: agent_supervisor::AgentSupervisor::with_records(store.clone()),
-            hooks: hook_ingress::HookIngress::new(store.clone(), Arc::new(inventory.clone())),
+            hooks: hook_ingress::HookIngress::new(store.clone(), Arc::new(inventory.clone()), claims.clone()),
+            claims,
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             pr_fills: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -1869,7 +2028,69 @@ impl Service {
             default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_urls: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
-        })
+        };
+        service.prepare_workspace_homes();
+        Ok(service)
+    }
+
+    /// Give every workspace its home, and adopt each repository's
+    /// `.farcooler/manager.md` as its Main's charter where Main has none.
+    ///
+    /// Here, in `open_in`, rather than in `main`: nothing can reach a line in
+    /// `main` from a test, so a call there could be deleted with every test
+    /// still green. Every process that opens the service runs it, which is
+    /// safe because it only ever creates: a charter that exists is never
+    /// touched (`workspace_home`). It costs a stat or two per workspace.
+    ///
+    /// Mains first, so a workspace made before its Main had a charter (by a
+    /// daemon from before this existed) is seeded from the charter adopted a
+    /// moment earlier. Never fails the open: a home that can't be made is
+    /// logged, and the next start tries again.
+    fn prepare_workspace_homes(&self) {
+        let workspaces = match self.store.list_workspaces(None) {
+            Ok(all) => all,
+            Err(e) => {
+                tracing::warn!(error = ?e, "could not list workspaces to give them homes");
+                return;
+            }
+        };
+        let (mains, others): (Vec<_>, Vec<_>) = workspaces.iter().partition(|w| w.is_main);
+        for workspace in mains.into_iter().chain(others) {
+            if let Err(e) = self.ensure_workspace_home(workspace) {
+                tracing::warn!(workspace = %workspace.id, error = %e, "could not make a workspace's home");
+            }
+        }
+    }
+
+    /// Make `workspace`'s home if it has none (`workspace_home::make_home`).
+    ///
+    /// Main's charter is adopted from its repository's
+    /// `.farcooler/manager.md`, if there is one, for as long as Main has none.
+    /// Any other workspace's starts as a copy of Main's, once: when its home
+    /// is made. A home that's already there is left as it is, so a charter
+    /// the user deleted, or one Main didn't have yet when this workspace was
+    /// made, isn't filled in from Main's later. Either way an existing
+    /// charter is kept. Returns the home.
+    pub fn ensure_workspace_home(&self, workspace: &models::Workspace) -> std::io::Result<PathBuf> {
+        if workspace.is_main {
+            let checkout = self
+                .store
+                .get_repository(workspace.repository_id)
+                .map(|repo| self.repository_worktree(&repo))
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            crate::workspace_home::adopt_repository_charters(&self.root, &[(workspace.id, checkout)]);
+            return crate::workspace_home::make_home(&self.root, workspace.id, None);
+        }
+        let home = crate::workspace_home::home(&self.root, workspace.id);
+        if home.is_dir() {
+            return Ok(home);
+        }
+        let main = self
+            .store
+            .main_workspace(workspace.repository_id)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        let seed = crate::workspace_home::charter_path(&self.root, main.id);
+        crate::workspace_home::make_home(&self.root, workspace.id, Some(&seed))
     }
 
     /// Enroll devices into some other file than this user's own.
@@ -2235,18 +2456,20 @@ impl Service {
             &remote,
         )?;
 
-        // Unlike the reconcile call below, this is NOT best-effort: the
-        // prefix is derived from the name as registered, here. `?`
-        // propagates a failure as the registration's own failure rather than
-        // returning a repository without one. (Should that row outlive the
-        // failure, `Store::next_task_key` claims a prefix before its first
-        // key, so it still never mints "-1".)
-        let prefix = self.store.assign_task_key_prefix(repository.id)?;
-        tracing::info!(repository = %repository.id, %prefix, "assigned a task key prefix");
-        // Re-read rather than patching the struct in hand: `assign_task_key_prefix`
-        // also bumped `resource_version`, and this is the one copy of that
-        // number that is actually current.
-        let repository = self.store.get_repository(repository.id)?;
+        // Unlike the reconcile call below, this is NOT best-effort: Main's
+        // prefix is derived from the name as registered, here. `?` propagates
+        // a failure as the registration's own failure rather than returning a
+        // repository without a Main. (Should that row outlive the failure,
+        // `task.create` makes Main before filing the first task, so it still
+        // never mints "-1".)
+        let main = self.store.ensure_main_workspace(repository.id)?;
+        tracing::info!(repository = %repository.id, prefix = %main.task_prefix, "made its Main workspace");
+        // Main's home, with the repository's `.farcooler/manager.md` as its
+        // charter if it has one. Best-effort: the repository IS registered,
+        // and the next start makes the home.
+        if let Err(e) = self.ensure_workspace_home(&main) {
+            tracing::warn!(workspace = %main.id, error = %e, "could not make Main's home");
+        }
 
         // Synchronously, before returning: adding a project should fill the
         // sidebar by the time the sheet closes, not a tick later. A failure
@@ -2256,7 +2479,30 @@ impl Service {
             tracing::warn!(error = ?e, "could not reconcile a freshly registered repository");
         }
 
+        // That pass is also what gives Main the main checkout, explicitly
+        // (`reconcile::repository`). No second claim here: every pass claims
+        // an unclaimed main checkout, so one that fails here is claimed by the
+        // next tick's.
+
         Ok(repository)
+    }
+
+    /// Where a workspace's home is: `<runtime dir>/workspaces/<id>/`, keyed
+    /// by id so a rename never moves it. Holds `charter.md`, and is where the
+    /// orchestrator runs. Only computed; `ensure_workspace_home` makes it.
+    pub fn workspace_home(&self, workspace: Uuid) -> PathBuf {
+        crate::workspace_home::home(&self.root, workspace)
+    }
+
+    /// Check that `workspace` is one a worktree in `repository` can be
+    /// claimed for, before anything is made: `NotFound` for a workspace that
+    /// isn't there, `other_repository` for one in another repository.
+    fn claimant(&self, repository_id: Uuid, workspace: Option<Uuid>) -> Result<Option<Uuid>> {
+        let Some(workspace) = workspace else { return Ok(None) };
+        if self.store.get_workspace(workspace)?.repository_id != repository_id {
+            return Err(DomainError::InvalidArgument { what: "other_repository" });
+        }
+        Ok(Some(workspace))
     }
 
     pub fn list_repositories(&self) -> Result<Vec<models::Repository>> {
@@ -2290,13 +2536,17 @@ impl Service {
         branch: &str,
         base_revision: &str,
     ) -> Result<models::Worktree> {
-        self.create_worktree_with(repository_id, name, branch, base_revision, false).await
+        self.create_worktree_with(repository_id, name, branch, base_revision, false, None).await
     }
 
     /// `create_worktree`, and with `fork_only` never on a branch that already
     /// exists anywhere: a name a remote carries is refused as `BranchExists`
     /// instead of checked out (`git::create_worktree_with`). What
     /// `WorktreeCreate.fork_only` asks for.
+    ///
+    /// `workspace` claims the new worktree explicitly for that workspace,
+    /// which must be in this repository; checked before git is touched. `None`
+    /// leaves it unclaimed.
     pub async fn create_worktree_with(
         &self,
         repository_id: Uuid,
@@ -2304,9 +2554,11 @@ impl Service {
         branch: &str,
         base_revision: &str,
         fork_only: bool,
+        workspace: Option<Uuid>,
     ) -> Result<models::Worktree> {
         validate::worktree_name(name)?;
         validate::branch_name(branch)?;
+        let workspace = self.claimant(repository_id, workspace)?;
 
         // Held until this function returns: everything below is "mutate git,
         // then write the row", and the reconciler must not see the gap.
@@ -2343,7 +2595,7 @@ impl Service {
                 // the worktree again, and there is no reason to have written
                 // into a directory that is about to go.
                 install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root)).await;
-                Ok(ws)
+                self.claim_new(ws, workspace)
             }
             Err(e) => {
                 // Do not erase a possibly valuable worktree to make the database
@@ -2353,6 +2605,22 @@ impl Service {
                     .unwrap_or(false);
                 tracing::warn!(rolled_back = removed, "worktree metadata failed after git");
                 Err(e)
+            }
+        }
+    }
+
+    /// Claim a worktree just made, while the repository's lock is still held
+    /// so no reconcile pass sees it unclaimed. Checked beforehand by
+    /// `claimant`, so this fails only if the workspace went in between; the
+    /// worktree is kept either way, and the claim is left to other signals.
+    fn claim_new(&self, worktree: models::Worktree, workspace: Option<Uuid>) -> Result<models::Worktree> {
+        let Some(workspace) = workspace else { return Ok(worktree) };
+        match self.store.claim_worktree(worktree.id, workspace, models::ClaimSource::Explicit) {
+            Ok(Some(claimed)) => Ok(claimed),
+            Ok(None) => Ok(worktree),
+            Err(e) => {
+                tracing::warn!(worktree = %worktree.id, error = ?e, "made a worktree and could not claim it");
+                Ok(worktree)
             }
         }
     }
@@ -2392,8 +2660,10 @@ impl Service {
         &self,
         repository_id: Uuid,
         branch: &str,
+        workspace: Option<Uuid>,
     ) -> Result<models::Worktree> {
         validate::branch_name(branch)?;
+        let workspace = self.claimant(repository_id, workspace)?;
 
         // A branch is `feat/rate-limiting`; the worktree is `rate-limiting`. The
         // prefix says what kind of work it is, which the sidebar row does not
@@ -2420,7 +2690,7 @@ impl Service {
                 // the same panes, and a pane that reports nothing is exactly
                 // as broken here as it is in `create_worktree`.
                 install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root)).await;
-                Ok(worktree)
+                self.claim_new(worktree, workspace)
             }
             Err(e) => {
                 // The worktree exists but nothing records it. Remove it —
@@ -2533,6 +2803,7 @@ impl Service {
     fn delete_terminal_record(&self, id: Uuid, expected_version: u64) -> Result<()> {
         self.store.delete_terminal(id, expected_version)?;
         self.hooks.forget(id);
+        self.claims.forget_terminal(id);
         self.agents.forget(id);
         Ok(())
     }
@@ -2923,7 +3194,7 @@ impl Service {
         if is_codex(preset) && self.forked_this_worktree(Path::new(worktree)) {
             crate::codex_trust::trust_for_worktree(&self.root, Path::new(worktree)).await;
         }
-        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None }
+        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None }
     }
 
     /// Whether `worktree` is one this install made for a new task: a real
@@ -3004,6 +3275,73 @@ impl Service {
         prompt: Option<&str>,
         task: Option<Uuid>,
     ) -> Result<models::Terminal> {
+        self.open_terminal(worktree_id, title, command_preset, prompt, task, None).await
+    }
+
+    /// Start `workspace`'s orchestrator running `harness` (`claude`, `codex`
+    /// or `cursor`, each with or without `:<model>`), from the recipe in
+    /// `orchestrator`: in the repository's main-checkout row, with the pane
+    /// started in the home for Claude Code and Cursor.
+    ///
+    /// **At most one live orchestrator per workspace** (`live_orchestrator`:
+    /// a lost one doesn't count). A second is refused (`orchestrator_taken`)
+    /// unless `replace`, which stops the live one and removes its record first. A stopped record kept its role, so it could
+    /// be restarted into a second live orchestrator (`restart_terminal` now
+    /// refuses that too), and it would keep `workspace.delete` refusing. The
+    /// store's seat check still guards two starts racing past this one.
+    ///
+    /// The manager skill comes the way it comes to any pane of that harness
+    /// (`prepare_launch_hooks`): the plugin in the runtime directory for
+    /// Claude Code and Cursor, a copy in the main checkout for Codex, which
+    /// runs there.
+    pub async fn start_orchestrator(
+        &self,
+        workspace: Uuid,
+        harness: &str,
+        replace: bool,
+    ) -> Result<models::Terminal> {
+        let harness = harness.trim();
+        validate::command_preset(harness)?;
+        if crate::orchestrator::harness_of(harness).is_none() {
+            return Err(DomainError::InvalidArgument { what: "command_preset" });
+        }
+        let row = self.store.get_workspace(workspace)?;
+        let live = self.orchestrator_seat(workspace).await?.0;
+        if live.is_some() && !replace {
+            return Err(DomainError::InvalidArgument { what: "orchestrator_taken" });
+        }
+        // Everything the new start needs that can fail is found before the
+        // live one is stopped: its row, and its home. A `--replace` that
+        // stopped first and then failed would leave the workspace with no
+        // orchestrator at all.
+        let main = self
+            .store
+            .list_worktrees_for_repository(row.repository_id)?
+            .into_iter()
+            .find(|w| w.is_main_checkout)
+            .ok_or(DomainError::NotFound)?;
+        self.orchestrator_home(&row)?;
+        if let Some(live) = live {
+            self.stop_terminal(live.id).await?;
+            self.remove_terminal(live.id).await?;
+        }
+        self.open_terminal(main.id, "orchestrator", harness, None, None, Some(workspace)).await
+    }
+
+    /// `create_terminal_with_prompt`, and for `orchestrating`, the start of
+    /// that workspace's orchestrator: the record takes the workspace and the
+    /// role BEFORE the first launch, because the launch reads both off it
+    /// (`orchestrator_launch`, `pane_workspace`). A seat already taken removes
+    /// the record again and launches nothing.
+    async fn open_terminal(
+        &self,
+        worktree_id: Uuid,
+        title: &str,
+        command_preset: &str,
+        prompt: Option<&str>,
+        task: Option<Uuid>,
+        orchestrating: Option<Uuid>,
+    ) -> Result<models::Terminal> {
         validate::display_name(title)?;
         validate::command_preset(command_preset)?;
         let prompt = prompt.filter(|p| !p.trim().is_empty());
@@ -3013,6 +3351,7 @@ impl Service {
 
         let ws = self.store.get_worktree(worktree_id)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
+        self.claim_for_task(&ws, task)?;
 
         // 1. Commit the durable record with intent RUNNING, unconfirmed.
         let term = self.store.create_terminal_for_task(
@@ -3024,6 +3363,26 @@ impl Service {
             40,
             task,
         )?;
+        let term = match orchestrating {
+            None => term,
+            Some(workspace) => {
+                let vacated = self.orchestrator_seat(workspace).await.map(|(_, vacated)| vacated);
+                let seated = vacated.and_then(|vacated| {
+                    self.store.set_terminal_workspace_with(term.id, workspace, &vacated).and_then(|t| {
+                        self.store.set_terminal_role_with(t.id, models::TerminalRole::Orchestrator, &vacated)
+                    })
+                });
+                match seated {
+                    Ok(term) => term,
+                    Err(e) => {
+                        if let Ok(now) = self.store.get_terminal(term.id) {
+                            let _ = self.delete_terminal_record(term.id, now.resource_version);
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+        };
 
         // A claude terminal gets its session id now, so that adopting it into
         // agent pane mode later is exact.
@@ -3060,7 +3419,17 @@ impl Service {
         let term = self.mark_changes_pane(term, command_preset)?;
 
         // 2. Create and tag the window.
-        let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path).await;
+        let mut extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path).await;
+        let dir = match self.orchestrate(&term, &ws, &mut extras) {
+            Ok(dir) => dir,
+            Err(e) => {
+                // Nothing was launched: the record, and the seat it took, go.
+                if let Ok(now) = self.store.get_terminal(term.id) {
+                    let _ = self.delete_terminal_record(term.id, now.resource_version);
+                }
+                return Err(e);
+            }
+        };
         let command = launch_command_with_prompt(
             &self.root,
             term.id,
@@ -3069,12 +3438,13 @@ impl Service {
             extras,
             prompt.as_deref(),
             task_key.as_deref(),
+            self.pane_workspace(&term).as_ref(),
         );
         #[cfg(test)]
         test_agent::refuse_a_real_agent(&command);
         let created = self
             .tmux
-            .create_terminal_window(worktree_id, term.id, title, &ws.worktree_path, &command)
+            .create_terminal_window(worktree_id, term.id, title, &dir, &command)
             .await;
 
         if let Err(e) = created {
@@ -3155,6 +3525,25 @@ impl Service {
         Ok((key, Some(first)))
     }
 
+    /// A pane opened for a task in a worktree nobody has claimed claims it
+    /// for the task's workspace, explicitly: dispatching a task there says
+    /// whose work it is (spec, "Claiming worktrees", signal 1). Before the
+    /// terminal's record is made, so the pane is that workspace's too. A
+    /// worktree that has an owner keeps it, as every claim does; `task
+    /// dispatch` warns when that owner isn't the task's workspace. `task` has
+    /// passed `opening_for`, so it's on this worktree's repository's board.
+    fn claim_for_task(&self, ws: &models::Worktree, task: Option<Uuid>) -> Result<()> {
+        let Some(task) = task else { return Ok(()) };
+        if ws.workspace_id.is_some() {
+            return Ok(());
+        }
+        let workspace = self.store.get_task(task)?.workspace_id;
+        if self.store.claim_worktree(ws.id, workspace, models::ClaimSource::Explicit)?.is_some() {
+            tracing::info!(worktree = %ws.id, %workspace, %task, "a worktree is claimed by the task dispatched into it");
+        }
+        Ok(())
+    }
+
     /// The task `key` names on `worktree`'s own board, for `terminal.create`.
     ///
     /// On that board only. Resolved across every board, a key that happens to
@@ -3168,6 +3557,79 @@ impl Service {
             [task] => Ok(task.id),
             _ => Err(DomainError::InvalidArgument { what: "task_key" }),
         }
+    }
+
+    /// What a launch of `term` exports about its workstream: the workspace
+    /// on its record, and for its workspace's orchestrator, that workspace's
+    /// charter. `None` for a terminal with no workspace.
+    fn pane_workspace(&self, term: &models::Terminal) -> Option<PaneWorkspace> {
+        let id = term.workspace_id?;
+        let charter = (term.role == models::TerminalRole::Orchestrator)
+            .then(|| crate::workspace_home::charter_path(&self.root, id));
+        let env = self
+            .orchestrator_launch(term)
+            .map(|(harness, launch)| crate::orchestrator::extra_env(harness, &launch))
+            .unwrap_or_default();
+        Some(PaneWorkspace { id, charter, env })
+    }
+
+    /// `term`'s recipe when it's its workspace's orchestrator running a
+    /// harness: read off the record on every launch, the first and every
+    /// relaunch, so a restarted orchestrator comes back the way it started.
+    /// The main checkout is the terminal's own worktree, which
+    /// `start_orchestrator` chose.
+    fn orchestrator_launch(
+        &self,
+        term: &models::Terminal,
+    ) -> Option<(crate::orchestrator::Harness, crate::orchestrator::OrchestratorLaunch)> {
+        if term.role != models::TerminalRole::Orchestrator {
+            return None;
+        }
+        let workspace = term.workspace_id?;
+        let harness = crate::orchestrator::harness_of(&term.command_preset)?;
+        let ws = self.store.get_worktree(term.worktree_id).ok()?;
+        let launch = crate::orchestrator::OrchestratorLaunch::new(
+            &self.root,
+            workspace,
+            Path::new(&ws.worktree_path),
+            user_home().as_deref(),
+        );
+        Some((harness, launch))
+    }
+
+    /// Where a launch of `term` in `ws` starts, with `extras` made an
+    /// orchestrator's when `term` is one: its arguments, and for Claude Code
+    /// its own settings file (`write_orchestrator_settings`, falling back to
+    /// the shared hooks file if that can't be written). Its home is made
+    /// first if it's missing, and the launch is refused if it can't be
+    /// (`orchestrator_home`): tmux starts a pane whose directory isn't there
+    /// in `$HOME`, which would be a real agent running in the owner's home
+    /// directory. Every other pane starts in its worktree, unchanged.
+    fn orchestrate(
+        &self,
+        term: &models::Terminal,
+        ws: &models::Worktree,
+        extras: &mut LaunchExtras,
+    ) -> Result<String> {
+        use crate::orchestrator::{Harness, working_directory};
+        let Some((harness, launch)) = self.orchestrator_launch(term) else { return Ok(ws.worktree_path.clone()) };
+        self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
+        if harness == Harness::Claude {
+            extras.settings = write_orchestrator_settings(&self.root, &launch).or(extras.settings.take());
+        }
+        let dir = working_directory(harness, &launch).to_string_lossy().into_owned();
+        extras.orchestrator = Some(launch);
+        Ok(dir)
+    }
+
+    /// `workspace`'s home, made if it's missing, or the refusal an
+    /// orchestrator's launch gets when it can't be (`orchestrator_home`),
+    /// with the cause in the log.
+    fn orchestrator_home(&self, workspace: &models::Workspace) -> Result<PathBuf> {
+        self.ensure_workspace_home(workspace).map_err(|e| {
+            tracing::warn!(workspace = %workspace.id, error = %e, "could not make an orchestrator's home");
+            DomainError::InvalidArgument { what: "orchestrator_home" }
+        })
     }
 
     /// The key a relaunch of `term` exports: the one its first launch did.
@@ -3359,6 +3821,9 @@ impl Service {
         let ws = self.store.get_worktree(worktree_id)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
         let pane = self.pane_of(target).await?;
+        // After the target is found, so a split refused for a bad target
+        // claims nothing; claims stick.
+        self.claim_for_task(&ws, task)?;
         let (axis, before) = crate::layout::split_args(side);
 
         let term = self.store.create_terminal_for_task(
@@ -3409,6 +3874,7 @@ impl Service {
             extras,
             prompt.as_deref(),
             task_key.as_deref(),
+            self.pane_workspace(&term).as_ref(),
         );
         #[cfg(test)]
         test_agent::refuse_a_real_agent(&command);
@@ -3444,6 +3910,27 @@ impl Service {
 
         tracing::warn!(terminal = %term.id, "split pane did not verify");
         Ok(term)
+    }
+
+    /// An orchestrator that took its seat back for a restart that never came
+    /// up gives it up again: `term` is the reseated row, `was` the row as it
+    /// was before. Left unconfirmed, it would hold the seat forever.
+    fn give_back_seat(&self, term: &models::Terminal, was: Option<&models::Terminal>) {
+        let Some(was) = was else { return };
+        if let Err(undo) = self.store.update_terminal(
+            term.id,
+            term.resource_version,
+            terminal_update(term, |u| {
+                u.intent = was.intent;
+                u.runtime_confirmed = was.runtime_confirmed;
+                u.exit_code = was.exit_code;
+                u.exit_signal = was.exit_signal;
+            }),
+        ) {
+            // Left unconfirmed, it holds the seat until it's restarted again
+            // or replaced (`seat_of`).
+            tracing::warn!(terminal = %term.id, error = %undo, "a restart that failed kept its orchestrator's seat");
+        }
     }
 
     /// Kill exactly this terminal's pane.
@@ -3504,6 +3991,22 @@ impl Service {
         let term = self.store.get_terminal(id)?;
         let ws = self.store.get_worktree(term.worktree_id)?;
 
+        // One live orchestrator per workspace. An orchestrator that exited
+        // or was lost, and was succeeded, would otherwise come back as a
+        // second one. So it takes its seat back first, in one transaction
+        // that refuses if another holds it, and holds it, unconfirmed and so
+        // starting, while its pane comes up: a start or a second restart in
+        // that window finds the seat taken. `seated` is the row as it was,
+        // to put back if the pane never comes.
+        let (term, seated) = match (term.role, term.workspace_id) {
+            (models::TerminalRole::Orchestrator, Some(workspace)) => {
+                let (_, vacated) = self.orchestrator_seat(workspace).await?;
+                let reseated = self.store.reseat_orchestrator(id, term.resource_version, &vacated)?;
+                (reseated, Some(term))
+            }
+            _ => (term, None),
+        };
+
         // A restarted claude or codex reattaches to the conversation it
         // already had rather than starting a new one the record does not know
         // about.
@@ -3525,15 +4028,27 @@ impl Service {
         // the socket, and the pane's activity would sit frozen at whatever it
         // last reported. That is precisely the silent disagreement between
         // record and runtime this whole design exists to prevent.
-        let extras = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path).await;
+        //
+        // An orchestrator comes back from its own directory with its own
+        // recipe (`orchestrate`), and its conversation is looked for there:
+        // claude files a transcript under the directory it was started in.
+        let mut extras = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path).await;
+        let dir = match self.orchestrate(&term, &ws, &mut extras) {
+            Ok(dir) => dir,
+            Err(e) => {
+                self.give_back_seat(&term, seated.as_ref());
+                return Err(e);
+            }
+        };
         let command = with_pane_env(
             id,
             &term.command_preset,
             self.pane_task_key(&term).as_deref(),
+            self.pane_workspace(&term).as_ref(),
             respawn_command(
                 user_home().as_deref(),
                 &term.command_preset,
-                &ws.worktree_path,
+                &dir,
                 term.agent_session_id.as_deref().unwrap_or_default(),
                 &extras,
             ),
@@ -3561,19 +4076,15 @@ impl Service {
         let existing = self.inventory.refresh().await.claimants(id).into_iter().next().cloned();
         #[cfg(test)]
         test_agent::refuse_a_real_agent(&command);
-        match existing {
-            Some(pane) => self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?,
+        let respawned = match existing {
+            Some(pane) => self.tmux.respawn_pane(&pane.pane_id, &dir, &command).await,
             None => {
-                self.tmux
-                    .create_terminal_window(
-                        term.worktree_id,
-                        id,
-                        &term.title,
-                        &ws.worktree_path,
-                        &command,
-                    )
-                    .await?;
+                self.tmux.create_terminal_window(term.worktree_id, id, &term.title, &dir, &command).await.map(|_| ())
             }
+        };
+        if let Err(e) = respawned {
+            self.give_back_seat(&term, seated.as_ref());
+            return Err(e);
         }
 
         self.inventory.refresh().await;
@@ -3845,6 +4356,9 @@ impl Service {
             )
             .map(|rules| rules.preset.clone());
 
+        // Where the pane restarts: its worktree, or an orchestrator's own
+        // directory when it comes back as a terminal (`orchestrate`).
+        let mut dir = ws.worktree_path.clone();
         let command = match pane_mode {
             // Already refused at the top of this function; spelled out rather
             // than folded into a wildcard so that a fourth mode arriving here
@@ -3860,15 +4374,10 @@ impl Service {
                 // point: a pane going back to a TUI is one question with one
                 // answer, however it got there. See `respawn_command`.
                 let sid = session_id.clone().unwrap_or_default();
-                let extras =
+                let mut extras =
                     self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path).await;
-                respawn_command(
-                    user_home().as_deref(),
-                    &term.command_preset,
-                    &ws.worktree_path,
-                    &sid,
-                    &extras,
-                )
+                dir = self.orchestrate(&term, &ws, &mut extras)?;
+                respawn_command(user_home().as_deref(), &term.command_preset, &dir, &sid, &extras)
             }
             models::PaneMode::Agent => {
                 let binary = shim_binary(std::env::current_exe().ok().as_deref());
@@ -3964,12 +4473,13 @@ impl Service {
                 _ => &term.command_preset,
             },
             self.pane_task_key(&term).as_deref(),
+            self.pane_workspace(&term).as_ref(),
             command,
         );
 
         #[cfg(test)]
         test_agent::refuse_a_real_agent(&command);
-        self.tmux.respawn_pane(&pane.pane_id, &ws.worktree_path, &command).await?;
+        self.tmux.respawn_pane(&pane.pane_id, &dir, &command).await?;
         let updated = self.record_pane_mode(&term, pane_mode, session_id)?;
         // The shim died with the pane the line above respawned. Nothing told
         // the supervisor that, so everything it held for this terminal went on
@@ -4188,7 +4698,94 @@ impl Service {
             &pairs,
         );
 
-        Ok(WorktreeView { worktree: ws.clone(), state, terminals: views })
+        let observed_writers = self.observed_writers(ws);
+        Ok(WorktreeView { worktree: ws.clone(), state, terminals: views, observed_writers })
+    }
+
+    /// The workspaces of live, non-orchestrator terminals `claims` saw working
+    /// in `ws` that aren't its owner's. Reads the store only for terminals
+    /// the ledger names, and it names none on a runner with no foreign writer.
+    fn observed_writers(&self, ws: &models::Worktree) -> Vec<Uuid> {
+        let Some(owner) = ws.workspace_id else { return Vec::new() };
+        let mut found = Vec::new();
+        for terminal in self.claims.terminals_in(ws.id) {
+            let Ok(t) = self.store.get_terminal(terminal) else { continue };
+            if crate::wire::has_ended(&t) || t.role == models::TerminalRole::Orchestrator {
+                continue;
+            }
+            if let Some(workspace) = t.workspace_id
+                && workspace != owner
+                && !found.contains(&workspace)
+            {
+                found.push(workspace);
+            }
+        }
+        found
+    }
+
+    /// Every workspace other than the owner with a terminal working in this
+    /// worktree, as `Worktree.foreign_writer_workspace_ids` reports it.
+    pub async fn foreign_writers(&self, worktree: Uuid) -> Result<Vec<Uuid>> {
+        let ws = self.store.get_worktree(worktree)?;
+        Ok(crate::wire::foreign_writers(&self.worktree_view(&ws).await?))
+    }
+
+    /// The workspace's live orchestrator, for showing: one whose row hasn't
+    /// ended and whose pane is running, or starting, or can't be read right
+    /// now. A lost one, whose tmux server went away, or one whose pane
+    /// exited before the exit reached its row, is not, and the wire doesn't
+    /// name it. Read from the inventory's current view, which a refresh
+    /// that started earlier can overwrite with an older one: fine for
+    /// showing, not for taking the seat, which `orchestrator_seat` decides.
+    pub fn live_orchestrator(&self, workspace: Uuid) -> Result<Option<models::Terminal>> {
+        Ok(seat_of(self.store.unended_orchestrators(workspace)?, &self.inventory.snapshot()).0)
+    }
+
+    /// Who holds `workspace`'s orchestrator seat, and the unended
+    /// orchestrators found not running, as the store's seat checks take
+    /// them (`seat_of`). Every path that takes the seat (`start_orchestrator`,
+    /// `set_terminal_role`, `restart_terminal`) decides here.
+    ///
+    /// From this call's own read of tmux, never the shared view. The view is
+    /// whatever refresh wrote last, and a refresh that listed the panes
+    /// before an orchestrator's window existed can write after the one that
+    /// saw it. Read from that, a running orchestrator looks lost, is passed
+    /// as vacated at its row's current version, and the store seats a second
+    /// one beside it.
+    ///
+    /// **Rows first, then tmux.** Every write that confirms an orchestrator
+    /// (`open_terminal` after verifying, `restart_terminal` after the
+    /// respawn) comes after its pane exists. So a row read here as confirmed
+    /// has a pane the later tmux read sees, unless the pane has really gone.
+    /// Read the other way round, a start that makes and confirms its
+    /// orchestrator between the two reads is a confirmed row with no pane in
+    /// a list taken before the pane was, judged lost, and passed as vacated
+    /// at the version it still has. The two other cases are safe either
+    /// way: an unconfirmed row holds the seat whatever tmux says, and a row
+    /// written after it was read here fails the store's version check.
+    async fn orchestrator_seat(
+        &self,
+        workspace: Uuid,
+    ) -> Result<(Option<models::Terminal>, Vec<farcooler_store::Vacated>)> {
+        let unended = self.store.unended_orchestrators(workspace)?;
+        let snapshot = self.inventory.refresh().await;
+        Ok(seat_of(unended, &snapshot))
+    }
+
+    /// Make a terminal a shell, an agent, or its workspace's orchestrator,
+    /// with the seat decided by `orchestrator_seat`: a lost orchestrator
+    /// doesn't keep another from taking it.
+    pub async fn set_terminal_role(&self, terminal: Uuid, role: models::TerminalRole) -> Result<models::Terminal> {
+        let vacated = match (role, self.store.get_terminal(terminal)?.workspace_id) {
+            (models::TerminalRole::Orchestrator, Some(workspace)) => self.orchestrator_seat(workspace).await?.1,
+            _ => Vec::new(),
+        };
+        self.store.set_terminal_role_with(terminal, role, &vacated)
+    }
+
+    /// Where claims are recorded that the store doesn't hold. See `claims`.
+    pub fn claims(&self) -> &crate::claims::Ledger {
+        &self.claims
     }
 
     /// The whole fleet, refreshed once. One inventory query, not one per terminal.
@@ -4211,6 +4808,40 @@ pub(crate) fn to_record(t: &models::Terminal) -> derive::TerminalRecord {
         exit_code: t.exit_code,
         exit_signal: t.exit_signal,
     }
+}
+
+/// `Service::orchestrator_seat` over rows and panes already read: the first
+/// of `unended` that holds the seat, and the ones found not running.
+///
+/// Unknown (tmux unreadable) holds the seat: that's no finding, and seating a
+/// second then would leave two once tmux answers. So does a row not yet
+/// confirmed, whatever its pane: that's a start or a restart underway
+/// (`Store::reseat_orchestrator`), and a restarted pane that still shows the
+/// exit it's replacing would otherwise read as exited.
+///
+/// That second rule has no time limit. A start whose pane never verified
+/// (`open_terminal` leaves the row unconfirmed), or a restart cut off between
+/// taking the seat and confirming (a daemon crash, a dropped request), holds
+/// the seat while the apps show it exited or starting, and `start` says
+/// `orchestrator_taken`. `start --replace`, or restarting that terminal
+/// (`reseat_orchestrator` excepts its own row), frees it.
+fn seat_of(
+    unended: Vec<models::Terminal>,
+    snapshot: &farcooler_core::inventory::RuntimeSnapshot,
+) -> (Option<models::Terminal>, Vec<farcooler_store::Vacated>) {
+    let mut live = None;
+    let mut vacated = Vec::new();
+    for t in unended {
+        let state = derive::derive_terminal(&to_record(&t), snapshot).state;
+        let holds = !t.runtime_confirmed
+            || matches!(state, TerminalState::Running | TerminalState::Starting | TerminalState::Unknown);
+        if !holds {
+            vacated.push(farcooler_store::Vacated { terminal: t.id, resource_version: t.resource_version });
+        } else if live.is_none() {
+            live = Some(t);
+        }
+    }
+    (live, vacated)
 }
 
 fn terminal_update(
@@ -4628,16 +5259,15 @@ mod tests {
         assert!(!hits.iter().any(|p| p.starts_with(".git/")), "{hits:?}");
     }
 
-    /// `register_repository` is the only production caller of
-    /// `Store::assign_task_key_prefix` — everything else that exercises it
-    /// is this crate's own test helpers. Going through the real,
-    /// fully-async `register_repository` here rather than calling
-    /// `svc.store.assign_task_key_prefix` directly is the whole point: a
-    /// test written the second way would prove the store-level mechanism
-    /// works without proving registration ever reaches it, which is exactly
-    /// the gap that shipped — `create_repository` alone leaves
-    /// `task_key_prefix` at the schema's `''` default forever, and nothing
-    /// before this test called `register_repository` and then checked.
+    /// `register_repository` makes the repository's Main, and with it the
+    /// prefix its keys start with. Going through the real, fully-async
+    /// `register_repository` here rather than calling
+    /// `svc.store.ensure_main_workspace` directly is the whole point: a test
+    /// written the second way would prove the store-level mechanism works
+    /// without proving registration ever reaches it, which is exactly the gap
+    /// that once shipped — `create_repository` alone makes no Main, and
+    /// nothing before this test called `register_repository` and then
+    /// checked.
     ///
     /// `crate::test_support::fixture()` registers through this exact
     /// function (see its own body), so this asserts against what it
@@ -4649,21 +5279,14 @@ mod tests {
 
         // The fixture's worktree directory is named "repo" — a single,
         // four-letter word, so `derive_prefix` takes its first two letters.
+        let main = svc.store.main_workspace(repo).expect("register_repository made Main");
+        assert_eq!(main.task_prefix, "re", "Main's prefix, derived from the name as registered");
         assert_eq!(
-            repository.task_key_prefix, "re",
-            "register_repository must have called assign_task_key_prefix, not left the \
-             schema's '' default in place"
-        );
-        assert_eq!(
-            svc.store.next_task_key(repo).unwrap(),
+            svc.store.next_task_key(main.id).unwrap(),
             "re-1",
             "a real prefix, not the bare '-1' an empty prefix would produce"
         );
-        assert_eq!(
-            repository.resource_version, 2,
-            "create_repository left it at 1; the prefix assignment inside \
-             register_repository must have bumped it once"
-        );
+        assert_eq!(repository.resource_version, 1, "making Main writes no repository row");
     }
 
     /// Hiding never consults terminal state at all — proven structurally,
@@ -5967,6 +6590,697 @@ mod agent_mode_wiring_tests {
 }
 
 #[cfg(test)]
+mod pane_workspace_tests {
+    //! Which workstream a pane works for, driven end to end: a `Service`
+    //! method on a real tmux server, and `#{pane_start_command}` read back,
+    //! for the reason `pane_actor_tests` gives. One test per launch path.
+
+    use super::restart_wiring_tests::{a_worktree, pane_start_command};
+    use super::*;
+    use farcooler_core::pane_env;
+
+    /// What a pane in `ws` must export: its owner's id. The fixture's
+    /// worktree is the main checkout, which Main owns.
+    fn expected(svc: &Service, ws: &models::Worktree) -> String {
+        let main = svc.store.main_workspace(ws.repository_id).unwrap();
+        assert_eq!(ws.workspace_id, Some(main.id), "the fixture's worktree is Main's");
+        format!("{}={}", pane_env::WORKSPACE, main.id)
+    }
+
+    /// A shell too, and without the agent's name: a person's shell is a
+    /// person's, but the person is working for this workspace.
+    #[tokio::test]
+    async fn a_created_shell_pane_knows_its_workspace() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let term = svc.create_terminal(ws.id, "one", "shell").await.expect("a shell pane");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains(&expected(&svc, &ws)), "{command}");
+        assert!(!command.contains(pane_env::ACTOR), "a shell is a person's: {command}");
+        assert!(!command.contains(pane_env::CHARTER), "no orchestrator here: {command}");
+    }
+
+    #[tokio::test]
+    async fn a_split_pane_knows_its_workspace() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let target = svc.create_terminal(ws.id, "one", "shell").await.expect("a pane to split");
+        let split = svc
+            .split_terminal(ws.id, target.id, farcooler_protocol::v1::SplitSide::Right, "two", "shell")
+            .await
+            .expect("split");
+
+        let command = pane_start_command(&svc, split.id).await;
+        assert!(command.contains(&expected(&svc, &ws)), "{command}");
+    }
+
+    #[tokio::test]
+    async fn a_restarted_pane_knows_its_workspace() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains(&expected(&svc, &ws)), "{command}");
+        assert!(!command.contains(pane_env::CHARTER), "an agent isn't told the charter: {command}");
+    }
+
+    #[tokio::test]
+    async fn a_pane_switched_back_to_a_terminal_knows_its_workspace() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+        svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains(&expected(&svc, &ws)), "{command}");
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// Its workspace's orchestrator is also told where the charter is, quoted,
+    /// because the runtime directory can hold a space.
+    #[tokio::test]
+    async fn an_orchestrator_pane_is_told_where_its_charter_is() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let term = svc.create_terminal(ws.id, "orchestrator", "claude").await.expect("a claude pane");
+        svc.store.set_terminal_role(term.id, models::TerminalRole::Orchestrator).unwrap();
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        let command = pane_start_command(&svc, term.id).await;
+        let main = svc.store.main_workspace(ws.repository_id).unwrap();
+        let charter = crate::workspace_home::charter_path(&svc.root, main.id);
+        assert!(command.contains(&expected(&svc, &ws)), "{command}");
+        assert!(
+            command.contains(&format!("{}={}", pane_env::CHARTER, shell_quote(&charter.to_string_lossy()))),
+            "{command}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod orchestrator_launch_tests {
+    //! A workspace's orchestrator, launched from its recipe
+    //! (`orchestrator`). The builders first, then each launch path end to
+    //! end on a real tmux server, reading `#{pane_start_command}` and
+    //! `#{pane_current_path}` back, for the reason `pane_actor_tests` gives.
+
+    use super::restart_wiring_tests::{a_worktree, pane_start_command};
+    use super::*;
+    use crate::orchestrator::{Harness, OrchestratorLaunch, extra_env};
+    use farcooler_core::pane_env;
+
+    fn launch() -> OrchestratorLaunch {
+        OrchestratorLaunch {
+            workspace: Uuid::nil(),
+            home: "/fc/workspaces/w".into(),
+            main_checkout: "/src/My Repo".into(),
+            charter: "/fc/workspaces/w/charter.md".into(),
+            memory_dir: Some("/u/.claude/projects/-src-My-Repo/memory".into()),
+        }
+    }
+
+    fn extras() -> LaunchExtras {
+        LaunchExtras { orchestrator: Some(launch()), ..LaunchExtras::NONE }
+    }
+
+    /// Each harness's arm writes its own pointer back at the repository, the
+    /// path as one quoted word, and no other harness's.
+    #[test]
+    fn each_harness_is_launched_pointing_at_the_repository() {
+        let _real = test_agent::real_names();
+        let main = shell_quote("/src/My Repo");
+        let cases =
+            [("claude", "--add-dir"), ("claude:opus", "--add-dir"), ("codex", "--cd"), ("cursor", "--workspace")];
+        for (preset, flag) in cases {
+            let command = preset_command_with_hooks(preset, None, &extras());
+            let payload = command.split_once(" -ilc ").expect("an agent launch").1;
+            let inner = unquote(payload);
+            assert!(inner.contains(&format!(" {flag} {main}")), "{preset}: {inner}");
+            for other in ["--add-dir", "--cd", "--workspace"].into_iter().filter(|f| *f != flag) {
+                assert!(!inner.contains(other), "{preset} got {other}: {inner}");
+            }
+        }
+    }
+
+    /// A resumed claude orchestrator is pointed back too: `--resume` goes
+    /// through the same tail as a fresh launch.
+    #[test]
+    fn a_resumed_orchestrator_still_sees_the_repository() {
+        let _real = test_agent::real_names();
+        let sid = Uuid::now_v7().to_string();
+        let command = terminal_mode_command("claude", &sid, true, &extras());
+        let inner = unquote(command.split_once(" -ilc ").unwrap().1);
+        assert!(inner.contains("--resume"), "{inner}");
+        assert!(inner.contains(&format!(" --add-dir {}", shell_quote("/src/My Repo"))), "{inner}");
+    }
+
+    /// `shell_quote`'s inverse for one word, enough to read a payload back.
+    fn unquote(word: &str) -> String {
+        let out = std::process::Command::new("/bin/sh")
+            .args(["-c", &format!("printf %s {word}")])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// The recipe's variables replace the ones a pane exports anyway: the
+    /// manager files as the manager, not as agent `<id>`, and nothing is on
+    /// the line twice.
+    #[test]
+    fn an_orchestrator_exports_its_recipe_and_files_as_the_manager() {
+        let terminal = Uuid::now_v7();
+        let l = launch();
+        let workspace =
+            PaneWorkspace { id: l.workspace, charter: Some(l.charter.clone()), env: extra_env(Harness::Claude, &l) };
+        let line = with_pane_env(terminal, "claude", None, Some(&workspace), "claude".into());
+        assert!(line.contains(&format!("{}=manager ", pane_env::ACTOR)), "{line}");
+        assert!(!line.contains(&format!("agent:{terminal}")), "{line}");
+        assert!(line.contains("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 "), "{line}");
+        let charter = shell_quote("/fc/workspaces/w/charter.md");
+        assert!(line.contains(&format!("{}={charter} ", pane_env::CHARTER)), "{line}");
+        for name in [pane_env::ACTOR, pane_env::WORKSPACE, pane_env::CHARTER] {
+            assert_eq!(line.matches(&format!("{name}=")).count(), 1, "{name} twice: {line}");
+        }
+        // And every variable reaches the program through a real shell.
+        let out = std::process::Command::new("/bin/sh")
+            .args(["-c", &with_pane_env(terminal, "claude", None, Some(&workspace), "printenv".into())])
+            .output()
+            .unwrap();
+        let printed = String::from_utf8(out.stdout).unwrap();
+        for (name, value) in extra_env(Harness::Claude, &l) {
+            assert!(printed.lines().any(|l| l == format!("{name}={value}")), "{name}: {printed}");
+        }
+    }
+
+    /// Claude's settings for an orchestrator: every hook an agent pane gets,
+    /// and the repository's memory directory, in a file of its own. The
+    /// shared `claude-hooks.json` is not written by it.
+    #[test]
+    fn an_orchestrators_settings_are_the_hooks_and_the_repositorys_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let l = launch();
+        let path = write_orchestrator_settings(dir.path(), &l).expect("written");
+        assert_eq!(path, dir.path().join(format!("orchestrator-{}.json", l.workspace)));
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let hooks = crate::hook_install::claude_settings(&hook_ingress::HookIngress::socket_path(dir.path()));
+        assert_eq!(written["hooks"], hooks["hooks"]);
+        assert_eq!(written["autoMemoryDirectory"], "/u/.claude/projects/-src-My-Repo/memory");
+        assert!(!claude_hook_settings_path(dir.path()).exists());
+    }
+
+    /// The main workspace of the fixture's repository.
+    fn main_of(svc: &Service, ws: &models::Worktree) -> models::Workspace {
+        svc.store.main_workspace(ws.repository_id).unwrap()
+    }
+
+    async fn pane_path(svc: &Service, terminal: Uuid) -> PathBuf {
+        let pane = svc.inventory.refresh().await.claimants(terminal).into_iter().next().expect("a pane").clone();
+        let out = svc
+            .tmux
+            .run(&["display-message", "-p", "-t", &pane.pane_id, "#{pane_current_path}"])
+            .await
+            .expect("tmux answered");
+        PathBuf::from(out.stdout.trim())
+    }
+
+    fn resolved(path: &Path) -> PathBuf {
+        path.canonicalize().unwrap()
+    }
+
+    /// The word after `flag` in a pane's start command as tmux prints it,
+    /// with the quoting of its two nested layers taken off. Enough for a path
+    /// with no quote in it.
+    fn arg_after(command: &str, flag: &str) -> String {
+        let (_, rest) = command.split_once(&format!("{flag} ")).unwrap_or_else(|| panic!("no {flag}: {command}"));
+        let rest = rest.trim_start_matches(['\'', '\\']);
+        rest.split(['\'', ' ']).next().unwrap_or_default().to_string()
+    }
+
+    /// The carry from the pane environment: the charter is exported only to
+    /// a terminal whose record says orchestrator AT launch, so the record
+    /// has to say it before the first one. A freshly started claude
+    /// orchestrator runs in its home, pointed at the repository, with its
+    /// own settings and the manager skill's plugin.
+    #[tokio::test]
+    async fn a_started_claude_orchestrator_launches_from_its_home_seated() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let term = svc.start_orchestrator(main.id, "claude", false).await.expect("started");
+        assert_eq!(term.role, models::TerminalRole::Orchestrator);
+        assert_eq!(term.workspace_id, Some(main.id));
+        assert_eq!(term.worktree_id, ws.id, "in the main-checkout row");
+
+        let command = pane_start_command(&svc, term.id).await;
+        let charter = crate::workspace_home::charter_path(&svc.root, main.id);
+        assert!(
+            command.contains(&format!("{}={}", pane_env::CHARTER, shell_quote(&charter.to_string_lossy()))),
+            "{command}"
+        );
+        assert!(command.contains(&format!("{}=manager", pane_env::ACTOR)), "{command}");
+        assert!(command.contains("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1"), "{command}");
+        let repo = resolved(Path::new(&ws.worktree_path));
+        assert_eq!(arg_after(&command, "--add-dir"), repo.to_string_lossy());
+        let settings = orchestrator_settings_path(&svc.root, main.id);
+        assert_eq!(arg_after(&command, "--settings"), settings.to_string_lossy());
+        let plugin = svc.root.join(crate::skill_install::PLUGIN_DIR);
+        assert_eq!(arg_after(&command, "--plugin-dir"), plugin.to_string_lossy(), "the manager skill");
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        let memory = user_home().map(|h| crate::orchestrator::claude_memory_dir(&h, &repo));
+        assert_eq!(written["autoMemoryDirectory"].as_str().map(PathBuf::from), memory);
+
+        let home = crate::workspace_home::home(&svc.root, main.id);
+        assert_eq!(pane_path(&svc, term.id).await, resolved(&home));
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// Codex runs in the repository, where it reads the manager skill Far
+    /// Cooler writes there, and Cursor in the home with the plugin and
+    /// `--workspace`.
+    #[tokio::test]
+    async fn codex_orchestrates_from_the_repository_and_cursor_from_the_home() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let repo = resolved(Path::new(&ws.worktree_path));
+
+        let codex = svc.start_orchestrator(main.id, "codex", false).await.expect("codex");
+        let command = pane_start_command(&svc, codex.id).await;
+        assert_eq!(arg_after(&command, "--cd"), repo.to_string_lossy());
+        assert_eq!(pane_path(&svc, codex.id).await, repo);
+        assert!(repo.join(crate::skill_install::PROJECT_SKILL).is_file(), "codex's copy of the skill");
+
+        let cursor = svc.start_orchestrator(main.id, "cursor", true).await.expect("cursor, replacing codex");
+        let command = pane_start_command(&svc, cursor.id).await;
+        assert_eq!(arg_after(&command, "--workspace"), repo.to_string_lossy());
+        let plugin = svc.root.join(crate::skill_install::PLUGIN_DIR);
+        assert_eq!(arg_after(&command, "--plugin-dir"), plugin.to_string_lossy(), "the manager skill");
+        assert_eq!(pane_path(&svc, cursor.id).await, resolved(&crate::workspace_home::home(&svc.root, main.id)));
+        let _ = svc.stop_terminal(cursor.id).await;
+    }
+
+    /// One live orchestrator: a second start is refused in words, and
+    /// `replace` stops the first before starting the next.
+    #[tokio::test]
+    async fn a_second_orchestrator_is_refused_unless_it_replaces_the_first() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let refused = svc.start_orchestrator(main.id, "claude", false).await;
+        assert!(
+            matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })),
+            "{refused:?}"
+        );
+        assert_eq!(svc.store.list_terminals_for_worktree(ws.id).unwrap().len(), 1, "nothing was left behind");
+
+        let second = svc.start_orchestrator(main.id, "claude", true).await.expect("replaced");
+        assert_ne!(first.id, second.id);
+        // Removed, not only stopped: a kept record still says Orchestrator,
+        // so it could be restarted beside `second`, and it would keep
+        // `workspace.delete` refusing.
+        assert!(
+            matches!(svc.store.get_terminal(first.id), Err(DomainError::NotFound)),
+            "the replaced orchestrator's record is still there"
+        );
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(second.id));
+        assert!(svc.inventory.refresh().await.claimants(first.id).is_empty(), "the old pane is closed");
+
+        let not_a_harness = svc.start_orchestrator(main.id, "shell", true).await;
+        assert!(
+            matches!(not_a_harness, Err(DomainError::InvalidArgument { what: "command_preset" })),
+            "{not_a_harness:?}"
+        );
+        let _ = svc.stop_terminal(second.id).await;
+    }
+
+    /// Where every workspace's home would go made impossible: a file where
+    /// the directory of homes belongs.
+    fn no_homes_can_be_made(svc: &Service) {
+        let homes = crate::workspace_home::home(&svc.root, Uuid::nil()).parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&homes);
+        std::fs::write(&homes, "not a directory").unwrap();
+    }
+
+    /// An orchestrator whose home can't be made isn't started at all, rather
+    /// than started by tmux in `$HOME`: it's refused in a sentence, and
+    /// leaves no record, no seat and no pane.
+    #[tokio::test]
+    async fn an_orchestrator_with_no_home_is_refused_not_started_in_home() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        no_homes_can_be_made(&svc);
+        let refused = svc.start_orchestrator(main.id, "claude", false).await;
+        assert!(
+            matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_home" })),
+            "{refused:?}"
+        );
+        assert!(refused.unwrap_err().redacted_message().ends_with("wasn't started."));
+        assert!(svc.store.list_terminals_for_worktree(ws.id).unwrap().is_empty(), "a record was left");
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), None);
+        assert!(svc.inventory.refresh().await.panes.is_empty(), "a pane was started");
+
+        // And past `start_orchestrator`'s own look: the launch itself refuses.
+        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id)).await;
+        assert!(matches!(late, Err(DomainError::InvalidArgument { what: "orchestrator_home" })), "{late:?}");
+        assert!(svc.store.list_terminals_for_worktree(ws.id).unwrap().is_empty(), "a record was left");
+        assert!(svc.inventory.refresh().await.panes.is_empty(), "a pane was started");
+    }
+
+    /// A restart refused for want of a home gives back the seat it took:
+    /// the record is as it was, stopped, and a new start can have the seat.
+    #[tokio::test]
+    async fn a_restart_with_no_home_is_refused_and_gives_its_seat_back() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        svc.stop_terminal(first.id).await.expect("stopped");
+        no_homes_can_be_made(&svc);
+        let again = svc.restart_terminal(first.id).await;
+        assert!(matches!(again, Err(DomainError::InvalidArgument { what: "orchestrator_home" })), "{again:?}");
+        assert_eq!(svc.store.get_terminal(first.id).unwrap().intent, TerminalIntent::Stopped);
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), None, "the seat is still held");
+    }
+
+    /// `--replace` finds everything the new start needs before it stops the
+    /// live orchestrator: with no main checkout, or no home, it's refused and
+    /// the live one keeps running.
+    #[tokio::test]
+    async fn a_replace_that_cannot_start_leaves_the_live_orchestrator_running() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+
+        let row = svc.store.get_worktree(ws.id).unwrap();
+        svc.store.set_worktree_identity(ws.id, row.resource_version, &row.branch, false).unwrap();
+        let refused = svc.start_orchestrator(main.id, "claude", true).await;
+        assert!(matches!(refused, Err(DomainError::NotFound)), "{refused:?}");
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(first.id), "no main checkout");
+        assert!(!svc.inventory.refresh().await.claimants(first.id).is_empty(), "its pane was closed");
+
+        let row = svc.store.get_worktree(ws.id).unwrap();
+        svc.store.set_worktree_identity(ws.id, row.resource_version, &row.branch, true).unwrap();
+        no_homes_can_be_made(&svc);
+        let refused = svc.start_orchestrator(main.id, "claude", true).await;
+        assert!(
+            matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_home" })),
+            "{refused:?}"
+        );
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(first.id), "no home");
+        assert!(!svc.inventory.refresh().await.claimants(first.id).is_empty(), "its pane was closed");
+        let _ = svc.stop_terminal(first.id).await;
+    }
+
+    /// Two starts racing past `start_orchestrator`'s own check meet the
+    /// store's seat check in `open_terminal`, and the loser leaves no record
+    /// and no pane behind.
+    #[tokio::test]
+    async fn a_seat_taken_at_the_last_moment_leaves_nothing_behind() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id)).await;
+        assert!(matches!(late, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{late:?}");
+        let left: Vec<Uuid> = svc.store.list_terminals_for_worktree(ws.id).unwrap().iter().map(|t| t.id).collect();
+        assert_eq!(left, [first.id], "the loser's record is gone");
+        let _ = svc.stop_terminal(first.id).await;
+    }
+
+    /// An orchestrator that exited and was succeeded can't be restarted
+    /// beside its successor: that would be two live orchestrators, and the
+    /// store checks the seat only when a role or workspace is set.
+    #[tokio::test]
+    async fn a_succeeded_orchestrator_is_not_restarted_beside_its_successor() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        svc.stop_terminal(first.id).await.expect("stopped");
+        let second = svc.start_orchestrator(main.id, "claude", false).await.expect("second");
+
+        let again = svc.restart_terminal(first.id).await;
+        assert!(matches!(again, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{again:?}");
+        assert_eq!(svc.store.get_terminal(first.id).unwrap().intent, TerminalIntent::Stopped);
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(second.id));
+        assert!(svc.inventory.refresh().await.claimants(first.id).is_empty(), "no pane came back");
+        let _ = svc.stop_terminal(second.id).await;
+    }
+
+    /// An orchestrator whose tmux server went away: its row still says
+    /// running and confirmed, and no pane claims it.
+    fn a_lost_orchestrator(svc: &Service, ws: &models::Worktree, workspace: Uuid) -> models::Terminal {
+        let term = svc.store.create_terminal(ws.id, "orchestrator", "claude", TerminalIntent::Running, 80, 24).unwrap();
+        svc.store.set_terminal_workspace(term.id, workspace).unwrap();
+        let term = svc.store.set_terminal_role(term.id, models::TerminalRole::Orchestrator).unwrap();
+        let term = svc
+            .store
+            .update_terminal(term.id, term.resource_version, terminal_update(&term, |u| u.runtime_confirmed = true))
+            .unwrap();
+        assert_eq!(svc.derive_one(&term).state, TerminalState::Lost);
+        term
+    }
+
+    /// Who holds the seat, pane by pane: running, and anything not yet
+    /// confirmed, hold it; lost and exited don't; and an unreadable tmux
+    /// holds it, since that's no finding.
+    #[tokio::test]
+    async fn the_seat_is_held_by_a_pane_that_may_be_running() {
+        use farcooler_core::inventory::{RuntimeSnapshot, TaggedPane};
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let lost = a_lost_orchestrator(&svc, &ws, main.id);
+        let pane = |dead: bool| TaggedPane {
+            daemon_id: Uuid::nil(),
+            worktree_id: ws.id,
+            terminal_id: lost.id,
+            schema_version: 1,
+            pane_id: "%1".into(),
+            window_id: "@1".into(),
+            columns: 80,
+            rows: 24,
+            left: 0,
+            top: 0,
+            window_active: true,
+            pane_active: true,
+            zoomed: false,
+            tty: "/dev/ttys001".into(),
+            dead,
+            dead_status: None,
+            command: "claude".into(),
+            title: String::new(),
+        };
+        let found = farcooler_store::Vacated { terminal: lost.id, resource_version: lost.resource_version };
+        let seat = |t: &models::Terminal, snapshot: RuntimeSnapshot| {
+            let (live, vacated) = seat_of(vec![t.clone()], &snapshot);
+            (live.map(|t| t.id), vacated)
+        };
+
+        assert_eq!(seat(&lost, RuntimeSnapshot::healthy(vec![])), (None, vec![found]), "lost");
+        assert_eq!(seat(&lost, RuntimeSnapshot::healthy(vec![pane(true)])), (None, vec![found]), "exited");
+        assert_eq!(seat(&lost, RuntimeSnapshot::healthy(vec![pane(false)])), (Some(lost.id), vec![]), "running");
+        assert_eq!(seat(&lost, RuntimeSnapshot::unavailable()), (Some(lost.id), vec![]), "unreadable");
+        let coming_back = models::Terminal { runtime_confirmed: false, ..lost.clone() };
+        assert_eq!(
+            seat(&coming_back, RuntimeSnapshot::healthy(vec![pane(true)])),
+            (Some(lost.id), vec![]),
+            "a restart underway, over the exit it replaces"
+        );
+    }
+
+    /// A lost orchestrator doesn't hold its workspace's seat. `set_role`,
+    /// `start_orchestrator` and `restart_terminal` decide that the same way,
+    /// and the wire doesn't name it as the workspace's orchestrator.
+    #[tokio::test]
+    async fn a_lost_orchestrator_does_not_hold_the_seat() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let lost = a_lost_orchestrator(&svc, &ws, main.id);
+        assert_eq!(svc.live_orchestrator(main.id).unwrap(), None);
+        let listed = crate::workspace_ops::list(&svc, Some(ws.repository_id), farcooler_protocol::v1::Scope::HostAdmin);
+        assert_eq!(listed.unwrap().items[0].orchestrator_terminal_id, None, "the wire names no orchestrator");
+
+        let other = svc.store.create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24).unwrap();
+        // Through `terminal.set_role`'s own handler, which is what the CLI's
+        // `set-role` reaches.
+        let watcher = crate::watch::Watcher::new(svc.clone());
+        let role = |r: farcooler_protocol::v1::TerminalRole| farcooler_protocol::v1::TerminalSetRole { role: r as i32 };
+        crate::workspace_ops::set_role(&svc, &watcher, other.id, &role(farcooler_protocol::v1::TerminalRole::Orchestrator))
+            .await
+            .expect("set-role takes the free seat");
+        crate::workspace_ops::set_role(&svc, &watcher, other.id, &role(farcooler_protocol::v1::TerminalRole::Agent))
+            .await
+            .unwrap();
+
+        let started = svc.start_orchestrator(main.id, "claude", false).await.expect("a start without --replace");
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(started.id));
+        assert_eq!(svc.store.get_terminal(lost.id).unwrap().resource_version, lost.resource_version, "left alone");
+
+        let again = svc.restart_terminal(lost.id).await;
+        assert!(matches!(again, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{again:?}");
+        assert_eq!(svc.store.get_terminal(lost.id).unwrap(), lost, "the refused restart wrote nothing");
+        assert!(svc.inventory.refresh().await.claimants(lost.id).is_empty(), "and opened no pane");
+        let _ = svc.stop_terminal(started.id).await;
+    }
+
+    /// A restart underway holds the seat before its pane is back. Its row is
+    /// taken back first (`reseat_orchestrator`), unconfirmed; the pane it's
+    /// about to respawn still shows the exit it's replacing, which on its own
+    /// reads as exited. Read that way, a start in the window would seat a
+    /// second orchestrator beside the one coming back.
+    #[tokio::test]
+    async fn a_restart_underway_holds_the_seat_over_the_exit_it_replaces() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let pane = svc.inventory.refresh().await.claimants(first.id).into_iter().next().expect("a pane").clone();
+        svc.tmux.run(&["respawn-pane", "-k", "-t", &pane.pane_id, "true"]).await.expect("its program exits");
+        let mut exited = false;
+        for _ in 0..100 {
+            if svc.inventory.refresh().await.claimants(first.id).iter().all(|p| p.dead) {
+                exited = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(exited, "the pane never showed its exit");
+        assert_eq!(svc.live_orchestrator(main.id).unwrap(), None, "an exited orchestrator holds nothing");
+
+        let row = svc.store.get_terminal(first.id).unwrap();
+        let (_, vacated) = svc.orchestrator_seat(main.id).await.unwrap();
+        svc.store.reseat_orchestrator(first.id, row.resource_version, &vacated).expect("its seat back");
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(first.id));
+        let refused = svc.start_orchestrator(main.id, "claude", false).await;
+        assert!(matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{refused:?}");
+        let _ = svc.tmux.run(&["kill-pane", "-t", &pane.pane_id]).await;
+    }
+
+    /// The seat is taken on a fresh read of tmux, never the shared view. A
+    /// view left stale by a refresh that listed the panes before the
+    /// orchestrator's window existed (made here by hiding its tag for one
+    /// refresh) shows the running orchestrator as lost, and must not let a
+    /// second one sit down beside it.
+    #[tokio::test]
+    async fn a_stale_view_does_not_seat_a_second_orchestrator() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let first = svc.start_orchestrator(main.id, "claude", false).await.expect("first");
+        let pane = svc.inventory.refresh().await.claimants(first.id).into_iter().next().expect("a pane").clone();
+        let tag = farcooler_core::tags::TERMINAL_ID;
+        svc.tmux.run(&["set-option", "-p", "-u", "-t", &pane.pane_id, tag]).await.expect("tag hidden");
+        assert!(svc.inventory.refresh().await.claimants(first.id).is_empty(), "the stale read");
+        svc.tmux.run(&["set-option", "-p", "-t", &pane.pane_id, tag, &first.id.to_string()]).await.expect("tag back");
+        assert_eq!(svc.live_orchestrator(main.id).unwrap(), None, "the shared view is stale");
+
+        let second = svc.start_orchestrator(main.id, "claude", false).await;
+        assert!(matches!(second, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{second:?}");
+        assert_eq!(svc.inventory.refresh().await.claimants(first.id).len(), 1, "the first is still running");
+
+        // `set-role` too, from a view made stale the same way.
+        let other = svc.store.create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24).unwrap();
+        svc.tmux.run(&["set-option", "-p", "-u", "-t", &pane.pane_id, tag]).await.expect("tag hidden");
+        svc.inventory.refresh().await;
+        svc.tmux.run(&["set-option", "-p", "-t", &pane.pane_id, tag, &first.id.to_string()]).await.expect("tag back");
+        let taken = svc.set_terminal_role(other.id, models::TerminalRole::Orchestrator).await;
+        assert!(matches!(taken, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{taken:?}");
+        let _ = svc.stop_terminal(first.id).await;
+    }
+
+    /// The seat reads the rows before tmux. Another start that makes and
+    /// confirms its orchestrator while this one's tmux read is out (forced
+    /// here: the test runtime has one thread, so a task spawned first runs
+    /// at the read's first await) must be seen as a row that holds the seat,
+    /// or is at least unvacated. Read tmux first, and that orchestrator is a
+    /// confirmed row with no pane in the list, judged lost, and a second
+    /// orchestrator is seated beside it.
+    #[tokio::test]
+    async fn an_orchestrator_confirmed_during_the_seats_read_keeps_it() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let asking = svc.store.create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24).unwrap();
+        let store = svc.store.clone();
+        let (wt, workspace) = (ws.id, main.id);
+        let racer = tokio::spawn(async move {
+            let o = store.create_terminal(wt, "orchestrator", "claude", TerminalIntent::Running, 80, 24).unwrap();
+            store.set_terminal_workspace(o.id, workspace).unwrap();
+            let o = store.set_terminal_role(o.id, models::TerminalRole::Orchestrator).unwrap();
+            store.update_terminal(o.id, o.resource_version, terminal_update(&o, |u| u.runtime_confirmed = true)).unwrap()
+        });
+
+        let taken = svc.set_terminal_role(asking.id, models::TerminalRole::Orchestrator).await;
+        let racer = racer.await.unwrap();
+        assert!(racer.runtime_confirmed, "the other start confirmed its orchestrator");
+        assert!(matches!(taken, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{taken:?}");
+    }
+
+    /// A restart whose pane can't be made gives the seat back: the row is
+    /// written back as it was, so a lost orchestrator is still lost and
+    /// another can start. Made to fail by putting a directory where the
+    /// tmux config goes, so every tmux call is refused before it runs.
+    #[tokio::test]
+    async fn a_restart_that_fails_gives_the_seat_back() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let lost = a_lost_orchestrator(&svc, &ws, main.id);
+        let recovery = svc.tmux.recovery_command();
+        let config = recovery.split(" -f ").nth(1).and_then(|r| r.split(" attach").next()).expect("the config path");
+        std::fs::remove_file(config).ok();
+        std::fs::create_dir_all(config).unwrap();
+
+        let failed = svc.restart_terminal(lost.id).await;
+        std::fs::remove_dir(config).unwrap();
+        assert!(failed.is_err(), "{failed:?}");
+        let row = svc.store.get_terminal(lost.id).unwrap();
+        assert_eq!(
+            (row.intent, row.runtime_confirmed, row.exit_code, row.exit_signal),
+            (lost.intent, lost.runtime_confirmed, lost.exit_code, lost.exit_signal),
+            "written back as it was"
+        );
+        let started = svc.start_orchestrator(main.id, "claude", false).await.expect("the seat is free again");
+        let _ = svc.stop_terminal(started.id).await;
+    }
+
+    /// With nobody else in the seat, a lost orchestrator is restarted into
+    /// it, and holds it while it comes up.
+    #[tokio::test]
+    async fn a_lost_orchestrator_restarted_takes_its_seat_back() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let lost = a_lost_orchestrator(&svc, &ws, main.id);
+        let back = svc.restart_terminal(lost.id).await.expect("restarted");
+        assert_eq!(svc.live_orchestrator(main.id).unwrap().map(|t| t.id), Some(lost.id));
+        assert!(back.runtime_confirmed);
+        let refused = svc.start_orchestrator(main.id, "claude", false).await;
+        assert!(matches!(refused, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{refused:?}");
+        let _ = svc.stop_terminal(lost.id).await;
+    }
+
+    /// A restart comes back from the home with the whole recipe.
+    #[tokio::test]
+    async fn a_restarted_orchestrator_comes_back_the_way_it_started() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let term = svc.start_orchestrator(main.id, "claude", false).await.expect("started");
+        svc.restart_terminal(term.id).await.expect("restart");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains(&format!("{}=manager", pane_env::ACTOR)), "{command}");
+        assert!(command.contains("--add-dir"), "{command}");
+        assert!(command.contains(&format!("orchestrator-{}.json", main.id)), "{command}");
+        assert_eq!(pane_path(&svc, term.id).await, resolved(&crate::workspace_home::home(&svc.root, main.id)));
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// And so does a pane switched back to a terminal.
+    #[tokio::test]
+    async fn an_orchestrator_switched_back_to_a_terminal_keeps_its_recipe() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let main = main_of(&svc, &ws);
+        let term = svc.start_orchestrator(main.id, "claude", false).await.expect("started");
+        svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
+
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains("--add-dir"), "{command}");
+        assert!(command.contains(&format!("orchestrator-{}.json", main.id)), "{command}");
+        assert_eq!(pane_path(&svc, term.id).await, resolved(&crate::workspace_home::home(&svc.root, main.id)));
+        let _ = svc.stop_terminal(term.id).await;
+    }
+}
+
+#[cfg(test)]
 mod pane_actor_tests {
     //! The name a pane files its board writes under, driven end to end.
     //!
@@ -6256,9 +7570,39 @@ mod pane_actor_tests {
     fn a_task(svc: &Service, ws: &models::Worktree) -> (Uuid, String) {
         let task = svc
             .store
-            .create_task(ws.repository_id, "a task", farcooler_store::models::Actor::User)
+            .create_task(
+                svc.store.ensure_main_workspace(ws.repository_id).unwrap().id,
+                "a task",
+                farcooler_store::models::Actor::User,
+            )
             .expect("a task");
         (task.id, task.key)
+    }
+
+    /// A task dispatched into a worktree nobody has claimed claims it for the
+    /// task's workspace, as an explicit claim, and its pane is that
+    /// workspace's. One dispatched into a worktree another workspace owns
+    /// doesn't take it.
+    #[tokio::test]
+    async fn a_task_dispatched_into_an_unclaimed_worktree_claims_it_for_its_board() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let billing = svc.store.create_workspace(ws.repository_id, "Billing", "bil").unwrap();
+        let task = svc.store.create_task(billing.id, "a task", farcooler_store::models::Actor::User).unwrap();
+        let path = std::fs::canonicalize(&ws.worktree_path).unwrap().join(".worktrees").join("free");
+        std::fs::create_dir_all(&path).unwrap();
+        let free = svc.store.create_unclaimed_worktree_for_test(ws.repository_id, &path.to_string_lossy());
+
+        let term = svc.create_terminal_with_prompt(free, "w", "claude", None, Some(task.id)).await.expect("dispatched");
+        let row = svc.store.get_worktree(free).unwrap();
+        assert_eq!((row.workspace_id, row.claim_source), (Some(billing.id), Some(models::ClaimSource::Explicit)));
+        assert_eq!(term.workspace_id, Some(billing.id), "the pane is Billing's");
+        let _ = svc.stop_terminal(term.id).await;
+
+        // Main's checkout stays Main's.
+        let main = svc.store.get_worktree(ws.id).unwrap().workspace_id;
+        let term = svc.create_terminal_with_prompt(ws.id, "w", "claude", None, Some(task.id)).await.expect("dispatched");
+        assert_eq!(svc.store.get_worktree(ws.id).unwrap().workspace_id, main);
+        let _ = svc.stop_terminal(term.id).await;
     }
 
     /// A pane opened for a task says so, and still says so after a restart,
@@ -6391,10 +7735,10 @@ mod pane_actor_tests {
         let host = Uuid::now_v7();
         let root = svc.store.create_repository_root(host, "/elsewhere", 0).unwrap();
         let other = svc.store.create_repository(host, root.id, "Elsewhere", "/elsewhere/.git", "").unwrap().id;
-        svc.store.assign_task_key_prefix(other).unwrap();
+        let main = svc.store.ensure_main_workspace(other).unwrap();
         let task = svc
             .store
-            .create_task(other, "not here", farcooler_store::models::Actor::User)
+            .create_task(main.id, "not here", farcooler_store::models::Actor::User)
             .unwrap();
         let before = svc.store.list_terminals_for_worktree(ws.id).unwrap().len();
 
@@ -7000,7 +8344,7 @@ mod naming_tests {
         let (dir, svc, repo) = crate::test_support::fixture().await;
         git::git(&dir.path().join("repo"), &["branch", "feat/rate-limiting"]).await.unwrap();
 
-        let ws = svc.adopt_branch(repo, "feat/rate-limiting").await.unwrap();
+        let ws = svc.adopt_branch(repo, "feat/rate-limiting", None).await.unwrap();
 
         assert_eq!(ws.name(), "rate limiting");
         assert_eq!(ws.branch, "feat/rate-limiting", "the branch keeps its prefix; the name drops it");
@@ -8480,7 +9824,7 @@ mod hook_file_tests {
         let (dir, svc, repo) = crate::test_support::fixture().await;
         git::git(&dir.path().join("repo"), &["branch", "feat/rate-limiting"]).await.unwrap();
 
-        let ws = svc.adopt_branch(repo, "feat/rate-limiting").await.expect("a worktree");
+        let ws = svc.adopt_branch(repo, "feat/rate-limiting", None).await.expect("a worktree");
 
         let worktree = Path::new(&ws.worktree_path);
         assert!(worktree.join(".codex/hooks.json").exists(), "codex reports itself here too");
@@ -9319,9 +10663,11 @@ mod launch_hook_install_tests {
         // rename that put a launch path out of its sight would otherwise leave
         // it passing over an empty walk.
         // `create_terminal` and `split_terminal` are delegates now; the
-        // launches they make are built in their `_with_prompt` halves.
+        // launches they make are built in `open_terminal` (which
+        // `create_terminal_with_prompt` and `start_orchestrator` share) and
+        // in `split_terminal_with_prompt`.
         for expected in [
-            "create_terminal_with_prompt",
+            "open_terminal",
             "split_terminal_with_prompt",
             "restart_terminal",
             "set_pane_mode",
@@ -9367,12 +10713,14 @@ mod launch_hook_install_tests {
         builders.dedup();
         setters.sort();
         setters.dedup();
-        assert_eq!(builders, ["create_terminal_with_prompt", "split_terminal_with_prompt"]);
+        assert_eq!(builders, ["open_terminal", "split_terminal_with_prompt"]);
         // Constructed in the one function that decides inline or file, and
         // read in the one that renders it — nowhere else.
         assert_eq!(setters, ["launch_command_with_prompt", "prompt_argument"]);
         // And the extras every launch path starts from carry none.
-        assert!(production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None }"));
+        assert!(
+            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None }")
+        );
     }
 }
 
@@ -9909,7 +11257,7 @@ mod launch_prompt_tests {
         let shells = shells();
         for (preset, program, flags) in &cases {
             let command = launch_command_with_prompt(
-                dir.path(), Uuid::now_v7(), preset, None, LaunchExtras::NONE, Some(&opening), Some("fc-1"));
+                dir.path(), Uuid::now_v7(), preset, None, LaunchExtras::NONE, Some(&opening), Some("fc-1"), None);
             assert!(command.starts_with("env "), "{command}");
             assert!(command.contains(" FARCOOLER_TASK=fc-1 "), "{command}");
             for outer in &shells {
@@ -9935,10 +11283,25 @@ mod launch_prompt_tests {
         assert!(opening.contains("farcooler task note --kind decision"), "{opening}");
         assert!(opening.contains("farcooler task ask --body"), "{opening}");
         // And the export it relies on is there for such a key.
-        let command = with_pane_env(Uuid::now_v7(), "claude", Some("-1"), "claude".into());
+        let command = with_pane_env(Uuid::now_v7(), "claude", Some("-1"), None, "claude".into());
         assert!(command.contains(" FARCOOLER_TASK=-1 "), "{command}");
         // An ordinary key is still written out.
         assert!(opening_prompt("farcooler", "fc-1").contains("farcooler task show fc-1."));
+    }
+
+    /// The charter is the orchestrator's, in its workspace's home, and a task
+    /// agent is never told where it is (`PaneWorkspace::charter`). So the
+    /// opening doesn't send the agent looking for one, in the repository
+    /// where it used to be or anywhere else: the task is the whole brief, and
+    /// when it doesn't say how to finish, the agent hands it to review rather
+    /// than calling it done.
+    #[test]
+    fn the_opening_prompt_sends_the_agent_to_its_task_and_not_to_a_charter() {
+        let opening = opening_prompt("farcooler", "fc-1");
+        assert!(!opening.contains("manager.md"), "{opening}");
+        assert!(!opening.contains("charter"), "{opening}");
+        assert!(opening.contains("The task is your whole brief"), "{opening}");
+        assert!(opening.contains("farcooler task set fc-1 --status in_review"), "{opening}");
     }
 
     /// `TASK_AGENTS` is the daemon's and the CLI's one list of what a task
@@ -9959,11 +11322,39 @@ mod launch_prompt_tests {
         }
     }
 
+    /// The workspace goes on every pane whose terminal has one, the agent's
+    /// name and task only on an agent's, and a pane with none of them is
+    /// launched exactly as built.
+    #[test]
+    fn a_pane_says_its_workspace_whether_or_not_an_agent_runs_in_it() {
+        let (terminal, ws) = (Uuid::now_v7(), Uuid::now_v7());
+        let workspace = PaneWorkspace { id: ws, charter: None, env: Vec::new() };
+        let agent = with_pane_env(terminal, "claude", Some("ov-3"), Some(&workspace), "claude".into());
+        assert_eq!(agent, format!("env FARCOOLER_ACTOR=agent:{terminal} FARCOOLER_TASK=ov-3 FARCOOLER_WORKSPACE={ws} claude"));
+        let shell = with_pane_env(terminal, "shell", None, Some(&workspace), "zsh -il".into());
+        assert_eq!(shell, format!("env FARCOOLER_WORKSPACE={ws} zsh -il"));
+        assert_eq!(with_pane_env(terminal, "shell", None, None, "zsh -il".into()), "zsh -il");
+    }
+
+    /// The charter's path reaches the orchestrator as one value under every
+    /// shell a pane can be parsed by, space and quote included.
+    #[test]
+    fn an_orchestrators_charter_path_survives_every_shell() {
+        let charter = PathBuf::from("/tmp/My Runner/it's/workspaces/x/charter.md");
+        let workspace = PaneWorkspace { id: Uuid::now_v7(), charter: Some(charter.clone()), env: Vec::new() };
+        let command =
+            with_pane_env(Uuid::now_v7(), "claude", None, Some(&workspace), "printenv FARCOOLER_CHARTER".into());
+        for shell in shells() {
+            let out = std::process::Command::new(&shell).arg("-c").arg(&command).output().expect("run");
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), charter.to_string_lossy(), "{shell}: {command}");
+        }
+    }
+
     /// A key that is not a plain identifier never reaches the `env` line,
     /// which is not quoted.
     #[test]
     fn a_key_that_is_not_a_plain_identifier_is_not_exported() {
-        let command = with_pane_env(Uuid::now_v7(), "claude", Some("fc-1; rm -rf ~"), "claude".into());
+        let command = with_pane_env(Uuid::now_v7(), "claude", Some("fc-1; rm -rf ~"), None, "claude".into());
         assert!(!command.contains("FARCOOLER_TASK"), "{command}");
     }
 
@@ -10010,7 +11401,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         for padded in [format!("update{}", "\n".repeat(9 * 1024)), "\n\t update \n".to_string()] {
             let command = launch_command_with_prompt(
-                dir.path(), Uuid::now_v7(), "claude", None, LaunchExtras::NONE, Some(&padded), None);
+                dir.path(), Uuid::now_v7(), "claude", None, LaunchExtras::NONE, Some(&padded), None, None);
             let bare = command.split_once(" /").map(|(_, rest)| format!("/{rest}")).unwrap();
             assert_eq!(argv_through(&bare, "claude", "/bin/sh", "/bin/sh"), ", update");
         }
@@ -10021,7 +11412,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::now_v7();
         let word = "u".repeat(20_000);
-        launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&word), None);
+        launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&word), None, None);
         assert_eq!(std::fs::read_to_string(prompt_file(dir.path(), id)).unwrap(), format!(" {word}"));
     }
 
@@ -10109,7 +11500,7 @@ mod launch_prompt_tests {
 
         // An adopted branch is somebody's commits, and is not.
         git::git(Path::new(&ws.worktree_path), &["branch", "theirs"]).await.unwrap();
-        let adopted = svc.adopt_branch(ws.repository_id, "theirs").await.unwrap();
+        let adopted = svc.adopt_branch(ws.repository_id, "theirs", None).await.unwrap();
         assert!(!trusts(adopted.worktree_path.clone()).await, "adopted");
 
         // The repository's own checkout is not.
@@ -10168,7 +11559,7 @@ mod launch_prompt_tests {
 
         // An adopted branch is somebody's commits, and is not trusted either.
         git::git(Path::new(&ws.worktree_path), &["branch", "theirs"]).await.unwrap();
-        let adopted = svc.adopt_branch(ws.repository_id, "theirs").await.unwrap();
+        let adopted = svc.adopt_branch(ws.repository_id, "theirs", None).await.unwrap();
         svc.prepare_launch_hooks("codex", &adopted.worktree_path).await;
         assert_eq!(entries(), Vec::<String>::new());
 
@@ -10183,7 +11574,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::now_v7();
         let command =
-            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(AWKWARD), None);
+            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(AWKWARD), None, None);
         assert!(command.len() <= MAX_INLINE_LAUNCH_BYTES);
         assert!(!dir.path().join(format!("prompt-{id}")).exists(), "no file for a prompt that fits");
     }
@@ -10205,7 +11596,7 @@ mod launch_prompt_tests {
         let id = Uuid::now_v7();
         let prompt = long_prompt();
         let command =
-            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&prompt), None);
+            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&prompt), None, None);
         assert!(command.len() <= MAX_INLINE_LAUNCH_BYTES, "{} bytes", command.len());
 
         let file = dir.path().join(format!("prompt-{id}"));
@@ -10244,6 +11635,7 @@ mod launch_prompt_tests {
             Uuid::now_v7(),
             "claude",
             None,
+            None,
             preset_command_with_hooks("claude", None, &inline(&prompt)),
         );
         assert!(inline.len() > 16_384, "the inline form is past the ceiling: {}", inline.len());
@@ -10255,7 +11647,7 @@ mod launch_prompt_tests {
 
         let id = Uuid::now_v7();
         let command =
-            launch_command_with_prompt(&svc.root, id, "claude", None, LaunchExtras::NONE, Some(&prompt), None);
+            launch_command_with_prompt(&svc.root, id, "claude", None, LaunchExtras::NONE, Some(&prompt), None, None);
         svc.tmux
             .create_terminal_window(ws.id, id, "file", &ws.worktree_path, &super::test_agent::unstubbed(&command).replacen("claude", &printf, 1))
             .await

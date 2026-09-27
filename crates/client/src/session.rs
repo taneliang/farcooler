@@ -231,7 +231,22 @@ pub enum FleetEvent {
     /// call: the Mac board deliberately does not, because its own writes and a
     /// person's writes from the CLI in another window are both `user`, and a
     /// board that dropped `user` would go blind to the second.
-    Task { repository: Uuid, actor: String },
+    ///
+    /// **`workspace` is the board, now that a repository has several.** A
+    /// board view is keyed by workspace, so the repository alone would make
+    /// every board in it re-read on every write to any of them. `None` is a
+    /// runner without `workstreams`, which has one board per repository, and a
+    /// client reads it as "any board in `repository` may have moved".
+    ///
+    /// `from_workspace` is set only by `task.move`, which changes two boards
+    /// in one event: without it the board the task LEFT would keep drawing a
+    /// card that is no longer on it.
+    Task {
+        repository: Uuid,
+        workspace: Option<Uuid>,
+        from_workspace: Option<Uuid>,
+        actor: String,
+    },
 }
 
 impl FleetEvent {
@@ -282,6 +297,8 @@ impl FleetEvent {
             // board test was a model test.
             Payload::TaskChanged(t) => Some(FleetEvent::Task {
                 repository: uuid_of(&t.repository_id),
+                workspace: some_uuid(t.workspace_id.as_deref()),
+                from_workspace: some_uuid(t.from_workspace_id.as_deref()),
                 // Verbatim. This is a word the daemon composed and a client
                 // compares; parsing it here into a kind and an id would give
                 // two fields that can disagree, which is the exact thing the
@@ -718,11 +735,22 @@ impl Session {
         let host = self.host().await?;
         let healthy =
             host.self_health != farcooler_protocol::v1::SelfHealth::Degraded as i32;
+        // The workstreams, from a runner that has them. `None` from one that
+        // does not, and the envelope then carries no `workspaces` key at all:
+        // an app reads that as one implicit workspace per repository, which
+        // is today's layout. An empty list would say something else — a
+        // runner with workstreams and no repositories.
+        let workspaces = if self.can(farcooler_protocol::capability::WORKSTREAMS) {
+            Some(self.workspaces().await?)
+        } else {
+            None
+        };
+        let known = workspaces.as_deref().unwrap_or(&[]);
 
         let items: Vec<_> = worktrees
             .iter()
             .map(|w| {
-                json!({
+                let row = json!({
                     "id": uuid_of(&w.id).to_string(),
                     "short": short(&w.id),
                     // Which repository this worktree belongs to.
@@ -863,11 +891,29 @@ impl Session {
                             "taskId": task_of(t),
                         }))
                         .collect::<Vec<_>>(),
-                })
+                });
+                with_workspaces(row, w, terminals, known)
             })
             .collect();
 
-        Ok(fleet_json(healthy, json!(host.live_terminal_count), &list, items))
+        let workspaces = workspaces
+            .map(|all| all.iter().map(crate::workspaces_json::workspace_json).collect());
+        Ok(fleet_json(healthy, json!(host.live_terminal_count), &list, items, workspaces))
+    }
+
+    /// Every workstream on the runner, Main first within each repository.
+    ///
+    /// Refused here, without a round trip, on a runner that does not advertise
+    /// `workstreams`, for `tasks`' reason: an old runner answers
+    /// `workspace.list` with `CAPABILITY_UNSUPPORTED` anyway.
+    pub async fn workspaces(
+        &mut self,
+    ) -> Result<Vec<farcooler_protocol::v1::Workspace>, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::WORKSTREAMS, "workspace.list")?;
+        match self.value("workspace.list", None, None).await? {
+            result::Value::WorkspaceList(l) => Ok(l.items),
+            other => Err(wrong("workspace_list", &other)),
+        }
     }
 
     pub async fn host(&mut self) -> Result<farcooler_protocol::v1::Host, SessionError> {
@@ -949,6 +995,27 @@ impl Session {
         terminal_preset: &str,
         adopt: bool,
     ) -> Result<Worktree, SessionError> {
+        // Claimed for the repository's Main, where the runner has workspaces:
+        // a pane opened in an unclaimed worktree has no workspace, so nothing
+        // it does there could ever claim it, and the worktree would sit in
+        // Unclaimed for good. The phones make worktrees from nowhere more
+        // specific than the repository, so Main is the one they mean.
+        //
+        // A list that can't be read makes the worktree unclaimed rather than
+        // refusing it: the claim is a convenience, and the create is what
+        // was asked for.
+        let workspaces = if self.can(farcooler_protocol::capability::WORKSTREAMS) {
+            match self.workspaces().await {
+                Ok(listed) => Some(listed),
+                Err(e) => {
+                    tracing::warn!(error = %e, "could not list workspaces; the new worktree is unclaimed");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let (workspace_id, required) = main_claim(repository, workspaces.as_deref());
         let payload = request::Payload::WorktreeCreate(farcooler_protocol::v1::WorktreeCreate {
             task_name: task.into(),
             branch: branch.into(),
@@ -956,8 +1023,9 @@ impl Session {
             terminal_preset: terminal_preset.into(),
             adopt_existing: adopt,
             fork_only: false,
+            workspace_id,
         });
-        match self.value("worktree.create", Some(repository), Some(payload)).await? {
+        match self.value_requiring("worktree.create", Some(repository), Some(payload), required).await? {
             result::Value::Worktree(w) => Ok(w),
             other => Err(wrong("worktree", &other)),
         }
@@ -1656,14 +1724,19 @@ impl Session {
     /// advertise `tasks`. The daemon would refuse it too, with the same code;
     /// asking first only spends a request to be told what the handshake
     /// already said.
-    pub async fn tasks(&mut self, repository: Uuid) -> Result<serde_json::Value, SessionError> {
+    ///
+    /// `workspace` narrows the read to that workspace's board. See
+    /// `task_list_request` for what it does on a runner without
+    /// `workstreams`.
+    pub async fn tasks(
+        &mut self,
+        repository: Uuid,
+        workspace: Option<Uuid>,
+    ) -> Result<serde_json::Value, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.list")?;
-        let payload = request::Payload::TaskList(farcooler_protocol::v1::TaskListRequest {
-            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
-            status: 0,
-            stale_after_millis: None,
-        });
-        match self.value("task.list", Some(repository), Some(payload)).await? {
+        let (list, required) = task_list_request(self.capabilities(), repository, workspace);
+        let payload = request::Payload::TaskList(list);
+        match self.value_requiring("task.list", Some(repository), Some(payload), required).await? {
             result::Value::TaskList(l) => Ok(crate::tasks_json::list_json(&l.items, now_millis())),
             other => Err(wrong("task_list", &other)),
         }
@@ -1850,7 +1923,23 @@ impl Session {
         target: Option<Uuid>,
         payload: Option<request::Payload>,
     ) -> Result<result::Value, SessionError> {
+        self.value_requiring(method, target, payload, Vec::new()).await
+    }
+
+    /// `value`, naming the capabilities the request depends on.
+    ///
+    /// For a field an older daemon would silently drop — `TaskListRequest.
+    /// workspace_id` is one — so that daemon refuses the request instead of
+    /// answering a different question. See `Request.required_capabilities`.
+    async fn value_requiring(
+        &mut self,
+        method: &str,
+        target: Option<Uuid>,
+        payload: Option<request::Payload>,
+        required: Vec<String>,
+    ) -> Result<result::Value, SessionError> {
         let mut request = farcooler_transport::request(method);
+        request.required_capabilities = required;
         if let Some(id) = target {
             request.target_resource_id = Some(bytes::Bytes::copy_from_slice(id.as_bytes()));
         }
@@ -1875,6 +1964,55 @@ fn advertises(advertised: &[String], capability: &str) -> bool {
             || capability == farcooler_protocol::capability::TERMINALS;
     }
     advertised.iter().any(|c| c == capability)
+}
+
+/// A board read, and the capabilities it depends on.
+///
+/// With a workspace, on a runner that advertises `workstreams`, the read is
+/// that workspace's board, and names `workstreams` as required: an older
+/// daemon drops `workspace_id` without a word and would answer with the whole
+/// repository.
+///
+/// With a workspace, on a runner WITHOUT `workstreams`, the workspace is left
+/// off and the read is the repository's board. That runner has one board per
+/// repository, and the only workspace an app can hold for it is the implicit
+/// one AgentKit's `WorkspaceSummary.implicit(repository:)` stands in for, so
+/// the repository's board IS that workspace's board. Refusing would leave an
+/// old runner's board unreadable from a client keyed by workspace.
+fn task_list_request(
+    advertised: &[String],
+    repository: Uuid,
+    workspace: Option<Uuid>,
+) -> (farcooler_protocol::v1::TaskListRequest, Vec<String>) {
+    let workstreams = farcooler_protocol::capability::WORKSTREAMS;
+    let workspace = workspace.filter(|_| advertises(advertised, workstreams));
+    let list = farcooler_protocol::v1::TaskListRequest {
+        repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+        status: 0,
+        stale_after_millis: None,
+        workspace_id: workspace.map(|w| bytes::Bytes::copy_from_slice(w.as_bytes())),
+    };
+    let required = workspace.map(|_| vec![workstreams.to_string()]).unwrap_or_default();
+    (list, required)
+}
+
+/// The workspace a worktree the phones make is claimed for, and the
+/// capabilities that claim depends on: `repository`'s Main, from `workspaces`
+/// as a runner with `workstreams` listed them. `None` from a runner without
+/// them, which has no workspace to claim for and would refuse the
+/// requirement, and where the list names no Main for the repository.
+fn main_claim(
+    repository: Uuid,
+    workspaces: Option<&[farcooler_protocol::v1::Workspace]>,
+) -> (Option<bytes::Bytes>, Vec<String>) {
+    let main = workspaces
+        .unwrap_or_default()
+        .iter()
+        .find(|w| w.is_main && w.repository_id.as_ref() == repository.as_bytes());
+    match main {
+        Some(w) => (Some(w.id.clone()), vec![farcooler_protocol::capability::WORKSTREAMS.to_string()]),
+        None => (None, Vec::new()),
+    }
 }
 
 /// Refuse `method` on a runner that cannot serve it, as the runner itself
@@ -1952,12 +2090,25 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::TaskNote(_) => "task_note",
         result::Value::TaskBlockList(_) => "task_block_list",
         result::Value::TaskNoteHitList(_) => "task_note_hit_list",
+        result::Value::Workspace(_) => "workspace",
+        result::Value::WorkspaceList(_) => "workspace_list",
     }
 }
 
 
 pub fn uuid_of(bytes: &[u8]) -> Uuid {
     Uuid::from_slice(bytes).unwrap_or(Uuid::nil())
+}
+
+/// An id the runner may not have sent, as `None` rather than the nil uuid.
+///
+/// For the workspace fields, which are absent from a runner without
+/// `workstreams` and absent on an unclaimed worktree. `uuid_of` would turn
+/// both into the nil uuid, and a client would key a board by it — one board
+/// every old runner's events and every unclaimed worktree shared. `task_of`
+/// follows the same rule for the same reason.
+pub fn some_uuid(bytes: Option<&[u8]>) -> Option<Uuid> {
+    bytes.and_then(|b| Uuid::from_slice(b).ok()).filter(|u| !u.is_nil())
 }
 
 /// UUIDv7 puts a timestamp in its LEADING bytes, so anything created in the
@@ -2122,6 +2273,41 @@ fn terminal_label(s: TerminalState) -> &'static str {
     }
 }
 
+/// A fleet row with its workspace fields, and its terminals' too.
+///
+/// Added to the row after it is built rather than written into it, because
+/// the row's `json!` is at the macro's recursion limit. The terminals in the
+/// row are the worktree's in `terminals`' order, which is how the row was
+/// built.
+///
+/// On the worktree: `workspace` owns it, or null while it is unclaimed and
+/// from a runner without `workstreams`; `claim_source` is the machine word
+/// for what made the claim; `foreign_writers` names the other workspaces with
+/// a live terminal in it. On each terminal: `workspace`, whose work it is
+/// doing (not always the worktree's owner), and `role`. The CLI's `worktree
+/// list --json` spells all five the same way; see `workspaces_json`. The Mac
+/// draws an orchestrator once, as its workspace's own row, and leaves it out
+/// of the worktree it runs in.
+fn with_workspaces(
+    mut row: serde_json::Value,
+    w: &Worktree,
+    terminals: &[Terminal],
+    known: &[farcooler_protocol::v1::Workspace],
+) -> serde_json::Value {
+    use crate::workspaces_json::{foreign_writers, role_word, workspace_of};
+    row["workspace"] = json!(workspace_of(w.workspace_id.as_deref()));
+    row["claim_source"] = json!(w.claim_source);
+    row["foreign_writers"] = json!(foreign_writers(w, known));
+    let mine = terminals.iter().filter(|t| t.worktree_id == w.id);
+    if let Some(rows) = row["terminals"].as_array_mut() {
+        for (out, t) in rows.iter_mut().zip(mine) {
+            out["workspace"] = json!(workspace_of(t.workspace_id.as_deref()));
+            out["role"] = json!(role_word(t.role));
+        }
+    }
+    row
+}
+
 /// The object `Session::fleet` returns, given what it read.
 ///
 /// Its own function so the keys the apps decode by name can be checked by a
@@ -2133,8 +2319,9 @@ fn fleet_json(
     live_panes: serde_json::Value,
     list: &farcooler_protocol::v1::TerminalList,
     worktrees: Vec<serde_json::Value>,
+    workspaces: Option<Vec<serde_json::Value>>,
 ) -> serde_json::Value {
-    json!({
+    let mut fleet = json!({
         "runtime_healthy": healthy,
         "live_panes": live_panes,
         // Every pane's trace added together at one width, summed by the
@@ -2147,7 +2334,17 @@ fn fleet_json(
         // exactly. Null with no trace, and from an older daemon.
         "fleetTraceAnchor": fleet_trace_anchor(list),
         "worktrees": worktrees,
-    })
+    });
+    // The workstreams, as `workspace list --json` prints them. Absent, not
+    // empty, from a runner without `workstreams`; see `Session::fleet`.
+    //
+    // NOT AgentKit's `RunnerDirectory` key `"workspaces"`, which is older,
+    // persisted, and holds worktrees. Same word, different thing; see
+    // `workspaces_json`.
+    if let Some(workspaces) = workspaces {
+        fleet["workspaces"] = json!(workspaces);
+    }
+    fleet
 }
 
 /// The fleet's trace as `fleet` spells it: base64, or no key for none.
@@ -2187,6 +2384,98 @@ mod tests {
         assert!(super::require(&with, TASKS, "task.list").is_ok());
     }
 
+    /// A fleet row names its workspace, how it was claimed, and who else is
+    /// writing in it; each of its terminals names its own workspace and role.
+    /// A pane in another worktree does not lend its fields to this one's.
+    #[test]
+    fn a_fleet_row_carries_its_workspace_and_its_panes_roles() {
+        let b = |u: Uuid| bytes::Bytes::copy_from_slice(u.as_bytes());
+        let (lane, other, main, billing) =
+            (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        let w = Worktree {
+            id: b(lane),
+            workspace_id: Some(b(main)),
+            claim_source: Some("hook".into()),
+            foreign_writer_workspace_ids: vec![b(billing)],
+            ..Default::default()
+        };
+        let pane = |worktree: Uuid, workspace: Uuid, role: farcooler_protocol::v1::TerminalRole| {
+            Terminal {
+                worktree_id: b(worktree),
+                workspace_id: Some(b(workspace)),
+                role: role as i32,
+                ..Default::default()
+            }
+        };
+        use farcooler_protocol::v1::TerminalRole;
+        let terminals = vec![
+            pane(other, billing, TerminalRole::Orchestrator),
+            pane(lane, billing, TerminalRole::Agent),
+            Terminal { worktree_id: b(lane), ..Default::default() },
+        ];
+        let known = vec![farcooler_protocol::v1::Workspace {
+            id: b(billing),
+            name: "Billing".into(),
+            ..Default::default()
+        }];
+        let row = serde_json::json!({ "terminals": [{ "id": "a" }, { "id": "b" }] });
+        let row = super::with_workspaces(row, &w, &terminals, &known);
+        assert_eq!(row["workspace"], main.to_string(), "{row}");
+        assert_eq!(row["claim_source"], "hook");
+        assert_eq!(row["foreign_writers"], serde_json::json!(["Billing"]));
+        assert_eq!(row["terminals"][0]["workspace"], billing.to_string(), "{row}");
+        assert_eq!(row["terminals"][0]["role"], "agent", "another worktree's pane lent its role");
+        assert!(row["terminals"][1]["workspace"].is_null(), "{row}");
+        assert!(row["terminals"][1]["role"].is_null(), "an old runner's pane was given a role");
+    }
+
+    /// A board read keyed by workspace asks for that board, and says it needs
+    /// `workstreams` to; on a runner without it, the read is the repository's
+    /// one board, and nothing is required that the runner would refuse.
+    #[test]
+    fn a_board_read_by_workspace_names_the_board_only_where_the_runner_has_boards() {
+        use farcooler_protocol::capability::{TASKS, WORKSTREAMS};
+        let repository = Uuid::now_v7();
+        let billing = Uuid::now_v7();
+        let new = vec![TASKS.to_string(), WORKSTREAMS.to_string()];
+        let (list, required) = super::task_list_request(&new, repository, Some(billing));
+        assert_eq!(list.workspace_id.as_deref(), Some(billing.as_bytes().as_slice()));
+        assert_eq!(list.repository_id.as_ref(), repository.as_bytes());
+        assert_eq!(required, vec![WORKSTREAMS.to_string()]);
+
+        let (whole, required) = super::task_list_request(&new, repository, None);
+        assert_eq!(whole.workspace_id, None, "no workspace asked for is the whole repository");
+        assert!(required.is_empty());
+
+        let old = vec![TASKS.to_string()];
+        let (list, required) = super::task_list_request(&old, repository, Some(billing));
+        assert_eq!(list.workspace_id, None, "an old runner was sent a board it cannot name");
+        assert!(required.is_empty(), "an old runner would refuse the read outright");
+        assert_eq!(list.repository_id.as_ref(), repository.as_bytes());
+    }
+
+    /// A worktree made from a phone is claimed for its repository's Main on
+    /// a runner with workstreams, naming the capability, and for nothing on
+    /// one without them.
+    #[test]
+    fn a_worktree_made_from_a_phone_is_claimed_for_main() {
+        use farcooler_protocol::v1 as pb;
+        let bytes = |u: Uuid| bytes::Bytes::copy_from_slice(u.as_bytes());
+        let (repository, other) = (Uuid::now_v7(), Uuid::now_v7());
+        let (main, billing, elsewhere) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        let listed = [
+            pb::Workspace { id: bytes(elsewhere), repository_id: bytes(other), is_main: true, ..Default::default() },
+            pb::Workspace { id: bytes(billing), repository_id: bytes(repository), ..Default::default() },
+            pb::Workspace { id: bytes(main), repository_id: bytes(repository), is_main: true, ..Default::default() },
+        ];
+        let (claim, required) = super::main_claim(repository, Some(&listed));
+        assert_eq!(claim, Some(bytes(main)), "this repository's Main");
+        assert_eq!(required, vec![farcooler_protocol::capability::WORKSTREAMS.to_string()]);
+
+        assert_eq!(super::main_claim(repository, None), (None, Vec::new()), "a runner without workstreams");
+        assert_eq!(super::main_claim(repository, Some(&listed[..2])), (None, Vec::new()), "no Main listed");
+    }
+
     /// A pane's task is a uuid string or nothing: never the nil uuid, which
     /// would match no card and be drawn as a link to nowhere.
     #[test]
@@ -2219,7 +2508,7 @@ mod tests {
 
         // Spelled exactly as `CoreModel.Fleet` decodes it, and a number. A
         // rename here would be a phone that silently packs every runner again.
-        let sent = super::fleet_json(true, serde_json::json!(1), &list, Vec::new());
+        let sent = super::fleet_json(true, serde_json::json!(1), &list, Vec::new(), None);
         assert_eq!(sent["fleetTraceAnchor"], serde_json::json!(5_960_000), "{sent}");
         assert!(sent["fleetTrace"].is_string(), "{sent}");
 
@@ -2230,8 +2519,28 @@ mod tests {
         };
         assert_eq!(super::fleet_trace_anchor(&bare), None, "an anchor for no trace");
         assert_eq!(super::fleet_trace(&bare), None);
-        let quiet = super::fleet_json(true, serde_json::json!(0), &bare, Vec::new());
+        let quiet = super::fleet_json(true, serde_json::json!(0), &bare, Vec::new(), None);
         assert!(quiet["fleetTraceAnchor"].is_null(), "{quiet}");
+    }
+
+    /// The fleet carries the workstreams as `workspaces` from a runner that
+    /// has them, and no such key from one that does not.
+    ///
+    /// Absent and empty are different claims: absent is a runner without
+    /// `workstreams`, which an app draws as one implicit workspace per
+    /// repository; empty would be a runner with workstreams and nothing
+    /// registered. The key is the envelope's, not AgentKit's persisted
+    /// `RunnerDirectory` `"workspaces"`, which holds worktrees.
+    #[test]
+    fn the_fleet_names_its_workstreams_only_when_the_runner_has_them() {
+        let list = farcooler_protocol::v1::TerminalList::default();
+        let main = serde_json::json!({ "id": "m", "name": "Main", "is_main": true });
+        let with = super::fleet_json(true, serde_json::json!(0), &list, Vec::new(), Some(vec![main]));
+        assert_eq!(with["workspaces"][0]["name"], "Main", "{with}");
+        let empty = super::fleet_json(true, serde_json::json!(0), &list, Vec::new(), Some(Vec::new()));
+        assert_eq!(empty["workspaces"], serde_json::json!([]), "{empty}");
+        let old = super::fleet_json(true, serde_json::json!(0), &list, Vec::new(), None);
+        assert!(old.get("workspaces").is_none(), "{old}");
     }
 
     use super::*;
@@ -2320,11 +2629,14 @@ mod tests {
             task_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
             repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
             actor: "agent:0198f2c0-0000-7000-8000-000000000001".into(),
+            ..Default::default()
         }));
         assert_eq!(
             news,
             Some(FleetEvent::Task {
                 repository,
+                workspace: None,
+                from_workspace: None,
                 // Verbatim, which is what lets a client compare it against the
                 // word it writes with. A client that had to reconstruct this
                 // from a parsed kind and id would be the second place the
@@ -2333,6 +2645,52 @@ mod tests {
             }),
             "a board write reached a client as nothing at all"
         );
+    }
+
+    /// A board event names its board, and a move names both boards.
+    ///
+    /// The half of the per-workspace re-read that lives here: the daemon sends
+    /// `workspace_id` on every `TaskChanged` and `from_workspace_id` on a
+    /// move, and a client keyed by workspace can only re-read the right board
+    /// if both cross. Dropping either still delivers a re-read, so nothing
+    /// else would notice: a board would simply stop hearing its own writes, or
+    /// keep a card a move took away.
+    #[test]
+    fn a_board_event_names_its_board_and_a_move_names_both() {
+        use farcooler_protocol::v1::event::Payload;
+        let bytes = |u: Uuid| Some(bytes::Bytes::copy_from_slice(u.as_bytes()));
+        let repository = Uuid::now_v7();
+        let billing = Uuid::now_v7();
+        let main = Uuid::now_v7();
+        let moved = FleetEvent::of(Payload::TaskChanged(farcooler_protocol::v1::TaskChanged {
+            task_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+            repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+            actor: "user".into(),
+            workspace_id: bytes(main),
+            from_workspace_id: bytes(billing),
+        }));
+        assert_eq!(
+            moved,
+            Some(FleetEvent::Task {
+                repository,
+                workspace: Some(main),
+                from_workspace: Some(billing),
+                actor: "user".into(),
+            })
+        );
+        // A runner without `workstreams`, and bytes that are no id at all:
+        // absent, never the nil uuid, which would be a board of its own.
+        for workspace_id in [None, Some(bytes::Bytes::new()), bytes(Uuid::nil())] {
+            let old = FleetEvent::of(Payload::TaskChanged(farcooler_protocol::v1::TaskChanged {
+                repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
+                workspace_id: workspace_id.clone(),
+                ..Default::default()
+            }));
+            let Some(FleetEvent::Task { workspace, from_workspace, .. }) = old else {
+                panic!("{workspace_id:?} did not arrive as board news");
+            };
+            assert_eq!((workspace, from_workspace), (None, None), "{workspace_id:?}");
+        }
     }
 
     /// The three actor words the daemon can send all survive the crossing.
@@ -2349,6 +2707,7 @@ mod tests {
                 task_id: bytes::Bytes::new(),
                 repository_id: bytes::Bytes::new(),
                 actor: word.to_string(),
+                ..Default::default()
             }));
             let Some(FleetEvent::Task { actor, .. }) = news else {
                 panic!("{word} did not arrive as board news at all");

@@ -306,6 +306,30 @@ struct StartTaskTests {
             ])
     }
 
+    /// ⌘N names the workspace the window is in, so the runner claims the
+    /// new worktree for it — rather than leaving it in Unclaimed until an
+    /// agent's work there claims it. A runner without `workstreams` would
+    /// refuse the flag, so it is sent none, and neither is a start that
+    /// names no workspace.
+    @Test func theCreateNamesTheWorkspaceItIsFor() async {
+        let billing = "0198f2c0-0000-7000-8000-0000000000dd"
+        for (capabilities, workspace, sent) in [
+            (Self.prompting + ["workstreams"], billing, true),
+            (Self.prompting + ["workstreams"], nil, false),
+            (Self.prompting, billing, false),
+        ] {
+            let runner = Runner(capabilities: capabilities)
+            let client = await client(runner)
+            _ = await client.startTask(
+                project: "repo", description: Self.description, name: "fix-flaky-reconnect",
+                agent: "claude", workspace: workspace)
+            let made = runner.made("worktree") ?? []
+            let at = made.firstIndex(of: "--workspace")
+            #expect((at != nil) == sent, "\(capabilities) \(workspace ?? "none"): \(made)")
+            if let at { #expect(made[at + 1] == billing) }
+        }
+    }
+
     /// A runner that can refuse a branch a remote already has is asked to,
     /// which closes the window between reading the branch list and the create.
     /// One that can't is asked nothing it would refuse.

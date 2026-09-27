@@ -1,7 +1,8 @@
 # Workspaces are workstreams
 
 Date: 2026-09-27
-Status: design approved in conversation; spec awaiting review
+Status: implemented (Phase A 3842b4d6; Phase B in the commit "feat: workspaces are workstreams"). Claiming follows
+the owner's option 1; see "Claiming worktrees".
 Builds on: [`2026-09-08-agent-factory-design.md`](2026-09-08-agent-factory-design.md)
 
 ## Problem
@@ -66,8 +67,9 @@ resource_version
   issued twice, even after renaming a prefix away and back.
 - **Prefix uniqueness** is per runner and checked when set, because a moved
   task keeps its key and keys must resolve without naming a workspace.
-- **Deleting** a workspace is refused while it holds tasks or worktrees; move
-  them first. Main cannot be deleted. Deleting a repository still cascades
+- **Deleting** a workspace is refused while it holds tasks, worktrees or
+  terminal records (a stopped orchestrator's included; remove it, or use
+  `--replace`); move them first. Main cannot be deleted. Deleting a repository still cascades
   through everything, as it does today.
 
 ### `worktrees` (renamed from `workspaces`, same rows)
@@ -85,7 +87,12 @@ resource_version
   which Main owns, and a quick investigation Billing starts there is still
   Billing's.
 - New `role`: `orchestrator | agent | shell`. At most one live orchestrator per
-  workspace.
+  workspace, where live means its pane is running or starting: a Lost pane
+  doesn't hold the seat; an unconfirmed (starting or restarting) one does.
+- A dispatched pane in another workspace's worktree takes the worktree
+  owner's workspace, not the task's, and dispatch warns about it (see
+  "Claiming worktrees"). So "whose work it is" is the worktree's owner's
+  there until the worktree is reassigned.
 
 ### `tasks`
 
@@ -102,35 +109,56 @@ existing boards — tasks, keys, notes — and nothing more.
 - Each repository gets a Main workspace whose prefix is the repository's
   current `task_key_prefix`.
 - Every worktree, task, and terminal is assigned to its repository's Main.
-  Every terminal's role starts as `agent`; an orchestrator running today is
-  re-tagged with `farcooler terminal set-role` or by restarting it through
+  Every worktree is claimed for its Main with `claim_source = migration`.
+- A terminal running the `shell` preset becomes `role = shell`, and every
+  other terminal `agent`. Nothing is inferred to be an orchestrator. One
+  running today is re-tagged with `farcooler terminal set-role …
+  orchestrator` **and then restarted** (its pane gets `FARCOOLER_WORKSPACE`
+  and `FARCOOLER_CHARTER` only at launch), or replaced through
   `start-orchestrator`.
+- Prefixes already held are placed before any is derived.
+- `repositories.task_key_prefix` stays in the table, unread.
 - A `.farcooler/manager.md` found in a repository is copied to Main's
   `charter.md`. The file in the repository is left alone; removing it is the
   user's commit to make.
 
+**For the release note:** a pre-Phase-B build opening a migrated database
+doesn't refuse it, but it can't create tasks there (`task create` fails on
+the new not-null workspace). The way back is the checksummed backup the store
+writes before migrating.
+
 ## Claiming worktrees
 
 `reconcile.rs` already adopts every worktree git lists. Claiming decides the
-owner of an adopted, unclaimed worktree. Signals, strongest first; the first
-claim wins and sticks:
+owner of an adopted, unclaimed worktree. This follows the owner's option 1
+(card ov-30), after the spike. Signals, strongest first; the first claim wins
+and sticks:
 
-1. **Explicit.** `farcooler worktree create`, `farcooler worktree assign`, and
-   dispatch name the workspace. Every pane Far Cooler launches carries
-   `FARCOOLER_WORKSPACE`, so an agent running `farcooler worktree create` claims
-   for its own workspace without a flag.
-2. **The agent's hooks.** Far Cooler already installs hooks in all three
-   harnesses, and every hook payload carries the `cwd` the agent is working
-   in. `hook_ingress.rs` (`announced_terminal`) already matches a hook's `cwd`
-   to a worktree for Codex and Cursor. A hook from a terminal whose `cwd` is
-   inside an unclaimed worktree claims it for that terminal's workspace. This
-   signal does not depend on whether the harness moves its own process.
-   (Parsing session logs was considered first; hooks are the same fact,
-   already ingested, and arrive per tool call.)
-3. **The process tree.** For harnesses with no readable log: walk the pane's
-   processes (as `foreground.rs` already reads the process table per tty) and
-   read each working directory — `proc_pidinfo` on macOS, `/proc/<pid>/cwd` on
-   Linux. Weakest, because a short-lived subshell can fall between scans.
+1. **Explicit.**
+   - `farcooler worktree create` claims for `--workspace`, else for
+     `$FARCOOLER_WORKSPACE`; `farcooler worktree assign` sets the owner.
+     Every pane whose terminal has a workspace carries
+     `FARCOOLER_WORKSPACE`, so an agent running `farcooler worktree create`
+     claims for its own workspace without a flag.
+   - Dispatch: the runner claims an unclaimed worktree for the task's
+     workspace as the pane opens (daemon-side, `claim_for_task`).
+   - The apps claim what they make: the phones for the repository's Main,
+     the Mac for the workspace the window is in when it's in that
+     repository, else for the repository's Main. A runner without
+     `workstreams` gets no claim.
+   - Reconcile gives every repository's main checkout to Main, explicitly,
+     on every pass.
+2. **Claude Code hooks, on the events already registered.** The hook `cwd`
+   follows a Bash `cd` and `EnterWorktree`, and arrives by `Stop` at the
+   latest (the end of the turn). The terminal is found by session id. Codex
+   hooks never report a move, and Cursor's registered events carry no `cwd`,
+   so neither harness uses this signal.
+3. **The process tree.** Every watcher tick, every process on the pane's tty
+   and every descendant of those **by parent pid** (Codex and Cursor run
+   their commands with no tty), with each process's working directory read
+   from `proc_pidinfo` on macOS or `/proc/<pid>/cwd` on Linux. It sees a
+   worktree only while a command runs there. It's the only signal for Codex,
+   and for a `cd` in Cursor.
 4. **Nothing matched:** the worktree stays unclaimed.
 
 A `cwd` is matched to the worktree with the **longest** path containing it.
@@ -141,15 +169,28 @@ Rules on top:
 
 - **Orchestrators never claim.** Terminals with `role = orchestrator` are
   skipped by signals 2 and 3; otherwise a Codex orchestrator for Billing would
-  claim the main checkout.
+  claim the main checkout. Shells claim through the walk; only orchestrators
+  are skipped.
+- **A terminal with no workspace never claims.** That includes every pane in
+  an unclaimed worktree, which is why the apps claim what they make.
+- Paths are resolved before matching (Cursor reports `/tmp/…` as typed).
+- A `cwd` inside a nested checkout that reconcile hasn't adopted yet decides
+  nothing.
 - **No stealing.** A terminal of workspace B seen working in a worktree A owns
   does not move ownership. It is reported instead: in `farcooler worktree list`,
   and as a warning on dispatch ("a terminal from Billing is working in a
   worktree Main owns"). This is the two-writers hazard the agent-factory design
   recorded, now visible across workstreams. Moving ownership is
   `farcooler worktree assign`.
-- `worktree list` shows which signal made each claim, so a wrong claim is
-  diagnosable.
+- Foreign-writer reports are kept per signal, in memory, and cleared when that
+  signal next sees the terminal in its own or an unclaimed worktree. They
+  aren't sticky for the terminal's life.
+- A dispatched pane in another workspace's worktree belongs to the worktree's
+  owner, and dispatch warns and names `worktree assign`.
+- **Diagnosis:** `worktree list` shows the claim's signal (`explicit | hook |
+  process | migration`) and the foreign writers, in `--json` and in the plain
+  listing (`[Main, hook]`, then `also writing here: Billing`), so a wrong
+  claim is diagnosable.
 - Removing a worktree removes its claim. The existing rule — never drop a row
   that still holds terminals — is unchanged.
 
@@ -177,16 +218,25 @@ the way `skill_install.rs` already does per harness, and applies:
 
 | | Working directory | Repository context | Memory |
 |---|---|---|---|
-| Claude Code | the home | `--add-dir <main checkout>` and `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` | `autoMemoryDirectory` pointed at the repository's memory directory, through the `--settings` file Far Cooler already writes |
-| Cursor | the home | `--workspace <main checkout>` | none documented |
-| Codex | the main checkout (`--cd`) | native | none |
+| Claude Code | the home | `--add-dir <main checkout, resolved>` and `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` | `autoMemoryDirectory` = `~/.claude/projects/<slug(realpath(main checkout))>/memory`, where the slug replaces every character outside `[A-Za-z0-9]` with `-`; written into the orchestrator's own `--settings` file under the runtime directory, together with Far Cooler's hooks |
+| Cursor | the home | `--workspace <main checkout, resolved>`, because trust follows the spelling | none documented |
+| Codex | the main checkout (`--cd <resolved path>`, since hook trust is keyed by resolved path) | native | none |
+
+- Every path handed to a harness is resolved (`realpath`).
+- The manager skill comes by `--plugin-dir` for Claude Code and Cursor, and as
+  a copy in the main checkout for Codex, which runs there.
+- Every orchestrator pane also exports `FARCOOLER_ACTOR=manager`.
+- If the workspace's home can't be made, the launch is refused
+  (`orchestrator_home`) rather than left to tmux, which would start the pane
+  in `$HOME`.
 
 Why they differ, measured against the documentation and source on 2026-09-27:
 
 - **Claude Code** loads `CLAUDE.md` from an added directory only with that
   environment variable, and discovers skills from it. Its auto-memory
-  directory is chosen from the git root of the working directory, which the
-  home does not have, hence the override.
+  directory is chosen from the **main checkout** (the git common directory's
+  parent), shared by every worktree of the repository, which the home does
+  not have, hence the override.
 - **Cursor**'s `--workspace` "sets an explicit repository root", from which it
   reads `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules`.
 - **Codex** anchors `AGENTS.md`, skills, and `.codex/config.toml` to the
@@ -199,8 +249,14 @@ almost everything in it is about the repository. Focus comes from the
 conversation and the board, not from memory. Per-workspace memory can be an
 option later.
 
-**At most one live orchestrator per workspace.** A second `start-orchestrator`
-is refused; `--replace` closes the old pane first.
+**At most one live orchestrator per workspace.** Live means its pane is
+running or starting: a Lost pane doesn't hold the seat; an unconfirmed
+(starting or restarting) one does. A second `start-orchestrator` is refused;
+`--replace` closes the old pane and removes its record first, but only after
+everything the new start needs (the main checkout, the home) has been found.
+A terminal re-tagged with `farcooler terminal set-role … orchestrator` gets
+`FARCOOLER_WORKSPACE` and `FARCOOLER_CHARTER` only when it next starts, so
+restart it after re-tagging.
 
 ### Wake-ups and events
 
@@ -253,6 +309,13 @@ behavior-free lane that lands before any new behavior:
   `worktree.discover` and `DiscoveredWorktreeList` / `DiscoveredWorktree`.
 - Capability **values** advertised on the wire stay as they are; only the Rust
   constant names change.
+- The workstream level is the capability `workstreams`, because the value
+  `workspaces` is frozen and means worktrees. Every field an older daemon
+  would silently drop names it in `required_capabilities`.
+- `TaskChanged` carries `workspace_id` and, on a move, `from_workspace_id`.
+- `workspace.list` is Read scope. The workspace writes, `task.move`,
+  `worktree.assign`, `terminal.set_role` and `start_orchestrator` are
+  Control. A workspace's `home` and `charter` paths go to `host_admin` only.
 - Rust, Swift, and Kotlin types and identifiers.
 - App copy: a worktree row, "New Workspace", "Find Workspace or Agent", and the
   rest become *worktree* where they mean the directory.
@@ -264,16 +327,20 @@ behavior-free lane that lands before any new behavior:
 ## CLI
 
 ```
-farcooler worktree   create | list | hide | unhide | reorder | remove | assign
+farcooler worktree   create … [--workspace <ws>]
+                     list | hide | unhide | reorder | remove | assign
                      (plus the existing file search)
-farcooler workspace  create --name … --prefix …
-                     list | show | rename | set-prefix | delete
+farcooler workspace  create [<repo>] --name … --prefix …
+                     (<repo> defaults to $FARCOOLER_WORKSPACE's repository,
+                     then the only one)
+                     list | show <ws> | rename | set-prefix | delete
                      start-orchestrator <ws> --harness … [--replace]
 farcooler task       move <key>… --to <ws>
                      list: --workspace <ws> names a board; otherwise
                      $FARCOOLER_WORKSPACE's; otherwise the whole repository,
                      each row naming its workspace
 farcooler terminal   set-role <terminal> orchestrator|agent|shell
+                     (takes effect in the pane at its next start)
 ```
 
 `farcooler workspace create --branch …`, the old spelling, fails with a pointer
@@ -329,9 +396,9 @@ the CLI.
   tasks with notes, and a `manager.md`. Everything lands in its Main, keys and
   notes unchanged, and the charter is copied.
 - **Invariants**: prefix uniqueness; a key never issued twice across prefix
-  renames; delete refused while a workspace holds tasks or worktrees; Main
-  undeletable; one live orchestrator per workspace; orchestrators never claim;
-  claims are sticky.
+  renames; delete refused while a workspace holds tasks, worktrees or
+  terminal records; Main undeletable; one live orchestrator per workspace;
+  orchestrators never claim; claims are sticky.
 - **Wire**: field numbers of renamed messages are unchanged (a test over the
   descriptor, broken once on purpose to watch it go red).
 - **Claiming**: hook payload fixtures for all three harnesses, and a
@@ -348,10 +415,19 @@ the CLI.
 - **Claiming can be wrong.** An agent that passes through someone else's
   unclaimed worktree claims it. Claims stick, so recovery is one
   `worktree assign`, and `worktree list` shows which signal made the claim.
-- **Claude Code settings may not reach an orchestrator.** If added directories
-  do not contribute `.claude/settings.json`, a Claude Code orchestrator runs
-  without the repository's hooks and permission allowlist. Tolerable for an
-  agent that does not write code; the spike settles it.
+- **Claude Code settings don't reach an orchestrator** (settled by the
+  spike). Added directories don't contribute `.claude/settings*.json`, so a
+  Claude Code orchestrator runs without the repository's hooks and permission
+  allowlist. Far Cooler's own hooks reach it through `--settings`. Tolerable
+  for an agent that doesn't write code.
+- **A worktree nobody's workspace works in stays Unclaimed.** A pane in an
+  unclaimed worktree has no workspace and so never claims; only `worktree
+  assign`, which no app offers yet, moves it. Worktrees the apps make are
+  claimed as they're made, so this is left to three cases: a worktree made
+  outside Far Cooler that no workspace's pane works in; `farcooler worktree
+  create` run from a plain terminal, with no `$FARCOOLER_WORKSPACE` and no
+  `--workspace`; and a phone's create when the runner's workspace list can't
+  be read, which goes ahead unclaimed rather than failing.
 - **A harness may trigger neither claiming signal** — for example one whose hooks omit `cwd`. Its agents'
   worktrees then stay unclaimed until assigned: degraded, but honest.
 - **Splitting is only as good as the handoff.** The skill makes the handoff

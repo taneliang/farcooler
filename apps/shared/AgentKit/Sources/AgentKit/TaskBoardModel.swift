@@ -165,6 +165,9 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     /// or nil from a runner too old to say. Equal to `createdAt` on a card
     /// nothing has happened to since it was filed. See `timeNote(at:)`.
     public var updatedAt: Date?
+    /// The board this task is on: its workspace's id, or nil from a runner
+    /// without `workstreams`, which has one board per repository.
+    public var workspaceID: String?
 
     public init(
         id: String,
@@ -179,7 +182,8 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         worktreeID: String? = nil,
         blockedBy: [TaskBlockRef] = [],
         createdAt: Date? = nil,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        workspaceID: String? = nil
     ) {
         self.id = id
         self.key = key
@@ -194,6 +198,7 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         self.blockedBy = blockedBy
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.workspaceID = workspaceID
     }
 
     /// When anything last moved on this card: `updatedAt` — a move, a note or
@@ -570,6 +575,9 @@ public struct WireTask: Decodable, Sendable {
     /// here as nil; so does a zero, for a producer that passed one through.
     public var createdAt: Int64?
     public var updatedAt: Int64?
+    /// The board, as `workspace`: the key `tasks_json` writes for both
+    /// producers. Nil from a runner without `workstreams`.
+    public var workspaceID: String?
 
     enum CodingKeys: String, CodingKey {
         case id, key, title, status, intent, labels, constraints, acceptance
@@ -577,6 +585,7 @@ public struct WireTask: Decodable, Sendable {
         case worktreeID = "worktree_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case workspaceID = "workspace"
     }
 
     public init(from decoder: Decoder) throws {
@@ -609,6 +618,9 @@ public struct WireTask: Decodable, Sendable {
             .flatMap { $0 > 0 ? $0 : nil }
         updatedAt = ((try? c.decodeIfPresent(Int64.self, forKey: .updatedAt)) ?? nil)
             .flatMap { $0 > 0 ? $0 : nil }
+        // `try?` for the reason the clocks use it: a malformed board id costs
+        // the row its board, never the board its rows.
+        workspaceID = (try? c.decodeIfPresent(String.self, forKey: .workspaceID)) ?? nil
     }
 
     /// This wire row as a card, given the status it was placed under.
@@ -627,7 +639,8 @@ public struct WireTask: Decodable, Sendable {
             constraints: constraints,
             worktreeID: worktreeID,
             createdAt: createdAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
-            updatedAt: updatedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) })
+            updatedAt: updatedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+            workspaceID: workspaceID)
     }
 }
 

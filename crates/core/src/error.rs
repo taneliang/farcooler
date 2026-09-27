@@ -236,8 +236,45 @@ impl DomainError {
     /// vendor session id. The `Display` impls above are written to that rule,
     /// so this is the single place that has to hold it.
     pub fn redacted_message(&self) -> String {
-        self.to_string()
+        match self {
+            DomainError::InvalidArgument { what } => match sentence(what) {
+                Some(said) => said.to_string(),
+                None => self.to_string(),
+            },
+            _ => self.to_string(),
+        }
     }
+}
+
+/// The sentence for an argument word, where the runner has one a client can
+/// say as it is.
+///
+/// Written for the workspace refusals (`crates/store/src/workspaces.rs`),
+/// which reach a person from three apps and a CLI. The rule that a client
+/// owns its sentences still stands: `Error.what` still carries the word, and
+/// a client that has its own sentence for one uses it. This is what
+/// `Error.message` carries instead of `invalid argument: task_prefix_taken`,
+/// which is a Rust error and not a sentence, so a client that shows the
+/// message shows something a person can act on.
+///
+/// Each word has its own sentence, because two refusals that read alike are
+/// two different fixes a person can't tell apart. `None` for every other
+/// word, whose message is unchanged.
+pub fn sentence(what: &str) -> Option<&'static str> {
+    Some(match what {
+        "task_prefix" => "A prefix is a letter followed by up to seven letters or digits.",
+        "task_prefix_taken" => "That prefix is already used by another workspace.",
+        "name" => "A workspace needs a name.",
+        "main_workspace" => "Main can't be deleted.",
+        "workspace_not_empty" => "Move this workspace's tasks, worktrees and terminals first.",
+        "other_repository" => "That workspace is in a different repository.",
+        "orchestrator_taken" => "This workspace already has an orchestrator running.",
+        "orchestrator_home" => "This workspace's folder couldn't be made, so its orchestrator wasn't started.",
+        "workspace" => "This terminal doesn't belong to a workspace yet.",
+        "role" => "Choose a role: shell, agent or orchestrator.",
+        "task_ids" => "Name at least one task to move.",
+        _ => return None,
+    })
 }
 
 /// The word a client switches on, for a code that came off the wire.
@@ -561,6 +598,41 @@ mod tests {
                 word.len()
             );
         }
+    }
+
+    /// Every workspace refusal reads as its own sentence, and none of them as
+    /// a Rust error.
+    #[test]
+    fn a_workspace_refusal_is_a_sentence_of_its_own() {
+        let words = [
+            "task_prefix",
+            "task_prefix_taken",
+            "name",
+            "main_workspace",
+            "workspace_not_empty",
+            "other_repository",
+            "orchestrator_taken",
+            "orchestrator_home",
+            "workspace",
+            "role",
+            "task_ids",
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for what in words {
+            let message = DomainError::InvalidArgument { what }.redacted_message();
+            assert_eq!(Some(message.as_str()), sentence(what), "{what} is sent as its sentence");
+            assert!(!message.contains("invalid argument"), "{what} reads as a Rust error: {message}");
+            assert!(!message.contains('_'), "{what} puts a machine word on a screen: {message}");
+            assert!(message.ends_with('.'), "{what} is a sentence: {message}");
+            assert!(seen.insert(message.clone()), "{what} reads the same as another refusal");
+            // The word still crosses for a client that has its own sentence.
+            assert_eq!(DomainError::InvalidArgument { what }.what(), what);
+        }
+        // A word with no sentence here is left exactly as it was.
+        assert_eq!(
+            DomainError::InvalidArgument { what: "blocked_by" }.redacted_message(),
+            "invalid argument: blocked_by"
+        );
     }
 
     #[test]

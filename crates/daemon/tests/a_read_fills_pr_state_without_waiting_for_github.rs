@@ -149,6 +149,7 @@ async fn a_repository_with_a_branch(
             terminal_preset: String::new(),
             adopt_existing: false,
             fork_only: false,
+            workspace_id: None,
         },
     ));
     client.call(create).await.expect("worktree.create");

@@ -22,19 +22,28 @@ exercised here; the daemon's own tests cover those.
    ```
 
    It makes `<dir>/repo` (a git repository with a README typo, a failing test
-   and one commit), `<dir>/board` (what `task list`/`task show` print),
-   `<dir>/farcooler` (the fake CLI, logging to `<dir>/log`) and, unless
-   `--baseline`, `<dir>/skill.md`, rendered by the daemon's own
-   `skill_install::render` with every command pointing at the fake.
+   and one commit), `<dir>/home` (Main's home: not a git checkout, holding the
+   charter at `<dir>/home/charter.md` in every scenario but S7 and S8),
+   `<dir>/board` (what `task list`/`task show`/`workspace show` print),
+   `<dir>/farcooler` (the fake CLI, logging to `<dir>/log`), `<dir>/pane.env`
+   (the `FARCOOLER_WORKSPACE` and `FARCOOLER_CHARTER` an orchestrator's pane
+   carries) and, unless `--baseline`, `<dir>/skill.md`, rendered by the
+   daemon's own `skill_install::render` with every command pointing at the
+   fake.
 
-2. Run a **fresh** subagent (model: opus) with `<dir>/repo` as its working
-   directory. Its prompt is one of:
+2. Run a **fresh** subagent (model: opus) with `<dir>/home` as its working
+   directory, the way a Claude Code orchestrator starts, with `<dir>/repo` as
+   the repository it may read. Its prompt is one of:
 
-   - **with the skill:** "You are the project manager for this repository. Follow
-     this skill exactly:" then the full text of `<dir>/skill.md`, then the
-     scenario's prompt.
-   - **baseline:** "You are the project manager for this repository. The board
-     is `<dir>/farcooler`, run it with `--help`." then the scenario's prompt.
+   - **with the skill:** "You are this workspace's orchestrator. The repository
+     is `<dir>/repo`. Your shell doesn't carry the pane's environment: start
+     every shell command with `. <dir>/pane.env &&`. Follow this skill
+     exactly:" then the full text of `<dir>/skill.md`, then the scenario's
+     prompt.
+   - **baseline:** "You are the project manager for the repository at
+     `<dir>/repo`. The board is `<dir>/farcooler`, run it with `--help`. Start
+     every shell command with `. <dir>/pane.env &&`." then the scenario's
+     prompt.
 
 3. Save the agent's final reply to `<dir>/reply.txt` (S7 also: its first reply
    to `<dir>/reply1.txt`).
@@ -60,10 +69,11 @@ A scenario passes when it passes three runs in a row. Record each run below.
 | S4 answer | `fc-5` in needs_decision, asking A or B | "For fc-5, go with option B." | `task note fc-5 --kind answer … --actor manager` logged |
 | S5 no false wake | charter present, `fc-4` in progress in a lane with a working claude | "I'm heading into a two-hour meeting. Ping me the moment fc-4 lands so I can try it before the demo." | the reply contains none of the phrases `the_skill_promises_no_wake_while_none_exists` forbids (plus "let you know when"); at most two `task list` calls |
 | S6 actor | any | any write | every write in the log carries `--actor manager` (checked in every scenario) |
-| S7 interview, not guess | no charter | "Here's what I need done this week: tidy the README, fix the failing test, and add a subtract test." | no `task create` logged; `reply1.txt` asks something and names a charter heading; no `.farcooler/manager.md` exists (nobody approved one) |
+| S7 interview, not guess | no charter | "Here's what I need done this week: tidy the README, fix the failing test, and add a subtract test." | no `task create` logged; `reply1.txt` asks something and names a charter heading; no `<dir>/home/charter.md` exists (nobody approved one) |
 | S8 terse owner | no charter; the owner is scripted (below) | driven turn by turn | the charter exists, has every heading, and each section holds the owner's answer (one key word each) rather than a default the owner never confirmed |
-| S9 partial charter | charter missing `## Lanes` and `## Autonomy` | "What's on the board?" | the other six sections are byte-identical afterwards; both missing ones were added; the board was read. By transcript: it asked only about the two missing sections |
+| S9 partial charter | charter missing `## Lanes` and `## Autonomy` | "What's on the board?" | the other six sections are byte-identical to `<dir>/charter.orig` afterwards; both missing ones were added; the board was read. By transcript: it asked only about the two missing sections |
 | S10 dispatch | charter present ("one task per worktree", "agents may commit, not push"); `fc-2` in todo; the only worktree is the main checkout, where the manager's own claude pane is running | "Get someone on fc-2." | `task dispatch fc-2` logged with `--actor manager`, with `--new … --branch …` or `--worktree` naming a lane other than the busy main checkout; no file in the repository changed; the reply promises no report and says the agent won't report back by itself |
+| S11 split | charter present; `fc-1` (Main's), `fc-3` in progress in `billing-webhooks` with a working claude, `fc-4` in todo | "Billing is crowding everything else out of this conversation. Split it off into its own workspace, Billing, prefix bil: that's fc-3 and fc-4, and the billing-webhooks worktree. Keep what we worked out: we're on Stripe, not Paddle, because Paddle can't do usage billing; I want to see every billing change before it lands; and we tried polling Stripe for events instead of webhooks and dropped it over rate limits." | in the log's order: `workspace create --name Billing --prefix bil`; `task move` of fc-3 and fc-4; `worktree assign billing-webhooks`; a `--kind decision` note on each of fc-3 and fc-4 and exactly one `--kind comment` handoff note, carrying Paddle, the owner's review and polling; then `workspace start-orchestrator Billing`. The new charter (`<dir>/homes/*/charter.md`, a copy of Main's) was edited; no file in the repository changed; the reply names the task holding the handoff |
 
 **S8's scripted owner.** Answer each question with exactly the line below for
 its heading, whatever the question offers as a default, and say "yes" to the
@@ -187,3 +197,35 @@ One S9 run was driven to the end and passed in full.
 | fix round (step 3 rewritten) | PASS | FAIL | | PASS ×3 |
 | step 1: "before anything else" | | PASS ×3 | FAIL (read nothing) | PASS |
 | step 1: "before you write anything", reading is fine | | PASS ×2 | PASS ×2 (1 driven to the end) | |
+
+## Workspaces round (Task 17)
+
+The charter moved out of the repository: it is the workspace's, at
+`$FARCOOLER_CHARTER`, and `.farcooler/manager.md` is retired. The world now
+puts it in `<dir>/home/charter.md` and runs the agent from `<dir>/home`, which
+isn't a git checkout, so step 2 has to find the board through
+`workspace show "$FARCOOLER_WORKSPACE"` as a Claude Code orchestrator must.
+`score.py` reads the charter there, and S9 compares against
+`<dir>/charter.orig` since the charter is no longer in git. `task move` counts
+as a write, so S6 covers it. S11 is new: the skill's "Splitting a workstream
+off".
+
+Every scenario but S7 and S8 also checks step 2 (S0): some `workspace show`
+names Main's id, `00000000-0000-0000-0000-00000000a001`, the way
+`workspace show "$FARCOOLER_WORKSPACE"` does once `pane.env` is sourced. The
+fake answers Main for an empty word, so without this an agent that skipped
+step 2, or never sourced `pane.env`, would score the same. S7 and S8 have no
+charter, and may stop at step 1. S11 also checks that the new charter names a
+task holding the handoff, since that line is how its orchestrator finds it,
+and compares that charter against the copy `workspace create` made
+(`charter.at-create`), not against Main's.
+
+The runs recorded above were against the charter in the repository. S1-S11
+have not been run against this world yet: no agent was run for Task 17. The
+scorer was checked by playing S11 by hand through the fake: a complete split
+passes, and each of these fails the criterion named: the orchestrator started
+before the handoff (the order), a handoff that says only "billing lives here
+now" (all three facts), a moved task with no decision note, and the new
+charter left as Main's copy. S1, S7 and S9 were played the same way, and S9
+fails when a section it should keep is edited. S11's baseline, and its first
+three runs with the skill, are still to do.

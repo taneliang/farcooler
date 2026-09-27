@@ -321,6 +321,7 @@ async fn a_pane(runner: &Runner) -> uuid::Uuid {
             terminal_preset: String::new(),
             adopt_existing: false,
             fork_only: false,
+            workspace_id: None,
         },
     ));
     let result = client.call(create).await.expect("worktree.create");

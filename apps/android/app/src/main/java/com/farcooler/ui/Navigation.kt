@@ -2,12 +2,14 @@ package com.farcooler.ui
 
 import com.farcooler.model.Terminal
 import com.farcooler.model.landingTerminal
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNames
 
 /**
  * Where the app is.
@@ -137,7 +139,9 @@ sealed interface Route {
     data class RunnerSettings(val hostId: String) : Route
 
     /**
-     * One repository's task board, from its Board row on the front door. Read
+     * One workspace's task board, from its Board row on the front door — by
+     * workspace id, which on a runner without workspaces is the repository's
+     * own (`WorkspaceSummary.implicit`). Read
      * and jump: an Agent button goes to [Terminal] through
      * [AppModel.openFromBoard], which pushes it ON TOP of the board — so Back
      * comes out of the pane onto the board it was chosen from (or the card),
@@ -145,12 +149,25 @@ sealed interface Route {
      */
     @Serializable
     @SerialName("board")
-    data class Board(val hostId: String, val repositoryId: String) : Route
+    data class Board(
+        val hostId: String,
+        // Read under its old name too: a stack saved before workspaces named
+        // the board by repository, and that id is the repository's implicit
+        // workspace, which `Connection.board` resolves. See
+        // `BackstackTest.aBoardSavedByRepositoryStillDecodes`.
+        @OptIn(ExperimentalSerializationApi::class)
+        @JsonNames("repositoryId") val workspaceId: String,
+    ) : Route
 
     /** One card on that board, opened. */
     @Serializable
     @SerialName("board-task")
-    data class BoardTask(val hostId: String, val repositoryId: String, val taskId: String) : Route
+    data class BoardTask(
+        val hostId: String,
+        @OptIn(ExperimentalSerializationApi::class)
+        @JsonNames("repositoryId") val workspaceId: String,
+        val taskId: String,
+    ) : Route
 
     /**
      * Whether this route is drawn OVER the worktree rather than instead of it.

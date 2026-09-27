@@ -274,6 +274,66 @@ final class ShellBoardTests: XCTestCase {
         XCTAssertEqual(probe(app, "shell-state")["overview"], "1", "the shell moved anyway")
     }
 
+    // MARK: - Workspaces
+
+    /// **A runner split into workspaces is a heading per workspace, each with
+    /// its own Board row over its own cards, then the worktrees nobody has
+    /// claimed; the orchestrator is its workspace's row and lands on its
+    /// pane.**
+    ///
+    /// `-shell-workspaces` (`HarnessWorkspaces`): Main holds `ws-0` and
+    /// `ws-1`, Billing holds `ws-2` and runs an orchestrator in `ws-0`, and
+    /// `ws-3` is unclaimed. Which rows exist and what they count are
+    /// `RunnerBoardsTests`' and `ShellWorkspacesTests`'; this is that they are
+    /// drawn, in that order, and that the orchestrator's row goes somewhere.
+    func testEachWorkspaceHasItsOwnBoardRow() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-shell-harness", "-shell-overview", "-shell-4", "-shell-workspaces"]
+        app.launch()
+        XCTAssertEqual(probe(app, "shell-state")["overview"], "1", "the harness did not open on the grid")
+
+        let mainBoard = app.buttons["shell-board-harness-ws-main"]
+        let billingBoard = app.buttons["shell-board-harness-ws-billing"]
+        XCTAssertTrue(mainBoard.waitForExistence(timeout: 10), "no Main board: \(app.debugDescription)")
+        XCTAssertTrue(billingBoard.exists, "no Billing board: \(app.debugDescription)")
+        XCTAssertEqual(mainBoard.label, "Main Board")
+        XCTAssertEqual(billingBoard.label, "Billing Board")
+        XCTAssertEqual(billingBoard.value as? String, "1 task needs a decision")
+
+        let any = app.descendants(matching: .any)
+        let main = any["shell-workspace-harness-ws-main"]
+        let billing = any["shell-workspace-harness-ws-billing"]
+        let unclaimed = any["shell-workspace-harness-unclaimed/repo-overnight"]
+        XCTAssertTrue(main.exists && billing.exists && unclaimed.exists, "a workspace has no heading")
+        XCTAssertEqual(billing.label, "Billing")
+
+        // Each heading over its own: Main's heading and board over ws-0 and
+        // ws-1, Billing's under them and over ws-2, Unclaimed over ws-3.
+        let cards = (0..<4).map { app.buttons["shell-card-ws-\($0)"] }
+        XCTAssertTrue(cards.allSatisfy(\.exists), "a card is missing")
+        XCTAssertLessThan(main.frame.maxY, mainBoard.frame.minY)
+        XCTAssertLessThan(mainBoard.frame.maxY, cards[0].frame.minY, "Main's board is not over its cards")
+        XCTAssertLessThan(cards[1].frame.maxY, billing.frame.minY, "Billing is not after Main's cards")
+        XCTAssertLessThan(billingBoard.frame.maxY, cards[2].frame.minY, "Billing's board is not over its card")
+        XCTAssertLessThan(cards[2].frame.maxY, unclaimed.frame.minY, "Unclaimed is not after Billing")
+        XCTAssertLessThan(unclaimed.frame.maxY, cards[3].frame.minY, "ws-3 is not under Unclaimed")
+
+        // Billing's orchestrator is Billing's row, and Main has none — though
+        // its pane runs in Main's checkout.
+        let orchestrator = app.buttons["shell-orchestrator-harness-ws-billing"]
+        XCTAssertTrue(orchestrator.exists, "Billing has no orchestrator row")
+        XCTAssertFalse(app.buttons["shell-orchestrator-harness-ws-main"].exists)
+        XCTAssertLessThan(billing.frame.maxY, orchestrator.frame.minY)
+        XCTAssertLessThan(orchestrator.frame.maxY, cards[2].frame.minY)
+        XCTAssertTrue(orchestrator.value as? String ?? "" != "", "the row says nothing about the pane")
+
+        orchestrator.tap()
+        XCTAssertTrue(
+            waitUntilVisible(app, "ws-0-orch"),
+            "the row did not land on the orchestrator: \(probe(app, "shell-pane-ws-0-orch"))")
+        XCTAssertEqual(probe(app, "shell-state")["overview"], "0", "the overview is still up")
+    }
+
     // MARK: - The real path, against the demo runner
 
     /// **Overview → Board row → card → Agent lands on the pane the runner
@@ -340,7 +400,15 @@ final class ShellBoardTests: XCTestCase {
             rows.firstMatch.waitForExistence(timeout: 30),
             "no Board row from the demo runner; did ./scripts/demo-host.sh make its board?")
         let row = rows.firstMatch
-        XCTAssertEqual(row.label, "scrollback Board")
+        // The repository's one board is its Main workspace's: the demo runner
+        // has workstreams, and the task was filed on Main. Under Main's
+        // heading, which is drawn with Main alone.
+        XCTAssertEqual(row.label, "Main Board")
+        let heading = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "shell-workspace-", "Main")
+        ).firstMatch
+        XCTAssertTrue(heading.exists, "no Main heading from the demo runner")
+        XCTAssertLessThan(heading.frame.maxY, row.frame.minY, "the Board row is not under Main")
         XCTAssertTrue(
             (row.value as? String ?? "").contains("An agent is on 1 task"),
             "the row does not count the stand-in agent: \(row.value ?? "nil")")

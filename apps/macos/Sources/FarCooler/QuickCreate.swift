@@ -488,6 +488,6 @@ enum Branch {
             if out.count >= 48 { break }
         }
         while out.hasSuffix("-") { out.removeLast() }
-        return prefix + (out.isEmpty ? "workspace" : out)
+        return prefix + (out.isEmpty ? "worktree" : out)
     }
 }

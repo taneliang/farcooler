@@ -56,13 +56,9 @@ pub struct Repository {
     pub canonical_git_dir: String,
     pub remote_summary: String,
     pub resource_version: u64,
-    /// The task key prefix this repository was assigned, once, at
-    /// registration -- `''` until `Store::assign_task_key_prefix` sets it.
-    ///
-    /// Stored, not derived from `display_name`: see `farcooler_store::tasks`
-    /// for why a prefix computed on every read would break every task key
-    /// ever written down the moment the repository was renamed.
-    pub task_key_prefix: String,
+    // No task key prefix: that is a workspace's now (`Workspace::task_prefix`).
+    // The `repositories.task_key_prefix` column is still in the table, because
+    // migrations 0010 and 0012 write it, and nothing reads it after 0015.
 }
 
 pub(crate) fn row_to_repository(row: &Row) -> rusqlite::Result<Repository> {
@@ -74,7 +70,6 @@ pub(crate) fn row_to_repository(row: &Row) -> rusqlite::Result<Repository> {
         canonical_git_dir: row.get(4)?,
         remote_summary: row.get(5)?,
         resource_version: row.get::<_, i64>(6)? as u64,
-        task_key_prefix: row.get(7)?,
     })
 }
 
@@ -101,6 +96,12 @@ pub struct Worktree {
     /// someone who is reading it, which is the one thing this must never do.
     pub ordinal: u32,
     pub resource_version: u64,
+    /// The workspace that owns it. `None` is unclaimed: git lists it and
+    /// nothing has yet said whose work it is.
+    pub workspace_id: Option<Uuid>,
+    /// Which signal made the claim, so a wrong one can be diagnosed. Set
+    /// exactly when `workspace_id` is.
+    pub claim_source: Option<ClaimSource>,
 }
 
 impl Worktree {
@@ -127,7 +128,129 @@ pub(crate) fn row_to_worktree(row: &Row) -> rusqlite::Result<Worktree> {
         is_main_checkout: row.get(7)?,
         worktree_missing: row.get(8)?,
         ordinal: row.get::<_, i64>(9)? as u32,
+        workspace_id: get_optional_uuid(row, 10)?,
+        claim_source: get_claim_source(row, 11)?,
     })
+}
+
+/// How a worktree came to belong to its workspace, strongest signal first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimSource {
+    /// Somebody named the workspace: `worktree create`, `worktree assign`, a
+    /// dispatch. The only source that overrides an existing claim.
+    Explicit,
+    /// An agent's hook reported a working directory inside it.
+    Hook,
+    /// A pane's process tree was seen working inside it.
+    Process,
+    /// It existed before workspaces did, and migration 0015 gave it to Main.
+    Migration,
+}
+
+impl ClaimSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClaimSource::Explicit => "explicit",
+            ClaimSource::Hook => "hook",
+            ClaimSource::Process => "process",
+            ClaimSource::Migration => "migration",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<ClaimSource> {
+        Some(match raw {
+            "explicit" => ClaimSource::Explicit,
+            "hook" => ClaimSource::Hook,
+            "process" => ClaimSource::Process,
+            "migration" => ClaimSource::Migration,
+            _ => return None,
+        })
+    }
+}
+
+/// Strict, like a task's status: only this crate writes the column, so a
+/// value it cannot read was written by something else, and saying which
+/// signal made a claim is the column's whole purpose.
+fn get_claim_source(row: &Row, idx: usize) -> rusqlite::Result<Option<ClaimSource>> {
+    let raw: Option<String> = row.get(idx)?;
+    raw.map(|raw| {
+        ClaimSource::parse(&raw).ok_or_else(|| decode_failure(idx, format!("unknown claim source {raw:?}")))
+    })
+    .transpose()
+}
+
+/// A workstream: a name, a task prefix, a board, and the worktrees it owns.
+///
+/// Every repository has one called Main, made with the repository and never
+/// deleted; the others are split off it. The home and charter live on disk,
+/// keyed by `id`, so nothing about them is stored here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Workspace {
+    pub id: Uuid,
+    pub repository_id: Uuid,
+    /// The user's. `Main` for the first.
+    pub name: String,
+    /// What new task keys start with: `bil` mints `bil-1`. Unique on the
+    /// runner ignoring case, because a key must resolve without naming its
+    /// workspace. Changing it affects only tasks created afterwards.
+    pub task_prefix: String,
+    pub is_main: bool,
+    /// Order within the repository. Main is 0.
+    pub ordinal: u32,
+    pub resource_version: u64,
+}
+
+pub(crate) fn row_to_workspace(row: &Row) -> rusqlite::Result<Workspace> {
+    Ok(Workspace {
+        id: get_uuid(row, 0)?,
+        repository_id: get_uuid(row, 1)?,
+        name: row.get(2)?,
+        task_prefix: row.get(3)?,
+        is_main: row.get(4)?,
+        ordinal: row.get::<_, i64>(5)? as u32,
+        resource_version: row.get::<_, i64>(6)? as u64,
+    })
+}
+
+/// What a terminal is to its workspace.
+///
+/// Stored as 0, 1, 2. The wire's `TerminalRole` has an `UNSPECIFIED` at 0, so
+/// the two numberings are one apart: map between them by name, never by
+/// number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalRole {
+    Shell,
+    /// The default: anything running an agent, or anything not known to be a
+    /// shell.
+    Agent,
+    /// The workspace's orchestrator. At most one live per workspace.
+    Orchestrator,
+}
+
+impl TerminalRole {
+    pub fn as_i64(self) -> i64 {
+        match self {
+            TerminalRole::Shell => 0,
+            TerminalRole::Agent => 1,
+            TerminalRole::Orchestrator => 2,
+        }
+    }
+
+    pub fn from_i64(raw: i64) -> Self {
+        match raw {
+            0 => TerminalRole::Shell,
+            2 => TerminalRole::Orchestrator,
+            // Never promote an unknown value to orchestrator, and never demote
+            // one to a shell that nothing would wake.
+            _ => TerminalRole::Agent,
+        }
+    }
+
+    /// The role a new terminal starts with, from its preset: the same rule
+    /// migration 0015 applied to every terminal that already existed.
+    pub fn for_preset(command_preset: &str) -> Self {
+        if command_preset == "shell" { TerminalRole::Shell } else { TerminalRole::Agent }
+    }
 }
 
 /// What a terminal's pane is hosting.
@@ -190,6 +313,12 @@ pub struct Terminal {
     /// The task this terminal was opened for, if it was opened for one. Set
     /// at creation and never moved; `None` again if the task is deleted.
     pub task_id: Option<Uuid>,
+    /// Whose work it is. Usually the owner of its worktree, and set from it
+    /// at creation, but not always: an orchestrator for Billing may run in
+    /// the main checkout, which Main owns. `None` while its worktree is
+    /// unclaimed and nothing has said otherwise.
+    pub workspace_id: Option<Uuid>,
+    pub role: TerminalRole,
 }
 
 pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
@@ -210,6 +339,8 @@ pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
         pane_mode: PaneMode::from_i64(row.get(13)?),
         agent_session_id: row.get(14)?,
         task_id: get_optional_uuid(row, 15)?,
+        workspace_id: get_optional_uuid(row, 16)?,
+        role: TerminalRole::from_i64(row.get(17)?),
     })
 }
 
@@ -425,10 +556,12 @@ impl AcceptanceItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
     pub id: Uuid,
-    /// Short and typeable, for a person and for a prompt: `fc-42`. Per
-    /// repository, not global.
+    /// Short and typeable, for a person and for a prompt: `fc-42`. Unique on
+    /// the runner, and kept when the task moves to another workspace.
     pub key: String,
     pub repository_id: Uuid,
+    /// The board it is on. Always in `repository_id`.
+    pub workspace_id: Uuid,
     /// One line, for the board.
     pub title: String,
     pub status: TaskStatus,
@@ -620,7 +753,8 @@ pub(crate) fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         worktree_id: get_optional_uuid(row, 10)?,
         resource_version: row.get::<_, i64>(11)? as u64,
         created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        workspace_id: get_uuid(row, 13)?,
+        updated_at: row.get(14)?,
     })
 }
 

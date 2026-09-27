@@ -70,6 +70,26 @@ pub mod pane_env {
     /// somebody else's ticket.
     pub const TASK: &str = "FARCOOLER_TASK";
 
+    /// The workspace (workstream) this pane's work belongs to, as a uuid.
+    ///
+    /// `farcooler_daemon::service` exports it for EVERY pane whose terminal
+    /// has a workspace (`terminals.workspace_id`), shells included, not only
+    /// agent panes: a person typing `farcooler worktree create` in a pane
+    /// that belongs to a workstream is working for that workstream too, and
+    /// the CLI claims for it without a flag. A pane whose terminal has no
+    /// workspace (its worktree was unclaimed when it opened) gets nothing.
+    pub const WORKSPACE: &str = "FARCOOLER_WORKSPACE";
+
+    /// The path of the charter an orchestrator pane works from:
+    /// `<runtime dir>/workspaces/<workspace id>/charter.md`.
+    ///
+    /// Exported, beside `WORKSPACE`, for a pane whose terminal is its
+    /// workspace's orchestrator (`TerminalRole::Orchestrator`), and for no
+    /// other. The manager skill reads it first and re-reads it on every
+    /// wake-up. The path can hold a space (`Application Support`), so the
+    /// daemon quotes it.
+    pub const CHARTER: &str = "FARCOOLER_CHARTER";
+
     /// The agents a pane can be opened FOR a task with: the three that take
     /// an initial prompt as their launch argument, so they are told the task
     /// on their first launch. Any other preset would export the key beside a

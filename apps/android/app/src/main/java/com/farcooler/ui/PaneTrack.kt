@@ -200,12 +200,18 @@ class PaneTrackState internal constructor() {
  * order. A track whose sequence disagreed with the strip's would be two
  * different answers to "what is next to this".
  */
-fun trackFleet(worktree: Worktree?, worktreeId: String, hostId: String): ShellFleet {
+fun trackFleet(
+    worktree: Worktree?,
+    worktreeId: String,
+    hostId: String,
+    /** Orchestrators' tab titles, by terminal id ([com.farcooler.model.FleetLayout.orchestratorTitles]). */
+    titles: Map<String, String> = emptyMap(),
+): ShellFleet {
     val terminals = worktree?.terminals.orEmpty().filterNot { it.isChangesPane }
     val tabs = buildList {
         add(ShellTab(id = Pane.CHANGES_ID, title = "Diff", mark = null))
         terminals.forEach {
-            add(ShellTab(id = Pane.Terminal(it.id).id, title = it.label, mark = null))
+            add(ShellTab(id = Pane.Terminal(it.id).id, title = titles[it.id] ?: it.label, mark = null))
         }
     }
     return ShellFleet(

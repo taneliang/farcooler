@@ -37,9 +37,19 @@ struct TaskNameTests {
         }
     }
 
+    /// With no word a directory can hold, the worktree and its branch are
+    /// called `worktree`: the thing being made. They were called
+    /// `workspace`, which is now the name of a workstream — a different
+    /// thing, with its own board.
+    @Test func aNameWithNoUsableWordIsWorktree() {
+        #expect(TaskName.heuristic("!!! ???") == "worktree")
+        #expect(Branch.slug(from: "!!! ???") == "worktree")
+        #expect(Branch.slug(from: "—", prefix: "el/") == "el/worktree")
+    }
+
     @Test func aDescriptionOfNothingButFillerStillHasAName() {
         #expect(TaskName.heuristic("can you do this for me please") == "can-you-do-this")
-        #expect(TaskName.heuristic("日本語のテスト") == "workspace")
+        #expect(TaskName.heuristic("日本語のテスト") == "worktree")
         #expect(TaskName.heuristic("naïve café") == "naive-cafe")
         // An apostrophe joins a word rather than splitting it.
         #expect(TaskName.heuristic("Don't break the build") == "dont-break-build")

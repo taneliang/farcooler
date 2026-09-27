@@ -393,7 +393,7 @@ fn shell_join(args: &[String]) -> String {
     args.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")
 }
 
-fn shell_quote(arg: &str) -> String {
+pub(crate) fn shell_quote(arg: &str) -> String {
     if !arg.is_empty()
         && arg.chars().all(|c| c.is_ascii_alphanumeric() || "-_./:@=+,".contains(c))
     {

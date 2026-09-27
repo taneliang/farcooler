@@ -87,14 +87,22 @@ struct BoardCardTickTests {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         let store = TaskBoardStore(
             client: client,
-            repository: Repository(
-                id: "r", short: "r", displayName: "r", remote: "", repositoryRootId: ""))
+            workspace: .implicit(repository: "r"))
         let card = TaskCardRow(
             row: row, prominent: false, store: store, live: [], presence: .unsaid,
             onGoTo: { _ in })
         // The card at a column's width and its own height, and the window
         // exactly that, so the regions `ink` reads are the card's and not
         // margin the window centers it in.
+        // The process's appearance as well as the view's: the pane chrome the
+        // border is stroked over resolves its system color against
+        // `NSApp.effectiveAppearance` (`blend` in Theme.swift), so on a Mac in
+        // Dark mode the orange border lands on dark chrome and reads as too
+        // dark to count, whatever the host view says.
+        let app = NSApplication.shared
+        let appearance = app.appearance
+        app.appearance = NSAppearance(named: .aqua)
+        defer { app.appearance = appearance }
         let host = NSHostingView(
             rootView: card.frame(width: 260).fixedSize().environment(\.boardClock, clock.board))
         host.appearance = NSAppearance(named: .aqua)

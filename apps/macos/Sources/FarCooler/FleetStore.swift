@@ -284,9 +284,14 @@ final class FleetStore: ObservableObject {
         case .live(let count): (healthy, live) = (true, count)
         case .runtimeDown, .connecting, .unsaid, .notInstalled: (healthy, live) = (false, 0)
         }
-        let fleet = Fleet(
+        var fleet = Fleet(
             runtimeHealthy: healthy, livePanes: live,
             worktrees: runners.flatMap(\.fleet.worktrees))
+        // Each runner's workspaces, under that runner. Kept from an
+        // unreachable runner as its rows are, so its sidebar stays put.
+        for runner in runners {
+            fleet.runnerWorkspaces.merge(runner.fleet.runnerWorkspaces) { first, _ in first }
+        }
         return (fleet, reading)
     }
 

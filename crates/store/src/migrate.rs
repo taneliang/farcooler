@@ -26,6 +26,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_0012_every_board_has_a_prefix,
     migration_0013_task_edited_at,
     migration_0014_worktrees,
+    migration_0015_workspaces,
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -643,6 +644,124 @@ fn migration_0014_worktrees(tx: &Transaction) -> rusqlite::Result<()> {
     )
 }
 
+/// Workspaces: workstreams that own tasks and, once claimed, worktrees.
+///
+/// Every repository gets a workspace called Main that takes its prefix, its
+/// whole board, every worktree and every terminal. A task's workspace is
+/// required, but SQLite will not `ADD COLUMN … NOT NULL` without a default, and
+/// rebuilding `tasks` inside this transaction would run `task_notes`'s cascade
+/// and its append-only triggers (foreign keys cannot be switched off inside a
+/// transaction). So the column is added nullable, filled here, and held
+/// non-null from now on by two triggers.
+///
+/// **Prefixes already held are placed first.** A repository with no prefix
+/// (registered before the board and never given one) derives one, and it must
+/// not derive a prefix another repository already holds: placing it first
+/// would take that prefix, and the holder's own Main would then fail the
+/// unique index and the store would not open. So every held prefix goes in
+/// before any is derived.
+///
+/// **What deleting does.** The three new references are plain (`NO ACTION`),
+/// which SQLite checks at the end of each statement. Deleting a workspace that
+/// a task, a worktree or a terminal still names fails: that is the refusal
+/// the design wants. Deleting a repository cascades to its workspaces and to
+/// its tasks (and so their notes) in the same statement, so nothing is left
+/// naming a deleted workspace when the check runs. It does NOT cascade to
+/// worktrees or terminals: `worktrees.repository_id` and
+/// `terminals.worktree_id` have never cascaded, and a repository with rows in
+/// either still refuses to be deleted, exactly as before this migration.
+/// `Service` removes terminals and worktrees itself before it deletes a
+/// repository.
+///
+/// Roles: a terminal running the `shell` preset is a shell, and every other
+/// terminal is an agent. Nothing is inferred to be an orchestrator; one running
+/// today is re-tagged by hand or by restarting it as one.
+///
+/// `repositories.task_key_prefix` stays in the table, since migrations 0010 and
+/// 0012 and their tests still write it, but nothing reads it after this: the
+/// prefix lives on the workspace.
+fn migration_0015_workspaces(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE workspaces (
+            id BLOB PRIMARY KEY NOT NULL,
+            repository_id BLOB NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            task_prefix TEXT NOT NULL,
+            is_main INTEGER NOT NULL DEFAULT 0,
+            ordinal INTEGER NOT NULL,
+            resource_version INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL
+        );
+
+        -- One prefix per runner, ignoring case: keys are looked up ignoring
+        -- case (see `Store::tasks_with_key`), so `bil` and `BIL` would mint
+        -- keys that resolve to each other's tasks.
+        CREATE UNIQUE INDEX workspaces_one_prefix ON workspaces (task_prefix COLLATE NOCASE);
+        CREATE UNIQUE INDEX workspaces_one_main ON workspaces (repository_id) WHERE is_main = 1;
+        CREATE INDEX workspaces_by_repository ON workspaces (repository_id, ordinal);
+
+        ALTER TABLE worktrees ADD COLUMN workspace_id BLOB REFERENCES workspaces(id);
+        ALTER TABLE worktrees ADD COLUMN claim_source TEXT;
+        ALTER TABLE terminals ADD COLUMN workspace_id BLOB REFERENCES workspaces(id);
+        ALTER TABLE terminals ADD COLUMN role INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE tasks ADD COLUMN workspace_id BLOB REFERENCES workspaces(id);
+        CREATE INDEX tasks_by_workspace ON tasks (workspace_id, status);
+        "#,
+    )?;
+
+    let repositories: Vec<(Vec<u8>, String, String)> = {
+        let mut stmt =
+            tx.prepare("SELECT id, display_name, task_key_prefix FROM repositories ORDER BY rowid")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    let now = crate::tasks::now_millis();
+    let (held, prefixless): (Vec<_>, Vec<_>) =
+        repositories.into_iter().partition(|(_, _, prefix)| !prefix.is_empty());
+    for (repository, name, prefix) in held.into_iter().chain(prefixless) {
+        // A held prefix is its own base, and comes back unchanged unless an
+        // earlier repository holds the same letters in another case, which
+        // `repositories_one_task_prefix` (case-sensitive) never refused.
+        let base = if prefix.is_empty() { crate::tasks::derive_prefix(&name) } else { prefix };
+        let prefix = crate::workspaces::free_prefix(tx, &base)?;
+        let main = crate::models::uuid_blob(uuid::Uuid::now_v7());
+        tx.execute(
+            "INSERT INTO workspaces (id, repository_id, name, task_prefix, is_main, ordinal, created_at)
+             VALUES (?1, ?2, 'Main', ?3, 1, 0, ?4)",
+            rusqlite::params![main, repository, prefix, now],
+        )?;
+        tx.execute(
+            "UPDATE worktrees SET workspace_id = ?1, claim_source = 'migration' WHERE repository_id = ?2",
+            rusqlite::params![main, repository],
+        )?;
+        tx.execute(
+            "UPDATE tasks SET workspace_id = ?1 WHERE repository_id = ?2",
+            rusqlite::params![main, repository],
+        )?;
+    }
+
+    tx.execute_batch(
+        r#"
+        UPDATE terminals
+           SET workspace_id = (SELECT w.workspace_id FROM worktrees w WHERE w.id = terminals.worktree_id);
+        UPDATE terminals SET role = 0 WHERE command_preset = 'shell';
+
+        CREATE TRIGGER tasks_need_a_workspace
+        BEFORE INSERT ON tasks WHEN NEW.workspace_id IS NULL
+        BEGIN
+            SELECT RAISE(ABORT, 'a task needs a workspace');
+        END;
+
+        CREATE TRIGGER tasks_keep_a_workspace
+        BEFORE UPDATE OF workspace_id ON tasks WHEN NEW.workspace_id IS NULL
+        BEGIN
+            SELECT RAISE(ABORT, 'a task needs a workspace');
+        END;
+        "#,
+    )
+}
+
 /// Every migration below `version`, applied in one transaction, with the
 /// watermark set to it: a database exactly as a build that stopped at
 /// `version` left it, for a test to seed and then migrate forward.
@@ -911,8 +1030,11 @@ mod tests {
             "INSERT INTO repository_roots VALUES (x'10', x'11', '/r', 0, 1);
              INSERT INTO repositories
                  VALUES (x'12', x'11', x'10', 'r', '/r/.git', '', 1, '');
-             INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at, resource_version)
-                 VALUES (x'02', x'12', 'fc-1', 'a task', 'backlog', 0, 0, 1);
+             INSERT INTO workspaces (id, repository_id, name, task_prefix, is_main, ordinal, created_at)
+                 VALUES (x'13', x'12', 'Main', 'fc', 1, 0, 0);
+             INSERT INTO tasks (id, repository_id, workspace_id, key, title, status, status_since,
+                                created_at, resource_version)
+                 VALUES (x'02', x'12', x'13', 'fc-1', 'a task', 'backlog', 0, 0, 1);
              INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
              VALUES (x'01', x'02', 'decision', 'user', 0, 'because', '{}');",
         )
@@ -1203,5 +1325,280 @@ mod tests {
         let broken: i64 =
             conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
         assert_eq!(broken, 0, "every reference still resolves");
+    }
+
+    /// Every row of `query`, each column rendered as text, for comparing a
+    /// table before and after a migration without naming its columns twice.
+    fn snapshot(conn: &Connection, query: &str) -> Vec<Vec<String>> {
+        let mut stmt = conn.prepare(query).unwrap();
+        let width = stmt.column_count();
+        stmt.query_map([], |r| {
+            (0..width)
+                .map(|i| {
+                    Ok(match r.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => "NULL".to_string(),
+                        rusqlite::types::ValueRef::Integer(n) => n.to_string(),
+                        rusqlite::types::ValueRef::Real(f) => f.to_string(),
+                        rusqlite::types::ValueRef::Text(t) => String::from_utf8_lossy(t).into_owned(),
+                        rusqlite::types::ValueRef::Blob(b) => format!("{b:02x?}"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    }
+
+    /// Main's id in `repository`.
+    fn main_of(conn: &Connection, repository: u8) -> Vec<u8> {
+        conn.query_row(
+            "SELECT id FROM workspaces WHERE repository_id = ?1 AND is_main = 1",
+            [vec![repository]],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|e| panic!("repository {repository:#x} has no Main: {e}"))
+    }
+
+    /// The live board this must carry: keys, former keys from the prefixless
+    /// era, and notes, all landing on their repository's Main.
+    ///
+    /// Two repositories, and the one registered FIRST has no prefix and a name
+    /// that derives the prefix the second already holds (`overcast` and
+    /// `overnight` both give `ov`). A migration that walked repositories in
+    /// order and derived a free prefix for each as it went would hand `ov` to
+    /// `overcast`, then fail on `overnight`'s own `ov` and refuse to open the
+    /// store. Every prefix already held is placed first.
+    #[test]
+    fn a_board_with_renamed_keys_survives_into_main() {
+        let mut conn = open();
+        migrate_only_to(&mut conn, 14);
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'0a', x'02', x'01', 'overcast', '/a/.git', '', 1, '');
+             INSERT INTO repositories VALUES (x'0b', x'02', x'01', 'overnight', '/b/.git', '', 3, 'ov');
+             INSERT INTO worktrees (id, repository_id, branch, worktree_path, hidden, creation_failed,
+                                    resource_version, is_main_checkout, worktree_missing, ordinal)
+                 VALUES (x'a1', x'0a', 'main', '/a', 0, 0, 1, 1, 0, 0),
+                        (x'b1', x'0b', 'main', '/b', 0, 0, 4, 1, 0, 1),
+                        (x'b2', x'0b', 'feat/x', '/b/.worktrees/x', 1, 0, 2, 0, 1, 2);
+             INSERT INTO tasks (id, repository_id, key, former_key, title, status, status_since,
+                                intent, acceptance, constraints, labels, worktree_id, created_at,
+                                resource_version, edited_at)
+                 VALUES (x'd1', x'0b', 'ov-1', '-1', 'first', 'in_progress', 5, 'why', '[]', '[\"c\"]',
+                         '[\"l\"]', x'b2', 1, 3, 7),
+                        (x'd2', x'0b', 'ov-2', '-2', 'second', 'done', 6, '', '[]', '[]', '[]', NULL, 2,
+                         2, NULL),
+                        (x'd3', x'0b', 'ov-3', NULL, 'third', 'todo', 8, '', '[]', '[]', '[]', NULL, 8,
+                         1, NULL),
+                        (x'd4', x'0a', '-1', NULL, 'unkeyed', 'backlog', 9, '', '[]', '[]', '[]', NULL, 9,
+                         1, NULL);
+             INSERT INTO terminals (id, worktree_id, title, command_preset, intent, runtime_confirmed,
+                                    exit_code, exit_signal, lease_generation, epoch, \"columns\", \"rows\",
+                                    resource_version, pane_mode, agent_session_id, task_id)
+                 VALUES (x'c1', x'b1', 'agent', 'claude', 1, 1, NULL, NULL, 0, 0, 80, 24, 1, 0, 's', NULL),
+                        (x'c2', x'b1', 'shell', 'shell', 1, 1, NULL, NULL, 0, 0, 80, 24, 1, 0, NULL, NULL),
+                        (x'c3', x'a1', 'codex', 'codex', 2, 1, 0, NULL, 0, 0, 80, 24, 1, 0, NULL, NULL),
+                        (x'c4', x'b2', 'worker', 'claude:opus', 1, 1, NULL, NULL, 0, 0, 80, 24, 1, 1,
+                         NULL, x'd1');
+             INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra, supersedes)
+                 VALUES (x'e1', x'd1', 'created', 'user', 1, 'first', '{}', NULL),
+                        (x'e2', x'd1', 'decision', 'manager', 2, 'use sqlite', '{\"rejected\":[\"files\"]}', NULL),
+                        (x'e3', x'd1', 'decision', 'manager', 3, 'use files after all', '{}', x'e2'),
+                        (x'e4', x'd2', 'status_change', 'user', 4, '', '{\"from\":\"todo\",\"to\":\"done\"}', NULL),
+                        (x'e5', x'd4', 'comment', 'user', 5, 'still here', '{}', NULL);",
+        )
+        .unwrap();
+        // Every column each table had at 14, which 0015 must not change.
+        let tasks_at_14 = "SELECT id, repository_id, key, former_key, title, status, status_since, intent,
+                                  acceptance, constraints, labels, worktree_id, created_at,
+                                  resource_version, edited_at
+                             FROM tasks ORDER BY id";
+        let notes_at_14 = "SELECT * FROM task_notes ORDER BY id";
+        let worktrees_at_14 = "SELECT id, repository_id, branch, worktree_path, hidden, creation_failed,
+                                      resource_version, is_main_checkout, worktree_missing, ordinal
+                                 FROM worktrees ORDER BY id";
+        let terminals_at_14 = "SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
+                                      exit_code, exit_signal, lease_generation, epoch, \"columns\", \"rows\",
+                                      resource_version, pane_mode, agent_session_id, task_id
+                                 FROM terminals ORDER BY id";
+        let before: Vec<_> = [tasks_at_14, notes_at_14, worktrees_at_14, terminals_at_14]
+            .iter()
+            .map(|q| snapshot(&conn, q))
+            .collect();
+
+        migrate(&mut conn, 14).unwrap();
+
+        let after: Vec<_> = [tasks_at_14, notes_at_14, worktrees_at_14, terminals_at_14]
+            .iter()
+            .map(|q| snapshot(&conn, q))
+            .collect();
+        assert_eq!(before, after, "every task, key, former key, note, worktree and terminal as it was");
+
+        let workspaces = snapshot(
+            &conn,
+            "SELECT hex(repository_id), name, task_prefix, is_main, ordinal, resource_version
+               FROM workspaces ORDER BY repository_id",
+        );
+        assert_eq!(
+            workspaces,
+            vec![
+                vec!["0A", "Main", "ov2", "1", "0", "1"],
+                vec!["0B", "Main", "ov", "1", "0", "1"],
+            ],
+            "one Main per repository; a prefix already held stays with its holder"
+        );
+        let (a, b) = (main_of(&conn, 0x0a), main_of(&conn, 0x0b));
+
+        let tasks = snapshot(&conn, "SELECT hex(id), hex(workspace_id) FROM tasks ORDER BY id");
+        let (a_hex, b_hex) = (hex(&a), hex(&b));
+        assert_eq!(
+            tasks,
+            vec![
+                vec!["D1".to_string(), b_hex.clone()],
+                vec!["D2".to_string(), b_hex.clone()],
+                vec!["D3".to_string(), b_hex.clone()],
+                vec!["D4".to_string(), a_hex.clone()],
+            ],
+            "every task is on its own repository's Main"
+        );
+        let worktrees =
+            snapshot(&conn, "SELECT hex(id), hex(workspace_id), claim_source FROM worktrees ORDER BY id");
+        assert_eq!(
+            worktrees,
+            vec![
+                vec!["A1".to_string(), a_hex.clone(), "migration".to_string()],
+                vec!["B1".to_string(), b_hex.clone(), "migration".to_string()],
+                vec!["B2".to_string(), b_hex.clone(), "migration".to_string()],
+            ],
+            "every worktree, hidden and missing ones too, belongs to its repository's Main"
+        );
+        let terminals =
+            snapshot(&conn, "SELECT hex(id), hex(workspace_id), role FROM terminals ORDER BY id");
+        assert_eq!(
+            terminals,
+            vec![
+                vec!["C1".to_string(), b_hex.clone(), "1".to_string()],
+                vec!["C2".to_string(), b_hex.clone(), "0".to_string()],
+                vec!["C3".to_string(), a_hex.clone(), "1".to_string()],
+                vec!["C4".to_string(), b_hex.clone(), "1".to_string()],
+            ],
+            "a shell is a shell, everything else an agent, and nothing is guessed to be an orchestrator"
+        );
+
+        let broken: i64 =
+            conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(broken, 0, "every reference resolves");
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02X}")).collect()
+    }
+
+    /// A repository whose prefix was never claimed still gets a Main with one.
+    #[test]
+    fn a_repository_without_a_prefix_gets_a_main_with_one() {
+        let mut conn = open();
+        migrate_only_to(&mut conn, 14);
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'far cooler', '/r/.git', '', 1, '');",
+        )
+        .unwrap();
+        migrate(&mut conn, 14).unwrap();
+        let prefix: String =
+            conn.query_row("SELECT task_prefix FROM workspaces", [], |r| r.get(0)).unwrap();
+        assert_eq!(prefix, "fc");
+    }
+
+    /// Deleting a workspace that still holds a task is refused by the schema
+    /// itself, a task cannot be left without a workspace, and deleting the
+    /// repository still takes its workspaces and tasks with it.
+    #[test]
+    fn a_workspace_with_tasks_cannot_be_deleted_but_its_repository_can() {
+        let mut conn = open();
+        migrate_only_to(&mut conn, 14);
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, 'r');
+             INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at,
+                                resource_version)
+                 VALUES (x'07', x'03', 'r-1', 't', 'todo', 0, 0, 1);
+             INSERT INTO task_notes (id, task_id, kind, actor, at, body, extra)
+                 VALUES (x'08', x'07', 'decision', 'manager', 0, 'why', '{}');",
+        )
+        .unwrap();
+        migrate(&mut conn, 14).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        assert!(conn.execute("DELETE FROM workspaces", []).is_err(), "Main still holds a task");
+        assert!(
+            conn.execute("UPDATE tasks SET workspace_id = NULL", []).is_err(),
+            "a task needs a workspace"
+        );
+        assert!(
+            conn.execute(
+                "INSERT INTO tasks (id, repository_id, key, title, status, status_since, created_at,
+                                    resource_version)
+                     VALUES (x'09', x'03', 'r-2', 't', 'todo', 0, 0, 1)",
+                [],
+            )
+            .is_err(),
+            "nor can one be filed without one"
+        );
+
+        conn.execute("DELETE FROM repositories", []).unwrap();
+        let left: i64 = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM tasks) + (SELECT count(*) FROM workspaces)
+                      + (SELECT count(*) FROM task_notes)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0, "the repository took its workspaces, tasks and notes with it");
+    }
+
+    /// `bil` and `BIL` are one prefix: a key is looked up ignoring case, so
+    /// two workspaces whose prefixes differ only by case would mint keys that
+    /// resolve to each other's tasks. Held by the index, not only by the
+    /// store's own check.
+    #[test]
+    fn the_prefix_index_ignores_case() {
+        let mut conn = open();
+        migrate(&mut conn, 0).unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
+             INSERT INTO workspaces (id, repository_id, name, task_prefix, ordinal, created_at)
+                 VALUES (x'04', x'03', 'Billing', 'bil', 1, 0);",
+        )
+        .unwrap();
+        let second = conn.execute(
+            "INSERT INTO workspaces (id, repository_id, name, task_prefix, ordinal, created_at)
+                 VALUES (x'05', x'03', 'Other', 'BIL', 2, 0)",
+            [],
+        );
+        assert!(second.is_err(), "a prefix differing only by case is the same prefix");
+    }
+
+    /// One Main per repository, held by the schema.
+    #[test]
+    fn a_repository_has_one_main() {
+        let mut conn = open();
+        migrate(&mut conn, 0).unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
+             INSERT INTO workspaces (id, repository_id, name, task_prefix, is_main, ordinal, created_at)
+                 VALUES (x'04', x'03', 'Main', 'r', 1, 0, 0);",
+        )
+        .unwrap();
+        let second = conn.execute(
+            "INSERT INTO workspaces (id, repository_id, name, task_prefix, is_main, ordinal, created_at)
+                 VALUES (x'05', x'03', 'Main', 'r2', 1, 1, 0)",
+            [],
+        );
+        assert!(second.is_err(), "a second Main is refused");
     }
 }

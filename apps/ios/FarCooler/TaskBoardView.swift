@@ -32,11 +32,16 @@ struct BoardAgent: Identifiable, Equatable {
 }
 
 /// What a board sheet is about, and where it came from.
+///
+/// A WORKSPACE's board: a repository has one per workspace, and the sheet is
+/// read and refreshed by the workspace it names (`Connection.readBoard`). On
+/// a runner without workspaces that is the repository's implicit one, whose
+/// board is the whole repository's.
 struct BoardSheet: Identifiable {
     let runner: String
-    let repository: String
+    let workspace: WorkspaceSummary
     let name: String
-    var id: String { "\(runner)/\(repository)" }
+    var id: String { "\(runner)/\(workspace.id)" }
 }
 
 struct TaskBoardView: View {

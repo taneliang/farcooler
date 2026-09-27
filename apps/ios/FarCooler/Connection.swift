@@ -401,11 +401,13 @@ final class Connection: ObservableObject {
             // the same state from outside it.
             //
             // A board is the exception because it is not in the fleet. A
-            // `task` notice names its repository so that one `task.list` is
-            // what it costs, and `resync` — the queue overflowed and said
-            // nothing more specific — is every board.
+            // `task` notice names its board — the workspace the task is on,
+            // and on a move the one it left — so that a `task.list` per board
+            // it moved is what it costs, and `resync` — the queue overflowed
+            // and said nothing more specific — is every board. Which boards a
+            // notice moves is `RunnerBoards.touched`'s to say.
             let event = notice["event"] as? String
-            let repository = notice["repository"] as? String
+            let moved = BoardNotice(notice: notice)
             //
             // The fleet first, and never behind a board: `fleetNewsArrived`
             // only arms a refresh, and the board read after it runs on its
@@ -416,7 +418,11 @@ final class Connection: ObservableObject {
                 guard let self else { return }
                 self.fleetNewsArrived()
                 switch event {
-                case "task": if let repository { await self.readBoard(repository) }
+                case "task":
+                    guard let moved else { break }
+                    for board in RunnerBoards.touched(by: moved, among: self.boardList) {
+                        await self.readBoard(board)
+                    }
                 case "resync": await self.loadBoards()
                 default: break
                 }
@@ -1180,18 +1186,30 @@ final class Connection: ObservableObject {
 
     // MARK: - Boards
 
-    /// Each repository's board, by repository id, as the runner last said it.
+    /// Each board, by workspace id, as the runner last said it.
     ///
-    /// Only boards that have been read: a repository with no entry has not
+    /// Keyed by WORKSPACE, because a repository has one board per workspace
+    /// now. A runner without `workstreams` has one implicit workspace per
+    /// repository whose id is the repository's (`WorkspaceSummary.implicit`),
+    /// so its boards are keyed exactly as they were.
+    ///
+    /// Only boards that have been read: a workspace with no entry has not
     /// answered yet, which `RunnerBoards.rows` draws as no row rather than as
     /// an empty board. Kept through a dropped link and a failed read, on the
     /// same terms as `fleet` and `inbox` — a Needs Decision count that vanished
     /// every time the Wi-Fi blinked would be a count nobody could trust.
     @Published private(set) var boards: [String: TaskBoardModel] = [:]
 
-    /// Repositories whose last board read failed. The overview's row keeps
-    /// the last good board; the board itself says it could not read.
+    /// Boards, by workspace id, whose last read failed. The overview's row
+    /// keeps the last good board; the board itself says it could not read.
     @Published private(set) var unreadBoards: Set<String> = []
+
+    /// Every board this runner keeps, in the order the overview draws them:
+    /// each repository's workspaces, or its one implicit board on a runner
+    /// that names none. What a sweep reads; see `RunnerBoards.boards`.
+    var boardList: [WorkspaceSummary] {
+        RunnerBoards.boards(repositories: repositories.map(\.id), workspaces: fleet.workspaces)
+    }
 
     /// Boards with a read crossing the network, and boards whose news arrived
     /// while it was: one read at a time per board, and one more after it if
@@ -1201,13 +1219,19 @@ final class Connection: ObservableObject {
     private var readingBoards: Set<String> = []
     private var boardMovedAgain: Set<String> = []
 
-    /// Read every repository's board, on a runner that keeps one.
+    /// Read every board, on a runner that keeps one.
     ///
-    /// When a link comes up (after the repositories are known), when a
-    /// link's build lands on a link whose boards were not read yet (see
+    /// When a link comes up (after the repositories and the fleet are known),
+    /// when a link's build lands on a link whose boards were not read yet (see
     /// `boardSweep`), on `resync`, and — only for a runner with no live event
     /// channel — on foreground and on the poll, at most once a minute (see
     /// `boardsMayHaveMissedNews`). Otherwise a board is read on its own news.
+    ///
+    /// **This is what reads an open board again after a reconnect.** Notices
+    /// that fired while the link was down are gone with it, and `reconnect`
+    /// ends here: every board in `boardList`, which is every workspace's —
+    /// the one a board sheet is showing among them, since its row came from
+    /// the same list. `readBoard` folds into a read the sheet itself started.
     ///
     /// One board at a time, and that is not caution. The client core holds
     /// this runner's session for the whole of each round trip, so every call
@@ -1220,9 +1244,10 @@ final class Connection: ObservableObject {
     func loadBoards() async {
         guard phase == .connected, daemon?.can("tasks") == true else { return }
         lastBoardsRead = Date()
-        if !repositories.isEmpty { boardSweep.swept() }
-        for repository in repositories.map(\.id) {
-            await readBoard(repository)
+        let list = boardList
+        if !list.isEmpty { boardSweep.swept() }
+        for board in list {
+            await readBoard(board)
         }
     }
 
@@ -1252,35 +1277,44 @@ final class Connection: ObservableObject {
         return Date().timeIntervalSince(last) > 60
     }
 
-    /// Read one repository's board, or fold into the read already under way.
+    /// Read one workspace's board, or fold into the read already under way.
+    ///
+    /// `task.list` names the repository and, for a real workspace, the
+    /// workspace (`WorkspaceSummary.boardWorkspace`); an implicit one's board
+    /// is the whole repository's, which is what an older runner answers
+    /// anyway. The client core drops the workspace for a runner without
+    /// `workstreams` and makes a runner with it refuse rather than widen.
     ///
     /// Errors are swallowed as `loadInbox`'s are: a failed read keeps the last
     /// good board and marks it unread, and must never be taken for a dropped
     /// link — a runner refusing `task.list` would otherwise reconnect a
     /// working session every time a card moved.
     @discardableResult
-    func readBoard(_ repository: String) async -> Bool {
-        guard !readingBoards.contains(repository) else {
-            boardMovedAgain.insert(repository)
+    func readBoard(_ workspace: WorkspaceSummary) async -> Bool {
+        let key = workspace.id
+        guard !readingBoards.contains(key) else {
+            boardMovedAgain.insert(key)
             return true
         }
-        readingBoards.insert(repository)
-        defer { readingBoards.remove(repository) }
+        readingBoards.insert(key)
+        defer { readingBoards.remove(key) }
+        var args: [String: Any] = ["repository": workspace.repository ?? workspace.id]
+        if let board = workspace.boardWorkspace { args["workspace"] = board }
         var read = false
         repeat {
-            boardMovedAgain.remove(repository)
+            boardMovedAgain.remove(key)
             guard phase == .connected, daemon?.can("tasks") == true else { return read }
-            if let data = try? await core.call("task.list", ["repository": repository]),
+            if let data = try? await core.call("task.list", args),
                 let board = try? TaskBoardModel.decode(data)
             {
-                boards[repository] = board
-                unreadBoards.remove(repository)
+                boards[key] = board
+                unreadBoards.remove(key)
                 read = true
             } else {
-                unreadBoards.insert(repository)
+                unreadBoards.insert(key)
                 read = false
             }
-        } while boardMovedAgain.contains(repository)
+        } while boardMovedAgain.contains(key)
         return read
     }
 

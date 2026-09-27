@@ -86,7 +86,7 @@ async fn task_list_and_task_get_are_refused_without_a_request() {
     // forever. Two seconds is a refusal that never needed the wire, many
     // times over.
     let bound = std::time::Duration::from_secs(2);
-    let list = tokio::time::timeout(bound, session.tasks(uuid::Uuid::now_v7()))
+    let list = tokio::time::timeout(bound, session.tasks(uuid::Uuid::now_v7(), None))
         .await
         .expect("task.list went to the runner and waited for an answer");
     refused_as_unsupported(list, "task.list");

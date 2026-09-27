@@ -20,10 +20,13 @@ mod store;
 mod tasks;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+mod workspaces;
 
 pub use models::{
-    AcceptanceItem, Actor, IdempotencyRecord, NoteHit, NoteKind, Repository, RepositoryRoot, Task,
-    TaskBlock, TaskNote, TaskStatus, TaskUpdate, Terminal, TerminalUpdate, Worktree,
+    AcceptanceItem, Actor, ClaimSource, IdempotencyRecord, NoteHit, NoteKind, Repository, RepositoryRoot,
+    Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate, Terminal, TerminalRole, TerminalUpdate, Workspace,
+    Worktree,
 };
 pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};
-pub use tasks::derive_prefix;
+pub use tasks::{TaskScope, derive_prefix};
+pub use workspaces::{Vacated, valid_prefix};

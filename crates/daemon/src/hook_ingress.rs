@@ -186,6 +186,9 @@ pub struct HookIngress {
     /// `accept` directly, say) starts no tail rather than spawning one with
     /// nowhere to deliver to.
     sink: Arc<Mutex<Option<EventSink>>>,
+    /// `Service`'s claims ledger, so a Claude session's `cwd` can claim the
+    /// worktree it is working in (`observe_cwd`).
+    claims: Arc<crate::claims::Ledger>,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -210,13 +213,18 @@ fn release_tail_slot(tails: &Mutex<HashMap<Uuid, Arc<AtomicBool>>>, terminal: Uu
 type EventSink = Arc<dyn Fn(Uuid, Vec<AgentEvent>) + Send + Sync>;
 
 impl HookIngress {
-    pub fn new(store: Arc<Store>, inventory: Arc<dyn RuntimeInventory>) -> Self {
+    pub fn new(
+        store: Arc<Store>,
+        inventory: Arc<dyn RuntimeInventory>,
+        claims: Arc<crate::claims::Ledger>,
+    ) -> Self {
         Self {
             store,
             inventory,
             assemblers: Arc::new(Mutex::new(HashMap::new())),
             tails: Arc::new(Mutex::new(HashMap::new())),
             sink: Arc::new(Mutex::new(None)),
+            claims,
         }
     }
 
@@ -436,6 +444,38 @@ impl HookIngress {
         self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
         if let Some(alive) = self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal) {
             alive.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Claiming's second signal: where a Claude Code session says it is
+    /// working claims that worktree for its pane's workspace
+    /// (`claims::observe_in`).
+    ///
+    /// Claude only, and on the events already registered, which is what the
+    /// spike measured (spec, "Spike findings (2026-09-27)"). Claude's `cwd`
+    /// follows a `cd` in its Bash tool and an `EnterWorktree`, and every
+    /// later hook reports it, `Stop` included, so a move is seen by the end
+    /// of the turn it happened in. Codex's `cwd` is its launch directory
+    /// whatever its commands do. Cursor's registered events carry no `cwd`,
+    /// and `facts` falls back to `workspace_roots[0]`, its launch directory
+    /// too. For both, that is the pane's own worktree, which is already
+    /// known without a hook; acting on it would only repeat the pane's
+    /// placement as though it were news. Their moves are left to the
+    /// process walk (`claims::scan`).
+    ///
+    /// A Claude hook reaches a terminal by its session id, through
+    /// `terminal_for`'s claimants: `preset_command` launches every Claude
+    /// Far Cooler starts with `--session-id`, and the row holds it. A Claude
+    /// someone started by hand has no row naming its session, so it claims
+    /// nothing, as it routes nothing.
+    fn observe_cwd(&self, terminal: Uuid, agent: Agent, f: &Facts) {
+        if agent != Agent::Claude {
+            return;
+        }
+        let Some(cwd) = f.cwd.as_deref() else { return };
+        let source = farcooler_store::models::ClaimSource::Hook;
+        if let Err(e) = crate::claims::observe_in(&self.store, &self.claims, terminal, cwd, source) {
+            tracing::warn!(error = %e, %terminal, "could not judge where a session is working");
         }
     }
 
@@ -745,6 +785,7 @@ impl HookIngress {
                 continue;
             };
             self.start_transcript_tail(terminal, hook.agent, &f);
+            self.observe_cwd(terminal, hook.agent, &f);
 
             let events =
                 self.accept(terminal, hook.agent, &hook.event, &hook.payload, f.session_id.as_deref());
@@ -943,7 +984,7 @@ mod tests {
         let store = Arc::new(Store::open_in_memory().expect("store"));
         let inventory: Arc<dyn RuntimeInventory> =
             Arc::new(farcooler_core::inventory::FakeInventory::default());
-        HookIngress::new(store, inventory)
+        HookIngress::new(store, inventory, Arc::default())
     }
 
     /// Poll rather than a fixed sleep: both the initial catch-up read and the

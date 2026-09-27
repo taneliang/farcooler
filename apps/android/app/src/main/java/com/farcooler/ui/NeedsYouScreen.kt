@@ -265,12 +265,13 @@ fun NeedsYouScreen(
                     }
                 }
 
-                // A Board row per repository whose board has something on it,
+                // A Board row per workspace whose board has something on it,
                 // directly above the door to the worktrees — where the Mac puts
-                // its Board row above a repository's worktrees. Here rather
-                // than in the worktree list: that list is flat across runners
-                // with no repository level, and this screen is the one every
-                // session starts on. One item per runner, because each runner's
+                // its Board row above a workspace's worktrees. Here rather
+                // than in the worktree list, because this screen is the one
+                // every session starts on; each row names its workspace, and
+                // its repository where that is not the whole of the name.
+                // One item per runner, because each runner's
                 // boards are flows of their own; see [RunnerBoardRows].
                 connections.forEach { connection ->
                     item(key = "boards/${connection.host.id}") {
