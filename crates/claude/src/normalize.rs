@@ -8,8 +8,10 @@
 //! `tests/fixtures/turn_basic.jsonl` by `tests/fixtures/capture_turn.py`.
 
 use farcooler_agent_core::event::{
-    AgentChoice, AgentEvent, AgentGapReason, EndReason, PermissionOption, PlanEntry, Role,
-    ToolStatus,
+    AgentChoice, AgentEvent, AgentGapReason, EndReason, PlanEntry, Role, ToolStatus,
+};
+use farcooler_agent_core::permission::{
+    claude_task_key as task_key, claude_tool_title as tool_title, permission_options,
 };
 
 /// One model the session offers, and the reasoning depths it supports.
@@ -514,57 +516,6 @@ fn result_text(content: &serde_json::Value) -> Option<String> {
     (!joined.is_empty()).then_some(joined)
 }
 
-/// What a tool row should say it is doing.
-///
-/// The command for a shell, the path for a file operation, the tool's own name
-/// otherwise. A row reading "Bash" tells you less than the command it ran.
-///
-/// The task tools are here because of what the fallback did to them: a session
-/// that called `TaskCreate` five times drew five rows every one of which said
-/// literally "TaskCreate", which is the worst version of this — five rows that
-/// are not merely uninformative but indistinguishable. `TaskUpdate` has the
-/// same shape of problem and less to work with, since an update that only moves
-/// a status carries nothing but `taskId`.
-///
-/// `TaskList` deliberately gets no case: it takes no parameters at all, so its
-/// own name is the whole truth about it.
-fn tool_title(name: &str, input: &serde_json::Value) -> String {
-    let field = |key: &str| input[key].as_str().map(str::to_string);
-    match name {
-        "Bash" | "BashOutput" => field("command").unwrap_or_else(|| name.to_string()),
-        "Read" | "Write" | "Edit" | "NotebookEdit" => {
-            field("file_path").unwrap_or_else(|| name.to_string())
-        }
-        "Glob" | "Grep" => field("pattern").unwrap_or_else(|| name.to_string()),
-        "WebFetch" => field("url").unwrap_or_else(|| name.to_string()),
-        "WebSearch" => field("query").unwrap_or_else(|| name.to_string()),
-        // `Task` and `Agent` are the SUBAGENT dispatch, unrelated to the
-        // `Task*` tools below despite the shared prefix.
-        "Task" | "Agent" => field("description").unwrap_or_else(|| name.to_string()),
-        "TaskCreate" => field("subject").unwrap_or_else(|| name.to_string()),
-        "TaskUpdate" => task_update_title(input).unwrap_or_else(|| name.to_string()),
-        _ => name.to_string(),
-    }
-}
-
-/// A `TaskUpdate` row, named for whatever it actually says.
-///
-/// A new `subject` is a rename and IS the row. Otherwise the only required
-/// field is `taskId`, so the row is the task it moved plus the state it moved
-/// it to — because the update most often made is a status change, and without
-/// the status three of those in a row would read identically, which is the
-/// complaint that brought this whole function here.
-fn task_update_title(input: &serde_json::Value) -> Option<String> {
-    if let Some(subject) = input["subject"].as_str().filter(|s| !s.is_empty()) {
-        return Some(subject.to_string());
-    }
-    let id = task_key(input["taskId"].as_str()?);
-    Some(match input["status"].as_str().filter(|s| !s.is_empty()) {
-        Some(status) => format!("Task #{id}: {status}"),
-        None => format!("Task #{id}"),
-    })
-}
-
 /// The generic kind a client renders an icon from.
 fn tool_kind(name: &str) -> &'static str {
     match name {
@@ -606,18 +557,7 @@ pub fn permission_event(request_id: &str, request: &serde_json::Value) -> AgentE
     AgentEvent::Permission {
         id: request_id.to_string(),
         tool_call: request["tool_use_id"].as_str().unwrap_or_default().to_string(),
-        options: vec![
-            PermissionOption {
-                id: "allow".into(),
-                name: format!("Allow {}", tool_title(name, &request["input"])),
-                kind: "allow_once".into(),
-            },
-            PermissionOption {
-                id: "deny".into(),
-                name: "Deny".into(),
-                kind: "reject_once".into(),
-            },
-        ],
+        options: permission_options(name, &request["input"]),
     }
 }
 
@@ -643,16 +583,6 @@ pub fn plan_from_todo(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
             })
             .collect(),
     )
-}
-
-/// A task id as this crate keys tasks by.
-///
-/// `#` is display sugar. The result sentence writes `Task #2` and `TaskUpdate`
-/// is documented to take `"2"`, so both are trimmed to the same key. That costs
-/// nothing and means a model that writes `taskId: "#2"` still hits the task it
-/// meant, instead of being discarded as an id nobody created.
-fn task_key(id: &str) -> String {
-    id.trim().trim_start_matches('#').trim().to_string()
 }
 
 /// The id a `TaskCreate` was given, read out of the sentence announcing it.

@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 serde.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
+# `Value`, because a tool's input is whatever JSON the agent sent.
 serde_json.workspace = true
+thiserror.workspace = true
