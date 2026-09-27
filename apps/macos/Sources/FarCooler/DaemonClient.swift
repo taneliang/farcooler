@@ -2190,16 +2190,6 @@ final class DaemonClient: ObservableObject {
         await refresh()
     }
 
-    // MARK: - Subprocess
-
-    /// Run a command; on failure, set `lastError` and hand back `nil`.
-    ///
-    /// A thin wrapper over `runRaw`, kept for the roughly thirty call sites
-    /// in this file that only ever wanted the data-or-banner behavior. The
-    /// one caller that needs its OWN failure's exact words — `refresh()`,
-    /// which decides `.unreachable`'s reason and whether this is a runner
-    /// that needs installing — calls `runRaw` directly instead. See there.
-    @discardableResult
     // ---- changes ----
     //
     // Every one of these is the same CLI the terminal rows already go through.
@@ -2496,6 +2486,16 @@ final class DaemonClient: ObservableObject {
         return message ?? "The command didn’t finish."
     }
 
+    // MARK: - Subprocess
+
+    /// Run a command; on failure, set `lastError` and hand back `nil`.
+    ///
+    /// A thin wrapper over `runRaw`, kept for the roughly thirty call sites
+    /// in this file that only ever wanted the data-or-banner behavior. The
+    /// one caller that needs its OWN failure's exact words — `refresh()`,
+    /// which decides `.unreachable`'s reason and whether this is a runner
+    /// that needs installing — calls `runRaw` directly instead. See there.
+    @discardableResult
     private func run(_ args: [String], background: Bool = false) async -> Data? {
         let (data, message) = await runRaw(args, background: background)
         if let message { lastError = message }

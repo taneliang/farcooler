@@ -10,13 +10,6 @@ public struct ToolRow: Sendable, Equatable, Identifiable {
     public var diff: Diff?
 }
 
-/// One row, with an identity of its own.
-///
-/// The id is assigned when the row is created, NOT derived from its contents.
-/// Deriving it meant asking the same question twice produced two rows with the
-/// same id, and `ForEach` over duplicate ids does not merely look odd — it
-/// renders blank bands and repeats rows in the wrong places. Content is not
-/// identity: two identical messages are two messages.
 /// A subagent's dispatch row, and everything it did.
 ///
 /// The children are `TranscriptRow`s rather than a second row type, so a
@@ -69,6 +62,13 @@ public struct SubagentBlock: Sendable, Equatable, Identifiable {
     }
 }
 
+/// One row, with an identity of its own.
+///
+/// The id is assigned when the row is created, NOT derived from its contents.
+/// Deriving it meant asking the same question twice produced two rows with the
+/// same id, and `ForEach` over duplicate ids does not merely look odd — it
+/// renders blank bands and repeats rows in the wrong places. Content is not
+/// identity: two identical messages are two messages.
 public struct TranscriptRow: Sendable, Equatable, Identifiable {
     public let id: Int
     public var kind: Kind

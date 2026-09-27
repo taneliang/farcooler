@@ -41,10 +41,6 @@ class VtCore(columns: Int, rows: Int) {
     }
 
     /**
-     * Jump back to the live screen. Call this on input: typing into a
-     * scrolled-back view would show the user nothing of what they typed.
-     */
-    /**
      * Recolor every cell the next snapshot produces.
      *
      * Colors resolve when a snapshot is taken rather than when bytes arrive,
@@ -57,6 +53,10 @@ class VtCore(columns: Int, rows: Int) {
         return NativeVt.nativeSetPalette(h, colors)
     }
 
+    /**
+     * Jump back to the live screen. Call this on input: typing into a
+     * scrolled-back view would show the user nothing of what they typed.
+     */
     fun scrollToBottom() {
         if (handle == 0L) return
         NativeVt.nativeScrollToBottom(handle)

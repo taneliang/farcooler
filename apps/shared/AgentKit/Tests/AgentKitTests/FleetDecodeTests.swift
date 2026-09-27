@@ -285,12 +285,6 @@ struct FleetDecodeTests {
         #expect(!terminal.runsAgent)
     }
 
-    /// A daemon NEWER than this app, sending a key nothing here declares.
-    ///
-    /// `JSONDecoder` ignores it, which is the behavior that makes this whole
-    /// file necessary and is also the behavior we want: a phone that refused to
-    /// draw a fleet because the runner had learned a new word would be worse
-    /// than one that draws it without the new word.
     /// The trace's two keys, which `Session::fleet` does NOT send yet.
     ///
     /// **Deliberately not in `fleetJSON`.** That fixture's contract is that it
@@ -373,6 +367,12 @@ struct FleetDecodeTests {
         #expect(ActivityTrace(terminal.activityTrace) == nil)
     }
 
+    /// A daemon NEWER than this app, sending a key nothing here declares.
+    ///
+    /// `JSONDecoder` ignores it, which is the behavior that makes this whole
+    /// file necessary and is also the behavior we want: a phone that refused to
+    /// draw a fleet because the runner had learned a new word would be worse
+    /// than one that draws it without the new word.
     @Test func aNewerDaemonSendingAnUnknownKeyStillDecodes() throws {
         let fleet = try Self.decodeFleet("""
         {

@@ -172,18 +172,18 @@ data class TaskRow(
         const val STALE_AFTER_MS = DAY_MS
 
         /**
-         * `just now`, `5m ago`, `2h ago`, `3d ago`, `2mo ago`, `1y ago`.
-         * AgentKit's `TaskRow.ago`, transcribed, so the three boards say the
-         * same words; Android's `DateUtils` says "2 hours ago". Floors, so a
-         * card is never called older than it is; negative is "just now".
-         */
-        /**
          * How long until the wall clock next crosses a minute, so a ticking
          * card redraws as the minute turns rather than up to a minute late.
          * Always in (0, 60 s]: exactly on a boundary waits a whole minute.
          */
         fun untilNextMinuteMs(nowMs: Long): Long = 60_000L - Math.floorMod(nowMs, 60_000L)
 
+        /**
+         * `just now`, `5m ago`, `2h ago`, `3d ago`, `2mo ago`, `1y ago`.
+         * AgentKit's `TaskRow.ago`, transcribed, so the three boards say the
+         * same words; Android's `DateUtils` says "2 hours ago". Floors, so a
+         * card is never called older than it is; negative is "just now".
+         */
         fun ago(elapsedMs: Long): String {
             val ms = maxOf(0L, elapsedMs)
             val minute = 60_000L

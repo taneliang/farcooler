@@ -289,6 +289,11 @@ struct AgentView: View {
         }
     }
 
+    /// The way-back button's diameter, named because two places need it: the
+    /// button itself, and the offset that lifts it clear of the composer's
+    /// strip. A literal in both is a literal that drifts in one.
+    private static let jumpDiameter: CGFloat = 38
+
     /// The way back, offered rather than taken.
     ///
     /// A transcript that yanks the reader to the bottom is the single
@@ -303,11 +308,6 @@ struct AgentView: View {
     /// honest question a count is trying to answer is whether anything has
     /// happened since you looked away, and a dot answers exactly that and
     /// claims nothing more.
-    /// The way-back button's diameter, named because two places need it: the
-    /// button itself, and the offset that lifts it clear of the composer's
-    /// strip. A literal in both is a literal that drifts in one.
-    private static let jumpDiameter: CGFloat = 38
-
     private var jumpToLatest: some View {
         Button {
             setPinned(true)
@@ -3078,12 +3078,6 @@ private struct ComposerTextView: UIViewRepresentable {
 }
 
 
-/// The composer's surface: Liquid Glass, because that is what a control resting
-/// ON scrolling content is on this platform.
-///
-/// No fallback. This app's minimum is iOS 26, so the material-and-hairline
-/// approximation that used to sit behind an availability check was dead code
-/// pretending to be portability.
 /// Putting the keyboard away without owning the field that raised it.
 ///
 /// The composer's text view is a `UIViewRepresentable` several layers down, so
@@ -3191,6 +3185,10 @@ enum TranscriptFill {
 /// `glassEffect` itself, so there is exactly one opinion about what glass is
 /// and a shape can never end up backed by a slightly different material than
 /// the one beside it.
+///
+/// No fallback. This app's minimum is iOS 26, so the material-and-hairline
+/// approximation that used to sit behind an availability check was dead code
+/// pretending to be portability.
 struct GlassSurface: ViewModifier {
     var radius: CGFloat = PaneMetrics.surfaceRadius
     /// Whether this surface is a thing you TOUCH, and should react like one.

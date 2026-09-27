@@ -1519,13 +1519,6 @@ struct TerminalView: View {
         return mods
     }
 
-    /// What `columns(for:)`/`rows(for:)` depend on — the view's own size, AND
-    /// the cell a font produces. `cell` is here so a font or size change in
-    /// Settings re-runs `session.configure`, not just the drawing: a viewport
-    /// that fit 80 columns at 13pt fits fewer at 18pt, and the pane this
-    /// screen asks the host to resize to should reflect the font actually on
-    /// screen, not whatever it was measured at when this screen first
-    /// appeared.
     /// What this pane owes the host: whether anybody is looking at it, and
     /// whether it is the kind of pane that draws a terminal.
     ///
@@ -1537,6 +1530,13 @@ struct TerminalView: View {
         var drawsGrid: Bool
     }
 
+    /// What `columns(for:)`/`rows(for:)` depend on — the view's own size, AND
+    /// the cell a font produces. `cell` is here so a font or size change in
+    /// Settings re-runs `session.configure`, not just the drawing: a viewport
+    /// that fit 80 columns at 13pt fits fewer at 18pt, and the pane this
+    /// screen asks the host to resize to should reflect the font actually on
+    /// screen, not whatever it was measured at when this screen first
+    /// appeared.
     private struct GridSize: Equatable {
         var width: Double
         var height: Double

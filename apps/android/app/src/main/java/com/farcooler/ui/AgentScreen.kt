@@ -401,29 +401,6 @@ internal data class AgentEmptyState(
 }
 
 /**
- * The four honest states, and the two that are still trying change with how
- * long they have been trying.
- *
- * This screen asked one question — is there a connection error — and had two
- * answers, so it went "Say something to begin." → red failure → transcript, and
- * was wrong at both of the first two. Before the first poll came back it invited
- * a message into a session it knew nothing about, which would not have worked:
- * `AgentSupervisor::send` in `crates/daemon/src/agent_supervisor.rs` looks the
- * terminal up in its writer map and drops the message when no shim is
- * registered. A round trip later it called a shim that was still coming up a
- * failure, and kept calling it one for as long as the shim took.
- *
- * [AgentPhase.Live] with no rows is the one state the invitation was ever true
- * for.
- *
- * The words are `40a6cd1`'s, deliberately: the fact being reported is the same
- * fact on both phones, and this repo has spent several commits this week undoing
- * two apps disagreeing about one. What is NOT shared is the promise neither of
- * them makes — no state here tells anybody to send something to start an agent,
- * because that is the advice that does not work. What starts one is the pane
- * going into agent mode.
- */
-/**
  * Why a pane in agent mode has no agent in it.
  *
  * **The runner's stable words, and this app owns the sentence** — the rule
@@ -512,6 +489,29 @@ internal fun agentFailureState(word: String?): AgentEmptyState? {
     }
 }
 
+/**
+ * The four honest states, and the two that are still trying change with how
+ * long they have been trying.
+ *
+ * This screen asked one question — is there a connection error — and had two
+ * answers, so it went "Say something to begin." → red failure → transcript, and
+ * was wrong at both of the first two. Before the first poll came back it invited
+ * a message into a session it knew nothing about, which would not have worked:
+ * `AgentSupervisor::send` in `crates/daemon/src/agent_supervisor.rs` looks the
+ * terminal up in its writer map and drops the message when no shim is
+ * registered. A round trip later it called a shim that was still coming up a
+ * failure, and kept calling it one for as long as the shim took.
+ *
+ * [AgentPhase.Live] with no rows is the one state the invitation was ever true
+ * for.
+ *
+ * The words are `40a6cd1`'s, deliberately: the fact being reported is the same
+ * fact on both phones, and this repo has spent several commits this week undoing
+ * two apps disagreeing about one. What is NOT shared is the promise neither of
+ * them makes — no state here tells anybody to send something to start an agent,
+ * because that is the advice that does not work. What starts one is the pane
+ * going into agent mode.
+ */
 internal fun agentEmptyState(
     phase: AgentPhase,
     /**
