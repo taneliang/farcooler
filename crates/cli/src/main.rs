@@ -1791,6 +1791,41 @@ fn worktree_workspace(
     Ok(pane.filter(|id| mine.iter().any(|w| uuid_of(&w.id) == *id)))
 }
 
+/// `worktree_workspace`, asked of the runner only when something asks for a
+/// claim: `--workspace`, or the pane's own workspace, `pane`.
+///
+/// `--workspace` is the person's own words, so a runner that can't answer
+/// fails the create. The pane's workspace is only a default: a failed read
+/// claims nothing and says so through `warn`, rather than failing a create
+/// that asked for no claim.
+async fn worktree_claim<L: tasks::DispatchLink>(
+    link: &mut L,
+    repositories: &[Repository],
+    repository: uuid::Uuid,
+    named: Option<&str>,
+    pane: Option<uuid::Uuid>,
+    warn: &mut impl FnMut(String),
+) -> Result<Option<uuid::Uuid>, Box<dyn std::error::Error>> {
+    if named.is_none() && pane.is_none() {
+        return Ok(None);
+    }
+    if !workspaces::has_workstreams(&link.capabilities()) {
+        return match named {
+            Some(_) => Err(workspaces::NO_WORKSPACES.into()),
+            None => Ok(None),
+        };
+    }
+    let all = match workspaces::workspaces_on(link, Some(repository)).await {
+        Ok(all) => all,
+        Err(e) if named.is_none() => {
+            warn(format!("warning: the new worktree isn't claimed for this pane's workspace ({e})"));
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    };
+    Ok(worktree_workspace(&all, repositories, repository, named, pane)?)
+}
+
 async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
     match cmd {
@@ -1798,15 +1833,9 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
             let repos = list_repositories(&mut link).await?;
             let target = uuid_of(&resolve_repository(&repos, &args.repo)?.id);
             let pane = workspaces::pane_workspace(std::env::var(workspaces::WORKSPACE_ENV).ok());
-            let asking = args.workspace.is_some() || pane.is_some();
-            let workspace = if asking && workspaces::has_workstreams(link.daemon_capabilities()) {
-                let all = workspaces::workspaces_on(&mut link, Some(target)).await?;
-                worktree_workspace(&all, &repos, target, args.workspace.as_deref(), pane)?
-            } else if args.workspace.is_some() {
-                return Err(workspaces::NO_WORKSPACES.into());
-            } else {
-                None
-            };
+            let named = args.workspace.as_deref();
+            let workspace =
+                worktree_claim(&mut link, &repos, target, named, pane, &mut |w| eprintln!("{w}")).await?;
             let r = link.call(worktree_create_from_args(target, args, workspace)).await?;
             let result::Value::Worktree(ws) = expect_value(r.value, "worktree")? else {
                 return Err("the daemon returned the wrong resource".into());

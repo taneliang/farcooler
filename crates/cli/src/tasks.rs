@@ -672,7 +672,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             let r = link
                 .call(move_request(&tasks, uuid_of(&target.id), actor))
                 .await
-                .map_err(|e| refused(e, "those tasks could not be moved"))?;
+                .map_err(|e| move_refused(e, &target.name))?;
             let result::Value::TaskList(moved) = expect_value(r.value, "task_list")? else {
                 return Err("the daemon returned the wrong resource".into());
             };
@@ -680,14 +680,8 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 println!("{}", render_list_json(&moved.items));
                 return Ok(());
             }
-            // The runner answers with every task named, moved or not: one
-            // already on the board was left alone, and is said to be.
-            for (before, after) in tasks.iter().zip(&moved.items) {
-                if before.workspace_id == target.id {
-                    println!("{}  was on {} already", after.key, target.name);
-                } else {
-                    println!("{}  moved to {}", after.key, target.name);
-                }
+            for line in moved_lines(&tasks, &moved.items, target) {
+                println!("{line}");
             }
         }
 
@@ -819,9 +813,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
         TaskCmd::Search { query, kind, repo } => {
             // The record is the repository's, every board of it: the pane's
             // workspace only says which repository.
-            let repository = board_for(&mut link, repo.as_deref(), None, std::env::var(WORKSPACE_ENV).ok())
-                .await?
-                .repository;
+            let repository = repository_to_search(&mut link, repo.as_deref(), std::env::var(WORKSPACE_ENV).ok()).await?;
             let kind = match kind.as_deref() {
                 Some(word) => Some(kind_named(word)?),
                 None => None,
@@ -1365,6 +1357,54 @@ async fn board_for<L: DispatchLink>(
     }
     let repository = repository_for(link, repo).await?;
     Ok(Board { repository, workspace: None, has_workspaces })
+}
+
+/// The repository `task search` reads: `board_for`'s, except that a pane
+/// whose workspace this runner doesn't have is no reason to refuse. A search
+/// covers every board in the repository, so the pane's workspace only ever
+/// said which repository, and without it `repository_for` still can.
+async fn repository_to_search<L: DispatchLink>(
+    link: &mut L,
+    repo: Option<&str>,
+    from_env: Option<String>,
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    if let (None, true, Some(own)) = (repo, has_workstreams(&link.capabilities()), pane_workspace(from_env)) {
+        let all = workspaces_on(link, None).await?;
+        if let Some(ws) = all.iter().find(|w| uuid_of(&w.id) == own) {
+            return Ok(uuid_of(&ws.repository_id));
+        }
+    }
+    repository_for(link, repo).await
+}
+
+/// What `task move` says about each task: the runner answers with every
+/// task named, moved or not, in the order given, and one that was on
+/// `target` already was left alone, and is said to be.
+fn moved_lines(before: &[pb::Task], after: &[pb::Task], target: &pb::Workspace) -> Vec<String> {
+    before
+        .iter()
+        .zip(after)
+        .map(|(before, after)| {
+            if before.workspace_id == target.id {
+                format!("{}  was on {} already", after.key, target.name)
+            } else {
+                format!("{}  moved to {}", after.key, target.name)
+            }
+        })
+        .collect()
+}
+
+/// A refused `task.move`, in this CLI's words. Its `not-found` doesn't say
+/// which: a task, or the workspace `target`, deleted since both were looked
+/// up. `refusal`'s own sentence for it names only the task.
+fn move_refused(err: ClientError, target: &str) -> Refused {
+    let refused = refusal(err, "those tasks could not be moved");
+    if refused.word() == Some("not-found") {
+        return refused.reworded(|_| {
+            format!("{target}, or one of those tasks, is no longer on this runner. read the board again")
+        });
+    }
+    refused
 }
 
 /// Which repository a command works in.
@@ -3156,24 +3196,8 @@ mod tests {
             }
             // clap takes these as plain strings and they are refused only when
             // run, so the literal values the skill writes are checked here too.
-            // Both spellings: `--status done` and `--status=done`.
-            let words = shell_words(line);
-            let spaced = words.windows(2).map(|pair| (pair[0].as_str(), pair[1].as_str()));
-            let joined = words.iter().filter_map(|w| w.split_once('=')).filter(|(f, _)| f.starts_with("--"));
-            for (flag, value) in spaced.chain(joined) {
-                if value == "x" {
-                    continue;
-                }
-                let checked = match flag {
-                    "--status" => status_named(value).map(drop),
-                    "--kind" => writable_kind(value).map(drop),
-                    "--fields" => asked_fields(Some(value)).map(drop),
-                    "--stale-for" => parse_gap(value).map(drop),
-                    _ => Ok(()),
-                };
-                if let Err(e) = checked {
-                    panic!("the manager skill writes a value the CLI refuses:\n  {line}\n{e}");
-                }
+            if let Some(e) = refused_value(&shell_words(line)) {
+                panic!("the manager skill writes a value the CLI refuses:\n  {line}\n{e}");
             }
         }
         // Dispatch is the one verb that starts an agent, so the skill has to
@@ -3586,6 +3610,183 @@ mod tests {
 
         let whole = board_for(&mut link, Some("repo"), None, None).await.expect("a board");
         assert_eq!(created(&whole), (uuid_of(&REPO), None, false));
+    }
+
+    /// `worktree create` reads the workspaces only when something asks for a
+    /// claim. `--workspace` fails with the runner; the pane's own workspace
+    /// is a default, so a failed read claims nothing, with a warning.
+    #[tokio::test]
+    async fn a_worktree_claim_asks_the_runner_only_when_asked_and_a_pane_never_fails_it() {
+        let repositories = FakeLink::default().repositories;
+        async fn claim(
+            link: &mut FakeLink,
+            repositories: &[pb::Repository],
+            named: Option<&str>,
+            pane: Option<Uuid>,
+        ) -> (Result<Option<Uuid>, String>, Vec<String>) {
+            let mut warned = Vec::new();
+            let got = crate::worktree_claim(link, repositories, uuid_of(&REPO), named, pane, &mut |w| warned.push(w))
+                .await
+                .map_err(|e| e.to_string());
+            (got, warned)
+        }
+
+        // Nothing asked: nothing read.
+        let mut link = FakeLink::default();
+        assert_eq!(claim(&mut link, &repositories, None, None).await, (Ok(None), vec![]));
+        assert!(link.sent.is_empty(), "{:?}", link.methods());
+
+        // Asked, and read in the target repository.
+        let mut link = FakeLink::default();
+        assert_eq!(claim(&mut link, &repositories, None, Some(BILLING)).await.0, Ok(Some(BILLING)));
+        assert_eq!(link.sent("workspace.list").target_resource_id.as_deref(), Some(REPO.as_slice()));
+
+        // A failed read: the pane's default claims nothing and says so ...
+        let mut link = FakeLink { refuse: Some(("workspace.list", "not-found")), ..Default::default() };
+        let (got, warned) = claim(&mut link, &repositories, None, Some(BILLING)).await;
+        assert_eq!(got, Ok(None));
+        assert_eq!(warned.len(), 1, "{warned:?}");
+        assert!(warned[0].starts_with("warning: the new worktree isn't claimed"), "{warned:?}");
+        // ... and a workspace the person named fails the create.
+        let mut link = FakeLink { refuse: Some(("workspace.list", "not-found")), ..Default::default() };
+        let (got, warned) = claim(&mut link, &repositories, Some("Billing"), Some(BILLING)).await;
+        assert!(got.is_err(), "{got:?}");
+        assert!(warned.is_empty(), "{warned:?}");
+
+        // An old runner: a pane claims nothing, a named workspace is refused,
+        // and neither asks.
+        let mut old = FakeLink::default();
+        old.capabilities.retain(|c| c != farcooler_protocol::capability::WORKSTREAMS);
+        assert_eq!(claim(&mut old, &repositories, None, Some(BILLING)).await, (Ok(None), vec![]));
+        assert_eq!(claim(&mut old, &repositories, Some("Billing"), None).await.0, Err(NO_WORKSPACES.to_string()));
+        assert!(old.sent.is_empty(), "{:?}", old.methods());
+    }
+
+    /// `task search` reads the whole repository, so a pane whose workspace
+    /// is gone still searches: the repository comes from elsewhere. A pane
+    /// whose workspace is here says which repository.
+    #[tokio::test]
+    async fn a_stale_pane_workspace_does_not_stop_a_search() {
+        let stale = Some(Uuid::from_u128(0x90).to_string());
+        let mut link = FakeLink::default();
+        link.repositories.retain(|r| r.id == REPO.as_slice());
+        assert_eq!(repository_to_search(&mut link, None, stale.clone()).await.expect("searched"), uuid_of(&REPO));
+        assert_eq!(repository_to_search(&mut link, Some("repo"), stale).await.expect("searched"), uuid_of(&REPO));
+
+        let mut link = FakeLink::default();
+        link.workspaces.push(pb::Workspace {
+            id: id_bytes(Uuid::from_u128(0x91)),
+            repository_id: OTHER_REPO.to_vec().into(),
+            name: "Web".into(),
+            task_prefix: "web".into(),
+            ..Default::default()
+        });
+        let pane = Some(Uuid::from_u128(0x91).to_string());
+        assert_eq!(repository_to_search(&mut link, None, pane).await.expect("searched"), uuid_of(&OTHER_REPO));
+    }
+
+    /// `task move` says, for each task in the order given, whether it moved
+    /// or was on the board already.
+    #[test]
+    fn task_move_says_which_tasks_moved() {
+        let billing = FakeLink::default().workspaces.remove(1);
+        let task = |key: &str, workspace: Uuid| pb::Task { key: key.into(), workspace_id: id_bytes(workspace), ..Default::default() };
+        let before = [task("fc-1", MAIN), task("bil-2", BILLING)];
+        let after = [task("fc-1", BILLING), task("bil-2", BILLING)];
+        assert_eq!(moved_lines(&before, &after, &billing), ["fc-1  moved to Billing", "bil-2  was on Billing already"]);
+    }
+
+    /// A `not-found` from `task.move` names the workspace too, since either
+    /// could be gone; any other refusal is `refusal`'s, and every one keeps
+    /// its code.
+    #[test]
+    fn a_move_that_finds_nothing_names_the_workspace_too() {
+        let refused = |code: pb::ErrorCode, what: &str| {
+            move_refused(
+                ClientError::Daemon { code: code as i32, retryable: false, message: String::new(), what: what.into() },
+                "Billing",
+            )
+        };
+        let gone = refused(pb::ErrorCode::NotFound, "");
+        assert!(gone.to_string().starts_with("Billing, or one of those tasks, is no longer on this runner"), "{gone}");
+        assert_eq!(gone.word(), Some("not-found"));
+        let other = refused(pb::ErrorCode::InvalidArgument, "other_repository");
+        assert!(!other.to_string().contains("no longer"), "{other}");
+        assert_eq!(other.word(), Some("invalid-argument"));
+    }
+
+    /// The prompt a task's agent opens on names commands, and they are this
+    /// CLI's commands: each one parses through the real clap tree, with the
+    /// values clap takes as plain strings checked as well. A key without a
+    /// prefix (`-1`) is left out of the commands, and they still parse.
+    #[test]
+    fn every_command_the_opening_prompt_names_parses() {
+        use clap::Parser;
+        for key in ["fc-12", "-1"] {
+            let prompt = farcooler_daemon::service::opening_prompt("farcooler", key);
+            let commands = commands_in_prose(&prompt);
+            assert!(commands.len() >= 4, "too few commands to be checking anything: {commands:?}");
+            for words in &commands {
+                if let Err(e) = crate::Cli::try_parse_from(words) {
+                    panic!("the opening prompt names a command the CLI refuses:\n  {words:?}\n{e}");
+                }
+                if let Some(e) = refused_value(words) {
+                    panic!("the opening prompt writes a value the CLI refuses:\n  {words:?}\n{e}");
+                }
+            }
+            assert!(commands.iter().any(|c| c.windows(2).any(|w| w == ["--status", "in_review"])), "{commands:?}");
+        }
+    }
+
+    /// Each `farcooler …` command in a paragraph of prose, as words: from
+    /// `farcooler` to the full stop that ends its sentence, or to an `and`
+    /// that carries on in English. A `"<placeholder>"` is one word, and may
+    /// have a full stop or an `and` inside it.
+    fn commands_in_prose(prose: &str) -> Vec<Vec<String>> {
+        let mut commands = Vec::new();
+        for (start, _) in prose.match_indices("farcooler ") {
+            let rest = &prose[start..];
+            let mut quoted = false;
+            let mut end = rest.len();
+            for (i, c) in rest.char_indices() {
+                match c {
+                    '"' => quoted = !quoted,
+                    '.' if !quoted && rest[i + 1..].chars().next().is_none_or(char::is_whitespace) => {
+                        end = i;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            let words = shell_words(&rest[..end]);
+            commands.push(words.into_iter().take_while(|w| w != "and").collect());
+        }
+        commands
+    }
+
+    /// Every `task`-command value clap takes as a plain string and that is
+    /// only refused when run: `--status`, `--kind`, `--fields` and
+    /// `--stale-for`, spelled `--flag value` or `--flag=value`. The first
+    /// refusal, if any.
+    fn refused_value(words: &[String]) -> Option<String> {
+        let spaced = words.windows(2).map(|pair| (pair[0].as_str(), pair[1].as_str()));
+        let joined = words.iter().filter_map(|w| w.split_once('=')).filter(|(f, _)| f.starts_with("--"));
+        for (flag, value) in spaced.chain(joined) {
+            if value == "x" {
+                continue;
+            }
+            let checked = match flag {
+                "--status" => status_named(value).map(drop),
+                "--kind" => writable_kind(value).map(drop),
+                "--fields" => asked_fields(Some(value)).map(drop),
+                "--stale-for" => parse_gap(value).map(drop),
+                _ => Ok(()),
+            };
+            if let Err(e) = checked {
+                return Some(e.to_string());
+            }
+        }
+        None
     }
 
     /// Every board in a repository at once names each row's workspace, in a

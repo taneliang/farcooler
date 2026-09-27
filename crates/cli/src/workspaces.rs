@@ -226,8 +226,19 @@ impl Role {
 }
 
 pub async fn workspace(runner: Option<&str>, cmd: WorkspaceCmd, json: bool) -> Fallible {
+    workspace_via(cmd, json, connect_to(runner)).await
+}
+
+/// `workspace`, on the link `connecting` makes. `cmd.check()` refuses what
+/// the command line alone can before `connecting` is ever awaited, so the old
+/// spelling of `workspace create` never reaches a runner.
+async fn workspace_via(
+    cmd: WorkspaceCmd,
+    json: bool,
+    connecting: impl std::future::Future<Output = Result<Link, Box<dyn Error>>>,
+) -> Fallible {
     cmd.check()?;
-    let mut link = connect_to(runner).await?;
+    let mut link = connecting.await?;
     require_workstreams(&link)?;
     let env = pane_workspace(std::env::var(WORKSPACE_ENV).ok());
 
@@ -793,6 +804,20 @@ mod tests {
         // not taken as a worktree.
         let said = parsed("farcooler workspace create api Billing --prefix bil").checked().unwrap_err();
         assert!(said.contains("--name Billing") && !said.contains("worktree"), "{said}");
+    }
+
+    /// `workspace` refuses the old spelling of `workspace create` before it
+    /// connects to anything: the link it would have used is never awaited.
+    #[tokio::test]
+    async fn the_old_create_spelling_is_refused_before_connecting() {
+        use clap::Parser;
+        let argv = "farcooler workspace create repo fix-it --branch fix-it".split_whitespace();
+        let crate::Command::Workspace(cmd) = crate::Cli::try_parse_from(argv).expect("parses").command else {
+            panic!("workspace create")
+        };
+        let connecting = async { Err::<Link, Box<dyn Error>>("connected to a runner".into()) };
+        let said = workspace_via(cmd, false, connecting).await.expect_err("refused").to_string();
+        assert!(said.contains("farcooler worktree create repo fix-it --branch fix-it"), "{said}");
     }
 
     /// Every refusal the runner names a word for is its sentence, never the

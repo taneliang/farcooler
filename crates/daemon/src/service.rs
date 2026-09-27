@@ -809,7 +809,10 @@ pub(crate) struct PaneWorkspace {
 /// flag in a command, so the commands leave it out and let the pane's
 /// `FARCOOLER_TASK` name the task, which it does for every key this is
 /// given.
-fn opening_prompt(cli: &str, key: &str) -> String {
+///
+/// Public for the CLI's tests, which parse every command in it through the
+/// CLI's own clap tree; this crate can't reach that tree.
+pub fn opening_prompt(cli: &str, key: &str) -> String {
     let arg = if key.starts_with('-') { String::new() } else { format!(" {key}") };
     format!(
         "You're working {key} on this repository's Far Cooler board. Read the task first: \
