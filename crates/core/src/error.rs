@@ -261,25 +261,36 @@ impl DomainError {
 /// two different fixes a person can't tell apart. `None` for every other
 /// word, whose message is unchanged.
 pub fn sentence(what: &str) -> Option<&'static str> {
-    Some(match what {
-        "task_prefix" => "A prefix is a letter followed by up to seven letters or digits.",
-        "task_prefix_taken" => "That prefix is already used by another workspace.",
-        "name" => "A workspace needs a name.",
-        "main_workspace" => "Main can't be deleted.",
-        "workspace_not_empty" => "Move this workspace's tasks, worktrees and terminals first.",
-        "other_repository" => "That workspace is in a different repository.",
-        "main_checkout" => "The repository's main checkout always belongs to Main.",
-        "orchestrator_taken" => "This workspace already has an orchestrator running.",
-        "orchestrator_home" => "This workspace's folder couldn't be made, so its orchestrator wasn't started.",
-        "orchestrator_chat_acp" => {
-            "On Claude Code's ACP adapter, this orchestrator's chat would start a new conversation. Set backend = \"native\" under [adapters.claude], or keep it in terminal mode."
-        }
-        "workspace" => "This terminal doesn't belong to a workspace yet.",
-        "role" => "Choose a role: shell, agent or orchestrator.",
-        "task_ids" => "Name at least one task to move.",
-        _ => return None,
-    })
+    SENTENCES.iter().find(|(word, _)| *word == what).map(|(_, said)| *said)
 }
+
+/// Every word `sentence` has a sentence for.
+///
+/// So a client can check it has its own line for each, from the table itself
+/// rather than from a copy of it: a copy is what let a new word ship with no
+/// line in the CLI while the CLI's test, reading its copy, stayed green.
+pub fn sentence_words() -> impl Iterator<Item = &'static str> {
+    SENTENCES.iter().map(|(word, _)| *word)
+}
+
+const SENTENCES: &[(&str, &str)] = &[
+    ("task_prefix", "A prefix is a letter followed by up to seven letters or digits."),
+    ("task_prefix_taken", "That prefix is already used by another workspace."),
+    ("name", "A workspace needs a name."),
+    ("main_workspace", "Main can't be deleted."),
+    ("workspace_not_empty", "Move this workspace's tasks, worktrees and terminals first."),
+    ("other_repository", "That workspace is in a different repository."),
+    ("main_checkout", "The repository's main checkout always belongs to Main."),
+    ("orchestrator_taken", "This workspace already has an orchestrator running."),
+    ("orchestrator_home", "This workspace's folder couldn't be made, so its orchestrator wasn't started."),
+    (
+        "orchestrator_chat_acp",
+        "On Claude Code's ACP adapter, this orchestrator's chat would start a new conversation. Set backend = \"native\" under [adapters.claude], or keep it in terminal mode.",
+    ),
+    ("workspace", "This terminal doesn't belong to a workspace yet."),
+    ("role", "Choose a role: shell, agent or orchestrator."),
+    ("task_ids", "Name at least one task to move."),
+];
 
 /// The word a client switches on, for a code that came off the wire.
 ///

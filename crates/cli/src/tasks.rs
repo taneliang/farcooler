@@ -1760,6 +1760,10 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "main_checkout" => "the repository's main checkout always belongs to Main",
         "orchestrator_taken" => "this workspace already has an orchestrator running",
         "orchestrator_home" => "this workspace's folder couldn't be made, so its orchestrator wasn't started",
+        "orchestrator_chat_acp" => {
+            "on Claude Code's ACP adapter, this orchestrator's chat would start a new conversation. \
+             set backend = \"native\" under [adapters.claude], or keep it in terminal mode"
+        }
         "workspace" => "this terminal doesn't belong to a workspace yet",
         "role" => "choose a role: shell, agent or orchestrator",
         "task_ids" => "name at least one task to move",
@@ -3906,20 +3910,25 @@ mod tests {
     /// Every word the runner has a sentence for has one of this CLI's own,
     /// in clap's style: lowercase but for a name, and no closing full stop.
     /// So is every other sentence `said_about` has.
+    ///
+    /// The runner's words are read from its own table
+    /// (`farcooler_core::error::sentence_words`), not from a copy here: a
+    /// copy is how `orchestrator_chat_acp` shipped with no line in this CLI's
+    /// style while this test stayed green.
     #[test]
     fn every_runner_sentence_has_one_in_this_clis_style() {
-        let runners = [
-            "task_prefix", "task_prefix_taken", "name", "main_workspace", "workspace_not_empty",
-            "other_repository", "main_checkout", "orchestrator_taken", "orchestrator_home", "workspace",
-            "role", "task_ids",
-        ];
+        // A runner word this CLI deliberately has no line for, because no
+        // command here can meet it. Say why beside each one.
+        const NOT_SAID_HERE: &[&str] = &[];
+        let runners: Vec<&str> = farcooler_core::error::sentence_words().collect();
+        assert!(runners.contains(&"task_prefix"), "the runner's table reads as empty");
         let ours = [
             "title", "actor", "status", "kind", "body", "acceptance", "extra_json", "supersedes",
             "worktree_id", "repository_id", "query", "key", "task_key", "cycle", "blocked_by",
         ];
         for what in runners.iter().chain(&ours) {
-            if runners.contains(what) {
-                assert!(farcooler_core::error::sentence(what).is_some(), "the runner has no sentence for {what}");
+            if NOT_SAID_HERE.contains(what) {
+                continue;
             }
             let said = said_about(what).unwrap_or_else(|| panic!("this CLI has no sentence for {what}"));
             let first = said.chars().next().expect("a sentence");
