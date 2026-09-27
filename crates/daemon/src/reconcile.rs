@@ -60,11 +60,12 @@ pub struct Outcome {
     /// is: a row that just started telling the truth about itself is news a
     /// client should see, not something to swallow.
     pub healed: usize,
-    /// A main checkout that had no owner and was just given to Main. Nearly
-    /// always zero: the pass that adopts the row claims it in the same pass.
-    /// Nonzero when that claim failed, or when the row was written by
-    /// something that doesn't claim (an older Far Cooler, a restore). News,
-    /// like `healed`: the worktree now says whose it is.
+    /// A main checkout that had no owner, or another workspace's, and was
+    /// just given to Main. Nearly always zero: the pass that adopts the row
+    /// claims it in the same pass. Nonzero when that claim failed, or when
+    /// the row was written by something that doesn't claim or by a runner
+    /// from before a main checkout was Main's alone (an older Far Cooler, a
+    /// restore). News, like `healed`: the worktree now says whose it is.
     pub claimed: usize,
 }
 
@@ -219,27 +220,46 @@ pub async fn repository(svc: &Service, repository_id: Uuid) -> Result<Outcome> {
     // no later pass adopts it again, and the main checkout would stay
     // unclaimed for good. Read after adoption, so a row adopted or healed
     // into the main checkout above is claimed in this same pass.
-    // `claim_worktree` is sticky, so this can't take a worktree from an owner
-    // it already has (`worktree assign` moved it, say), and with nothing to
-    // claim it writes nothing.
-    let unclaimed: Vec<_> = svc
+    //
+    // One another workspace holds goes back to Main too. The runner no longer
+    // puts a main checkout anywhere else (`assign_worktree` refuses, and
+    // `claim_worktree` skips it), but a runner from before that rule could
+    // have, and for this one row that outranks a claim sticking. Only Main's
+    // own rows are left alone, so a pass with nothing to fix writes nothing.
+    let checkouts: Vec<_> = svc
         .store
         .list_worktrees_for_repository(repository_id)?
         .into_iter()
-        .filter(|w| w.is_main_checkout && w.workspace_id.is_none())
+        .filter(|w| w.is_main_checkout)
         .collect();
-    for checkout in unclaimed {
-        let explicit = farcooler_store::models::ClaimSource::Explicit;
-        let claimed = svc
-            .store
-            .ensure_main_workspace(repository_id)
-            .and_then(|main| svc.store.claim_worktree(checkout.id, main.id, explicit));
-        match claimed {
-            Ok(Some(_)) => outcome.claimed += 1,
-            Ok(None) => {}
-            Err(e) => {
-                tracing::warn!(path = %checkout.worktree_path, error = ?e, "could not give the main checkout to Main")
+    if !checkouts.is_empty() {
+        match svc.store.ensure_main_workspace(repository_id) {
+            Ok(main) => {
+                for checkout in checkouts.into_iter().filter(|w| w.workspace_id != Some(main.id)) {
+                    let given = match checkout.workspace_id {
+                        None => svc
+                            .store
+                            .claim_worktree(checkout.id, main.id, farcooler_store::models::ClaimSource::Explicit)
+                            .map(|claimed| claimed.is_some()),
+                        Some(held_by) => svc.store.assign_worktree(checkout.id, main.id).map(|_| {
+                            tracing::info!(
+                                path = %checkout.worktree_path,
+                                from = %held_by,
+                                "gave the main checkout back to Main from another workspace"
+                            );
+                            true
+                        }),
+                    };
+                    match given {
+                        Ok(true) => outcome.claimed += 1,
+                        Ok(false) => {}
+                        Err(e) => {
+                            tracing::warn!(path = %checkout.worktree_path, error = ?e, "could not give the main checkout to Main")
+                        }
+                    }
+                }
             }
+            Err(e) => tracing::warn!(error = ?e, "could not find Main to give the main checkout to"),
         }
     }
 
@@ -395,12 +415,13 @@ mod tests {
         assert_eq!(repository(&svc, repo).await.unwrap().claimed, 0);
     }
 
-    /// A main checkout another workspace already holds stays there. The
-    /// runner no longer assigns one away from Main, but a runner from before
-    /// that rule could have. The pass gives Main only a main checkout nobody
-    /// owns; a claimed row never moves.
+    /// A main checkout another workspace holds goes back to Main on the next
+    /// pass, once, as an explicit claim. The runner no longer puts one
+    /// anywhere else, but a runner from before that rule could have. The
+    /// main checkout always belongs to Main, which outranks a claim sticking
+    /// for this one row.
     #[tokio::test]
-    async fn a_main_checkout_another_workspace_holds_stays_there() {
+    async fn a_main_checkout_another_workspace_holds_goes_back_to_main() {
         let (_dir, svc, repo) = fixture().await;
         let checkout = svc
             .store
@@ -409,15 +430,19 @@ mod tests {
             .into_iter()
             .find(|w| w.is_main_checkout)
             .unwrap();
+        let main = svc.store.ensure_main_workspace(repo).unwrap();
         let billing = svc.store.create_workspace(repo, "Billing", "bil").unwrap();
         svc.store.give_worktree_for_test(checkout.id, billing.id);
 
-        for pass in 0..2 {
-            let outcome = repository(&svc, repo).await.unwrap();
-            assert_eq!(outcome.claimed, 0, "pass {pass}: {outcome:?}");
-            let row = svc.store.get_worktree(checkout.id).unwrap();
-            assert_eq!(row.workspace_id, Some(billing.id), "pass {pass}");
-        }
+        let outcome = repository(&svc, repo).await.unwrap();
+        assert_eq!(outcome.claimed, 1, "{outcome:?}");
+        let row = svc.store.get_worktree(checkout.id).unwrap();
+        assert_eq!(
+            (row.workspace_id, row.claim_source),
+            (Some(main.id), Some(farcooler_store::models::ClaimSource::Explicit))
+        );
+        let again = repository(&svc, repo).await.unwrap();
+        assert_eq!(again.claimed, 0, "once: {again:?}");
     }
 
     #[tokio::test]
