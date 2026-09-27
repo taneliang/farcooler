@@ -509,7 +509,7 @@ private struct TaskColumnView: View {
 /// "Added 3d ago" — both composed by AgentKit against the moment handed in.
 /// The board itself redraws only when a task changes, so without a clock of
 /// its own a card filed at six would still read "Added just now" at eleven
-/// on a quiet board. `TimelineView` scoped to these two lines and nothing
+/// on a quiet board. `BoardTick` scoped to these two lines and nothing
 /// else: a tick redraws the sentences, not the card or the board around it.
 private struct CardTimeLines: View {
     let row: TaskRow
@@ -517,12 +517,7 @@ private struct CardTimeLines: View {
     let timeSize: CGFloat
 
     var body: some View {
-        // The tick decides WHEN to redraw, and `Date()` what time it is.
-        // `.everyMinute` hands in the minute's start, up to sixty seconds in
-        // the past, and a sentence built on it read "Updated 9m ago" for ten
-        // minutes and "Added 4d ago" for five days, a whole unit short.
-        TimelineView(.everyMinute) { _ in
-            let now = Date()
+        BoardTick { now in
             if let note = row.stalenessNote(at: now) {
                 Text(note)
                     .font(.system(size: staleSize))
@@ -536,8 +531,9 @@ private struct CardTimeLines: View {
     }
 }
 
-/// One card.
-private struct TaskCardRow: View {
+/// One card. Internal rather than private for `BoardCardTickTests`, which
+/// draws it.
+struct TaskCardRow: View {
     let row: TaskRow
     let prominent: Bool
     @ObservedObject var store: TaskBoardStore
@@ -546,8 +542,6 @@ private struct TaskCardRow: View {
     let live: [BoardPane]
     let presence: TaskAgentPresence
     let onGoTo: (BoardPane) -> Void
-
-    private var stale: Bool { row.staleness == .stale }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -561,10 +555,16 @@ private struct TaskCardRow: View {
                 // assumed was in flight is the failure mode of the factory,
                 // and one rendered identically to a task that moved a minute
                 // ago is what lets it happen.
-                if stale {
-                    Image(systemName: "clock.badge.exclamationmark")
-                        .foregroundStyle(.orange)
-                        .font(.system(size: WorkspaceStyle.PaneText.body))
+                //
+                // On the board's tick, like the sentence and the border: a
+                // card crosses a day of silence on a quiet board, with no data
+                // change to redraw it, and its three stale marks turn together.
+                BoardTick { now in
+                    if row.staleness(at: now) == .stale {
+                        Image(systemName: "clock.badge.exclamationmark")
+                            .foregroundStyle(.orange)
+                            .font(.system(size: WorkspaceStyle.PaneText.body))
+                    }
                 }
             }
             Text(row.title)
@@ -610,10 +610,13 @@ private struct TaskCardRow: View {
             RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(
-                    stale ? Color.orange.opacity(0.55) : WorkspaceStyle.hairline,
-                    lineWidth: stale ? 1 : 0.5)
+            BoardTick { now in
+                let stale = row.staleness(at: now) == .stale
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        stale ? Color.orange.opacity(0.55) : WorkspaceStyle.hairline,
+                        lineWidth: stale ? 1 : 0.5)
+            }
         )
         .contentShape(Rectangle())
         .onTapGesture { Task { await store.open(row) } }

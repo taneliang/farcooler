@@ -48,8 +48,8 @@ extension TaskRow {
     let fresh = TaskRow.fixture(status: .inProgress, statusSince: .now)
     let old = TaskRow.fixture(
         status: .inProgress, statusSince: .now.addingTimeInterval(-3 * 86_400))
-    #expect(fresh.staleness == .fresh)
-    #expect(old.staleness == .stale)
+    #expect(fresh.staleness(at: .now) == .fresh)
+    #expect(old.staleness(at: .now) == .stale)
 }
 
 /// Which statuses can go stale, one case per status, each a week old.
@@ -75,10 +75,10 @@ func onlyActiveWorkGoesStale(status: TaskStatus) {
 
 @Test func aFinishedTaskIsNeverStale() {
     let shipped = TaskRow.fixture(status: .done, statusSince: .now.addingTimeInterval(-90 * 86_400))
-    #expect(shipped.staleness == .fresh, "done is finished, not forgotten")
+    #expect(shipped.staleness(at: .now) == .fresh, "done is finished, not forgotten")
     let dropped = TaskRow.fixture(
         status: .cancelled, statusSince: .now.addingTimeInterval(-90 * 86_400))
-    #expect(dropped.staleness == .fresh, "cancelled work is not work that stopped moving")
+    #expect(dropped.staleness(at: .now) == .fresh, "cancelled work is not work that stopped moving")
 }
 
 /// A note or an edit is movement (ov-28): three days in progress, and a note

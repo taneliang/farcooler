@@ -246,11 +246,16 @@ private struct TaskBoardCardRow: View {
                 Text(row.key)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
-                if row.staleness == .stale {
-                    Image(systemName: "clock")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .accessibilityHidden(true)
+                // On the board's tick, like the sentence below it: a card
+                // crosses a day of silence on a quiet board, with no data
+                // change to redraw it, and its icon and sentence turn together.
+                BoardTick { now in
+                    if row.staleness(at: now) == .stale {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
             Text(row.title)
@@ -278,19 +283,14 @@ private struct TaskBoardCardRow: View {
 /// "Hasn’t moved in 3 days", or else "Updated 2h ago" / "Added 3d ago" —
 /// both composed by AgentKit against the moment handed in. The board redraws
 /// only when a task changes, so without a clock of its own a card filed at six
-/// would still read "Added just now" at eleven. `TimelineView` scoped to these
+/// would still read "Added just now" at eleven. `BoardTick` scoped to these
 /// lines alone, so a tick redraws the sentences and not the board.
 private struct CardTimeLines: View {
     let row: TaskRow
     let timeFont: Font
 
     var body: some View {
-        // The tick decides WHEN to redraw, and `Date()` what time it is.
-        // `.everyMinute` hands in the minute's start, up to sixty seconds in
-        // the past, and a sentence built on it read "Updated 9m ago" for ten
-        // minutes and "Added 4d ago" for five days, a whole unit short.
-        TimelineView(.everyMinute) { _ in
-            let now = Date()
+        BoardTick { now in
             if let note = row.stalenessNote(at: now) {
                 Text(note)
                     .font(.caption)

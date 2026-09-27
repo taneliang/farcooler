@@ -244,10 +244,6 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         }
     }
 
-    /// `staleness(at:)` against the clock, for a caller with no reason to
-    /// name a moment.
-    public var staleness: TaskStaleness { staleness(at: Date()) }
-
     /// The sentence under a stale row, or nil for one that is still moving.
     ///
     /// A sentence and not a timestamp: "3 days" is what makes somebody act,

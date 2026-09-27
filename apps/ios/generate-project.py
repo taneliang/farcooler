@@ -402,6 +402,10 @@ AGENTKIT_SOURCES = [
     "TaskBoardModel.swift",
     "TaskBoardAgents.swift",
     "RunnerBoards.swift",
+    # The clock the cards read and the tick that redraws them, shared so the
+    # phone's card turns stale on the minute by the same rule as the Mac's.
+    # See `BoardClockTests`.
+    "BoardClock.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #

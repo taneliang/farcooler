@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// A repository's board, opened from the overview, and the way from a card to
@@ -106,6 +107,75 @@ final class ShellBoardTests: XCTestCase {
         // on it is not an agent.
         XCTAssertTrue(app.descendants(matching: .any)["board-no-agent--21"].exists)
         XCTAssertFalse(app.buttons["board-agent--21"].exists)
+    }
+
+    /// **A quiet card turns stale on its own tick: the sentence and the clock
+    /// icon, with nothing on the board changing.**
+    ///
+    /// `-board-clock-leap` hands the cards a clock that jumps a day ahead
+    /// eight seconds after the board first reads it (`HarnessBoard.clock`).
+    /// -20 moved ten minutes before; a day on, it has sat a day in progress.
+    /// No task changes, so nothing but `BoardTick` can redraw it — and a card
+    /// that read the time outside one keeps saying "Updated 10m ago" here.
+    ///
+    /// The icon is hidden from VoiceOver (the sentence says the same), so it
+    /// is read off the card's picture: the band along the card's top, where
+    /// the key and the icon sit, must change. Nothing else in that band
+    /// depends on the time.
+    func testAQuietCardTurnsStaleOnTheTick() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-shell-harness", "-shell-overview", "-shell-4", "-shell-board", "-board-clock-leap",
+        ]
+        app.launch()
+        XCTAssertTrue(boardRow(app).waitForExistence(timeout: 30), "no Board row")
+        boardRow(app).tap()
+
+        let card = app.buttons["board-card--20"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "-20 is not on the board")
+        XCTAssertTrue(card.label.contains("Updated 10m ago"), "before the leap: \(card.label)")
+        let before = card.screenshot().image
+
+        let stale = NSPredicate(format: "label CONTAINS %@", "Hasn’t moved in a day")
+        let turned = expectation(for: stale, evaluatedWith: card)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [turned], timeout: 30), .completed,
+            "the sentence did not tick: \(card.label)")
+        XCTAssertFalse(card.label.contains(" ago"), card.label)
+
+        // A beat for the icon's own tick, which lands on the same half second.
+        Thread.sleep(forTimeInterval: 1)
+        let after = card.screenshot().image
+        let changed = Self.pixelsThatDiffer(before, after, topPoints: 12)
+        XCTAssertGreaterThan(changed, 20, "the clock icon did not tick: \(changed) pixels changed")
+    }
+
+    /// How many pixels differ between two pictures of one element, in the
+    /// band `topPoints` tall along its top.
+    private static func pixelsThatDiffer(_ a: UIImage, _ b: UIImage, topPoints: CGFloat) -> Int {
+        func pixels(_ image: UIImage) -> (bytes: [UInt8], width: Int, height: Int) {
+            let cg = image.cgImage!
+            let (width, height) = (cg.width, cg.height)
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            let context = CGContext(
+                data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return (bytes, width, height)
+        }
+        let (pa, pb) = (pixels(a), pixels(b))
+        let width = min(pa.width, pb.width)
+        let band = min(Int(topPoints * a.scale), pa.height, pb.height)
+        var changed = 0
+        for y in 0..<band {
+            for x in 0..<width {
+                let (i, j) = ((y * pa.width + x) * 4, (y * pb.width + x) * 4)
+                let delta = (0..<3).map { abs(Int(pa.bytes[i + $0]) - Int(pb.bytes[j + $0])) }.max()!
+                if delta > 40 { changed += 1 }
+            }
+        }
+        return changed
     }
 
     /// **One agent on a card is a button, and it lands on that agent's pane.**

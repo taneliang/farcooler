@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 #if DEBUG
 
@@ -129,6 +130,7 @@ struct ShellHarness: View {
                     return nil
                 },
                 onRefresh: {}, onDone: { boardOpen = false })
+            .environment(\.boardClock, HarnessBoard.clock)
         }
     }
 
@@ -406,6 +408,30 @@ struct ShellHarness: View {
 /// it into one.
 enum HarnessBoard {
     static var isRequested: Bool { CommandLine.arguments.contains("-shell-board") }
+
+    /// The clock the cards read: the wall clock, or with `-board-clock-leap`
+    /// one that jumps a day ahead `leapAfter` seconds after the board first
+    /// reads it, and ticks twice a second.
+    ///
+    /// For `testAQuietCardTurnsStaleOnTheTick`: nothing on the harness board
+    /// ever changes, so the only thing that can turn a card stale there is the
+    /// cards' own tick — which is the thing under test. A real minute would
+    /// be a test that waits a minute; this is the same redraw, sooner.
+    static let clock: BoardClock = {
+        guard CommandLine.arguments.contains("-board-clock-leap") else { return .wall }
+        let firstRead = OSAllocatedUnfairLock<Date?>(initialState: nil)
+        return BoardClock(interval: 0.5) {
+            let now = Date()
+            let first = firstRead.withLock { first in
+                if first == nil { first = now }
+                return first ?? now
+            }
+            return now.timeIntervalSince(first) < leapAfter ? now : now.addingTimeInterval(86_400)
+        }
+    }()
+
+    /// Long enough for the test to read a card before the leap.
+    static let leapAfter: TimeInterval = 8
 
     /// A pane in the harness fleet, working a task or not.
     struct Pane: TaskBoardPane {
