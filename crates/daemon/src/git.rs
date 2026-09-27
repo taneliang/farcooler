@@ -940,6 +940,37 @@ mod tests {
         assert!(!tree.is_dirty(), "and the diff view opens empty: {tree:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
+
+    /// m7-r of the re-review: a crash between writing a hooks file's
+    /// temporary copy and renaming it leaves the copy beside it, under the
+    /// name `codex_trust::replace` really uses. That is our debris, not the
+    /// owner's work: the diff view doesn't list it, and removal isn't handed
+    /// it to look inside. A file of theirs with a name like it still shows.
+    #[tokio::test]
+    async fn a_temporary_hooks_file_a_crash_left_is_not_the_users_work() {
+        let d = scratch("leftover-hooks-temp");
+        init_repo(&d);
+        for relative in crate::hook_install::PROJECT_HOOK_FILES {
+            let path = d.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "{}\n").unwrap();
+            let temp = crate::codex_trust::temporary_beside(&path).unwrap();
+            std::fs::write(&temp, "{\"hooks\": {\"Stop\": [{\"command\": \"say theirs\"}]}}\n").unwrap();
+        }
+
+        assert!(!is_dirty(&d).await.unwrap(), "nothing here is the user's");
+        let (tree, hidden) = crate::change_set::working_tree_and_hidden(&d).await.unwrap();
+        assert!(!tree.is_dirty(), "and the diff view opens empty: {tree:?}");
+        let mut hidden: Vec<&str> = hidden.iter().map(|f| f.path.as_str()).collect();
+        hidden.sort();
+        assert_eq!(hidden, [".codex/hooks.json", ".cursor/hooks.json"], "removal looks inside the hooks files alone");
+
+        std::fs::write(d.join(".codex/.hooks.json.farcooler-notes.tmp"), "mine\n").unwrap();
+        let tree = crate::change_set::working_tree(&d).await.unwrap();
+        let untracked: Vec<&str> = tree.untracked.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(untracked, [".codex/.hooks.json.farcooler-notes.tmp"], "a name of theirs is listed");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }
 
 /// A worktree that already exists on disk.

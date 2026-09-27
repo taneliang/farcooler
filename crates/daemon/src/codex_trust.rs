@@ -403,9 +403,10 @@ fn trust_repository_between(
     if !one_insertion(text, &after) {
         return Trusted::LeftAlone("the edit would have changed more than the new entry");
     }
-    match replace(&config, after.as_bytes(), mode, &before, between) {
-        Ok(true) => Trusted::Wrote,
-        Ok(false) => Trusted::LeftAlone("the config changed while it was being written"),
+    match replace(&config, after.as_bytes(), Some(mode), &before, between) {
+        Ok(Replaced::Written) => Trusted::Wrote,
+        Ok(Replaced::Changed) => Trusted::LeftAlone("the config changed while it was being written"),
+        Ok(Replaced::Refused(why)) => Trusted::LeftAlone(why),
         Err(e) => {
             tracing::warn!(error = %e, config = %config.display(), "could not write codex's config");
             Trusted::LeftAlone("the write failed")
@@ -530,21 +531,43 @@ static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(
 /// name, the process id, a count of writes in this process, and the time,
 /// so a file left by a crash in an earlier process with the same id doesn't
 /// block this one.
-fn temporary_beside(path: &Path) -> Option<PathBuf> {
+pub(crate) fn temporary_beside(path: &Path) -> Option<PathBuf> {
     let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let name = path.file_name()?.to_string_lossy();
     Some(path.parent()?.join(format!(".{name}.farcooler-{}-{write}-{nanos}.tmp", std::process::id())))
 }
 
+/// What `replace` did, when nothing failed outright.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Replaced {
+    /// The new contents are in place.
+    Written,
+    /// The file no longer held `before`: somebody saved it meanwhile.
+    Changed,
+    /// The read that decides refused the file (`read_no_follow`), for the
+    /// reason given: a symbolic link, more than one name, read-only.
+    Refused(&'static str),
+}
+
 /// Write `contents` to a new temporary file beside `path` with `mode`, then
 /// rename it over `path` if `path` still holds `before` (or is still absent
-/// when `before` is empty), and say whether it did.
+/// when `before` is empty), and say what happened.
+///
+/// `mode` `None` is for a file that doesn't exist yet and should get what
+/// any new file would: `0o666` less the process's umask, applied by the
+/// kernel when the temporary file is created.
 ///
 /// Also how `service::replace_hooks_file` writes a hooks file. The read that
 /// decides refuses the same things for both (`read_no_follow`): a symbolic
 /// link, a file with more than one name, a read-only file.
-pub(crate) fn replace(path: &Path, contents: &[u8], mode: u32, before: &[u8], between: impl FnOnce()) -> std::io::Result<bool> {
+pub(crate) fn replace(
+    path: &Path,
+    contents: &[u8],
+    mode: Option<u32>,
+    before: &[u8],
+    between: impl FnOnce(),
+) -> std::io::Result<Replaced> {
     let temp = temporary_beside(path).ok_or(std::io::ErrorKind::InvalidInput)?;
     replace_through(path, &temp, contents, mode, before, between)
 }
@@ -559,34 +582,38 @@ fn replace_through(
     path: &Path,
     temp: &Path,
     contents: &[u8],
-    mode: u32,
+    mode: Option<u32>,
     before: &[u8],
     between: impl FnOnce(),
-) -> std::io::Result<bool> {
+) -> std::io::Result<Replaced> {
+    // With no mode to keep, the kernel applies the umask to `0o666` here.
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(0o600)
+        .mode(if mode.is_some() { 0o600 } else { 0o666 })
         .custom_flags(libc::O_NOFOLLOW)
         .open(temp)?;
     let written = (|| {
         file.write_all(contents)?;
-        file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        if let Some(mode) = mode {
+            file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
         file.sync_all()
     })();
     drop(file);
     between();
-    let unmoved = match read_no_follow(path) {
-        Ok(Some((now, _))) => now == before,
-        Ok(None) => before.is_empty(),
-        Err(_) => false,
+    let verdict = match read_no_follow(path) {
+        Ok(Some((now, _))) if now == before => Replaced::Written,
+        Ok(None) if before.is_empty() => Replaced::Written,
+        Ok(_) => Replaced::Changed,
+        Err(why) => Replaced::Refused(why),
     };
     let renamed = match written {
-        Ok(()) if unmoved => std::fs::rename(temp, path).map(|()| true),
-        Ok(()) => Ok(false),
+        Ok(()) if verdict == Replaced::Written => std::fs::rename(temp, path).map(|()| verdict),
+        Ok(()) => Ok(verdict),
         Err(e) => Err(e),
     };
-    if matches!(renamed, Ok(true)) {
+    if matches!(renamed, Ok(Replaced::Written)) {
         // The rename itself, on disk. Best effort: without it a crash can
         // only bring the old file back, and codex asks.
         if let Some(dir) = path.parent().and_then(|d| std::fs::File::open(d).ok()) {
@@ -946,7 +973,7 @@ mod tests {
         std::fs::write(&victim, "keep\n").unwrap();
         let temp = home.path().join(".config.toml.planted.tmp");
         std::os::unix::fs::symlink(&victim, &temp).unwrap();
-        let outcome = replace_through(&config, &temp, b"new\n", 0o600, OWNERS.as_bytes(), || {});
+        let outcome = replace_through(&config, &temp, b"new\n", Some(0o600), OWNERS.as_bytes(), || {});
         assert!(outcome.is_err(), "{outcome:?}");
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep\n");
         assert_eq!(read(&home), OWNERS);
@@ -954,9 +981,29 @@ mod tests {
         // A plain file there is refused the same way.
         let plain = home.path().join(".config.toml.plain.tmp");
         std::fs::write(&plain, "somebody's\n").unwrap();
-        assert!(replace_through(&config, &plain, b"new\n", 0o600, OWNERS.as_bytes(), || {}).is_err());
+        assert!(replace_through(&config, &plain, b"new\n", Some(0o600), OWNERS.as_bytes(), || {}).is_err());
         assert_eq!(std::fs::read_to_string(&plain).unwrap(), "somebody's\n");
         assert_eq!(read(&home), OWNERS);
+    }
+
+    /// m7-r of the re-review: a file saved meanwhile and a file that can't be
+    /// replaced safely are two answers, so the hooks writer can say which.
+    #[test]
+    fn a_changed_file_and_a_refused_one_are_told_apart() {
+        let home = home_with(Some(OWNERS));
+        let config = home.path().join("config.toml");
+        let changed = replace(&config, b"new\n", Some(0o600), OWNERS.as_bytes(), || {
+            std::fs::write(&config, "saved just now\n").unwrap();
+        });
+        assert_eq!(changed.unwrap(), Replaced::Changed);
+        assert_eq!(read(&home), "saved just now\n");
+
+        let elsewhere = tempfile::tempdir().unwrap();
+        let refused = replace(&config, b"new\n", Some(0o600), b"saved just now\n", || {
+            std::fs::hard_link(&config, elsewhere.path().join("second name")).unwrap();
+        });
+        assert_eq!(refused.unwrap(), Replaced::Refused("the config has more than one name"));
+        assert_eq!(read(&home), "saved just now\n");
     }
 
     /// No temporary file is left beside the config, written or not.

@@ -137,12 +137,32 @@ pub const PROJECT_HOOK_FILES: &[&str] = &[CODEX_HOOKS, CURSOR_HOOKS];
 /// are hidden by git itself, through a line in the repository's
 /// `info/exclude` (`service::exclude_locally`), which also keeps `git add -A`
 /// from committing them.
+///
+/// Also takes out, and doesn't return, a temporary file a crash left beside
+/// one of ours (`is_our_leftover`). It is our debris, not the owner's work,
+/// and removing the worktree loses nothing by deleting it.
 pub fn hide_our_untracked(tree: &mut crate::change_set::WorkingTree) -> Vec<crate::change_set::FileChange> {
     let (hidden, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut tree.untracked)
         .into_iter()
+        .filter(|f| !is_our_leftover(&f.path))
         .partition(|f| PROJECT_HOOK_FILES.contains(&f.path.as_str()));
     tree.untracked = kept;
     hidden
+}
+
+/// Whether `path` is the temporary file `codex_trust::replace` writes beside
+/// one of our hooks files, `<dir>/.<name>.farcooler-<pid>-<n>-<nanos>.tmp`
+/// (`codex_trust::temporary_beside`), exactly: three runs of digits, nothing
+/// else. The rename moves it into place, so one is only still there after a
+/// crash between the two.
+fn is_our_leftover(path: &str) -> bool {
+    PROJECT_HOOK_FILES.iter().any(|file| {
+        let Some((dir, name)) = file.rsplit_once('/') else { return false };
+        let Some(rest) = path.strip_prefix(&format!("{dir}/.{name}.farcooler-")) else { return false };
+        let Some(numbers) = rest.strip_suffix(".tmp") else { return false };
+        let parts: Vec<&str> = numbers.split('-').collect();
+        parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    })
 }
 
 /// A hooks file's text as JSON, or `None` for text that isn't JSON or that
