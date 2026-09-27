@@ -444,27 +444,25 @@ async fn next_event(
         std::future::pending::<()>().await;
         unreachable!("pending never resolves");
     };
-    loop {
-        match receiver.recv().await {
-            Ok(event) => return Some(event),
-            // A slow client missed some. Dropping the connection would be
-            // worse than the gap: the next event still arrives. But the
-            // client is told, in place of what it lost — every event is a
-            // "re-read" notice, harmless to lose only if the client learns it
-            // missed SOMETHING, and a phone that reads its boards on their
-            // own news had no other way to.
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                tracing::warn!(skipped, "client fell behind the event stream");
-                return Some(Event {
-                    event_id: ids::new_id(),
-                    sequence: 0,
-                    payload: Some(farcooler_protocol::v1::event::Payload::EventsMissed(
-                        farcooler_protocol::v1::Empty {},
-                    )),
-                });
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+    match receiver.recv().await {
+        Ok(event) => Some(event),
+        // A slow client missed some. Dropping the connection would be
+        // worse than the gap: the next event still arrives. But the
+        // client is told, in place of what it lost — every event is a
+        // "re-read" notice, harmless to lose only if the client learns it
+        // missed SOMETHING, and a phone that reads its boards on their
+        // own news had no other way to.
+        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+            tracing::warn!(skipped, "client fell behind the event stream");
+            Some(Event {
+                event_id: ids::new_id(),
+                sequence: 0,
+                payload: Some(farcooler_protocol::v1::event::Payload::EventsMissed(
+                    farcooler_protocol::v1::Empty {},
+                )),
+            })
         }
+        Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
     }
 }
 
