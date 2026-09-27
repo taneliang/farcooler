@@ -69,42 +69,6 @@ jobs:
       # one lives in the `swift` job below and this one lives here instead.
       - run: ./scripts/appcast-test.sh
 
-  # Does every doc comment this change touched still sit on the item it
-  # describes?
-  #
-  # An item inserted above another one's signature lands between that item and
-  # its doc comment, which then documents the newcomer. It compiles and every
-  # test passes, and it had happened 57 times in this history when this job
-  # was added. The same script is the opt-in pre-commit hook
-  # (./scripts/install-git-hooks.sh); this is for the commits made without it.
-  #
-  # A diff, not a scan of the tree: see the script for why no local rule can
-  # tell a long doc comment from two stuck together. So the existing tree
-  # cannot turn this red, only a change can. Full history because the push
-  # range's first commit has to be there to compare against.
-  doc-comments:
-    name: Doc comments on their items
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      # The check's own tests first, so a parser change that stops it finding
-      # anything fails here rather than passing every range from then on.
-      - run: ./scripts/doc-comment-check.py --self-test
-      - name: Check the pushed or proposed range
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          # A push that created the branch has no before; there is nothing to
-          # compare against, and saying so beats passing silently.
-          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ] \
-            || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            echo "No base commit to compare against ($BASE); nothing checked."
-            exit 0
-          fi
-          ./scripts/doc-comment-check.py --base "$BASE" --head HEAD
-
   # The tunnel itself, which is Go, and which nothing in this workflow ran until
   # now.
   #

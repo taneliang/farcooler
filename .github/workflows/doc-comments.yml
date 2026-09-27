@@ -1,0 +1,76 @@
+# Does every doc comment a change touched still sit on the item it describes?
+#
+# An item inserted above another one's signature lands between that item and
+# its doc comment, which then documents the newcomer. It compiles and every
+# test passes, and it had happened 57 times in this history when this check
+# was added. The same script is the opt-in commit-msg hook
+# (./scripts/install-git-hooks.sh); this is for the commits made without it.
+#
+# A diff, not a scan of the tree: see the script for why no local rule can
+# tell a long doc comment from two stuck together. So the existing tree cannot
+# turn this red, only a change can.
+#
+# Its own workflow rather than a job in ci.yml because of `concurrency`. CI
+# cancels a run that a newer push supersedes, and that is right for a build,
+# which the newer run redoes. It is wrong here: this checks the range a push
+# ADDED, `before..after`, so a cancelled run is a range nobody ever checks —
+# shown grey, not red. Runs here queue instead, and each takes seconds.
+#
+# A doc moved on purpose passes with a `Doc-Comment-Check: moved` trailer on
+# the commit that moved it.
+name: Doc comments
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: doc-comments-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  doc-comments:
+    name: Doc comments on their items
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, because the range's first commit has to be here to
+          # compare against, and each commit's parent to read its trailer.
+          fetch-depth: 0
+      # The check's own tests first, so a parser change that stops it finding
+      # anything fails here rather than passing every range from then on.
+      - run: ./scripts/doc-comment-check.py --self-test
+      # And the git half, which the self-test never touches: a commit known to
+      # orphan a doc (a test module inserted under another's doc) has to be
+      # refused end to end, through the file list and the blob reads. If those
+      # broke and every file came back empty, every range would pass.
+      - name: Check a known orphan is still refused
+        run: |
+          if ./scripts/doc-comment-check.py --base 621d4182^ --head 621d4182; then
+            echo "::error::621d4182 orphans a doc comment and the check passed it"
+            exit 1
+          fi
+      - name: Check the pushed or proposed commits
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            # The checkout is the merge ref: its first parent is the base
+            # branch and its second the PR's head, so this is exactly the
+            # PR's own commits.
+            base=HEAD^1 head=HEAD^2
+          else
+            base="$BEFORE" head=HEAD
+          fi
+          # A force push leaves `before` unreachable from anything fetched.
+          # Comparing two unrelated trees would be noise, so it is skipped, but
+          # loudly: a skip that only reached the log would be a check that
+          # silently did not run.
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "::warning title=Doc comments not checked::No base commit to compare against ($base), so $EVENT's commits weren't checked."
+            exit 0
+          fi
+          ./scripts/doc-comment-check.py --base "$base" --head "$head"

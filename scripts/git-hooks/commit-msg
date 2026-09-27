@@ -1,0 +1,15 @@
+#!/bin/bash
+# The repo's commit-msg hook. Opt in with ./scripts/install-git-hooks.sh.
+#
+# commit-msg rather than pre-commit so the check can read the message: a doc
+# moved on purpose says so with a `Doc-Comment-Check: moved` trailer, which CI
+# honors too. It runs at the same moment, before the commit exists.
+#
+# Runs from whichever worktree is committing, so a lane on an older branch runs
+# that branch's copy of each check.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+
+# A doc comment left on the wrong item by an insertion anchored on a signature.
+"$root/scripts/doc-comment-check.py" --message-file "$1"

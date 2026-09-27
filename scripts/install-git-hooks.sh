@@ -16,6 +16,13 @@ hooks="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
 mark="# installed by scripts/install-git-hooks.sh"
 mkdir -p "$hooks"
 
+# With core.hooksPath set, git never reads the hooks directory at all, so a
+# stub written there would sit inert and say nothing.
+if hooks_path="$(git config --get core.hooksPath)" && [ "${1:-}" != "--uninstall" ]; then
+  echo "warning: core.hooksPath is set to '$hooks_path', so git won't run hooks from $hooks." >&2
+  echo "         Link or copy scripts/git-hooks/* into '$hooks_path' instead." >&2
+fi
+
 for src in scripts/git-hooks/*; do
   name="$(basename "$src")"
   dest="$hooks/$name"

@@ -22,21 +22,26 @@ when an item X lost D and a different item Y gained it, and:
   - Y had a doc before, or is new (Y undocumented before is the commit that
     fixes an orphan by moving D back).
 
-An item is its kind and name (`fn forget`, `case idle`, `val name`), so two
-overloads of one name count as one item.
+An item is its kind and name within the type it sits in (`impl Foo::fn new`,
+`enum State::case idle`), found by indentation, so two overloads of one name
+count as one item and `fn new` in two impls as two. A member that moved to
+another type with its doc keeps its name, and is not a finding.
 
 Rust, Swift and Kotlin: `///` runs and `/** ... */` blocks, then any
-attributes, annotations, plain comments and blank lines, then the item.
+attributes, annotations, `#if`s, plain comments and blank lines, then the item.
 
-    ./scripts/doc-comment-check.py                   # staged changes vs HEAD (the pre-commit hook)
+    ./scripts/doc-comment-check.py --message-file F  # staged changes vs HEAD (the commit-msg hook)
     ./scripts/doc-comment-check.py --base origin/main  # the working tree vs a commit
-    ./scripts/doc-comment-check.py --base A --head B   # one commit range, as CI runs it
+    ./scripts/doc-comment-check.py --base A --head B   # the commits A..B, as CI runs it
     ./scripts/doc-comment-check.py --self-test
 
 What it still flags that isn't a bug: a doc moved on purpose onto a new item
 that now does the work, leaving the old one an undocumented forwarder. That was
 2 of 59 findings over this repository's first 1,087 commits; the other 57 were
-real. Commit one with `git commit --no-verify`, and say why in the message.
+real. Say so in the commit that does it, with this trailer, which both the hook
+and CI honor:
+
+    Doc-Comment-Check: moved
 """
 
 import argparse
@@ -51,11 +56,17 @@ DOC_LINE = re.compile(r"^\s*///(?!/)")
 BLOCK_OPEN = re.compile(r"^\s*/\*\*(?![*/])")
 RUST_ATTR = re.compile(r"^\s*#!?\[")
 ANNOTATION = re.compile(r"^\s*@[A-Za-z_]")
+# Swift's conditional compilation, which can sit between a doc and its item.
+COMPILE_IF = re.compile(r"^\s*#(?:if|elseif|else|endif)\b")
+# The kinds whose members are scoped by them.
+CONTAINER = re.compile(
+    r"^(?:impl|struct|enum|trait|union|mod|class|protocol|extension|actor|object|interface) "
+)
 
 MODIFIERS = (
     r"(?:(?:pub(?:\([^)]*\))?|async|unsafe|const|extern(?:\s+\"[^\"]*\")?|default"
     r"|(?:public|private|internal|fileprivate|open|package)(?:\(set\))?|protected|static|final|override"
-    r"|mutating|nonmutating|nonisolated|lazy|weak|unowned|dynamic|convenience|required"
+    r"|mutating|nonmutating|nonisolated(?:\(unsafe\))?|lazy|weak|unowned|dynamic|convenience|required"
     r"|indirect|package|consuming|borrowing|isolated"
     r"|data|sealed|abstract|inline|suspend|operator|infix|tailrec|external|lateinit"
     r"|value|annotation|companion|enum|inner|actual|expect|noinline|crossinline"
@@ -65,7 +76,7 @@ DECL = re.compile(
     r"^\s*" + MODIFIERS +
     r"(fn|struct|enum|trait|type|union|mod|const|static|macro_rules!"
     r"|func|var|let|case|class|protocol|extension|actor|typealias|associatedtype|macro"
-    r"|fun|val|object|interface)\s+"
+    r"|fun\s+interface|fun|val|object|interface)\s+"
     r"(?:<[^>]*>\s*)?(?:[\w.]+\.)?(`?[A-Za-z_][\w]*`?)"
 )
 # `impl Foo for Bar`, `init(`, `subscript(`, `deinit`, Kotlin `constructor(`.
@@ -83,6 +94,8 @@ def item_key(line):
     m = DECL.match(line)
     if m:
         kind = m.group(1)
+        if kind.startswith("fun") and kind.endswith("interface"):
+            kind = "interface"
         if kind in ("fn", "func", "fun"):
             kind = "fn"
         return f"{kind} {m.group(2).strip('`')}"
@@ -156,6 +169,7 @@ def parse(text):
     lines = text.splitlines()
     documented = []
     keys = collections.Counter()
+    scope = []  # (indent, key) of each enclosing container
     i, n = 0, len(lines)
     while i < n:
         line = lines[i]
@@ -184,7 +198,12 @@ def parse(text):
                     if c.startswith("*"):
                         c = c[1:]
                     doc.append(_norm(c))
-            elif doc and (not line.strip() or line.lstrip().startswith("//")):
+            elif doc and (not line.strip() or line.lstrip().startswith("//")
+                          or COMPILE_IF.match(line)):
+                i += 1
+            elif doc and line.lstrip().startswith("/*"):
+                while i < n and "*/" not in lines[i]:
+                    i += 1
                 i += 1
             elif doc and (RUST_ATTR.match(line) or ANNOTATION.match(line)):
                 after = _past_attributes(lines, i)
@@ -198,6 +217,17 @@ def parse(text):
         line = lines[i]
         key = item_key(line)
         if key:
+            # Scope it by the nearest container above at a shallower indent, so
+            # `fn new` in two impls, or `id` in two structs, are two items. By
+            # indent rather than braces: the tree is hand-formatted, and a
+            # brace count would have to understand strings and char literals.
+            indent = len(line) - len(line.lstrip())
+            while scope and scope[-1][0] >= indent:
+                scope.pop()
+            if scope:
+                key = f"{scope[-1][1]}::{key}"
+            if CONTAINER.match(key.rsplit("::", 1)[-1]):
+                scope.append((indent, key))
             keys[key] += 1
         doc = [d for d in doc if d]
         if doc:
@@ -233,6 +263,8 @@ def compare(old, new):
             if sum(1 for k, _, _ in new_docs if k == owner) >= new_keys[owner]:
                 continue  # given a doc of its own: a deliberate move
             for taker in gained:
+                if taker.rsplit("::", 1)[-1] == owner.rsplit("::", 1)[-1]:
+                    continue  # the same item, moved to another type with its doc
                 if old_keys[taker] > sum(1 for k, _, _ in old_docs if k == taker):
                     continue  # it had no doc before: this is an orphan being fixed
                 line = next(ln for k, d, ln in new_docs if k == taker and _contains(d, doc))
@@ -271,51 +303,105 @@ def blobs(specs):
 
 
 def changed(base, head, staged):
+    """(old path, new path) for each modified file, renamed ones included: an
+    orphan made while moving a file is still an orphan."""
+    args = ["diff", "--name-status", "-M", "--diff-filter=MR", "-z"]
     if staged:
-        out = git("diff", "--cached", "--name-only", "--diff-filter=M", "-z", base)
-    elif head:
-        out = git("diff", "--name-only", "--diff-filter=M", "-z", base, head)
-    else:
-        out = git("diff", "--name-only", "--diff-filter=M", "-z", base)
-    return [p for p in out.split("\0") if p.endswith(EXTENSIONS)]
+        args.append("--cached")
+    args.append(base)
+    if head:
+        args.append(head)
+    fields = git(*args).split("\0")
+    pairs, i = [], 0
+    while i < len(fields) - 1:
+        status = fields[i]
+        if status.startswith("R"):
+            old, new = fields[i + 1], fields[i + 2]
+            i += 3
+        else:
+            old = new = fields[i + 1]
+            i += 2
+        if new.endswith(EXTENSIONS):
+            pairs.append((old, new))
+    return pairs
 
 
-def run(base, head, staged):
+def findings(base, head, staged):
+    """(path, line, old owner, new owner, doc) for each doc that moved."""
     root = git("rev-parse", "--show-toplevel").strip()
-    paths = changed(base, head, staged)
-    olds = blobs([f"{base}:{p}" for p in paths])
+    pairs = changed(base, head, staged)
+    olds = blobs([f"{base}:{old}" for old, _ in pairs])
     if staged:
-        news = blobs([f":{p}" for p in paths])
+        news = blobs([f":{new}" for _, new in pairs])
     elif head:
-        news = blobs([f"{head}:{p}" for p in paths])
+        news = blobs([f"{head}:{new}" for _, new in pairs])
     else:
         news = []
-        for p in paths:
+        for _, new in pairs:
             try:
-                with open(f"{root}/{p}", encoding="utf-8", errors="replace") as f:
+                with open(f"{root}/{new}", encoding="utf-8", errors="replace") as f:
                     news.append(f.read())
             except FileNotFoundError:
                 news.append(None)
-    total = 0
-    for path, old, new in zip(paths, olds, news):
+    out = []
+    for (_, path), old, new in zip(pairs, olds, news):
         if old is None or new is None:
             continue
         for owner, taker, doc, line in compare(old, new):
-            total += 1
-            print(f"{path}:{line}: the doc comment on `{owner}` now sits on `{taker}`")
-            print(f"    /// {doc[0]}")
-    if total:
-        sys.stdout.flush()
-        print(
-            f"\n{total} doc comment(s) moved onto an item they don't describe. This is\n"
-            "what an insertion anchored on a signature does: the new item lands\n"
-            "between the old one and its doc. Move the new item below the closing\n"
-            "brace of the one above instead. If the move was deliberate, commit\n"
-            "with --no-verify and say so in the message.",
-            file=sys.stderr,
-        )
-        return 1
-    return 0
+            out.append((path, line, owner, taker, doc))
+    return out
+
+
+# The escape for a doc moved on purpose, as a trailer in the commit message.
+# `--no-verify` only gets a commit past the local hook; this also gets it past
+# CI, and it leaves the reason in the history rather than in nobody's memory.
+TRAILER = "Doc-Comment-Check: moved"
+TRAILER_LINE = re.compile(r"^Doc-Comment-Check:\s*moved\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def exempt_by_trailer(base, head, found):
+    """The range's findings, less those that only commits carrying the trailer
+    made. A finding is matched to a commit by file and items, so one another
+    commit in the range also made still counts."""
+    commits = git("rev-list", "--reverse", "--no-merges", f"{base}..{head}").split()
+    exempt, blamed = {}, set()
+    for c in commits:
+        message = git("log", "-1", "--format=%B", c)
+        mark = TRAILER_LINE.search(message)
+        for path, _, owner, taker, _ in findings(f"{c}^", c, staged=False):
+            if mark:
+                exempt.setdefault((path, owner, taker), c)
+            else:
+                blamed.add((path, owner, taker))
+    kept = []
+    for f in found:
+        key = (f[0], f[2], f[3])
+        if key in exempt and key not in blamed:
+            print(f"{f[0]}: `{f[2]}` -> `{f[3]}` accepted: {exempt[key][:8]} says `{TRAILER}`")
+        else:
+            kept.append(f)
+    return kept
+
+
+def report(found):
+    for path, line, owner, taker, doc in found:
+        print(f"{path}:{line}: the doc comment on `{owner}` now sits on `{taker}`")
+        print(f"    /// {doc[0]}")
+    if not found:
+        return 0
+    sys.stdout.flush()
+    print(
+        f"\n{len(found)} doc comment(s) moved onto an item they don't describe. This is\n"
+        "what an insertion anchored on a signature does: the new item lands\n"
+        "between the old one and its doc. Move the new item below the closing\n"
+        "brace of the one above instead.\n\n"
+        "If the move was deliberate, add this trailer to the commit message, which\n"
+        "gets it past both this hook and CI:\n\n"
+        f"    {TRAILER}\n\n"
+        "(`git commit --no-verify` gets past the hook alone; CI will still refuse it.)",
+        file=sys.stderr,
+    )
+    return 1
 
 
 # The self-test's fixtures. Each is (name, old, new, expected findings as
@@ -384,7 +470,7 @@ fn left_agent_mode(&self) -> bool { true }
         "rust: an enum variant inserted above a documented one",
         "enum E {\n    /// Still running.\n    Busy,\n}\n",
         "enum E {\n    /// Still running.\n    Idle,\n    Busy,\n}\n",
-        [("variant Busy", "variant Idle")],
+        [("enum E::variant Busy", "enum E::variant Idle")],
     ),
     (
         "rust: a doc shared by two items, one of them new, is not a move",
@@ -477,7 +563,51 @@ fn left_agent_mode(&self) -> bool { true }
         "rust: a doc lands on a field inserted above the documented one",
         "struct S {\n    /// When it started.\n    pub started: i64,\n}\n",
         "struct S {\n    /// When it started.\n    pub ended: i64,\n    pub started: i64,\n}\n",
-        [("field started", "field ended")],
+        [("struct S::field started", "struct S::field ended")],
+    ),
+    (
+        "a rename is not a move when another type has an item of the old name",
+        "impl A {\n    /// Make an A.\n    fn new() {}\n}\n\nimpl B {\n    fn new() {}\n}\n",
+        "impl A {\n    /// Make an A.\n    fn empty() {}\n}\n\nimpl B {\n    fn new() {}\n}\n",
+        [],
+    ),
+    (
+        "an orphan is still one when its taker's name is undocumented elsewhere",
+        "impl A {\n    /// Make an A.\n    fn new() {}\n}\n\nimpl B {\n    fn empty() {}\n}\n",
+        "impl A {\n    /// Make an A.\n    fn empty() {}\n\n    fn new() {}\n}\n\nimpl B {\n    fn empty() {}\n}\n",
+        [("impl A::fn new", "impl A::fn empty")],
+    ),
+    (
+        "swift: `#if` between a doc and its func, and a func added inside it",
+        "/// Haptics.\n#if os(iOS)\nfunc buzz() {}\n#endif\n",
+        "/// Haptics.\n#if os(iOS)\nfunc tap() {}\nfunc buzz() {}\n#endif\n",
+        [("fn buzz", "fn tap")],
+    ),
+    (
+        "swift: wrapping a documented func in `#if` is not a move",
+        "/// Haptics.\nfunc buzz() {}\n",
+        "/// Haptics.\n#if os(iOS)\nfunc buzz() {}\n#endif\n",
+        [],
+    ),
+    (
+        "a `/* */` comment between a doc and its item is not an item",
+        "/// Parse it.\nfn parse() {}\n",
+        "/// Parse it.\n/* keep in step with the header */\nfn parse() {}\n",
+        [],
+    ),
+    (
+        "swift `nonisolated(unsafe) var` and kotlin `fun interface` are named",
+        "/// Shared.\nnonisolated(unsafe) var shared = 0\n/// Called back.\nfun interface Callback {}\n",
+        "/// Shared.\nnonisolated(unsafe) var other = 0\nnonisolated(unsafe) var shared = 0\n"
+        "/// Called back.\nfun interface Listener {}\nfun interface Callback {}\n",
+        [("var shared", "var other"), ("interface Callback", "interface Listener")],
+    ),
+    (
+        "a type renamed, and a wrapper of the old name forwarding the same members",
+        "struct Surface {\n    /// Bumped on a font change.\n    var revision: Int\n}\n",
+        "struct Canvas {\n    /// Bumped on a font change.\n    var revision: Int\n}\n\n"
+        "struct Surface {\n    var revision: Int\n}\n",
+        [],
     ),
     (
         "a moved block of items keeps its docs",
@@ -503,7 +633,8 @@ def self_test():
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--base", help="the commit to compare against (default: HEAD, staged changes)")
-    p.add_argument("--head", help="with --base, compare against this commit instead of the working tree")
+    p.add_argument("--head", help="with --base, check the commits BASE..HEAD, honoring the trailer")
+    p.add_argument("--message-file", help="the commit message, as the commit-msg hook is handed it")
     p.add_argument("--self-test", action="store_true")
     args = p.parse_args()
     if args.self_test:
@@ -511,8 +642,18 @@ def main():
     if args.head and not args.base:
         p.error("--head needs --base")
     if args.base:
-        return run(args.base, args.head, staged=False)
-    return run("HEAD", None, staged=True)
+        found = findings(args.base, args.head, staged=False)
+        if found and args.head:
+            found = exempt_by_trailer(args.base, args.head, found)
+        return report(found)
+    # The hook: staged changes against HEAD.
+    if subprocess.run(["git", "rev-parse", "-q", "--verify", "HEAD"], capture_output=True).returncode:
+        return 0  # the first commit: nothing to compare against
+    if args.message_file:
+        with open(args.message_file, encoding="utf-8", errors="replace") as f:
+            if TRAILER_LINE.search(f.read()):
+                return 0
+    return report(findings("HEAD", None, staged=True))
 
 
 if __name__ == "__main__":
