@@ -134,7 +134,7 @@ struct FleetListView<Client: FleetClient>: View {
                     AgentRow(agent: agent, confidence: snapshot.confidence(in: agent, at: now))
                 }
             }
-            if !snapshot.complete { PartialFooter() }
+            if let hedge = snapshot.hedge { PartialFooter(hedge: hedge) }
         }
     }
 }
@@ -242,14 +242,18 @@ private struct CachedBanner: View {
     }
 }
 
-/// That these may not be all the agents there are.
+/// That these may not be all the agents there are, and why.
 ///
 /// A snapshot assembled only from pushes knows about the agents that happened to
 /// notify. Drawing it as the fleet would assert that the others do not exist,
-/// which is the same claim "No agents" makes and just as untrue.
+/// which is the same claim "No agents" makes and just as untrue. A runner the
+/// phone lost touch with is the other reason, and gets its own words: see
+/// `FleetSnapshot.hedge`.
 private struct PartialFooter: View {
+    let hedge: FleetSnapshot.Hedge
+
     var body: some View {
-        Text("From notifications, so other agents may be missing.")
+        Text(hedge.sentence)
             .font(.caption2)
             .foregroundStyle(.tertiary)
     }

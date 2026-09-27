@@ -774,8 +774,9 @@ private struct StaleFooter: View {
     var body: some View {
         // A snapshot assembled only from pushes knows about the agents that
         // happened to notify. Saying so is the difference between "these are
-        // your agents" and "these are the ones I have heard from".
-        let source = entry.snapshot.complete ? "" : " · from notifications"
+        // your agents" and "these are the ones I have heard from". A runner
+        // the phone lost touch with is named instead: see `FleetSnapshot.hedge`.
+        let source = entry.snapshot.hedge.map { " · \($0.footer)" } ?? ""
         if entry.hasSnapshot {
             // **A figure, not a running clock.** This was
             // `Text(_, style: .relative)`, which ticks: a widget counting

@@ -111,7 +111,9 @@ enum FleetSnapshotWriter {
         let mine = FleetSnapshot(
             runner: fleet, agents: agents, capturedAt: now,
             reviewsWaiting: reviewsWaiting(inbox))
-        publication.record(runner: runner, snapshot: mine)
+        // Named, so a lost link reads "Lost touch with Studio" on the
+        // surfaces. See `FleetSnapshot.lostRunners`.
+        publication.record(runner: runner, snapshot: mine, named: machine)
         publish(at: now)
     }
 

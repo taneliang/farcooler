@@ -240,6 +240,10 @@ final class WatchLinkHost: NSObject {
         let changed =
             !snapshot.agentsSayTheSame(as: lastSent)
             || snapshot.reviewsWaiting != lastSent?.reviewsWaiting
+            // And the footer's reason. A lost runner with no agents changes
+            // no row, so without this the wrist waits out the thirty seconds
+            // to learn the phone lost touch with it.
+            || snapshot.hedge != lastSent?.hedge
         guard changed || Date().timeIntervalSince(lastSentAt) >= Self.refreshInterval else {
             return
         }
