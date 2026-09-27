@@ -631,8 +631,11 @@ pub(crate) mod test_agent {
                 // Quote-blind on purpose: every launch nests its prompt in
                 // `shell_quote` inside an `-ilc '...'`, so honoring only the
                 // outer quotes would put a stubbed launch and a real `; codex`
-                // after it in one segment. What this can do is say which of
-                // its two refusals this is.
+                // after it in one segment. The sound quote-aware version is
+                // to unquote the `-ilc` argument into words and run this
+                // check on those again, recursively -- more than a backstop
+                // earns, so this fails closed instead. What this can do is
+                // say which of its two refusals this is.
                 assert!(
                     !stubbed_earlier,
                     "a daemon unit test's command names `{program}` after the stub, but past one of \
