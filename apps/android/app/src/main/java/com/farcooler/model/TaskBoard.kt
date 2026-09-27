@@ -356,11 +356,13 @@ object TaskAgentLink {
 
     /**
      * Whether a board may say anything about agents on one runner: it is
-     * connected right now, and it records which pane works which task. Anything
-     * else is "can't say", which is different from "none".
+     * answering right now — connected, and its fleet read on this link, since
+     * the panes an agent count is made from are that fleet's (see
+     * [RunnerLink.given]) — and it records which pane works which task.
+     * Anything else is "can't say", which is different from "none".
      */
-    fun speaksOfAgents(connected: Boolean, build: DaemonBuild?): Boolean =
-        connected && build?.can("terminal_task") == true
+    fun speaksOfAgents(link: RunnerLink, build: DaemonBuild?): Boolean =
+        link == RunnerLink.ANSWERING && build?.can("terminal_task") == true
 
     /** Menu items for several panes, told apart by short id where the titles collide. */
     fun menuTitles(titles: List<String>, shorts: List<String>): List<String> {
@@ -491,10 +493,10 @@ object RunnerBoards {
         models: Map<String, TaskBoard>,
         panes: List<Terminal>,
         build: DaemonBuild?,
-        connected: Boolean,
+        link: RunnerLink,
     ): List<BoardRow> {
         if (build?.can("tasks") != true) return emptyList()
-        val speaks = TaskAgentLink.speaksOfAgents(connected, build)
+        val speaks = TaskAgentLink.speaksOfAgents(link, build)
         val names = repositories.associate { it.id to it.displayName.ifEmpty { it.short } }
         return boards.mapNotNull { workspace ->
             val board = models[workspace.id] ?: return@mapNotNull null
@@ -523,7 +525,7 @@ object RunnerBoards {
         boards: Map<String, TaskBoard>,
         panes: List<Terminal>,
         build: DaemonBuild?,
-        connected: Boolean,
+        link: RunnerLink,
     ): List<BoardRow> = rows(
         hostId = hostId,
         boards = repositories.map { WorkspaceSummary.implicit(it.id) },
@@ -531,7 +533,7 @@ object RunnerBoards {
         models = boards,
         panes = panes,
         build = build,
-        connected = connected,
+        link = link,
     )
 }
 

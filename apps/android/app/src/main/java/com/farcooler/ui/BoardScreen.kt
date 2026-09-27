@@ -110,7 +110,7 @@ fun rememberBoardRows(connection: Connection): List<BoardRow> {
     val boards by connection.boards.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
-    val phase by connection.phase.collectAsStateWithLifecycle()
+    val link by connection.link.collectAsStateWithLifecycle()
 
     // A row per workspace with something on its board, or per repository on
     // a runner without workspaces. The list is the fleet's and the
@@ -122,7 +122,7 @@ fun rememberBoardRows(connection: Connection): List<BoardRow> {
         models = boards,
         panes = fleet.worktrees.flatMap { it.terminals },
         build = daemon,
-        connected = phase is Connection.Phase.Connected,
+        link = link,
     )
 }
 
@@ -214,7 +214,7 @@ fun BoardScreen(
     val unread by connection.unreadBoards.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
-    val phase by connection.phase.collectAsStateWithLifecycle()
+    val link by connection.link.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var refreshing by remember { mutableStateOf(false) }
@@ -237,7 +237,7 @@ fun BoardScreen(
         workspace.name.ifEmpty { "Board" }
     }
     val board = boards[workspaceId]
-    val speaks = TaskAgentLink.speaksOfAgents(phase is Connection.Phase.Connected, daemon)
+    val speaks = TaskAgentLink.speaksOfAgents(link, daemon)
     val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }
     }
@@ -531,12 +531,12 @@ fun TaskDetailScreen(
     val boards by connection.boards.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
-    val phase by connection.phase.collectAsStateWithLifecycle()
+    val link by connection.link.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
     val row = boards[workspaceId]?.row(taskId)
-    val speaks = TaskAgentLink.speaksOfAgents(phase is Connection.Phase.Connected, daemon)
+    val speaks = TaskAgentLink.speaksOfAgents(link, daemon)
     val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }
     }

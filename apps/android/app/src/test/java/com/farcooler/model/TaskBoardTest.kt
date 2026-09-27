@@ -343,10 +343,10 @@ class TaskBoardTest {
     fun aBoardSpeaksOfAgentsOnlyOnAConnectedRunnerThatRecordsThem() {
         val records = DaemonBuild("1", true, "", setOf("tasks", "terminal_task"))
         val doesNot = DaemonBuild("1", true, "", setOf("tasks"))
-        assertTrue(TaskAgentLink.speaksOfAgents(true, records))
-        assertFalse(TaskAgentLink.speaksOfAgents(false, records))
-        assertFalse(TaskAgentLink.speaksOfAgents(true, doesNot))
-        assertFalse(TaskAgentLink.speaksOfAgents(true, null))
+        assertTrue(TaskAgentLink.speaksOfAgents(RunnerLink.ANSWERING, records))
+        assertFalse(TaskAgentLink.speaksOfAgents(RunnerLink.AWAY, records))
+        assertFalse(TaskAgentLink.speaksOfAgents(RunnerLink.ANSWERING, doesNot))
+        assertFalse(TaskAgentLink.speaksOfAgents(RunnerLink.ANSWERING, null))
     }
 
     @Test
@@ -420,7 +420,7 @@ class TaskBoardTest {
             models = mapOf("w-main" to busy, "w-billing" to busy, "r-busy" to TaskBoard.EMPTY),
             panes = panes,
             build = both,
-            connected = true,
+            link = RunnerLink.ANSWERING,
         )
         assertEquals(listOf("w-main", "w-billing"), rows.map { it.key })
         assertEquals(listOf("Main", "Billing"), rows.map { it.name })
@@ -432,7 +432,7 @@ class TaskBoardTest {
     /** An implicit board's row is the repository's, as it always was, and names nothing twice. */
     @Test
     fun anImplicitBoardIsTheRepositorysRow() {
-        val row = RunnerBoards.rows("h", repositories, boards, panes, both, connected = true).single()
+        val row = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING).single()
         assertEquals("r-busy", row.key)
         assertEquals(null, row.repositoryName)
         assertEquals(null, row.workspace.boardWorkspace)
@@ -471,35 +471,56 @@ class TaskBoardTest {
 
     @Test
     fun onlyARepositoryWithSomethingOnItsBoardGetsARow() {
-        val rows = RunnerBoards.rows("h", repositories, boards, panes, both, connected = true)
+        val rows = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING)
         assertEquals(listOf("r-busy"), rows.map { it.repository })
         assertEquals("overnight", rows.single().name)
     }
 
     @Test
     fun aRowCountsDecisionsAndTheTasksAgentsAreOn() {
-        val row = RunnerBoards.rows("h", repositories, boards, panes, both, connected = true).single()
+        val row = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING).single()
         assertEquals(2, row.decisions)
         assertEquals(2, row.agents)
         assertEquals("2 tasks need a decision, Agents are on 2 tasks", row.spoken)
     }
 
+    /**
+     * **A reconnected runner counts no agents until this link has read its
+     * fleet** (ov-26 review). The board passed "connected" from the phase,
+     * and a reconnect is Connected for a host read and a fleet read before
+     * it has heard anything, so for that round trip the agent chips and row
+     * counts came from the last link's panes. The board now reads
+     * `Connection.link`, which this is.
+     *
+     * Mutation: `speaksOfAgents` ignoring the link. Red.
+     */
+    @Test
+    fun aReconnectedRunnerCountsNoAgentsUntilItsFleetIsRead() {
+        val records = DaemonBuild("1", true, "", setOf("tasks", "terminal_task"))
+        val reconnected = RunnerLink.ANSWERING.given(FleetRead.EARLIER_LINK)
+        assertFalse(TaskAgentLink.speaksOfAgents(reconnected, records))
+        assertEquals(
+            0, RunnerBoards.rows("h", repositories, boards, panes, both, reconnected).single().agents)
+        val read = RunnerLink.ANSWERING.given(FleetRead.THIS_LINK)
+        assertEquals(2, RunnerBoards.rows("h", repositories, boards, panes, both, read).single().agents)
+    }
+
     @Test
     fun aRunnerThatCannotBeBelievedAboutItsPanesCountsNoAgents() {
-        val dropped = RunnerBoards.rows("h", repositories, boards, panes, both, connected = false).single()
+        val dropped = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.AWAY).single()
         assertEquals(0, dropped.agents)
         assertEquals(2, dropped.decisions)
         val older = DaemonBuild("1", true, "", setOf("workspaces", "tasks"))
-        assertEquals(0, RunnerBoards.rows("h", repositories, boards, panes, older, connected = true).single().agents)
+        assertEquals(0, RunnerBoards.rows("h", repositories, boards, panes, older, link = RunnerLink.ANSWERING).single().agents)
     }
 
     @Test
     fun aRunnerWithoutABoardGetsNoRows() {
         val old = DaemonBuild("1", true, "", setOf("workspaces"))
-        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, old, true).isEmpty())
-        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, null, true).isEmpty())
+        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, old, RunnerLink.ANSWERING).isEmpty())
+        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, null, RunnerLink.ANSWERING).isEmpty())
         // Silence is a runner older than capabilities, which has no board either.
-        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, DaemonBuild("1", true, ""), true).isEmpty())
+        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, DaemonBuild("1", true, ""), RunnerLink.ANSWERING).isEmpty())
     }
 
     /** A board whose only rows this build cannot place still has something on it, and a row. */
@@ -511,7 +532,7 @@ class TaskBoardTest {
         )
         val rows = RunnerBoards.rows(
             "h", listOf(Repository("r-new", displayName = "newer")), mapOf("r-new" to future),
-            panes, both, connected = true,
+            panes, both, link = RunnerLink.ANSWERING,
         )
         assertEquals(listOf("r-new"), rows.map { it.repository })
         assertEquals(0, rows.single().decisions)
