@@ -8,11 +8,14 @@
 //!
 //! Failing is only half of it. **Not returning is the worse failure**, because a
 //! failure is over and a hang is somebody's agent stopped mid-turn with nothing
-//! it can do about it. So nothing in here is merely unlikely to block: the whole
-//! errand runs under one deadline, and every way of getting stuck — a parent
-//! that never closes the pipe, a connect, a write into a socket nobody drains,
-//! an answer that never comes — ends the same way, at the same moment, with
-//! nothing printed.
+//! it can do about it. So nothing in here is merely unlikely to block. The first
+//! contact (the payload, the connect, the write, the daemon's first word) runs
+//! under one deadline, and every way of getting stuck in it — a parent that
+//! never closes the pipe, a connect, a write into a socket nobody drains, an
+//! answer that never comes — ends the same way, at the same moment, with
+//! nothing printed. Only a gating hook whose daemon answered inside that
+//! deadline with a hold waits longer, for one more line, and never for more
+//! than `LONGEST_HOLD`; see `HOOK_DEADLINE`.
 //!
 //! It is a subcommand of the binary that already ships rather than a second
 //! executable, so there is nothing extra to build, sign, notarize or install.
@@ -594,14 +597,20 @@ mod tests {
     }
 
     /// `MessageDisplay` and the rest never read, so a hold cannot slow them.
+    ///
+    /// The daemon follows its hold with a deny at once, so a hook that read
+    /// the hold and waited on it prints the deny: that is the assertion, and
+    /// it needs no clock. The time bound is only far below the 60 s hold, so a
+    /// loaded machine cannot trip it and a hook that sat out the hold still
+    /// does.
     #[tokio::test]
     async fn a_non_gating_hook_never_waits_for_a_hold() {
         let dir = tempfile::tempdir().expect("a directory");
         let socket = dir.path().join("h.sock");
-        a_daemon_that(&socket, vec![Say::Write(A_HOLD)]);
+        a_daemon_that(&socket, vec![Say::Write(A_HOLD), Say::Write(A_DENY)]);
         let (out, took) = ask(socket, false, SHAPE_NOT_SPEED).await;
-        assert_eq!(out, "");
-        assert!(took < HOOK_DEADLINE, "a non-gating hook took {took:?}");
+        assert_eq!(out, "", "a non-gating hook read past its frame");
+        assert!(took < Duration::from_secs(5), "a non-gating hook took {took:?}");
     }
 
     #[test]
