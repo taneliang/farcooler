@@ -107,9 +107,12 @@ pub fn set_prefix(
 
 /// `workspace.delete`: refused for Main and for a workspace anything still
 /// belongs to. Its home is left on disk: the charter in it is the user's
-/// own words, and deleting a workspace shouldn't delete those.
+/// own words, and deleting a workspace shouldn't delete those. Its
+/// orchestrator's settings file, which is only Far Cooler's, goes
+/// (`remove_orchestrator_settings`).
 pub fn delete(svc: &Service, watcher: &Watcher, id: Uuid) -> Result<pb::Empty> {
     svc.store.delete_workspace(id)?;
+    crate::service::remove_orchestrator_settings(svc.root_dir(), id);
     watcher.announce_fleet_changed();
     Ok(pb::Empty {})
 }
@@ -217,5 +220,32 @@ mod tests {
         let listed = list(&svc, Some(repo), Scope::HostAdmin).unwrap();
         let main = &listed.items[0];
         assert!(main.home.is_some() && main.charter_path.is_some(), "{main:?}");
+    }
+
+    /// Deleting a workspace removes its orchestrator's settings file, and
+    /// leaves its home, charter included, and every other workspace's file.
+    #[tokio::test]
+    async fn a_deleted_workspace_takes_its_orchestrators_settings_with_it() {
+        let (_dir, svc, repo) = fixture().await;
+        let watcher = crate::watch::Watcher::new(svc.clone());
+        let req = pb::WorkspaceCreate { name: "Billing".into(), task_prefix: "bil".into() };
+        let made = create(&svc, &watcher, repo, &req, Scope::HostAdmin).unwrap();
+        let billing = Uuid::from_slice(&made.id).unwrap();
+        let main = svc.store.main_workspace(repo).unwrap().id;
+        let settings = |ws: Uuid| svc.root_dir().join(format!("orchestrator-{ws}.json"));
+
+        for ws in [billing, main] {
+            let term = svc.start_orchestrator(ws, "claude", false).await.expect("started");
+            assert!(settings(ws).is_file(), "the launch wrote {}", settings(ws).display());
+            svc.stop_terminal(term.id).await.unwrap();
+            svc.remove_terminal(term.id).await.unwrap();
+        }
+        let charter = crate::workspace_home::charter_path(svc.root_dir(), billing);
+        std::fs::write(&charter, "Billing's words").unwrap();
+
+        delete(&svc, &watcher, billing).expect("deleted");
+        assert!(!settings(billing).exists(), "left behind: {}", settings(billing).display());
+        assert!(settings(main).is_file(), "another workspace's file stays");
+        assert_eq!(std::fs::read_to_string(&charter).unwrap(), "Billing's words", "the home stays");
     }
 }

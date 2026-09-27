@@ -871,6 +871,23 @@ fn orchestrator_settings_path(runtime_dir: &Path, workspace: Uuid) -> PathBuf {
     runtime_dir.join(format!("orchestrator-{workspace}.json"))
 }
 
+/// Remove `workspace`'s orchestrator settings once the workspace is deleted
+/// (`workspace_ops::delete`). Nothing can be using the file then: a workspace
+/// is deleted only when no terminal names it. Its home stays, for the
+/// charter's sake; this file is only Far Cooler's own, rewritten on every
+/// orchestrator launch. One that isn't there is fine, and one that can't be
+/// removed is logged and left.
+pub(crate) fn remove_orchestrator_settings(runtime_dir: &Path, workspace: Uuid) {
+    let path = orchestrator_settings_path(runtime_dir, workspace);
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path.display(), "could not remove a deleted workspace's orchestrator settings")
+        }
+    }
+}
+
 /// Write an orchestrator's claude settings, and say where they went: the
 /// hooks every claude pane gets (`hook_install::claude_settings`) plus
 /// `autoMemoryDirectory`, pointed at the repository's memory directory
