@@ -51,6 +51,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
 
+use crate::hook_asks::HookAsks;
 use crate::transcript_tail::TranscriptTail;
 
 /// How long a connection may say nothing at all before it is dropped.
@@ -189,6 +190,9 @@ pub struct HookIngress {
     /// `Service`'s claims ledger, so a Claude session's `cwd` can claim the
     /// worktree it is working in (`observe_cwd`).
     claims: Arc<crate::claims::Ledger>,
+    /// Claude's permission asks, held while a phone may answer them. Shares
+    /// `sink`, so an ask's `Resolved` lands where its `Permission` did.
+    asks: Arc<HookAsks>,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -210,7 +214,7 @@ fn release_tail_slot(tails: &Mutex<HashMap<Uuid, Arc<AtomicBool>>>, terminal: Uu
 /// The erased shape of a `listen`/`start_transcript_tail` sink. Named so
 /// neither call site spells out the `Arc<dyn Fn(...) + Send + Sync>` clippy's
 /// `type_complexity` lint (CI's `-D warnings`) refuses inline.
-type EventSink = Arc<dyn Fn(Uuid, Vec<AgentEvent>) + Send + Sync>;
+pub(crate) type EventSink = Arc<dyn Fn(Uuid, Vec<AgentEvent>) + Send + Sync>;
 
 impl HookIngress {
     pub fn new(
@@ -218,12 +222,14 @@ impl HookIngress {
         inventory: Arc<dyn RuntimeInventory>,
         claims: Arc<crate::claims::Ledger>,
     ) -> Self {
+        let sink = Arc::new(Mutex::new(None));
         Self {
             store,
             inventory,
             assemblers: Arc::new(Mutex::new(HashMap::new())),
             tails: Arc::new(Mutex::new(HashMap::new())),
-            sink: Arc::new(Mutex::new(None)),
+            asks: Arc::new(HookAsks::new(sink.clone())),
+            sink,
             claims,
         }
     }
@@ -441,6 +447,7 @@ impl HookIngress {
     /// instead of an event for a terminal `agents.record` would otherwise
     /// have to invent a fresh entry for.
     pub fn forget(&self, terminal: Uuid) {
+        self.asks.forget(terminal);
         self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
         if let Some(alive) = self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal) {
             alive.store(false, Ordering::Relaxed);
@@ -483,6 +490,11 @@ impl HookIngress {
     /// logs.
     pub fn is_tracking(&self, terminal: Uuid) -> bool {
         self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&terminal)
+    }
+
+    /// The held permission asks, which `terminal.agent_answer` answers.
+    pub fn asks(&self) -> &Arc<HookAsks> {
+        &self.asks
     }
 
     /// Whether a transcript tail has been started for a terminal. For tests
@@ -1059,6 +1071,18 @@ mod tests {
             ),
             "got {seen:?}"
         );
+    }
+
+    /// A deleted terminal's held ask is released, not left for its minute: its
+    /// hook would otherwise keep claude waiting on a pane nobody can answer.
+    #[tokio::test]
+    async fn forgetting_a_terminal_releases_its_held_ask() {
+        let ingress = ingress_for_test();
+        let terminal = Uuid::from_u128(103);
+        let (_id, rx) = ingress.asks().hold(terminal);
+        ingress.forget(terminal);
+        assert!(!ingress.asks().is_holding(terminal));
+        assert_eq!(rx.await.expect("the hook is released").decision, None);
     }
 
     /// `forget` must silence a running tail, not merely leave `is_tracking`

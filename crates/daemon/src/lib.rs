@@ -10,6 +10,7 @@ pub mod file_diff;
 pub mod foreground;
 pub mod fs_watch;
 pub mod git;
+pub mod hook_asks;
 pub mod hook_ingress;
 pub mod hook_install;
 pub mod layout;
