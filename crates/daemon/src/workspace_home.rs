@@ -202,8 +202,8 @@ mod tests {
     }
 }
 
-/// The homes as the daemon makes them: at registration, at every start, and
-/// when a workspace is created.
+/// The homes as the daemon makes them: at registration, at each of its
+/// starts, and when a workspace is created.
 #[cfg(test)]
 mod service_tests {
     use farcooler_protocol::v1::{self as pb, Scope};
@@ -259,6 +259,7 @@ mod service_tests {
         assert!(!home(svc.root_dir(), billing.id).exists(), "made past the daemon");
 
         let restarted = Service::open_in(svc.root_dir().to_path_buf()).await.unwrap();
+        restarted.prepare_workspace_homes();
         assert_eq!(read(&charter_path(restarted.root_dir(), main.id)), "from the repo");
         assert_eq!(read(&charter_path(restarted.root_dir(), billing.id)), "from the repo", "seeded from Main");
 
@@ -266,6 +267,7 @@ mod service_tests {
         std::fs::remove_file(charter_path(restarted.root_dir(), billing.id)).unwrap();
         drop(restarted);
         let again = Service::open_in(svc.root_dir().to_path_buf()).await.unwrap();
+        again.prepare_workspace_homes();
         assert!(!charter_path(again.root_dir(), billing.id).exists());
     }
 

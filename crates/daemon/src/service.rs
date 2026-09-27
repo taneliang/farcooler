@@ -2029,24 +2029,30 @@ impl Service {
             repo_urls: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
         };
-        service.prepare_workspace_homes();
         Ok(service)
     }
 
     /// Give every workspace its home, and adopt each repository's
     /// `.farcooler/manager.md` as its Main's charter where Main has none.
     ///
-    /// Here, in `open_in`, rather than in `main`: nothing can reach a line in
-    /// `main` from a test, so a call there could be deleted with every test
-    /// still green. Every process that opens the service runs it, which is
-    /// safe because it only ever creates: a charter that exists is never
-    /// touched (`workspace_home`). It costs a stat or two per workspace.
+    /// The daemon runs it at its start, and nothing else does. Not in
+    /// `open_in`: every `--stream` and `--stdio` process opens a service, one
+    /// per terminal a phone opens and one per ssh connection, and this reads
+    /// a file in every repository's main checkout. One repository on an
+    /// unmounted or slow network volume would hold up every one of those for
+    /// the mount's timeout. A workspace that needs its home sooner gets it
+    /// where it's used (`ensure_workspace_home`, at registration, creation
+    /// and an orchestrator's start). `only_the_daemon_adopts_charters.rs`
+    /// drives the binary in all three modes.
+    ///
+    /// Safe beside another process doing the same, because it only ever
+    /// creates: a charter that exists is never touched (`workspace_home`).
     ///
     /// Mains first, so a workspace made before its Main had a charter (by a
     /// daemon from before this existed) is seeded from the charter adopted a
-    /// moment earlier. Never fails the open: a home that can't be made is
-    /// logged, and the next start tries again.
-    fn prepare_workspace_homes(&self) {
+    /// moment earlier. Never fails: a home that can't be made is logged, and
+    /// the next start tries again.
+    pub fn prepare_workspace_homes(&self) {
         let workspaces = match self.store.list_workspaces(None) {
             Ok(all) => all,
             Err(e) => {
@@ -2466,7 +2472,7 @@ impl Service {
         tracing::info!(repository = %repository.id, prefix = %main.task_prefix, "made its Main workspace");
         // Main's home, with the repository's `.farcooler/manager.md` as its
         // charter if it has one. Best-effort: the repository IS registered,
-        // and the next start makes the home.
+        // and the daemon's next start makes the home.
         if let Err(e) = self.ensure_workspace_home(&main) {
             tracing::warn!(workspace = %main.id, error = %e, "could not make Main's home");
         }

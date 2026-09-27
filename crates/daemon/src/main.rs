@@ -191,6 +191,13 @@ async fn run() -> Result<(), i32> {
     // Shims outlive a daemon restart; without this they dial a socket nobody
     // is listening on and every agent pane goes silent while looking healthy.
     service.resume_agent_listeners();
+    // Homes, and each repository's charter, for the daemon alone: see
+    // `prepare_workspace_homes` for why no `--stream` or `--stdio` process
+    // does it. On the blocking pool rather than inline, because it reads
+    // every repository's main checkout, and one on a slow volume mustn't
+    // keep the socket below from being bound.
+    let homes = service.clone();
+    tokio::task::spawn_blocking(move || homes.prepare_workspace_homes());
 
     // Not fatal, ever. A runner that cannot start its tunnel is still a runner
     // reachable by address, and refusing to boot would take away the access
