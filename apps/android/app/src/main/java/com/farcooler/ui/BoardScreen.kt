@@ -410,11 +410,15 @@ private fun TaskCardRow(
  * [MinuteClock.start] has read the clock before it returns, so that frame is
  * right. Started, not resumed: a board half-covered by another window is
  * still on screen, and its cards still move on.
+ *
+ * [wallClock] is for `MinuteClockLifecycleTest` alone, which runs this under a
+ * lifecycle it drives, on a clock it moves. Every caller here takes the
+ * default.
  */
 @Composable
-private fun rememberMinuteClock(): Long {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    val clock = remember { MinuteClock(System::currentTimeMillis) { now = it } }
+internal fun rememberMinuteClock(wallClock: () -> Long = System::currentTimeMillis): Long {
+    var now by remember { mutableLongStateOf(wallClock()) }
+    val clock = remember { MinuteClock(wallClock) { now = it } }
     LifecycleStartEffect(clock) {
         clock.start(lifecycle.coroutineScope)
         onStopOrDispose { clock.stop() }
