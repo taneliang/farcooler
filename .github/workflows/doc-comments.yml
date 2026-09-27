@@ -46,10 +46,18 @@ jobs:
       # orphan a doc (a test module inserted under another's doc) has to be
       # refused end to end, through the file list and the blob reads. If those
       # broke and every file came back empty, every range would pass.
+      # A crash exits 1 as well, so the refusal is matched by its text, not
+      # only by the exit status: a traceback is not a refusal.
       - name: Check a known orphan is still refused
         run: |
-          if ./scripts/doc-comment-check.py --base 621d4182^ --head 621d4182; then
+          if out=$(./scripts/doc-comment-check.py --base 621d4182^ --head 621d4182 2>&1); then
+            echo "$out"
             echo "::error::621d4182 orphans a doc comment and the check passed it"
+            exit 1
+          fi
+          echo "$out"
+          if ! grep -qF 'the doc comment on `mod test_agent_tests` now sits on `mod stand_in_agent_tests`' <<<"$out"; then
+            echo "::error::the check failed on 621d4182 without refusing its orphaned doc comment"
             exit 1
           fi
       - name: Check the pushed or proposed commits
