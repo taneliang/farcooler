@@ -720,10 +720,17 @@ fn migration_0015_workspaces(tx: &Transaction) -> rusqlite::Result<()> {
     let (held, prefixless): (Vec<_>, Vec<_>) =
         repositories.into_iter().partition(|(_, _, prefix)| !prefix.is_empty());
     for (repository, name, prefix) in held.into_iter().chain(prefixless) {
-        // A held prefix is its own base, and comes back unchanged unless an
-        // earlier repository holds the same letters in another case, which
-        // `repositories_one_task_prefix` (case-sensitive) never refused.
-        let base = if prefix.is_empty() { crate::tasks::derive_prefix(&name) } else { prefix };
+        // A held prefix is its own base, lowercased as every prefix since is,
+        // and comes back unchanged unless an earlier repository holds the
+        // same letters in another case, which `repositories_one_task_prefix`
+        // (case-sensitive) never refused. Then it takes a digit. Keys minted
+        // under it in another case still resolve: a key is looked up
+        // ignoring case.
+        let base = if prefix.is_empty() {
+            crate::tasks::derive_prefix(&name)
+        } else {
+            prefix.to_ascii_lowercase()
+        };
         let prefix = crate::workspaces::free_prefix(tx, &base)?;
         let main = crate::models::uuid_blob(uuid::Uuid::now_v7());
         tx.execute(
@@ -1509,6 +1516,27 @@ mod tests {
         let prefix: String =
             conn.query_row("SELECT task_prefix FROM workspaces", [], |r| r.get(0)).unwrap();
         assert_eq!(prefix, "fc");
+    }
+
+    /// A held prefix is stored lowercase, and one that differs from an
+    /// earlier holder's only by case takes a digit, as any other taken one
+    /// does. Unreachable from a real database, since every prefix before 0015
+    /// was `derive_prefix`'s, which lowercases; the old index was
+    /// case-sensitive, so nothing but that ever kept `BIL` out.
+    #[test]
+    fn a_held_prefix_is_lowercased_and_one_differing_only_by_case_takes_a_digit() {
+        let mut conn = open();
+        migrate_only_to(&mut conn, 14);
+        conn.execute_batch(
+            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+             INSERT INTO repositories VALUES (x'0a', x'02', x'01', 'billing', '/a/.git', '', 1, 'bil');
+             INSERT INTO repositories VALUES (x'0b', x'02', x'01', 'bills', '/b/.git', '', 1, 'BIL');
+             INSERT INTO repositories VALUES (x'0c', x'02', x'01', 'ops', '/c/.git', '', 1, 'Ops');",
+        )
+        .unwrap();
+        migrate(&mut conn, 14).unwrap();
+        let prefixes = snapshot(&conn, "SELECT task_prefix FROM workspaces ORDER BY repository_id");
+        assert_eq!(prefixes, vec![vec!["bil"], vec!["bil2"], vec!["ops"]]);
     }
 
     /// Deleting a workspace that still holds a task is refused by the schema
