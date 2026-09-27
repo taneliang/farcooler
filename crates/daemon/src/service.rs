@@ -689,6 +689,16 @@ fn preset_runs_an_agent(preset: &str) -> bool {
     head != "shell" && head != CHANGES_PRESET && is_safe_model(head)
 }
 
+/// Where an orchestrator's chat runs and its recipe, both halves of it
+/// (`Service::orchestrator_chat`): `adapter_args` for a native adapter
+/// (`agent-host --adapter-arg`), `acp_session` for an ACP one
+/// (`agent-host --acp-session`).
+struct OrchestratorChat {
+    dir: String,
+    adapter_args: Vec<String>,
+    acp_session: Option<serde_json::Value>,
+}
+
 /// The launch, plus the name the pane files its board writes under.
 ///
 /// `FARCOOLER_ACTOR=agent:<terminal id>`, which is exactly what
@@ -3697,65 +3707,71 @@ impl Service {
         Ok(dir)
     }
 
-    /// Where an orchestrator's chat runs, and the arguments its adapter gets
-    /// after its own (`agent-host --adapter-arg`), when `term` is one and
-    /// `hosted` is what the chat will host. `None` for every other pane,
-    /// whose chat runs in its worktree as stored.
+    /// Where an orchestrator's chat runs, and the recipe the shim hands its
+    /// adapter (`OrchestratorChat`), when `term` is one and `hosted` is what
+    /// the chat will host. `None` for every other pane, whose chat runs in
+    /// its worktree as stored.
     ///
-    /// **Claude Code on its native backend: the home**, as in terminal mode,
-    /// because Claude Code files a conversation under its working directory:
-    /// the orchestrator's is under the home's, and the chat's `--resume` and
-    /// its history (`farcooler_claude::backend::transcript_for`) look there.
-    /// From the main checkout the chat would find neither. Then `--add-dir
-    /// <main>` and `--project-config-root <main>`, and `autoMemoryDirectory`
-    /// as inline JSON to `--settings`, which Claude Code takes as a file or a
-    /// JSON string. Only the memory, not the terminal's settings file: a chat
-    /// reports through the shim, and no chat is handed Far Cooler's hooks. The recipe's variables
-    /// reach it from the pane's own line (`with_pane_env`).
+    /// **Claude Code: the home**, as in terminal mode, because Claude Code
+    /// files a conversation under its working directory: the orchestrator's
+    /// is under the home's, and the chat's resume looks there. From the main
+    /// checkout the chat would find neither it nor, on the native backend,
+    /// its history (`farcooler_claude::backend::transcript_for`). The recipe
+    /// goes both ways, and the shim uses the one for the backend it starts:
     ///
-    /// **Claude Code on an ACP adapter (the built-in one) is refused.** Its
-    /// adapter takes none of claude's flags, and from the main checkout its
-    /// `session/load` can't find the conversation filed under the home, so
-    /// it starts a fresh one (`farcooler_acp::session`), the record takes
-    /// that id, and the orchestrator's own conversation is orphaned. A
-    /// toggle that loses the conversation is refused (`orchestrator_chat_acp`,
-    /// whose sentence names the native backend) rather than taken, as
-    /// `set_pane_mode` refuses swapping the agent.
+    /// - A native adapter takes claude's flags: `--add-dir <main>`,
+    ///   `--project-config-root <main>`, and `autoMemoryDirectory` as inline
+    ///   JSON to `--settings`, which Claude Code takes as a file or a JSON
+    ///   string. Only the memory, not the terminal's settings file: a chat
+    ///   reports through the shim, and no chat is handed Far Cooler's hooks.
+    /// - An ACP adapter takes the same as `session/new` and `session/load`
+    ///   params: `additionalDirectories`, and `projectConfigRoot` and
+    ///   `settings` under `_meta.claudeCode.options`, which
+    ///   `claude-agent-acp` hands the Agent SDK (0.81.2 does; the SDK turns
+    ///   them into the same three flags). Every `session/load` sends the
+    ///   same params, so the adapter doesn't rebuild the session over them.
+    ///
+    /// The switch that reads the added directory's `CLAUDE.md` reaches both
+    /// from the pane's own line (`with_pane_env`), and the adapter inherits
+    /// it.
     ///
     /// **Codex: the resolved main checkout**, where its terminal runs, and
-    /// with no arguments: its chat takes the directory as `thread/start`'s
+    /// with no recipe: its chat takes the directory as `thread/start`'s
     /// `cwd`, and codex keys hook trust by the resolved path (see
     /// `orchestrator`). **Cursor:** the main checkout, the root its
     /// terminal's `--workspace` names; its ACP adapter takes no such flag,
     /// and its chats are kept by that root, not the home.
-    ///
-    /// The shim appends the arguments only to a native adapter
-    /// (`agent_host::resolve_with`), so a config changed between this read
-    /// and the shim's hands an ACP adapter no flags it doesn't know.
     fn orchestrator_chat(
         &self,
         term: &models::Terminal,
         hosted: Option<&str>,
-    ) -> Result<Option<(String, Vec<String>)>> {
+    ) -> Result<Option<OrchestratorChat>> {
         use crate::orchestrator::{Harness, extra_args, working_directory};
-        use farcooler_core::activity::AdapterBackend;
         let Some((harness, launch)) = self.orchestrator_launch(term) else { return Ok(None) };
-        let backend = hosted.and_then(|h| self.registry().adapter(h).map(|a| a.backend));
         let dir = |h| working_directory(h, &launch).to_string_lossy().into_owned();
-        match (harness, hosted, backend) {
-            (Harness::Claude, Some("claude"), Some(AdapterBackend::Native)) => {
+        match (harness, hosted) {
+            (Harness::Claude, Some("claude")) => {
                 self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
-                let mut args = extra_args(Harness::Claude, &launch);
+                let main = launch.main_checkout.to_string_lossy().into_owned();
+                let mut adapter_args = extra_args(Harness::Claude, &launch);
+                let mut options = serde_json::json!({ "projectConfigRoot": main });
                 if let Some(memory) = &launch.memory_dir {
-                    args.push("--settings".into());
-                    args.push(serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() }).to_string());
+                    let settings = serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() });
+                    adapter_args.push("--settings".into());
+                    adapter_args.push(settings.to_string());
+                    options["settings"] = settings;
                 }
-                Ok(Some((dir(Harness::Claude), args)))
+                let acp_session = serde_json::json!({
+                    "additionalDirectories": [main],
+                    "_meta": { "claudeCode": { "options": options } },
+                });
+                Ok(Some(OrchestratorChat { dir: dir(Harness::Claude), adapter_args, acp_session: Some(acp_session) }))
             }
-            (Harness::Claude, Some("claude"), Some(AdapterBackend::Acp)) => {
-                Err(DomainError::InvalidArgument { what: "orchestrator_chat_acp" })
-            }
-            (Harness::Codex, Some("codex"), _) => Ok(Some((dir(Harness::Codex), Vec::new()))),
+            (Harness::Codex, Some("codex")) => Ok(Some(OrchestratorChat {
+                dir: dir(Harness::Codex),
+                adapter_args: Vec::new(),
+                acp_session: None,
+            })),
             _ => Ok(None),
         }
     }
@@ -4541,12 +4557,20 @@ impl Service {
                     .map(|h| format!(" --preset {}", shell_quote(h)))
                     .unwrap_or_default();
                 // An orchestrator's chat runs where its conversation is, with
-                // its recipe, or is refused (`orchestrator_chat`); every
-                // other chat runs in its worktree.
+                // its recipe (`orchestrator_chat`); every other chat runs in
+                // its worktree.
                 let recipe = match self.orchestrator_chat(&term, harness.as_deref())? {
-                    Some((at, args)) => {
-                        dir = at;
-                        args.iter().map(|a| format!(" --adapter-arg {}", shell_quote(a))).collect()
+                    Some(chat) => {
+                        dir = chat.dir;
+                        let mut recipe: String = chat
+                            .adapter_args
+                            .iter()
+                            .map(|a| format!(" --adapter-arg {}", shell_quote(a)))
+                            .collect();
+                        if let Some(params) = chat.acp_session {
+                            recipe.push_str(&format!(" --acp-session {}", shell_quote(&params.to_string())));
+                        }
+                        recipe
                     }
                     None => String::new(),
                 };
@@ -7479,12 +7503,14 @@ mod orchestrator_launch_tests {
         panic!("the pane never drew {marker}");
     }
 
-    /// And so does one switched into a chat, on Claude Code's native
-    /// backend: the shim runs in the home, where the conversation is filed,
-    /// and hands the adapter `--add-dir`, `--project-config-root` and the
-    /// memory directory. On the
-    /// built-in ACP adapter the switch is refused, and the pane is left
-    /// as it was: that chat would start a new conversation.
+    /// And so does one switched into a chat, on either backend: the shim
+    /// runs in the home, where the conversation is filed, and is handed the
+    /// recipe both ways. A native adapter takes `--add-dir`,
+    /// `--project-config-root` and the memory directory as flags; the
+    /// built-in ACP adapter takes the same as `--acp-session` params
+    /// (`additionalDirectories`, and `projectConfigRoot` and `settings`
+    /// under `_meta.claudeCode.options`). Both get the switch that reads the
+    /// added directory's `CLAUDE.md` from the pane's environment.
     #[tokio::test]
     async fn an_orchestrator_switched_into_a_chat_keeps_its_recipe() {
         let (dir, svc, ws) = a_worktree().await;
@@ -7493,6 +7519,8 @@ mod orchestrator_launch_tests {
         let home = crate::workspace_home::home(&svc.root, main.id);
         let config = dir.path().join("config.toml");
         std::fs::write(&config, "[adapters.claude]\nbackend = \"native\"\nprogram = \"claude\"\n").unwrap();
+        let memory = user_home().map(|h| crate::orchestrator::claude_memory_dir(&h, &repo)).unwrap();
+        let settings = serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() });
 
         for native in [true, false] {
             *svc.registry.write().unwrap() = Arc::new(if native {
@@ -7501,40 +7529,40 @@ mod orchestrator_launch_tests {
                 farcooler_core::activity::Registry::built_in()
             });
             let term = an_orchestrator_that_looks_like(&svc, &ws, main.id, "claude", "? for shortcuts").await;
-            let switched = svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await;
+            svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
 
-            let command = pane_start_command(&svc, term.id).await;
-            if native {
-                switched.expect("a chat");
-                assert!(command.contains("agent-host"), "{command}");
-                assert_eq!(arg_after(&command, "--worktree"), home.to_string_lossy(), "{command}");
-                assert_eq!(pane_path(&svc, term.id).await, resolved(&home));
-                assert!(
-                    command.contains(&format!("--adapter-arg '--add-dir' --adapter-arg '{}'", repo.display())),
-                    "{command}"
-                );
-                assert!(
-                    command.contains(&format!(
-                        "--adapter-arg '--project-config-root' --adapter-arg '{}'",
-                        repo.display()
-                    )),
-                    "{command}"
-                );
-                let memory = user_home().map(|h| crate::orchestrator::claude_memory_dir(&h, &repo)).unwrap();
-                assert!(command.contains("--adapter-arg '--settings' --adapter-arg '{"), "{command}");
-                // tmux prints a `"` in the start command as `\"`.
-                let settings = serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() });
-                assert!(command.replace("\\\"", "\"").contains(&format!("'{settings}'")), "{command}");
-            } else {
-                match switched {
-                    Err(DomainError::InvalidArgument { what }) => assert_eq!(what, "orchestrator_chat_acp"),
-                    other => panic!("an orchestrator's ACP chat must be refused: {other:?}"),
-                }
-                assert!(!command.contains("agent-host"), "the pane is left as it was: {command}");
-                let record = svc.store.get_terminal(term.id).unwrap();
-                assert_eq!(record.pane_mode, models::PaneMode::Terminal);
-                assert_eq!(record.agent_session_id, term.agent_session_id, "the conversation is kept");
-            }
+            // tmux prints a `"` in the start command as `\"`.
+            let command = pane_start_command(&svc, term.id).await.replace("\\\"", "\"");
+            assert!(command.contains("agent-host"), "{command}");
+            assert_eq!(arg_after(&command, "--worktree"), home.to_string_lossy(), "{command}");
+            assert_eq!(pane_path(&svc, term.id).await, resolved(&home));
+            assert!(command.contains("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 "), "{command}");
+            assert!(
+                command.contains(&format!("--adapter-arg '--add-dir' --adapter-arg '{}'", repo.display())),
+                "{command}"
+            );
+            assert!(
+                command.contains(&format!(
+                    "--adapter-arg '--project-config-root' --adapter-arg '{}'",
+                    repo.display()
+                )),
+                "{command}"
+            );
+            assert!(command.contains(&format!("--adapter-arg '--settings' --adapter-arg '{settings}'")), "{command}");
+
+            let (_, params) = command.split_once("--acp-session '").unwrap_or_else(|| panic!("{command}"));
+            let params: serde_json::Value =
+                serde_json::from_str(params.split('\'').next().unwrap()).expect("a JSON object");
+            assert_eq!(
+                params,
+                serde_json::json!({
+                    "additionalDirectories": [repo.to_string_lossy()],
+                    "_meta": { "claudeCode": { "options": {
+                        "projectConfigRoot": repo.to_string_lossy(),
+                        "settings": settings,
+                    } } },
+                }),
+            );
             let _ = svc.stop_terminal(term.id).await;
         }
     }
@@ -7562,6 +7590,7 @@ mod orchestrator_launch_tests {
         assert!(command.contains("agent-host"), "{command}");
         assert_eq!(arg_after(&command, "--worktree"), repo.to_string_lossy(), "{command}");
         assert!(!command.contains("--adapter-arg"), "{command}");
+        assert!(!command.contains("--acp-session"), "{command}");
         let _ = svc.stop_terminal(term.id).await;
     }
 }

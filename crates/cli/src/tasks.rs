@@ -1760,10 +1760,6 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "main_checkout" => "the repository's main checkout always belongs to Main",
         "orchestrator_taken" => "this workspace already has an orchestrator running",
         "orchestrator_home" => "this workspace's folder couldn't be made, so its orchestrator wasn't started",
-        "orchestrator_chat_acp" => {
-            "on Claude Code's ACP adapter, this orchestrator's chat would start a new conversation. \
-             set backend = \"native\" under [adapters.claude], or keep it in terminal mode"
-        }
         "workspace" => "this terminal doesn't belong to a workspace yet",
         "role" => "choose a role: shell, agent or orchestrator",
         "task_ids" => "name at least one task to move",
@@ -3913,8 +3909,8 @@ mod tests {
     ///
     /// The runner's words are read from its own table
     /// (`farcooler_core::error::sentence_words`), not from a copy here: a
-    /// copy is how `orchestrator_chat_acp` shipped with no line in this CLI's
-    /// style while this test stayed green.
+    /// copy is how `orchestrator_chat_acp` (since removed) shipped with no
+    /// line in this CLI's style while this test stayed green.
     #[test]
     fn every_runner_sentence_has_one_in_this_clis_style() {
         // A runner word this CLI deliberately has no line for, because no
