@@ -1,5 +1,6 @@
 //! `workspace.start_orchestrator` over a real socket, on a real tmux server,
-//! with a stand-in in place of every agent.
+//! with a stand-in in place of every agent. And, since only this binary can
+//! start one, how the layout verbs treat an orchestrator's window.
 //!
 //! Its own binary because of the stand-in. This is the daemon's library
 //! built without `cfg(test)`, so an agent launch here runs whatever
@@ -305,4 +306,277 @@ async fn the_stand_in_is_one_file_not_one_per_run() {
     start_orchestrator(&mut client, main.id.clone(), "claude", false).await.expect("started");
     records(&h, &workspace_id(&main), 1).await;
     assert!(home(&h, &workspace_id(&main)).starts_with(h.dir.path()), "removed with the test's directory");
+}
+
+// ---------------------------------------------------------------------------
+// An orchestrator's window beside the checkout's
+//
+// Every orchestrator's window is tagged with the main checkout's worktree
+// (`start_orchestrator` opens it in `main.id`), so `layout.list` for the
+// checkout lists it, and a layout verb that names no window acts on the one
+// tmux calls active. The CLI or an agent focusing the orchestrator makes that
+// the orchestrator's. A client showing the checkout's own window says which
+// one it means with `group_id`, and these tests hold the daemon to it.
+// ---------------------------------------------------------------------------
+
+/// The repository's main checkout, where every orchestrator's window is.
+async fn main_checkout(client: &mut SocketClient) -> farcooler_protocol::v1::Worktree {
+    let Some(result::Value::WorktreeList(list)) =
+        client.call(request("worktree.list")).await.expect("worktree.list").value
+    else {
+        panic!("wrong result")
+    };
+    list.items.into_iter().find(|w| w.is_main_checkout).expect("the main checkout")
+}
+
+async fn layout_call(
+    client: &mut SocketClient,
+    method: &str,
+    worktree: &bytes::Bytes,
+    update: farcooler_protocol::v1::LayoutUpdate,
+) -> farcooler_protocol::v1::PaneGroupList {
+    let mut r = request(method);
+    r.target_resource_id = Some(worktree.clone());
+    r.payload = Some(request::Payload::LayoutUpdate(update));
+    let Some(result::Value::PaneGroupList(list)) =
+        client.call(r).await.unwrap_or_else(|e| panic!("{method}: {e:?}")).value
+    else {
+        panic!("{method} returned the wrong resource")
+    };
+    list
+}
+
+/// The window holding `terminal`.
+fn window_of<'a>(
+    list: &'a farcooler_protocol::v1::PaneGroupList,
+    terminal: &[u8],
+) -> &'a farcooler_protocol::v1::PaneGroup {
+    list.items
+        .iter()
+        .find(|g| g.panes.iter().any(|p| p.terminal_id == terminal))
+        .unwrap_or_else(|| panic!("no window holds that terminal: {list:?}"))
+}
+
+/// The window with id `id`.
+fn window<'a>(list: &'a farcooler_protocol::v1::PaneGroupList, id: &str) -> &'a farcooler_protocol::v1::PaneGroup {
+    list.items.iter().find(|g| g.id == id).unwrap_or_else(|| panic!("no window {id}: {list:?}"))
+}
+
+/// Main's orchestrator, and beside it in the main checkout a window of two
+/// shells, with tmux's active window the orchestrator's: what focusing the
+/// orchestrator from the CLI leaves behind.
+struct Scene {
+    workspace: farcooler_protocol::v1::Workspace,
+    /// The main checkout's worktree id.
+    main: bytes::Bytes,
+    orchestrator: bytes::Bytes,
+    /// The checkout's own window, the one its row shows.
+    checkout: String,
+    /// The orchestrator's window.
+    orchestrators: String,
+}
+
+impl Scene {
+    /// A verb naming the checkout's window.
+    fn named(&self, update: farcooler_protocol::v1::LayoutUpdate) -> farcooler_protocol::v1::LayoutUpdate {
+        farcooler_protocol::v1::LayoutUpdate { group_id: self.checkout.clone(), ..update }
+    }
+
+    /// Focus the orchestrator, as `farcooler layout focus` from an agent does.
+    async fn focus_the_orchestrator(&self, client: &mut SocketClient) -> farcooler_protocol::v1::PaneGroupList {
+        let list = layout_call(
+            client,
+            "layout.focus",
+            &self.main,
+            farcooler_protocol::v1::LayoutUpdate { focus: Some(self.orchestrator.clone()), ..Default::default() },
+        )
+        .await;
+        assert!(window(&list, &self.orchestrators).active, "tmux calls the orchestrator's window active");
+        assert!(!window(&list, &self.checkout).active);
+        list
+    }
+
+    /// Nothing about the orchestrator's window moved: one pane, the
+    /// orchestrator's, not zoomed, and still the one tmux calls active.
+    fn untouched(&self, list: &farcooler_protocol::v1::PaneGroupList, name: &str, verb: &str) {
+        let w = window(list, &self.orchestrators);
+        assert_eq!(w.panes.len(), 1, "{verb}: {list:?}");
+        assert_eq!(w.panes[0].terminal_id, self.orchestrator, "{verb}");
+        assert!(!w.panes[0].zoomed, "{verb}");
+        assert_eq!(w.name, name, "{verb}");
+        assert!(w.active, "{verb} moved tmux off the orchestrator's window");
+    }
+}
+
+async fn scene(h: &Harness, client: &mut SocketClient) -> Scene {
+    let workspace = main_workspace(h, client).await;
+    let orchestrator = start_orchestrator(client, workspace.id.clone(), "claude", false).await.expect("started").id;
+    records(h, &workspace_id(&workspace), 1).await;
+    let main = main_checkout(client).await.id;
+
+    let mut create = request("terminal.create");
+    create.target_resource_id = Some(main.clone());
+    create.payload = Some(request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
+        title: "shell".into(),
+        command_preset: "shell".into(),
+        join_active_group: false,
+        prompt: None,
+        task_key: None,
+    }));
+    let Some(result::Value::Terminal(shell)) = client.call(create).await.expect("terminal.create").value else {
+        panic!("wrong result")
+    };
+    let list = layout_call(
+        client,
+        "layout.split",
+        &main,
+        farcooler_protocol::v1::LayoutUpdate {
+            target: Some(shell.id.clone()),
+            side: farcooler_protocol::v1::SplitSide::Right as i32,
+            command_preset: "shell".into(),
+            ..Default::default()
+        },
+    )
+    .await;
+    let checkout = window_of(&list, &shell.id).id.clone();
+    let orchestrators = window_of(&list, &orchestrator).id.clone();
+    assert_ne!(checkout, orchestrators, "the orchestrator has a window of its own");
+    assert_eq!(window(&list, &checkout).panes.len(), 2);
+
+    let scene = Scene { workspace, main, orchestrator, checkout, orchestrators };
+    // A size stated for both, so geometry is tmux's arithmetic rather than
+    // whatever the session happened to have.
+    for id in [&scene.checkout, &scene.orchestrators] {
+        let update = farcooler_protocol::v1::LayoutUpdate {
+            group_id: id.clone(),
+            columns: Some(120),
+            rows: Some(40),
+            ..Default::default()
+        };
+        layout_call(client, "layout.viewport", &scene.main, update).await;
+    }
+    scene.focus_the_orchestrator(client).await;
+    scene
+}
+
+/// Zoom, a preset, `cycle`, the viewport, a rename and ⌃B o/; each act on
+/// the window they name, with the orchestrator's the one tmux calls active.
+#[tokio::test]
+async fn a_verb_naming_the_checkouts_window_leaves_the_orchestrators_alone() {
+    use farcooler_protocol::v1::{LayoutPreset, LayoutUpdate};
+    let h = start().await;
+    let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
+    let s = scene(&h, &mut client).await;
+    let before = s.focus_the_orchestrator(&mut client).await;
+    let name = window(&before, &s.orchestrators).name.clone();
+
+    let list = layout_call(&mut client, "layout.zoom", &s.main, s.named(LayoutUpdate::default())).await;
+    assert!(window(&list, &s.checkout).panes.iter().any(|p| p.zoomed && p.focused), "zoom: {list:?}");
+    s.untouched(&list, &name, "zoom");
+    let unzoom = LayoutUpdate { unzoom: true, ..Default::default() };
+    let list = layout_call(&mut client, "layout.zoom", &s.main, s.named(unzoom)).await;
+    assert!(!window(&list, &s.checkout).panes.iter().any(|p| p.zoomed), "unzoom");
+    s.untouched(&list, &name, "unzoom");
+
+    let stacked = LayoutUpdate { preset: Some(LayoutPreset::EvenVertical as i32), ..Default::default() };
+    let list = layout_call(&mut client, "layout.preset", &s.main, s.named(stacked)).await;
+    let panes = &window(&list, &s.checkout).panes;
+    assert!(panes.iter().all(|p| p.left == 0) && panes[0].top != panes[1].top, "stacked: {panes:?}");
+    s.untouched(&list, &name, "preset");
+
+    let was = window(&list, &s.checkout).layout.clone();
+    let list = layout_call(&mut client, "layout.cycle", &s.main, s.named(LayoutUpdate::default())).await;
+    assert_ne!(window(&list, &s.checkout).layout, was, "cycle rearranged the checkout's panes");
+    s.untouched(&list, &name, "cycle");
+
+    let sized = LayoutUpdate { columns: Some(100), rows: Some(30), ..Default::default() };
+    let list = layout_call(&mut client, "layout.viewport", &s.main, s.named(sized)).await;
+    let (c, o) = (window(&list, &s.checkout), window(&list, &s.orchestrators));
+    assert_eq!((c.columns, c.rows), (100, 30), "the checkout's window takes the viewport");
+    assert_eq!((o.columns, o.rows), (120, 40), "and the orchestrator's keeps its own");
+    s.untouched(&list, &name, "viewport");
+
+    let renamed = LayoutUpdate { name: "shells".into(), ..Default::default() };
+    let list = layout_call(&mut client, "layout.rename", &s.main, s.named(renamed)).await;
+    assert_eq!(window(&list, &s.checkout).name, "shells");
+    s.untouched(&list, &name, "rename");
+
+    // ⌃B o and ⌃B ; move focus within the named window, which is the one
+    // verb here that is meant to bring its window forward.
+    for step in [1, -1] {
+        let was = window(&s.focus_the_orchestrator(&mut client).await, &s.checkout)
+            .panes
+            .iter()
+            .position(|p| p.focused);
+        let stepped = LayoutUpdate { step: Some(step), ..Default::default() };
+        let list = layout_call(&mut client, "layout.focus", &s.main, s.named(stepped)).await;
+        let c = window(&list, &s.checkout);
+        assert!(c.active, "step {step}: the checkout's window comes forward");
+        assert_ne!(c.panes.iter().position(|p| p.focused), was, "step {step}: focus moved within it");
+        assert!(!window(&list, &s.orchestrators).active);
+    }
+    s.focus_the_orchestrator(&mut client).await;
+    let second = LayoutUpdate { pane: Some(2), ..Default::default() };
+    let list = layout_call(&mut client, "layout.focus", &s.main, s.named(second)).await;
+    let c = window(&list, &s.checkout);
+    assert!(c.active && c.panes[1].focused, "pane 2 is counted in the checkout's window: {c:?}");
+}
+
+/// A split or a break with no pane named starts from the focused pane of the
+/// window named, not of the one tmux calls active.
+#[tokio::test]
+async fn a_split_or_break_in_a_named_window_starts_from_its_focused_pane() {
+    use farcooler_protocol::v1::{LayoutUpdate, SplitSide};
+    let h = start().await;
+    let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
+    let s = scene(&h, &mut client).await;
+    let name = window(&s.focus_the_orchestrator(&mut client).await, &s.orchestrators).name.clone();
+
+    let split = LayoutUpdate { side: SplitSide::Bottom as i32, command_preset: "shell".into(), ..Default::default() };
+    let list = layout_call(&mut client, "layout.split", &s.main, s.named(split)).await;
+    assert_eq!(window(&list, &s.checkout).panes.len(), 3, "split the checkout's window: {list:?}");
+    assert_eq!(window(&list, &s.orchestrators).panes.len(), 1, "not the orchestrator's");
+
+    let list = s.focus_the_orchestrator(&mut client).await;
+    let focused =
+        window(&list, &s.checkout).panes.iter().find(|p| p.focused).expect("a focused pane").terminal_id.clone();
+    let list = layout_call(&mut client, "layout.break", &s.main, s.named(LayoutUpdate::default())).await;
+    assert_eq!(window(&list, &s.checkout).panes.len(), 2, "broke out of the checkout's window: {list:?}");
+    let out = window_of(&list, &focused);
+    assert!(out.id != s.checkout && out.id != s.orchestrators && out.panes.len() == 1, "its focused pane, alone");
+    let o = window(&list, &s.orchestrators);
+    assert_eq!((o.panes.len(), &o.panes[0].terminal_id, &o.name), (1, &s.orchestrator, &name));
+}
+
+/// A daemon started again on the same home and tmux server still finds the
+/// orchestrator: its window is still among the checkout's, its seat is still
+/// taken, and a verb naming the checkout's window still leaves it alone.
+#[tokio::test]
+async fn a_restarted_daemon_still_finds_the_orchestrator() {
+    use farcooler_protocol::v1::LayoutPreset;
+    let h = start().await;
+    let mut client = Client::connect(&h.socket, "test-client", "0.0.0").await.expect("connect");
+    let s = scene(&h, &mut client).await;
+
+    let again = Service::open_in(h.dir.path().join("state")).await.expect("service");
+    assert_eq!(again.tmux.socket(), h.tmux_socket, "the same tmux server");
+    let main = uuid::Uuid::from_slice(&s.main).unwrap();
+    let orchestrator = uuid::Uuid::from_slice(&s.orchestrator).unwrap();
+    let layouts = again.layout(main).await.expect("layout");
+    let held = |id: &str| layouts.iter().find(|l| l.window.window_id == id).map(|l| l.panes.len());
+    assert_eq!(held(&s.orchestrators), Some(1), "the orchestrator's window is still the checkout's");
+    assert_eq!(held(&s.checkout), Some(2));
+    assert!(layouts.iter().any(|l| l.panes.iter().any(|p| p.terminal_id == orchestrator)));
+
+    let workspace = uuid::Uuid::from_slice(&s.workspace.id).unwrap();
+    match again.start_orchestrator(workspace, "claude", false).await {
+        Err(farcooler_core::DomainError::InvalidArgument { what: "orchestrator_taken" }) => {}
+        other => panic!("the live orchestrator's seat must still be taken: {other:?}"),
+    }
+
+    let after = again.layout_preset(main, Some(&s.checkout), LayoutPreset::EvenVertical).await.expect("preset");
+    let c = after.iter().find(|l| l.window.window_id == s.checkout).unwrap();
+    assert!(c.panes.iter().all(|p| p.left == 0), "the checkout's window was stacked: {c:?}");
+    let o = after.iter().find(|l| l.window.window_id == s.orchestrators).unwrap();
+    assert!(o.window.active && o.panes.len() == 1, "and the orchestrator's left alone");
 }

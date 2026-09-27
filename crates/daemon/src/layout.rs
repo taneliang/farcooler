@@ -148,6 +148,18 @@ impl Service {
         }
     }
 
+    /// The pane a verb starts from when it names none: the focused pane of
+    /// the layout named, or of the active one.
+    ///
+    /// The layout named, when there is one, because tmux marks one window
+    /// active for the whole runner. Every orchestrator's window is among the
+    /// main checkout's, so after the CLI or an agent focuses one, the active
+    /// window is the orchestrator's while the checkout's row is on screen.
+    pub async fn focused_pane(&self, worktree: Uuid, group: Option<&str>) -> Result<Uuid> {
+        let view = self.resolve(worktree, group).await?;
+        view.focused().map(|p| p.terminal_id).ok_or(DomainError::NotFound)
+    }
+
     /// The pane a terminal lives in.
     pub async fn pane_of(&self, terminal: Uuid) -> Result<TaggedPane> {
         self.tmux

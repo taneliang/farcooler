@@ -2182,11 +2182,7 @@ impl Rpc {
                         };
                         let anchor = match target {
                             Some(id) => id,
-                            None => svc
-                                .active_layout(worktree)
-                                .await?
-                                .and_then(|l| l.focused().map(|f| f.terminal_id))
-                                .ok_or(DomainError::NotFound)?,
+                            None => svc.focused_pane(worktree, group).await?,
                         };
                         let title = if p.name.is_empty() { preset } else { p.name.as_str() };
                         svc.split_terminal(worktree, anchor, side, title, preset).await?;
@@ -2250,11 +2246,7 @@ impl Rpc {
                     "layout.break" => {
                         let terminal = match target.or(terminals.first().copied()) {
                             Some(id) => id,
-                            None => svc
-                                .active_layout(worktree)
-                                .await?
-                                .and_then(|l| l.focused().map(|f| f.terminal_id))
-                                .ok_or(DomainError::NotFound)?,
+                            None => svc.focused_pane(worktree, group).await?,
                         };
                         svc.layout_break(worktree, terminal).await?
                     }

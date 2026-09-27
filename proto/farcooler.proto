@@ -1772,7 +1772,8 @@ message LayoutUpdate {
   optional uint32 pane = 9;
   // For a split or a drop: which edge of `target`.
   SplitSide side = 10;
-  // The pane being split or dropped onto. Empty means the focused one.
+  // The pane being split or dropped onto. Empty means the focused one, in the
+  // layout `group_id` names, or in the active one.
   optional bytes target = 11;
   // What to run in a pane this call creates.
   string command_preset = 12;
