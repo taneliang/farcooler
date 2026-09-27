@@ -365,7 +365,7 @@ fn unwrap<'r, 'a>(
 /// `ps` prints argv joined by spaces, so an option VALUE with a space in it
 /// (`-C 'set x 1'`) splits into several words, the second is taken for an
 /// operand, and the answer is None. That is the old reading, never a wrong one.
-fn command_string(args: &str) -> Option<Vec<&str>> {
+fn command_string<'a>(args: &'a str) -> Option<CommandString<'a>> {
     let mut parts = args.split_whitespace();
     // A login shell is started as `-fish`, with a dash for a name.
     let mut program = basename(parts.next()?).trim_start_matches('-');
@@ -376,7 +376,9 @@ fn command_string(args: &str) -> Option<Vec<&str>> {
     if !SHELLS.contains(&program) {
         return None;
     }
-    let valued: &[char] = if program == "fish" { &['C', 'd', 'f', 'o'] } else { &['o', 'O'] };
+    let fish = program == "fish";
+    let valued: &[char] = if fish { &['C', 'd', 'f', 'o'] } else { &['o', 'O'] };
+    let found = |words: Vec<&'a str>| Some(CommandString { words, fish });
     while let Some(arg) = parts.next() {
         // `--` ends the options, and what follows is an operand.
         if arg == "--" {
@@ -384,10 +386,10 @@ fn command_string(args: &str) -> Option<Vec<&str>> {
         }
         if let Some(long) = arg.strip_prefix("--") {
             if let Some(first) = long.strip_prefix("command=") {
-                return Some(std::iter::once(first).chain(parts).collect());
+                return found(std::iter::once(first).chain(parts).collect());
             }
             if long == "command" || long == "commands" {
-                return Some(parts.collect());
+                return found(parts.collect());
             }
             if LONG_VALUED.contains(&long) {
                 parts.next();
@@ -396,7 +398,7 @@ fn command_string(args: &str) -> Option<Vec<&str>> {
         }
         if let Some(flags) = arg.strip_prefix('-') {
             if flags.contains('c') {
-                return Some(parts.collect());
+                return found(parts.collect());
             }
             if flags.ends_with(valued) {
                 parts.next();
@@ -413,6 +415,23 @@ fn command_string(args: &str) -> Option<Vec<&str>> {
         return None;
     }
     None
+}
+
+/// A shell's command string, as words, and whether fish is the shell that
+/// reads it: fish's single quotes take `\'` and `\\` as escapes, and no
+/// other shell's do (`open_quote`).
+#[derive(Debug, PartialEq)]
+struct CommandString<'a> {
+    words: Vec<&'a str>,
+    fish: bool,
+}
+
+impl<'a> std::ops::Deref for CommandString<'a> {
+    type Target = [&'a str];
+
+    fn deref(&self) -> &Self::Target {
+        &self.words
+    }
 }
 
 /// Long options that take their value as the next word.
@@ -437,8 +456,8 @@ const LONG_VALUED: &[&str] = &["rcfile", "init-file", "init-command", "features"
 /// how a word ends: `shell_quote` writes `it' b` as `'it'\'' b'`, whose
 /// first word ends in a quote that opens, and `A='a b'c` has no word ending
 /// in one.
-fn target<'a>(words: &[&'a str]) -> Option<&'a str> {
-    let mut words = words.iter();
+fn target<'a>(command: &CommandString<'a>) -> Option<&'a str> {
+    let mut words = command.words.iter();
     let mut prefix = "";
     while let Some(raw) = words.next() {
         let word = raw.trim_matches(QUOTES).trim_end_matches(';').trim_matches(QUOTES);
@@ -457,10 +476,10 @@ fn target<'a>(words: &[&'a str]) -> Option<&'a str> {
         if let Some((name, _)) = word.split_once('=') {
             if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                 // The untrimmed word, because trimming took its quotes.
-                let mut open = open_quote(raw, None);
+                let mut open = open_quote(raw, None, command.fish);
                 while let Some(quote) = open {
                     let Some(rest) = words.next() else { break };
-                    open = open_quote(rest, Some(quote));
+                    open = open_quote(rest, Some(quote), command.fish);
                 }
                 continue;
             }
@@ -479,13 +498,19 @@ fn target<'a>(words: &[&'a str]) -> Option<&'a str> {
 ///
 /// As POSIX sh reads it: everything up to the next `'` is literal inside
 /// single quotes, and elsewhere a backslash escapes the character after it.
-/// fish agrees on everything `shell_quote` writes, which never puts a
-/// backslash inside single quotes.
-fn open_quote(word: &str, mut open: Option<char>) -> Option<char> {
+/// fish differs in one place: inside single quotes, `\'` and `\\` are
+/// escapes, so `'it\'s'` is one word (fish's own manual, "Quotes"). Skipping
+/// whatever follows a backslash there is the same test, because only a `'`
+/// could close the quote. What `shell_quote` writes reads the same in both,
+/// since it never puts a backslash inside single quotes.
+fn open_quote(word: &str, mut open: Option<char>, fish: bool) -> Option<char> {
     let mut chars = word.chars();
     while let Some(c) = chars.next() {
         match (open, c) {
             (Some('\''), '\'') | (Some('"'), '"') => open = None,
+            (Some('\''), '\\') if fish => {
+                chars.next();
+            }
             (Some('\''), _) => {}
             (_, '\\') => {
                 chars.next();
@@ -1125,6 +1150,14 @@ mod tests {
             ("sh -c env A=\"one \\\" two\" claude", Some("claude")),
             // Never closed, as `ps` cutting a long command short leaves it.
             ("sh -c env A='one two", Option::None),
+            // fish takes `\'` inside single quotes as a quote, so this value
+            // is `it's here`. sh ends the quote at `\'`, so its value is
+            // `it\s` and the next word is where its program starts (sh then
+            // refuses the line for the quote `here'` leaves open).
+            ("fish -c env A='it\\'s here' claude", Some("claude")),
+            ("sh -c env A='it\\'s here' claude", Some("here")),
+            // And `\\` is fish's backslash, so the `'` after it closes.
+            ("fish -c env A='one \\\\' claude", Some("claude")),
         ]
         .into_iter()
         .filter(|(args, program)| target_of(args) != *program)
