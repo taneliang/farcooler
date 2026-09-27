@@ -1724,7 +1724,16 @@ fn new_acceptance(text: &str) -> pb::TaskAcceptanceItem {
 /// The runner's own words are switched on and never printed. These are this
 /// CLI's sentences about this CLI's flags, which is the whole rule: a word
 /// crosses the wire, the app owns the prose.
-fn said_about(what: &str) -> Option<&'static str> {
+///
+/// **The CLI's style is clap's.** Every error prints after clap's own
+/// `error: `, beside clap's own refusals ("error: unexpected argument
+/// '--nots' found"), so a sentence here starts lowercase and has no closing
+/// full stop, as clap's, cargo's and rustc's do. The runner's sentences
+/// (`farcooler_core::error::sentence`) are written for the apps, capitalized
+/// and stopped, so each word that has one has this CLI's own here too, in
+/// this style (`every_runner_sentence_has_one_in_this_clis_style`). The
+/// runner's sentence stands only for a word newer than this build.
+pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
         "title" => "a task needs a title, and it has to fit in a line",
         "actor" => "that is not an actor. use user, manager, or agent:<terminal id>",
@@ -1741,6 +1750,18 @@ fn said_about(what: &str) -> Option<&'static str> {
         "task_key" => "that task isn't on the board of the worktree it was sent to",
         "cycle" => "those two tasks would end up waiting on each other",
         "blocked_by" => "the task it would wait on is not on this runner",
+        // The workspace words, which the runner also has sentences for.
+        "task_prefix" => "a prefix is a letter followed by up to seven letters or digits",
+        "task_prefix_taken" => "that prefix is already used by another workspace",
+        "name" => "a workspace needs a name",
+        "main_workspace" => "Main can't be deleted",
+        "workspace_not_empty" => "move this workspace's tasks, worktrees and terminals first",
+        "other_repository" => "that workspace is in a different repository",
+        "orchestrator_taken" => "this workspace already has an orchestrator running",
+        "orchestrator_home" => "this workspace's folder couldn't be made, so its orchestrator wasn't started",
+        "workspace" => "this terminal doesn't belong to a workspace yet",
+        "role" => "choose a role: shell, agent or orchestrator",
+        "task_ids" => "name at least one task to move",
         _ => return None,
     })
 }
@@ -1826,9 +1847,8 @@ pub(crate) fn refusal(err: ClientError, invalid: &str) -> Refused {
     let word = farcooler_core::error::word_for(code);
     let said: String = match word {
         "not-found" => "that task is not on this runner".to_string(),
-        // This CLI's sentence about its own flag first, then the runner's own
-        // sentence for the word (the workspace refusals: "That prefix is
-        // already used by another workspace."), and only then the call
+        // This CLI's sentence for the word first, then the runner's own
+        // sentence for a word newer than this build, and only then the call
         // site's guess. Never the word itself.
         "invalid-argument" => said_about(&what)
             .or_else(|| farcooler_core::error::sentence(&what))
@@ -3820,10 +3840,10 @@ mod tests {
         assert_eq!(p.actor, "manager");
     }
 
-    /// A workspace refusal on a board command is the runner's own sentence
-    /// for the word, not the word, and not the call site's guess.
+    /// A workspace refusal on a board command is this CLI's sentence for
+    /// the word, not the word, and not the call site's guess.
     #[test]
-    fn a_workspace_refusal_on_the_board_is_the_runners_sentence() {
+    fn a_workspace_refusal_on_the_board_is_said_for_the_word() {
         let said = refused(
             ClientError::Daemon {
                 code: pb::ErrorCode::InvalidArgument as i32,
@@ -3834,7 +3854,31 @@ mod tests {
             "those tasks could not be moved",
         )
         .to_string();
-        assert_eq!(said, "That workspace is in a different repository.");
+        assert_eq!(said, "that workspace is in a different repository");
+    }
+
+    /// Every word the runner has a sentence for has one of this CLI's own,
+    /// in clap's style: lowercase but for a name, and no closing full stop.
+    /// So is every other sentence `said_about` has.
+    #[test]
+    fn every_runner_sentence_has_one_in_this_clis_style() {
+        let runners = [
+            "task_prefix", "task_prefix_taken", "name", "main_workspace", "workspace_not_empty",
+            "other_repository", "orchestrator_taken", "orchestrator_home", "workspace", "role", "task_ids",
+        ];
+        let ours = [
+            "title", "actor", "status", "kind", "body", "acceptance", "extra_json", "supersedes",
+            "worktree_id", "repository_id", "query", "key", "task_key", "cycle", "blocked_by",
+        ];
+        for what in runners.iter().chain(&ours) {
+            if runners.contains(what) {
+                assert!(farcooler_core::error::sentence(what).is_some(), "the runner has no sentence for {what}");
+            }
+            let said = said_about(what).unwrap_or_else(|| panic!("this CLI has no sentence for {what}"));
+            let first = said.chars().next().expect("a sentence");
+            assert!(first.is_lowercase() || said.starts_with("Main "), "{what}: {said}");
+            assert!(!said.ends_with('.'), "{what}: {said}");
+        }
     }
 
     /// The pane is asked for with the task's key, and the capability without

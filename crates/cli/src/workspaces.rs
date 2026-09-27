@@ -14,9 +14,10 @@
 //! repository is searched, and a name two of them use is refused with both
 //! listed rather than picked from, the way `resolve_repository` refuses.
 //!
-//! **Refusals** are said in the runner's own sentence for the word it sent
-//! (`farcooler_core::error::sentence`), never the word itself. See
-//! `workspace_refused`.
+//! **Refusals** are said in this CLI's sentence for the word the runner sent
+//! (`tasks::said_about`, in clap's style), or the runner's own
+//! (`farcooler_core::error::sentence`) for a word newer than this build;
+//! never the word itself. See `workspace_refused`.
 
 use std::error::Error;
 
@@ -27,7 +28,7 @@ use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_transport::ClientError;
 use uuid::Uuid;
 
-use crate::tasks::{DispatchLink, Refused, refusal};
+use crate::tasks::{DispatchLink, Refused, refusal, said_about};
 use crate::{
     Fallible, Link, connect_to, expect_value, id_bytes, list_worktrees, req, req_for, resolve,
     resolve_repository, short_bytes, truncate, uuid_of, with,
@@ -681,7 +682,10 @@ pub(crate) fn workspace_refused(e: ClientError, missing: &str, fallback: &str) -
     };
     let said = match farcooler_core::error::word_for(code) {
         "invalid-argument" if what == "command_preset" => "an orchestrator runs claude, codex or cursor".to_string(),
-        "invalid-argument" => farcooler_core::error::sentence(what).unwrap_or(fallback).to_string(),
+        "invalid-argument" => said_about(what)
+            .or_else(|| farcooler_core::error::sentence(what))
+            .unwrap_or(fallback)
+            .to_string(),
         "not-found" => missing.to_string(),
         "resource-conflict" => "that workspace changed while you were reading it. run the command again".to_string(),
         "scope-denied" => "this client may read workspaces but not change them".to_string(),
@@ -820,10 +824,10 @@ mod tests {
         assert!(said.contains("farcooler worktree create repo fix-it --branch fix-it"), "{said}");
     }
 
-    /// Every refusal the runner names a word for is its sentence, never the
-    /// word, and keeps the code for `--json`.
+    /// Every refusal the runner names a word for is this CLI's sentence for
+    /// it, never the word, and keeps the code for `--json`.
     #[test]
-    fn a_workspace_refusal_is_the_runners_sentence_and_keeps_its_code() {
+    fn a_workspace_refusal_is_said_for_its_word_and_keeps_its_code() {
         for what in ["task_prefix_taken", "main_workspace", "workspace_not_empty", "orchestrator_taken", "other_repository"] {
             let refused = workspace_refused(
                 ClientError::Daemon {
@@ -835,7 +839,7 @@ mod tests {
                 "missing",
                 "fallback",
             );
-            assert_eq!(refused.to_string(), farcooler_core::error::sentence(what).unwrap(), "{what}");
+            assert_eq!(refused.to_string(), said_about(what).unwrap(), "{what}");
             assert_eq!(refused.word(), Some("invalid-argument"));
         }
         let unknown = workspace_refused(

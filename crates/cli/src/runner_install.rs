@@ -176,7 +176,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
 
     let arch = probe.arch.as_str();
     let Some(slug) = probe.platform.dist_slug(arch) else {
-        return Err(format!("{target} reports {arch}, which has no build here.").into());
+        return Err(format!("{target} reports {arch}, which has no build here").into());
     };
     let dir = match from {
         Some(p) => p.to_path_buf(),
@@ -209,7 +209,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
              inside, built for that host's architecture."
                 .to_string()
         };
-        return Err(format!("No Linux binaries in {}.\n{hint}", dir.display()).into());
+        return Err(format!("no Linux binaries in {}\n{hint}", dir.display()).into());
     };
 
     println!(
