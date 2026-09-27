@@ -454,7 +454,7 @@ struct TerminalRenderer {
                                 color: occupant.foreground, bold: occupant.bold))
                     }
                 }
-                // A wide character's neighbour is its own spacer; drawing it
+                // A wide character's neighbor is its own spacer; drawing it
                 // too would put a second, blank glyph where the wide one
                 // already reaches.
                 column += occupant.wide ? 2 : 1
@@ -1572,7 +1572,7 @@ struct TerminalView: View {
 /// The row of keys a terminal needs and a phone's keyboard does not have.
 ///
 /// Styled as a keyboard accessory, not a strip of custom chrome: system
-/// materials rather than a hand-picked grey, so it reads as part of iOS rather
+/// materials rather than a hand-picked gray, so it reads as part of iOS rather
 /// than as a widget floating on top of it.
 ///
 /// It used to say `.bordered`/`.borderedProminent` gave every key its
@@ -1711,7 +1711,7 @@ private struct TerminalKeyRow: View {
 /// that landed from one that missed. On a row whose keys send Escape and
 /// Control to a shell, that is not a polish item.
 ///
-/// The unpressed fill is `.quaternary` and not `systemGray3`. Grey 3 is
+/// The unpressed fill is `.quaternary` and not `systemGray3`. Gray 3 is
 /// OPAQUE, and nine opaque slabs on a glass bar cancel exactly the material
 /// they are sitting on — the bar stops refracting the terminal behind it and
 /// goes back to being the flat strip the glass replaced.
@@ -1954,7 +1954,7 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
     /// are asked about a touch independently of who UIKit hit-tested. Which
     /// is this delegate method: called once per touch per recognizer, before
     /// any of them have decided anything, and it is what a tap gesture
-    /// recognizer's `require(toFail:)` neighbour is normally used FOR.
+    /// recognizer's `require(toFail:)` neighbor is normally used FOR.
     ///
     /// One touch reaches every recognizer here (tap, pan, hold all sit on
     /// this same view), so this fires two or three times for a single
@@ -2096,7 +2096,7 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
     /// the tail of the exponential is not left crawling for another second.
     private static let coastFloor: CGFloat = 40
     /// The spring that returns content from an over-drag and lands a coast on a
-    /// row. One constant for both because they are the same behaviour: content
+    /// row. One constant for both because they are the same behavior: content
     /// relaxing into a resting position once the strain is off it.
     private static let settleResponse: CGFloat = 0.3
 
@@ -2150,7 +2150,7 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
         guard cellHeight > 0 else { return }
         lastTouch = recognizer.location(in: self)
 
-        // The alternate screen keeps exactly the behaviour it had. There is no
+        // The alternate screen keeps exactly the behavior it had. There is no
         // scrollback behind it, so there is no local offset to track between
         // rows, nothing to bound and no edge to rubberband against — the wheel
         // belongs to the program, and `TerminalSession.scroll` is the one place
@@ -2250,7 +2250,7 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
             velocity = next.velocity
             if position < 0 || position > span {
                 // Ran off the end still moving. The spring takes the velocity
-                // it had, so there is no moment where one behaviour stopped and
+                // it had, so there is no moment where one behavior stopped and
                 // another started — the talk's seamless handoff, as arithmetic.
                 motion = .settling(target: position < 0 ? 0 : span)
             } else if abs(velocity) < Self.coastFloor {

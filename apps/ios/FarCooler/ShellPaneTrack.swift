@@ -41,7 +41,7 @@ import SwiftUI
 //
 // It is a `ZStack` of absolutely-placed panes rather than the literal `HStack`
 // the mechanics brief describes because the two sequences the track walks are
-// not one order. From the bar the neighbours are the adjacent WORKTREES at
+// not one order. From the bar the neighbors are the adjacent WORKTREES at
 // their first tabs; from the content they are the adjacent TABS along a flat
 // sequence through the whole fleet. One container cannot be laid out in both
 // orders at once, and a container that RE-ORDERS to answer the gesture is the
@@ -89,7 +89,7 @@ struct ShellPaneSlot {
     ///
     /// What it buys is a stream, a poll and a tmux size assertion — see
     /// `TerminalView` — and what it costs when two panes have it is two
-    /// composers fighting over first responder. Never true of a neighbour,
+    /// composers fighting over first responder. Never true of a neighbor,
     /// however much of it is on screen.
     var isVisible: Bool
 }
@@ -225,7 +225,7 @@ struct ShellPaneTrack<Pane: View>: View {
     /// The pane at rest. The one thing a commit re-seats, and the only source
     /// of "which pane is visible".
     let position: ShellPosition
-    /// The two neighbours, along whichever sequence the gesture is walking.
+    /// The two neighbors, along whichever sequence the gesture is walking.
     let previous: ShellStep?
     let next: ShellStep?
     /// One pane's width, which is the display's.
@@ -251,7 +251,7 @@ struct ShellPaneTrack<Pane: View>: View {
     /// Only panes actually visited are retained. Mounting every tab in the
     /// fleet would pay setup for panes nobody opens — including fetching a
     /// diff nobody asked to see, forty times — and a handful of visited panes
-    /// is what "the tabs I am working in" actually means. The two NEIGHBOURS
+    /// is what "the tabs I am working in" actually means. The two NEIGHBORS
     /// are mounted too, and are not in here: they are mounted because they are
     /// on screen during a swipe and released again when they stop being, which
     /// costs nothing because a pane that has never been at rest has never held
@@ -267,7 +267,7 @@ struct ShellPaneTrack<Pane: View>: View {
         // A FIXED width, and this is not interchangeable with
         // `.frame(maxWidth: .infinity)`. A flexible frame's lower bound is its
         // CHILD's width when no `minWidth` is given, and the shell then becomes
-        // wider than the screen, the bar centres itself off the right edge, and
+        // wider than the screen, the bar centers itself off the right edge, and
         // the whole thing renders empty. A fixed frame is what a page is.
         .frame(width: page)
         .frame(maxHeight: .infinity)
@@ -284,7 +284,7 @@ struct ShellPaneTrack<Pane: View>: View {
             }
         }
         // And clipped, which is not optional once the page shrinks. The
-        // neighbours sit exactly one page off each edge, so they are off the
+        // neighbors sit exactly one page off each edge, so they are off the
         // display at rest — but a page scaled to a third of its size brings
         // them back inside it, and a shrinking screen with two ghost pages
         // beside it is not a screen.
@@ -361,7 +361,7 @@ struct ShellPaneTrack<Pane: View>: View {
         fleet.worktrees.flatMap { $0.tabs.map(\.id) }.sorted()
     }
 
-    /// The three positions the track is drawing, nearest neighbour first.
+    /// The three positions the track is drawing, nearest neighbor first.
     private var slots: [(rank: Int, step: ShellStep?)] {
         [(-1, previous), (0, ShellStep(position: position, crossesWorktree: false)), (1, next)]
     }
@@ -371,7 +371,7 @@ struct ShellPaneTrack<Pane: View>: View {
     ///
     /// Derived rather than stored, and that is what lets the retained set be
     /// written from a change handler without ever being a frame behind. A
-    /// neighbour appears here the instant the gesture asks for it; whether it
+    /// neighbor appears here the instant the gesture asks for it; whether it
     /// STAYS is `record()`'s business, one frame later, and by then it has
     /// either been landed on or not.
     private var mounted: [ShellRetainedPane] {
@@ -401,9 +401,9 @@ struct ShellPaneTrack<Pane: View>: View {
     /// test.
     ///
     /// **It is near.** The worktree it belongs to is the one you are in or one
-    /// of its two neighbours. Before the shell, leaving a worktree was popping
+    /// of its two neighbors. Before the shell, leaving a worktree was popping
     /// a route, which destroyed every pane in it outright; keeping the
-    /// neighbours means a swipe across a worktree boundary and straight back
+    /// neighbors means a swipe across a worktree boundary and straight back
     /// costs nothing, which is the gesture the shell has that the stack did
     /// not. Two worktrees further and the panes go, because forty worktrees
     /// of retained terminals is forty ssh streams and the reason a phone gets
@@ -419,7 +419,7 @@ struct ShellPaneTrack<Pane: View>: View {
         return nearby.contains(entry.worktree)
     }
 
-    /// The worktree at rest and its two neighbours, by id.
+    /// The worktree at rest and its two neighbors, by id.
     private var nearby: Set<String> {
         let here = position.worktree
         return Set(

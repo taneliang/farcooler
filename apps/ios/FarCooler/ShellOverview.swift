@@ -18,7 +18,7 @@ import SwiftUI
 //
 // The header, the search field and the empty state were all hand-built once —
 // an `HStack` with a title and a `Done` in it, a `TextField` inside a capsule,
-// a `Text` centred between two spacers. Every one of them was a near-miss:
+// a `Text` centered between two spacers. Every one of them was a near-miss:
 // the header did not blur or collapse as the grid went under it, the search
 // field had no cancel button, no dictation, no scroll-to-dismiss, and the
 // empty state was a sentence where the platform has a whole layout. They are
@@ -68,7 +68,7 @@ struct ShellTileFrame: PreferenceKey {
 /// a grid.
 ///
 /// Split out of the card because the flight needs to draw one too. The page
-/// that lifts off the display has to ARRIVE as a card rather than as a grey
+/// that lifts off the display has to ARRIVE as a card rather than as a gray
 /// rectangle that a card fades in over afterwards — see `ShellRootView`'s
 /// `cardFace` — and the only way that landing can be invisible is if the thing
 /// that lands and the thing already in the cell are the same drawing. Two
@@ -236,7 +236,7 @@ struct ShellCardFace: View {
         // No hairline on an ordinary card. A system card is a fill, and
         // the border that used to be here was a second, weaker way of
         // saying the same edge — which left the amber one competing with
-        // forty greys instead of standing alone.
+        // forty grays instead of standing alone.
         .overlay {
             if isCurrent {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -438,7 +438,7 @@ private struct ShellElsewhereCard: View {
     let worktree: ShellWorktree
     /// The same cell width the live cards get. A cached runner's section is
     /// in the same grid, and a card that kept the design's 168 while its
-    /// neighbours stretched would be the only ragged column on the screen.
+    /// neighbors stretched would be the only ragged column on the screen.
     let width: CGFloat
     let onOpen: () -> Void
 
@@ -1384,7 +1384,7 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
 
             if !hasCards {
                 // The platform's empty state, which is a layout and not a
-                // sentence: glyph, title and explanation, centred and sized the
+                // sentence: glyph, title and explanation, centered and sized the
                 // way every other iOS app's is. The wording is still this
                 // app's — what failed is a match against a fleet, and "No
                 // Results" alone would not say that. Both sentences live in
@@ -1395,10 +1395,10 @@ struct ShellOverview<Actions: View, Trouble: View>: View {
                 } description: {
                     Text(ShellEmptyCopy.description(matching: search))
                 }
-                // As tall as the scroll view's own container, so it centres in
+                // As tall as the scroll view's own container, so it centers in
                 // the display the way it did when it WAS the display — and,
                 // with a runner row above it, scrolls by exactly that row's
-                // height rather than being shoved off centre. On the ordinary
+                // height rather than being shoved off center. On the ordinary
                 // day `runners()` draws nothing at all, this is the whole
                 // content, and it scrolls not at all.
                 .containerRelativeFrame(.vertical)

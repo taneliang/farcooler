@@ -137,7 +137,7 @@ struct ShellRibbon: View {
     /// **A stored copy rather than `current` itself, and that is the whole of
     /// why the mark travels.** The elongation is a width — the same mark, 2.5
     /// times as wide — so a ribbon whose widths interpolate is a ribbon where
-    /// the long mark appears to slide along, pushing its neighbours aside and
+    /// the long mark appears to slide along, pushing its neighbors aside and
     /// closing up behind itself. Every ingredient for that was already here
     /// and none of it ever ran, because of WHERE the selection changes: a tab
     /// swipe re-seats `position` inside `ShellRootView.commit`'s deliberately
@@ -312,7 +312,7 @@ struct ShellColumn: View {
     /// new threshold that could disagree with it.
     var closable = false
     /// A row's Close, tapped. Nil in a bar that has no runner behind it — the
-    /// two neighbours on the track, and the harness's fixtures.
+    /// two neighbors on the track, and the harness's fixtures.
     var onClose: ((ShellTab) -> Void)?
     /// Which row a finger is resting on, reported by the row itself, and nil
     /// the moment it lifts.
@@ -325,7 +325,7 @@ struct ShellColumn: View {
     /// the tap still reaches the bar at the END (`.land` fires and the tab
     /// changes), but the frames BEFORE the release do not, so the row under the
     /// thumb stopped lighting up at all. Measured after the rebuild:
-    /// 0.98 brightness levels between the thumbed row and its neighbour,
+    /// 0.98 brightness levels between the thumbed row and its neighbor,
     /// against the 8 the assertion asks for and the 24.74 a lit row stands at.
     ///
     /// That is not cosmetic and it is not new ground — it is the defect
@@ -606,7 +606,7 @@ struct ShellBar: View {
     /// draw.
     let worktree: ShellWorktree?
     /// Which of its tabs is current, or -1 on a bar that is not the one you
-    /// are in — a neighbour sliding past must not claim a current tab it does
+    /// are in — a neighbor sliding past must not claim a current tab it does
     /// not have.
     let currentTab: Int
     /// The bar's width. The page's, less `ShellMetrics.barInset` each side.
@@ -626,7 +626,7 @@ struct ShellBar: View {
     /// rows may be swiped to close a terminal.
     ///
     /// Passed straight through to `ShellColumn.closable`, which carries the
-    /// argument. It defaults to false, so the two neighbour bars on the track —
+    /// argument. It defaults to false, so the two neighbor bars on the track —
     /// which are drawn a page off the screen and are not hit-testable at all —
     /// cannot offer it either.
     var columnPinned = false
@@ -638,19 +638,19 @@ struct ShellBar: View {
     var onChoose: ((Int) -> Void)?
     /// Whether this bar can grow a column at all.
     ///
-    /// **False for the two neighbours on the track, and it is not an
-    /// optimization.** A neighbour is a page off the display, is not
+    /// **False for the two neighbors on the track, and it is not an
+    /// optimization.** A neighbor is a page off the display, is not
     /// hit-testable and has `columnHeight` nailed to zero, so its column is
     /// three rows nobody can see — and since the rebuild those rows are
     /// `List` cells, which are hosted as accessibility elements of their own
     /// and leak straight through the `accessibilityHidden(true)`
-    /// `ShellRootView.neighbourBar` puts on them and through `ShellBar`'s own
+    /// `ShellRootView.neighborBar` puts on them and through `ShellBar`'s own
     /// `accessibilityElement(children: .ignore)`. Measured: every row
     /// identifier matched three times, and XCUITest refused to press any of
     /// them because none of the three was the one.
     ///
     /// So a bar that cannot open a menu does not build one. What that costs is
-    /// nothing on screen — a neighbour's column window is already zero points
+    /// nothing on screen — a neighbor's column window is already zero points
     /// tall at zero opacity — and what it saves is two whole lists composed on
     /// every frame of every worktree swipe.
     var showsColumn = true
@@ -660,13 +660,13 @@ struct ShellBar: View {
     /// One namespace per bar rather than one shared across the three on the
     /// track, because the three are three different surfaces on three
     /// different screens; giving them one identity would ask the platform to
-    /// morph a worktree's bar into its neighbour's as they slide past.
+    /// morph a worktree's bar into its neighbor's as they slide past.
     @Namespace private var glass
 
     /// The namespace the worktree's dots share between the ribbon and the
     /// menu. One per bar, like the glass's, and for the same reason: the
     /// three bars on the track are three different screens, and one namespace
-    /// across them would ask a worktree's dot to fly into its neighbour's.
+    /// across them would ask a worktree's dot to fly into its neighbor's.
     @Namespace private var marks
 
     private var tabs: [ShellTab] { worktree?.tabs ?? [] }
@@ -811,13 +811,13 @@ struct ShellBar: View {
                 //
                 // There are three bars on the track and each one builds its
                 // whole column, so nine rows exist for the three that are on
-                // screen — the two neighbours' six, a page off the display, and
+                // screen — the two neighbors' six, a page off the display, and
                 // this bar's own three behind a closed window. None of the nine
                 // is reachable by a finger, and a furled menu that still read
                 // out its rows would be VoiceOver describing a menu that is not
                 // open.
                 //
-                // It has to be HERE and not on the rows. `neighbourBar` already
+                // It has to be HERE and not on the rows. `neighborBar` already
                 // says `accessibilityHidden(true)` and `ShellBar` already
                 // ignores its own children, and a `List` leaks through both:
                 // its rows are hosted as elements of their own. Measured before

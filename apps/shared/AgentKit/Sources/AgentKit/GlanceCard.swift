@@ -17,7 +17,7 @@ import SwiftUI
 // grew a defect that was invisible to every assertion above the pixels — the
 // card forced the dark palette onto a surface whose background the SYSTEM
 // supplies, so on a Mac's menu bar, and on a phone set to Light, the secondary
-// ink and the trace's upper half landed as pale grey on pale grey. See
+// ink and the trace's upper half landed as pale gray on pale gray. See
 // `GlanceCardContrastTests`, which renders this view over both grounds and
 // reads the ink back out.
 //

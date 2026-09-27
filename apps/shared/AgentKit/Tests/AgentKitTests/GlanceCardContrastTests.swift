@@ -390,7 +390,7 @@ import Testing
             }
             let rungs: [(String, Double)] = [
                 ("a silent bucket", ratio(GlancePalette.emptyInk(ground.scheme))),
-                ("the centre rule", ratio(GlancePalette.axisInk(ground.scheme))),
+                ("the center rule", ratio(GlancePalette.axisInk(ground.scheme))),
                 ("talk", ratio(AnyShapeStyle(GlancePalette.chat(ground.scheme)))),
                 ("code", ratio(AnyShapeStyle(GlancePalette.code(ground.scheme)))),
             ]

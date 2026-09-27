@@ -693,7 +693,7 @@ private struct AgentLine: View {
             GlanceMarkView(GlanceMark(agent: agent, confidence: confidence).withoutCore, size: .row)
                 // A shape has no baseline of its own, so a `firstTextBaseline`
                 // stack would hang it off its bottom edge and leave it sitting
-                // a descender low. One point below the baseline centres it
+                // a descender low. One point below the baseline centers it
                 // against the x-height of the caption beside it.
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             VStack(alignment: .leading, spacing: 0) {
@@ -755,7 +755,7 @@ private struct AgentLine: View {
                 // A shape has no baseline. The mark at the head of this row
                 // hangs its BOTTOM on the text baseline, which is right for an
                 // 10pt dot; a 21pt graphic hung the same way floats above the
-                // row and reads as belonging to nothing. Its CENTRE on the
+                // row and reads as belonging to nothing. Its CENTER on the
                 // baseline is what puts §04's axis level with the name, and it
                 // holds whether or not the row has its second line — which is
                 // the case that made the difference visible. Rendered both ways

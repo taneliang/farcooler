@@ -58,7 +58,7 @@ struct ShellHarness: View {
         ZStack {
             // A ground for the glass to be glass against. The panes are text
             // on nothing, and glass over nothing has no material to sample —
-            // the bar would read as a grey rectangle and every screenshot of
+            // the bar would read as a gray rectangle and every screenshot of
             // it would be a screenshot of the wrong thing.
             LinearGradient(
                 colors: [Color(red: 0.06, green: 0.07, blue: 0.09), Color(red: 0.02, green: 0.02, blue: 0.03)],
@@ -346,7 +346,7 @@ struct ShellHarness: View {
     /// sections would have rewritten all of them.
     ///
     /// The marks are the interesting part and they are not uniform. A cached
-    /// runner is not uniformly grey: `RunnerDirectory.decayed` holds
+    /// runner is not uniformly gray: `RunnerDirectory.decayed` holds
     /// `needsYou` and `unreadDiff` at any age and lets `working` go dashed, so
     /// this fixture carries one of each — a fixture where every cached ring
     /// was dashed could not show that rule working or failing.

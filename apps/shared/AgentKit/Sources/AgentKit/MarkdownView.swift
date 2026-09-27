@@ -415,7 +415,7 @@ public struct MarkdownText: View {
     }
 
     /// A prose run is paragraphs and nothing else, so it relates to its
-    /// neighbours exactly as the single paragraph at its edge used to.
+    /// neighbors exactly as the single paragraph at its edge used to.
     private func role(for run: Markdown.Run) -> MarkdownBlockRole {
         switch run {
         case .prose: .paragraph
@@ -613,7 +613,7 @@ private struct TableCell: ViewModifier {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .overlay(alignment: .leading) {
                 // Every column but the first draws the rule to its left, so
-                // neighbours share one line instead of drawing two.
+                // neighbors share one line instead of drawing two.
                 if column > 0 {
                     Rectangle().fill(.quaternary).frame(width: 1)
                 }

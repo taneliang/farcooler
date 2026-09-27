@@ -86,7 +86,7 @@ public struct GlanceMark: Hashable, Sendable {
     /// "Not stated" is `nil` on the `core` property rather than a case here —
     /// see that property.
     public enum Core: Hashable, Sendable {
-        /// Producing. A filled disc at the centre.
+        /// Producing. A filled disc at the center.
         case producing
         /// At a prompt. No disc.
         case atAPrompt
@@ -775,7 +775,7 @@ public struct GlanceTraceLayout: Sendable, Equatable {
         }
     }
 
-    /// The centre rule. §01: "The trace centre rule. Continuous, never dotted."
+    /// The center rule. §01: "The trace center rule. Continuous, never dotted."
     public var axisRect: CGRect {
         CGRect(x: 0, y: band, width: size.width, height: axisHeight)
     }
@@ -797,10 +797,10 @@ public struct GlanceTraceLayout: Sendable, Equatable {
     /// a busy bucket simply became a taller code bar. At three points the rule
     /// shows either side and the mark is a mark.
     ///
-    /// **Centred on the rule rather than started at its top edge.** With the
+    /// **Centered on the rule rather than started at its top edge.** With the
     /// rule scaled (see `axisHeight`) a 3pt block hung from the top of a 1pt
     /// rule would sit almost entirely in the lower half and read as a chat bar.
-    /// Centred, it straddles the rule by a point either side, which is the
+    /// Centered, it straddles the rule by a point either side, which is the
     /// drawing §04 describes.
     public func commitRect(_ bucket: Int, in trace: ActivityTrace) -> CGRect? {
         guard drawsCommits, trace.commits(bucket) > 0 else { return nil }

@@ -94,7 +94,7 @@ extension ShellRootView {
             .overlay(alignment: .bottom) { cardFace }
             .clipShape(ShellFlightShape(height: flightHeight, radius: flightRadius))
             // Anchored top-leading so the scale and the offset compose
-            // predictably: with a centre anchor the offset would have to carry
+            // predictably: with a center anchor the offset would have to carry
             // half the shrink as well, which is the arithmetic that makes this
             // kind of thing land a few points off.
             .scaleEffect(flightScale, anchor: .topLeading)
@@ -141,7 +141,7 @@ extension ShellRootView {
     ///
     /// **The landing is not a handover between two objects; it is one object
     /// arriving as what it becomes.** What used to land in the cell was the
-    /// bottom of a terminal — a grey rectangle — and the finished card faded
+    /// bottom of a terminal — a gray rectangle — and the finished card faded
     /// in over it once everything had stopped. Putting an opaque card
     /// underneath first and dissolving the page over it removed the see-through
     /// dip but not the sequence: the card still resolved after the arrival,
@@ -213,7 +213,7 @@ extension ShellRootView {
     ///
     /// The middle of the display until a finger says otherwise, which is what
     /// the reverse journey wants: a page growing back out of a cell has no
-    /// finger on it, and growing about its own centre is the only unbiased
+    /// finger on it, and growing about its own center is the only unbiased
     /// answer.
     private var shrinkAnchorX: CGFloat {
         liftOrigin ?? pageFrame.width / 2

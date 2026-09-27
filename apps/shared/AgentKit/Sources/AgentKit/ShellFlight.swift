@@ -334,8 +334,8 @@ enum ShellFlight {
     /// arithmetic below and nothing more.
     ///
     /// **And sideways too.** The horizontal term is the shrunken page's own
-    /// centre PLUS `carryX`, which is the finger, one point per point. It used
-    /// to be the centre alone, which was a correct fix for the wrong amount of
+    /// center PLUS `carryX`, which is the finger, one point per point. It used
+    /// to be the center alone, which was a correct fix for the wrong amount of
     /// the problem: the page must not AIM at its destination cell mid-drag —
     /// that is the curve that goes up and then suddenly sideways — but a card
     /// that ignores your thumb sideways is a card on rails, and no card in the
@@ -406,7 +406,7 @@ enum ShellFlight {
     /// The home end is anchored at the middle of the display rather than under
     /// the finger, and that matches the release flight's own rule: a page
     /// growing back out of a cell has no grab point on it — the finger is on
-    /// the grid, not on the page — so growing about its own centre is the only
+    /// the grid, not on the page — so growing about its own center is the only
     /// unbiased answer. See `ShellPageLayer.shrinkAnchorX`, which says the
     /// same thing about the same journey run by a spring.
     static func returning(

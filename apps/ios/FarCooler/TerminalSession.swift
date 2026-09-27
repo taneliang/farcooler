@@ -1615,7 +1615,7 @@ final class TerminalSession: ObservableObject {
     /// Nothing is the ordinary answer and not a failure: a pane that has
     /// printed less than a screenful has no history, one on the alternate
     /// screen has none the host will send, and a runner too old to know the
-    /// field at all simply omits it — which is exactly the behaviour that
+    /// field at all simply omits it — which is exactly the behavior that
     /// keeps this working against a daemon that has not been updated.
     private static func decodedHistory(_ response: ScreenResponse) -> [UInt8] {
         guard
@@ -2117,7 +2117,7 @@ struct TerminalCell {
     /// Packed 0x00RRGGBB, as the core reports it, and NOT a `Color`.
     ///
     /// Both were `Color` and both are read thousands of times per frame — the
-    /// renderer compares neighbouring cells to batch background runs, and
+    /// renderer compares neighboring cells to batch background runs, and
     /// batches glyphs by the color they are drawn in. `Color` is an opaque
     /// box: comparing two of them is a protocol-witness call into SwiftUI, and
     /// building one is an allocation. As `UInt32` both are a register compare

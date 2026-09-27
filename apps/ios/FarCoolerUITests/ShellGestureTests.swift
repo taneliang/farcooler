@@ -123,7 +123,7 @@ final class ShellGestureTests: XCTestCase {
     ///
     /// The round trip is the assertion that matters. A commit that re-seats on
     /// the wrong index, or one whose silent transaction never runs and leaves
-    /// the track parked a page off centre, both show up as a return journey
+    /// the track parked a page off center, both show up as a return journey
     /// that does not land where it left.
     func testASwipeOnTheContentChangesTabAndComesBack() throws {
         let app = launch()
@@ -156,7 +156,7 @@ final class ShellGestureTests: XCTestCase {
     }
 
     /// The bar walks WORKTREES, not tabs: one swipe on it from anywhere in a
-    /// worktree lands on the neighbour's first tab.
+    /// worktree lands on the neighbor's first tab.
     func testASwipeOnTheBarChangesWorktree() throws {
         let app = launch()
         // Somewhere in the middle of worktree 0, so "tab 0" afterwards is a
@@ -232,7 +232,7 @@ final class ShellGestureTests: XCTestCase {
     ///
     /// **The distances are chosen for what they prove, and they differ.** 60
     /// points pins the ROW, because that is where the two mappings disagree:
-    /// the bar's centre sits 22 points below its own top edge, so a 60-point
+    /// the bar's center sits 22 points below its own top edge, so a 60-point
     /// lift puts the fingertip 38 points up the column — inside the row
     /// nearest the bar, which is the LAST tab. The delta mapping this replaced
     /// read the 60 rather than the 38 and answered tab 1, a whole row above
@@ -293,7 +293,7 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(
             opened["column"], 3 * rowHeight, "worktree 0's three rows were not showing")
 
-        // The bar element has grown by the column's height, so its centre is
+        // The bar element has grown by the column's height, so its center is
         // no longer over the bar. Aim at the bottom of it, which is.
         bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).tap()
         let closed = try state(app)
@@ -301,7 +301,7 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(closed["column"], 0)
     }
 
-    /// A lift that also travels sideways lands in the NEIGHBOUR's cell.
+    /// A lift that also travels sideways lands in the NEIGHBOR's cell.
     ///
     /// **The mechanism the rest of the redirection generalises**, and it was
     /// here first. Past the last row the page is off the display and the two
@@ -316,7 +316,7 @@ final class ShellGestureTests: XCTestCase {
     /// the path: this is a straight line at 130 across to 320 up, so its
     /// running ratio is 0.41 for every frame of it and no threshold in
     /// `lean` is anywhere near. 130 is also well past the 70-point commit.
-    func testALiftedPageFlickedSidewaysCarriesToTheNeighbour() throws {
+    func testALiftedPageFlickedSidewaysCarriesToTheNeighbor() throws {
         let app = launch()
         XCTAssertEqual(try state(app)["ws"], 0)
 
@@ -330,7 +330,7 @@ final class ShellGestureTests: XCTestCase {
         let carried = try state(app)
         XCTAssertEqual(carried["overview"], 1, "the lift did not reach the overview")
         XCTAssertEqual(carried["ws"], 1, "the sideways half of the lift was ignored")
-        XCTAssertEqual(carried["tab"], 0, "a carry lands on the neighbour's first tab")
+        XCTAssertEqual(carried["tab"], 0, "a carry lands on the neighbor's first tab")
     }
 
     /// **A fast, slightly angled fling up reaches the overview and does NOT
@@ -351,13 +351,13 @@ final class ShellGestureTests: XCTestCase {
     ///
     /// **The second half is the control that matters**: the same fling, same
     /// speed, same angle-ish path, but 130 points across — genuinely into the
-    /// neighbour's cell — still carries. The fix narrows a PREDICTION and
+    /// neighbor's cell — still carries. The fix narrows a PREDICTION and
     /// never the drawing, so a card actually moved sideways still goes.
     ///
     /// An explicit 12000 rather than `.fast`, for the reason `flickBar`
     /// gives: a synthesized flick's velocity is not repeatable, and the
     /// assertion has to survive the slow reading.
-    func testAFastAngledFlingUpDoesNotCarryToANeighbour() throws {
+    func testAFastAngledFlingUpDoesNotCarryToANeighbor() throws {
         let app = launch()
         XCTAssertEqual(try state(app)["ws"], 0)
 
@@ -375,7 +375,7 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(flung["overview"], 1, "a hard fling did not reach the overview")
         XCTAssertEqual(
             flung["ws"], 0,
-            "a fling angled 60 points across 320 landed in a neighbour's cell")
+            "a fling angled 60 points across 320 landed in a neighbor's cell")
 
         // Back to the worktree, then the control: genuinely sideways still
         // carries, at the same speed.
@@ -453,7 +453,7 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(crossed["overview"], 0)
     }
 
-    /// One straight drag from the bar's centre, held before release so it
+    /// One straight drag from the bar's center, held before release so it
     /// throws nothing.
     private func dragBar(_ app: XCUIApplication, by offset: CGVector) {
         let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
@@ -489,27 +489,27 @@ final class ShellGestureTests: XCTestCase {
     /// Three comments in this codebase exist because that was got wrong three
     /// ways, and the shell's three-slot `HStack` was a fourth — it keyed its
     /// children by POSITION, so re-seating the position destroyed the pane at
-    /// the middle slot and the already-mounted neighbour along with it. Every
+    /// the middle slot and the already-mounted neighbor along with it. Every
     /// commit rebuilt every pane. With text placeholders that is invisible,
     /// which is exactly why it needs a test rather than a look.
     ///
     /// Both directions of the assertion matter and they fail differently. The
-    /// pane swiped ONTO was mounted as a neighbour before the swipe: if it is
+    /// pane swiped ONTO was mounted as a neighbor before the swipe: if it is
     /// rebuilt, the thing you watched slide in is not the thing you landed on,
     /// and a real terminal would renegotiate with tmux at the instant of
     /// arrival. The pane swiped AWAY FROM has the half-typed message.
     func testCommittingASwipeRebuildsNothing() throws {
         let app = launch()
         let here = try pane(app, "ws-0-tab-0")["born"]
-        let neighbour = try pane(app, "ws-0-tab-1")["born"]
+        let neighbor = try pane(app, "ws-0-tab-1")["born"]
         XCTAssertNotNil(here)
-        XCTAssertNotNil(neighbour)
-        XCTAssertNotEqual(here, neighbour, "two panes reported one identity")
+        XCTAssertNotNil(neighbor)
+        XCTAssertNotEqual(here, neighbor, "two panes reported one identity")
 
         swipeContent(app, toward: -1)
         XCTAssertEqual(try state(app)["tab"], 1, "the swipe did not commit")
         XCTAssertEqual(
-            try pane(app, "ws-0-tab-1")["born"], neighbour,
+            try pane(app, "ws-0-tab-1")["born"], neighbor,
             "the pane swiped ONTO was rebuilt by the commit")
         XCTAssertEqual(
             try pane(app, "ws-0-tab-0")["born"], here,
@@ -518,7 +518,7 @@ final class ShellGestureTests: XCTestCase {
         swipeContent(app, toward: 1)
         XCTAssertEqual(try state(app)["tab"], 0)
         XCTAssertEqual(try pane(app, "ws-0-tab-0")["born"], here, "the return swipe rebuilt a pane")
-        XCTAssertEqual(try pane(app, "ws-0-tab-1")["born"], neighbour)
+        XCTAssertEqual(try pane(app, "ws-0-tab-1")["born"], neighbor)
     }
 
     /// The same, for the release that used to be worst: `.carry` re-seats the
@@ -636,10 +636,10 @@ final class ShellGestureTests: XCTestCase {
     /// fraction of it means a different row for every tab count.
     private func tapColumnRow(_ app: XCUIApplication, _ bar: XCUIElement, fromBottom row: Int) {
         let frame = bar.frame
-        let centre = CGVector(
+        let center = CGVector(
             dx: frame.midX,
             dy: frame.maxY - CGFloat(rowHeight) * (1.5 + CGFloat(row)))
-        app.coordinate(withNormalizedOffset: .zero).withOffset(centre).tap()
+        app.coordinate(withNormalizedOffset: .zero).withOffset(center).tap()
     }
 
     /// **A drag down the content does not turn the page, however far it
@@ -1022,7 +1022,7 @@ final class ShellGestureTests: XCTestCase {
     /// its highlight where you already were for the whole press and moved it
     /// at the instant you let go.
     ///
-    /// **Measured against a NEIGHBOURING row rather than against the same row
+    /// **Measured against a NEIGHBORING row rather than against the same row
     /// at rest, and that is what makes this test mean anything.** The bar is
     /// `GlassSurface(interactive: true)`, so the platform lights the whole
     /// surface up at the point of contact — about nine levels of brightness,

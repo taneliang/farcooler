@@ -1779,7 +1779,7 @@ struct ShellScreen: View {
             if let ref = map.refs[slot.tab.id], let connection = connection(ref) {
                 ShellPaneRealView(
                     slot: slot, ref: ref, connection: connection, pastes: pastes,
-                    // Only the worktree at rest gets an answer. A neighbour's
+                    // Only the worktree at rest gets an answer. A neighbor's
                     // diff header can wait until you land on it; asking for
                     // three is three GitHub round trips per swipe.
                     // The WHOLE ref, runner included. What "the same worktree"

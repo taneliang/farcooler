@@ -582,7 +582,7 @@ public struct Transcript: Sendable {
 
         case let .gap(reason):
             // Never merged, never dropped. A gap that could be swallowed by a
-            // neighbouring message would leave the user believing a transcript
+            // neighboring message would leave the user believing a transcript
             // is complete when it is not.
             append(.gap(reason))
         }

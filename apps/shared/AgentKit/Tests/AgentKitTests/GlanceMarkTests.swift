@@ -599,7 +599,7 @@ struct ActivityTraceTests {
         #expect(wide.drawsCommits)
         let mark = try #require(wide.commitRect(3, in: trace))
         #expect(mark.height == 3)
-        #expect(mark.midY == wide.axisRect.midY, "centred on the rule")
+        #expect(mark.midY == wide.axisRect.midY, "centered on the rule")
         #expect(mark.width == 3, "3pt across, not the bucket's whole column")
         #expect(mark.width < wide.column(3).width, "so the rule shows either side of it")
         let column = wide.column(3)
@@ -651,7 +651,7 @@ struct ActivityTraceTests {
             })
     }
 
-    /// The centre rule is §04's 3 points **as a proportion of the drawing §04
+    /// The center rule is §04's 3 points **as a proportion of the drawing §04
     /// states them about**, and this is the assertion that says so.
     ///
     /// §04 draws the trace once at 156 wide, which by its own derivation is 41
@@ -664,7 +664,7 @@ struct ActivityTraceTests {
     /// Stated as the two things that can go wrong with that: the rule must not
     /// grow back to the specimen's literal figure at a shipping size, and it
     /// must never round away to nothing.
-    @Test func theCentreRuleIsSevenPercentOfTheBoxAndNeverLessThanAPoint() {
+    @Test func theCenterRuleIsSevenPercentOfTheBoxAndNeverLessThanAPoint() {
         for size in GlanceTraceSize.allCases {
             let layout = GlanceTraceLayout(
                 size: CGSize(width: size.width, height: size.height))

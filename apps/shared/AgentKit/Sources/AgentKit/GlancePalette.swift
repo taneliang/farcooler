@@ -186,7 +186,7 @@ public enum GlancePalette {
     // a spec gets invented at build time, and inventing an amber is the one
     // mistake that breaks the whole system." The same holds one level down. A
     // trace built later against a palette missing its own four tones is a trace
-    // whose author picks four greys.
+    // whose author picks four grays.
 
     /// Upper half of the trace — lines touched. Inverts in light mode.
     public static let code = GlanceInk(
@@ -199,7 +199,7 @@ public enum GlancePalette {
     /// Commit marks on the trace axis. Resolved by `commitInk`.
     public static let commit = GlanceInk(OKLCH(0.96, 0.002, 250))
 
-    /// The trace centre rule. Continuous, never dotted. Resolved by `axisInk`.
+    /// The trace center rule. Continuous, never dotted. Resolved by `axisInk`.
     public static let axis = GlanceInk(OKLCH(0.44, 0.002, 250))
 
     /// A bucket with no activity. Drawn, not omitted. Resolved by `emptyInk`.
@@ -300,7 +300,7 @@ public enum GlancePalette {
     /// thing in the trace and reads as a commit. Rendering §04 in LIGHT mode is
     /// what turned §09's standing note — "Light mode is specified as values but
     /// not drawn. Worth one pass before build." — into a defect, and it is
-    /// worse than faint: on a pale widget an L 0.96 block sits inside a mid-grey
+    /// worse than faint: on a pale widget an L 0.96 block sits inside a mid-gray
     /// axis and reads as a HOLE punched in the rule. A gap means "nothing here";
     /// a commit is the opposite of nothing.
     ///
@@ -353,7 +353,7 @@ public enum GlancePalette {
             ? AnyShapeStyle(rowRule.darkColor) : AnyShapeStyle(HierarchicalShapeStyle.quaternary)
     }
 
-    /// The trace's centre rule, resolved.
+    /// The trace's center rule, resolved.
     ///
     /// **`axis` above is ONE figure — L 0.44 — and it is a quiet rule on a dark
     /// card and a loud one on a pale material.** The whole trace is a ladder of
@@ -369,7 +369,7 @@ public enum GlancePalette {
     /// So this defers where `emptyInk` and the two rules defer, one rung
     /// louder: `tertiary` against `quaternary`, which restores the ladder in
     /// light mode without a fourteenth number. It is also what makes the commit
-    /// mark work again — a near-black block inside a quiet grey rule is the
+    /// mark work again — a near-black block inside a quiet gray rule is the
     /// brightest thing in the trace, which is §04's own description of it.
     ///
     /// When the design document draws light mode, this becomes a literal like
@@ -416,7 +416,7 @@ public enum GlancePalette {
     /// `AnyShapeStyle` because the three tints are not all colors: the working
     /// rung stays a hierarchical style, which is what lets the all-clear case
     /// recede against whatever wallpaper or watch face is behind it rather than
-    /// sitting at a fixed grey that vanishes on one and shouts on the other.
+    /// sitting at a fixed gray that vanishes on one and shouts on the other.
     /// That reasoning survives the palette — §01 has no color for "getting on
     /// with it", and it should not, because the answer is "whatever is behind
     /// this, slightly".

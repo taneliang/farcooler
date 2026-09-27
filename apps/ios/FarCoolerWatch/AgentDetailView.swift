@@ -11,7 +11,7 @@ import SwiftUI
 /// host's words; the only string this file writes is how long the agent has held
 /// its state, and it writes that only when the host said when the state began.
 ///
-/// **The buttons are disabled unless the phone is reachable.** Not greyed as a
+/// **The buttons are disabled unless the phone is reachable.** Not grayed as a
 /// hint — genuinely off, because `WatchState.canAct` is the same rule
 /// `WatchLinkClient.send` enforces at the door. A watch that offers an Allow it
 /// cannot deliver is worse than one that says it cannot reach the phone: the

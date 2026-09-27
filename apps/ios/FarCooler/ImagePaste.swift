@@ -247,7 +247,7 @@ private struct ImagePasteChip: View {
                     .font(.footnote.weight(.semibold))
                     .frame(minHeight: PaneMetrics.target)
                     .contentShape(.rect)
-                // Grey, beside an accent "Retry" — the same pair, and the same
+                // Gray, beside an accent "Retry" — the same pair, and the same
                 // reasoning, as the send-failure row in `AgentView`. Retry is
                 // what somebody who came back to this chip wants; giving up on
                 // one attachment is the incidental half, and two accent words

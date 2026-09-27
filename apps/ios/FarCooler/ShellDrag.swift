@@ -504,7 +504,7 @@ extension ShellRootView {
             // back. What is left for this to catch is a scroller that gained
             // room DURING the drag, which is a real thing a diff does when a
             // hunk's widest row finishes measuring. Put back rather than left
-            // standing either way: a page parked two points off centre for
+            // standing either way: a page parked two points off center for
             // the rest of a read is a page nobody asked to move.
             //
             // **The one write in this file that is still animated, and the
@@ -672,7 +672,7 @@ extension ShellRootView {
     /// `carryX` or `reveal`. They are the shell's translation and the shell's
     /// SHAPE rather than facts about the gesture, every arm of `apply`
     /// resolves all four exactly once, and zeroing them here would make a
-    /// commit animate from the centre as a full-bleed page — the page jumping
+    /// commit animate from the center as a full-bleed page — the page jumping
     /// back and flattening before it goes. `reveal` in particular has to
     /// survive this call: it is what holds the grid in the view tree across
     /// the frame where the lift has been zeroed and the overview has not yet
@@ -807,7 +807,7 @@ extension ShellRootView {
     /// and the page is what is in the air above it.
     ///
     /// `carrying` is the sideways half of the same release: the page was moved
-    /// far enough toward a neighbour to be handed to it, so the worktree is
+    /// far enough toward a neighbor to be handed to it, so the worktree is
     /// re-seated in the SAME animation that flies the card. Not silently, and
     /// this is the one re-seat in this file that is deliberately animated. The
     /// card that leaves your thumb is the one you were holding and the card
@@ -892,7 +892,7 @@ extension ShellRootView {
     private func flyOut(_ change: @escaping () -> Void) {
         flights += 1
         // A page growing back out of a cell has no finger on it, so it grows
-        // about its own centre. Set before the animation and invisible there:
+        // about its own center. Set before the animation and invisible there:
         // `overview` is still true, so the offset is taking its tile branch
         // and nothing reads this until the branch changes.
         liftOrigin = nil
@@ -926,7 +926,7 @@ extension ShellRootView {
         }
     }
 
-    /// Animate to the neighbour, then re-seat on it without animating.
+    /// Animate to the neighbor, then re-seat on it without animating.
     ///
     /// The one that is easy to get wrong. Animating the track to ±one page and
     /// then setting the new position leaves `trackX` still at ±one page with
@@ -1082,7 +1082,7 @@ extension ShellRootView {
         flights += 1
         // A page a finger is pulling out of the grid still has no grab point
         // ON it — the thumb is on the cards — so it grows about its own
-        // centre, the same as one a spring is growing. See
+        // center, the same as one a spring is growing. See
         // `ShellFlight.returning`.
         liftOrigin = nil
         withAnimation(Self.handover, completionCriteria: .logicallyComplete) {

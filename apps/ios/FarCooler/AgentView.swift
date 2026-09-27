@@ -176,7 +176,7 @@ struct AgentView: View {
     /// phase is the daemon having ANSWERED and said it holds no session — see
     /// `AgentStream.answered`. `.opening` and `.failing` are not knowing, and
     /// they keep Send live on purpose, because the retryable failure a send
-    /// gets from a link that is down is more use than a greyed button, and the
+    /// gets from a link that is down is more use than a grayed button, and the
     /// message is not lost.
     private var hasAgent: Bool { stream.phase != .starting }
 
@@ -544,7 +544,7 @@ struct AgentView: View {
                             .font(.footnote.weight(.semibold))
                             .frame(minHeight: PaneMetrics.target)
                             .contentShape(.rect)
-                        // Grey, beside an accent "Retry".
+                        // Gray, beside an accent "Retry".
                         //
                         // Two accent controls in one banner is the row-of-blue
                         // pattern in miniature: Retry is what this row is FOR
@@ -1247,7 +1247,7 @@ private struct MessageRow: View {
             // The comment was right and the fill had drifted past it. This was
             // `Color.primary.opacity(0.07)` and so was every tool card in the
             // file, so the one thing that had to be a different speaker was
-            // the same grey as a container around some output. It is a full
+            // the same gray as a container around some output. It is a full
             // step above them now — see `TranscriptFill`.
             //
             // `.body`, which is the size the agent's own words are: the two
@@ -1298,7 +1298,7 @@ private struct ToolRowView: View {
     @State private var expanded = false
 
     var body: some View {
-        // The Mac's grey box, not a `DisclosureGroup`.
+        // The Mac's gray box, not a `DisclosureGroup`.
         //
         // `DisclosureGroup` tints its label with the accent color, so every
         // tool call rendered as blue link text — a command looked like
@@ -1429,7 +1429,7 @@ private func toolStatusColor(_ status: ToolStatus) -> Color {
 
 /// A subagent's dispatch, and everything it did, as one object.
 ///
-/// The Mac's block on a phone, and the same grey box `ToolRowView` draws for the
+/// The Mac's block on a phone, and the same gray box `ToolRowView` draws for the
 /// same reason: the row and what it opens are one fill, so an expanded block
 /// cannot drift to a different edge than the header that opened it. Its
 /// children are ordinary `AgentRowView`s — a subagent's messages and tools are
@@ -1782,7 +1782,7 @@ private struct QueuedRow: View {
                 //
                 // All four used to be `.caption` in `.secondary` with the
                 // buttons set `.plain`, so "Queued", "Send now", "Edit" and
-                // "Remove" were one line of identical grey words — three of
+                // "Remove" were one line of identical gray words — three of
                 // which do something, with nothing saying which three.
                 //
                 // The correction to THAT was a full accent on all three, and
@@ -1801,12 +1801,12 @@ private struct QueuedRow: View {
                 // already meaning to do; interrupting a running turn is the
                 // one this card exists to offer. See `QueuedActionStyle`.
                 //
-                // And all three GO when the pane's agent does. Not greyed:
-                // greying is what the composer does with Send, and it earns it
+                // And all three GO when the pane's agent does. Not grayed:
+                // graying is what the composer does with Send, and it earns it
                 // — the field beside it still holds your draft, so a dead
                 // button is the thing keeping your words on screen. Nothing
                 // here is holding anything. Three unreadable words in a row
-                // are the "grey on grey" complaint in miniature, and they
+                // are the "gray on gray" complaint in miniature, and they
                 // would be saying, at their most legible, exactly what the
                 // notice a few points below already says.
                 //
@@ -1870,8 +1870,8 @@ private struct QueuedRow: View {
 /// One of the queue's actions: a word you can tap, drawn as one.
 ///
 /// Semibold, which is what this file already uses for an action standing in
-/// prose — the composer's "Retry" — rather than a fifth grey word in a row of
-/// grey words. The 44-point band is the hit target a 16-point caption never
+/// prose — the composer's "Retry" — rather than a fifth gray word in a row of
+/// gray words. The 44-point band is the hit target a 16-point caption never
 /// had, and the `contentShape` is what makes it live: padding around a
 /// `Button`'s label is layout only.
 ///
@@ -1883,9 +1883,9 @@ private struct QueuedRow: View {
 /// `Color.accentColor` and `Color.secondary` rather than `.tint` and a
 /// hierarchical style, for the reason `FleetList` gives about its own `+`: a
 /// hierarchical style resolves against whatever foreground is in force, so
-/// `.secondary` under a tinted control is a paler accent and not grey at all.
+/// `.secondary` under a tinted control is a paler accent and not gray at all.
 /// A custom `ButtonStyle` does not tint its label, so both of these reach —
-/// and if a future edit puts a tint back over this row, it goes grey rather
+/// and if a future edit puts a tint back over this row, it goes gray rather
 /// than blue, which is the safe direction to fail in.
 private struct QueuedActionStyle: ButtonStyle {
     /// Whether this is the one action on the card worth finding by color.
@@ -1937,7 +1937,7 @@ private struct QueuedActionStyle: ButtonStyle {
 /// **And it had drifted a second time, in the half nobody could see.** That
 /// fix put `.frame(maxWidth: .infinity)` on the buttons, which widened the
 /// boxes and not the capsules — so what shipped was still two intrinsic pills,
-/// merely centred in the halves instead of bunched at the left. Reasoning from
+/// merely centered in the halves instead of bunched at the left. Reasoning from
 /// the code found neither round of this. `AgentLayoutHarness` now draws the
 /// card under `-approval`, which is where both were finally seen.
 struct ApprovalControls: View {
@@ -1953,7 +1953,7 @@ struct ApprovalControls: View {
                 // full-width was still not true. A frame around a `Button`
                 // whose style draws its own capsule stretches the button's
                 // box; the capsule inside it keeps its intrinsic width and
-                // sits centred in the space, which is what shipped — two
+                // sits centered in the space, which is what shipped — two
                 // ordinary pills floating in a row twice their width, on the
                 // one card where a thumb has to hit the right half the first
                 // time. Stretching the label is what stretches the capsule.
@@ -1968,7 +1968,7 @@ struct ApprovalControls: View {
                     // NOT a second blue.
                     //
                     // `.bordered` paints its label in the tint, so Reject was
-                    // accent text on a translucent grey capsule directly
+                    // accent text on a translucent gray capsule directly
                     // beside Allow's solid accent fill: two blues, one of them
                     // the hardest thing on the card to read, in the one place
                     // this app cannot afford a misread. Allow carries the
@@ -1979,9 +1979,9 @@ struct ApprovalControls: View {
                     //
                     // Both said, in this order, on purpose. `.tint` is what
                     // reliably reaches a system button style; the foreground
-                    // style is what lifts the label off the greyed tint to
+                    // style is what lifts the label off the grayed tint to
                     // full label contrast. If the second one is ever
-                    // overridden the button goes grey, not back to blue.
+                    // overridden the button goes gray, not back to blue.
                     Button { onChoose(reject.id) } label: {
                         Text(reject.name).frame(maxWidth: .infinity)
                     }
@@ -2304,7 +2304,7 @@ private struct AgentComposer: View {
     /// This was text-only, which disagreed with `send` — that guard has always
     /// accepted either — so the one case where the disagreement showed was a
     /// screenshot with nothing typed: the thumbnail sat in the strip with the
-    /// send button greyed out beside it, and the only way forward was to type
+    /// send button grayed out beside it, and the only way forward was to type
     /// something you did not mean.
     private var canSend: Bool {
         guard hasAgent else { return false }
@@ -2322,7 +2322,7 @@ private struct AgentComposer: View {
         //
         // The transcript scrolls behind it — see `transcriptBody`'s
         // `safeAreaInset` — which is what the glass is for. A material with
-        // nothing passing under it is just a grey rectangle.
+        // nothing passing under it is just a gray rectangle.
         VStack(alignment: .leading, spacing: 0) {
             suggestions
 
@@ -2415,7 +2415,7 @@ private struct AgentComposer: View {
                         .accessibilityIdentifier("composer-hide-keyboard")
                     }
                 }
-                // Grey, not accent.
+                // Gray, not accent.
                 //
                 // A `Menu` and a `PhotosPicker` tint their labels with the app's
                 // accent color, and `.foregroundStyle` on the label inside does
@@ -2429,9 +2429,9 @@ private struct AgentComposer: View {
                 // beside its LAST line rather than floating halfway up the
                 // box. What that alone could not do is the resting state: an
                 // empty field is one 26-point line and Send is a 44-point
-                // target, so bottom-aligning them put the glyph's centre nine
+                // target, so bottom-aligning them put the glyph's center nine
                 // points above the text's. The field carries the same
-                // 44-point minimum now, and a single line sits centred in it,
+                // 44-point minimum now, and a single line sits centered in it,
                 // which is what puts the two on one line.
                 HStack(alignment: .bottom, spacing: PaneMetrics.step) {
                     fieldWithPlaceholder
@@ -2528,7 +2528,7 @@ private struct AgentComposer: View {
             // `.secondary`, not `.tertiary`. A placeholder is the field's
             // label until you type — the only thing saying which agent this
             // message goes to — and tertiary on glass is a third level of
-            // grey over a surface that is already sampling whatever scrolled
+            // gray over a surface that is already sampling whatever scrolled
             // under it.
             if text.isEmpty {
                 Text("Message \(harness)")
@@ -2881,7 +2881,7 @@ private struct AgentComposer: View {
     private func send() {
         // The button's own condition, asked again here rather than only on
         // `.disabled`: a hardware Return also lands in this function, and it
-        // reaches it past a greyed button. See `hasAgent`.
+        // reaches it past a grayed button. See `hasAgent`.
         guard canSend else { return }
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // The attachments GO now. They used to be cleared on the next line

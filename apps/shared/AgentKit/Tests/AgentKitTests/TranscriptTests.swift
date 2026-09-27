@@ -60,7 +60,7 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
 }
 
 @Test func aGapIsItsOwnRowAndIsNeverMergedAway() {
-    // If a gap could merge into a neighbouring message the user would never
+    // If a gap could merge into a neighboring message the user would never
     // learn that history is missing, which is the one thing this design
     // promises never to hide.
     var t = Transcript()

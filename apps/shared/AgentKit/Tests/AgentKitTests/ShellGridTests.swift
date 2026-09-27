@@ -82,11 +82,11 @@ struct ShellGridTests {
                 layout asked for \(margin)
                 """)
             // The arithmetic this replaced, for the record: two fixed
-            // 168-point columns and a gutter centred in the display, which is
+            // 168-point columns and a gutter centered in the display, which is
             // `(width - 348) / 2` and is 16 at exactly one width in the world.
-            let centred = (display.width - (ShellGrid.card.width * 2 + gutter)) / 2
+            let centered = (display.width - (ShellGrid.card.width * 2 + gutter)) / 2
             #expect(
-                abs(centred - margin) > 0.5,
+                abs(centered - margin) > 0.5,
                 """
                 \(display.name) happens to be the width where centring two fixed columns \
                 already gave \(margin) points, so it proves nothing here

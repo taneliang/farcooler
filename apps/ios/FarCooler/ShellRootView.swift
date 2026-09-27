@@ -112,7 +112,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// answers this exact question — the anchored tab is gone, so it clamps,
     /// which keeps the person in the same worktree on the index that slid into
     /// the slot they were on. A second rule here would be a second answer, and
-    /// the Mac's `selectNeighbour(of:)` is what that looks like when it drifts:
+    /// the Mac's `selectNeighbor(of:)` is what that looks like when it drifts:
     /// despite the name it takes the first running terminal ANYWHERE in the
     /// fleet and jumps runners freely.
     private let onCloseTab: (ShellWorktree, ShellTab) -> Void
@@ -345,7 +345,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     ///
     /// The point the shrink is anchored at. The page used to shrink about the
     /// middle of the display, which is fine only if that is where your thumb
-    /// is: anywhere else, the pixels under the finger slide toward the centre
+    /// is: anywhere else, the pixels under the finger slide toward the center
     /// as the page gets smaller, so a card that is not being moved sideways at
     /// all appears to slide sideways out from under the thumb holding it.
     /// Anchoring at the touch-down point makes the one point of the page you
@@ -995,7 +995,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // Bottom-aligned, and spelled out on the frame as well as on the
         // stack. The page fills this stack and the bar does not, so the
         // alignment is the only thing saying where the bar goes; left at the
-        // frame's default it would centre, and the bar would sit halfway up
+        // frame's default it would center, and the bar would sit halfway up
         // the worktree.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .background { screenFrameReader }
@@ -1096,7 +1096,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// Which three are ON the track depends on the track the gesture started
     /// on: from the bar they are the adjacent WORKTREES on the tab you last
     /// had open in each, and from the content they are the adjacent TABS along
-    /// the flat sequence. Both neighbours are genuinely mounted and drawn at
+    /// the flat sequence. Both neighbors are genuinely mounted and drawn at
     /// 0.72, which is what makes the incoming pane real rather than something
     /// that appears on commit.
     ///
@@ -1175,7 +1175,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// worktree is not changing, and a bar that moved for every tab swipe
     /// would be saying something false twice a swipe. Across worktrees the
     /// bar travels a FULL PAGE, in step with the pane, so the whole screen
-    /// leaves together and the neighbour's whole screen arrives — the way a
+    /// leaves together and the neighbor's whole screen arrives — the way a
     /// browser changes tab.
     ///
     /// The rail used to do this from inside a single bar, sliding its contents
@@ -1188,7 +1188,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     private func barTrack(page: CGFloat, safeArea: EdgeInsets) -> some View {
         let width = ShellMetrics.railWidth(page: page)
         return HStack(alignment: .bottom, spacing: 0) {
-            neighbourBar(previousStep, page: page, width: width)
+            neighborBar(previousStep, page: page, width: width)
 
             ShellBar(
                 worktree: currentWorktree,
@@ -1214,7 +1214,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
                 .gesture(barGesture(page: page))
                 .frame(width: page)
 
-            neighbourBar(nextStep, page: page, width: width)
+            neighborBar(nextStep, page: page, width: width)
         }
         .frame(width: page * 3)
         .offset(x: barX)
@@ -1259,11 +1259,11 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// The worktree waiting off one edge, drawn on the tab you would land on.
     ///
     /// Not hit-testable and not in the accessibility tree: there are three
-    /// bars on this track and exactly one of them is the bar. A neighbour that
+    /// bars on this track and exactly one of them is the bar. A neighbor that
     /// answered to `shell-bar` would be the one a test found first, and it is
     /// a page off the side of the screen.
     @ViewBuilder
-    private func neighbourBar(_ step: ShellStep?, page: CGFloat, width: CGFloat) -> some View {
+    private func neighborBar(_ step: ShellStep?, page: CGFloat, width: CGFloat) -> some View {
         ShellBar(
             worktree: step.flatMap { worktree(at: $0.position.worktree) },
             currentTab: step?.position.tab ?? -1,
@@ -1288,7 +1288,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
     /// A carried LIFT moves it too, and by the same rule rather than as a
     /// special case: a page held off the display and moved sideways is asking
     /// for the next worktree, so the whole screen leaves together — the bar
-    /// included — and the neighbour's bar comes in behind it saying which
+    /// included — and the neighbor's bar comes in behind it saying which
     /// worktree the card is being handed to. What would be strange is the
     /// other way round: the thing under your thumb sliding a third of the way
     /// across the display while the surface it came off sits perfectly still
@@ -1438,7 +1438,7 @@ struct ShellRootView<Pane: View, Actions: View, Trouble: View>: View {
         // which is the confirmation arriving without the acknowledgement.
         // Measured before the fix, with a thumb held on the row nearest the
         // bar while tab 0 was current: the row under the thumb stood 0.95
-        // brightness levels above its neighbour, against the 24.74 the lit row
+        // brightness levels above its neighbor, against the 24.74 the lit row
         // stood above it — the highlight had not moved at all. See
         // `ShellGestureTests.testAColumnRowLightsUpUnderAThumb`.
         //

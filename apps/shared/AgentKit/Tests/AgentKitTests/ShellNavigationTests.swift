@@ -474,7 +474,7 @@ struct ShellNavigationTests {
     /// scale the sideways component is mostly the roll a thumb makes as it
     /// lands.
     ///
-    /// Both edges, both signs, and the two neighbours of the boundary — 139
+    /// Both edges, both signs, and the two neighbors of the boundary — 139
     /// and 141 against 100 — are the same pair the bar's own
     /// `theDiagonalKeepsWhateverTheGestureAlreadyIs` uses, because it is the
     /// same 1.4.
@@ -518,7 +518,7 @@ struct ShellNavigationTests {
     /// draw a page turn through UIKit's slop and then take it back.
     ///
     /// The off-screen entry is not decoration. The pane track mounts the
-    /// NEIGHBOURING worktrees' panes and holds them, so a diff two panes away
+    /// NEIGHBORING worktrees' panes and holds them, so a diff two panes away
     /// is laid out and reporting the whole time — and if its rectangle were
     /// not what excluded it, every drag anywhere would find its hunks.
     @Test func onlyTheScrollerUnderTheFingerAnswers() {
@@ -527,10 +527,10 @@ struct ShellNavigationTests {
             room: ShellSidewaysRoom(before: 0, after: 400))
         // The same diff, one pane to the left: mounted, laid out, reporting,
         // and nowhere near the finger.
-        let neighbour = ShellScroller(
+        let neighbor = ShellScroller(
             frame: CGRect(x: -393, y: 200, width: 393, height: 120),
             room: ShellSidewaysRoom(before: 40, after: 900))
-        let all = [neighbour, hunk]
+        let all = [neighbor, hunk]
 
         #expect(ShellScroller.room(under: CGPoint(x: 100, y: 260), of: all) == hunk.room)
         // The ground between two hunks, which is where a page turn over a diff
@@ -787,7 +787,7 @@ struct ShellNavigationTests {
             "a charge on the lift belongs to whoever is holding the vertical")
         // Charged for the 140-odd points it spent inside the column, so the
         // page turn begins from nothing rather than jumping most of the way
-        // to the neighbour in the frame the gesture changed its mind.
+        // to the neighbor in the frame the gesture changed its mind.
         #expect(run.drag.spentSideways < -139 && run.drag.spentSideways > -150)
         #expect(
             run.frame.sideways > -81 && run.frame.sideways < -70,
@@ -1355,7 +1355,7 @@ struct ShellNavigationTests {
     /// The finger still chooses, even though the column no longer unrolls
     /// under it.
     ///
-    /// This is the half of the original behaviour worth keeping: one
+    /// This is the half of the original behavior worth keeping: one
     /// continuous drag still walks the tabs and carries on into the overview.
     /// What changed is which number it walks — the finger's height above the
     /// bar rather than the distance it has come.
@@ -1738,7 +1738,7 @@ struct ShellNavigationTests {
     ///
     /// `GlanceMark.Link` states the rule this follows — "decay applies only to
     /// claims about the present. Blocked and to-review hold at any age;
-    /// working and idle go dashed" — so a cached card is not uniformly greyed
+    /// working and idle go dashed" — so a cached card is not uniformly grayed
     /// out. An agent that was waiting on you when this runner was last seen is
     /// still waiting on you, and that is the one thing worth crossing a runner
     /// for.
@@ -1887,7 +1887,7 @@ struct ShellNavigationTests {
         #expect(ShellGesture.project(velocity: 1000, decelerationRate: 1) == 0)
         #expect(ShellGesture.project(velocity: 1000, decelerationRate: 0) == 0)
         // Nothing moving projects nowhere, so every default in this file is
-        // the old behaviour exactly.
+        // the old behavior exactly.
         #expect(ShellGesture.projected(40, velocity: 0) == 40)
     }
 
@@ -2154,18 +2154,18 @@ struct ShellNavigationTests {
     }
 
     /// Lifted into the overview AND far enough sideways: the page is carried
-    /// into the neighbouring worktree's cell.
+    /// into the neighboring worktree's cell.
     ///
     /// Both axes answered off one release — the lift says you are staying up,
     /// the sideways says which card you are holding when you get there.
-    @Test func aLiftedPageCanBeCarriedToTheNeighbouringWorktree() {
+    @Test func aLiftedPageCanBeCarriedToTheNeighboringWorktree() {
         let fleet = Self.crossing()
         let at = ShellPosition(worktree: 1, tab: 2)
         let up = ShellGesture.columnFull(tabCount: 3) + ShellMetrics.overRun
         #expect(
             fleet.barRelease(axis: .vertical, dx: -ShellMetrics.pageCommit, up: up, at: at)
                 == .carry(ShellStep(position: ShellPosition(worktree: 2, tab: 0), crossesWorktree: true)))
-        // The bar's own step, so it lands on the neighbour's FIRST tab and not
+        // The bar's own step, so it lands on the neighbor's FIRST tab and not
         // on the tab you happened to be looking at.
         #expect(
             fleet.barRelease(axis: .vertical, dx: ShellMetrics.pageCommit, up: up, at: at)
@@ -2210,7 +2210,7 @@ struct ShellNavigationTests {
             fleet.barRelease(
                 axis: .vertical, dx: -24, up: up, at: at,
                 dxVelocity: dxVelocity, upVelocity: upVelocity) == .openOverview,
-            "an overwhelmingly vertical fling landed the page in a neighbour's cell")
+            "an overwhelmingly vertical fling landed the page in a neighbor's cell")
         // The mirror image, so the fix cannot be a sign error.
         #expect(
             fleet.barRelease(
@@ -2226,7 +2226,7 @@ struct ShellNavigationTests {
     /// placed with no momentum at all, flicked from short of the commit, and
     /// flicked from a standstill after the lift has finished. The first is
     /// the one that proves the narrowing is on the MOMENTUM only — `dx` is
-    /// never discounted, so a card drawn into the neighbour's cell carries
+    /// never discounted, so a card drawn into the neighbor's cell carries
     /// however it got there.
     @Test func aLiftedPageFlickedSidewaysStillCarries() {
         let fleet = Self.crossing()
@@ -2266,7 +2266,7 @@ struct ShellNavigationTests {
     /// `ShellMetrics.redirect` is `tan 54.5°`, so a release whose velocity is
     /// more than 54.46° off vertical has its momentum counted sideways and
     /// one within it does not. Equivalently: the thumb has to be leaving
-    /// within 35.54° of horizontal to throw the page into a neighbour's cell.
+    /// within 35.54° of horizontal to throw the page into a neighbor's cell.
     /// It is the same angle `lean` uses to take a gesture off the vertical,
     /// which is the point — one ratio, asked once about where the finger has
     /// been and once about where it is going.
@@ -2316,7 +2316,7 @@ struct ShellNavigationTests {
                 dxVelocity: -1090, upVelocity: -3000) == .land(tab: 0))
     }
 
-    /// At the ends of the fleet there is no neighbour to carry to, and the
+    /// At the ends of the fleet there is no neighbor to carry to, and the
     /// lift's answer stands on its own.
     @Test func aCarryOffTheEndOfTheFleetIsJustTheOverview() {
         let fleet = Self.crossing()
@@ -2335,7 +2335,7 @@ struct ShellNavigationTests {
     }
 
     /// Lifted, but not far enough to stay up, and flicked sideways: the page
-    /// comes back down onto the neighbour.
+    /// comes back down onto the neighbor.
     ///
     /// The composition the two axes are supposed to have — the height decides
     /// whether you end up in the overview, the sideways decides which

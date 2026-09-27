@@ -158,7 +158,7 @@ struct PullRequestRowTests {
     /// at all. That is what makes the failing one glanceable at arm's length,
     /// and it is the position `71934f8` took when it turned the last permanent
     /// green dot neutral.
-    @Test func aHealthyPullRequestIsGreyAndSilent() {
+    @Test func aHealthyPullRequestIsGrayAndSilent() {
         let healthy = pr(checks: "passing", review: "approved")
         #expect(healthy.emphasis == .quiet)
         #expect(healthy.headerSymbol == nil)

@@ -60,7 +60,7 @@ struct BranchPullRequest: Equatable {
 /// nothing about anything.
 ///
 /// The rule here is narrower than that file's, because this screen's shape
-/// allows it. **Moving through a diff is grey; producing something is blue.**
+/// allows it. **Moving through a diff is gray; producing something is blue.**
 /// Movement is found by position — the chevrons live in fixed corners, the bar
 /// is always at the bottom — and it repeats on every commit and every file.
 /// What does not repeat is the one thing reading a diff is FOR: a note for the
@@ -69,10 +69,10 @@ struct BranchPullRequest: Equatable {
 /// filled accent for the same reason `FleetList` gives about a control that
 /// appears once — it is a one-time offer with one obvious answer.
 ///
-/// Grey here means `.tint(.secondary)` with `.foregroundStyle(.primary)` over
+/// Gray here means `.tint(.secondary)` with `.foregroundStyle(.primary)` over
 /// it: the tint is the part that reliably reaches a system button style, and
 /// the foreground style is what keeps the label at full label contrast instead
-/// of the 60%-of-grey a greyed tint would leave. Losing the second one fails
+/// of the 60%-of-gray a grayed tint would leave. Losing the second one fails
 /// quiet; losing the first fails back to blue, which is why both are said.
 ///
 /// What this screen never records is a JUDGMENT. There is no "reviewed" tick on
@@ -388,7 +388,7 @@ struct ChangesView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 Spacer(minLength: 4)
-                // Grey beside a filled Continue. `.bordered` paints its label
+                // Gray beside a filled Continue. `.bordered` paints its label
                 // in the tint, so declining an offer was accent text an inch
                 // from an accent fill — two blues for a yes/no. See the accent
                 // rule in `ChangesView`'s own doc comment.
@@ -615,7 +615,7 @@ struct ChangesView: View {
             Link(destination: url) { pullRequestLine(pr, linked: true) }
                 // The row's own colors are set on every element inside it, so
                 // the accent never reaches the label. This is the same pairing
-                // the file header describes for greyed controls, and losing it
+                // the file header describes for grayed controls, and losing it
                 // fails back to blue.
                 .tint(.secondary)
                 .accessibilityIdentifier("changes-pr-row")
@@ -664,7 +664,7 @@ struct ChangesView: View {
     /// The one thing to offer when there is no pull request yet.
     ///
     /// Blue, and the only blue on this header. This screen's rule is that
-    /// moving through a diff is grey and PRODUCING something is blue, and the
+    /// moving through a diff is gray and PRODUCING something is blue, and the
     /// accent is affordable here for the reason the resume card's Continue
     /// gives: it appears once, and it is a one-time offer with one obvious
     /// answer.
@@ -689,7 +689,7 @@ struct ChangesView: View {
         .accessibilityHint("Opens GitHub with a new pull request for this branch")
     }
 
-    /// Grey, orange, red — and never green. See `PullRequestEmphasis`.
+    /// Gray, orange, red — and never green. See `PullRequestEmphasis`.
     private static func tint(for emphasis: PullRequestEmphasis) -> Color {
         switch emphasis {
         case .quiet: return .secondary
@@ -926,7 +926,7 @@ struct ChangesView: View {
             }
             .font(.footnote)
             .buttonStyle(.bordered)
-            // Grey. Two accent chevrons and an accent position label is a
+            // Gray. Two accent chevrons and an accent position label is a
             // traffic sign where a pair of arrows will do — and these two are
             // the most-repeated controls on the screen, one pair per commit
             // for as long as the branch is. See the accent rule above.
@@ -948,7 +948,7 @@ struct ChangesView: View {
         }
         .font(.footnote)
         .buttonStyle(.bordered)
-        // Grey, with the chevrons above them. Both are ways back to a list you
+        // Gray, with the chevrons above them. Both are ways back to a list you
         // have already seen — the definition of movement on this screen — and
         // they are also the two widest controls in the card, so they were most
         // of what made a commit header read as a row of links.
@@ -1002,7 +1002,7 @@ private struct CommitBodyText: View {
                 // button paints its label in the tint too, so the smallest
                 // control in the card simply gained a ground under its accent.
                 // Unfolding a paragraph you can already see four lines of is
-                // the most incidental thing on this screen. Grey.
+                // the most incidental thing on this screen. Gray.
                 Button(expanded ? "Less" : "More") {
                     withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
                 }
@@ -1353,7 +1353,7 @@ struct ChangesToolbarMenu: View {
 /// view". Dozens of independent glass surfaces would also be the expensive way
 /// to draw a list even if it did work.
 ///
-/// Derived from the theme's own ground rather than a system grey, so a card
+/// Derived from the theme's own ground rather than a system gray, so a card
 /// reads as sitting ON the terminal palette instead of next to it.
 ///
 /// A flat FILL is not the same claim as a flat surface, and one card on this
@@ -1670,12 +1670,12 @@ private struct ChangesFileBody: View {
                 // brings its own ground with it and clears whatever is behind.
                 //
                 // **The one control on this screen that keeps the accent**,
-                // and the sweep that greyed the rest of them left it
+                // and the sweep that grayed the rest of them left it
                 // deliberately. It is the only thing here that produces
                 // something rather than moving you somewhere, and it is on
                 // screen exactly once: one file is open at a time, so this
                 // does not repeat down the scroll the way a per-card control
-                // would. If everything on a screen is grey, grey has stopped
+                // would. If everything on a screen is gray, gray has stopped
                 // meaning anything either.
                 Button {
                     onComment(
@@ -1954,7 +1954,7 @@ private struct HunkView: View {
             // it still has and the shell stands down for exactly that much;
             // and a line scrolled to its end reports zero, so the next point
             // of the same drag turns the page without the finger lifting.
-            // That last one is the behaviour the owner asked for by name, and
+            // That last one is the behavior the owner asked for by name, and
             // it is why this is a distance rather than a flag.
             //
             // Two callbacks and not one. The geometry says what the room IS
@@ -2765,10 +2765,10 @@ struct ChangesLayoutHarness: View {
     /// | --- | --- |
     /// | none | nothing at all — `gh` could not answer |
     /// | `-pr-none` | Create Pull Request |
-    /// | `-pr-healthy` | #335 Approved · Checks passed, all grey |
+    /// | `-pr-healthy` | #335 Approved · Checks passed, all gray |
     /// | `-pr-failing` | #335 Changes requested · Checks failed, red |
     /// | `-pr-pending` | #335 Draft · Checks running, orange |
-    /// | `-pr-merged` | #335 Merged, grey, with the merge glyph |
+    /// | `-pr-merged` | #335 Merged, gray, with the merge glyph |
     private static var pullRequest: BranchPullRequest? {
         let args = CommandLine.arguments
         // `gh` answered and there is no pull request on this branch.

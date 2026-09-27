@@ -396,7 +396,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// `crates/daemon/src/rpc.rs` fills it — but the JSON projection the phone
     /// actually decodes (`crates/client/src/session.rs`) has no line for it, so
     /// on today's runner this is nil for every terminal and every Apple surface
-    /// draws no trace. That is the correct behaviour for a field nobody sends;
+    /// draws no trace. That is the correct behavior for a field nobody sends;
     /// it is not the intended end state. One `"activityTrace": t.activity_trace`
     /// beside `"planDone"` over there lights all of this up.
     var activityTrace: Data?
@@ -947,12 +947,12 @@ struct StackResponse: Decodable {
 /// How much the pull-request row should raise its voice.
 ///
 /// Three levels and no more, because the row is a single line and the rule it
-/// is built on is that a healthy pull request must be a grey line you skim
+/// is built on is that a healthy pull request must be a gray line you skim
 /// past. A signal that is always lit has stopped carrying information — the
 /// position `71934f8` took when it turned the last permanent green dot
 /// neutral, and the one Android's `PullRequestRows` took again for checks.
 enum PullRequestEmphasis {
-    /// Grey, and most of them. Open, approved, checks passed: nothing here
+    /// Gray, and most of them. Open, approved, checks passed: nothing here
     /// wants you.
     case quiet
     /// Orange, and only ever this: nothing has been decided yet.

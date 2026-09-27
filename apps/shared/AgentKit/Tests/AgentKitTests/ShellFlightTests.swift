@@ -152,7 +152,7 @@ struct ShellFlightTests {
     ///
     /// The anchor is the whole of it. The page used to shrink about the middle
     /// of the display, so anywhere else the pixels under the finger slid toward
-    /// the centre — a card that is not being moved sideways at all appearing to
+    /// the center — a card that is not being moved sideways at all appearing to
     /// slide out from under the thumb holding it.
     @Test func theShrinkHoldsTheTouchPointStill() {
         let anchor: CGFloat = 60

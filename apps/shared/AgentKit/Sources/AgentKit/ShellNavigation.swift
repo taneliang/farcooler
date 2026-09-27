@@ -63,7 +63,7 @@ enum ShellMetrics {
     /// comes through `columnRow` too, deliberately, because two mappings
     /// disagreeing by a row is the bug this is part of fixing — would choose
     /// the row under the one you touched. Half a row is no better for the
-    /// tap: a row's label is centred, so aiming at it lands exactly on the
+    /// tap: a row's label is centered, so aiming at it lands exactly on the
     /// boundary and resolves by rounding.
     ///
     /// Eleven points leaves the middle 33 of every row still selecting
@@ -583,7 +583,7 @@ struct ShellStep: Hashable {
     var crossesWorktree: Bool
 }
 
-/// Which gesture is driving the track, which decides what its neighbours are.
+/// Which gesture is driving the track, which decides what its neighbors are.
 ///
 /// The same three-pane track serves both, and the only difference is what
 /// `previous` and `next` mean. From the bar they mean the adjacent WORKTREE,
@@ -708,7 +708,7 @@ struct ShellFleet: Hashable {
     ///
     /// Falling back to a CLAMP rather than to `first` when the tab is gone.
     /// The tab going away is the ordinary shrink — a terminal exited, a
-    /// worktree was removed — and the neighbouring pane is where a person
+    /// worktree was removed — and the neighboring pane is where a person
     /// already was; sending them to the front of the fleet would be the app
     /// moving them somewhere they never asked to go. An empty fleet has nothing
     /// to clamp to and gets the position back unchanged, for
@@ -771,7 +771,7 @@ struct ShellFleet: Hashable {
     /// From the content that means the two true ends of the whole fleet: the
     /// very first tab of the first worktree and the very last tab of the
     /// last, and nowhere in between — walking off the end of a worktree lands
-    /// on its neighbour, so a worktree boundary is not an end.
+    /// on its neighbor, so a worktree boundary is not an end.
     ///
     /// Worktrees with NO tabs are skipped rather than landed on. An empty
     /// worktree is reachable from the bar and from the overview, which is
@@ -1044,7 +1044,7 @@ enum ShellGesture {
     /// inside the gesture. Calling a swipe vertical costs a page turn that
     /// did not happen: the pane scrolls a little, you lift, you swipe again.
     /// `ShellPaneScrollTests`' own header says the same thing from the other
-    /// end — *"if arbitration has to favour one of them it favours the
+    /// end — *"if arbitration has to favor one of them it favors the
     /// scroll"* — and this is that preference written as an angle instead of
     /// as a hope.
     ///
@@ -1199,7 +1199,7 @@ enum ShellGesture {
     ///
     /// **And it is a gate on the MOMENTUM only, never on the drawing.** `dx`
     /// is always returned in full. A card drawn 70 points into the
-    /// neighbour's cell still carries with no velocity at all, however the
+    /// neighbor's cell still carries with no velocity at all, however the
     /// finger got there — which is what keeps this a narrowing of a
     /// prediction rather than the removal of a capability. Nothing that
     /// committed on translation alone stops committing.
@@ -1425,7 +1425,7 @@ enum ShellGesture {
     /// answer to the other's question. Handing the gesture to `.horizontal`
     /// here would drop the page back onto the display while your thumb was
     /// still up in the air holding it. Owning both is what a card in the app
-    /// switcher does: you can move it sideways among its neighbours without
+    /// switcher does: you can move it sideways among its neighbors without
     /// ever stopping holding it. `barRelease`'s `.carry` arm is that
     /// composition, and it was in the shell before the redirection was — this
     /// is the mechanism the rest generalises, not a new one.
@@ -1546,7 +1546,7 @@ struct ShellScroller: Equatable {
     /// dictionary's values, which is an answer that depends on hashing.
     ///
     /// Scrollers the shell has been told about but that are off screen — a
-    /// neighbouring pane's hunks, which the track mounts and holds — are
+    /// neighboring pane's hunks, which the track mounts and holds — are
     /// excluded by the rectangle itself rather than by a rule about panes.
     static func room(under point: CGPoint, of scrollers: [ShellScroller]) -> ShellSidewaysRoom {
         scrollers
@@ -1757,7 +1757,7 @@ struct ShellBarDrag {
 /// tuple of booleans instead is a view where "abandon" and "spring back" drift
 /// apart into two subtly different nothings.
 enum ShellRelease: Hashable {
-    /// Animate the track to the neighbour, then re-seat on it. See the
+    /// Animate the track to the neighbor, then re-seat on it. See the
     /// no-bounce commit in `ShellRootView`.
     case commit(ShellStep)
     /// A horizontal drag that did not go far enough. The track slides home.
@@ -1767,7 +1767,7 @@ enum ShellRelease: Hashable {
     /// Dragged past the last row, all the way into the overview.
     case openOverview
     /// Dragged past the last row AND far enough sideways: the page is carried
-    /// into the neighbouring worktree's cell and the overview opens on that
+    /// into the neighboring worktree's cell and the overview opens on that
     /// worktree instead of this one.
     ///
     /// Both axes answered at once, which is the point of it. It is not
@@ -1795,7 +1795,7 @@ extension ShellFleet {
     /// That split is the same one `ShellGesture.projected` argues for one
     /// level down, applied to the redirection: which axis won is a question
     /// about what the shell had on screen when you let go — a menu, or a
-    /// track halfway to the neighbour — and confirming an outcome other than
+    /// track halfway to the neighbor — and confirming an outcome other than
     /// the one being drawn is the defect a hint exists to prevent. How far
     /// along that axis you got is a question about where the gesture was
     /// GOING, and that is what the velocities answer.
@@ -1904,13 +1904,13 @@ extension ShellFleet {
             if thrownUp >= ShellGesture.columnFull(tabCount: tabs) + ShellMetrics.overRun {
                 // The lift says you are staying in the overview; the sideways
                 // says which cell the page lands in. At the ends of the fleet
-                // there is no neighbour to carry to, and the lift's answer
+                // there is no neighbor to carry to, and the lift's answer
                 // stands on its own.
                 return sideways.map(ShellRelease.carry) ?? .openOverview
             }
             if let sideways {
                 // Lifted, but not far enough to stay up. The page comes back
-                // down — onto the neighbour, because the finger asked for it
+                // down — onto the neighbor, because the finger asked for it
                 // on the way. The same crossing a swipe along the bar makes,
                 // reached from a few points higher up.
                 return .commit(sideways)

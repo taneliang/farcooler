@@ -116,7 +116,7 @@ final class TerminalScrollTests: XCTestCase {
     ///
     /// `app.otherElements["terminal-surface"]` is not it, and stopped being it
     /// the moment the demo fleet grew a second terminal: the shell keeps
-    /// neighbouring tabs alive off-screen, so that query resolves to several
+    /// neighboring tabs alive off-screen, so that query resolves to several
     /// elements and every use of it raises "Multiple matching elements found".
     /// The identifier names a KIND of element here, not one element.
     ///
@@ -469,7 +469,7 @@ final class TerminalScrollTests: XCTestCase {
     /// laborious swipes that would require a lot more manual input."*
     ///
     /// Negative control, run: with `release` taking `velocity = 0` — the
-    /// release velocity thrown away, which is exactly the old behaviour —
+    /// release velocity thrown away, which is exactly the old behavior —
     ///
     ///     XCTAssertGreaterThan failed: ("0") is not greater than ("51")
     ///
@@ -511,7 +511,7 @@ final class TerminalScrollTests: XCTestCase {
         // The margin is deliberately wide in both directions, because the two
         // outcomes this separates are not close. Measured with the projection:
         // 130 rows, for 17 rows of finger. Measured with `release` patched to
-        // throw the release velocity away — the old behaviour, exactly: **0**.
+        // throw the release velocity away — the old behavior, exactly: **0**.
         //
         // Zero rather than seventeen, and the reason is worth knowing before
         // anybody reads too much into the ratio: XCUITest synthesizes a
@@ -1121,7 +1121,7 @@ final class TerminalScrollTests: XCTestCase {
     /// first in every worktree and the terminals after it in fleet order.
     /// Repeated a few times rather than once: the demo fleet's first worktree
     /// may have no terminal at all, in which case the sequence spills into the
-    /// next worktree, which is the behaviour rather than a failure.
+    /// next worktree, which is the behavior rather than a failure.
     private func openATerminalInTheShell(_ app: XCUIApplication) throws -> XCUIElement {
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         // 180 seconds, not 60, and the number is measured rather than chosen.

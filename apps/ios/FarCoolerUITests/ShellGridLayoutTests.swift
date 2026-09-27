@@ -6,7 +6,7 @@ import XCTest
 /// That suite proves the arithmetic; this one proves the grid is laid out BY
 /// that arithmetic. The defect it exists for is the one the old grid had — two
 /// `GridItem(.fixed(168))` columns and no horizontal padding, so a `LazyVGrid`
-/// centred them and the side gap became `(width - 348) / 2`, a number no part
+/// centered them and the side gap became `(width - 348) / 2`, a number no part
 /// of the app had chosen. Every unit test in the world can agree that the
 /// margin should be 16 while the view goes on centring fixed columns.
 ///

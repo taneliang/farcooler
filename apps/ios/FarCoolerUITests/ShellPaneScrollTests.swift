@@ -92,7 +92,7 @@ final class ShellPaneScrollTests: XCTestCase {
     ///
     /// The half that has to be protected first: a diff is a long document and
     /// reading it is the common action, while turning a page is the rare one.
-    /// If arbitration has to favour one of them it favours the scroll.
+    /// If arbitration has to favor one of them it favors the scroll.
     func testAScrollingPaneStillScrollsInsideTheShell() throws {
         let app = launch(["-shell-harness", "-shell-scroll"])
         _ = try state(app)
