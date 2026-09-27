@@ -578,3 +578,44 @@ rows need an addition:
 The explanation under the table, "the git root of the working directory", is
 more precisely the main checkout: every worktree shares the main checkout's
 memory directory.
+
+### `--project-config-root` (2026-09-28)
+
+Measured with Claude Code 2.1.283, whose `--help` does not list the flag; the
+binary describes it as reading "project settings, .mcp.json and the .claude
+config trees … from this directory rather than the working directory". Same
+method as above: a scratch repository (`/tmp/fc-ws/ov46/repo`) whose
+`.claude/settings.json` holds a `SessionStart` hook that touches a marker, and a
+home with no git (`/tmp/fc-ws/ov46/home`), each run a one-line `claude -p` from
+the home.
+
+| Flags from the home | Repository hook fired? |
+|---|---|
+| `--add-dir <repo>` (control) | No |
+| `--project-config-root <repo>` | **Yes** |
+| both | **Yes** |
+| none, run inside `repo/` (control) | Yes |
+
+**The permission allowlist is read from the config root but gated by trust of
+the working directory.** With `"allow": ["Bash(touch PERM)"]` in the
+repository's settings and `--permission-mode default`, `touch PERM` ran only
+when the *launch directory* was trusted (`hasTrustDialogAccepted` in
+`~/.claude.json`, for that path or a parent). From an untrusted home with a
+trusted repository as the config root, claude printed "Ignoring 1
+permissions.allow entry from .claude/settings.json: this workspace has not been
+trusted … set projects["/private/tmp/fc-ws/ov46/home"].hasTrustDialogAccepted"
+and the command was refused. From a trusted home with an untrusted repository
+as the config root, it ran. Hooks fired in `-p` either way; the interactive
+trust dialog was not measured.
+
+**`.mcp.json` is read from the config root.** A `.mcp.json` in the repository
+declaring one stdio server made that server appear in the home-launched
+session's `init` as `"source": "project"`.
+
+The binary also refuses, under this flag, background sessions, project-scope
+MCP changes, durable scheduled tasks, project-scope workflow saves and
+`--routine`, because a relaunched copy would lose the flag.
+
+For the Claude orchestrator recipe: launch from the home with
+`--project-config-root <main checkout>`, and make sure the home itself is
+trusted, or the repository's allowlist is dropped while its hooks still run.
